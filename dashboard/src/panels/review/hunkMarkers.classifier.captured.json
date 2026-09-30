@@ -1,0 +1,2093 @@
+{
+ "after_unread": {
+  "pkg/a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 2,
+     "linked": 1,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "membership_unknown"
+         },
+         {
+          "family": "FAM-F00002",
+          "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+          "family_revision": 1,
+          "state": "membership_unknown"
+         },
+         {
+          "family": "FAM-F00003",
+          "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+          "family_revision": 1,
+          "state": "membership_unknown"
+         }
+        ],
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 1
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 4,
+       "start": 7
+      },
+      "before": {
+       "count": 0,
+       "start": 6
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "after"
+       }
+      ]
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/a.py",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-A00001, RLZ-A00002); the after knowledge was not read, so its mappings are unknown",
+    "sides": [
+     {
+      "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 6,
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 5
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "before"
+     },
+     {
+      "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "entries": [],
+      "knowledge": "unavailable",
+      "path": "pkg/a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "problems": [],
+     "side": "after",
+     "state": "unavailable-history",
+     "tree": "0000000000000000000000000000000000000000"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def land(value):\n    return value + 0\n\n\ndef keep():\n    return 1\n\n\ndef extra():\n    return 2\n",
+    "before": "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
+   }
+  }
+ },
+ "before_unread": {
+  "pkg/a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 0,
+     "hunks": 2,
+     "linked": 2,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         }
+        ],
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "after",
+        "start_line": 1
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 4,
+       "start": 7
+      },
+      "before": {
+       "count": 0,
+       "start": 6
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 10,
+        "families": [
+         {
+          "state": "confirmed_no_family"
+         }
+        ],
+        "id": "RLZ-C00010",
+        "invariant": "INV-CCCCCC",
+        "invariant_key": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+        "invariant_revision": 1,
+        "invariant_revision_key": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+        "kind": "realization",
+        "side": "after",
+        "start_line": 9
+       }
+      ],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/a.py",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the after side RLZ-A00001, RLZ-A00002, RLZ-C00010); the before knowledge was not read, so its mappings are unknown",
+    "sides": [
+     {
+      "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "entries": [],
+      "knowledge": "unavailable",
+      "path": "pkg/a.py",
+      "side": "before"
+     },
+     {
+      "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 6,
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 5
+       },
+       {
+        "end_line": 10,
+        "id": "RLZ-C00010",
+        "invariant": "INV-CCCCCC",
+        "kind": "realization",
+        "start_line": 9
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "problems": [],
+     "side": "before",
+     "state": "unavailable-history",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def land(value):\n    return value + 0\n\n\ndef keep():\n    return 1\n\n\ndef extra():\n    return 2\n",
+    "before": "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
+   }
+  },
+  "pkg/lines.txt": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attribution_unknown",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 3,
+     "hunks": 3,
+     "linked": 0,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "before"
+       },
+       {
+        "detail": "2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-A00010",
+         "RLZ-B00001"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 1,
+       "start": 4
+      },
+      "before": {
+       "count": 1,
+       "start": 4
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "before"
+       },
+       {
+        "detail": "2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-A00010",
+         "RLZ-B00001"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 0,
+       "start": 5
+      },
+      "before": {
+       "count": 1,
+       "start": 6
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "before"
+       }
+      ]
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/lines.txt",
+    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory; on the after side 2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
+    "sides": [
+     {
+      "blob": "b414108e81e5091fe0974a1858b4d0d22b107f70",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "entries": [],
+      "knowledge": "unavailable",
+      "path": "pkg/lines.txt",
+      "side": "before"
+     },
+     {
+      "blob": "e2dd3ede630867ee406de2b618197e7e4fa63e61",
+      "entries": [
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-A00010",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       },
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "problems": [],
+     "side": "before",
+     "state": "unavailable-history",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "1\nX\n3\nY\n5\n",
+    "before": "1\n2\n3\n4\n5\n6\n"
+   }
+  }
+ },
+ "both_unread": {
+  "pkg/a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attribution_unknown",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 2,
+     "hunks": 2,
+     "linked": 0,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "before"
+       },
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 4,
+       "start": 7
+      },
+      "before": {
+       "count": 0,
+       "start": 6
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "entries": [],
+        "reason": "knowledge_unavailable",
+        "side": "after"
+       }
+      ]
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/a.py",
+    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory; the after knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+    "sides": [
+     {
+      "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "entries": [],
+      "knowledge": "unavailable",
+      "path": "pkg/a.py",
+      "side": "before"
+     },
+     {
+      "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "entries": [],
+      "knowledge": "unavailable",
+      "path": "pkg/a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "problems": [],
+     "side": "before",
+     "state": "unavailable-history",
+     "tree": "0000000000000000000000000000000000000000"
+    },
+    {
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "problems": [],
+     "side": "after",
+     "state": "unavailable-history",
+     "tree": "0000000000000000000000000000000000000000"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def land(value):\n    return value + 0\n\n\ndef keep():\n    return 1\n\n\ndef extra():\n    return 2\n",
+    "before": "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
+   }
+  }
+ },
+ "curated": {
+  "pkg/a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 0,
+     "hunks": 2,
+     "linked": 2,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         },
+         {
+          "family": "FAM-F00002",
+          "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+          "family_revision": 1,
+          "state": "removed_or_reassigned"
+         },
+         {
+          "family": "FAM-F00003",
+          "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+          "family_revision": 1,
+          "state": "before_only"
+         }
+        ],
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 1
+       },
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         }
+        ],
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "after",
+        "start_line": 1
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 4,
+       "start": 7
+      },
+      "before": {
+       "count": 0,
+       "start": 6
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 10,
+        "families": [
+         {
+          "state": "confirmed_no_family"
+         }
+        ],
+        "id": "RLZ-C00010",
+        "invariant": "INV-CCCCCC",
+        "invariant_key": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+        "invariant_revision": 1,
+        "invariant_revision_key": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+        "kind": "realization",
+        "side": "after",
+        "start_line": 9
+       }
+      ],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/a.py",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-A00001, RLZ-A00002; on the after side RLZ-A00001, RLZ-A00002, RLZ-C00010)",
+    "sides": [
+     {
+      "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 6,
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 5
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "before"
+     },
+     {
+      "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 6,
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 5
+       },
+       {
+        "end_line": 10,
+        "id": "RLZ-C00010",
+        "invariant": "INV-CCCCCC",
+        "kind": "realization",
+        "start_line": 9
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def land(value):\n    return value + 0\n\n\ndef keep():\n    return 1\n\n\ndef extra():\n    return 2\n",
+    "before": "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
+   }
+  },
+  "pkg/lines.txt": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 3,
+     "linked": 1,
+     "unexplained": 1
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         },
+         {
+          "family": "FAM-F00002",
+          "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+          "family_revision": 1,
+          "state": "removed_or_reassigned"
+         },
+         {
+          "family": "FAM-F00003",
+          "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+          "family_revision": 1,
+          "state": "before_only"
+         }
+        ],
+        "id": "RLZ-A00010",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 1
+       },
+       {
+        "end_line": 3,
+        "families": [
+         {
+          "state": "confirmed_no_family"
+         }
+        ],
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "invariant_key": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+        "invariant_revision": 1,
+        "invariant_revision_key": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 2
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 1,
+       "start": 4
+      },
+      "before": {
+       "count": 1,
+       "start": 4
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-A00010",
+         "RLZ-B00001"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 0,
+       "start": 5
+      },
+      "before": {
+       "count": 1,
+       "start": 6
+      },
+      "classification": "unexplained",
+      "links": [],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/lines.txt",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-A00010, RLZ-B00001)",
+    "sides": [
+     {
+      "blob": "b414108e81e5091fe0974a1858b4d0d22b107f70",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00010",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 3,
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "start_line": 2
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "before"
+     },
+     {
+      "blob": "e2dd3ede630867ee406de2b618197e7e4fa63e61",
+      "entries": [
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-A00010",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       },
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "1\nX\n3\nY\n5\n",
+    "before": "1\n2\n3\n4\n5\n6\n"
+   }
+  }
+ },
+ "partial": {
+  "pkg/lines.txt": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "59331fa585bfd80db7509716e1f346b05a9aca82"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 3,
+     "linked": 1,
+     "unexplained": 1
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 3,
+        "families": [
+         {
+          "state": "membership_unknown"
+         }
+        ],
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "invariant_key": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+        "invariant_revision": 1,
+        "invariant_revision_key": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 2
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 1,
+       "start": 4
+      },
+      "before": {
+       "count": 1,
+       "start": 4
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "1 entry recorded here supplies no range: RLZ-B00001 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-B00001"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 0,
+       "start": 5
+      },
+      "before": {
+       "count": 1,
+       "start": 6
+      },
+      "classification": "unexplained",
+      "links": [],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/lines.txt",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-B00001)",
+    "sides": [
+     {
+      "blob": "b414108e81e5091fe0974a1858b4d0d22b107f70",
+      "entries": [
+       {
+        "end_line": 3,
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "start_line": 2
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "before"
+     },
+     {
+      "blob": "e2dd3ede630867ee406de2b618197e7e4fa63e61",
+      "entries": [
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "partial",
+     "problems": [
+      [
+       "knowledge/families/FAM-F00009-broken.json",
+       "a knowledge document names its format in a string 'schema' field"
+      ]
+     ],
+     "side": "before",
+     "state": "available",
+     "tree": "59331fa585bfd80db7509716e1f346b05a9aca82"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "1\nX\n3\nY\n5\n",
+    "before": "1\n2\n3\n4\n5\n6\n"
+   }
+  }
+ },
+ "precuration": {
+  "pkg/a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 2,
+     "linked": 1,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         },
+         {
+          "family": "FAM-F00002",
+          "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+          "family_revision": 1,
+          "state": "removed_or_reassigned"
+         },
+         {
+          "family": "FAM-F00003",
+          "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+          "family_revision": 1,
+          "state": "before_only"
+         }
+        ],
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 1
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 4,
+       "start": 7
+      },
+      "before": {
+       "count": 0,
+       "start": 6
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "2 entries recorded here supply no range: RLZ-A00001 (recorded_blob_mismatch), RLZ-A00002 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-A00001",
+         "RLZ-A00002"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/a.py",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-A00001, RLZ-A00002)",
+    "sides": [
+     {
+      "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 1
+       },
+       {
+        "end_line": 6,
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "start_line": 5
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "before"
+     },
+     {
+      "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
+      "entries": [
+       {
+        "detail": "recorded against blob 4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5; the after blob is c728aae5f5ac3e385709013a8d97a0850b98d950",
+        "id": "RLZ-A00001",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       },
+       {
+        "detail": "recorded against blob 4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5; the after blob is c728aae5f5ac3e385709013a8d97a0850b98d950",
+        "id": "RLZ-A00002",
+        "invariant": "INV-AAAAAA",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def land(value):\n    return value + 0\n\n\ndef keep():\n    return 1\n\n\ndef extra():\n    return 2\n",
+    "before": "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
+   }
+  },
+  "pkg/lines.txt": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 3,
+     "linked": 1,
+     "unexplained": 1
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 3,
+        "families": [
+         {
+          "state": "confirmed_no_family"
+         }
+        ],
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "invariant_key": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+        "invariant_revision": 1,
+        "invariant_revision_key": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+        "kind": "realization",
+        "side": "before",
+        "start_line": 2
+       }
+      ],
+      "unknown": []
+     },
+     {
+      "after": {
+       "count": 1,
+       "start": 4
+      },
+      "before": {
+       "count": 1,
+       "start": 4
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "1 entry recorded here supplies no range: RLZ-B00001 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-B00001"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     },
+     {
+      "after": {
+       "count": 0,
+       "start": 5
+      },
+      "before": {
+       "count": 1,
+       "start": 6
+      },
+      "classification": "unexplained",
+      "links": [],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/lines.txt",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-B00001)",
+    "sides": [
+     {
+      "blob": "b414108e81e5091fe0974a1858b4d0d22b107f70",
+      "entries": [
+       {
+        "end_line": 3,
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "start_line": 2
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "before"
+     },
+     {
+      "blob": "e2dd3ede630867ee406de2b618197e7e4fa63e61",
+      "entries": [
+       {
+        "detail": "recorded against blob b414108e81e5091fe0974a1858b4d0d22b107f70; the after blob is e2dd3ede630867ee406de2b618197e7e4fa63e61",
+        "id": "RLZ-B00001",
+        "invariant": "INV-BBBBBB",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/lines.txt",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "1\nX\n3\nY\n5\n",
+    "before": "1\n2\n3\n4\n5\n6\n"
+   }
+  },
+  "pkg/new.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "unexplained",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 0,
+     "hunks": 1,
+     "linked": 0,
+     "unexplained": 1
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 2,
+       "start": 1
+      },
+      "before": {
+       "count": 0,
+       "start": 0
+      },
+      "classification": "unexplained",
+      "links": [],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/new.py",
+    "reason": "no realization or proof entry is recorded for this path in either memory tree, and both memory trees were read",
+    "sides": [
+     {
+      "entries": [],
+      "knowledge": "available",
+      "side": "before"
+     },
+     {
+      "blob": "d8316b967bcc9a6be2f88e76520a39ad8923a07b",
+      "entries": [],
+      "knowledge": "available",
+      "path": "pkg/new.py",
+      "side": "after"
+     }
+    ],
+    "status": "added"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def fresh():\n    return 3\n",
+    "before": null
+   }
+  },
+  "pkg/stale.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attribution_unknown",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 1,
+     "hunks": 1,
+     "linked": 0,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 1
+      },
+      "before": {
+       "count": 1,
+       "start": 1
+      },
+      "classification": "attribution_unknown",
+      "links": [],
+      "unknown": [
+       {
+        "detail": "1 entry recorded here supplies no range: RLZ-C00002 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-C00002"
+        ],
+        "reason": "range_not_supplied",
+        "side": "before"
+       },
+       {
+        "detail": "1 entry recorded here supplies no range: RLZ-C00002 (recorded_blob_mismatch)",
+        "entries": [
+         "RLZ-C00002"
+        ],
+        "reason": "range_not_supplied",
+        "side": "after"
+       }
+      ]
+     }
+    ],
+    "mode_change": false,
+    "path": "pkg/stale.py",
+    "reason": "on the before side 1 entry recorded here supplies no range: RLZ-C00002 (recorded_blob_mismatch); on the after side 1 entry recorded here supplies no range: RLZ-C00002 (recorded_blob_mismatch)",
+    "sides": [
+     {
+      "blob": "7d4290a117a4ddcc11daae7ea675841033830c8f",
+      "entries": [
+       {
+        "detail": "recorded against blob 0000000000000000000000000000000000000000; the before blob is 7d4290a117a4ddcc11daae7ea675841033830c8f",
+        "id": "RLZ-C00002",
+        "invariant": "INV-CCCCCC",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/stale.py",
+      "side": "before"
+     },
+     {
+      "blob": "407de3068e7b5950585d5abed9776d104235a85d",
+      "entries": [
+       {
+        "detail": "recorded against blob 0000000000000000000000000000000000000000; the after blob is 407de3068e7b5950585d5abed9776d104235a85d",
+        "id": "RLZ-C00002",
+        "invariant": "INV-CCCCCC",
+        "kind": "realization",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "pkg/stale.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "x = 2\n",
+    "before": "x = 1\n"
+   }
+  },
+  "tests/test_a.py": {
+   "code_sides": [
+    {
+     "side": "base",
+     "state": "available",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    {
+     "side": "candidate",
+     "state": "available",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    }
+   ],
+   "comparison": {
+    "code_base": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
+    },
+    "code_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/code",
+     "tree": "c8af799c585a685b1abd5eb795047f422600c693"
+    },
+    "leaf_id": "260101-TRV-L1",
+    "memory_base": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    "memory_candidate": {
+     "repository": "/tmp/tmp3b8tqae9/memory",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    },
+    "number": 1,
+    "recorded_at": "2026-09-30T00:00:00+00:00",
+    "schema": "ar-review-tree-comparison/v1",
+    "task_id": "260101_tree_review"
+   },
+   "entries": [],
+   "file_classification": {
+    "bucket": "attributed",
+    "content": "text",
+    "counts": {
+     "attribution_unknown": 0,
+     "hunks": 1,
+     "linked": 1,
+     "unexplained": 0
+    },
+    "hunks": [
+     {
+      "after": {
+       "count": 1,
+       "start": 2
+      },
+      "before": {
+       "count": 1,
+       "start": 2
+      },
+      "classification": "linked",
+      "links": [
+       {
+        "end_line": 2,
+        "facet": "land returns its value.",
+        "families": [
+         {
+          "family": "FAM-F00001",
+          "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
+          "family_revision": 1,
+          "state": "member"
+         },
+         {
+          "family": "FAM-F00002",
+          "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+          "family_revision": 1,
+          "state": "removed_or_reassigned"
+         },
+         {
+          "family": "FAM-F00003",
+          "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+          "family_revision": 1,
+          "state": "before_only"
+         }
+        ],
+        "id": "PRF-A00004",
+        "invariant": "INV-AAAAAA",
+        "invariant_key": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision": 1,
+        "invariant_revision_key": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "kind": "proof",
+        "side": "before",
+        "start_line": 1
+       }
+      ],
+      "unknown": []
+     }
+    ],
+    "mode_change": false,
+    "path": "tests/test_a.py",
+    "reason": "a recorded entry supplies a range at its recorded blob (on the before side PRF-A00004)",
+    "sides": [
+     {
+      "blob": "cfb900d08be90122da7697ea658e2cefa1c9a8d2",
+      "entries": [
+       {
+        "end_line": 2,
+        "id": "PRF-A00004",
+        "invariant": "INV-AAAAAA",
+        "kind": "proof",
+        "start_line": 1
+       }
+      ],
+      "knowledge": "available",
+      "path": "tests/test_a.py",
+      "side": "before"
+     },
+     {
+      "blob": "33723e870fbf756f754cbff9722274e2e244478b",
+      "entries": [
+       {
+        "detail": "recorded against blob cfb900d08be90122da7697ea658e2cefa1c9a8d2; the after blob is 33723e870fbf756f754cbff9722274e2e244478b",
+        "id": "PRF-A00004",
+        "invariant": "INV-AAAAAA",
+        "kind": "proof",
+        "reason": "recorded_blob_mismatch"
+       }
+      ],
+      "knowledge": "available",
+      "path": "tests/test_a.py",
+      "side": "after"
+     }
+    ],
+    "status": "modified"
+   },
+   "knowledge_sides": [
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "before",
+     "state": "available",
+     "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
+    },
+    {
+     "index_state": "complete",
+     "problems": [],
+     "side": "after",
+     "state": "available",
+     "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
+    }
+   ],
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "state": "trees",
+   "texts": {
+    "after": "def test_land():\n    assert 1 == 1\n",
+    "before": "def test_land():\n    assert True\n"
+   }
+  }
+ }
+}

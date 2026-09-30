@@ -1,0 +1,572 @@
+{
+ "operation": "read_knowledge_review",
+ "payload": {
+  "candidate": {
+   "leaf_id": "260928-MIK-L34",
+   "master": "260928_maintained-invariant-knowledge",
+   "repository_id": "agents-remember",
+   "task_ref": "260928_maintained-invariant-knowledge"
+  },
+  "comparison": {
+   "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "after_snapshot_digest": "1e15a1d7d7782f9571193da66c1d0ef6fb8ad7b1a99f16cfb69bc08fdab5ee12",
+   "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+   "before_snapshot_digest": "a1ea4abe833b81cf516f0d78fd6e843936fa3fb79c542da7dc7f427a590fbffe",
+   "binding_digest": "edc09e13629e32111467c2a6c1dd63026c7cc7d2b825edfe564fd664eb2531df",
+   "knowledge_compared": true,
+   "policy_version": "recorded-two-snapshot-union/v1",
+   "reference": "edc09e13629e32111467c2a6c1dd63026c7cc7d2b825edfe564fd664eb2531df",
+   "selector_digest": "df2f20b211ba33a62456af8bdb42da426e8a0c18acfdc17718a39df00afd538a"
+  },
+  "evidence": {
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "verification_observations",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "evidence_claims",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessment_state": "unassessed",
+   "assessments": [],
+   "channels": [
+    {
+     "detail": "The live curator authority 260928-MIK-L34-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "owner": "curator_coherence.load_curator_coherence_generation",
+     "record_count": 0,
+     "records": "assessments",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no detection run, so no detector signal exists for this review; the detection owner answered for the runs it holds",
+     "owner": "detection.read_detection_run",
+     "record_count": 0,
+     "records": "detection_signals",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate's dataset answers for this exact candidate and records no verification observation for it; the evidence owner's own answer is a measured zero, not an unread authority",
+     "owner": "knowledge_evidence.read_evidence_scope",
+     "record_count": 0,
+     "records": "verification_observations",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no evidence claim, so no authored evidence exists for this review; the evidence owner answered for the claims it holds",
+     "owner": "evidence_records.claim_record",
+     "record_count": 0,
+     "records": "evidence_claims",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this candidate records no assessment, so no binding existed to measure; a measured zero of assessments is not a measured binding",
+     "owner": "review_assessment_currentness.comparison_currentness_measurement",
+     "record_count": 0,
+     "records": "assessment_currentness",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+     "owner": "knowledge_views.read_knowledge_view:review_matrix",
+     "record_count": 0,
+     "records": "authored_effects",
+     "state": "none_recorded",
+     "unreadable": []
+    }
+   ],
+   "context": [],
+   "evidence_links": [],
+   "evidence_state": "none_recorded",
+   "observations": [],
+   "source_inspection_available": true,
+   "unresolved": []
+  },
+  "family_context": {
+   "detail": "the recorded scope was read on both snapshots and holds no family membership for the selected invariant, so no family context exists for it; this is a measured zero and not an unread, unavailable or filtered scope",
+   "entries": [],
+   "families_remaining": 0,
+   "families_returned": 0,
+   "families_total": 0,
+   "limitations": [],
+   "membership_rows_total": 0,
+   "references": {
+    "applicability": "knowledge.applicability",
+    "assessments": "evidence.assessments",
+    "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them",
+    "evidence_links": "evidence.evidence_links",
+    "join_key": "invariant_revision_id",
+    "observations": "evidence.observations",
+    "relationship_union": "source.relationships",
+    "source_inventory": "source.inventory"
+   },
+   "state": "no_family_recorded",
+   "unique_member_revision_total": 0
+  },
+  "knowledge": {
+   "after_conditions": [
+    "The listing process can read the directory but cannot open its children.",
+    "Family examination: no joint obligation is supported. Basis: This is a ruled exception that bounds the byte-identity member rather than an obligation supporting the joint guarantee; the family guarantee names it as its one exception."
+   ],
+   "after_statement": {
+    "detail": "the after snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "A notes directory that is readable but not searchable lists without its children (HTTP 200) where the path-based walk answered 500; accepted as the one deliberate deviation from byte identity."
+   },
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "detection_signals",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "authored_effects",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessments": [],
+   "authored_effects": [],
+   "before_conditions": [
+    "The listing process can read the directory but cannot open its children.",
+    "Family examination: no joint obligation is supported. Basis: This is a ruled exception that bounds the byte-identity member rather than an obligation supporting the joint guarantee; the family guarantee names it as its one exception."
+   ],
+   "before_statement": {
+    "detail": "the before snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "A notes directory that is readable but not searchable lists without its children (HTTP 200) where the path-based walk answered 500; accepted as the one deliberate deviation from byte identity."
+   },
+   "context": [],
+   "family_ids": [],
+   "field_changes": [],
+   "invariant_ids": [
+    "4ec11f34-62de-5d3e-a036-756e10ae7859"
+   ],
+   "revision_groups": [
+    {
+     "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+     "selected_revision_count": 1,
+     "side": "after"
+    }
+   ],
+   "revision_selection": {
+    "after_heads": [
+     "f9417c0a-c89e-5167-9595-1289de41dc28"
+    ],
+    "after_retained": [
+     "f9417c0a-c89e-5167-9595-1289de41dc28"
+    ],
+    "after_revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+    "before_heads": [
+     "f9417c0a-c89e-5167-9595-1289de41dc28"
+    ],
+    "before_retained": [
+     "f9417c0a-c89e-5167-9595-1289de41dc28"
+    ],
+    "before_revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+    "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+    "record_kind": "invariant",
+    "state": "compared",
+    "statement": "the invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 comparison uses the before head f9417c0a-c89e-5167-9595-1289de41dc28 and the after head f9417c0a-c89e-5167-9595-1289de41dc28, each the unique retained revision with no recorded successor in its snapshot's selected population; 0 other retained revision(s) remain selectable history"
+   },
+   "selection_state": "subject_selected",
+   "signals": [],
+   "unresolved": []
+  },
+  "limitations": [
+   "limitation:unattributed_changed_paths",
+   "limitation:no_semantic_assessment_performed",
+   "omitted:change_not_attributed_to_a_recorded_realization:2",
+   "review:trees:3",
+   "history:intent:before:available",
+   "knowledge-index:before:complete",
+   "history:intent:after:available",
+   "knowledge-index:after:partial"
+  ],
+  "source": {
+   "attributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_comparison_retention.py",
+    "mcp/src/agents_remember/serving/notes.py"
+   ],
+   "attribution": {
+    "attributed_total": 2,
+    "changed_total": 4,
+    "complete": true,
+    "confirmed_unregistered_total": 2,
+    "detail": "4 measured changed path(s) at the changed-path granularity: 2 attributed, 2 confirmed to have no valid registered attribution, and 0 of undetermined attribution. Snapshot inspection: before inspected; after inspected. Every required snapshot/scope completely inspected or legitimately known empty: True. This denominator is the whole measured change population of the bound pair. A resolved path-level mapping establishes that a recorded claim's bytes are at this path and never that every change inside it realizes that claim",
+    "granularity": "changed_path",
+    "paths": [
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "22 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "selected_subject",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "unresolved_mapping_count": 0
+     }
+    ],
+    "sides": [
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "before",
+      "state": "inspected"
+     },
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "after",
+      "state": "inspected"
+     }
+    ],
+    "state": "measured",
+    "subject_scope_complete": true,
+    "unknown_attribution_total": 0
+   },
+   "expansion_command": "git diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+   "inventory": {
+    "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
+    "entries": [
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "status": "added"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "status": "modified"
+     }
+    ],
+    "listed_total": 4,
+    "partial": false,
+    "state": "measured",
+    "unrepresentable_paths": []
+   },
+   "locations": [
+    {
+     "before_only": false,
+     "change_state": "changed",
+     "claim_id": "20726a95-fdcb-5d00-bfe0-80347d8bafaf",
+     "counterpart_path": "mcp/src/agents_remember/serving/notes.py",
+     "invariant_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+     "invariant_revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+     "movement": {
+      "after": {
+       "change_state": "changed",
+       "detail": "the after snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 through relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Its OSError catch returns None for a child whose stat fails, which is what happens (EACCES) to every child of a readable but not searchable directory; those children are skipped and the listing answers 200 instead of the path-based walk's 500.",
+       "reached_via": [
+        "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28",
+        "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28"
+       ],
+       "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+       "record_kind": "invariant",
+       "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "relationship_id": "20726a95-fdcb-5d00-bfe0-80347d8bafaf",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+       "revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [
+       {
+        "change_state": "changed",
+        "detail": "the before snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 through relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "selected_both",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Its OSError catch returns None for a child whose stat fails, which is what happens (EACCES) to every child of a readable but not searchable directory; those children are skipped and the listing answers 200 instead of the path-based walk's 500.",
+        "reached_via": [
+         "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28",
+         "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28"
+        ],
+        "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "20726a95-fdcb-5d00-bfe0-80347d8bafaf",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+        "revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "pairing_basis": "same_recorded_relationship",
+      "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py (revision f9417c0a-c89e-5167-9595-1289de41dc28) and the candidate records realization 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py (revision f9417c0a-c89e-5167-9595-1289de41dc28) under invariant 4ec11f34-62de-5d3e-a036-756e10ae7859; the association is displayed as unchanged paired by the same recorded relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+      "transition": "unchanged"
+     },
+     "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Its OSError catch returns None for a child whose stat fails, which is what happens (EACCES) to every child of a readable but not searchable directory; those children are skipped and the listing answers 200 instead of the path-based walk's 500.",
+     "reached_via": [
+      "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28",
+      "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "unchanged"
+    }
+   ],
+   "relationships": [
+    {
+     "after": {
+      "change_state": "changed",
+      "detail": "the after snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 through relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py",
+      "item_coverage": "selected_both",
+      "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "rationale": "Its OSError catch returns None for a child whose stat fails, which is what happens (EACCES) to every child of a readable but not searchable directory; those children are skipped and the listing answers 200 instead of the path-based walk's 500.",
+      "reached_via": [
+       "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28",
+       "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28"
+      ],
+      "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+      "record_kind": "invariant",
+      "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "relationship_id": "20726a95-fdcb-5d00-bfe0-80347d8bafaf",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+      "revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "change_state": "changed",
+       "detail": "the before snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 through relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Its OSError catch returns None for a child whose stat fails, which is what happens (EACCES) to every child of a readable but not searchable directory; those children are skipped and the listing answers 200 instead of the path-based walk's 500.",
+       "reached_via": [
+        "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28",
+        "invariant_identity:f9417c0a-c89e-5167-9595-1289de41dc28"
+       ],
+       "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "20726a95-fdcb-5d00-bfe0-80347d8bafaf",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+       "revision_id": "f9417c0a-c89e-5167-9595-1289de41dc28",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py (revision f9417c0a-c89e-5167-9595-1289de41dc28) and the candidate records realization 20726a95-fdcb-5d00-bfe0-80347d8bafaf at mcp/src/agents_remember/serving/notes.py (revision f9417c0a-c89e-5167-9595-1289de41dc28) under invariant 4ec11f34-62de-5d3e-a036-756e10ae7859; the association is displayed as unchanged paired by the same recorded relationship 20726a95-fdcb-5d00-bfe0-80347d8bafaf, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+      "item_coverage": "selected_both",
+      "reached_via": [],
+      "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+      "record_kind": "invariant",
+      "side": "after",
+      "state": "ungoverned"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+       "item_coverage": "selected_both",
+       "reached_via": [],
+       "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+       "record_kind": "invariant",
+       "side": "before",
+       "state": "ungoverned"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_governed_identity",
+     "record_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+     "record_kind": "invariant",
+     "relationship_kind": "governing_route",
+     "statement": "the invariant 4ec11f34-62de-5d3e-a036-756e10ae7859 is associated with the same governing route on both snapshots (no governing route)",
+     "transition": "unchanged"
+    }
+   ],
+   "remaining": [
+    {
+     "name": "locations_remaining",
+     "value": 0
+    },
+    {
+     "name": "changed_paths_outside_selection",
+     "value": 3
+    },
+    {
+     "name": "unattributed_changed_paths",
+     "value": 2
+    },
+    {
+     "name": "unknown_attribution_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "records_present_outside_selection",
+     "value": 0
+    },
+    {
+     "name": "references_unresolved",
+     "value": 0
+    }
+   ],
+   "unattributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_marker_scratch.py",
+    "mcp/tests/test_knowledge_review_attributed_source_content.py"
+   ],
+   "unknown_attribution_changed_paths": [],
+   "unresolved": []
+  },
+  "staleness": {
+   "moved": [],
+   "state": "current",
+   "statement": "the displayed comparison is the candidate's current comparison"
+  },
+  "submission": {
+   "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+   "none_is_approval": true,
+   "proposed_dispositions": [
+    "concern_found",
+    "no_concern_found",
+    "unresolved"
+   ],
+   "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+   "state": "unavailable"
+  },
+  "surface_version": "knowledge-review-surface/1"
+ },
+ "repository_id": "agents-remember",
+ "state": "review"
+}

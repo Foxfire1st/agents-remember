@@ -24,6 +24,7 @@ import {
   type ReviewTreesRead,
 } from '../../data/reviewTrees';
 import { ExpressionCards } from './ExpressionCards';
+import { MemberFamilyLabel } from './MarkerTargetState';
 import {
   GuaranteeTextChange,
   IntentWordDiffScope,
@@ -792,7 +793,7 @@ function MemberCenter({
       <div>
         <h2 className={sectionLabel}>{member?.display_label ?? 'Selected invariant'}</h2>
         <p className={muted} data-testid="review-center-member-family">
-          {memberContextLabel(entry, payload)}
+          <MemberFamilyLabel subject={subject} payload={payload} entry={entry} />
         </p>
       </div>
       {entry ? <GuaranteeComparisonBlock entry={entry} layout={layout} /> : null}
@@ -1098,14 +1099,4 @@ function FamilyEvidence({
       <SubjectEvidence payload={payload} subject={{ kind: 'family', id: entry.family_id }} />
     </div>
   );
-}
-
-function memberContextLabel(
-  entry: ReviewFamilyContextEntry | undefined,
-  payload: ReviewPayload,
-): string {
-  if (entry) return `${entry.display_label ?? entry.family_id} · Member review`;
-  return payload.family_context?.state === 'no_family_recorded'
-    ? 'No recorded family'
-    : 'Family context unavailable';
 }

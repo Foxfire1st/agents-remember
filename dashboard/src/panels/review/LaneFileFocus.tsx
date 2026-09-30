@@ -5,9 +5,11 @@
 // the landed source-content read of the listed generation (exact side blobs, the same read the source
 // explorer makes and caches). Each focused hunk is its own diff window cut on the side line numbers
 // the server named, so a displayed change region can never merge two of the server's hunks under one
-// mark. The gate's own items for the file (MIK-R10, with the history rows that answer them) are shown
-// beside, grouped as the leaf panel groups them; nothing here assesses, approves or explains a change.
-import { useState } from 'react';
+// mark. Every owner hunk a window draws -- the focused one and any neighbour its context lines show --
+// carries its own intent marker in the window's gutter (MIK-R34), as the full file's hunks do. The
+// gate's own items for the file (MIK-R10, with the history rows that answer them) are shown beside,
+// grouped as the leaf panel groups them; nothing here assesses, approves or explains a change.
+import { useContext, useState } from 'react';
 
 import { css } from '../../../styled-system/css';
 import type {
@@ -24,6 +26,9 @@ import {
 import type { ReviewWorklistView } from '../../data/reviewTrees';
 import { DiffPane } from '../changeset/DiffPane';
 import { FilePane } from '../file-viewer/FilePane';
+import { fileMarks, hunkKey, type PaneWindow } from './hunkMarkers';
+import { FileMark, describesDrawn, sideMarks, usePaneMarking } from './IntentMarkers';
+import { IntentMarkerScope } from './intentMarkerScope';
 import {
   CLASS_LABELS,
   FOCUSED_HUNK_LIMIT,
@@ -136,6 +141,7 @@ export function LaneFileFocus({
             task={task}
             path={path}
             generation={{ before: generation.before, after: generation.after }}
+            file={file}
             hunks={hunks}
             layout={layout}
           />
@@ -144,6 +150,7 @@ export function LaneFileFocus({
             entry={entry}
             generation={{ before: generation.before, after: generation.after }}
             layout={layout}
+            file={file}
           />
         </>
       ) : (
@@ -197,12 +204,14 @@ function FocusedDiffs({
   task,
   path,
   generation,
+  file,
   hunks,
   layout,
 }: {
   task: LaneTask;
   path: string;
   generation: { before: string; after: string };
+  file: ReviewFileClassification;
   hunks: ReviewLaneHunk[];
   layout: DiffLayout;
 }) {
@@ -229,19 +238,27 @@ function FocusedDiffs({
   if (!expansion)
     return <p className={muted}>{result.refusal?.detail ?? 'The content could not be opened.'}</p>;
   const shown = hunks.slice(0, FOCUSED_HUNK_LIMIT);
+  const marks = fileMarks(file);
   return (
     <div data-testid="review-lane-hunks" data-hunks={hunks.length}>
+      <FileMark file={file} />
       {shown.map((hunk) => (
         <FocusedHunk
-          key={`${hunk.before.start}:${hunk.before.count}:${hunk.after.start}:${hunk.after.count}`}
+          key={hunkKey(hunk)}
+          path={path}
+          file={file}
           hunk={hunk}
           expansion={expansion}
           layout={layout}
         />
       ))}
       {hunks.length > shown.length ? (
-        <p className={muted}>
-          {hunks.length - shown.length} more hunk(s) of this class; the full file shows every one.
+        <p className={muted} data-testid="review-lane-hunks-more">
+          {hunks.length - shown.length} more hunk(s) of this class are not drawn here. Full file
+          draws every changed region of the text its read returns,{' '}
+          {marks.kind === 'file'
+            ? 'under the one mark this file carries.'
+            : 'each owner hunk with its own mark.'}
         </p>
       ) : null}
     </div>
@@ -249,10 +266,14 @@ function FocusedDiffs({
 }
 
 function FocusedHunk({
+  path,
+  file,
   hunk,
   expansion,
   layout,
 }: {
+  path: string;
+  file: ReviewFileClassification;
   hunk: ReviewLaneHunk;
   expansion: ReviewSourceExpansion;
   layout: DiffLayout;
@@ -280,7 +301,7 @@ function FocusedHunk({
           ))}
         </ul>
       ) : null}
-      <HunkExcerpt hunk={hunk} expansion={expansion} layout={layout} />
+      <HunkExcerpt path={path} file={file} hunk={hunk} expansion={expansion} layout={layout} />
     </section>
   );
 }
@@ -296,17 +317,64 @@ function sideWindow(
   return hunkWindow(hunk[side], sideLines(opened.text ?? ''));
 }
 
+// The lines each side's window draws, in the file's numbering.
+function drawnLines(window: HunkWindow | null) {
+  return window
+    ? { first: window.first, last: window.first + sideLines(window.text).length - 1 }
+    : null;
+}
+
+// The intent marks of one window: every owner hunk whose changed lines the window draws, each on its
+// own side lines (a neighbour shown only as context keeps its own mark).
+function useWindowMarking(
+  path: string,
+  file: ReviewFileClassification,
+  hunk: ReviewLaneHunk,
+  expansion: ReviewSourceExpansion,
+  layout: DiffLayout,
+  windows: { before: HunkWindow | null; after: HunkWindow | null },
+) {
+  const scope = useContext(IntentMarkerScope);
+  const window: PaneWindow = {
+    before: drawnLines(windows.before),
+    after: drawnLines(windows.after),
+  };
+  const drawn =
+    scope !== null &&
+    fileMarks(file).kind === 'hunks' &&
+    describesDrawn(file, { before: expansion.before.object_id, after: expansion.after.object_id });
+  return usePaneMarking(
+    drawn
+      ? {
+          path,
+          pane: `lane-window:${hunkKey(hunk)}`,
+          file,
+          layout: windows.before && windows.after ? layout : 'split',
+          window,
+        }
+      : null,
+  );
+}
+
 function HunkExcerpt({
+  path,
+  file,
   hunk,
   expansion,
   layout,
 }: {
+  path: string;
+  file: ReviewFileClassification;
   hunk: ReviewLaneHunk;
   expansion: ReviewSourceExpansion;
   layout: DiffLayout;
 }) {
   const beforeWindow = sideWindow(hunk, expansion, 'before');
   const afterWindow = sideWindow(hunk, expansion, 'after');
+  const marking = useWindowMarking(path, file, hunk, expansion, layout, {
+    before: beforeWindow,
+    after: afterWindow,
+  });
   if (beforeWindow?.beyond || afterWindow?.beyond)
     return (
       <p className={muted} data-testid="review-lane-hunk-beyond">
@@ -316,19 +384,34 @@ function HunkExcerpt({
     );
   if (beforeWindow && afterWindow)
     return (
-      <DiffPane
-        before={beforeWindow.text}
-        after={afterWindow.text}
-        language={expansion.language}
-        mode={layout}
-        collapse={false}
-        firstLine={{ before: beforeWindow.first, after: afterWindow.first }}
-        fit
-      />
+      <>
+        <DiffPane
+          before={beforeWindow.text}
+          after={afterWindow.text}
+          language={expansion.language}
+          mode={layout}
+          collapse={false}
+          firstLine={{ before: beforeWindow.first, after: afterWindow.first }}
+          fit
+          marks={marking.marks}
+        />
+        {marking.panel}
+      </>
     );
   const only = beforeWindow ?? afterWindow;
   if (!only) return <p className={muted}>Neither side of this hunk is text the read returned.</p>;
-  return <FilePane content={only.text} language={expansion.language} firstLine={only.first} fit />;
+  return (
+    <>
+      <FilePane
+        content={only.text}
+        language={expansion.language}
+        firstLine={only.first}
+        fit
+        marks={sideMarks(marking.marks, beforeWindow ? 'before' : 'after')}
+      />
+      {marking.panel}
+    </>
+  );
 }
 
 function FullFile({
@@ -336,13 +419,19 @@ function FullFile({
   entry,
   generation,
   layout,
+  file,
 }: {
   task: LaneTask;
   entry: ReviewChangedFile;
   generation: { before: string; after: string };
   layout: DiffLayout;
+  file: ReviewFileClassification;
 }) {
-  const [open, setOpen] = useState(false);
+  // A return to a marker followed from the full file opens it again.
+  const returning = useContext(IntentMarkerScope)?.returning;
+  const [open, setOpen] = useState(
+    returning?.pane === 'lane-full' && returning.path === entry.path,
+  );
   return (
     <div>
       <button
@@ -363,6 +452,7 @@ function FullFile({
           afterCodeTreeId={generation.after}
           mode={layout}
           collapse={false}
+          markers={{ pane: 'lane-full', classification: file }}
         />
       ) : null}
     </div>

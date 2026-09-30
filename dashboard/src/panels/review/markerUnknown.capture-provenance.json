@@ -1,0 +1,119 @@
+{
+  "captured_at": "2026-09-30T14:30:58+00:00",
+  "producer": "260928-MIK-L34 worker (rulings round), notes/reports/260928-MIK-L34-evidence/capture_rulings_fixtures.py",
+  "command": "PYTHONPATH=<L34 worktree>/mcp/src <mcp venv python> capture_rulings_fixtures.py <L34 worktree>/dashboard <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l34 worktree (base 904e804b07a598d5d6c66f06b7e67ddab64d9b8e, with this leaf's uncommitted changes; no server file changed)",
+  "scratch": "/tmp/mik-l34-real (see markerReturn.capture-provenance.json), then setup_leaf.py break-family: the leaf's FAM-4V4GSQCS record made '{}' on the after side, so the after memory tree is not read whole -- comparison 3",
+  "comparisons": {
+    "markerUnknown.*": 3,
+    "markerReturn.cards": 2
+  },
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/markerUnknown.task.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34"
+      },
+      "status": 200,
+      "seconds": 6.45,
+      "sha256": "017cb13bd5ae3fe17c2af49294caf2e5a924124464b026c8d0e47824c7b93ccd",
+      "bytes": 14990
+    },
+    {
+      "file": "src/panels/review/markerUnknown.lane.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "lane": "files"
+      },
+      "status": 200,
+      "seconds": 0.16,
+      "sha256": "5791337287f0027fb88564051f5e43b499d3561691475bd72c60b42cedbecb6b",
+      "bytes": 3806
+    },
+    {
+      "file": "src/panels/review/markerUnknown.file.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "file": "mcp/src/agents_remember/serving/notes.py"
+      },
+      "status": 200,
+      "seconds": 0.11,
+      "sha256": "8eb09293f0d559850f1b677341856b5cfcace095b05448d67c63f1c0937060e7",
+      "bytes": 10172
+    },
+    {
+      "file": "src/panels/review/markerUnknown.source.captured.json",
+      "route": "GET /api/review/intent/source-content",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "beforeCodeTreeId": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+        "afterCodeTreeId": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+      },
+      "status": 200,
+      "seconds": 4.08,
+      "sha256": "330123f211ef70f9fad66bdfd92b4dc1049f0995487d3d84bb95ef1f9e2a82ae",
+      "bytes": 28591
+    },
+    {
+      "file": "src/panels/review/markerUnknown.memberUnknown.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "selectorKind": "invariant",
+        "selectorId": "c7c5be49-164f-56e0-923d-fb5f5259d80c"
+      },
+      "status": 200,
+      "seconds": 7.21,
+      "sha256": "6975f97aaa50e46e86e74dafde54c1dcfb983400c5a83f80c0b0bf2a172f95bb",
+      "bytes": 98501
+    },
+    {
+      "file": "src/panels/review/markerUnknown.noFamily.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "selectorKind": "invariant",
+        "selectorId": "4ec11f34-62de-5d3e-a036-756e10ae7859"
+      },
+      "status": 200,
+      "seconds": 7.18,
+      "sha256": "a361c6e22a10d11a9e690927c6783112d1f251cdc885c2f5f9ff0015991561b8",
+      "bytes": 27246
+    },
+    {
+      "file": "src/panels/review/markerReturn.cards.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 2,
+        "invariants": "16b287d6-2337-5554-b911-43e3a7d15fab,5bcc7ed2-71c4-547f-a4b9-4dc5233531e6,5c75cbf9-0778-5765-bdac-50ed81e31ff6,c7c5be49-164f-56e0-923d-fb5f5259d80c,e9043896-8124-5cdb-b1e9-ed38604ca2e2"
+      },
+      "status": 200,
+      "seconds": 0.11,
+      "sha256": "177cb6c52fd93e5c05a4230f34726c3532e34d60a539d838e4a8779ce820bb40",
+      "bytes": 20035
+    }
+  ]
+}

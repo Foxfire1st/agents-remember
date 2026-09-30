@@ -10,6 +10,7 @@ import { css } from "../../../styled-system/css";
 import { codeTheme } from "./codemirrorTheme";
 import { numberedFrom } from "./lineNumbering";
 import { langExtension } from "./langByExtension";
+import { type PaneMarks, useMarkedPane } from "./markGutter";
 
 const host = css({
   height: "100%",
@@ -26,13 +27,17 @@ export function FilePane({
   language,
   firstLine = 1,
   fit = false,
+  marks,
 }: {
   content: string;
   language: string;
   firstLine?: number;
   fit?: boolean;
+  // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
+  marks?: PaneMarks;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
 
   useEffect(() => {
     const parent = ref.current;
@@ -44,6 +49,7 @@ export function FilePane({
     void langExtension(language).then((lang) => {
       if (disposed || !parent) return;
       const extensions: Extension[] = [
+        gutterFor("all", firstLine),
         numberedFrom(firstLine),
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
@@ -52,13 +58,21 @@ export function FilePane({
       ];
       if (lang) extensions.push(lang);
       view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions }) });
+      drawn({ after: { view, first: firstLine } });
     });
 
     return () => {
       disposed = true;
+      drawn(null);
       view?.destroy();
     };
-  }, [content, language, firstLine]);
+    // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
+  }, [content, language, firstLine, placement, gutterFor, drawn]);
 
-  return <div ref={ref} className={fit ? fitHost : host} data-testid="file-pane" />;
+  return (
+    <>
+      <div ref={ref} className={fit ? fitHost : host} data-testid="file-pane" />
+      {portals}
+    </>
+  );
 }

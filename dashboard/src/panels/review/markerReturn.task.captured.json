@@ -1,0 +1,354 @@
+{
+ "operation": "read_knowledge_review",
+ "payload": {
+  "candidate": {
+   "leaf_id": "260928-MIK-L34",
+   "master": "260928_maintained-invariant-knowledge",
+   "repository_id": "agents-remember",
+   "task_ref": "260928_maintained-invariant-knowledge"
+  },
+  "evidence": {
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "verification_observations",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "evidence_claims",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessment_state": "unassessed",
+   "assessments": [],
+   "channels": [
+    {
+     "detail": "The live curator authority 260928-MIK-L34-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "owner": "curator_coherence.load_curator_coherence_generation",
+     "record_count": 0,
+     "records": "assessments",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no detection run, so no detector signal exists for this review; the detection owner answered for the runs it holds",
+     "owner": "detection.read_detection_run",
+     "record_count": 0,
+     "records": "detection_signals",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate's dataset answers for this exact candidate and records no verification observation for it; the evidence owner's own answer is a measured zero, not an unread authority",
+     "owner": "knowledge_evidence.read_evidence_scope",
+     "record_count": 0,
+     "records": "verification_observations",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no evidence claim, so no authored evidence exists for this review; the evidence owner answered for the claims it holds",
+     "owner": "evidence_records.claim_record",
+     "record_count": 0,
+     "records": "evidence_claims",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this candidate records no assessment, so no binding existed to measure; a measured zero of assessments is not a measured binding",
+     "owner": "review_assessment_currentness.comparison_currentness_measurement",
+     "record_count": 0,
+     "records": "assessment_currentness",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this review selected no knowledge subject, so no review-matrix row was read and this collection was neither supplied nor ruled out",
+     "next_action": "open the review on a recorded subject: the review matrix selects its rows for a selected subject and never for the task alone",
+     "owner": "knowledge_views.read_knowledge_view:review_matrix",
+     "records": "authored_effects",
+     "state": "not_selected",
+     "unreadable": []
+    }
+   ],
+   "context": [],
+   "evidence_links": [],
+   "evidence_state": "none_recorded",
+   "observations": [],
+   "source_inspection_available": true,
+   "unresolved": []
+  },
+  "family_context": {
+   "detail": "no knowledge subject was selected for this review, so no recorded family, guarantee or member roster was resolved; the Source pane carries the complete inventory of the bound source pair independently of any family membership",
+   "entries": [],
+   "families_remaining": 0,
+   "families_returned": 0,
+   "families_total": 0,
+   "limitations": [],
+   "membership_rows_total": 0,
+   "references": {
+    "applicability": "knowledge.applicability",
+    "assessments": "evidence.assessments",
+    "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them",
+    "evidence_links": "evidence.evidence_links",
+    "join_key": "invariant_revision_id",
+    "observations": "evidence.observations",
+    "relationship_union": "source.relationships",
+    "source_inventory": "source.inventory"
+   },
+   "state": "no_subject_selected",
+   "unique_member_revision_total": 0
+  },
+  "knowledge": {
+   "after_conditions": [],
+   "after_statement": {
+    "detail": "no invariant or family subject was selected for this review, so no knowledge operand was compared and none is reported as empty; the Source pane carries the complete source change inventory of the bound pair",
+    "language": "text",
+    "state": "unresolved"
+   },
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "detection_signals",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "authored_effects",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessments": [],
+   "authored_effects": [],
+   "before_conditions": [],
+   "before_statement": {
+    "detail": "no invariant or family subject was selected for this review, so no knowledge operand was compared and none is reported as empty; the Source pane carries the complete source change inventory of the bound pair",
+    "language": "text",
+    "state": "unresolved"
+   },
+   "context": [],
+   "family_ids": [],
+   "field_changes": [],
+   "invariant_ids": [],
+   "revision_groups": [],
+   "selection_detail": "no invariant or family subject was selected for this review, so no knowledge operand was compared and none is reported as empty; the Source pane carries the complete source change inventory of the bound pair",
+   "selection_state": "task_context",
+   "signals": [],
+   "unresolved": []
+  },
+  "limitations": [
+   "limitation:no_knowledge_subject_selected",
+   "review:trees:2",
+   "history:intent:before:available",
+   "knowledge-index:before:complete",
+   "history:intent:after:available",
+   "knowledge-index:after:complete"
+  ],
+  "source": {
+   "attributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_comparison_retention.py",
+    "mcp/src/agents_remember/serving/notes.py"
+   ],
+   "attribution": {
+    "attributed_total": 2,
+    "changed_total": 4,
+    "complete": true,
+    "confirmed_unregistered_total": 2,
+    "detail": "4 measured changed path(s) at the changed-path granularity: 2 attributed, 2 confirmed to have no valid registered attribution, and 0 of undetermined attribution. Snapshot inspection: before inspected; after inspected. Every required snapshot/scope completely inspected or legitimately known empty: True. This denominator is the whole measured change population of the bound pair. A resolved path-level mapping establishes that a recorded claim's bytes are at this path and never that every change inside it realizes that claim",
+    "granularity": "changed_path",
+    "paths": [
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "no_subject_selected",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "22 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "no_subject_selected",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "unresolved_mapping_count": 0
+     }
+    ],
+    "sides": [
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "before",
+      "state": "inspected"
+     },
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "after",
+      "state": "inspected"
+     }
+    ],
+    "state": "measured",
+    "unknown_attribution_total": 0
+   },
+   "expansion_command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "expansion_reference": "review:source-change-inventory-of-the-bound-code-tree-pair",
+   "inventory": {
+    "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
+    "entries": [
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "status": "added"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "status": "modified"
+     }
+    ],
+    "listed_total": 4,
+    "partial": false,
+    "state": "measured",
+    "unrepresentable_paths": []
+   },
+   "locations": [],
+   "relationships": [],
+   "remaining": [
+    {
+     "name": "locations_remaining",
+     "reason": "no knowledge subject was selected for this review, so no selection was made and no locations were reached or left"
+    },
+    {
+     "name": "changed_paths_outside_selection",
+     "reason": "no invariant or family subject was selected for this review, so no change is inside or outside one; the inventory above is the complete source change set of the bound pair"
+    },
+    {
+     "name": "unattributed_changed_paths",
+     "value": 2
+    },
+    {
+     "name": "unknown_attribution_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "records_present_outside_selection",
+     "reason": "no knowledge subject was selected, so neither snapshot was selected over"
+    },
+    {
+     "name": "references_unresolved",
+     "reason": "no knowledge subject was selected, so no reference was resolved"
+    }
+   ],
+   "unattributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_marker_scratch.py",
+    "mcp/tests/test_knowledge_review_attributed_source_content.py"
+   ],
+   "unknown_attribution_changed_paths": [],
+   "unresolved": []
+  },
+  "staleness": {
+   "moved": [],
+   "state": "not_compared",
+   "statement": "no knowledge subject was selected for this review, so no comparison binding exists to be current or stale; the Source pane carries the complete inventory of the bound source pair"
+  },
+  "submission": {
+   "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+   "none_is_approval": true,
+   "proposed_dispositions": [
+    "concern_found",
+    "no_concern_found",
+    "unresolved"
+   ],
+   "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+   "state": "unavailable"
+  },
+  "surface_version": "knowledge-review-surface/1"
+ },
+ "repository_id": "agents-remember",
+ "state": "review"
+}

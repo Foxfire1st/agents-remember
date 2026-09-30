@@ -1,0 +1,137 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  },
+  "leaf_id": "260928-MIK-L34",
+  "memory_base": {
+   "commit": "2e3810ed9cc7e9595ca510e8313c3781635373b3",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "e524f6c1485b4bd276cb8350960c6672dbc620d8"
+  },
+  "number": 3,
+  "recorded_at": "2026-09-30T14:24:07+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [],
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  {
+   "index_state": "partial",
+   "problems": [
+    [
+     "knowledge/families/FAM-4V4GSQCS-Bounded-notes-listing-with-unchanged-meaning.json",
+     "a knowledge document names its format in a string 'schema' field"
+    ]
+   ],
+   "side": "after",
+   "state": "available",
+   "tree": "e524f6c1485b4bd276cb8350960c6672dbc620d8"
+  }
+ ],
+ "lane": {
+  "attributed": 3,
+  "attribution_unknown": 0,
+  "changed_total": 4,
+  "detail": "4 changed file(s): 3 attributed, 1 unexplained, 0 of unknown attribution",
+  "paths": [
+   {
+    "bucket": "attributed",
+    "path": "mcp/src/agents_remember/application/review_comparison_retention.py"
+   },
+   {
+    "bucket": "unexplained",
+    "path": "mcp/src/agents_remember/application/review_marker_scratch.py"
+   },
+   {
+    "bucket": "attributed",
+    "path": "mcp/src/agents_remember/serving/notes.py"
+   },
+   {
+    "bucket": "attributed",
+    "path": "mcp/tests/test_knowledge_review_attributed_source_content.py"
+   }
+  ],
+  "state": "measured",
+  "unexplained": 1,
+  "unexplained_changes": {
+   "attributed_files": 1,
+   "bucket_files": 1,
+   "files": [
+    {
+     "bucket": "unexplained",
+     "content": "text",
+     "counts": {
+      "attribution_unknown": 0,
+      "hunks": 1,
+      "linked": 0,
+      "unexplained": 1
+     },
+     "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+     "reason": "no realization or proof entry is recorded for this path in either memory tree, and both memory trees were read",
+     "status": "added",
+     "unknown_reasons": []
+    },
+    {
+     "bucket": "attributed",
+     "content": "text",
+     "counts": {
+      "attribution_unknown": 0,
+      "hunks": 2,
+      "linked": 1,
+      "unexplained": 1
+     },
+     "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+     "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-15WP0QCN, RLZ-A54M1HGQ, RLZ-D2SEVSM9; on the after side RLZ-15WP0QCN, RLZ-A54M1HGQ, RLZ-D2SEVSM9)",
+     "status": "modified",
+     "unknown_reasons": []
+    }
+   ],
+   "hunks": 2,
+   "non_text": 0
+  },
+  "unknown_attribution": {
+   "attributed_files": 0,
+   "bucket_files": 0,
+   "files": [],
+   "hunks": 0,
+   "non_text": 0
+  },
+  "unmeasured": []
+ },
+ "leaf_id": "260928-MIK-L34",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

@@ -256,6 +256,25 @@ export function useReviewLane(
   return picked(useLaneAnswer(url), (answer) => answer.lane);
 }
 
+// One changed path's classification as a single read (no hook): the per-hunk intent markers
+// (MIK-R34) keep each answer for the surface on screen, so a file opened again asks nothing.
+export async function readFileClassification(
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number,
+  path: string,
+): Promise<LaneRead<ReviewFileClassification>> {
+  try {
+    const answer = await getReviewJson<ReviewLaneAnswer>(
+      laneUrl(repo, master, leaf, comparison, { file: path }),
+    );
+    return readOf(answer, answer.file_classification);
+  } catch (cause: unknown) {
+    return { phase: 'unavailable', problem: reviewProblemFromCause(cause) };
+  }
+}
+
 // One changed path's classification, read when the lane opens it.
 export function useReviewFileClassification(
   repo: string,

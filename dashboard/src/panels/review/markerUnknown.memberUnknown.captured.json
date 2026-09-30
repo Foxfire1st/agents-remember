@@ -1,0 +1,1730 @@
+{
+ "operation": "read_knowledge_review",
+ "payload": {
+  "candidate": {
+   "leaf_id": "260928-MIK-L34",
+   "master": "260928_maintained-invariant-knowledge",
+   "repository_id": "agents-remember",
+   "task_ref": "260928_maintained-invariant-knowledge"
+  },
+  "comparison": {
+   "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "after_snapshot_digest": "1e15a1d7d7782f9571193da66c1d0ef6fb8ad7b1a99f16cfb69bc08fdab5ee12",
+   "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+   "before_snapshot_digest": "a1ea4abe833b81cf516f0d78fd6e843936fa3fb79c542da7dc7f427a590fbffe",
+   "binding_digest": "b657a0029d4a27b9eafd0a9c71d17e0986b92fd011ad4de27bf6f67f9eb63c6b",
+   "knowledge_compared": true,
+   "policy_version": "recorded-two-snapshot-union/v1",
+   "reference": "b657a0029d4a27b9eafd0a9c71d17e0986b92fd011ad4de27bf6f67f9eb63c6b",
+   "selector_digest": "f38c0f1a37b4b280c97e78c8df35d8ab2bff1a4b6c3f9bb1eff56dd214fe7c7b"
+  },
+  "evidence": {
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "verification_observations",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "evidence_claims",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessment_state": "unassessed",
+   "assessments": [],
+   "channels": [
+    {
+     "detail": "The live curator authority 260928-MIK-L34-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "owner": "curator_coherence.load_curator_coherence_generation",
+     "record_count": 0,
+     "records": "assessments",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no detection run, so no detector signal exists for this review; the detection owner answered for the runs it holds",
+     "owner": "detection.read_detection_run",
+     "record_count": 0,
+     "records": "detection_signals",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate's dataset answers for this exact candidate and records no verification observation for it; the evidence owner's own answer is a measured zero, not an unread authority",
+     "owner": "knowledge_evidence.read_evidence_scope",
+     "record_count": 0,
+     "records": "verification_observations",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no evidence claim, so no authored evidence exists for this review; the evidence owner answered for the claims it holds",
+     "owner": "evidence_records.claim_record",
+     "record_count": 0,
+     "records": "evidence_claims",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this candidate records no assessment, so no binding existed to measure; a measured zero of assessments is not a measured binding",
+     "owner": "review_assessment_currentness.comparison_currentness_measurement",
+     "record_count": 0,
+     "records": "assessment_currentness",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+     "owner": "knowledge_views.read_knowledge_view:review_matrix",
+     "record_count": 0,
+     "records": "authored_effects",
+     "state": "none_recorded",
+     "unreadable": []
+    }
+   ],
+   "context": [],
+   "evidence_links": [],
+   "evidence_state": "none_recorded",
+   "observations": [],
+   "source_inspection_available": true,
+   "unresolved": []
+  },
+  "family_context": {
+   "detail": "every recorded family the two snapshots place this selection in is composed: 1 family context(s), each with its selected before/after family revision, that revision's own authored guarantee and its recorded member roster",
+   "entries": [
+    {
+     "after": {
+      "detail": "this snapshot records no revision of the family this selection names, so no roster is claimed for it and no guarantee is presented as the family's own",
+      "family_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+      "members": [],
+      "members_total": 0,
+      "recorded_revision_ids": [],
+      "side": "after",
+      "state": "not_recorded"
+     },
+     "before": {
+      "detail": "the before snapshot's recorded roster of family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read whole: 5 recorded membership(s), all carried here",
+      "family_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+      "family_revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+      "guarantee": {
+       "display_version": "r1",
+       "family_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "joint_guarantee": "The notes listing costs one followed stat per entry, with path resolution paid only for the notes root and for symlinks, and it still means what the path-based walk meant: the same response bytes (except the ruled read-without-search directory), nothing listed from outside the notes root even when a directory is swapped for a symlink mid-walk, no whole-listing failure from a looping or file-traversing symlink, and no state kept between requests.",
+       "payload_digest": "fb6e3573801034d022c5a31dfa88cb0f41ba529381dba17963e3cd9a30408008",
+       "provenance": {
+        "actor_ref": "260921-ICR/260921-ICR-L55",
+        "authorization_ref": "text-knowledge:knowledge/families/FAM-4V4GSQCS-Bounded-notes-listing-with-unchanged-meaning.json",
+        "operation_id": "5573a179-27c1-5164-ac0f-a8f3956d61e3",
+        "origin_refs": [],
+        "recorded_at": "1970-01-01T00:00:00+00:00"
+       },
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "state_at_origin": "proposed"
+      },
+      "members": [
+       {
+        "applicability": "The notes listing behind GET /api/notes/list (list_notes and its walk helpers in mcp/src/agents_remember/serving/notes.py) over one series master's tasks/<repo>/<master>/notes/ root.",
+        "detail": "the before snapshot records membership e5299a23-39a6-5fe6-b4a7-253116ccb53c placing the exact invariant revision 5c1219b0-8a23-54a4-98bd-0dcf1316fb85 in family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and its recorded revision content",
+        "display_label": "INV-ZJS1XY4R",
+        "display_version": "r1",
+        "essential_conditions": [
+         "Every request walks the live notes tree from the root."
+        ],
+        "exclusions": [
+         "Browser-side caching or polling cadence in the dashboard client."
+        ],
+        "invariant_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+        "invariant_revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+        "lifecycle": "proposed",
+        "member_id": "e5299a23-39a6-5fe6-b4a7-253116ccb53c",
+        "movement_reference": "e5299a23-39a6-5fe6-b4a7-253116ccb53c",
+        "other_family_revision_ids": [],
+        "payload_digest": "4a7518bb48e1b82194d38bb63a30808e91576702de3ae95b587318f7fad06c91",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L55",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZJS1XY4R-L55-S2-no-listing-state-across-requests.json",
+         "operation_id": "a7564d3e-e26a-519f-af8a-c2627b716444",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "90e5be44-7496-56b5-ab9f-a1b74c7ee7e8",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+          "invariant_revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "list_notes"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 220,
+            "kind": "line_range",
+            "start_line": 209
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "The notes listing keeps no state between requests, so a note written or grown after one listing appears with its current size in the next one (ICR-R17 live refresh)."
+       },
+       {
+        "applicability": "Every directory the notes listing walk enters below the resolved notes root, including the target of an in-root directory symlink.",
+        "detail": "the before snapshot records membership 675510b9-25a3-5dbd-863e-5a3a1bb25805 placing the exact invariant revision 9630f112-284c-5234-82bf-5384f4bac489 in family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and its recorded revision content",
+        "display_label": "INV-QR24S1VH",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The platform provides O_DIRECTORY, O_NOFOLLOW, dir_fd opens and os.scandir on a descriptor."
+        ],
+        "exclusions": [
+         "A directory renamed out of the root after its descriptor was opened: its own entries are still listed (whoever can move it could place the same content inside the root).",
+         "The per-symlink stat-before-check window, which the symlink-only confinement clause states.",
+         "Open errors other than ELOOP/ENOTDIR, which propagate as the path-based walk's did."
+        ],
+        "invariant_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+        "invariant_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+        "lifecycle": "proposed",
+        "member_id": "675510b9-25a3-5dbd-863e-5a3a1bb25805",
+        "movement_reference": "675510b9-25a3-5dbd-863e-5a3a1bb25805",
+        "other_family_revision_ids": [],
+        "payload_digest": "968a63aad03f963ff6e988c55f5cea8ac730fc58f95593947d5000c79ce1caca",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L55",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-QR24S1VH-L55-A2-descriptor-walk.json",
+         "operation_id": "f774bca7-bd82-5f84-b445-0c605abead18",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "06d18d6b-9220-5674-ab81-0f5078101bf2",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_subdir' at mcp/src/agents_remember/serving/notes.py:142-162",
+          "invariant_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "_open_subdir"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 162,
+            "kind": "line_range",
+            "start_line": 142
+           }
+          ],
+          "role": "primary-authority"
+         },
+         {
+          "claim_id": "8e62d80f-19ab-5b56-bfbb-e129db13ff54",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_below_root' at mcp/src/agents_remember/serving/notes.py:130-139",
+          "invariant_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "_open_below_root"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 139,
+            "kind": "line_range",
+            "start_line": 130
+           }
+          ],
+          "role": "enforcement"
+         }
+        ],
+        "state": "recorded",
+        "statement": "The notes listing enters every directory through a descriptor opened with O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent (in-root directory symlinks component-wise from the root descriptor), so a directory replaced by a symlink or file after it was observed is refused (ELOOP/ENOTDIR) rather than followed out of the notes root."
+       },
+       {
+        "applicability": "The notes listing behind GET /api/notes/list (list_notes and its walk helpers in mcp/src/agents_remember/serving/notes.py) over one series master's tasks/<repo>/<master>/notes/ root.",
+        "detail": "the before snapshot records membership 9ffddd27-b891-569e-9d03-dd7a714e10c7 placing the exact invariant revision a1c28709-da32-5ca3-91c4-5e43f5c498da in family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and its recorded revision content",
+        "display_label": "INV-Z66EMHMH",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The walk starts at the realpath-resolved notes root and descends only into directories opened by descriptor beneath it, so a non-symlink child is inside the root by construction.",
+         "A symlink entry is confined by resolve() plus path_is_relative_to against the resolved root, judged on the entry's lexical path through the walk."
+        ],
+        "exclusions": [
+         "read_note, which confines each requested path with confine_rel.",
+         "The listing remains linear in directory entries (one stat each); only per-entry path resolution is excluded.",
+         "The symlink stat-before-check window: the DirEntry stat is taken in the directory-first sort before the path check, so a retarget in between can list one outside file's size (the path-based walk had the same single-entry window in the opposite order)."
+        ],
+        "invariant_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+        "invariant_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "lifecycle": "proposed",
+        "member_id": "9ffddd27-b891-569e-9d03-dd7a714e10c7",
+        "movement_reference": "9ffddd27-b891-569e-9d03-dd7a714e10c7",
+        "other_family_revision_ids": [],
+        "payload_digest": "49a4ea4343228a7364a4f0ebec6652e04804cadbee7635b0e15db4f4ef9f120b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L55",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-Z66EMHMH-L55-S2-symlink-only-confinement.json",
+         "operation_id": "fe7f8480-30ab-5834-86c8-0045adcc675c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_walk_notes' at mcp/src/agents_remember/serving/notes.py:165-193",
+          "invariant_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "_walk_notes"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 193,
+            "kind": "line_range",
+            "start_line": 165
+           }
+          ],
+          "role": "support"
+         },
+         {
+          "claim_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+          "invariant_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "_confined_stat"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 127,
+            "kind": "line_range",
+            "start_line": 113
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "The notes listing realpath-checks only symlink entries against the resolved notes root; a non-symlink child of a directory the walk entered is confined by construction, so each listed entry costs one followed stat and path resolution is paid once for the root plus once per symlink regardless of note count or content size."
+       },
+       {
+        "applicability": "The response bytes of GET /api/notes/list for one series master, compared with the path-based walk that realpath-checked every entry.",
+        "detail": "the before snapshot records membership d0ce2d1d-4f31-5079-affd-3c57f0f3bdad placing the exact invariant revision be2d7ee4-a5bb-5778-b553-c0ec428a072b in family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and its recorded revision content",
+        "display_label": "INV-EJW15DXA",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The notes tree is not mutated between the two listings being compared.",
+         "Depth is counted on the lexical path, so an in-root directory symlink is listed and pruned at its own position."
+        ],
+        "exclusions": [
+         "A directory that is readable but not searchable, reached directly or through an in-root symlink: its children are skipped and the listing answers 200 where the path-based walk answered 500 (Architect rulings 2026-09-28T16:30:31 and 16:55:00).",
+         "A directory renamed out of the notes root while it is being listed: its own entries are still listed through the open descriptor, where the path-based walk lost it.",
+         "Error answers other than the ELOOP/ENOTDIR swap signature and the is_dir errno set, which propagate exactly as before (for example a mode-000 directory still answers 500)."
+        ],
+        "invariant_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+        "invariant_revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+        "lifecycle": "proposed",
+        "member_id": "d0ce2d1d-4f31-5079-affd-3c57f0f3bdad",
+        "movement_reference": "d0ce2d1d-4f31-5079-affd-3c57f0f3bdad",
+        "other_family_revision_ids": [],
+        "payload_digest": "b508cc37d127aecdcae1ec4c41721f62820ea4bfb0dbf84e1956ffba73f8c5bf",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L55",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-EJW15DXA-L55-S2-byte-identical-NotesListing.json",
+         "operation_id": "9a9b46fd-7cc2-5371-a93a-700ed3cee9c5",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "56a462b7-7332-58b1-868c-cd5a415bc589",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+          "invariant_revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "list_notes"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 220,
+            "kind": "line_range",
+            "start_line": 209
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "GET /api/notes/list returns the same bytes as before the bounding change: files before folders by case-folded name with readdir-order ties, in-root symlinks listed under their own lexical path, escaping or broken symlinks and non-regular files skipped, folders at depth cap 4 pruned with truncated true, missing notes folder an empty list."
+       },
+       {
+        "applicability": "The directory-first sort key of the notes listing walk (_is_dir) for every entry of a listed directory.",
+        "detail": "the before snapshot records membership b5997a33-bca0-5eff-a78b-5970a568827b placing the exact invariant revision c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1 in family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and its recorded revision content",
+        "display_label": "INV-DA7D417G",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The entry's followed stat raises OSError."
+        ],
+        "exclusions": [
+         "Errors outside ENOENT, ENOTDIR, EBADF and ELOOP, which propagate as they did through Path.is_dir()."
+        ],
+        "invariant_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+        "invariant_revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+        "lifecycle": "proposed",
+        "member_id": "b5997a33-bca0-5eff-a78b-5970a568827b",
+        "movement_reference": "b5997a33-bca0-5eff-a78b-5970a568827b",
+        "other_family_revision_ids": [],
+        "payload_digest": "6e18290e7b3a6df3c45cf9f78fb4abb69609af8bf861ce2b22ef1ad4732e0867",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L55",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-DA7D417G-L55-A2-is_dir-parity.json",
+         "operation_id": "98d5965a-7c25-58fd-b748-fb2aa81f1ad6",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "c040fe00-5310-5034-8287-fc57e2d3e24f",
+          "detail": "the author recorded this realization at mcp/src/agents_remember/serving/notes.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_is_dir' at mcp/src/agents_remember/serving/notes.py:99-110",
+          "invariant_revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "_is_dir"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "path": "mcp/src/agents_remember/serving/notes.py",
+          "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+          "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 110,
+            "kind": "line_range",
+            "start_line": 99
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "The notes listing's directory-first sort key treats ENOENT, ENOTDIR, EBADF and ELOOP from a followed stat as not-a-directory and propagates every other error, so a looping or file-traversing symlink is skipped and never fails the listing."
+       }
+      ],
+      "members_total": 5,
+      "page": {
+       "complete": true,
+       "counts": {
+        "advertised_expansions_total": 0,
+        "distinct_source_locations_total": 6,
+        "distinct_source_paths_total": 1,
+        "family_revisions_total": 1,
+        "invariant_revisions_total": 5,
+        "memberships_total": 5,
+        "primary_items_remaining": 0,
+        "primary_items_returned": 18,
+        "primary_items_total": 18,
+        "realization_claims_total": 7,
+        "unresolved_anchor_total": 0
+       },
+       "members_total": 5,
+       "scope": [
+        "side=before",
+        "family_revision_id=1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+        "policy_version=recorded-family-frontier/v1",
+        "page_size=64"
+       ],
+       "state": "first_page"
+      },
+      "recorded_revision_ids": [
+       "1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+      ],
+      "side": "before",
+      "state": "recorded"
+     },
+     "candidates": [],
+     "detail": "the after snapshot records no revision of the family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea, so the before family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f is shown as a removal under the one-sided contract; the two snapshots record 1 before and 0 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read whole: 5 recorded membership(s), all carried here; after: this snapshot records no revision of the family this selection names, so no roster is claimed for it and no guarantee is presented as the family's own",
+     "display_label": "Bounded notes listing with unchanged meaning",
+     "family_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "label_side": "before",
+     "selection": {
+      "after_heads": [],
+      "after_retained": [],
+      "before_heads": [
+       "1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+      ],
+      "before_retained": [
+       "1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+      ],
+      "before_revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+      "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+      "record_kind": "family",
+      "state": "removed",
+      "statement": "the after snapshot records no revision of the family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea, so the before family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f is shown as a removal under the one-sided contract; the two snapshots record 1 before and 0 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history"
+     },
+     "state": "recorded"
+    }
+   ],
+   "families_remaining": 0,
+   "families_returned": 1,
+   "families_total": 1,
+   "limitations": [],
+   "membership_rows_total": 5,
+   "references": {
+    "applicability": "knowledge.applicability",
+    "assessments": "evidence.assessments",
+    "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them",
+    "evidence_links": "evidence.evidence_links",
+    "join_key": "invariant_revision_id",
+    "observations": "evidence.observations",
+    "relationship_union": "source.relationships",
+    "source_inventory": "source.inventory"
+   },
+   "state": "recorded",
+   "unique_member_revision_total": 5
+  },
+  "knowledge": {
+   "after_conditions": [
+    "The walk starts at the realpath-resolved notes root and descends only into directories opened by descriptor beneath it, so a non-symlink child is inside the root by construction.",
+    "A symlink entry is confined by resolve() plus path_is_relative_to against the resolved root, judged on the entry's lexical path through the walk."
+   ],
+   "after_statement": {
+    "detail": "the after snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "The notes listing realpath-checks only symlink entries against the resolved notes root; a non-symlink child of a directory the walk entered is confined by construction, so each listed entry costs one followed stat and path resolution is paid once for the root plus once per symlink regardless of note count or content size."
+   },
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "detection_signals",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "authored_effects",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessments": [],
+   "authored_effects": [],
+   "before_conditions": [
+    "The walk starts at the realpath-resolved notes root and descends only into directories opened by descriptor beneath it, so a non-symlink child is inside the root by construction.",
+    "A symlink entry is confined by resolve() plus path_is_relative_to against the resolved root, judged on the entry's lexical path through the walk."
+   ],
+   "before_statement": {
+    "detail": "the before snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "The notes listing realpath-checks only symlink entries against the resolved notes root; a non-symlink child of a directory the walk entered is confined by construction, so each listed entry costs one followed stat and path resolution is paid once for the root plus once per symlink regardless of note count or content size."
+   },
+   "context": [],
+   "family_ids": [
+    "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea"
+   ],
+   "field_changes": [],
+   "invariant_ids": [
+    "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+    "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+    "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+    "16b287d6-2337-5554-b911-43e3a7d15fab",
+    "e9043896-8124-5cdb-b1e9-ed38604ca2e2"
+   ],
+   "revision_groups": [
+    {
+     "record_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "selected_revision_count": 1,
+     "side": "after"
+    }
+   ],
+   "revision_selection": {
+    "after_heads": [
+     "a1c28709-da32-5ca3-91c4-5e43f5c498da"
+    ],
+    "after_retained": [
+     "a1c28709-da32-5ca3-91c4-5e43f5c498da"
+    ],
+    "after_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+    "before_heads": [
+     "a1c28709-da32-5ca3-91c4-5e43f5c498da"
+    ],
+    "before_retained": [
+     "a1c28709-da32-5ca3-91c4-5e43f5c498da"
+    ],
+    "before_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+    "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+    "record_kind": "invariant",
+    "state": "compared",
+    "statement": "the invariant c7c5be49-164f-56e0-923d-fb5f5259d80c comparison uses the before head a1c28709-da32-5ca3-91c4-5e43f5c498da and the after head a1c28709-da32-5ca3-91c4-5e43f5c498da, each the unique retained revision with no recorded successor in its snapshot's selected population; 0 other retained revision(s) remain selectable history"
+   },
+   "selection_state": "subject_selected",
+   "signals": [],
+   "unresolved": []
+  },
+  "limitations": [
+   "limitation:records_present_outside_the_selection",
+   "limitation:unattributed_changed_paths",
+   "limitation:no_semantic_assessment_performed",
+   "omitted:present_outside_the_declared_selection:4",
+   "omitted:present_outside_the_declared_selection:5",
+   "omitted:change_not_attributed_to_a_recorded_realization:2",
+   "review:trees:3",
+   "history:intent:before:available",
+   "knowledge-index:before:complete",
+   "history:intent:after:available",
+   "knowledge-index:after:partial"
+  ],
+  "source": {
+   "attributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_comparison_retention.py",
+    "mcp/src/agents_remember/serving/notes.py"
+   ],
+   "attribution": {
+    "attributed_total": 2,
+    "changed_total": 4,
+    "complete": true,
+    "confirmed_unregistered_total": 2,
+    "detail": "4 measured changed path(s) at the changed-path granularity: 2 attributed, 2 confirmed to have no valid registered attribution, and 0 of undetermined attribution. Snapshot inspection: before inspected; after inspected. Every required snapshot/scope completely inspected or legitimately known empty: True. This denominator is the whole measured change population of the bound pair. A resolved path-level mapping establishes that a recorded claim's bytes are at this path and never that every change inside it realizes that claim",
+    "granularity": "changed_path",
+    "paths": [
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "22 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "selected_subject",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "unresolved_mapping_count": 0
+     }
+    ],
+    "sides": [
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "before",
+      "state": "inspected"
+     },
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (14 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 14,
+      "side": "after",
+      "state": "inspected"
+     }
+    ],
+    "state": "measured",
+    "subject_scope_complete": true,
+    "unknown_attribution_total": 0
+   },
+   "expansion_command": "git diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+   "inventory": {
+    "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
+    "entries": [
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_comparison_retention.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/application/review_marker_scratch.py",
+      "status": "added"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "status": "modified"
+     }
+    ],
+    "listed_total": 4,
+    "partial": false,
+    "state": "measured",
+    "unrepresentable_paths": []
+   },
+   "locations": [
+    {
+     "before_only": true,
+     "change_state": "unchanged",
+     "claim_id": "56a462b7-7332-58b1-868c-cd5a415bc589",
+     "invariant_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+     "invariant_revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+     "movement": {
+      "before": [
+       {
+        "change_state": "unchanged",
+        "detail": "the before snapshot records invariant 16b287d6-2337-5554-b911-43e3a7d15fab through relationship 56a462b7-7332-58b1-868c-cd5a415bc589 at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "present_outside_selection",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+        "reached_via": [
+         "member_of_selected_family:be2d7ee4-a5bb-5778-b553-c0ec428a072b"
+        ],
+        "record_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "56a462b7-7332-58b1-868c-cd5a415bc589",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+        "revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 56a462b7-7332-58b1-868c-cd5a415bc589 at mcp/src/agents_remember/serving/notes.py (revision be2d7ee4-a5bb-5778-b553-c0ec428a072b) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+      "transition": "outside_selection"
+     },
+     "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+     "reached_via": [
+      "member_of_selected_family:be2d7ee4-a5bb-5778-b553-c0ec428a072b"
+     ],
+     "recorded_side": "before",
+     "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "outside_selection"
+    },
+    {
+     "before_only": true,
+     "change_state": "unchanged",
+     "claim_id": "90e5be44-7496-56b5-ab9f-a1b74c7ee7e8",
+     "invariant_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+     "invariant_revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+     "movement": {
+      "before": [
+       {
+        "change_state": "unchanged",
+        "detail": "the before snapshot records invariant 5bcc7ed2-71c4-547f-a4b9-4dc5233531e6 through relationship 90e5be44-7496-56b5-ab9f-a1b74c7ee7e8 at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "present_outside_selection",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+        "reached_via": [
+         "member_of_selected_family:5c1219b0-8a23-54a4-98bd-0dcf1316fb85"
+        ],
+        "record_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "90e5be44-7496-56b5-ab9f-a1b74c7ee7e8",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+        "revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 90e5be44-7496-56b5-ab9f-a1b74c7ee7e8 at mcp/src/agents_remember/serving/notes.py (revision 5c1219b0-8a23-54a4-98bd-0dcf1316fb85) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+      "transition": "outside_selection"
+     },
+     "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+     "reached_via": [
+      "member_of_selected_family:5c1219b0-8a23-54a4-98bd-0dcf1316fb85"
+     ],
+     "recorded_side": "before",
+     "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "outside_selection"
+    },
+    {
+     "before_only": true,
+     "change_state": "unchanged",
+     "claim_id": "06d18d6b-9220-5674-ab81-0f5078101bf2",
+     "invariant_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+     "invariant_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+     "movement": {
+      "before": [
+       {
+        "change_state": "unchanged",
+        "detail": "the before snapshot records invariant 5c75cbf9-0778-5765-bdac-50ed81e31ff6 through relationship 06d18d6b-9220-5674-ab81-0f5078101bf2 at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "present_outside_selection",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+        "reached_via": [
+         "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+        ],
+        "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "06d18d6b-9220-5674-ab81-0f5078101bf2",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_subdir' at mcp/src/agents_remember/serving/notes.py:142-162",
+        "revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 06d18d6b-9220-5674-ab81-0f5078101bf2 at mcp/src/agents_remember/serving/notes.py (revision 9630f112-284c-5234-82bf-5384f4bac489) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+      "transition": "outside_selection"
+     },
+     "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+     "reached_via": [
+      "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+     ],
+     "recorded_side": "before",
+     "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "outside_selection"
+    },
+    {
+     "before_only": true,
+     "change_state": "unchanged",
+     "claim_id": "8e62d80f-19ab-5b56-bfbb-e129db13ff54",
+     "invariant_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+     "invariant_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+     "movement": {
+      "before": [
+       {
+        "change_state": "unchanged",
+        "detail": "the before snapshot records invariant 5c75cbf9-0778-5765-bdac-50ed81e31ff6 through relationship 8e62d80f-19ab-5b56-bfbb-e129db13ff54 at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "present_outside_selection",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+        "reached_via": [
+         "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+        ],
+        "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "8e62d80f-19ab-5b56-bfbb-e129db13ff54",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_below_root' at mcp/src/agents_remember/serving/notes.py:130-139",
+        "revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+        "role": "enforcement",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 8e62d80f-19ab-5b56-bfbb-e129db13ff54 at mcp/src/agents_remember/serving/notes.py (revision 9630f112-284c-5234-82bf-5384f4bac489) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+      "transition": "outside_selection"
+     },
+     "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+     "reached_via": [
+      "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+     ],
+     "recorded_side": "before",
+     "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "resolution": "exact_recorded_blob",
+     "role": "enforcement",
+     "transition": "outside_selection"
+    },
+    {
+     "before_only": false,
+     "change_state": "changed",
+     "claim_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+     "counterpart_path": "mcp/src/agents_remember/serving/notes.py",
+     "invariant_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "invariant_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+     "movement": {
+      "after": {
+       "change_state": "changed",
+       "detail": "the after snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+       "reached_via": [
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+       ],
+       "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+       "record_kind": "invariant",
+       "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "relationship_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_walk_notes' at mcp/src/agents_remember/serving/notes.py:165-193",
+       "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "role": "support",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [
+       {
+        "change_state": "changed",
+        "detail": "the before snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "selected_both",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+        "reached_via": [
+         "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+         "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+        ],
+        "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_walk_notes' at mcp/src/agents_remember/serving/notes.py:165-193",
+        "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "role": "support",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "pairing_basis": "same_recorded_relationship",
+      "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) and the candidate records realization 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) under invariant c7c5be49-164f-56e0-923d-fb5f5259d80c; the association is displayed as unchanged paired by the same recorded relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+      "transition": "unchanged"
+     },
+     "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+     "reached_via": [
+      "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "resolution": "exact_recorded_blob",
+     "role": "support",
+     "transition": "unchanged"
+    },
+    {
+     "before_only": false,
+     "change_state": "changed",
+     "claim_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+     "counterpart_path": "mcp/src/agents_remember/serving/notes.py",
+     "invariant_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "invariant_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+     "movement": {
+      "after": {
+       "change_state": "changed",
+       "detail": "the after snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+       "reached_via": [
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+       ],
+       "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+       "record_kind": "invariant",
+       "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+       "relationship_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+       "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [
+       {
+        "change_state": "changed",
+        "detail": "the before snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "selected_both",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+        "reached_via": [
+         "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+         "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+        ],
+        "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+        "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "pairing_basis": "same_recorded_relationship",
+      "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) and the candidate records realization a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) under invariant c7c5be49-164f-56e0-923d-fb5f5259d80c; the association is displayed as unchanged paired by the same recorded relationship a1b054b4-111c-5b11-8924-b8e08f3e926a, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+      "transition": "unchanged"
+     },
+     "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+     "reached_via": [
+      "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "unchanged"
+    },
+    {
+     "before_only": true,
+     "change_state": "unchanged",
+     "claim_id": "c040fe00-5310-5034-8287-fc57e2d3e24f",
+     "invariant_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+     "invariant_revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+     "movement": {
+      "before": [
+       {
+        "change_state": "unchanged",
+        "detail": "the before snapshot records invariant e9043896-8124-5cdb-b1e9-ed38604ca2e2 through relationship c040fe00-5310-5034-8287-fc57e2d3e24f at mcp/src/agents_remember/serving/notes.py",
+        "item_coverage": "present_outside_selection",
+        "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "path": "mcp/src/agents_remember/serving/notes.py",
+        "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+        "reached_via": [
+         "member_of_selected_family:c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1"
+        ],
+        "record_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+        "record_kind": "invariant",
+        "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+        "relationship_id": "c040fe00-5310-5034-8287-fc57e2d3e24f",
+        "resolution": "exact_recorded_blob",
+        "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_is_dir' at mcp/src/agents_remember/serving/notes.py:99-110",
+        "revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+        "role": "primary-authority",
+        "side": "before",
+        "state": "recorded"
+       }
+      ],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the baseline records realization c040fe00-5310-5034-8287-fc57e2d3e24f at mcp/src/agents_remember/serving/notes.py (revision c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+      "transition": "outside_selection"
+     },
+     "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "path": "mcp/src/agents_remember/serving/notes.py",
+     "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+     "reached_via": [
+      "member_of_selected_family:c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1"
+     ],
+     "recorded_side": "before",
+     "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "outside_selection"
+    }
+   ],
+   "relationships": [
+    {
+     "before": [
+      {
+       "detail": "the before snapshot records family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea through relationship 675510b9-25a3-5dbd-863e-5a3a1bb25805 at None",
+       "item_coverage": "absent_from_snapshot",
+       "member_revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+       "reached_via": [
+        "member_of_selected_family:1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+       ],
+       "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "record_kind": "family",
+       "relationship_id": "675510b9-25a3-5dbd-863e-5a3a1bb25805",
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 675510b9-25a3-5dbd-863e-5a3a1bb25805 at no readable address (revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f) and the candidate records no relationship under this row, and no relationship citing 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read: the candidate's snapshot records no authored successor of it and this review read the comparison's union, so this is a withdrawn association rather than a movement, and the old address is still displayed",
+     "transition": "retracted"
+    },
+    {
+     "before": [
+      {
+       "detail": "the before snapshot records family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea through relationship 9ffddd27-b891-569e-9d03-dd7a714e10c7 at None",
+       "item_coverage": "absent_from_snapshot",
+       "member_revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "reached_via": [
+        "member_of_selected_family:1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+       ],
+       "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "record_kind": "family",
+       "relationship_id": "9ffddd27-b891-569e-9d03-dd7a714e10c7",
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 9ffddd27-b891-569e-9d03-dd7a714e10c7 at no readable address (revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f) and the candidate records no relationship under this row, and no relationship citing 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read: the candidate's snapshot records no authored successor of it and this review read the comparison's union, so this is a withdrawn association rather than a movement, and the old address is still displayed",
+     "transition": "retracted"
+    },
+    {
+     "before": [
+      {
+       "detail": "the before snapshot records family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea through relationship b5997a33-bca0-5eff-a78b-5970a568827b at None",
+       "item_coverage": "absent_from_snapshot",
+       "member_revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+       "reached_via": [
+        "member_of_selected_family:1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+       ],
+       "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "record_kind": "family",
+       "relationship_id": "b5997a33-bca0-5eff-a78b-5970a568827b",
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership b5997a33-bca0-5eff-a78b-5970a568827b at no readable address (revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f) and the candidate records no relationship under this row, and no relationship citing 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read: the candidate's snapshot records no authored successor of it and this review read the comparison's union, so this is a withdrawn association rather than a movement, and the old address is still displayed",
+     "transition": "retracted"
+    },
+    {
+     "before": [
+      {
+       "detail": "the before snapshot records family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea through relationship d0ce2d1d-4f31-5079-affd-3c57f0f3bdad at None",
+       "item_coverage": "absent_from_snapshot",
+       "member_revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+       "reached_via": [
+        "member_of_selected_family:1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+       ],
+       "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "record_kind": "family",
+       "relationship_id": "d0ce2d1d-4f31-5079-affd-3c57f0f3bdad",
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership d0ce2d1d-4f31-5079-affd-3c57f0f3bdad at no readable address (revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f) and the candidate records no relationship under this row, and no relationship citing 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read: the candidate's snapshot records no authored successor of it and this review read the comparison's union, so this is a withdrawn association rather than a movement, and the old address is still displayed",
+     "transition": "retracted"
+    },
+    {
+     "before": [
+      {
+       "detail": "the before snapshot records family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea through relationship e5299a23-39a6-5fe6-b4a7-253116ccb53c at None",
+       "item_coverage": "absent_from_snapshot",
+       "member_revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+       "reached_via": [
+        "member_of_selected_family:1b7ca0b9-0423-544f-8ba1-044bb13adc0f"
+       ],
+       "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+       "record_kind": "family",
+       "relationship_id": "e5299a23-39a6-5fe6-b4a7-253116ccb53c",
+       "revision_id": "1b7ca0b9-0423-544f-8ba1-044bb13adc0f",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership e5299a23-39a6-5fe6-b4a7-253116ccb53c at no readable address (revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f) and the candidate records no relationship under this row, and no relationship citing 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read: the candidate's snapshot records no authored successor of it and this review read the comparison's union, so this is a withdrawn association rather than a movement, and the old address is still displayed",
+     "transition": "retracted"
+    },
+    {
+     "before": [
+      {
+       "change_state": "unchanged",
+       "detail": "the before snapshot records invariant 16b287d6-2337-5554-b911-43e3a7d15fab through relationship 56a462b7-7332-58b1-868c-cd5a415bc589 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+       "reached_via": [
+        "member_of_selected_family:be2d7ee4-a5bb-5778-b553-c0ec428a072b"
+       ],
+       "record_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "56a462b7-7332-58b1-868c-cd5a415bc589",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+       "revision_id": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 56a462b7-7332-58b1-868c-cd5a415bc589 at mcp/src/agents_remember/serving/notes.py (revision be2d7ee4-a5bb-5778-b553-c0ec428a072b) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+     "transition": "outside_selection"
+    },
+    {
+     "before": [
+      {
+       "change_state": "unchanged",
+       "detail": "the before snapshot records invariant 5bcc7ed2-71c4-547f-a4b9-4dc5233531e6 through relationship 90e5be44-7496-56b5-ab9f-a1b74c7ee7e8 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+       "reached_via": [
+        "member_of_selected_family:5c1219b0-8a23-54a4-98bd-0dcf1316fb85"
+       ],
+       "record_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "90e5be44-7496-56b5-ab9f-a1b74c7ee7e8",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'list_notes' at mcp/src/agents_remember/serving/notes.py:209-220",
+       "revision_id": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 90e5be44-7496-56b5-ab9f-a1b74c7ee7e8 at mcp/src/agents_remember/serving/notes.py (revision 5c1219b0-8a23-54a4-98bd-0dcf1316fb85) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+     "transition": "outside_selection"
+    },
+    {
+     "before": [
+      {
+       "change_state": "unchanged",
+       "detail": "the before snapshot records invariant 5c75cbf9-0778-5765-bdac-50ed81e31ff6 through relationship 06d18d6b-9220-5674-ab81-0f5078101bf2 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+       "reached_via": [
+        "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+       ],
+       "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "06d18d6b-9220-5674-ab81-0f5078101bf2",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_subdir' at mcp/src/agents_remember/serving/notes.py:142-162",
+       "revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 06d18d6b-9220-5674-ab81-0f5078101bf2 at mcp/src/agents_remember/serving/notes.py (revision 9630f112-284c-5234-82bf-5384f4bac489) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+     "transition": "outside_selection"
+    },
+    {
+     "before": [
+      {
+       "change_state": "unchanged",
+       "detail": "the before snapshot records invariant 5c75cbf9-0778-5765-bdac-50ed81e31ff6 through relationship 8e62d80f-19ab-5b56-bfbb-e129db13ff54 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+       "reached_via": [
+        "member_of_selected_family:9630f112-284c-5234-82bf-5384f4bac489"
+       ],
+       "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "8e62d80f-19ab-5b56-bfbb-e129db13ff54",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_open_below_root' at mcp/src/agents_remember/serving/notes.py:130-139",
+       "revision_id": "9630f112-284c-5234-82bf-5384f4bac489",
+       "role": "enforcement",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 8e62d80f-19ab-5b56-bfbb-e129db13ff54 at mcp/src/agents_remember/serving/notes.py (revision 9630f112-284c-5234-82bf-5384f4bac489) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+     "transition": "outside_selection"
+    },
+    {
+     "after": {
+      "change_state": "changed",
+      "detail": "the after snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py",
+      "item_coverage": "selected_both",
+      "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+      "reached_via": [
+       "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+      ],
+      "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "record_kind": "invariant",
+      "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "relationship_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_walk_notes' at mcp/src/agents_remember/serving/notes.py:165-193",
+      "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "role": "support",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "change_state": "changed",
+       "detail": "the before snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+       "reached_via": [
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+       ],
+       "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "8655f162-36dd-5002-a5b2-5f0d22dad9c8",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_walk_notes' at mcp/src/agents_remember/serving/notes.py:165-193",
+       "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "role": "support",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) and the candidate records realization 8655f162-36dd-5002-a5b2-5f0d22dad9c8 at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) under invariant c7c5be49-164f-56e0-923d-fb5f5259d80c; the association is displayed as unchanged paired by the same recorded relationship 8655f162-36dd-5002-a5b2-5f0d22dad9c8, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "change_state": "changed",
+      "detail": "the after snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py",
+      "item_coverage": "selected_both",
+      "observed_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "path": "mcp/src/agents_remember/serving/notes.py",
+      "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+      "reached_via": [
+       "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+      ],
+      "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "record_kind": "invariant",
+      "recorded_source_identity": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+      "relationship_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+      "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "change_state": "changed",
+       "detail": "the before snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c through relationship a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "selected_both",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+       "reached_via": [
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da",
+        "invariant_identity:a1c28709-da32-5ca3-91c4-5e43f5c498da"
+       ],
+       "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "a1b054b4-111c-5b11-8924-b8e08f3e926a",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_confined_stat' at mcp/src/agents_remember/serving/notes.py:113-127",
+       "revision_id": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) and the candidate records realization a1b054b4-111c-5b11-8924-b8e08f3e926a at mcp/src/agents_remember/serving/notes.py (revision a1c28709-da32-5ca3-91c4-5e43f5c498da) under invariant c7c5be49-164f-56e0-923d-fb5f5259d80c; the association is displayed as unchanged paired by the same recorded relationship a1b054b4-111c-5b11-8924-b8e08f3e926a, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "before": [
+      {
+       "change_state": "unchanged",
+       "detail": "the before snapshot records invariant e9043896-8124-5cdb-b1e9-ed38604ca2e2 through relationship c040fe00-5310-5034-8287-fc57e2d3e24f at mcp/src/agents_remember/serving/notes.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "path": "mcp/src/agents_remember/serving/notes.py",
+       "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+       "reached_via": [
+        "member_of_selected_family:c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1"
+       ],
+       "record_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+       "record_kind": "invariant",
+       "recorded_source_identity": "e3e6f8d4c246e066532296e69563c435200ae08b",
+       "relationship_id": "c040fe00-5310-5034-8287-fc57e2d3e24f",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define '_is_dir' at mcp/src/agents_remember/serving/notes.py:99-110",
+       "revision_id": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1",
+       "role": "primary-authority",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the baseline records realization c040fe00-5310-5034-8287-fc57e2d3e24f at mcp/src/agents_remember/serving/notes.py (revision c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1) and the candidate's declared selection did not reach this relationship: the candidate's snapshot holds the record, so this is a fact about the selection and never a deletion, and the recorded side is displayed as it stands",
+     "transition": "outside_selection"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+      "item_coverage": "selected_both",
+      "reached_via": [],
+      "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "record_kind": "invariant",
+      "side": "after",
+      "state": "ungoverned"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records invariant c7c5be49-164f-56e0-923d-fb5f5259d80c with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+       "item_coverage": "selected_both",
+       "reached_via": [],
+       "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+       "record_kind": "invariant",
+       "side": "before",
+       "state": "ungoverned"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_governed_identity",
+     "record_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+     "record_kind": "invariant",
+     "relationship_kind": "governing_route",
+     "statement": "the invariant c7c5be49-164f-56e0-923d-fb5f5259d80c is associated with the same governing route on both snapshots (no governing route)",
+     "transition": "unchanged"
+    }
+   ],
+   "remaining": [
+    {
+     "name": "locations_remaining",
+     "value": 0
+    },
+    {
+     "name": "changed_paths_outside_selection",
+     "value": 3
+    },
+    {
+     "name": "unattributed_changed_paths",
+     "value": 2
+    },
+    {
+     "name": "unknown_attribution_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "records_present_outside_selection",
+     "value": 9
+    },
+    {
+     "name": "references_unresolved",
+     "value": 0
+    }
+   ],
+   "unattributed_changed_paths": [
+    "mcp/src/agents_remember/application/review_marker_scratch.py",
+    "mcp/tests/test_knowledge_review_attributed_source_content.py"
+   ],
+   "unknown_attribution_changed_paths": [],
+   "unresolved": [
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "9630f112-284c-5234-82bf-5384f4bac489"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "be2d7ee4-a5bb-5778-b553-c0ec428a072b"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "c5361b05-edda-5cc4-82ed-1fd5bbaf1fa1"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "06d18d6b-9220-5674-ab81-0f5078101bf2"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "56a462b7-7332-58b1-868c-cd5a415bc589"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "8e62d80f-19ab-5b56-bfbb-e129db13ff54"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "90e5be44-7496-56b5-ab9f-a1b74c7ee7e8"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "c040fe00-5310-5034-8287-fc57e2d3e24f"
+    }
+   ]
+  },
+  "staleness": {
+   "moved": [],
+   "state": "current",
+   "statement": "the displayed comparison is the candidate's current comparison"
+  },
+  "submission": {
+   "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+   "none_is_approval": true,
+   "proposed_dispositions": [
+    "concern_found",
+    "no_concern_found",
+    "unresolved"
+   ],
+   "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+   "state": "unavailable"
+  },
+  "surface_version": "knowledge-review-surface/1"
+ },
+ "repository_id": "agents-remember",
+ "state": "review"
+}

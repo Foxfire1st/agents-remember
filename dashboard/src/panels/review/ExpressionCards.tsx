@@ -5,13 +5,15 @@
 //
 // The cards read the selection's entries from the tree view (data/reviewTrees.ts); an unconverted
 // review never mounts this component and keeps the landed file view (ReviewExpressions.tsx).
-import { useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 
 import { css } from '../../../styled-system/css';
 import type { ReviewChangedFile, ReviewPayload } from '../../data/review';
 import type { ReviewTreeEntry, ReviewTreesRead, ReviewTreeEntrySide } from '../../data/reviewTrees';
 import { DiffPane } from '../changeset/DiffPane';
 import { FilePane } from '../file-viewer/FilePane';
+import { sideMarks, useExcerptMarking } from './IntentMarkers';
+import { IntentMarkerScope } from './intentMarkerScope';
 import { ReviewProblemBlock } from './ReviewOutcome';
 import { ExpressionControls } from './ReviewExpressions';
 import { SourceContent } from './SourceContent';
@@ -179,7 +181,12 @@ export function ExpressionCards(props: CardsProps) {
 // is the card's key. A path opened from the source explorer opens in the first card of that path.
 function ReadyCards(props: CardsProps & { entries: ReviewTreeEntry[] }) {
   const { openPath, onOpenPath, scope } = props;
-  const [openCard, setOpenCard] = useState<string | null>(null);
+  // A return to an intent marker followed from a card's full file (MIK-R34) reopens that card.
+  const returningCard = returnedCard(useContext(IntentMarkerScope)?.returning?.pane);
+  const [openCard, setOpenCard] = useState<string | null>(returningCard);
+  useEffect(() => {
+    if (returningCard !== null) setOpenCard(returningCard);
+  }, [returningCard]);
   const cards = expressionCards(props.entries, props.seed);
   const counts = cardCounts(cards);
   const chosen = cards.find((card) => card.key === openCard && card.path === openPath);
@@ -227,6 +234,12 @@ function ReadyCards(props: CardsProps & { entries: ReviewTreeEntry[] }) {
       ))}
     </section>
   );
+}
+
+const CARD_PANE = 'card:';
+
+function returnedCard(pane: string | undefined): string | null {
+  return pane?.startsWith(CARD_PANE) ? pane.slice(CARD_PANE.length) : null;
 }
 
 // A bounded roster: the counts above are of the loaded members' locations, never the family's.
@@ -358,7 +371,13 @@ function FocusedCard({
       </div>
       {open ? (
         <div className={fullFileBox}>
-          <FullFile payload={payload} path={card.path} layout={layout} fullFile={fullFile} />
+          <FullFile
+            payload={payload}
+            path={card.path}
+            layout={layout}
+            fullFile={fullFile}
+            pane={`${CARD_PANE}${card.key}`}
+          />
         </div>
       ) : null}
     </article>
@@ -419,12 +438,22 @@ function Excerpt({ card, layout }: { card: ExpressionCard; layout: DiffLayout })
 // An unchanged range: its text once (the two sides share one content identity).
 function UnchangedExcerpt({ card, language }: { card: ExpressionCard; language: string }) {
   const { after } = card;
+  // A range with the same text on both sides can still hold changed lines (code moved as a whole).
+  const marking = useExcerptMarking(card, 'split', { before: false, after: true });
   if (after.excerpt === undefined)
     return <p className={muted}>{after.reason ?? 'No excerpt was read for this range.'}</p>;
   return (
     <div data-testid="review-card-excerpt" data-excerpt="unchanged">
-      <FilePane content={after.excerpt} language={language} firstLine={after.start_line} fit />
+      <FilePane
+        content={after.excerpt}
+        language={language}
+        firstLine={after.start_line}
+        fit
+        marks={marking.marks}
+      />
       <Truncated side={after} />
+      {marking.note}
+      {marking.panel}
     </div>
   );
 }
@@ -441,6 +470,7 @@ function ChangedExcerpt({
   layout: DiffLayout;
 }) {
   const { before, after } = card;
+  const marking = useExcerptMarking(card, layout, { before: true, after: true });
   const beforeText = before.state === 'resolved' ? before.excerpt : '';
   const afterText = after.state === 'resolved' ? after.excerpt : '';
   if (beforeText === undefined || afterText === undefined)
@@ -455,9 +485,12 @@ function ChangedExcerpt({
         collapse={false}
         firstLine={firstLines(card)}
         fit
+        marks={marking.marks}
       />
       <Truncated side={before} />
       <Truncated side={after} />
+      {marking.note}
+      {marking.panel}
     </div>
   );
 }
@@ -465,6 +498,7 @@ function ChangedExcerpt({
 // A card whose two sides are not both regions: each readable side's text on its own, never a diff,
 // because a diff would claim the other side is a known operand.
 function SeparateSides({ card, language }: { card: ExpressionCard; language: string }) {
+  const marking = useExcerptMarking(card, 'split', { before: true, after: true });
   return (
     <div data-testid="review-card-excerpt" data-excerpt="separate">
       {(['before', 'after'] as const).map((name) => {
@@ -474,10 +508,18 @@ function SeparateSides({ card, language }: { card: ExpressionCard; language: str
             <p className={muted} style={{ padding: '0.3rem 0.8rem' }}>
               {name} side text · no comparison is drawn
             </p>
-            <FilePane content={side.excerpt} language={language} firstLine={side.start_line} fit />
+            <FilePane
+              content={side.excerpt}
+              language={language}
+              firstLine={side.start_line}
+              fit
+              marks={sideMarks(marking.marks, name)}
+            />
           </div>
         ) : null;
       })}
+      {marking.note}
+      {marking.panel}
     </div>
   );
 }
@@ -550,11 +592,14 @@ function FullFile({
   path,
   layout,
   fullFile,
+  pane,
 }: {
   payload: ReviewPayload;
   path: string;
   layout: DiffLayout;
   fullFile: boolean;
+  // The pane's name for the intent markers' return (MIK-R34).
+  pane: string;
 }) {
   const inventory = payload.source.inventory;
   if (!inventory.before_code_tree_id || !inventory.after_code_tree_id)
@@ -577,6 +622,7 @@ function FullFile({
         afterCodeTreeId={inventory.after_code_tree_id}
         mode={layout}
         collapse={!fullFile}
+        markers={{ pane }}
       />
     </div>
   );
@@ -599,7 +645,13 @@ function OpenedFile(props: CardsProps & { cards: ExpressionCard[] }) {
         </button>
       </header>
       <div className={fullFileBox}>
-        <FullFile payload={payload} path={openPath} layout={layout} fullFile={fullFile} />
+        <FullFile
+          payload={payload}
+          path={openPath}
+          layout={layout}
+          fullFile={fullFile}
+          pane="opened"
+        />
       </div>
     </article>
   );

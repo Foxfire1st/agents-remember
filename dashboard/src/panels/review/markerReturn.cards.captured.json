@@ -1,0 +1,304 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  },
+  "leaf_id": "260928-MIK-L34",
+  "memory_base": {
+   "commit": "2e3810ed9cc7e9595ca510e8313c3781635373b3",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+  },
+  "number": 2,
+  "recorded_at": "2026-09-30T13:47:00+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:416b34dcc8d590457c1d5d955a2d30666170c76362f84c3fd718868b89a11977",
+    "currentness": "current",
+    "end_line": 110,
+    "excerpt": "def _is_dir(entry: os.DirEntry[str]) -> bool:\n    \"\"\"The directory-first sort key with ``Path.is_dir()``'s error contract.\n\n    ``DirEntry.is_dir()`` swallows only ``FileNotFoundError``; a looping or file-traversing\n    symlink would otherwise raise out of ``sorted`` and fail the whole listing.\n    \"\"\"\n    try:\n        return entry.is_dir()\n    except OSError as err:\n        if err.errno in _NOT_A_DIR:\n            return False\n        raise\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 99,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:416b34dcc8d590457c1d5d955a2d30666170c76362f84c3fd718868b89a11977",
+    "currentness": "current",
+    "end_line": 110,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Is the directory-first sort key: it treats ENOENT, ENOTDIR, EBADF and ELOOP from DirEntry.is_dir() as not-a-directory and re-raises every other error, reproducing Path.is_dir() so looping or file-traversing symlinks cannot fail the sort.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 99,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-NGTT9WWJ",
+   "invariant": "INV-DA7D417G",
+   "invariant_key": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:a9442cabb0c162a80fddf940442c3369947d7de28ad091189e3ef81ad18e2d25",
+    "currentness": "current",
+    "end_line": 219,
+    "excerpt": "def list_notes(config: McpRuntimeConfig, repo_id: str, master: str) -> dict[str, Any]:\n    root = _notes_root(config, repo_id, master)\n    walk = _NotesWalk(root=root)\n    if root.is_dir():\n        walk.root = root.resolve()\n        walk.root_fd = os.open(walk.root, _DIR_OPEN)\n        try:\n            _walk_notes(walk, walk.root_fd, walk.root, \"\", 1)\n        finally:\n            os.close(walk.root_fd)\n    return {\"repo\": repo_id, \"master\": master, \"notes\": walk.notes, \"truncated\": walk.truncated}\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 209,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:0d00b8c2e8b4018c2285876277245ab1007dcea03c3afde5fc22afd8cfc21409",
+    "currentness": "current",
+    "end_line": 220,
+    "excerpt": "def list_notes(config: McpRuntimeConfig, repo_id: str, master: str) -> dict[str, Any]:\n    \"\"\"Every note file for one series master, notes-root-relative; missing folder -> [].\"\"\"\n    root = _notes_root(config, repo_id, master)\n    walk = _NotesWalk(root=root)\n    if root.is_dir():\n        walk.root = root.resolve()\n        walk.root_fd = os.open(walk.root, _DIR_OPEN)\n        try:\n            _walk_notes(walk, walk.root_fd, walk.root, \"\", 1)\n        finally:\n            os.close(walk.root_fd)\n    return {\"repo\": repo_id, \"master\": master, \"notes\": walk.notes, \"truncated\": walk.truncated}\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Assembles the NotesListing wire payload {repo, master, notes, truncated} from the walk's rows and prune flag, and returns an empty notes list for a missing folder; this is the shape and ordering that must match the path-based walk byte for byte.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 209,
+    "state": "resolved"
+   },
+   "change": "changed",
+   "id": "RLZ-7RNSV7PG",
+   "invariant": "INV-EJW15DXA",
+   "invariant_key": "16b287d6-2337-5554-b911-43e3a7d15fab",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:982283ac1245e4fc86e2fb53b687d371a42077dfb11192a3842764a6e629d62c",
+    "currentness": "current",
+    "end_line": 162,
+    "excerpt": "def _open_subdir(\n    walk: _NotesWalk, entry: os.DirEntry[str], lexical: Path, dir_fd: int\n) -> int | None:\n    \"\"\"A descriptor for a confined subdirectory, or ``None`` when it was swapped since observed.\n\n    A plain directory is opened relative to its parent's descriptor. An in-root symlink to a\n    directory (listed under its own path, as before) is re-resolved and opened component by\n    component from the root, so a retargeted link cannot lead outside either. Only the\n    swap signature is refused; every other open failure propagates as the path-based walk's did.\n    \"\"\"\n    try:\n        if not entry.is_symlink():\n            return os.open(entry.name, _DIR_OPEN, dir_fd=dir_fd)\n        target = lexical.resolve()\n        if not path_is_relative_to(target, walk.root):\n            return None\n        return _open_below_root(walk, target.relative_to(walk.root))\n    except OSError as err:\n        if err.errno in _SWAPPED_AWAY:\n            return None\n        raise\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 142,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:982283ac1245e4fc86e2fb53b687d371a42077dfb11192a3842764a6e629d62c",
+    "currentness": "current",
+    "end_line": 162,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Opens each subdirectory with O_RDONLY|O_DIRECTORY|O_NOFOLLOW relative to its already-confined parent descriptor, re-checks an in-root directory symlink's target, and refuses only the ELOOP/ENOTDIR swap signature, so a directory replaced after observation is not followed.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 142,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-5NWBYG1T",
+   "invariant": "INV-QR24S1VH",
+   "invariant_key": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:514778fe85fae024f5331223bcbbc3e05579331473811c4d6195580566a51a87",
+    "currentness": "current",
+    "end_line": 139,
+    "excerpt": "def _open_below_root(walk: _NotesWalk, rel: Path) -> int:\n    \"\"\"A descriptor for ``root/rel``, every component opened without following a symlink.\"\"\"\n    fd = os.open(\".\", _DIR_OPEN, dir_fd=walk.root_fd)\n    for part in rel.parts:\n        try:\n            child_fd = os.open(part, _DIR_OPEN, dir_fd=fd)\n        finally:\n            os.close(fd)\n        fd = child_fd\n    return fd\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 130,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:514778fe85fae024f5331223bcbbc3e05579331473811c4d6195580566a51a87",
+    "currentness": "current",
+    "end_line": 139,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Re-opens an in-root directory symlink's resolved target one path component at a time from the root descriptor with O_NOFOLLOW, so a component retargeted during the walk cannot redirect descent outside the notes root.",
+    "recorded": true,
+    "role": "enforcement",
+    "start_line": 130,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-W8VA2JEP",
+   "invariant": "INV-QR24S1VH",
+   "invariant_key": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:3024897a33256f888cc8bdf14471f8193608dad125b8f8ca27eae8694da69e33",
+    "currentness": "current",
+    "end_line": 193,
+    "excerpt": "def _walk_notes(walk: _NotesWalk, dir_fd: int, base: Path, prefix: str, depth: int) -> None:\n    \"\"\"Collect note files in the directory ``dir_fd``, files before subfolders, escapes skipped.\n\n    ``base`` is that directory's path through the walk (symlink confinement is judged on it) and\n    ``prefix`` its posix path relative to the root (``\"\"`` at the root), so a row's ``path`` is\n    built from entry names. A directory beyond the depth cap is not entered and flips\n    ``truncated``; only regular files (after following an in-root symlink) are listed.\n    \"\"\"\n    with os.scandir(dir_fd) as scan:\n        children = sorted(scan, key=lambda e: (_is_dir(e), e.name.lower()))\n    for child in children:\n        lexical = base / child.name\n        st = _confined_stat(child, lexical, walk.root)\n        if st is None:\n            continue\n        if S_ISDIR(st.st_mode):\n            if depth >= _MAX_LIST_DEPTH:\n                walk.truncated = True\n                continue\n            _walk_subdir(walk, child, lexical, dir_fd, depth + 1)\n        elif S_ISREG(st.st_mode):\n            walk.notes.append(\n                {\n                    \"name\": child.name,\n                    \"path\": f\"{prefix}{child.name}\",\n                    \"size\": st.st_size,\n                    \"language\": language_for(Path(child.name)),\n                }\n            )\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+    "recorded": true,
+    "role": "support",
+    "start_line": 165,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:3024897a33256f888cc8bdf14471f8193608dad125b8f8ca27eae8694da69e33",
+    "currentness": "current",
+    "end_line": 193,
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Calls _confined_stat exactly once per scanned entry and builds each row's path from the parent prefix plus the entry name, so the walk loop adds no path resolution of its own and each listed note costs one followed stat.",
+    "recorded": true,
+    "role": "support",
+    "start_line": 165,
+    "state": "resolved"
+   },
+   "change": "unchanged",
+   "id": "RLZ-5KCQCHVQ",
+   "invariant": "INV-Z66EMHMH",
+   "invariant_key": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:0b80f7ffc8cc62e446cf389a433e9feab7e09ff1276340ea2a2b9164ff779767",
+    "currentness": "current",
+    "end_line": 127,
+    "excerpt": "def _confined_stat(entry: os.DirEntry[str], lexical: Path, root: Path) -> os.stat_result | None:\n    \"\"\"The entry's followed stat, or ``None`` when it escapes ``root`` or cannot be read.\n\n    Only a symlink can escape: the walk starts at the realpath'd root and enters only directories\n    opened beneath it, so a non-symlink child is confined by construction and needs no\n    ``realpath``. Resolving every entry cost three ``realpath`` calls each (one ``lstat`` per path\n    component), which dominated the listing and, being pure-Python per-entry work, stretched it\n    many-fold under the GIL on a busy server. ``lexical`` is the entry's path through the walk.\n    \"\"\"\n    try:\n        if entry.is_symlink() and not path_is_relative_to(lexical.resolve(), root):\n            return None  # a symlink that escapes the root: never listed, never served\n        return entry.stat()\n    except OSError:\n        return None  # an unresolvable/vanished entry is skipped, never listed\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 113,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:d40680e3e52e1674571b0c9fe034680547f3e699eedd2038f71927be107959c5",
+    "currentness": "current",
+    "end_line": 127,
+    "excerpt": "def _confined_stat(entry: os.DirEntry[str], lexical: Path, root: Path) -> os.stat_result | None:\n    \"\"\"The entry's followed stat, or ``None`` when it escapes ``root`` or cannot be read.\n\n    Only a symlink can escape: the walk starts at the realpath'd root and enters only directories\n    opened beneath it, so a non-symlink child is confined by construction and needs no\n    ``realpath``. Resolving every entry cost three ``realpath`` calls each (one ``lstat`` per path\n    component), which dominated the listing and, being pure-Python per-entry work, stretched it\n    many-fold under the GIL on a busy server. ``lexical`` is the entry's path through the walk.\n    \"\"\"\n    try:\n        if entry.is_symlink() and not path_is_relative_to(lexical.resolve(), root):\n            return None  # symlink escape: never listed, never served\n        return entry.stat()\n    except OSError:\n        return None  # an unresolvable/vanished entry is skipped, never listed\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Decides confinement per entry: only an entry that is a symlink is resolved and checked with path_is_relative_to against the resolved root, and every other entry returns its one cached DirEntry stat. This is where the three per-entry realpath calls were removed, so resolution is paid only for symlinks.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 113,
+    "state": "resolved"
+   },
+   "change": "changed",
+   "id": "RLZ-7X2C4VRQ",
+   "invariant": "INV-Z66EMHMH",
+   "invariant_key": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+   "kind": "realization"
+  },
+  {
+   "after": {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "content": "sha256:a9442cabb0c162a80fddf940442c3369947d7de28ad091189e3ef81ad18e2d25",
+    "currentness": "current",
+    "end_line": 219,
+    "excerpt": "def list_notes(config: McpRuntimeConfig, repo_id: str, master: str) -> dict[str, Any]:\n    root = _notes_root(config, repo_id, master)\n    walk = _NotesWalk(root=root)\n    if root.is_dir():\n        walk.root = root.resolve()\n        walk.root_fd = os.open(walk.root, _DIR_OPEN)\n        try:\n            _walk_notes(walk, walk.root_fd, walk.root, \"\", 1)\n        finally:\n            os.close(walk.root_fd)\n    return {\"repo\": repo_id, \"master\": master, \"notes\": walk.notes, \"truncated\": walk.truncated}\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 209,
+    "state": "resolved"
+   },
+   "before": {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "content": "sha256:0d00b8c2e8b4018c2285876277245ab1007dcea03c3afde5fc22afd8cfc21409",
+    "currentness": "current",
+    "end_line": 220,
+    "excerpt": "def list_notes(config: McpRuntimeConfig, repo_id: str, master: str) -> dict[str, Any]:\n    \"\"\"Every note file for one series master, notes-root-relative; missing folder -> [].\"\"\"\n    root = _notes_root(config, repo_id, master)\n    walk = _NotesWalk(root=root)\n    if root.is_dir():\n        walk.root = root.resolve()\n        walk.root_fd = os.open(walk.root, _DIR_OPEN)\n        try:\n            _walk_notes(walk, walk.root_fd, walk.root, \"\", 1)\n        finally:\n            os.close(walk.root_fd)\n    return {\"repo\": repo_id, \"master\": master, \"notes\": walk.notes, \"truncated\": walk.truncated}\n",
+    "excerpt_truncated": false,
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "rationale": "Creates a fresh _NotesWalk accumulator and opens and closes the root descriptor inside each call, with no cache or module-level state, so every request walks the live tree and sees new or grown notes.",
+    "recorded": true,
+    "role": "primary-authority",
+    "start_line": 209,
+    "state": "resolved"
+   },
+   "change": "changed",
+   "id": "RLZ-9YY9Y1E1",
+   "invariant": "INV-ZJS1XY4R",
+   "invariant_key": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+   "kind": "realization"
+  }
+ ],
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+  }
+ ],
+ "leaf_id": "260928-MIK-L34",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

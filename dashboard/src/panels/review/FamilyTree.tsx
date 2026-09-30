@@ -12,6 +12,7 @@ import type {
 } from '../../data/review';
 import { FAMILY_SIDES } from '../../data/review';
 import { TreeComparisonScope, useTreeComparison } from './IntentWordDiff';
+import { MemberTargetNote } from './MarkerTargetState';
 import { rowWording, wordingComparison } from './statementWording';
 
 export interface FamilySelection {
@@ -449,6 +450,10 @@ function MemberNode({
         )}
         <span className={muted}>{memberSidesNote(row)}</span>
         <span className={sideTag}>{memberSideTag(row, tree)}</span>
+        <MemberTargetNote
+          familyId={entry.family_id}
+          memberRevisionId={member.invariant_revision_id}
+        />
       </button>
       {member.other_family_revision_ids.length ? (
         <details>

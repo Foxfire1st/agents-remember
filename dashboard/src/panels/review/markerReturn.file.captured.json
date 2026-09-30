@@ -1,0 +1,402 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "59daf5055eb1ceffba89170be64ac85cabf860f4",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "repository": "/tmp/mik-l34-real/code",
+   "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
+  },
+  "leaf_id": "260928-MIK-L34",
+  "memory_base": {
+   "commit": "2e3810ed9cc7e9595ca510e8313c3781635373b3",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "repository": "/tmp/mik-l34-real/memory",
+   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+  },
+  "number": 2,
+  "recorded_at": "2026-09-30T13:47:00+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [],
+ "file_classification": {
+  "bucket": "attributed",
+  "content": "text",
+  "counts": {
+   "attribution_unknown": 0,
+   "hunks": 2,
+   "linked": 2,
+   "unexplained": 0
+  },
+  "hunks": [
+   {
+    "after": {
+     "count": 1,
+     "start": 124
+    },
+    "before": {
+     "count": 1,
+     "start": 124
+    },
+    "classification": "linked",
+    "links": [
+     {
+      "end_line": 127,
+      "families": [
+       {
+        "family": "FAM-4V4GSQCS",
+        "family_key": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+        "family_revision": 1,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-7X2C4VRQ",
+      "invariant": "INV-Z66EMHMH",
+      "invariant_key": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "invariant_revision": 1,
+      "invariant_revision_key": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 113
+     },
+     {
+      "end_line": 127,
+      "families": [
+       {
+        "state": "confirmed_no_family"
+       }
+      ],
+      "id": "RLZ-DCXK7W7T",
+      "invariant": "INV-413DC8XE",
+      "invariant_key": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+      "invariant_revision": 1,
+      "invariant_revision_key": "f9417c0a-c89e-5167-9595-1289de41dc28",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 113
+     },
+     {
+      "end_line": 127,
+      "families": [
+       {
+        "family": "FAM-4V4GSQCS",
+        "family_key": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+        "family_revision": 2,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-7X2C4VRQ",
+      "invariant": "INV-Z66EMHMH",
+      "invariant_key": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+      "invariant_revision": 1,
+      "invariant_revision_key": "a1c28709-da32-5ca3-91c4-5e43f5c498da",
+      "kind": "realization",
+      "side": "after",
+      "start_line": 113
+     },
+     {
+      "end_line": 127,
+      "families": [
+       {
+        "state": "confirmed_no_family"
+       }
+      ],
+      "id": "RLZ-DCXK7W7T",
+      "invariant": "INV-413DC8XE",
+      "invariant_key": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+      "invariant_revision": 1,
+      "invariant_revision_key": "f9417c0a-c89e-5167-9595-1289de41dc28",
+      "kind": "realization",
+      "side": "after",
+      "start_line": 113
+     }
+    ],
+    "unknown": []
+   },
+   {
+    "after": {
+     "count": 0,
+     "start": 209
+    },
+    "before": {
+     "count": 1,
+     "start": 210
+    },
+    "classification": "linked",
+    "links": [
+     {
+      "end_line": 220,
+      "families": [
+       {
+        "family": "FAM-4V4GSQCS",
+        "family_key": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+        "family_revision": 1,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-7RNSV7PG",
+      "invariant": "INV-EJW15DXA",
+      "invariant_key": "16b287d6-2337-5554-b911-43e3a7d15fab",
+      "invariant_revision": 1,
+      "invariant_revision_key": "be2d7ee4-a5bb-5778-b553-c0ec428a072b",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 209
+     },
+     {
+      "end_line": 220,
+      "families": [
+       {
+        "family": "FAM-4V4GSQCS",
+        "family_key": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+        "family_revision": 1,
+        "state": "removed_or_reassigned"
+       }
+      ],
+      "id": "RLZ-9YY9Y1E1",
+      "invariant": "INV-ZJS1XY4R",
+      "invariant_key": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+      "invariant_revision": 1,
+      "invariant_revision_key": "5c1219b0-8a23-54a4-98bd-0dcf1316fb85",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 209
+     },
+     {
+      "end_line": 220,
+      "families": [
+       {
+        "state": "confirmed_no_family"
+       }
+      ],
+      "id": "RLZ-HNH06VQK",
+      "invariant": "INV-SMYSQKTJ",
+      "invariant_key": "60dc7093-285c-56db-9ad3-8c65df99b55a",
+      "invariant_revision": 1,
+      "invariant_revision_key": "6d38c1db-1f1e-51f1-979b-80dc0c6d4e77",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 209
+     }
+    ],
+    "unknown": []
+   }
+  ],
+  "mode_change": false,
+  "path": "mcp/src/agents_remember/serving/notes.py",
+  "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-5KCQCHVQ, RLZ-5NWBYG1T, RLZ-7RNSV7PG, RLZ-7X2C4VRQ, RLZ-9YY9Y1E1, RLZ-AFAM29GC, RLZ-DCXK7W7T, RLZ-HNH06VQK, RLZ-NGTT9WWJ, RLZ-V1EWDR6A and 1 more; on the after side RLZ-5KCQCHVQ, RLZ-5NWBYG1T, RLZ-7RNSV7PG, RLZ-7X2C4VRQ, RLZ-9YY9Y1E1, RLZ-AFAM29GC, RLZ-DCXK7W7T, RLZ-HNH06VQK, RLZ-NGTT9WWJ, RLZ-V1EWDR6A and 1 more)",
+  "sides": [
+   {
+    "blob": "e3e6f8d4c246e066532296e69563c435200ae08b",
+    "entries": [
+     {
+      "end_line": 193,
+      "id": "RLZ-5KCQCHVQ",
+      "invariant": "INV-Z66EMHMH",
+      "kind": "realization",
+      "start_line": 165
+     },
+     {
+      "end_line": 162,
+      "id": "RLZ-5NWBYG1T",
+      "invariant": "INV-QR24S1VH",
+      "kind": "realization",
+      "start_line": 142
+     },
+     {
+      "end_line": 220,
+      "id": "RLZ-7RNSV7PG",
+      "invariant": "INV-EJW15DXA",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 127,
+      "id": "RLZ-7X2C4VRQ",
+      "invariant": "INV-Z66EMHMH",
+      "kind": "realization",
+      "start_line": 113
+     },
+     {
+      "end_line": 220,
+      "id": "RLZ-9YY9Y1E1",
+      "invariant": "INV-ZJS1XY4R",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 247,
+      "id": "RLZ-AFAM29GC",
+      "invariant": "INV-2DF3HS9Q",
+      "kind": "realization",
+      "start_line": 223
+     },
+     {
+      "end_line": 127,
+      "id": "RLZ-DCXK7W7T",
+      "invariant": "INV-413DC8XE",
+      "kind": "realization",
+      "start_line": 113
+     },
+     {
+      "end_line": 220,
+      "id": "RLZ-HNH06VQK",
+      "invariant": "INV-SMYSQKTJ",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 110,
+      "id": "RLZ-NGTT9WWJ",
+      "invariant": "INV-DA7D417G",
+      "kind": "realization",
+      "start_line": 99
+     },
+     {
+      "end_line": 276,
+      "id": "RLZ-V1EWDR6A",
+      "invariant": "INV-2DF3HS9Q",
+      "kind": "realization",
+      "start_line": 250
+     },
+     {
+      "end_line": 139,
+      "id": "RLZ-W8VA2JEP",
+      "invariant": "INV-QR24S1VH",
+      "kind": "realization",
+      "start_line": 130
+     }
+    ],
+    "knowledge": "available",
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "side": "before"
+   },
+   {
+    "blob": "9019bea5a3b9ace22947a516a78718f1a2d8f123",
+    "entries": [
+     {
+      "end_line": 193,
+      "id": "RLZ-5KCQCHVQ",
+      "invariant": "INV-Z66EMHMH",
+      "kind": "realization",
+      "start_line": 165
+     },
+     {
+      "end_line": 162,
+      "id": "RLZ-5NWBYG1T",
+      "invariant": "INV-QR24S1VH",
+      "kind": "realization",
+      "start_line": 142
+     },
+     {
+      "end_line": 219,
+      "id": "RLZ-7RNSV7PG",
+      "invariant": "INV-EJW15DXA",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 127,
+      "id": "RLZ-7X2C4VRQ",
+      "invariant": "INV-Z66EMHMH",
+      "kind": "realization",
+      "start_line": 113
+     },
+     {
+      "end_line": 219,
+      "id": "RLZ-9YY9Y1E1",
+      "invariant": "INV-ZJS1XY4R",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 246,
+      "id": "RLZ-AFAM29GC",
+      "invariant": "INV-2DF3HS9Q",
+      "kind": "realization",
+      "start_line": 222
+     },
+     {
+      "end_line": 127,
+      "id": "RLZ-DCXK7W7T",
+      "invariant": "INV-413DC8XE",
+      "kind": "realization",
+      "start_line": 113
+     },
+     {
+      "end_line": 219,
+      "id": "RLZ-HNH06VQK",
+      "invariant": "INV-SMYSQKTJ",
+      "kind": "realization",
+      "start_line": 209
+     },
+     {
+      "end_line": 110,
+      "id": "RLZ-NGTT9WWJ",
+      "invariant": "INV-DA7D417G",
+      "kind": "realization",
+      "start_line": 99
+     },
+     {
+      "end_line": 275,
+      "id": "RLZ-V1EWDR6A",
+      "invariant": "INV-2DF3HS9Q",
+      "kind": "realization",
+      "start_line": 249
+     },
+     {
+      "end_line": 139,
+      "id": "RLZ-W8VA2JEP",
+      "invariant": "INV-QR24S1VH",
+      "kind": "realization",
+      "start_line": 130
+     }
+    ],
+    "knowledge": "available",
+    "path": "mcp/src/agents_remember/serving/notes.py",
+    "side": "after"
+   }
+  ],
+  "status": "modified"
+ },
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+  }
+ ],
+ "leaf_id": "260928-MIK-L34",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

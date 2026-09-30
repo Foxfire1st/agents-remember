@@ -9,10 +9,13 @@ import type {
   ReviewSourceSide,
 } from '../../data/review';
 import { reviewProblemFromCause, reviewSourceContent } from '../../data/review';
+import type { ReviewFileClassification } from '../../data/reviewLane';
 import { ReviewProblemBlock } from './ReviewOutcome';
 import { ReviewReadCacheContext, sourceContentKey } from './ReviewReadCache';
 import { DiffPane, type DiffMode } from '../changeset/DiffPane';
+import type { PaneMarks } from '../file-viewer/markGutter';
 import { FilePane } from '../file-viewer/FilePane';
+import { sideMarks, useSourceMarking } from './IntentMarkers';
 
 const textual = (side: ReviewSourceSide) => side.text !== undefined;
 
@@ -41,27 +44,43 @@ function sideLine(side: ReviewSourceSide, name: 'before' | 'after') {
   );
 }
 
-function contentBlock(side: ReviewSourceSide, name: 'before' | 'after', language: string) {
+function contentBlock(
+  side: ReviewSourceSide,
+  name: 'before' | 'after',
+  language: string,
+  marks?: PaneMarks,
+) {
   return (
     <div
       data-testid={`review-source-${name}-content`}
       style={{ height: '26rem', maxHeight: '60vh', minHeight: '12rem' }}
     >
-      <FilePane content={side.text ?? ''} language={language} />
+      <FilePane content={side.text ?? ''} language={language} marks={marks} />
     </div>
   );
+}
+
+// Where the per-hunk intent markers of this view come from (MIK-R34): the pane's name within the
+// workspace, and the classification when the caller already holds it. Outside a tree comparison's
+// workspace there are none, and the view is exactly the landed one.
+export interface SourceMarkers {
+  pane?: string;
+  classification?: ReviewFileClassification;
 }
 
 function Sides({
   expansion,
   mode,
   collapse,
+  markers,
 }: {
   expansion: ReviewSourceExpansion;
   mode: DiffMode;
   collapse: boolean;
+  markers?: SourceMarkers;
 }) {
   const { before, after } = expansion;
+  const marking = useSourceMarking(expansion, mode, markers);
   const lines = (
     <>
       {sideLine(before, 'before')}
@@ -72,6 +91,7 @@ function Sides({
     return (
       <>
         {lines}
+        {marking.note}
         <div style={{ height: '26rem', maxHeight: '60vh', minHeight: '12rem' }}>
           <DiffPane
             before={before.text ?? ''}
@@ -79,8 +99,10 @@ function Sides({
             language={expansion.language}
             mode={mode}
             collapse={collapse}
+            marks={marking.marks}
           />
         </div>
+        {marking.panel}
       </>
     );
   }
@@ -92,8 +114,14 @@ function Sides({
         no diff is drawn: at least one side is not a regular file's text, so an addition or a change
         cannot be claimed from the two sides beside it.
       </p>
-      {textual(before) ? contentBlock(before, 'before', expansion.language) : null}
-      {textual(after) ? contentBlock(after, 'after', expansion.language) : null}
+      {marking.note}
+      {textual(before)
+        ? contentBlock(before, 'before', expansion.language, sideMarks(marking.marks, 'before'))
+        : null}
+      {textual(after)
+        ? contentBlock(after, 'after', expansion.language, sideMarks(marking.marks, 'after'))
+        : null}
+      {marking.panel}
     </>
   );
 }
@@ -128,10 +156,12 @@ function Expansion({
   expansion,
   mode,
   collapse,
+  markers,
 }: {
   expansion: ReviewSourceExpansion;
   mode: DiffMode;
   collapse: boolean;
+  markers?: SourceMarkers;
 }) {
   return (
     <div data-testid="review-source-expansion" data-currentness={expansion.currentness}>
@@ -159,7 +189,7 @@ function Expansion({
           {expansion.currentness}: {expansion.currentness_detail}
         </p>
       ) : null}
-      <Sides expansion={expansion} mode={mode} collapse={collapse} />
+      <Sides expansion={expansion} mode={mode} collapse={collapse} markers={markers} />
       {boundedNote(expansion)}
     </div>
   );
@@ -228,6 +258,7 @@ export function SourceContent({
   afterCodeTreeId,
   mode = 'split',
   collapse = false,
+  markers,
 }: {
   repo: string;
   master: string;
@@ -237,6 +268,7 @@ export function SourceContent({
   afterCodeTreeId: string;
   mode?: DiffMode;
   collapse?: boolean;
+  markers?: SourceMarkers;
 }) {
   const { result, problem, retry } = useSourceContentRead({
     repo,
@@ -266,6 +298,8 @@ export function SourceContent({
   }
   if (result.state === 'refused' && result.refusal) return refusalBlock(result.refusal);
   if (result.expansion)
-    return <Expansion expansion={result.expansion} mode={mode} collapse={collapse} />;
+    return (
+      <Expansion expansion={result.expansion} mode={mode} collapse={collapse} markers={markers} />
+    );
   return null;
 }

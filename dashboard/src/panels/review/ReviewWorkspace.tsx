@@ -7,6 +7,8 @@
 // subject's name.
 // For a tree comparison the rail also offers the unexplained-changes lane's two destinations after the
 // families (MIK-R32); choosing one swaps the reading area for the lane, and choosing a family returns.
+// Its diffs mark each hunk with the intents whose recorded ranges it meets (MIK-R34); following a
+// marker selects its tree position here, and `Back to <file>` returns to the hunk.
 import { useEffect, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
@@ -23,6 +25,10 @@ import { SourceExplorer, type DiffLayout } from './SourceExplorer';
 import { LaneDestinations, type LaneSelection, UnexplainedLaneCenter } from './UnexplainedLane';
 import type { GateRead } from './LaneFileFocus';
 import { explorerAttribution } from './laneFocus';
+import { MarkerReturn } from './IntentMarkers';
+import { IntentMarkerScope, markerInventory, useIntentMarkerScope } from './intentMarkerScope';
+import { InvariantTargetState, useInvariantTargetState } from './MarkerTargetState';
+import { workspaceMarkerMoves } from './markerNavigation';
 
 const workspace = css({
   display: 'grid',
@@ -50,6 +56,12 @@ const jump = css({
   gridColumn: '1 / -1',
   justifySelf: 'start',
   '@media (min-width: 60.01rem)': { display: 'none' },
+});
+// While the rail and the reading area stack, the way back stays in view at the target.
+const markerReturn = css({
+  gridColumn: '1 / -1',
+  justifySelf: 'start',
+  '@media (max-width: 60rem)': { position: 'sticky', top: '0.5rem', zIndex: 2 },
 });
 
 function FamilyNotComposed({
@@ -145,6 +157,8 @@ export interface WorkspaceState {
   openPath: string | null | undefined;
   openFromCenter: (path: string) => void;
   closePath: (path: string | null) => void;
+  // Sets the opened path without moving focus (an intent marker's follow and return).
+  setOpenPath: (path: string | null | undefined) => void;
   center: React.RefObject<HTMLDivElement | null>;
   // The unexplained-changes lane destination on screen (and the file it opened), or none.
   lane: LaneSelection | null;
@@ -194,6 +208,7 @@ export function useWorkspaceState(): WorkspaceState {
     openPath,
     openFromCenter,
     closePath,
+    setOpenPath,
     center,
     lane,
     setLane,
@@ -230,7 +245,27 @@ interface ReviewWorkspaceProps {
   laneRead?: LaneRead<ReviewUnexplainedLane> | null;
 }
 
-export function ReviewWorkspace({
+// The workspace, inside the scope of its diffs' intent markers: a tree comparison's changed files are
+// classified for them (once per surface), and a followed marker can be returned to. A dataset review
+// names no tree comparison and has no scope.
+export function ReviewWorkspace(props: ReviewWorkspaceProps) {
+  const { payload, repo, master, leaf, state, navigation } = props;
+  const markers = useIntentMarkerScope({
+    repo,
+    master,
+    leaf,
+    comparison: treeComparisonNumber(payload.limitations),
+    ...markerInventory(payload.source.inventory),
+    moves: workspaceMarkerMoves(state, navigation),
+  });
+  return (
+    <IntentMarkerScope.Provider value={markers}>
+      <WorkspaceBody {...props} />
+    </IntentMarkerScope.Provider>
+  );
+}
+
+function WorkspaceBody({
   payload,
   reading = null,
   repo,
@@ -274,6 +309,7 @@ export function ReviewWorkspace({
       >
         ↓ Jump to selected review
       </button>
+      <MarkerReturn className={markerReturn} />
       <WorkspaceRail
         payload={payload}
         repo={repo}
@@ -285,6 +321,7 @@ export function ReviewWorkspace({
         rosterNext={rosterNext}
         onSelect={choose}
         laneRead={laneRead}
+        subject={reading ? undefined : navigation?.subject}
       />
       <WorkspaceCenter
         payload={payload}
@@ -428,6 +465,7 @@ function WorkspaceRail({
   rosterNext,
   onSelect,
   laneRead,
+  subject,
 }: {
   payload: ReviewPayload;
   repo: string;
@@ -439,6 +477,8 @@ function WorkspaceRail({
   chosen: FamilySelection | null;
   rosterNext: (family: string, side: string, continuation: string) => void;
   laneRead: LaneRead<ReviewUnexplainedLane> | null;
+  // The answered subject (none while another is read): an intent marker's unknown-membership target.
+  subject?: ReviewNavigationState['subject'];
 }) {
   const context = payload.family_context;
   // While a lane destination is on screen, no family node is the current selection.
@@ -459,6 +499,7 @@ function WorkspaceRail({
               onSelect={onSelect}
               rosterNext={rosterNext}
               selectable={Boolean(navigation.catalogue.entries?.length)}
+              subject={subject}
             />
           </ReviewNavigation>
         ) : (
@@ -469,6 +510,7 @@ function WorkspaceRail({
             onSelect={onSelect}
             rosterNext={rosterNext}
             selectable={false}
+            subject={subject}
           />
         )}
         <RailLaneDestinations laneRead={laneRead} state={state} />
@@ -519,6 +561,7 @@ function FamilyRailContext({
   rosterNext,
   selectable,
   onSelect,
+  subject,
 }: {
   payload: ReviewPayload;
   state: WorkspaceState;
@@ -526,19 +569,30 @@ function FamilyRailContext({
   rosterNext: (family: string, side: string, continuation: string) => void;
   selectable: boolean;
   onSelect: (selection: FamilySelection) => void;
+  subject?: ReviewNavigationState['subject'];
 }) {
   const context = payload.family_context;
-  return context && (context.state === 'recorded' || context.state === 'partial') ? (
-    <FamilyTree
-      context={context}
-      selection={chosen}
-      onSelect={onSelect}
-      onRosterNext={rosterNext}
-      query={state.query}
-      onQuery={state.setQuery}
-      embedded
-      tree={treeComparisonNumber(payload.limitations) !== undefined}
-    />
+  // An intent marker opened this invariant on an unknown membership the tree has no row for.
+  const unknown = useInvariantTargetState(subject, context);
+  const composed = context?.state === 'recorded' || context?.state === 'partial';
+  if (unknown && !composed) return <InvariantTargetState target={unknown} context={context} />;
+  // Above a composed tree too: the state is what a follow focuses (review R1 F3), not the tree's
+  // auto-selected row, whose name says nothing of it.
+  const unknownState = unknown ? <InvariantTargetState target={unknown} context={context} /> : null;
+  return context && composed ? (
+    <>
+      {unknownState}
+      <FamilyTree
+        context={context}
+        selection={chosen}
+        onSelect={onSelect}
+        onRosterNext={rosterNext}
+        query={state.query}
+        onQuery={state.setQuery}
+        embedded
+        tree={treeComparisonNumber(payload.limitations) !== undefined}
+      />
+    </>
   ) : (
     <FamilyNotComposed context={context} selectable={selectable} />
   );
@@ -579,10 +633,19 @@ function useSelectionFocus(payload: ReviewPayload, state: WorkspaceState): void 
     // selecting control, or lost with an unmounted node (`body`), is moved to the selection.
     const active = document.activeElement;
     if (active !== null && active !== document.body && active !== request.from) return;
-    const workspace = center.current?.closest('[data-testid="review-workspace"]');
-    const selected = workspace?.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]');
-    (selected ?? center.current)?.focus();
+    (selectionNode(center.current) ?? center.current)?.focus();
   }, [payload, center, focusSelection]);
+}
+
+// What a selection focuses: an intent marker's unknown-membership target as its own state (MIK-R34,
+// review F3), else the tree's current node.
+function selectionNode(center: HTMLElement | null): HTMLElement | null {
+  const workspace = center?.closest('[data-testid="review-workspace"]');
+  if (!workspace) return null;
+  return (
+    workspace.querySelector<HTMLElement>('[data-target-state-focus]') ??
+    workspace.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]')
+  );
 }
 
 // The rail owns its scroll; selecting there restores the common reading position without stealing focus.

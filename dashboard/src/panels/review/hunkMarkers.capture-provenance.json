@@ -1,0 +1,41 @@
+{
+  "captured_at": "2026-09-30T13:41:23+00:00",
+  "producer": "260928-MIK-L34 worker, notes/reports/260928-MIK-L34-evidence/capture_classifier_fixtures.py",
+  "command": "PYTHONPATH=<L34 worktree>/mcp/src:<L34 worktree>/mcp/tests <mcp venv python> capture_classifier_fixtures.py <L34 worktree>/dashboard <this file>",
+  "route": "GET /api/review/trees?comparison=1&file=<path>: register_review_trees_route over review_tree_knowledge._file_view (classify_changed_path), fastapi TestClient",
+  "source_tree": "260928-mik-l34 worktree (base 59daf5055eb1ceffba89170be64ac85cabf860f4; the classifier is MIK-L32's, unchanged by this leaf)",
+  "world": "mcp/tests/test_review_unexplained_lane.py (MIK-L32's lane fixture): code BASE/CANDIDATE, converted memory, families before {FAM-F00001:[A], FAM-F00002:[A], FAM-F00003:[A]} after {FAM-F00001:[A], FAM-F00002:[B]}",
+  "scratch_authored": "curated and before_unread scenarios: RLZ-A00010 (INV-AAAAAA, line_range 1-2 of pkg/lines.txt at the base blob, both memory sides) and RLZ-C00010 (INV-CCCCCC, symbol extra of pkg/a.py at the candidate blob, after side)",
+  "texts": "each body's `texts` is fixture-only (not a route field): the exact side blob texts, read with git cat-file at the blobs the classification names",
+  "scenarios": {
+    "precuration": [
+      "pkg/lines.txt",
+      "pkg/a.py",
+      "tests/test_a.py",
+      "pkg/new.py",
+      "pkg/stale.py"
+    ],
+    "curated": [
+      "pkg/lines.txt",
+      "pkg/a.py"
+    ],
+    "before_unread": [
+      "pkg/a.py",
+      "pkg/lines.txt"
+    ],
+    "after_unread": [
+      "pkg/a.py"
+    ],
+    "both_unread": [
+      "pkg/a.py"
+    ],
+    "partial": [
+      "pkg/lines.txt"
+    ]
+  },
+  "attempts": "one capture per body; each body is the first answer",
+  "seconds": 1.26,
+  "file": "src/panels/review/hunkMarkers.classifier.captured.json",
+  "sha256": "4f2b620fd272100ba8397316709ce6f552ec401738ae1b0c0f4fb71a05f4d2b0",
+  "bytes": 55216
+}

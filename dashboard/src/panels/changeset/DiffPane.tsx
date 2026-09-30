@@ -14,6 +14,7 @@ import { css } from "../../../styled-system/css";
 import { codeTheme } from "../file-viewer/codemirrorTheme";
 import { numberedFrom } from "../file-viewer/lineNumbering";
 import { langExtension } from "../file-viewer/langByExtension";
+import { type MarkedPane, type PaneMarks, useMarkedPane } from "../file-viewer/markGutter";
 
 const host = css({
   height: "100%",
@@ -60,6 +61,65 @@ const fitHost = css({
 
 export type DiffMode = "split" | "inline";
 
+// What both builders below share: the two documents, where each starts in its file, the common
+// read-only extensions and the collapse setting, plus the pane's mark gutters.
+interface DiffBuild {
+  parent: HTMLElement;
+  before: string;
+  after: string;
+  beforeFirst: number;
+  afterFirst: number;
+  common: Extension[];
+  collapseUnchanged?: { margin: number };
+  marked: Pick<MarkedPane, "gutterFor" | "drawn">;
+}
+
+function splitView(build: DiffBuild): { destroy: () => void } {
+  const { parent, before, after, beforeFirst, afterFirst, common, collapseUnchanged, marked } = build;
+  const merge = new MergeView({
+    a: {
+      doc: before,
+      extensions: [marked.gutterFor("before", beforeFirst), numberedFrom(beforeFirst), ...common],
+    },
+    b: {
+      doc: after,
+      extensions: [marked.gutterFor("after", afterFirst), numberedFrom(afterFirst), ...common],
+    },
+    parent,
+    gutter: true,
+    collapseUnchanged,
+    // no `revertControls` -> read-only diff (the editors are non-editable anyway).
+  });
+  marked.drawn({
+    before: { view: merge.a, first: beforeFirst },
+    after: { view: merge.b, first: afterFirst },
+  });
+  return merge;
+}
+
+function inlineView(build: DiffBuild): { destroy: () => void } {
+  const { parent, before, after, afterFirst, common, collapseUnchanged, marked } = build;
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: after,
+      extensions: [
+        marked.gutterFor("after", afterFirst),
+        unifiedMergeView({
+          original: before,
+          mergeControls: false, // read-only: no accept/reject chips
+          gutter: true,
+          collapseUnchanged,
+        }),
+        numberedFrom(afterFirst),
+        ...common,
+      ],
+    }),
+  });
+  marked.drawn({ after: { view, first: afterFirst } });
+  return view;
+}
+
 export function DiffPane({
   before,
   after,
@@ -68,6 +128,7 @@ export function DiffPane({
   collapse = true,
   firstLine,
   fit = false,
+  marks,
 }: {
   before: string;
   after: string;
@@ -78,10 +139,13 @@ export function DiffPane({
   // Where each side's document starts in its file (an excerpt); absent = line 1 on both sides.
   firstLine?: { before: number; after: number };
   fit?: boolean;
+  // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
+  marks?: PaneMarks;
 }) {
   const beforeFirst = firstLine?.before ?? 1;
   const afterFirst = firstLine?.after ?? 1;
   const ref = useRef<HTMLDivElement>(null);
+  const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
 
   useEffect(() => {
     const parent = ref.current;
@@ -99,42 +163,31 @@ export function DiffPane({
         codeTheme,
       ];
       if (lang) common.push(lang);
-      const base = [numberedFrom(afterFirst), ...common];
-
-      const collapseUnchanged = collapse ? { margin: 3 } : undefined;
-      if (mode === "split") {
-        view = new MergeView({
-          a: { doc: before, extensions: [numberedFrom(beforeFirst), ...common] },
-          b: { doc: after, extensions: base },
-          parent,
-          gutter: true,
-          collapseUnchanged,
-          // no `revertControls` -> read-only diff (the editors are non-editable anyway).
-        });
-      } else {
-        view = new EditorView({
-          parent,
-          state: EditorState.create({
-            doc: after,
-            extensions: [
-              unifiedMergeView({
-                original: before,
-                mergeControls: false, // read-only: no accept/reject chips
-                gutter: true,
-                collapseUnchanged,
-              }),
-              ...base,
-            ],
-          }),
-        });
-      }
+      const build: DiffBuild = {
+        parent,
+        before,
+        after,
+        beforeFirst,
+        afterFirst,
+        common,
+        collapseUnchanged: collapse ? { margin: 3 } : undefined,
+        marked: { gutterFor, drawn },
+      };
+      view = mode === "split" ? splitView(build) : inlineView(build);
     });
 
     return () => {
       disposed = true;
+      drawn(null);
       view?.destroy();
     };
-  }, [before, after, language, mode, collapse, beforeFirst, afterFirst]);
+    // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
+  }, [before, after, language, mode, collapse, beforeFirst, afterFirst, placement, gutterFor, drawn]);
 
-  return <div ref={ref} className={fit ? fitHost : host} data-testid="diff-pane" />;
+  return (
+    <>
+      <div ref={ref} className={fit ? fitHost : host} data-testid="diff-pane" />
+      {portals}
+    </>
+  );
 }
