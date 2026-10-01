@@ -1,0 +1,7 @@
+{
+  "id": "ar-plugin",
+  "description": "Agents Remember integration for the Paseo runtime that AR provisions.",
+  "requirements": {
+    "paseo": ">=0.11.0-beta.2"
+  }
+}

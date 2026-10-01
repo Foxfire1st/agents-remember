@@ -4,7 +4,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 
 | Family | Home | Read cadence |
 | --- | --- | --- |
-| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard, Orca RuntimeClient) | MCP authority settings file (outside the coordinator root) | boot |
+| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard, Orca RuntimeClient, Paseo runtime) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
@@ -137,6 +137,98 @@ and `codex_benchmark_run` tools. They are refused unless this is `true`, because
 real run clones third-party repositories and executes the Codex CLI against them.
 Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pass
 `"danger-full-access"` only for trusted local runs.
+
+### Paseo runtime
+
+`paseoRuntime` is an optional block that describes the one dedicated Paseo
+runtime Agents Remember provisions: a pinned Paseo install, one daemon home and
+one listen address. When the block is absent the settings are in the named state
+"no Paseo runtime configured" and each consumer refuses in its own words. When
+the block is present every key is required and an unknown key fails at start-up.
+
+```json
+{
+  "paseoRuntime": {
+    "installPrefix": "/absolute/path/to/paseo-prefix",
+    "home": "/absolute/path/to/paseo-home",
+    "listen": "127.0.0.1:6820",
+    "version": "0.11.0-beta.2",
+    "providers": {
+      "hermes": { "extends": "acp", "label": "Hermes", "command": ["hermes", "acp"] }
+    },
+    "embed": [
+      {
+        "dashboardOrigin": "http://127.0.0.1:9797",
+        "frameBaseUrl": "http://127.0.0.1:6820"
+      }
+    ]
+  }
+}
+```
+
+| Key | Fact |
+| --- | --- |
+| `installPrefix` | Absolute directory that holds the Paseo CLI as a private npm install (`<installPrefix>/node_modules/.bin/paseo`). Nothing is installed globally. |
+| `home` | Absolute directory of the daemon home (`PASEO_HOME`). Every Paseo call names it with `--home`; no other home is read, changed or stopped. |
+| `listen` | The daemon's listen address as `host:port`. Provision binds exactly this address and never chooses another port. |
+| `version` | One exact Paseo version (`MAJOR.MINOR.PATCH` with an optional prerelease). A range, a tag such as `beta`, or a partial version is refused. A prefix that holds any other version is replaced. |
+| `providers` | Provider entries for harnesses Paseo drives through ACP, keyed by provider id. The object is written unchanged to the daemon's `agents.providers`; Paseo validates it. May be `{}`. |
+| `embed` | The embed list: pairs of `dashboardOrigin` (the origin a browser opens the dashboard on: scheme, host and optional port) and `frameBaseUrl` (the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment). Each origin appears once. May be `[]`. |
+
+The block carries no secret. The daemon inherits the environment of the process
+that runs `provision`; Agents Remember writes no harness configuration and
+handles no harness credential.
+
+Three commands act on the block and print one JSON document each:
+
+```text
+agents-remember paseo provision --config <MCP settings file>
+agents-remember paseo status    --config <MCP settings file>
+agents-remember paseo stop      --config <MCP settings file>
+```
+
+`--config` is required and only the `paseoRuntime` block of that file is read.
+Exit status is `0` on success, `1` when a step failed (`error.step` names it and
+`error.detail` carries Paseo's text) and `2` when the command refused before
+doing anything (unusable settings, or `paseo_runtime_not_configured`).
+
+`provision` brings the runtime to the configured state and lists every change in
+`changes`; a run with nothing to change reports `"changed": false` and makes
+only read-only calls. It writes exactly these daemon settings and leaves every
+other key of the daemon's `config.json` alone:
+
+| Daemon setting | Value | Applied |
+| --- | --- | --- |
+| `daemon.listen` | `listen` | at start |
+| `daemon.relay.enabled` | `false` | live |
+| `features.webUi.enabled` | `true` | at start |
+| `features.dictation.enabled` | `false` | at start |
+| `features.voiceMode.enabled` | `false` | at start |
+| `pluginsEnabled` | `true` | live |
+| `agents.providers` | `providers` | live |
+
+Dictation and voice mode are switched off before the first start, so no speech
+model is downloaded. `daemon.action` in the report is `started` (the daemon was
+not running), `restarted` (it ran another version, or a setting applied only at
+start changed; `daemon.reasons` says which), `reloaded` (only live settings, the
+embed list or the plugin changed) or `untouched`. A restart closes the sessions
+of running agents; they stay resumable.
+
+Agents Remember keeps three things under `<home>/agents-remember/`: `plugin/`,
+the installed copy of the AR plugin (id `ar-plugin`) that ships inside the
+package; `embed.json`, the embed list the plugin reads; and
+`plugin-loaded.json`, a stamp of what the running plugin last loaded. A change
+to the plugin's content or to the embed list replaces the files and reloads the
+plugin. A frame base URL whose host is not `localhost` or an IP literal also
+needs that host in Paseo's `daemon.hostnames`; provision does not write that
+key.
+
+`status` reports `running` and, for a running daemon, `version`, `serverId`,
+`listen`, the AR plugin's `state` and `error`, the `embed` list in effect and
+each provider with its availability; when the daemon is not running the other
+fields are `null`. `stop` stops the daemon recorded in the configured home's own
+process record and reports `"action": "stopped"` or `"not running"`; it never
+looks a process up by port.
 
 ## Memory Fields
 
