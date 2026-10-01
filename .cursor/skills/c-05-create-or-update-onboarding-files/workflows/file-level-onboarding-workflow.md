@@ -4,6 +4,10 @@ Use this workflow when creating or maintaining the common file-level onboarding 
 
 Template: `../templates/file-level-onboarding-template.md`
 
+**Converted memory:** when the memory tree holds `knowledge/layout.json`, use `converted-card-workflow.md` instead.
+A converted card has no metadata table, no Update History and no citation tables, and its sidecar references are
+authored by `citation_fix`. The metadata, Update History and citation rules below are for unconverted memory.
+
 ## Goal
 
 Create or update the file-level onboarding content for one concrete source file.

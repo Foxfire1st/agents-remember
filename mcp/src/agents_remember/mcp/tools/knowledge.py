@@ -49,6 +49,7 @@ from agents_remember.application.knowledge_paging.tree_read import (
     TreeExtras,
     read_tree_page,
 )
+from agents_remember.application.knowledge_paging.tree_seeds import tree_seed_refusal
 from agents_remember.application.knowledge_projection import (
     ProjectionOptions,
     project_knowledge,
@@ -1070,10 +1071,9 @@ def _project_result(
             "unresolved_projection_input",
             "no view was named to project, so no artifact is emitted",
         )
-    try:
-        selected = _select(request.database_path, coordination_root)
-    except _SELECTION_FAILURES as error:
-        return _refused_project(destinationRoot, *_selection_refusal(request.database_path, error))
+    selected = _projection_selection(request, requests, coordination_root)
+    if isinstance(selected, dict):
+        return selected
     report = project_knowledge(
         selected.database_path,
         profile,
@@ -1102,6 +1102,45 @@ def _project_result(
         "memoryTree": memory_tree_block(selected.memory_tree),
         "indexComplete": _index_complete(selected),
     }
+
+
+def _projection_selection(
+    request: ProjectToolRequest,
+    requests: tuple[tuple[ViewRequest, str], ...],
+    coordination_root: str | None,
+) -> SelectedKnowledgeDataset | dict[str, Any]:
+    """The dataset a projection reads, or its refusal: an unreadable selection, or a converted
+    tree's seed that the tree does not hold (never projected empty, L37)."""
+
+    try:
+        selected = _select(request.database_path, coordination_root)
+        absent = _tree_seeds_absent(selected, requests)
+    except _SELECTION_FAILURES as error:
+        refusal = _selection_refusal(request.database_path, error)
+        return _refused_project(request.destination_root, *refusal)
+    if absent is not None:
+        return _refused_project(request.destination_root, "selector_absent", absent)
+    return selected
+
+
+def _tree_seeds_absent(
+    selected: SelectedKnowledgeDataset, requests: tuple[tuple[ViewRequest, str], ...]
+) -> str | None:
+    """On a converted tree, the reason the first seed the tree does not hold is refused."""
+
+    tree = selected.memory_tree
+    if tree is None:
+        return None
+    for view, _subject in requests:
+        absent = tree_seed_refusal(
+            selected.database_path,
+            tree.tree_key,
+            invariant_revision_id=view.invariant_revision_id,
+            family_revision_id=view.family_revision_id,
+        )
+        if absent is not None:
+            return absent
+    return None
 
 
 def _projection_requests(

@@ -19,6 +19,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 from agents_remember.worktrees.knowledge_gate import (
     HistoryClosing,
     close_owner_history,
+    leaf_cutover_refusal,
     leaf_memory_converted,
     parent_memory_tip,
 )
@@ -65,9 +66,16 @@ def external_closeout_commits(
             code_commit=change.commit,
             memory_commit=recovered.memoryContentCommit,
         )
+    converted = leaf_memory_converted(contract)
+    if not converted:
+        # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is never
+        # stamped or committed; it crosses through the crossing sync first.
+        locked = leaf_cutover_refusal(contract, "the closeout")
+        if locked is not None:
+            raise RuntimeError(locked)
     refresh = _refresh_external_memory(contract, args, change)
     closing = None
-    if leaf_memory_converted(contract):
+    if converted:
         # MIK-R07 rule 7 / MIK-R09 rule 3: the memory commit that publishes the leaf closes its
         # history file, creating it with no rows when the leaf wrote none.
         closing = close_owner_history(contract.memory_worktree, _owner(contract))

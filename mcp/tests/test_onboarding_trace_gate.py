@@ -625,6 +625,12 @@ def test_converted_trees_get_no_verification_stamps_and_no_history_sort(leaf: Le
 # --------------------------------------------------------------------------------------------------
 
 
+_QUALITY_RUN = mock.Mock(
+    side_effect=lambda *_a, **_k: {"ok": True, "checks": {}, "findings": [], "findingCount": 0}
+)
+"""The memory-quality run the controller makes (its checks are measured elsewhere)."""
+
+
 def _run_controller(leaf: Leaf, changed: tuple[str, ...]) -> tuple[dict[str, Any], mock.Mock]:
     contract = load_contract(leaf.contract())
     pair = MemoryCandidatePairIdentity(
@@ -672,11 +678,7 @@ def _run_controller(leaf: Leaf, changed: tuple[str, ...]) -> tuple[dict[str, Any
         mock.patch.object(controller, "prepare_memory_census", return_value=census),
         mock.patch.object(controller, "publish_memory_census", return_value={}),
         mock.patch.object(controller, "census_curator_candidates", return_value=()),
-        mock.patch.object(
-            controller,
-            "run_memory_quality_check",
-            return_value={"ok": True, "checks": {}, "findings": [], "findingCount": 0},
-        ),
+        mock.patch.object(controller, "run_memory_quality_check", _QUALITY_RUN),
         mock.patch.object(
             controller, "check_missing_onboarding", return_value={"missingCount": 0, "missing": []}
         ),
@@ -705,6 +707,8 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
     (leaf.code / A).write_text(SOURCE + "\n# tail\n", encoding="utf-8")
     response, legacy = _run_controller(leaf, (A,))
     legacy.assert_not_called()  # a converted tree never runs the Update History gate
+    # Review R3-1: the run's converted check is given its comparison base (MIK-R24 rule 7).
+    assert callable(_QUALITY_RUN.call_args.kwargs["drift_context"].knowledge_base)
     # MIK-R09 counts each open item once: the card, its governing route, and the uncovered file's
     # unexplained hunk (MIK-R10), which the card's own trace answers.
     assert response["curatorActionableCount"] == 3

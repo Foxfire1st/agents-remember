@@ -643,6 +643,16 @@ def validate_staged_resolution(side: SyncSideRecord) -> None:
         )
 
 
+def _abort_failure(
+    side: SyncSideRecord, aborted: subprocess.CompletedProcess[str]
+) -> SyncGitProofError:
+    """The refusal of a merge abort that did not restore the head, naming Git's own reason."""
+
+    detail = (aborted.stderr or aborted.stdout).strip()
+    suffix = f": {detail}" if detail else ""
+    return SyncGitProofError(f"{side.side} exact merge abort did not restore its head{suffix}")
+
+
 def rollback_side(side: SyncSideRecord) -> None:
     """Restore one side only when live history proves the exact sync-owned delta."""
 
@@ -653,9 +663,13 @@ def rollback_side(side: SyncSideRecord) -> None:
     if current_merge is not None:
         if current != side.preSyncHead or current_merge != side.sourceCommit:
             raise SyncGitProofError(f"{side.side} active merge is outside sync authority")
+        # The memory merge removed a tracked cache from the index (_continue_memory_merge); put the
+        # derived path back to HEAD first, or `git merge --abort` meets it as an untracked file and
+        # refuses (L37: cancel after a memory conflict on a line that still tracks memory.md).
+        discard_memory_cache_changes(side)
         aborted = run_git(worktree, ["merge", "--abort"])
         if aborted.returncode != 0 or head_commit(worktree) != side.preSyncHead:
-            raise SyncGitProofError(f"{side.side} exact merge abort did not restore its head")
+            raise _abort_failure(side, aborted)
     elif current != side.preSyncHead:
         if not exact_created_head(side, current):
             raise SyncGitProofError(

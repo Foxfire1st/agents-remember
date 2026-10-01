@@ -5,7 +5,9 @@ Paths are memory-repository-relative POSIX strings:
 =============================================  ====================================================
 ``knowledge/<kind-dir>/<ID>-<slug>.json``      a record (+ optional ``.md`` with the same stem)
 ``knowledge/layout.json``                      the layout marker
-``knowledge/history/<owner-id>.json``          a history file (schema owned by MIK-R07)
+``knowledge/history/<owner-id>.json``          a history file (schema owned by MIK-R07); a
+                                               reopened leaf's later attempt is
+                                               ``<owner-id>-attempt-<n>.json``
 ``knowledge/census/<census-id>/…``             census files (schemas owned by MIK-R20)
 ``onboarding/<source path>.json``              a file sidecar beside ``<source path>.md``
 ``onboarding/<route>/overview.json``           a route sidecar beside ``overview.md``
@@ -121,12 +123,35 @@ def split_record_filename(filename: str) -> tuple[str, str, str]:
     return match["id"], match["slug"], match["ext"]
 
 
-def history_path(owner_id: str) -> str:
-    """Return ``knowledge/history/<owner-id>.json`` (for example ``260928-MIK-L07``)."""
+_ATTEMPT_INFIX: Final = "-attempt-"
+
+
+def history_path(owner_id: str, attempt: int | None = None) -> str:
+    """Return ``knowledge/history/<owner-id>.json`` (for example ``260928-MIK-L07``).
+
+    A reopened leaf's later attempt ``n`` (>= 2) lives at ``<owner-id>-attempt-<n>.json``; the first
+    attempt is the plain file.
+    """
 
     if not _SLUG.match(owner_id):
         raise ValueError(f"not a history owner id: {owner_id!r}")
-    return f"{KNOWLEDGE_ROOT}/history/{owner_id}.json"
+    if attempt is None or attempt == 1:
+        return f"{KNOWLEDGE_ROOT}/history/{owner_id}.json"
+    if attempt < 1:
+        raise ValueError(f"not a history attempt: {attempt!r}")
+    return f"{KNOWLEDGE_ROOT}/history/{owner_id}{_ATTEMPT_INFIX}{attempt}.json"
+
+
+def owner_history_attempt(path: str, owner_id: str) -> int | None:
+    """The attempt of ``owner_id``'s history that ``path`` names, or ``None`` if not its file."""
+
+    prefix = f"{KNOWLEDGE_ROOT}/history/{owner_id}"
+    if path == f"{prefix}.json":
+        return 1
+    match = re.fullmatch(
+        re.escape(f"{prefix}{_ATTEMPT_INFIX}") + r"([2-9]|[1-9][0-9]+)\.json", path
+    )
+    return int(match[1]) if match is not None else None
 
 
 def parse_history_document(path: str, text: str) -> HistoryFile:
@@ -135,7 +160,7 @@ def parse_history_document(path: str, text: str) -> HistoryFile:
     document = parse_document_text(text)
     if not isinstance(document, HistoryFile):
         raise ValueError(f"{path} is not an {HISTORY_SCHEMA} document")
-    expected = history_path(document.owner_id)
+    expected = history_path(document.owner_id, document.attempt)
     if path != expected:
         raise ValueError(
             f"the history file of {document.owner_id!r} lives at {expected}, not {path}"

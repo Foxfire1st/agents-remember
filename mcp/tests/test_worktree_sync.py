@@ -843,6 +843,45 @@ class WorktreeSyncTests(unittest.TestCase):
                 self.assertEqual(section(result.payload, "memory")["wip"]["paths"], ["draft.md"])
                 self.assertEqual(git(worktree, "stash", "list"), "")
 
+    def test_cancel_after_a_memory_conflict_restores_the_branch_and_its_tracked_cache(
+        self,
+    ) -> None:
+        """L37 (P2 task 1): a line that still tracks ``memory.md`` cancels a conflicted memory sync.
+
+        The memory merge untracks the cache; without restoring it first, ``git merge --abort`` met
+        it as an untracked file and the cancel was refused, leaving the merge in place.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = SyncFixture(Path(tmp))  # tracks memory.md, the dormant lines' shape
+            worktree = fixture.contract.memory_worktree
+            assert worktree is not None
+            (worktree / "README.md").write_text("work version\n", encoding="utf-8")
+            git(worktree, "commit", "-qam", "leaf edits README")
+            before = git(worktree, "rev-parse", "HEAD")
+            code_tip = fixture.move_official_code()
+            (fixture.memory_repo / "README.md").write_text("source version\n", encoding="utf-8")
+            git(fixture.memory_repo, "add", "README.md")
+            git(
+                fixture.memory_repo,
+                "commit",
+                "-m",
+                render_memory_content_message("Source", code_tip),
+            )
+            conflicted = fixture.sync(memory_sync_choice="merge-memory")
+            self.assertEqual(conflicted.payload["state"], "sync-resolution-required")
+
+            cancelled = fixture.sync(resolution_action="cancel")
+
+            self.assertEqual(cancelled.payload["state"], "sync-cancelled", cancelled.payload)
+            self.assertEqual(git(worktree, "rev-parse", "HEAD"), before)
+            with self.assertRaises(AssertionError):
+                git(worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+            self.assertEqual(git(worktree, "status", "--porcelain"), "")
+            self.assertEqual(git(worktree, "ls-files", "--", "memory.md"), "memory.md")
+            again = fixture.sync(memory_sync_choice="merge-memory")
+            self.assertEqual(again.payload["state"], "sync-resolution-required", again.payload)
+
     def _resume_staged_memory_with_unstaged_content(self, fixture: SyncFixture):
         worktree = fixture.contract.memory_worktree
         assert worktree is not None

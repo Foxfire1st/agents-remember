@@ -38,6 +38,15 @@ for an item is the gate's rule (MIK-R09 rule 2), not this module's.
 rows) in the memory commit that publishes the leaf. From then on the file is frozen:
 :func:`frozen_history_violation` is the predicate "``closed`` in K_B (or in any parent of a merge)
 implies byte-identical in K_C", which the validator (MIK-R22 rule 7) enforces.
+
+**Reopen after a converted closeout (L37 ruling, 2026-10-01T01:57:55).** A leaf reopened after its
+closeout keeps its closed file frozen and writes a new, *attempt-qualified* file for the same leaf:
+``knowledge/history/<leaf-id>-attempt-<n>.json`` with ``leaf`` and ``attempt: n`` (``n`` >= 2; the
+first attempt is the plain ``<leaf-id>.json`` and carries no ``attempt``, so every earlier file keeps
+its bytes). All of a leaf's files are its history: :func:`merged_leaf_history` reads them as one,
+where a row in a later attempt about the same subject supersedes the earlier one, and a row of a
+closed file still counts while it is current. :func:`writable_attempt` names the file a write or a
+closeout goes to: the latest attempt while it is open, else the next one.
 """
 
 from __future__ import annotations
@@ -91,6 +100,7 @@ _OWNER_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 _CROSSING_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*-crossing-[1-9][0-9]*$"
 OwnerId = Annotated[str, Field(min_length=1, max_length=128, pattern=_OWNER_ID)]
 CrossingId = Annotated[str, Field(min_length=1, max_length=128, pattern=_CROSSING_ID)]
+Attempt = Annotated[StrictInt, Field(ge=2)]
 RowId = Annotated[str, Field(pattern=ROW_ID_PATTERN)]
 EntryId = Annotated[str, Field(pattern=ENTRY_ID_PATTERN)]
 Revision = Annotated[StrictInt, Field(ge=1)]
@@ -422,6 +432,9 @@ class HistoryFile(FileModel):
     leaf: OwnerId | None = None
     wave: OwnerId | None = None
     crossing: CrossingId | None = None
+    attempt: Attempt | None = None
+    """A reopened leaf's later attempt (2, 3, ...); absent on a leaf's first file and on every
+    wave or crossing file."""
     closed: StrictBool
     rows: tuple[SerializeAsAny[HistoryRow], ...]
 
@@ -437,6 +450,8 @@ class HistoryFile(FileModel):
         owners = [value for value in (self.leaf, self.wave, self.crossing) if value is not None]
         if len(owners) != 1:
             raise ValueError("a history file names exactly one of leaf, wave or crossing")
+        if self.attempt is not None and self.leaf is None:
+            raise ValueError("only a leaf's history is attempt-qualified (a reopened leaf)")
         require_unique(tuple(row.id for row in self.rows), what="row ids")
         require_unique(tuple(row.subject for row in self.rows), what="row subjects")
         return self
@@ -456,16 +471,61 @@ class HistoryFile(FileModel):
 
         return next((row for row in self.rows if row.subject == subject), None)
 
+    @property
+    def attempt_number(self) -> int:
+        """The attempt this file records: ``attempt``, or 1 for a leaf's first file."""
+
+        return self.attempt or 1
+
     def closed_copy(self) -> HistoryFile:
         """Return this file with ``closed: true``, as the closeout commit writes it."""
 
         return self if self.closed else self.model_copy(update={"closed": True})
 
 
-def empty_history(owner_kind: OwnerKind, owner_id: str, *, closed: bool = False) -> HistoryFile:
+def empty_history(
+    owner_kind: OwnerKind, owner_id: str, *, closed: bool = False, attempt: int = 1
+) -> HistoryFile:
     """Return a history file with no rows: the closeout creates one when the leaf has none."""
 
-    return HistoryFile.model_validate({owner_kind: owner_id, "closed": closed, "rows": []})
+    document: dict[str, Any] = {owner_kind: owner_id, "closed": closed, "rows": []}
+    if attempt > 1:
+        document["attempt"] = attempt
+    return HistoryFile.model_validate(document)
+
+
+def writable_attempt(closed_by_attempt: Mapping[int, bool]) -> int:
+    """The attempt a write or a closeout goes to, from each existing attempt's ``closed`` flag.
+
+    The latest attempt while it is open; the next one once it is closed (the leaf was reopened);
+    1 when the leaf has no file yet.
+    """
+
+    if not closed_by_attempt:
+        return 1
+    latest = max(closed_by_attempt)
+    return latest + 1 if closed_by_attempt[latest] else latest
+
+
+def merged_leaf_history(files: Iterable[HistoryFile]) -> HistoryFile | None:
+    """All of one owner's history files read as its history (L37 ruling on reopen).
+
+    The files are taken in attempt order; a row in a later attempt about a subject supersedes the
+    earlier one, and every other row -- a closed file's included -- still counts. The result carries
+    the latest file's ``closed`` and ``attempt``; it is a reading, never written back.
+    """
+
+    ordered = sorted(files, key=lambda one: one.attempt_number)
+    if not ordered:
+        return None
+    if len(ordered) == 1:
+        return ordered[0]
+    rows: dict[str, HistoryRow] = {}
+    for history in ordered:
+        for row in history.rows:
+            rows.pop(row.subject, None)
+            rows[row.subject] = row
+    return ordered[-1].model_copy(update={"rows": tuple(rows.values())})
 
 
 # --------------------------------------------------------------------------------------------------

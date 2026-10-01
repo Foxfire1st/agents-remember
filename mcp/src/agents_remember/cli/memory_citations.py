@@ -89,7 +89,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Scope every mode to ONE document, given as the work order writes it -- "
         "relative to the onboarding root. A curator wave shares one memory worktree, so a "
         "tree-wide --fix can rewrite another curator's document mid-edit. A name matching "
-        "no document is refused rather than checking nothing.",
+        "no document is refused rather than checking nothing. On converted memory --fix takes "
+        "--document alone (one card and its sidecar); on unconverted memory it comes with "
+        "--expected-snapshot.",
     )
     parser.add_argument(
         "--expected-snapshot",

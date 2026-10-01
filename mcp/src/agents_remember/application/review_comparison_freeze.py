@@ -124,6 +124,7 @@ __all__ = [
     "freeze_comparison_generation",
     "freeze_resolved_review",
     "freeze_review_comparison",
+    "tree_comparison_refusal",
 ]
 
 # The one suffix a private stage carries, so the sweep recognises its own kind and nothing else.
@@ -399,13 +400,13 @@ def _unfreezable(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
     """
 
     if resolved.trees is not None or resolved.knowledge_unavailable:
-        return _tree_comparison_refusal()
+        return tree_comparison_refusal()
     if resolved.contract is None or resolved.baseline_code_root is None:
         return _no_task_root_refusal()
     return None
 
 
-def _tree_comparison_refusal() -> ReviewRefusal:
+def tree_comparison_refusal() -> ReviewRefusal:
     """The refusal a freeze of a tree comparison earns: it is recorded by trees, never copied."""
 
     return refusal(

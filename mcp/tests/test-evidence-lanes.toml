@@ -121,6 +121,8 @@ unit-regression = [
   "mcp/tests/test_onboarding_trace_gate.py",
   "mcp/tests/test_knowledge_closeout_gate.py",
   "mcp/tests/test_knowledge_gate_routes.py",
+  "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_cutover.py",
   "mcp/tests/test_planned_knowledge_effects.py",
   "mcp/tests/test_knowledge_decisions.py",
   "mcp/tests/test_review_git_trees.py",

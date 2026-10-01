@@ -302,9 +302,28 @@ def published_dataset_path(context: CoordinationContext) -> Path:
 def resolve_published_intent(
     context: CoordinationContext,
 ) -> PublishedIntentSelection | PublishedIntentUnavailable:
-    """Resolve the repository's intended published dataset, or name why it cannot be read."""
+    """Resolve the repository's intended published dataset, or name why it cannot be read.
+
+    A converted memory tree publishes no dataset: its knowledge is text, read through the derived
+    index (:func:`resolve_published_memory_tree`), and the database file it still holds is frozen
+    (MIK-R37 rule 3), so it is never selected here (L23 F8) -- the answer is ``not-recorded``,
+    naming the tree.
+    """
 
     database_path = published_dataset_path(context)
+    converted = converted_memory_tree(context.memory_root)
+    if converted is not None:
+        return PublishedIntentUnavailable(
+            state="not-recorded",
+            code="selected_input_unavailable",
+            detail=(
+                f"the memory tree {converted} is converted ({LAYOUT_MARKER_PATH}): its knowledge "
+                "is text, read through the derived index of that tree (MIK-R23), so no knowledge "
+                f"dataset is published at {database_path}, and the database file frozen there at "
+                "the cutover is not read (MIK-R37 rule 3)"
+            ),
+            dataset_path=database_path,
+        )
     absent = _absence_state(database_path, context.code_repository_name)
     if absent is not None:
         return absent

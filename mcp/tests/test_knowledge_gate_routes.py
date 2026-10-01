@@ -17,6 +17,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from agents_remember.application import review_tree_entries
 from agents_remember.application.knowledge_currentness import observe
 from agents_remember.application.knowledge_gate import (
     GateResult,
@@ -26,6 +27,7 @@ from agents_remember.application.knowledge_gate import (
 )
 from agents_remember.application.knowledge_gate import gate as gate_module
 from agents_remember.application.knowledge_gate.landing import net_stale_entries
+from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.knowledge_worklist.leaf import (
     CandidateTrees,
     leaf_onboarding_trace_sides,
@@ -47,7 +49,7 @@ from agents_remember.memory_quality.style.citations import extents
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.worktrees import direct_landing as route
-from agents_remember.worktrees import knowledge_validation
+from agents_remember.worktrees import knowledge_gate, knowledge_validation
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
     direct_landing_store,
 )
@@ -990,3 +992,69 @@ def test_a_git_failure_asking_for_a_recorded_blob_is_incomplete_and_never_kept(
             assert failed.count("knowledge-worklist-incomplete")
             assert any("the object store is unreadable" in one.message for one in failed.findings)
     assert evaluated.call_count == 2  # nothing was kept
+
+
+# --------------------------------------------------------------------------------------------------
+# L09 review R4 notes, carried to L37 (2026-09-30T19:53:29): N23, N24 and N25 pinned
+# --------------------------------------------------------------------------------------------------
+
+
+_REAL_RUN_GIT = code_objects.run_git
+
+
+def _object_store_fails(repository: Path, args: list[str], *rest: Any, **named: Any) -> Any:
+    if args[:2] == ["cat-file", "-e"]:
+        return subprocess.CompletedProcess(args, 128, "", "fatal: the object store is unreadable")
+    return _REAL_RUN_GIT(repository, args, *rest, **named)
+
+
+def test_a_git_failure_asking_for_a_recorded_blob_is_named_by_the_trees_and_the_lane(
+    world: Gated,
+) -> None:
+    """N24: ``CodeTrees.has_blob`` names a Git failure as its own input; N23: the lane reads it
+    ``unavailable`` with that reason, never raising."""
+
+    tree = git(world.code, "rev-parse", "HEAD^{tree}")
+    trees = CodeTrees.open(world.code, tree, tree)
+    recorded = "e" * 40
+    entry = SimpleNamespace(
+        path=A,
+        document={
+            "anchor": {"locator": {"kind": "line_range", "start": 1, "end": 2}, "blob": recorded}
+        },
+    )
+    blob = git(world.code, "rev-parse", f"HEAD:{A}")
+    with mock.patch.object(code_objects, "run_git", _object_store_fails):
+        with pytest.raises(CodeReadError, match="the object store is unreadable"):
+            trees.has_blob(recorded)
+        placed = review_tree_entries._in_blob(cast(Any, entry), trees, blob)
+    assert placed["state"] == "unavailable"
+    assert "the object store is unreadable" in placed["reason"]
+
+
+def test_an_unwritable_closing_receipt_restores_the_file_and_admits_nothing(world: Gated) -> None:
+    """N25: direct landing restores the history file to its open bytes when the receipt fails."""
+
+    series = _series(world)
+    world.rows(*trace_rows(*TRACES))
+    open_bytes = (world.memory / HISTORY).read_bytes()
+    closing = close_owner_history(world.memory, LEAF)
+    assert json.loads((world.memory / HISTORY).read_text())["closed"] is True
+    fingerprint = "f" * 64
+    unwritable = knowledge_gate.ClosingReceiptError("git hash-object failed (exit 128)")
+    never = mock.Mock(side_effect=AssertionError("a generation was admitted"))
+    with (
+        mock.patch.object(knowledge_gate, "_closed_blob", side_effect=unwritable),
+        mock.patch.object(route, "_create_direct_landing", never),
+        pytest.raises(route.DirectLandingError) as refused,
+    ):
+        route._admit_direct_landing(
+            series,
+            cast(Any, None),
+            cast(Any, (None, SimpleNamespace(fingerprint=fingerprint))),
+            closing,
+        )
+    assert refused.value.status == "direct-landing-closing-receipt-unwritable"
+    assert (world.memory / HISTORY).read_bytes() == open_bytes
+    never.assert_not_called()
+    assert not knowledge_gate.direct_closing_receipt(series, fingerprint).exists()

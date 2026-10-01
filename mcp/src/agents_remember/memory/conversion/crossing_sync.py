@@ -9,8 +9,10 @@ transaction applies the plan to its merge (``worktrees/knowledge_crossing``); if
 
 1. **Markers first.** When the own side is a leaf line, the Update History no-impact markers that
    leaf added (``No content impact:``/``No route impact:``, lines absent from the base) become
-   ``onboarding_trace`` rows ``{subject, disposition: no_impact, reason: <marker text>}`` in the
-   leaf's history file, before its tree is converted.
+   ``onboarding_trace`` rows ``{subject, disposition: no_impact, reason: MARKER_ROW_REASON,
+   markers: [<marker line>, ...]}`` in the leaf's history file, before its tree is converted: the
+   marker text goes in ``markers``, one entry per moved line, and ``reason`` is a short fixed
+   summary (L24 ruling N1).
 2. **Convert** every unconverted tree with the converted side's pinned version; fallback cards use
    the own side's paired code commit on every side. (The commit route's converted base,
    ``base.GitBaseConverter``, uses the base's own ``Code-Commit`` instead; the two differ only for

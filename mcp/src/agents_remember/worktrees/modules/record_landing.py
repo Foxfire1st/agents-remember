@@ -33,6 +33,7 @@ from agents_remember.worktrees.knowledge_gate import (
     GateProbeError,
     converted_memory,
     landing_gate_refusal,
+    leaf_cutover_refusal,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -114,10 +115,12 @@ def _knowledge_gate_refusal(
     line = _line_converted(contract, repository)
     if isinstance(line, str):
         return line
+    if not line and not (memory_commit and _commit_converted(repository, memory_commit)):
+        # Unconverted memory: nothing more is read, exactly as before this master -- unless the
+        # repository holds converted memory, when the cutover lock refuses (MIK-R09 rule 6).
+        return leaf_cutover_refusal(contract, "record_landing")
     if not memory_commit:
         return _unnamed_memory_commit_refusal(line)
-    if not line and not _commit_converted(repository, memory_commit):
-        return None  # unconverted memory: nothing more is read, exactly as before this master
     request = _landing_request(contract, repository, code_commit, memory_commit)
     return request if isinstance(request, str) else landing_gate_refusal(request)
 

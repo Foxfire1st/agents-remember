@@ -42,9 +42,14 @@ from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     ONBOARDING_ROOT,
     history_path,
+    owner_history_attempt,
     parse_history_document,
 )
-from agents_remember.models.knowledge_files.history import HistoryFile, OnboardingTraceRow
+from agents_remember.models.knowledge_files.history import (
+    HistoryFile,
+    OnboardingTraceRow,
+    merged_leaf_history,
+)
 
 ITEM_KIND: Final = "onboarding_trace"
 SUBJECT_PREFIX: Final = "onboarding:"
@@ -339,21 +344,31 @@ class OnboardingTraceResult:
 def _history_rows(
     sides: OnboardingTraceSides,
 ) -> tuple[dict[str, str], tuple[str, str, str] | None]:
-    """The leaf's ``no_impact`` onboarding rows by subject, or the problem reading its file."""
+    """The leaf's ``no_impact`` onboarding rows by subject, or the problem reading its files.
 
-    path = history_path(sides.owner)
-    data = sides.candidate.get(path)
-    if data is None:
+    Every history file of the leaf counts: a leaf reopened after its closeout has its closed file and
+    a later attempt, read as one history (L37 ruling).
+    """
+
+    paths = sorted(
+        (attempt, path)
+        for path in sides.candidate
+        if (attempt := owner_history_attempt(path, sides.owner)) is not None
+    )
+    histories: list[HistoryFile] = []
+    for _attempt, path in paths:
+        try:
+            histories.append(parse_history_document(path, sides.candidate[path].decode("utf-8")))
+        except (UnicodeDecodeError, ValueError, ValidationError) as error:
+            return {}, (
+                HISTORY_UNREADABLE_CODE,
+                path,
+                f"the leaf's history file cannot be read, so no onboarding row can satisfy an "
+                f"item: {str(error).splitlines()[0]}",
+            )
+    history = merged_leaf_history(histories)
+    if history is None:
         return {}, None
-    try:
-        history: HistoryFile = parse_history_document(path, data.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, ValidationError) as error:
-        return {}, (
-            HISTORY_UNREADABLE_CODE,
-            path,
-            f"the leaf's history file cannot be read, so no onboarding row can satisfy an item: "
-            f"{str(error).splitlines()[0]}",
-        )
     return {
         row.subject: row.id
         for row in history.rows

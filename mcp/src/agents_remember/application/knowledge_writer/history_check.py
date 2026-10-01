@@ -24,8 +24,11 @@ from collections.abc import Iterator
 from pydantic import ValidationError
 
 from agents_remember.application.knowledge_writer.handoff import Problem
-from agents_remember.application.knowledge_writer.memory_state import MemoryState, Owner
-from agents_remember.models.knowledge_files.documents import history_path
+from agents_remember.application.knowledge_writer.memory_state import (
+    MemoryState,
+    MergeStageError,
+    Owner,
+)
 from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     HistoryFile,
@@ -49,7 +52,7 @@ _FROZEN = (
 def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
     """Every row of the owner's history file that the candidate contradicts, as a problem."""
 
-    path = history_path(owner.id)
+    path, _attempt = state.history_target(owner)
     document = state.document(path)
     if document is None:
         return []
@@ -82,12 +85,8 @@ def _row_messages(state: MemoryState, row: object, anchors: dict[str, Anchor]) -
             )
         revision = _revision(state, row.subject)
         if revision is not None:
-            base = state.base_record(row.subject)
-            base_revision = base.get("revision") if base is not None else None
             violation = invariant_revision_violation(
-                row,
-                base_revision=base_revision if isinstance(base_revision, int) else None,
-                candidate_revision=revision,
+                row, base_revision=_base_revision(state, row.subject), candidate_revision=revision
             )
             if violation is not None:
                 yield f"{violation}; {_REMEDY}"
@@ -100,6 +99,21 @@ def _row_messages(state: MemoryState, row: object, anchors: dict[str, Anchor]) -
         stale = stale_examined_members(row, revisions)
         if stale:
             yield f"examined members {stale} changed revision since the row (D7); {_REMEDY}"
+
+
+def _base_revision(state: MemoryState, record_id: str) -> int | None:
+    """The revision a row's change counts from: the higher merge side's while a merge leaves the
+    record unmerged (MIK-R24 rule 8 step 4), else the base's."""
+
+    try:
+        merged = state.merged_sides_revision(record_id)
+    except MergeStageError:
+        merged = None  # the record's own placement already names the failure
+    if merged is not None:
+        return merged
+    base = state.base_record(record_id)
+    revision = base.get("revision") if base is not None else None
+    return revision if isinstance(revision, int) else None
 
 
 def _revision(state: MemoryState, record_id: str) -> int | None:

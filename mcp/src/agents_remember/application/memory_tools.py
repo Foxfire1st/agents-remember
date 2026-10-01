@@ -31,7 +31,9 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.memory import baseline, carryover
+from agents_remember.memory.conversion import card_authoring
 from agents_remember.memory_quality import reference_state
+from agents_remember.memory_quality.converted_cards import card_sidecar_path
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     run_drift_summary,
 )
@@ -45,6 +47,7 @@ from agents_remember.memory_quality.style.citations.exclusion_register import (
     validate_caller_excludes,
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
 )
@@ -69,16 +72,25 @@ class CitationOperationScope:
     excludes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        self.validate()
+        self.validate(document_alone=True)
 
-    def validate(self) -> None:
+    def validate(self, *, document_alone: bool = False) -> None:
         """Enforce the indivisible document-plus-generation frozen-wave contract.
 
         The caller's own excludes ride with the scope because they scope the same acquisition
         the document and the frozen generation do: which bytes this one operation reads. They
         are validated here, before any work tree is resolved, so a pattern that cannot mean
         anything is refused at the call rather than during a tree walk.
+
+        ``document_alone`` admits one document with no frozen generation. That is the converted
+        memory's form (L37 ruling of 2026-10-01T10:06:02): a converted card is authored against
+        the code working tree and reads no source index, so a curator names one card and nothing
+        else. Construction validates in that form, because the tree's format is unknown until the
+        leaf is resolved; every legacy operation then validates strictly before it does any work.
         """
+        if document_alone and self.document is not None and self.expected_snapshot is None:
+            validate_caller_excludes(self.excludes)
+            return
         source_index.validate_operation_scope(
             self.document,
             self.expected_snapshot,
@@ -243,8 +255,11 @@ def citation_fix_tool(
     ``caller_excludes`` narrows the acquisition for THIS call only: a curator repairing one
     document may need a vendored or generated tree out of the way without editing the shared
     register every other document reads.
+
+    On converted memory one document needs no frozen generation (``--document`` alone); on
+    unconverted memory a document still comes with its snapshot.
     """
-    operation_scope.validate()
+    operation_scope.validate(document_alone=True)
     scope = _leaf_memory_writer_scope(
         config,
         repo_id=repo_id,
@@ -253,12 +268,12 @@ def citation_fix_tool(
     )
     memory_root = scope.onboarding_root.parent
     if reference_state.is_converted_memory(memory_root):
-        # MIK-R24 rule 5: the fixer re-records only mechanically moved reference anchors.
         return {
             "repoId": scope.repo_id,
-            **reference_state.fix_references(memory_root, scope.code_root, dry_run=dry_run),
+            **_converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run),
             **measuring_build_stamp(),
         }
+    operation_scope.validate()
     trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,
@@ -274,6 +289,24 @@ def citation_fix_tool(
         # the candidate's own code.
         **measuring_build_stamp(),
     }
+
+
+def _converted_citation_fix(
+    memory_root: Path, code_root: Path, scope: CitationOperationScope, dry_run: bool
+) -> dict[str, Any]:
+    """``citation_fix`` on a converted tree: author the cards' citation rows into resolved sidecar
+    references (:mod:`...memory.conversion.card_authoring`), then re-record the mechanically moved
+    anchors (MIK-R24 rule 5); a stale anchor is left to the curator. With one document named, both
+    steps touch that card and its sidecar only."""
+
+    authoring = card_authoring.author_card_references(
+        memory_root, code_root, only=scope.document, dry_run=dry_run
+    )
+    sidecar = (
+        None if scope.document is None else card_sidecar_path(f"{ONBOARDING_ROOT}/{scope.document}")
+    )
+    fixed = reference_state.fix_references(memory_root, code_root, dry_run=dry_run, only=sidecar)
+    return {**fixed, "ok": fixed["ok"] and not authoring["refused"], "authoring": authoring}
 
 
 def citation_migrate_tool(

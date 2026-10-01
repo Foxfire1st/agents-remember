@@ -25,7 +25,6 @@ from agents_remember.application.knowledge_worklist.code import CodeReadError, C
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.knowledge_writer.memory_state import MemoryState, Owner
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.models.knowledge_files.documents import history_path
 
 __all__ = ["carry_entries", "mapped_anchor"]
 
@@ -93,7 +92,7 @@ def carry_entries(state: MemoryState, snapshot: CodeSnapshot, owner: Owner) -> t
 def _carry_rows(
     state: MemoryState, owner: Owner, moved: dict[str, tuple[dict[str, Any], dict[str, Any]]]
 ) -> None:
-    path = history_path(owner.id)
+    path, _attempt = state.history_target(owner)
     history = state.document(path)
     if not moved or history is None or history.get("closed") is True:
         return

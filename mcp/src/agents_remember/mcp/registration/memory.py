@@ -114,7 +114,10 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         expected_snapshot to assert a previously built immutable source generation. `exclude`
         adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
         acquisition beyond the register every call already honours: the memory layer's
-        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore."""
+        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore.
+        On converted memory it authors the cards' citation rows into sidecar references and
+        re-records moved anchors; document then needs no expected_snapshot and scopes the run
+        to that one card."""
         return citation_fix_payload(
             config,
             repo_id,

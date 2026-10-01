@@ -11,13 +11,15 @@ conflicted path is left unmerged with its converted base, own and incoming versi
 itself is validated against converted bases (rule 7) when it is committed. The crossing sync's own
 commit converts the line; there is no separate conversion commit.
 
-**Unconverted lines (rule 9).** :func:`unconverted_line_refusal` is what a write, a memory-quality
-run or a closeout calls on a leaf's memory tree: an unconverted tree whose official line is already
-converted is refused, naming the crossing sync, which is only for lines that descend from a converted
-official line. An official line that is itself unconverted, or a repository without one, converts by
-running ``agents-remember knowledge-convert`` on that line and committing it through its normal route
-(for this master's line, MIK-R37); until then this returns ``None``, so no route changes behaviour
-before the cutover.
+**Unconverted lines (rule 9).** :func:`unconverted_line_refusal` is what a write or a memory-quality
+run calls on a leaf's memory tree: an unconverted tree whose official line is already converted is
+refused, naming the crossing sync, which is only for lines that descend from a converted official
+line. Any other unconverted tree is refused by the cutover lock (:mod:`.cutover_lock`, MIK-R09 rule 6)
+once its memory repository holds converted memory anywhere -- the cutover window of MIK-R37 rule 6,
+in which other masters' unconverted lines are only read. A repository that holds no converted memory
+is not locked: its official line converts by running ``agents-remember knowledge-convert`` on that
+line and committing it through its normal route (for this master's line, MIK-R37), and until then
+this returns ``None``, so no route changes behaviour.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
     PairedCode,
@@ -167,32 +170,45 @@ def unconverted_line_refusal(
     official_branch: str,
     operation: str,
 ) -> str | None:
-    """Rule 9: refuse ``operation`` on an unconverted tree whose official line is converted."""
+    """Rule 9: refuse ``operation`` on an unconverted tree whose official line is converted.
+
+    Otherwise the cutover lock decides (:func:`~.cutover_lock.cutover_lock_refusal`): an unconverted
+    tree in a memory repository that holds converted memory anywhere is refused as well.
+    """
 
     if (memory_worktree / LAYOUT_MARKER_PATH).is_file():
         return None
-    if memory_repository is None or not official_branch or not memory_repository.is_dir():
+    if memory_repository is None or not memory_repository.is_dir():
         return None
-    tip = run_git(
-        memory_repository,
-        ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{official_branch}^{{commit}}"],
-        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
-    )
-    commit = tip.stdout.strip()
-    if tip.returncode != 0 or not commit:
-        return None
-    try:
-        official_converted = has_layout_marker(memory_repository, commit)
-    except LayoutProbeError:
-        return None
-    if not official_converted:
-        return None
+    if not _official_line_converted(memory_repository, official_branch):
+        return cutover_lock_refusal(
+            memory_repository, operation=operation, line=os.fspath(memory_worktree)
+        )
     return (
         f"{operation} refuses the unconverted memory tree {os.fspath(memory_worktree)}: its "
         f"official line {official_branch} is already converted (knowledge/layout.json), and a "
         "line that descends from a converted official line converts only through the crossing "
         "sync -- run worktree_sync first (MIK-R24 rules 8 and 9)"
     )
+
+
+def _official_line_converted(repository: Path, official_branch: str) -> bool:
+    """Whether the official line's tip holds the marker (no line, or an unreadable one: no)."""
+
+    if not official_branch:
+        return False
+    tip = run_git(
+        repository,
+        ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{official_branch}^{{commit}}"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
+    commit = tip.stdout.strip()
+    if tip.returncode != 0 or not commit:
+        return False
+    try:
+        return has_layout_marker(repository, commit)
+    except LayoutProbeError:
+        return False
 
 
 _CROSSING_HISTORY: Final = re.compile(r"^knowledge/history/[^/]+-crossing-[1-9][0-9]*\.json$")

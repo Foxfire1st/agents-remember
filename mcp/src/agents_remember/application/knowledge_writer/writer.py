@@ -29,7 +29,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agents_remember.application.knowledge_worklist.base_cache import default_base_cache_directory
 from agents_remember.application.knowledge_writer.authoring import Authoring, DecisionResolver
+from agents_remember.application.knowledge_writer.base_side import BaseCode
 from agents_remember.application.knowledge_writer.carry import carry_entries
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
@@ -59,8 +61,8 @@ from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 
 UNCONVERTED = (
     "this memory tree has no layout marker, so it is unconverted: the file writer writes converted "
-    "trees only. Until the cutover (MIK-R37) unconverted memory is curated through the installed "
-    "database ingest"
+    "trees only. An unconverted line is curated through the database ingest only in a repository "
+    "that holds no converted memory; otherwise it crosses the boundary first (MIK-R24 rules 8 and 9)"
 )
 
 
@@ -93,13 +95,19 @@ class WriteRequest:
     questions: OpenQuestions | None = None
     """The leaf task document's ``openQuestions``, where a ``raise`` row's question goes
     (MIK-R14); without it a ``raise`` is refused."""
+    code_base: str | None = None
+    """The code commit an unconverted ``HEAD`` without a ``Code-Commit`` trailer is converted at
+    (MIK-R24 rule 7): a leaf's code base B, the gate's and the worklist's fallback, so all three
+    share one cached base. Without it, the code tree's ``HEAD``."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
     """Apply one hand-off document to the memory tree, or refuse it naming every problem."""
 
     document, problems = read_handoff(request.document)
-    state = MemoryState.load(request.memory_root)
+    if request.owner.kind == "crossing":
+        problems = [*problems, *_crossing_problems(document)]
+    state, unwritable = _load(request)
     report = WriteReport(
         state="refused",
         owner=request.owner.id,
@@ -107,8 +115,8 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         code_tree="",
         authorization=request.authorization,
     )
-    if not state.converted:
-        return replace(report, problems=(*problems, Problem(LAYOUT_MARKER_PATH, UNCONVERTED)))
+    if unwritable is not None:
+        return replace(report, problems=(*problems, unwritable))
     snapshot = code if code is not None else CodeSnapshot.capture(request.code_root)
     authoring = Authoring(
         state,
@@ -153,6 +161,51 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     if refused:
         return replace(report, problems=refused)
     return _finish(report, state, files, request.commit)
+
+
+CROSSING_ROWS_ONLY = (
+    "a master line's crossing sync resolves what conflicted and records judgment rows (MIK-R24 "
+    "rule 8 step 4): its owner <task-id>-crossing-<n> may update an existing record by its 'id' -- "
+    "the record both sides changed, which the writer resolves at one more than the higher side's "
+    "revision -- and write 'history' rows; it authors no entry, ruling or new record"
+)
+
+
+def _crossing_problems(document: Any) -> list[Problem]:
+    """A crossing owner resolves existing records and writes rows into the file its sync opened."""
+
+    problems = [
+        Problem(name, CROSSING_ROWS_ONLY)
+        for name, items in (("entries", document.entries), ("rulings", document.rulings))
+        if items
+    ]
+    problems.extend(
+        Problem(f"records[{record.key}]", CROSSING_ROWS_ONLY)
+        for record in document.records
+        if record.record_id is None
+    )
+    return problems
+
+
+def _load(request: WriteRequest) -> tuple[MemoryState, Problem | None]:
+    """The memory tree and its base, or why the writer cannot write it: an unconverted tree, or
+    a converted base (MIK-R24 rule 7) that cannot be built. The base is read through the
+    coordination root's converted-base cache, the one the worklist and the gate use."""
+
+    cache = (
+        None
+        if request.coordination_root is None
+        else default_base_cache_directory(request.coordination_root)
+    )
+    state = MemoryState.load(
+        request.memory_root,
+        code=BaseCode(request.code_root, request.code_base, cache),
+    )
+    if not state.converted:
+        return state, Problem(LAYOUT_MARKER_PATH, UNCONVERTED)
+    if state.base_problem is not None:
+        return state, Problem("base", state.base_problem)
+    return state, None
 
 
 def _reconsideration_items(worklist: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:

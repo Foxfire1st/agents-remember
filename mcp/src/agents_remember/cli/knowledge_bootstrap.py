@@ -96,6 +96,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     require_config_path,
 )
 from agents_remember.models.knowledge.snapshot import candidate_database_path
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 
 EXIT_REPORTED = 0
 EXIT_REFUSED = 2
@@ -525,6 +526,15 @@ def _run(args: argparse.Namespace, admitted: AdmittedKnowledgeBootstrap) -> int:
             task=admitted.admission.scope,
             coordination_root=admitted.authority.coordination_root,
         )
+    if memory is not None:
+        # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is
+        # never written; the database is frozen there (MIK-R37 rule 3).
+        locked = cutover_lock_refusal(
+            memory, operation="knowledge-bootstrap", line=memory.as_posix()
+        )
+        if locked is not None:
+            print(locked)
+            return EXIT_REFUSED
     result = bootstrap_knowledge(
         admitted,
         Path(args.hand_off_list),

@@ -62,6 +62,7 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
+from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE
 from agents_remember.worktrees.integration.configured_contract_authority import (
     reread_configured_contract,
 )
@@ -103,6 +104,7 @@ from agents_remember.worktrees.knowledge_gate import (
     direct_gate_verdict,
     forget_direct_closing,
     keep_direct_closing,
+    leaf_cutover_refusal,
     settle_direct_closing,
 )
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
@@ -619,16 +621,21 @@ def _memory_content_tree(contract: WorktreeContract) -> str:
 def _direct_gate_owner(contract: WorktreeContract, code_commit: str) -> str | None:
     """MIK-R09 rule 3 over the candidate; the leaf whose history file this landing closes.
 
-    ``None`` for unconverted memory, which is probed before anything is captured or written.
+    ``None`` for unconverted memory, which is probed before anything is captured or written; the
+    cutover lock refuses it instead once the repository holds converted memory (MIK-R09 rule 6).
     """
 
     memory_repo = contract.memory_repo_path
     assert memory_repo is not None
     try:
-        if not checkout_memory_converted(memory_repo):
-            return None
+        converted = checkout_memory_converted(memory_repo)
     except RuntimeError as exc:
         raise DirectLandingError("direct-landing-knowledge-gate-refused", str(exc)) from exc
+    if not converted:
+        locked = leaf_cutover_refusal(contract, "direct landing")
+        if locked is not None:
+            raise DirectLandingError(f"direct-landing-{CUTOVER_LOCK_CODE}", locked)
+        return None
     verdict = direct_gate_verdict(
         contract, code_commit=code_commit, memory_tree=_memory_content_tree(contract)
     )

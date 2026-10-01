@@ -24,6 +24,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from agents_remember.application.memory_tools import (
     CarryoverCommitMessages,
     CarryoverSelection,
@@ -298,6 +299,64 @@ def test_carryover_attributes_its_memory_content_commit_to_the_official_head(tmp
     )
     assert repeated["state"] == "nothing-to-carryover", repeated
     assert git(memory_worktree, "rev-parse", "HEAD") == content
+
+
+def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_path) -> None:
+    """L37 review R1, F2 (MIK-R24 rule 9, MIK-R09 rule 6).
+
+    Carryover copies legacy-format onboarding Markdown and commits it with no format check and no
+    validator, so a converted target is refused, naming the file writer. An unconverted target is
+    refused by the cutover lock once its memory repository holds converted memory, naming the
+    crossing sync. Neither refusal writes anything.
+    """
+
+    fixture, contract, old_base, _official_head, source_memory = _carryover_world(tmp_path)
+    memory_worktree = contract.memory_worktree
+    assert memory_worktree is not None
+    selection = CarryoverSelection(
+        repo_id=contract.repo_name,
+        contract_path=contract.contract_path.as_posix(),
+        source_memory=source_memory,
+        official_code_ref="official",
+        source_code_ref="source",
+        old_base=old_base,
+    )
+
+    def refused() -> str:
+        before = (
+            git(memory_worktree, "rev-parse", "HEAD"),
+            git(memory_worktree, "status", "--porcelain"),
+        )
+        with pytest.raises(RuntimeError) as raised:
+            memory_carryover_apply_tool(
+                fixture.cfg,
+                selection,
+                intent_note="carry the landed branch memory",
+                messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
+            )
+        after = (
+            git(memory_worktree, "rev-parse", "HEAD"),
+            git(memory_worktree, "status", "--porcelain"),
+        )
+        assert after == before
+        return str(raised.value)
+
+    def convert(checkout: Path) -> None:
+        (checkout / "knowledge").mkdir(exist_ok=True)
+        (checkout / "knowledge" / "layout.json").write_text("{}\n", encoding="utf-8")
+        git(checkout, "add", "knowledge/layout.json")
+        git(checkout, "commit", "-q", "-m", "Convert this line")
+
+    memory = fixture.memory
+    git(memory, "switch", "-q", "-c", "converted-line", "main")
+    convert(memory)
+    git(memory, "switch", "-q", "main")
+    locked = refused()
+    assert "branch converted-line" in locked and "crossing sync" in locked, locked
+
+    convert(memory_worktree)
+    converted = refused()
+    assert "refuses a converted target" in converted and "file writer" in converted, converted
 
 
 def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch(tmp_path) -> None:

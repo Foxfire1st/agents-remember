@@ -296,6 +296,8 @@ def initialize_memory(
             "initialBranchSource": branch_source,
             "createdDirs": created_dirs,
             "createdFiles": [],
+            # Nothing was written, so a marker this run would have created was not (L24 nit).
+            "layoutMarker": "not-created" if layout == "created" else layout,
             "git": git,
         }
 

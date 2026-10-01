@@ -37,6 +37,19 @@ done.
 
 The `c-05-create-or-update-onboarding-files` skill remains the normal public entry point for create or update onboarding requests. When the request is route-level slice creation, refresh, move handling, or deletion cleanup, the `c-05-create-or-update-onboarding-files` skill should route the work to the `c-03-repo-bootstrap` skill `existing-memory-slice-maintenance` mode instead of reducing it to unrelated file-level updates.
 
+## Converted Memory
+
+Check the memory tree first. When it holds `knowledge/layout.json` it is **converted** (MIK-R21), and file cards and
+route overviews follow `workflows/converted-card-workflow.md`, not the metadata, Update History and citation-table
+rules below:
+- a card's evidence is `- <finding> [n]` lines over sidecar `references`;
+- the curator writes the evidence as a citation table, and `citation_fix` authors the sidecar with resolved anchors
+  (a new card, or a reference re-authored by its number);
+- a change with no onboarding impact is an `onboarding_trace` row written through `knowledge-ingest`.
+
+Never write sidecar JSON by hand. Everything below applies to unconverted memory, which is only read once its
+repository holds converted memory.
+
 ## Routing
 
 Choose the artifact type first, then use the matching workflow and template.

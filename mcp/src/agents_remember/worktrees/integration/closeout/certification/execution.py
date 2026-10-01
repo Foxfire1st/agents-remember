@@ -15,6 +15,7 @@ from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE
 from agents_remember.worktrees.integration.lifecycle.certification_observation import (
     observe_certification_publication,
 )
@@ -23,6 +24,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 )
 from agents_remember.worktrees.knowledge_gate import (
     PREPARED_CLOSEOUT_UNCLOSABLE,
+    prepared_closeout_lock,
     prepared_closeout_refusal,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -359,6 +361,9 @@ def execute_selected_closeout(
     unclosable = prepared_closeout_refusal(contract)
     if unclosable is not None:
         refuse(PREPARED_CLOSEOUT_UNCLOSABLE, "unconverted memory", unclosable)
+    locked = prepared_closeout_lock(contract)
+    if locked is not None:
+        refuse(CUTOVER_LOCK_CODE, "converted memory, or a repository with none", locked)
     recovered = resume_prepared_closeout(contract, record, store)
     if recovered is not None:
         return recovered

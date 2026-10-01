@@ -67,6 +67,13 @@ response — it must be this leaf's memory worktree — and preview any write wi
    `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject it actually
    is. Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
+   **On converted memory** (the tree holds the knowledge layout marker), follow the c-05 skill's converted-card
+   workflow:
+   - cards have no metadata table, no Update History and no citation tables;
+   - a new card's evidence, or a refreshed reference, is a citation table that `citation_fix` turns into
+     `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
+   - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
+     `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
 3. **Author and publish the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
    knowledge, not prose. First author each entry's `scope` with the real applicability, conditions and exclusions
    in the hand-off template's shape; missing scope is unfinished curation and ingest refuses that entry. Make sure
@@ -86,6 +93,12 @@ response — it must be this leaf's memory worktree — and preview any write wi
    batch replays and the publication reports `no_change` — while the *same entry id with changed content* is refused
    by design; a correction is a successor entry that names the stored `invariant_id` and its
    `predecessor_revision_ids`, which is the explicit revision update and not a rewrite in place.
+   **On converted memory the same command is the file writer.** Its invocation is `agents-remember knowledge-ingest
+   --contract <this leaf's enclosure contract> --list <the hand-off list> --authorization-ref <ref> --commit --json`.
+   It writes files in the leaf's memory worktree and publishes no dataset: `--baseline`, `--publish` and
+   `--publish-to` are refused there. Its hand-off has three sections (`entries`, `records`, `history`) and its own
+   report, both described in the hand-off template's "The file writer's sections (MIK-R12)". The history rows
+   answer the leaf's worklist items.
    A live leaf's ingest captures the actual uncommitted source through the existing future-code owner, preserving
    the real Git index. It rechecks that source before writes and publication. An existing candidate progresses only
    against its exact predecessor receipt and dataset under its existing lock, within the same namespace, lane,

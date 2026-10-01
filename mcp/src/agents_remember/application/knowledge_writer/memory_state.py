@@ -8,35 +8,45 @@ leaves every file exactly as it was.
 The **base** is the memory worktree's ``HEAD`` commit: the memory line the leaf started from or last
 synced to. It answers the two questions only a base can answer: an existing record's revision before
 this leaf (a meaning change increments it once, MIK-R07 rule 2), and an entry's anchor before this
-leaf (a history row's ``before``). The exact K_B resolver of MIK-R07 rule 0 belongs to the gate
-(MIK-R08, MIK-R09); a memory root that is not a Git work tree has no base, and then every record and
-entry is new to this leaf.
+leaf (a history row's ``before``). When ``HEAD`` is unconverted and the candidate is converted, the
+base is ``HEAD``'s conversion (MIK-R24 rule 7, :mod:`.base_side`), the one the worklist and the gate
+read. The exact K_B resolver of MIK-R07 rule 0 belongs to the gate (MIK-R08, MIK-R09); a memory root
+that is not a Git work tree has no base, and then every record and entry is new to this leaf.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from agents_remember.kernel.git_command import GitPreparationError
+from agents_remember.application.knowledge_writer.base_side import BaseCode, writer_bases
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitPreparationError,
+    GitRunnerOptions,
+    read_git_blobs_bytes,
+    run_git,
+)
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
-    KnowledgeTreeReadError,
     knowledge_tree_from_directory,
-    knowledge_tree_from_git,
 )
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, parse_json
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     RECORD_DIRECTORIES,
     file_sidecar_path,
+    history_path,
+    owner_history_attempt,
     record_path,
     split_record_filename,
 )
+from agents_remember.models.knowledge_files.history import is_closed_history, writable_attempt
 from agents_remember.models.knowledge_files.ids import RecordKind
 from agents_remember.models.knowledge_files.sidecars import FILE_SIDECAR_SCHEMA
 
@@ -48,10 +58,15 @@ _KIND_OF_DIRECTORY: dict[str, RecordKind] = {
 
 @dataclass(frozen=True)
 class Owner:
-    """Who authors this operation: the task, and the leaf or wave that owns its history file."""
+    """Who authors this operation: the task, and the leaf, wave or crossing that owns its history.
+
+    A ``crossing`` owner is a master line's crossing sync (MIK-R24 rule 8 step 4): its rows go into
+    the ``<task-id>-crossing-<n>.json`` file the sync opened; it may resolve an existing record its
+    sync left conflicted, and authors no entry or new record.
+    """
 
     task: str
-    kind: Literal["leaf", "wave"]
+    kind: Literal["leaf", "wave", "crossing"]
     id: str
 
     def origin(self) -> dict[str, Any]:
@@ -118,15 +133,45 @@ def _file_sidecars(files: Mapping[str, bytes]) -> Iterator[tuple[str, dict[str, 
                 yield path, document
 
 
-def read_base(root: Path) -> KnowledgeTree | None:
-    """The memory worktree's ``HEAD`` tree, or ``None`` when ``root`` is not a Git work tree."""
+class MergeStageError(RuntimeError):
+    """Git cannot say which versions a merge left at an unmerged record path."""
 
-    if not (root / ".git").exists():
-        return None
+
+def _side_revisions(root: Path, path: str, blobs: tuple[str, str]) -> list[int]:
+    """The ``revision`` of each merge side's version of the record at ``path``."""
+
     try:
-        return knowledge_tree_from_git(root, "HEAD", label=f"{root.name}@HEAD")
-    except (KnowledgeTreeReadError, GitPreparationError):
-        return None
+        data = read_git_blobs_bytes(root, list(blobs))
+    except (GitPreparationError, OSError, subprocess.SubprocessError) as error:
+        raise MergeStageError(f"cannot read the merge sides of {path}: {error}") from error
+    revisions = [(_json(data.get(blob)) or {}).get("revision") for blob in blobs]
+    integers = [one for one in revisions if isinstance(one, int)]
+    if len(integers) != len(revisions):
+        raise MergeStageError(f"a merge side of {path} names no integer revision")
+    return integers
+
+
+def _unmerged_stages(root: Path, path: str) -> dict[str, str]:
+    """``{stage: blob}`` of ``path`` while a merge leaves it unmerged (empty when it is merged)."""
+
+    try:
+        result = run_git(
+            root,
+            ["ls-files", "-u", "-z", "--", path],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+    except subprocess.SubprocessError as error:
+        raise MergeStageError(f"cannot list the merge stages of {path}: {error}") from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise MergeStageError(f"cannot list the merge stages of {path}: {detail}")
+    stages: dict[str, str] = {}
+    for item in result.stdout.split("\0"):
+        metadata, _tab, _path = item.partition("\t")
+        fields = metadata.split()
+        if len(fields) == 3:
+            stages[fields[2]] = fields[1]
+    return stages
 
 
 @dataclass
@@ -143,14 +188,27 @@ class MemoryState:
     sidecar_paths: list[str] = field(default_factory=list)
     touched: set[str] = field(default_factory=set)
     minted: set[str] = field(default_factory=set)
+    base_problem: str | None = None
+    """Why the converted base could not be built; the writer refuses with it."""
     _base_records: dict[str, str] | None = None
     _base_anchors: dict[str, dict[str, Any]] | None = None
 
     @classmethod
-    def load(cls, root: Path) -> MemoryState:
+    def load(cls, root: Path, *, code: BaseCode | None = None) -> MemoryState:
+        """The candidate at ``root`` and its base: ``HEAD``, converted when the candidate is
+        converted and ``HEAD`` is not (MIK-R24 rule 7, :mod:`.base_side`; ``code`` names the code
+        the conversion reads, its fallback commit, and the converted-base cache)."""
+
         tree = knowledge_tree_from_directory(root)
         files = dict(tree.files)
-        state = cls(root=root, files=files, base=read_base(root), records=_record_paths(files))
+        sides = writer_bases(root, tree, code or BaseCode())
+        state = cls(
+            root=root,
+            files=files,
+            base=sides.base,
+            records=_record_paths(files),
+            base_problem=sides.problem,
+        )
         for path, document in _file_sidecars(files):
             state.sidecar_paths.append(path)
             state.documents[path] = document
@@ -173,6 +231,26 @@ class MemoryState:
                 return None
             self.documents[path] = loaded
         return self.documents[path]
+
+    def history_target(self, owner: Owner) -> tuple[str, int]:
+        """The history file this owner writes, and its attempt (L37 ruling on reopen).
+
+        A leaf writes its latest attempt, and the next attempt once the latest is closed in the
+        base -- the leaf closed out, and was reopened on a line that holds its frozen file, which it
+        never edits. A file closed only in the candidate is still the target, and the write refuses
+        it by name (MIK-R07 rule 7). A wave or a crossing has one file.
+        """
+
+        if owner.kind != "leaf":
+            return history_path(owner.id), 1
+        base = self.base.files if self.base is not None else {}
+        frozen: dict[int, bool] = {}
+        for path in (set(self.files) | set(self.documents) | set(base)) - self.removed:
+            attempt = owner_history_attempt(path, owner.id)
+            if attempt is not None:
+                frozen[attempt] = is_closed_history(base.get(path))
+        attempt = writable_attempt(frozen)
+        return history_path(owner.id, attempt), attempt
 
     def put(self, path: str, document: dict[str, Any]) -> None:
         self.removed.discard(path)
@@ -202,6 +280,22 @@ class MemoryState:
             for key in ("realizes", "proves"):
                 ids.update(str(entry.get("id")) for entry in sidecar.get(key) or ())
         return ids
+
+    def merged_sides_revision(self, record_id: str) -> int | None:
+        """The higher of the two sides' revisions of a record a merge left unmerged, else ``None``.
+
+        A crossing sync leaves a record both sides changed unmerged, its own and incoming versions
+        as index stages 2 and 3 (MIK-R24 rule 8 step 4); the resolution's revision is one more than
+        this. Raises :class:`MergeStageError` when Git cannot say.
+        """
+
+        located = self.records.get(record_id)
+        if located is None or not (self.root / ".git").exists():
+            return None
+        stages = _unmerged_stages(self.root, located[0])
+        if "2" not in stages or "3" not in stages:
+            return None
+        return max(_side_revisions(self.root, located[0], (stages["2"], stages["3"])))
 
     def record(self, record_id: str) -> tuple[str, RecordKind, dict[str, Any]] | None:
         located = self.records.get(record_id)

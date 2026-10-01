@@ -41,7 +41,11 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
-from agents_remember.models.knowledge_files.documents import history_path
+from agents_remember.models.knowledge_files.documents import (
+    KNOWLEDGE_ROOT,
+    history_path,
+    owner_history_attempt,
+)
 from agents_remember.models.knowledge_files.history import is_closed_history
 from agents_remember.worktrees.services import LandingGateRequest
 
@@ -101,7 +105,9 @@ def _history_closed(request: LandingGateRequest) -> list[GateFinding]:
     """Rule 3: in the landed memory commit the leaf's history file exists and is ``closed``."""
 
     assert request.leaf_owner is not None
-    path = history_path(request.leaf_owner)
+    path = _latest_history_path(request)
+    if isinstance(path, GateFinding):
+        return [path]
     listed = _git(
         request.memory_repository,
         "rev-parse",
@@ -125,6 +131,30 @@ def _history_closed(request: LandingGateRequest) -> list[GateFinding]:
             "commit closes it (MIK-R07 rule 7), so this commit is not a closed-out leaf's",
         )
     ]
+
+
+def _latest_history_path(request: LandingGateRequest) -> str | GateFinding:
+    """The leaf's latest history file in the landed commit (a reopened leaf's later attempt).
+
+    A listing Git cannot give is an unreadable input, never "only the first attempt": reading the
+    plain file then could pass a reopened leaf whose later attempt is still open.
+    """
+
+    assert request.leaf_owner is not None
+    directory = f"{KNOWLEDGE_ROOT}/history/"
+    listed = _git(
+        request.memory_repository, "ls-tree", "--name-only", request.memory_commit, "--", directory
+    )
+    if listed is None:
+        return _unreadable(
+            directory, f"the landed memory commit's history files cannot be listed ({directory})"
+        )
+    attempts = {
+        attempt: line
+        for line in listed.splitlines()
+        if (attempt := owner_history_attempt(line.strip(), request.leaf_owner))
+    }
+    return attempts[max(attempts)] if attempts else history_path(request.leaf_owner)
 
 
 def net_stale_entries(request: LandingGateRequest) -> list[GateFinding]:

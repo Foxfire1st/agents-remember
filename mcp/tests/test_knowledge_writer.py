@@ -12,7 +12,8 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
+from unittest import mock
 
 import pytest
 from agents_remember.application.knowledge_writer import (
@@ -20,7 +21,7 @@ from agents_remember.application.knowledge_writer import (
     WriteRequest,
     write_knowledge,
 )
-from agents_remember.cli import knowledge_bootstrap
+from agents_remember.cli import knowledge_bootstrap, knowledge_write_route
 from agents_remember.cli.__main__ import main
 from agents_remember.cli.knowledge_write_route import converted_contract, run_wave_write
 from agents_remember.memory_quality.knowledge_validator import (
@@ -33,6 +34,12 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.models.knowledge_files import Anchor, parse_document_text
 from agents_remember.models.knowledge_files.history import InvariantRow
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    RepoBranchPlan,
+    default_series_contract,
+    load_contract,
+)
 from knowledge_writer_test_support import (
     ADMISSION,
     BASE_FAMILY,
@@ -429,16 +436,27 @@ def test_incidental_is_written_as_support_and_a_closed_history_is_frozen(tmp_pat
     }
     closed = {"schema": "ar-history/v1", "leaf": LEAF_ID, "closed": True, "rows": [kept]}
     write(world.memory, {history: json.dumps(closed, indent=2, sort_keys=True) + "\n"})
-    commit_all(world.memory, "closed")
-    refused = _write(
+    closed_bytes = (world.memory / history).read_bytes()
+    open_closed = _write(
         world, {"history": [{"subject": BASE_INVARIANT, "disposition": "no_impact", "reason": "r"}]}
     )
-    assert refused.state == "refused"
-    assert "frozen" in refused.render()
+    assert open_closed.state == "refused"  # closed in the candidate only: still the leaf's file
+    assert "frozen" in open_closed.render()
+    commit_all(world.memory, "closed")
+    # L37 ruling (2026-10-01T01:57:55): the leaf closed out and was reopened on a line holding its
+    # frozen file, so its rows go to the next, attempt-qualified file; the closed file is untouched.
+    reopened = _write(
+        world, {"history": [{"subject": BASE_INVARIANT, "disposition": "no_impact", "reason": "r"}]}
+    )
+    assert reopened.state == "written", reopened.render()
+    assert (world.memory / history).read_bytes() == closed_bytes
+    attempt = read_json(world.memory, f"knowledge/history/{LEAF_ID}-attempt-2.json")
+    assert (attempt["leaf"], attempt["attempt"], attempt["closed"]) == (LEAF_ID, 2, False)
+    assert [row["subject"] for row in attempt["rows"]] == [BASE_INVARIANT]
     sharpened = entry("A-9", invariant_id=BASE_INVARIANT, statement="Pairs land together.")
     contradicted = _write(world, [sharpened]).render()
-    assert "row ROW-AAAAAA" in contradicted and "closed and frozen" in contradicted
-    assert "name this row again" not in contradicted
+    assert "ROW-AAAAAA" not in contradicted  # a frozen row is history, never a refusal
+    assert "-attempt-2.json" in contradicted and "name this row again" in contradicted
 
 
 def test_a_planning_run_writes_nothing_and_unconverted_memory_is_not_this_route(
@@ -615,8 +633,12 @@ def test_the_leaf_file_route_refuses_a_blank_authorization_and_reports_it(
     argv = ["knowledge-ingest", "--contract", str(world.contract), "--list", str(listed)]
     assert main([*argv, "--authorization-ref", "  "]) == 2
     assert "--authorization-ref must not be blank" in capsys.readouterr().out
-    assert main([*argv, "--authorization-ref", "curator-7", "--json"]) == 0
+    wraps = mock.patch.object(knowledge_write_route, "write_knowledge", wraps=write_knowledge)
+    with wraps as wrote:
+        assert main([*argv, "--authorization-ref", "curator-7", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["authorization"] == "curator-7"
+    # Review R1, F10: a trailerless HEAD converts at the leaf's code base B, as the gate does.
+    assert wrote.call_args.args[0].code_base == load_contract(world.contract).code_base_commit
 
 
 def test_family_route_rules_are_reports_in_the_writer_and_refusals_at_a_commit_route(
@@ -828,3 +850,129 @@ def test_a_decision_that_breaks_a_content_rule_is_refused_and_nothing_is_written
     assert refusals == {("R13.1-reconsider-when", "alternatives.1.reconsider_when")}
     assert report.requirements[0].state == "unresolved"  # no coordination root: reported only
     assert tree_bytes(world.memory) == before
+
+
+# --------------------------------------------------------------------------------------------------
+# The cutover (L37): knowledge-bootstrap under the cutover lock, and the crossing owner's rows
+# --------------------------------------------------------------------------------------------------
+
+
+class _Reached(Exception):
+    """The run passed the lock and reached the database ingest."""
+
+
+def _bootstrap(world: World, memory: Path) -> str:
+    """One ``knowledge-bootstrap`` run on ``memory``: the lock's refusal, or "reached"."""
+
+    admitted = SimpleNamespace(
+        admission=SimpleNamespace(memory_worktree=memory, code_worktree=world.code, scope="t"),
+        authority=SimpleNamespace(coordination_root=world.root),
+    )
+    args = argparse.Namespace(hand_off_list="list.json", authorization_ref="a", commit=True)
+    with (
+        mock.patch.object(knowledge_bootstrap, "bootstrap_knowledge", side_effect=_Reached),
+        mock.patch("builtins.print") as printed,
+    ):
+        try:
+            assert knowledge_bootstrap._run(args, cast(Any, admitted)) == 2
+        except _Reached:
+            return "reached"
+    return str(printed.call_args.args[0])
+
+
+def test_knowledge_bootstrap_refuses_unconverted_memory_once_the_repository_holds_converted_memory(
+    tmp_path: Path,
+) -> None:
+    """MIK-R09 rule 6 / MIK-R24 rule 9: the taskless database route is locked, naming the crossing."""
+
+    world = build_world(tmp_path)  # its main branch holds the layout marker
+    plain = tmp_path / "plain"
+    git(world.memory, "worktree", "add", "-q", "-b", "plain", str(plain))
+    git(plain, "rm", "-q", "knowledge/layout.json")
+    commit_all(plain, "an unconverted line")
+    refused = _bootstrap(world, plain)
+    assert "knowledge-bootstrap refuses" in refused and "crossing sync" in refused
+
+    other = tmp_path / "other"  # a repository that holds no converted memory: unchanged
+    other.mkdir()
+    git(other, "init", "-q", "-b", "main")
+    git(other, "config", "user.email", "fixture@example.invalid")
+    git(other, "config", "user.name", "writer fixture")
+    write(other, {"onboarding/a.py.md": "# a\n"})
+    commit_all(other, "unconverted")
+    assert _bootstrap(world, other) == "reached"
+
+
+def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Path) -> None:
+    """L24 carry (at L37): the curator's rows for a ``crossing`` owner, into
+    ``<task-id>-crossing-<n>.json``, through ``knowledge-ingest --crossing``; rows only."""
+
+    world = build_world(tmp_path)
+    series = default_series_contract(
+        ContractTask(
+            name="landing",
+            repo_name="agents-remember",
+            coordination_root=world.root,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        code=RepoBranchPlan(world.code, "main", "main", git(world.code, "rev-parse", "HEAD")),
+        memory=RepoBranchPlan(world.memory, "main", "main", git(world.memory, "rev-parse", "HEAD")),
+        task_root=world.task_root,
+    )
+    crossing = f"{series.task_id}-crossing-1"
+    history = world.memory / f"knowledge/history/{crossing}.json"
+    opened = {"schema": "ar-history/v1", "crossing": crossing, "closed": False, "rows": []}
+    write(world.memory, {history.relative_to(world.memory).as_posix(): json.dumps(opened)})
+    row = {"subject": BASE_INVARIANT, "disposition": "no_impact", "reason": "Both sides agree."}
+    listed = tmp_path / "rows.json"
+    listed.write_text(json.dumps({"history": [row]}), encoding="utf-8")
+
+    def run(contract: Any, name: str, **fields: Any) -> int:
+        args = argparse.Namespace(
+            hand_off_list=str(listed),
+            authorization_ref="crossing-review",
+            commit=True,
+            as_json=False,
+            crossing=name,
+            **dict.fromkeys(key for key, _flag in knowledge_write_route._DATABASE_ONLY),
+        )
+        for key, value in fields.items():
+            setattr(args, key, value)
+        locations = (world.memory, world.memory, "main", "main")
+        with mock.patch.object(knowledge_write_route, "side_locations", return_value=locations):
+            return knowledge_write_route.run_crossing_write(args, contract)
+
+    refused, written = knowledge_write_route.EXIT_REFUSED, knowledge_write_route.EXIT_WRITTEN
+    leaf = load_contract(world.contract)
+    with mock.patch("builtins.print") as printed:
+        assert run(leaf, f"{leaf.task_id}-crossing-1") == refused  # a leaf contract, its own id
+    assert "names the master's series contract" in str(printed.call_args.args[0])
+    assert run(series, f"{series.task_id}-crossing-2") == refused  # no such open file
+    assert run(series, crossing, baseline="b.sqlite") == refused  # a database-only flag
+    assert run(None, crossing) == refused  # an unreadable contract
+    wraps = mock.patch.object(knowledge_write_route, "write_knowledge", wraps=write_knowledge)
+    with wraps as wrote:
+        assert run(series, crossing) == written
+    assert wrote.call_args.args[0].code_base == "refs/heads/main"  # the crossing's paired code
+    recorded = json.loads(history.read_text())
+    assert (recorded["crossing"], recorded["closed"]) == (crossing, False)
+    assert [one["subject"] for one in recorded["rows"]] == [BASE_INVARIANT]
+    assert all(one["id"].startswith("ROW-") and one["revision"] for one in recorded["rows"])
+
+    entries = write_knowledge(
+        WriteRequest(
+            memory_root=world.memory,
+            code_root=world.code,
+            owner=Owner(task=TASK_ID, kind="crossing", id=crossing),
+            handoff_path="rows.json",
+            document={"entries": [entry("X-1")], "history": [row]},
+        )
+    )
+    assert entries.state == "refused" and "no entry, ruling or new record" in entries.render()
+
+    write(
+        world.memory,
+        {history.relative_to(world.memory).as_posix(): json.dumps({**recorded, "closed": True})},
+    )
+    assert run(series, crossing) == refused  # frozen at the crossing sync's commit

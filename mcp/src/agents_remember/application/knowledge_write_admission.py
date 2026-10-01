@@ -32,6 +32,13 @@ can tell which authority was behind a write by reading the value rather than by 
 **What this value is not.** It confers no authority by itself -- it is a frozen record of facts a
 resolver already established -- and it decides nothing about a destination, a namespace or an
 identity: those stay with the operation and with the shipped owners it calls.
+
+**The frozen database (MIK-R37 rule 3).** :func:`as_write_admission` is the database writer's front
+door, so it refuses an admission whose memory worktree is converted (it holds the layout marker),
+naming the curator file writer: from the cutover on, that tree's knowledge is text, and its
+``knowledge.sqlite`` stays in place, unwritten, until MIK-R26 removes it. An unconverted tree in a
+memory repository that holds converted memory is refused too, by the cutover lock (MIK-R09 rule 6),
+which names the crossing sync.
 """
 
 from __future__ import annotations
@@ -40,6 +47,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.memory.knowledge.publication import FILE_WRITER_ROUTE
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 __all__ = [
@@ -47,6 +57,7 @@ __all__ = [
     "ENCLOSURE_ADMISSION_KIND",
     "AdmissionKind",
     "AdmissionProvenance",
+    "KnowledgeDatabaseFrozen",
     "KnowledgeWriteAdmission",
     "as_write_admission",
     "enclosure_admission",
@@ -178,7 +189,35 @@ def as_write_admission(
     """
 
     if isinstance(target, KnowledgeWriteAdmission):
-        return target
-    if isinstance(target, WorktreeContract):
-        return enclosure_admission(target)
-    return enclosure_admission(load_contract(Path(target)))
+        admission = target
+    elif isinstance(target, WorktreeContract):
+        admission = enclosure_admission(target)
+    else:
+        admission = enclosure_admission(load_contract(Path(target)))
+    _require_unfrozen_database(admission)
+    return admission
+
+
+class KnowledgeDatabaseFrozen(ValueError):
+    """The admitted memory tree is converted, so its database is frozen (MIK-R37 rule 3)."""
+
+
+def _require_unfrozen_database(admission: KnowledgeWriteAdmission) -> None:
+    """Refuse the database writer on a converted memory tree, naming the file writer."""
+
+    memory = admission.memory_worktree
+    if memory is None:
+        return
+    if (memory / LAYOUT_MARKER_PATH).is_file():
+        raise KnowledgeDatabaseFrozen(
+            f"the memory tree {memory} is converted (it holds {LAYOUT_MARKER_PATH}), so its "
+            "knowledge database is frozen at the cutover (MIK-R37 rule 3) and the database writer "
+            f"writes nothing for {admission.source_ref}; {FILE_WRITER_ROUTE}"
+        )
+    locked = cutover_lock_refusal(
+        admission.memory_repo_path or memory,
+        operation="the knowledge database writer",
+        line=memory.as_posix(),
+    )
+    if locked is not None:
+        raise KnowledgeDatabaseFrozen(locked)

@@ -58,6 +58,7 @@ from agents_remember.models.knowledge.snapshot import (
     SnapshotDestinationRequest,
     SnapshotPublicationResult,
 )
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 # The one file name a private stage is written under inside its own directory.
 _STAGE_FILE_NAME = "snapshot.sqlite"
@@ -119,37 +120,14 @@ def publish_prepared_snapshot(
     This is the reusable half of the contract: a caller that produced a validated closed database
     -- a merged result, an import, a restored artifact -- reaches the destination through exactly
     this path, so every published file was replaced atomically against an expected identity.
+
+    A destination inside a converted memory tree is refused (``database_frozen``, MIK-R37 rule 3):
+    that tree's knowledge is written by the curator file writer, and its database stays frozen.
     """
 
-    if not prepared.stage_path.is_file():
-        return SnapshotPublicationResult(
-            state="refused",
-            refusal=snapshot_incomplete_refusal(
-                "publish_snapshot",
-                "the closed snapshot stage is not present",
-                stage_ref=str(prepared.stage_path),
-            ),
-        )
-    try:
-        current_digest = _file_digest(prepared.stage_path)
-    except OSError as error:
-        return SnapshotPublicationResult(
-            state="refused",
-            refusal=snapshot_incomplete_refusal(
-                "publish_snapshot",
-                f"the closed snapshot stage could not be read back: {error}",
-                stage_ref=str(prepared.stage_path),
-            ),
-        )
-    if current_digest != prepared.file_digest:
-        return SnapshotPublicationResult(
-            state="refused",
-            refusal=snapshot_incomplete_refusal(
-                "publish_snapshot",
-                "the closed snapshot stage is not the file that was frozen and verified",
-                stage_ref=str(prepared.stage_path),
-            ),
-        )
+    refused = frozen_database_refusal(request.destination_path) or _stage_refusal(prepared)
+    if refused is not None:
+        return SnapshotPublicationResult(state="refused", refusal=refused)
     try:
         with exclusive_file_lock(
             _publication_lock_resource(request.destination_path), "knowledge snapshot destination"
@@ -168,6 +146,56 @@ def publish_prepared_snapshot(
                 f"the destination publication lock could not be taken: {error}",
             ),
         )
+
+
+def _stage_refusal(prepared: PreparedKnowledgeSnapshot) -> KnowledgeRefusal | None:
+    """Why the frozen stage cannot be installed: absent, unreadable, or not the verified file."""
+
+    if not prepared.stage_path.is_file():
+        detail = "the closed snapshot stage is not present"
+    else:
+        try:
+            current_digest = _file_digest(prepared.stage_path)
+        except OSError as error:
+            detail = f"the closed snapshot stage could not be read back: {error}"
+        else:
+            if current_digest == prepared.file_digest:
+                return None
+            detail = "the closed snapshot stage is not the file that was frozen and verified"
+    return snapshot_incomplete_refusal(
+        "publish_snapshot", detail, stage_ref=str(prepared.stage_path)
+    )
+
+
+FILE_WRITER_ROUTE = (
+    "write knowledge through the curator file writer (MIK-R12): agents-remember knowledge-ingest "
+    "--contract <the leaf's contract>, or agents-remember knowledge-bootstrap --wave <wave> for a "
+    "taskless run"
+)
+
+
+def frozen_database_refusal(destination_path: Path) -> KnowledgeRefusal | None:
+    """Refuse a database destination inside a converted memory tree (MIK-R37 rule 3), or ``None``.
+
+    The database file of a tree that holds the layout marker stays where it is, unwritten, until
+    MIK-R26 removes it; every write goes through the file writer instead.
+    """
+
+    tree = destination_path.parent
+    if not (tree / LAYOUT_MARKER_PATH).is_file():
+        return None
+    return refusal(
+        "database_frozen",
+        "publish_snapshot",
+        (
+            f"{destination_path} lies in the converted memory tree {tree} (it holds "
+            f"{LAYOUT_MARKER_PATH}), whose database is frozen at the cutover (MIK-R37 rule 3): its "
+            "knowledge is text, and knowledge.sqlite stays in place, unwritten, until MIK-R26 "
+            "removes it"
+        ),
+        facts=RefusalFacts(record_id=str(destination_path)),
+        next_action=FILE_WRITER_ROUTE,
+    )
 
 
 # -- the install -----------------------------------------------------------------------

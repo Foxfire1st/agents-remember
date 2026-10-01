@@ -229,6 +229,10 @@ KnowledgeRefusalCode = Literal[
     # with its own name rather than folded into a neighbouring storage code. Requirement 7.1 states
     # the refusal, and ``detection_self_reference`` is the fact a caller branches on.
     "detection_self_reference",
+    # The cutover (MIK-R37 rule 3). A converted memory tree's knowledge is text written by the
+    # curator file writer (MIK-R12); the database file it still holds is frozen in place until
+    # MIK-R26 removes it, so a database write or publication into that tree is refused by name.
+    "database_frozen",
 ]
 
 

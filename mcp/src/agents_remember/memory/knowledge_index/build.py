@@ -41,7 +41,11 @@ from agents_remember.models.knowledge_files.documents import (
     route_sidecar_path,
     split_record_filename,
 )
-from agents_remember.models.knowledge_files.history import HistoryFile, InvariantRow
+from agents_remember.models.knowledge_files.history import (
+    HistoryFile,
+    InvariantRow,
+    merged_leaf_history,
+)
 from agents_remember.models.knowledge_files.ids import RecordKind
 from agents_remember.models.knowledge_files.records import (
     RECORD_MODELS,
@@ -96,6 +100,9 @@ class ParsedTree:
     file_sidecars: dict[str, FileSidecar] = field(default_factory=dict)
     route_sidecars: dict[str, RouteSidecar] = field(default_factory=dict)
     histories: dict[str, HistoryFile] = field(default_factory=dict)
+    """Each owner's history: all of its files read as one (a reopened leaf's attempts, L37)."""
+    history_files: dict[str, HistoryFile] = field(default_factory=dict)
+    """Each history file, by path."""
     layout: LayoutMarker | None = None
     problems: list[tuple[str, str]] = field(default_factory=list)
 
@@ -155,7 +162,7 @@ def build_index(snapshot: MemoryTreeSnapshot, destination: Path) -> BuildReport:
         problems=tuple(parsed.problems),
         record_count=len(parsed.records),
         entry_count=len(parsed.entries),
-        history_row_count=sum(len(history.rows) for history in parsed.histories.values()),
+        history_row_count=sum(len(history.rows) for history in parsed.history_files.values()),
     )
 
 
@@ -184,7 +191,11 @@ def _parse_knowledge_file(parsed: ParsedTree, path: str, parts: list[str], text:
     directory, filename = parts[1], parts[2]
     if directory == _HISTORY_DIRECTORY:
         history = parse_history_document(path, text)
-        parsed.histories[history.owner_id] = history
+        parsed.history_files[path] = history
+        owned = [one for one in parsed.history_files.values() if one.owner_id == history.owner_id]
+        merged = merged_leaf_history(owned)
+        if merged is not None:
+            parsed.histories[history.owner_id] = merged
         return
     kind = _DIRECTORY_KINDS.get(directory)
     if kind is None:
@@ -267,8 +278,8 @@ def _write_rows(connection: apsw.Connection, parsed: ParsedTree) -> None:
         _write_references(
             connection, _Owner(sidecar.path, "route", path), sidecar.references, own=None
         )
-    for history in parsed.histories.values():
-        _write_history(connection, history)
+    for path, history in parsed.history_files.items():
+        _write_history(connection, path, history)
 
 
 def _write_record(connection: apsw.Connection, indexed: IndexedRecord) -> None:
@@ -380,8 +391,7 @@ def _link(
     )
 
 
-def _write_history(connection: apsw.Connection, history: HistoryFile) -> None:
-    path = f"{KNOWLEDGE_ROOT}/{_HISTORY_DIRECTORY}/{history.owner_id}.json"
+def _write_history(connection: apsw.Connection, path: str, history: HistoryFile) -> None:
     for row in history.rows:
         connection.execute(
             "INSERT INTO ix_history_row (id, owner, owner_kind, closed, path, subject, "

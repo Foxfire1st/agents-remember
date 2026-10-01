@@ -9,6 +9,7 @@ from typing import Any
 from agents_remember.application import provider_runtime as provider_runtime_api
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
+from agents_remember.application.memory_quality.converted_base import context_check_base
 from agents_remember.application.prepared_certification import (
     PreparedMemoryCertificationAdapter,
 )
@@ -177,6 +178,7 @@ class MemoryQualityAdapter:
             context=context,
             detail_limit=detail_limit,
             unstamped_code_commit=unstamped_code_commit,
+            knowledge_base=context_check_base(code_repository_root, context),
         )
 
     def run_check(

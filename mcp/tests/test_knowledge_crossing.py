@@ -7,14 +7,24 @@ sync transaction on real Git repositories.
 
 from __future__ import annotations
 
+import gzip
 import json
 import shutil
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 import apsw
 import pytest
+from agents_remember.application.knowledge_worklist import base_cache
+from agents_remember.application.knowledge_writer import (
+    Owner,
+    WriteReport,
+    WriteRequest,
+    base_side,
+    write_knowledge,
+)
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.memory.conversion import base as base_module
 from agents_remember.memory.conversion.base import GitBaseConverter
@@ -39,8 +49,8 @@ from agents_remember.memory_quality.knowledge_validator.validator import validat
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.history import HistoryFile
 from agents_remember.models.knowledge_files.ids import derived_record_id
-from agents_remember.worktrees.knowledge_crossing import close_crossing_history
-from agents_remember.worktrees.services import bind_worktree_services
+from agents_remember.worktrees.knowledge_crossing import apply_crossing, close_crossing_history
+from agents_remember.worktrees.services import CrossingPlanView, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
 from agents_remember.worktrees.sync_transaction_state import sync_operation_path
 from knowledge_conversion_test_support import (
@@ -290,6 +300,253 @@ def test_a_master_line_record_conflict_opens_a_crossing_history_file_closed_at_c
     assert staged["closed"] is True
 
 
+@pytest.mark.parametrize("own_converted", [True, False], ids=["own-converted", "own-unconverted"])
+def test_a_record_both_sides_changed_is_resolved_at_one_more_than_the_higher_side(
+    tmp_path: Path, own_converted: bool
+) -> None:
+    """MIK-R24 rule 8 step 4 (L37 ruling 03:36:39): the crossing owner resolves the conflicted
+    record through the writer, whose ``revision`` becomes one more than the higher side's.
+
+    The incoming side changed the same statement and holds the higher revision; the base is the
+    unconverted fork point. The own side is either a converted master line, or (ONT's case,
+    ruling 03:56:27) an unconverted one: the writer then reads its converted base (MIK-R24 rule 7),
+    so the carried entries are not refused for want of a base.
+    """
+
+    code = code_repository(tmp_path / "code")
+    base_root = tmp_path / "base"
+    memory_repository(base_root, code)
+    fork = tmp_path / "fork.sqlite"
+    shutil.copyfile(base_root / "knowledge.sqlite", fork)
+    base = MemoryInput(
+        label="base", files=dict(memory_from_directory(base_root).files), database=fork
+    )
+    connection = apsw.Connection(str(base_root / "knowledge.sqlite"))
+    connection.execute("UPDATE invariant_revision SET statement = 'Own.' WHERE revision_id = 'r1b'")
+    connection.close()
+    own_conversion = convert_memory(
+        memory_from_directory(base_root), CodeObjects(code.root), paired_commit=code.head
+    )
+    if own_converted:
+        write_changed(base_root, own_conversion.changed)
+        own = MemoryInput(label="own", files=dict(own_conversion.files), database=None)
+    else:
+        own = MemoryInput(
+            label="own",
+            files=dict(memory_from_directory(base_root).files),
+            database=base_root / "knowledge.sqlite",
+        )
+    git(base_root, "add", "-A")
+    git(base_root, "commit", "-q", "-m", render_memory_content_message("own", code.head))
+    incoming_files = dict(own_conversion.files)
+    one = derived_record_id("invariant", "inv-one")
+    record = f"knowledge/invariants/{one}-FIX-I-1.json"
+    incoming_record = json.loads(incoming_files[record])
+    incoming_record.update(statement="Incoming.", revision=incoming_record["revision"] + 1)
+    incoming_files[record] = canonical_text(incoming_record).encode("utf-8")
+    plan = cross(
+        (base, own, MemoryInput(label="incoming", files=incoming_files, database=None)),
+        CodeObjects(code.root),
+        own_paired_commit=code.head,
+        repository=base_root,
+        owner=HistoryOwner(kind="master", id="260101-FIX"),
+    )
+    assert [(one.path, one.item) for one in plan.conflicts] == [(record, "statement")]
+    view = CrossingPlanView(
+        files=plan.files,
+        conflicts=tuple((one.path, one.item, one.reason) for one in plan.conflicts),
+        conflict_versions=plan.conflict_versions,
+        report=plan.report,
+    )
+    assert apply_crossing(base_root, view) == (record,)  # left unmerged: stages 1-3
+    sides = [json.loads(git(base_root, "show", f":{stage}:{record}"))["revision"] for stage in "23"]
+    assert sides[1] == sides[0] + 1  # the incoming side is the higher one
+
+    crossing = "260101-FIX-crossing-1"
+    owner = Owner(task="260101-FIX", kind="crossing", id=crossing)
+    resolution = {
+        "key": "R-1",
+        "kind": "invariant",
+        "id": one,
+        "fields": {"statement": "Both: adds one."},
+    }
+    row = {
+        "subject": one,
+        "disposition": "changed",
+        "effect": "clarify",
+        "reason": "Both sides reworded it; the resolution keeps both points.",
+        "covers": [],
+    }
+
+    def write(document: dict[str, object]) -> WriteReport:
+        return write_knowledge(
+            WriteRequest(
+                memory_root=base_root,
+                code_root=code.root,
+                owner=owner,
+                handoff_path="crossing-rows.json",
+                document=document,
+                commit=True,
+                coordination_root=tmp_path / "coordination",
+            )
+        )
+
+    new_record = {**resolution, "key": "R-2", "id": None}
+    refused = write({"records": [{k: v for k, v in new_record.items() if v is not None}]})
+    assert refused.state == "refused" and "no entry, ruling or new record" in refused.render()
+
+    written = write({"records": [resolution], "history": [row]})
+    assert written.state == "written", written.render()
+    resolved = json.loads((base_root / record).read_text())
+    assert (resolved["statement"], resolved["revision"]) == ("Both: adds one.", max(sides) + 1)
+    history = json.loads((base_root / f"knowledge/history/{crossing}.json").read_text())
+    assert [(one["subject"], one["revision"]) for one in history["rows"]] == [(one, max(sides) + 1)]
+
+
+def test_the_writer_compares_an_unconverted_head_through_its_converted_base(
+    tmp_path: Path,
+) -> None:
+    """L37 ruling 03:56:27: ``HEAD`` unconverted, the working tree converted (the converting leaf's
+    curation before its closeout commits the conversion): the writer's base is ``HEAD``'s
+    conversion (MIK-R24 rule 7), cached as the worklist and the gate cache it."""
+
+    code = code_repository(tmp_path / "code")
+    memory = tmp_path / "memory"
+    memory_repository(memory, code)
+    write_changed(
+        memory,
+        convert_memory(
+            memory_from_directory(memory), CodeObjects(code.root), paired_commit=code.head
+        ).changed,
+    )
+    one = derived_record_id("invariant", "inv-one")
+    record = memory / f"knowledge/invariants/{one}-FIX-I-1.json"
+    exported = json.loads(record.read_text())
+    entry = next(
+        one_entry
+        for one_entry in json.loads((memory / APP_SIDECAR).read_text())["realizes"]
+        if one_entry["invariant"] == one and one_entry["anchor"]["locator"]["kind"] == "symbol"
+    )
+    coordination = tmp_path / "coordination"
+
+    def change(statement: str, *, commit: bool = True, code_root: Path = code.root) -> WriteReport:
+        return write_knowledge(
+            WriteRequest(
+                memory_root=memory,
+                code_root=code_root,
+                owner=Owner(task="260101-FIX", kind="leaf", id="260101-FIX-L7"),
+                handoff_path="handoff.json",
+                document={
+                    "records": [
+                        {
+                            "key": "R",
+                            "kind": "invariant",
+                            "id": one,
+                            "fields": {"statement": statement},
+                        }
+                    ],
+                    "history": [
+                        {
+                            "subject": one,
+                            "disposition": "changed",
+                            "effect": "clarify",
+                            "reason": "The statement is sharper.",
+                            "covers": [entry["id"]],
+                        }
+                    ],
+                },
+                commit=commit,
+                coordination_root=coordination,
+            )
+        )
+
+    unbuildable = change("Alpha adds exactly one.", code_root=tmp_path / "no-code")
+    assert unbuildable.state == "refused"  # never compared against nothing
+    assert "converted base (MIK-R24 rule 7)" in unbuildable.render()
+    written = change("Alpha adds exactly one.")
+    assert written.state == "written", (
+        written.render()
+    )  # no carried anchor refused for want of a base
+    assert json.loads(record.read_text())["revision"] == exported["revision"] + 1
+    history = json.loads((memory / "knowledge/history/260101-FIX-L7.json").read_text())
+    (row,) = history["rows"]
+    assert row["revision"] == exported["revision"] + 1
+    assert row["covers"][0]["before"] == {**entry["anchor"], "path": APP}  # read from the base
+    cached = list((coordination / "runtime" / "knowledge-worklist-bases").glob("*.json.gz"))
+    assert len(cached) == 1  # converted once; the next operation reads the cache
+    never = mock.Mock(side_effect=AssertionError("converted again"))
+    with mock.patch.object(base_cache, "converted_base", never):
+        assert change("Alpha adds one, exactly.", commit=False).state == "planned"
+
+    git(memory, "add", "-A")
+    git(memory, "commit", "-q", "-m", render_memory_content_message("converted", code.head))
+    with mock.patch.object(
+        base_side, "converted_base_files", never
+    ):  # a converted HEAD is the base
+        again = change("Alpha adds one, always.")
+    assert again.state == "written", again.render()
+    assert json.loads(record.read_text())["revision"] == exported["revision"] + 2
+
+
+def test_a_trailerless_head_converts_at_the_gates_code_base_and_an_unreadable_one_refuses(
+    tmp_path: Path,
+) -> None:
+    """L37 review R1 (F10, F3 X14, F6). A ``HEAD`` without a ``Code-Commit`` trailer is converted at
+    the request's code base B -- the gate's and the worklist's fallback -- so the three share one
+    cache key. A code root with no commits, or a ``HEAD`` whose tree Git cannot read, is a named
+    refusal, never a comparison against nothing."""
+
+    code = code_repository(tmp_path / "code")
+    memory = tmp_path / "memory"
+    head = memory_repository(memory, code)  # committed as "legacy memory": no trailer
+    write_changed(
+        memory,
+        convert_memory(
+            memory_from_directory(memory), CodeObjects(code.root), paired_commit=code.head
+        ).changed,
+    )
+    coordination = tmp_path / "coordination"
+    cache = coordination / "runtime" / "knowledge-worklist-bases"
+
+    def plan(code_root: Path, code_base: str | None) -> WriteReport:
+        return write_knowledge(
+            WriteRequest(
+                memory_root=memory,
+                code_root=code_root,
+                owner=Owner(task="260101-FIX", kind="leaf", id="260101-FIX-L7"),
+                handoff_path="handoff.json",
+                document={"history": []},
+                coordination_root=coordination,
+                code_base=code_base,
+            )
+        )
+
+    unborn = tmp_path / "unborn-code"
+    unborn.mkdir()
+    git(unborn, "init", "-q")
+    refused = plan(unborn, None)  # X14: no code commit to convert the base at
+    assert refused.state == "refused"
+    assert "converted base (MIK-R24 rule 7)" in refused.render()
+    assert "'HEAD' is unknown" in refused.render()
+
+    planned = plan(code.root, code.first)  # B, not the code tree's HEAD
+    assert planned.state == "planned", planned.render()
+    (cached,) = cache.glob("*.json.gz")
+    key = json.loads(gzip.decompress(cached.read_bytes()))["key"]
+    assert (key[0], key[2]) == (head, code.first) and code.first != code.head
+    never = mock.Mock(side_effect=AssertionError("converted again"))
+    with mock.patch.object(base_cache, "converted_base", never):  # the gate's own call: a hit
+        base_cache.converted_base_files(
+            memory, head, code=(code.root, code.first), version=key[1], cache_directory=cache
+        )
+
+    blob = git(memory, "rev-parse", f"HEAD:{APP_CARD}")
+    (memory / ".git" / "objects" / blob[:2] / blob[2:]).unlink()  # F6: HEAD's tree unreadable
+    unreadable = plan(code.root, code.first)
+    assert unreadable.state == "refused"
+    assert "the memory worktree's HEAD, cannot be read" in unreadable.render()
+
+
 def test_the_commit_route_validates_against_the_conversion_of_an_unconverted_base(
     tmp_path: Path,
 ) -> None:
@@ -443,6 +700,21 @@ def test_the_managed_sync_crosses_an_unconverted_leaf_into_a_converted_line(
     assert document["pairing"]["memoryBase"]["commit"] == line_head
 
 
+def _cancel_and_cross_again(fixture: SyncFixture, worktree: Path, leaf_head: str) -> None:
+    """L37 (P2 task 1): a conflicted crossing cancels cleanly -- the leaf's head, no merge, no
+    converted file left behind -- and the same sync then crosses again."""
+
+    cancelled = fixture.sync(resolution_action="cancel")
+    assert cancelled.payload["state"] == "sync-cancelled", cancelled.payload
+    assert git(worktree, "rev-parse", "HEAD") == leaf_head
+    with pytest.raises(AssertionError):
+        git(worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    assert git(worktree, "status", "--porcelain") == ""
+    assert not (worktree / "knowledge/layout.json").exists()
+    again = fixture.sync(memory_sync_choice="merge-memory")
+    assert again.payload["state"] == "sync-resolution-required", again.payload
+
+
 def test_a_crossing_leaves_overlapping_edits_to_the_curator_and_a_failed_step_changes_nothing(
     tmp_path: Path, worktree_services: None
 ) -> None:
@@ -496,6 +768,8 @@ def test_a_crossing_leaves_overlapping_edits_to_the_curator_and_a_failed_step_ch
         "crossing-conflict": {k: v for k, v in item.items() if k != "path"}
     }
     assert "<<<<<<< ours" in card.read_text(encoding="utf-8")
+
+    _cancel_and_cross_again(fixture, worktree, leaf_head)
 
     # Staging the Markdown fix and the untouched marker is refused at commit: never a silent ours.
     card.write_text(git(worktree, "show", f"MERGE_HEAD:{APP_CARD}") + "\n", encoding="utf-8")

@@ -7,7 +7,9 @@ applies, with a marker probe that reads no knowledge:
 
 * **Applicability (rule 6).** The gate applies when K_C or K_B holds the layout marker
   ``knowledge/layout.json``, so a leaf that deletes the marker is still gated. Where neither side
-  holds it, the memory is unconverted and the route behaves exactly as before this master: every
+  holds it, the memory is unconverted: the cutover lock (:mod:`.cutover_lock`, rule 6's second
+  bullet) refuses it once the memory repository holds converted memory anywhere, naming the crossing
+  sync; in a repository that holds none, the route behaves exactly as before this master and every
   function here returns ``None`` after the probe. A probe Git cannot answer refuses; an unreadable
   side is never taken for unconverted memory.
 * **No bypass (rule 5).** A converted route with no bound gate is refused, never committed ungated.
@@ -48,8 +50,14 @@ from agents_remember.models.knowledge_files.canonical import (
     canonical_text,
     parse_json,
 )
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, history_path
+from agents_remember.models.knowledge_files.documents import (
+    KNOWLEDGE_ROOT,
+    LAYOUT_MARKER_PATH,
+    history_path,
+    owner_history_attempt,
+)
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
     PairedCode,
@@ -78,14 +86,19 @@ __all__ = [
     "forget_direct_closing",
     "keep_direct_closing",
     "landing_gate_refusal",
+    "latest_owner_history",
+    "leaf_cutover_refusal",
     "leaf_gate_refusal",
+    "leaf_line",
     "leaf_memory_converted",
     "parent_memory_tip",
+    "prepared_closeout_lock",
     "prepared_closeout_refusal",
     "require_readable_closings",
     "settle_direct_closing",
 ]
 
+_HISTORY_DIRECTORY = f"{KNOWLEDGE_ROOT}/history"
 GATE_UNBOUND = (
     "the mandatory invariant gate (MIK-R09) is not bound in this process; converted memory is "
     "never committed or landed ungated"
@@ -115,6 +128,23 @@ def parent_memory_tip(contract: WorktreeContract) -> str | None:
     if contract.memory_repo_path is None or not contract.memory_source_branch:
         return None
     return branch_commit(contract.memory_repo_path, contract.memory_source_branch)
+
+
+def leaf_line(contract: WorktreeContract) -> str:
+    """How a refusal names a contract's memory line: its leaf (or task) and its memory worktree."""
+
+    owner = contract.leaf_id or contract.task_name
+    where = contract.memory_worktree or contract.memory_repo_path
+    return f"{owner} ({where.as_posix()})" if where is not None else owner
+
+
+def leaf_cutover_refusal(contract: WorktreeContract, operation: str) -> str | None:
+    """The cutover lock over a contract whose memory is unconverted on every side (rule 6)."""
+
+    if contract.memory_mode != "external":
+        return None
+    repository = contract.memory_repo_path or contract.memory_worktree
+    return cutover_lock_refusal(repository, operation=operation, line=leaf_line(contract))
 
 
 def leaf_memory_converted(contract: WorktreeContract) -> bool:
@@ -173,14 +203,31 @@ def prepared_closeout_refusal(contract: WorktreeContract) -> str | None:
     )
 
 
+def prepared_closeout_lock(contract: WorktreeContract) -> str | None:
+    """The cutover lock on the certified (prepared) closeout of unconverted memory (rule 6).
+
+    ``None`` for converted memory (:func:`prepared_closeout_refusal` decides it, and names a probe
+    Git cannot answer) and for a repository that holds no converted memory.
+    """
+
+    try:
+        if leaf_memory_converted(contract):
+            return None
+    except RuntimeError:
+        return None  # prepared_closeout_refusal refuses the unreadable probe by name
+    return leaf_cutover_refusal(contract, "the certified (prepared) closeout")
+
+
 def leaf_gate_refusal(
     contract: WorktreeContract, *, code_tree: str, memory_tree: str
 ) -> str | None:
     """The closeout validator's gate over a leaf's exact candidate; ``None`` when it passes."""
 
     applies, refusal = _leaf_gate_applies(contract, memory_tree)
-    if refusal is not None or not applies:
+    if refusal is not None:
         return refusal
+    if not applies:
+        return leaf_cutover_refusal(contract, "the closeout validator")
     port = _port()
     if port is None:
         return GATE_UNBOUND
@@ -240,7 +287,11 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
         if not converted_memory(
             request.memory_repository, request.memory_commit, *request.memory_bases
         ):
-            return None
+            return cutover_lock_refusal(
+                request.memory_repository,
+                operation="the landing",
+                line=f"the landed memory commit {request.memory_commit}",
+            )
     except GateProbeError as error:
         return str(error)
     port = _port()
@@ -276,14 +327,32 @@ class HistoryClosing:
             self.path.write_bytes(self.previous)
 
 
+def latest_owner_history(memory_root: Path, owner: str) -> Path:
+    """The owner's latest history file in a memory checkout (its plain file when it has none).
+
+    A leaf reopened after its closeout writes a later, attempt-qualified file (L37 ruling); the
+    latest attempt is the one its closeout closes.
+    """
+
+    plain = memory_root / history_path(owner)
+    attempts = {
+        attempt: candidate
+        for candidate in plain.parent.glob("*.json")
+        if (attempt := owner_history_attempt(f"{_HISTORY_DIRECTORY}/{candidate.name}", owner))
+    }
+    return attempts[max(attempts)] if attempts else plain
+
+
 def close_owner_history(memory_root: Path, owner: str) -> HistoryClosing:
     """Set ``closed: true`` in the owner's history file, creating it with no rows when absent.
 
     The rows are never rewritten: only the flag changes, and the file stays canonical. A file that
-    does not parse is not touched here; the validator names it and refuses the commit.
+    does not parse is not touched here; the validator names it and refuses the commit. For a leaf
+    reopened after its closeout, the file is its latest attempt; when that attempt is already closed
+    (the reopened leaf wrote no row), nothing is written and its history stays the closed file.
     """
 
-    path = memory_root / history_path(owner)
+    path = latest_owner_history(memory_root, owner)
     previous = path.read_bytes() if path.is_file() else None
     if previous is None:
         document: object = {"schema": HISTORY_SCHEMA, "leaf": owner, "closed": True, "rows": []}

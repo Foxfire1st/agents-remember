@@ -100,13 +100,31 @@ def anchor_state(path: str, anchor: dict[str, Any], files: _WorkingFiles) -> str
     return "current" if content_identity(found) == anchor.get("content") else "stale"
 
 
-def _sidecars(memory_root: Path) -> Iterator[tuple[str, dict[str, Any]]]:
+_MALFORMED: Final = (AttributeError, KeyError, TypeError, ValueError)
+"""What reading a sidecar that is not valid JSON, or not shaped as a sidecar, raises."""
+
+
+def _sidecars(
+    memory_root: Path, unreadable: list[str], only: str | None = None
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Every sidecar that holds references (or the one ``only`` names), parsed.
+
+    A sidecar that is not valid JSON is named in ``unreadable`` and skipped: the knowledge validator
+    refuses it by its own rule, and the reference check and the fixer never raise on it.
+    """
+
     onboarding = memory_root / "onboarding"
     for sidecar in sorted(onboarding.rglob("*.json")):
         relative = sidecar.relative_to(memory_root).as_posix()
         if relative.endswith(".index.json") or not sidecar.is_file():
             continue
-        document = parse_json(sidecar.read_text(encoding="utf-8"))
+        if only is not None and relative != only:
+            continue
+        try:
+            document = parse_json(sidecar.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            unreadable.append(relative)
+            continue
         if isinstance(document, dict) and "references" in document:
             yield relative, document
 
@@ -128,24 +146,20 @@ def check_references(memory_root: Path, code_root: Path) -> dict[str, Any]:
     files = _WorkingFiles(code_root)
     states: Counter[str] = Counter()
     stale: list[dict[str, Any]] = []
-    for relative, document in _sidecars(memory_root):
-        for field_name, _, anchor in _anchor_targets(document):
-            state = anchor_state(anchor["path"], anchor, files)
+    unreadable: list[str] = []
+    for relative, document in _sidecars(memory_root, unreadable):
+        try:
+            observed = [
+                (field_name, anchor, anchor_state(anchor["path"], anchor, files))
+                for field_name, _, anchor in _anchor_targets(document)
+            ]
+        except _MALFORMED:
+            unreadable.append(relative)
+            continue
+        for field_name, anchor, state in observed:
             states[state.split(":")[0]] += 1
             if state != "current":
-                stale.append(
-                    {
-                        "check": STALE_REFERENCE_CHECK,
-                        "path": relative,
-                        "field": field_name,
-                        "target": anchor["path"],
-                        "state": state,
-                        "message": (
-                            f"{relative}: {field_name}: reference target {anchor['path']} is "
-                            f"{state}; refresh it through the onboarding gate (MIK-R30)"
-                        ),
-                    }
-                )
+                stale.append(_stale_finding(relative, field_name, anchor["path"], state))
     return {
         "ok": True,
         "check": STALE_REFERENCE_CHECK,
@@ -154,6 +168,21 @@ def check_references(memory_root: Path, code_root: Path) -> dict[str, Any]:
         "findings": [],
         "reportOnlyFindings": stale,
         "states": dict(sorted(states.items())),
+        "unreadableSidecars": unreadable,
+    }
+
+
+def _stale_finding(relative: str, field_name: str, target: str, state: str) -> dict[str, Any]:
+    return {
+        "check": STALE_REFERENCE_CHECK,
+        "path": relative,
+        "field": field_name,
+        "target": target,
+        "state": state,
+        "message": (
+            f"{relative}: {field_name}: reference target {target} is "
+            f"{state}; refresh it through the onboarding gate (MIK-R30)"
+        ),
     }
 
 
@@ -204,24 +233,37 @@ def _refresh_document(document: dict[str, Any], files: _WorkingFiles) -> int:
     return refreshed
 
 
-def fix_references(memory_root: Path, code_root: Path, *, dry_run: bool = False) -> dict[str, Any]:
-    """Re-record mechanically moved reference anchors; leave every stale one to the curator."""
+def fix_references(
+    memory_root: Path, code_root: Path, *, dry_run: bool = False, only: str | None = None
+) -> dict[str, Any]:
+    """Re-record mechanically moved reference anchors; leave every stale one to the curator.
+
+    ``only`` names one sidecar (memory-root relative): no other sidecar is read or rewritten. A
+    sidecar that cannot be read as one is named in ``unreadableSidecars``, never rewritten, and
+    makes the run not ``ok``; the others are still fixed.
+    """
 
     files = _WorkingFiles(code_root)
     rewritten: list[str] = []
+    unreadable: list[str] = []
     refreshed = 0
-    for relative, document in _sidecars(memory_root):
-        count = _refresh_document(document, files)
+    for relative, document in _sidecars(memory_root, unreadable, only):
+        try:
+            count = _refresh_document(document, files)
+        except _MALFORMED:
+            unreadable.append(relative)
+            continue
         if count:
             refreshed += count
             rewritten.append(relative)
             if not dry_run:
                 (memory_root / relative).write_text(canonical_text(document), encoding="utf-8")
     return {
-        "ok": True,
+        "ok": not unreadable,
         "status": "converted",
         "dryRun": dry_run,
         "refreshedAnchors": refreshed,
         "rewrittenSidecars": rewritten,
+        "unreadableSidecars": unreadable,
         "stale": check_references(memory_root, code_root)["reportOnlyFindings"],
     }

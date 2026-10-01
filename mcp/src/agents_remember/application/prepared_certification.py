@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agents_remember.application.knowledge_worklist import leaf_onboarding_trace_sides
+from agents_remember.application.memory_quality.converted_base import context_check_base
 from agents_remember.certification.certificate_authority import compile_gate_certificate
 from agents_remember.certification.certificate_models import (
     GateCertificateIssuanceContext,
@@ -84,6 +85,7 @@ from agents_remember.models.lifecycles.preparation import (
 )
 from agents_remember.models.lifecycles.prepared_memory import PreparedMemoryCandidate
 from agents_remember.models.task_document import CanonicalTaskObservation
+from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE
 from agents_remember.worktrees.integration.closeout.certification.execution import (
     CloseoutCertificationHandoff,
     current_certification_handoff,
@@ -110,6 +112,7 @@ from agents_remember.worktrees.integration.closeout.preparation_selection import
 )
 from agents_remember.worktrees.knowledge_gate import (
     PREPARED_CLOSEOUT_UNCLOSABLE,
+    prepared_closeout_lock,
     prepared_closeout_refusal,
 )
 from agents_remember.worktrees.modules.context import contract_context
@@ -350,6 +353,9 @@ def _realize_prepared_memory(
     unclosable = prepared_closeout_refusal(request.handoff.contract)
     if unclosable is not None:
         refuse(PREPARED_CLOSEOUT_UNCLOSABLE, "unconverted memory", unclosable)
+    locked = prepared_closeout_lock(request.handoff.contract)
+    if locked is not None:
+        refuse(CUTOVER_LOCK_CODE, "converted memory, or a repository with none", locked)
     current = _current(request)
     coherence = require_current_curator_coherence(current.contract)
     pair = request.candidate.codeView.logicalPair
@@ -521,6 +527,7 @@ def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResul
             detail_limit=1000,
             include_rows=True,
             write_report=False,
+            knowledge_base=context_check_base(physical_code, context),
         ),
         include_report_only_findings=True,
     )

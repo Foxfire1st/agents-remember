@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import apsw
 import pytest
@@ -52,6 +54,7 @@ from agents_remember.models.knowledge.registered_scope import (
     RegisteredScopeRequest,
     ScopeSnapshotDeclaration,
 )
+from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from knowledge_index_test_support import (
     FAMILY,
@@ -551,3 +554,66 @@ def test_a_real_database_in_an_unconverted_root_reads_identically(tmp_path: Path
     assert with_root == without_root
     assert "memoryTree" not in with_root and "indexComplete" not in with_root
     assert not coordination.exists()
+
+
+def test_a_converted_tree_refuses_a_seed_it_does_not_hold_and_a_database_read_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    """L37 ruling (P2 task 4): an unheld seed is refused ``selector_absent``, never answered as an
+    empty, complete view; a database read keeps its answer."""
+
+    root = _converted(tmp_path)
+    coordination = str(tmp_path / "coordination")
+
+    def read(view: str, **seeds: str) -> dict[str, Any]:
+        return knowledge_read_payload(
+            ReadToolRequest(
+                database_path=str(root),
+                repository_id=INDEX_REPOSITORY_ID,
+                view=view,
+                invariant_revision_id=seeds.get("invariant_revision_id"),
+                family_revision_id=seeds.get("family_revision_id"),
+            ),
+            coordination_root=coordination,
+        )
+
+    held = text_uuid("revision", f"{REVIEW_INVARIANT}@1")
+    assert read("invariant", invariant_revision_id=held)["state"] == "view"
+    for view, seeds in (
+        ("invariant", {"invariant_revision_id": str(uuid.uuid4())}),  # a database-era ID
+        ("invariant", {"invariant_revision_id": REVIEW_INVARIANT}),  # a bare record ID
+        ("family", {"family_revision_id": str(uuid.uuid4())}),
+        ("source_context", {"family_revision_id": "FAM-ZZZZZZ"}),
+    ):
+        refused = read(view, **seeds)
+        assert refused["state"] == "refused", (view, seeds, refused)
+        assert refused["refusalCode"] == "selector_absent"
+        assert "read_ar_files" in refused["refusalDetail"]
+    bare = read("invariant", invariant_revision_id=REVIEW_INVARIANT)["refusalDetail"]
+    assert f"whose seed is {held}" in bare
+    projected = knowledge_project_payload(
+        ProjectToolRequest(
+            database_path=str(root),
+            repository_id=INDEX_REPOSITORY_ID,
+            destination_root=str(tmp_path / "projected"),
+            views=({"view": "invariant", "invariantRevisionId": REVIEW_INVARIANT},),
+        ),
+        coordination_root=coordination,
+    )
+    assert (projected["state"], projected["refusalCode"]) == ("refused", "selector_absent")
+
+    database = tmp_path / "unconverted" / "knowledge.sqlite"
+    repository_id = str(uuid.uuid4())
+    store = open_knowledge_store(database, repository_id)
+    identity = RepositoryIdentity(repository_id=repository_id, authority_home="agents-remember")
+    assert store.create_repository(identity).state == "created"
+    store.close()
+    unchanged = knowledge_read_payload(
+        ReadToolRequest(
+            database_path=str(database),
+            repository_id=repository_id,
+            view="invariant",
+            invariant_revision_id=str(uuid.uuid4()),
+        )
+    )
+    assert (unchanged["state"], unchanged["completeWithinDeclaredScope"]) == ("view", True)

@@ -51,6 +51,7 @@ from agents_remember.application.knowledge_writer.handoff import (
 from agents_remember.application.knowledge_writer.memory_state import (
     EntryLocation,
     MemoryState,
+    MergeStageError,
     Owner,
     canonical_equal,
     deep_copy,
@@ -73,7 +74,6 @@ from agents_remember.application.knowledge_writer.report import (
     RowOutcome,
 )
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.models.knowledge_files.documents import history_path
 from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
     InvariantRow,
@@ -292,16 +292,7 @@ class Authoring:
         handoff_entry: str,
     ) -> None:
         record_id = str(document["id"])
-        reference = self.state.base_record(record_id)
-        if reference is None and self.state.base is None:
-            reference = before
-        if reference is None:
-            revision = 1
-        else:
-            base_revision = reference.get("revision")
-            revision = (base_revision if isinstance(base_revision, int) else 1) + (
-                0 if canonical_equal(meaning(reference), meaning(document)) else 1
-            )
+        revision = self._revision(record_id, document, before)
         document["revision"] = revision
         path = self.state.put_record(kind, record_id, slug, document)
         action: Action = (
@@ -312,6 +303,33 @@ class Authoring:
             else "updated"
         )
         self.records.append(RecordOutcome(kind, record_id, path, action, revision, handoff_entry))
+
+    def _revision(
+        self, record_id: str, document: Mapping[str, Any], before: Mapping[str, Any] | None
+    ) -> int:
+        """The record's revision after this operation.
+
+        A record a merge left unmerged (both sides changed it, MIK-R24 rule 8 step 4) is resolved
+        at one more than the higher side's revision. Otherwise the base's revision, incremented once
+        when the meaning changed; 1 for a record new to the base.
+        """
+
+        try:
+            merged = self.state.merged_sides_revision(record_id)
+        except MergeStageError as error:
+            self.problem(f"record {record_id}", str(error))
+            merged = None
+        if merged is not None:
+            return merged + 1
+        reference = self.state.base_record(record_id)
+        if reference is None and self.state.base is None:
+            reference = before
+        if reference is None:
+            return 1
+        base_revision = reference.get("revision")
+        return (base_revision if isinstance(base_revision, int) else 1) + (
+            0 if canonical_equal(meaning(reference), meaning(document)) else 1
+        )
 
     def _write_entry(self, entry: EntryRequest) -> tuple[CitedTest, ...]:
         invariant_id = self.handles.get(entry.entry_id)
@@ -587,7 +605,7 @@ class Authoring:
     # -- history rows -------------------------------------------------------------------------
 
     def _write_rows(self, requests: Sequence[RowRequest]) -> None:
-        path = history_path(self.owner.id)
+        path, attempt = self.state.history_target(self.owner)
         stored = self.state.document(path)
         if stored is not None and stored.get("closed") is True:
             self.problem(path, "this history file is closed and frozen (MIK-R07 rule 7)")
@@ -598,6 +616,7 @@ class Authoring:
             else {
                 "schema": HISTORY_SCHEMA,
                 self.owner.kind: self.owner.id,
+                **({"attempt": attempt} if attempt > 1 else {}),
                 "closed": False,
                 "rows": [],
             }
@@ -947,7 +966,7 @@ class Authoring:
         for handoff_entry, evidence in pending:
             reason = f"{reason} Evidence ({handoff_entry}): {'; '.join(evidence)}"
             self._stored_in.setdefault(handoff_entry, []).append(
-                f"{history_path(self.owner.id)}#{subject}"
+                f"{self.state.history_target(self.owner)[0]}#{subject}"
             )
         return reason
 

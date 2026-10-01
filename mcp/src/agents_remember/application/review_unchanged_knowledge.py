@@ -32,6 +32,7 @@ from agents_remember.application.review_comparison_freeze import (
     ComparisonFreezeOptions,
     ComparisonGenerationFreeze,
     freeze_resolved_review,
+    tree_comparison_refusal,
 )
 from agents_remember.application.review_recorded_knowledge import read_memory_knowledge
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -48,11 +49,9 @@ def freeze_unchanged_knowledge_review(
 
     if options.historical_absence:
         return _refused("unchanged knowledge and historical absence cannot select the same pair")
-    resolved = resolve_review_candidate(
-        config, request.repository_id, request.master, request.leaf_id
-    )
-    if isinstance(resolved, ReviewRefusal):
-        return ComparisonGenerationFreeze(state="refused", refusal=resolved)
+    resolved = _dataset_resolution(config, request)
+    if isinstance(resolved, ComparisonGenerationFreeze):
+        return resolved
     contract = resolved.contract
     if (
         contract is None
@@ -68,6 +67,25 @@ def freeze_unchanged_knowledge_review(
         if base.state != "available" or base.identity is None or base.path is None:
             return _refused(base.detail)
         return _prepare_and_record(resolved, request, options, base.identity, Path(temporary))
+
+
+def _dataset_resolution(
+    config: McpRuntimeConfig, request: ReviewSurfaceRequest
+) -> ReviewCandidateResolution | ComparisonGenerationFreeze:
+    """The leaf's dataset pair, or the refusal: an unresolved leaf, or a converted one.
+
+    A converted leaf's comparison is its Git trees (MIK-R25): no dataset is read or copied, and
+    the frozen database is never selected (L23 F8, MIK-R37 rule 3).
+    """
+
+    resolved = resolve_review_candidate(
+        config, request.repository_id, request.master, request.leaf_id
+    )
+    if isinstance(resolved, ReviewRefusal):
+        return ComparisonGenerationFreeze(state="refused", refusal=resolved)
+    if resolved.trees is not None or resolved.knowledge_unavailable:
+        return ComparisonGenerationFreeze(state="refused", refusal=tree_comparison_refusal())
+    return resolved
 
 
 def _prepare_and_record(

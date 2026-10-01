@@ -75,6 +75,10 @@ from agents_remember.application.knowledge_paging.scope_pages import (
     prepare_scope,
 )
 from agents_remember.application.knowledge_paging.threshold import threshold_block
+from agents_remember.application.knowledge_paging.tree_seeds import (
+    SEED_SOURCES,
+    tree_seed_refusal,
+)
 from agents_remember.application.knowledge_paging.view_pages import (
     VIEW_POLICY,
     VIEW_POLICY_VERSION,
@@ -224,8 +228,7 @@ def read_tree_page(
         raise ValueError("a tree read needs a selection that names a memory tree")
     read = _TreeRead(request, selected, tree, context, extras, workspace_root)
     if request.continuation is None:
-        # A fresh view walk is bound to the code tree the caller named, and only that one.
-        return _fresh_response(_at_code_tree(read, request.code_tree_id))
+        return _fresh_read(read)
     resume = read_continuation(request.continuation, view=request.view)
     if isinstance(resume, PagingRefusal):
         return _refused(read, resume.code, resume.detail)
@@ -249,6 +252,33 @@ def read_tree_page(
     if missing is not None:
         return _refused(read, missing.code, missing.detail)
     return _resumed_response(read, resume)
+
+
+def _fresh_read(read: _TreeRead) -> dict[str, Any]:
+    """Page 1 of a fresh read, or the refusal of a seed the tree does not hold."""
+
+    absent = _fresh_seed_absent(read)
+    if absent is not None:  # never answered as an empty, complete view (L37, P2 task 4)
+        return _refused(read, "selector_absent", absent)
+    # A fresh view walk is bound to the code tree the caller named, and only that one.
+    return _fresh_response(_at_code_tree(read, read.request.code_tree_id))
+
+
+def _fresh_seed_absent(read: _TreeRead) -> str | None:
+    """Why a fresh read's record seed names nothing this tree holds, or ``None``.
+
+    A ``source_context`` family seed has its own spellings (an ID, ``ID@revision`` or a UUID), and
+    :func:`_revision_absent` judges it.
+    """
+
+    request = read.request
+    family_seed = None if request.view == LEAF_VIEW else request.family_revision_id
+    return tree_seed_refusal(
+        read.selected.database_path,
+        read.tree.tree_key,
+        invariant_revision_id=request.invariant_revision_id,
+        family_revision_id=family_seed,
+    )
 
 
 def _fresh_response(read: _TreeRead) -> dict[str, Any]:
@@ -545,23 +575,23 @@ def _family_spelling(read: _TreeRead, named: str) -> tuple[str, str | None]:
 
 
 def _revision_absent(read: _TreeRead, named: str) -> str | None:
-    """Why ``named`` names a revision this tree does not hold (refused ``selector_absent``), or
-    ``None`` when it names none or the tree's own.
+    """Why ``named`` names a family or revision this tree does not hold (refused
+    ``selector_absent``), or ``None`` when it names a held family and none or the tree's revision.
 
-    A tree holds one revision of a family; a bare ``ID@`` names none of them.
+    A tree holds one revision of a family; a bare ``ID@`` names none of them. A family the tree
+    does not hold is never answered as an empty read (L37, P2 task 4).
     """
 
     family, revision = _family_spelling(read, named)
-    if revision is None:
-        return None
     with KnowledgeIndex(read.selected.database_path, expected_key=read.tree.tree_key) as index:
         record = index.record(family).value
-    if record is not None and str(record.revision) == revision:
+    if record is None or record.kind != "family":
+        return f"familyRevisionId {named!r} names no family this memory tree holds; {SEED_SOURCES}"
+    if revision is None or str(record.revision) == revision:
         return None
-    held = "no such family" if record is None else f"revision {record.revision}"
     return (
-        f"familyRevisionId {named!r} names a revision this memory tree does not hold ({held}); "
-        "name the family ID alone to read the tree's revision"
+        f"familyRevisionId {named!r} names a revision this memory tree does not hold (revision "
+        f"{record.revision}); name the family ID alone to read the tree's revision"
     )
 
 

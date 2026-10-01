@@ -34,9 +34,11 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops imp
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     GIT_BLOB_SET_ALGORITHM,
 )
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.memory_content_excludes import (
     MEMORY_CONTENT_EXCLUDES,
 )
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.integration.integration_branch_authority import (
     RepositoryCheckoutRequest,
     require_ordinary_repository_checkout,
@@ -709,6 +711,7 @@ def _apply_carryover_for_request(
         raise RuntimeError("apply requires an intent_note describing the requested carryover")
     target_memory = request.target_memory.resolve()
     configured = _require_carryover_authority(request, authority)
+    _require_legacy_format_target(request, configured)
     require_ordinary_repository_checkout(
         RepositoryCheckoutRequest(
             coordination_root=authority.coordination_root,
@@ -792,6 +795,36 @@ def _apply_carryover_for_request(
         "memory_content_commit": memory_content_commit,
         "ledger_cache": refresh_memory_cache(target_memory, repo_name=request.code_repository_name),
     }
+
+
+CONVERTED_TARGET = (
+    "memory_carryover_apply refuses a converted target: it copies legacy-format onboarding "
+    "Markdown and commits it with no format check and no knowledge validator, so on memory that "
+    "holds knowledge/layout.json it would commit the old format into converted memory (MIK-R24 "
+    "rule 9). A converted line is curated through the file writer (knowledge-ingest on the leaf's "
+    "memory worktree) until carryover is adapted to converted memory"
+)
+
+
+def _require_legacy_format_target(request: CarryoverRequest, configured: RepositoryScope) -> None:
+    """Carryover writes legacy-format memory only, and only while the repository is not locked.
+
+    A converted target is refused, naming the file writer. An unconverted target is refused by the
+    cutover lock once its memory repository holds converted memory (MIK-R09 rule 6), naming the
+    crossing sync, exactly as the closeout that would land the carried memory refuses it.
+    """
+
+    target = request.target_memory.resolve()
+    if (target / LAYOUT_MARKER_PATH).is_file():
+        raise RuntimeError(CONVERTED_TARGET)
+    contract = load_contract(request.target_contract_path)
+    refusal = cutover_lock_refusal(
+        configured.memory_root,
+        operation="memory_carryover_apply",
+        line=f"{contract.leaf_id or contract.task_name} ({target.as_posix()})",
+    )
+    if refusal is not None:
+        raise RuntimeError(refusal)
 
 
 def _require_carryover_authority(

@@ -24,6 +24,7 @@ from typing import Any
 from agents_remember.memory_quality.converted_check import (
     CONVERTED_KNOWLEDGE_CHECK,
     LEGACY_FORMAT_CHECKS,
+    KnowledgeBasePort,
     converted_knowledge_check,
     not_applicable_on_converted,
 )
@@ -119,6 +120,8 @@ class DriftCheckContext:
     report_path: Path | None = None
     include_rows: bool = False
     write_report: bool = True
+    knowledge_base: KnowledgeBasePort | None = None
+    """The converted tree's comparison base (MIK-R24 rule 7); without it, a converted ``HEAD``."""
 
 
 def run_memory_quality_check(
@@ -172,7 +175,9 @@ def _converted_check(
         if drift_context is None:
             raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
         return CONVERTED_KNOWLEDGE_CHECK, converted_knowledge_check(
-            onboarding_root.parent, drift_context.code_repository_root
+            onboarding_root.parent,
+            drift_context.code_repository_root,
+            base=drift_context.knowledge_base,
         )
     return check, run_check(check, onboarding_root, drift_context)
 

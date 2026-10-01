@@ -61,6 +61,26 @@ class CodeSnapshot:
 
         with TemporaryDirectory(prefix="ar-knowledge-writer-") as scratch:
             tree = worktree_candidate_tree(root, Path(scratch) / "index")
+        return cls.of_tree(root, tree)
+
+    @classmethod
+    def at_commit(cls, repository: Path, commit: str) -> CodeSnapshot:
+        """The tree C of a committed code state (a master line's paired code commit)."""
+
+        result = run_git(
+            repository,
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{commit}^{{tree}}"],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+        tree = result.stdout.strip()
+        if result.returncode != 0 or not tree:
+            raise AnchorResolutionError(f"the code commit {commit!r} has no tree in {repository}")
+        return cls.of_tree(repository, tree)
+
+    @classmethod
+    def of_tree(cls, root: Path, tree: str) -> CodeSnapshot:
+        """Read the regular files of ``tree`` in ``root``'s object store."""
+
         blobs: dict[str, str] = {}
         for row in read_git_tree_bytes(root, tree).split(b"\0"):
             if not row:

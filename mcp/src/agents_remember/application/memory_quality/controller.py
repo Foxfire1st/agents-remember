@@ -21,6 +21,7 @@ from agents_remember.application.memory_quality.census import (
     prepare_memory_census,
     publish_memory_census,
 )
+from agents_remember.application.memory_quality.converted_base import converted_check_base
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
     QualityRunSnapshot,
@@ -72,12 +73,14 @@ from agents_remember.memory_quality.knowledge_review import (
     summarise_assessment_state,
 )
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     ValidatedCuratorCoherence,
     all_assessment_subject_ids,
@@ -392,27 +395,47 @@ def _resolve_execution(
     )
 
 
-def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
-    scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
+def _unconverted_refusal(scope: Any) -> str | None:
+    """Why this run refuses its unconverted memory (MIK-R24 rule 9, MIK-R09 rule 6), or ``None``.
+
+    A leaf's tree is refused when its official line is converted, or by the cutover lock; the
+    official checkout of a repository-level run is refused by the cutover lock.
+    """
+
     contract = scope.contract
-    if contract is not None and isinstance(contract.memory_worktree, Path):
-        refusal = unconverted_line_refusal(
+    if contract is not None:
+        if not isinstance(contract.memory_worktree, Path):
+            return None
+        return unconverted_line_refusal(
             memory_worktree=contract.memory_worktree,
             memory_repository=contract.memory_repo_path,
             official_branch=contract.memory_source_branch,
             operation="memory_quality_check",
         )
-        if refusal is not None:
-            # MIK-R24 rule 9: an unconverted leaf tree whose official line is converted is never
-            # checked in the old format; the crossing sync converts it first.
-            return {
-                "ok": False,
-                "operation": "memory_quality_check",
-                "repoId": scope.repo_id,
-                "state": "refused",
-                "code": "unconverted-memory",
-                "detail": refusal,
-            }
+    memory_root = Path(scope.onboarding_root).parent
+    if (memory_root / LAYOUT_MARKER_PATH).is_file():
+        return None
+    return cutover_lock_refusal(
+        memory_root,
+        operation="memory_quality_check",
+        line=f"the official memory checkout {memory_root.as_posix()}",
+    )
+
+
+def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
+    scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
+    refusal = _unconverted_refusal(scope)
+    if refusal is not None:
+        # MIK-R24 rule 9 / MIK-R09 rule 6: unconverted memory is never checked in the old format
+        # once its official line, or anything in its repository, is converted; it crosses first.
+        return {
+            "ok": False,
+            "operation": "memory_quality_check",
+            "repoId": scope.repo_id,
+            "state": "refused",
+            "code": "unconverted-memory",
+            "detail": refusal,
+        }
     quality_code_root = scope.quality_code_root
     quality_context = scope.quality_context
     candidate_inputs = (
@@ -434,6 +457,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             report_path=(scope.curator_report_path if execution.publish_curator_report else None),
             include_rows=execution.publish_curator_report,
             write_report=not execution.publish_curator_report,
+            knowledge_base=converted_check_base(scope, execution.config.coordination_root),
         ),
         include_report_only_findings=execution.publish_curator_report,
     )

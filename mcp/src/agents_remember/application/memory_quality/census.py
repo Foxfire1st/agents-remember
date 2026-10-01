@@ -7,9 +7,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.application.memory_quality.census_base import census_comparison
 from agents_remember.application.memory_scope import MemoryScope
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.converted_cards import (
+    card_sidecar_path,
+    converted_card_metadata,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     normalize_overview_route,
     parse_table_metadata_text,
@@ -20,6 +25,7 @@ from agents_remember.memory_quality.memory_census_scope import (
     MemoryCensusScope,
     capture_memory_census_scope,
 )
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.lifecycles.curator_coherence import CuratorSourceCandidate
 from agents_remember.models.lifecycles.memory_census import MemoryCensusResult, MemoryCensusRow
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -39,6 +45,7 @@ def prepare_memory_census(scope: MemoryScope) -> PreparedMemoryCensus | None:
     candidate = capture_memory_census_scope(
         contract,
         code_input=_prepared_code_input(scope),
+        comparison=census_comparison(contract),
     )
     return PreparedMemoryCensus(
         candidate,
@@ -54,7 +61,9 @@ def publish_memory_census(
     """Retain the full exact worklist and return bounded, noncertifying diagnostics."""
     scope = prepared.scope
     contract = load_contract(Path(scope.pair_identity.contractPath))
-    current = capture_memory_census_scope(contract, code_input=scope.code_input)
+    current = capture_memory_census_scope(
+        contract, code_input=scope.code_input, comparison=census_comparison(contract)
+    )
     if current != scope:
         raise RuntimeError("memory census candidate changed before report publication")
     result = prepared.result
@@ -114,19 +123,7 @@ def _curator_source(prepared: PreparedMemoryCensus, row: MemoryCensusRow) -> str
         if len(row.sourcePaths) != 1:
             raise ValueError("inline census identity requires exactly one canonical source")
         return row.sourcePaths[0]
-    scope = prepared.scope
-    tree = (
-        scope.memory_candidate_tree
-        if row.expectedFinalPresence == "present"
-        else scope.memory_baseline_commit
-    )
-    result = run_git(
-        Path(scope.pair_identity.memoryRoot),
-        ["show", f"{tree}:{identity.memoryRootRelativePath}"],
-    )
-    if result.returncode != 0:
-        raise ValueError("cannot read exact governed artifact for curator candidate mapping")
-    metadata = parse_table_metadata_text(result.stdout)
+    metadata = _governed_metadata(prepared, row)
     if identity.artifactType == "route-overview":
         source = normalize_overview_route(metadata.get("sourceRoute", "."))
     else:
@@ -134,6 +131,34 @@ def _curator_source(prepared: PreparedMemoryCensus, row: MemoryCensusRow) -> str
     if not source:
         raise ValueError("governed artifact lacks its canonical source identity")
     return source
+
+
+def _governed_metadata(prepared: PreparedMemoryCensus, row: MemoryCensusRow) -> dict[str, str]:
+    """The governed card's kind and source, read in its own format from the tree that holds it.
+
+    A present card is read from the candidate; an absent one from what the census compared it
+    with (the baseline, or its conversion -- MIK-R24 rule 7). A converted card keeps no metadata
+    table: its sidecar and its place in the tree name its source (:mod:`.converted_cards`).
+    """
+
+    scope = prepared.scope
+    tree = (
+        scope.memory_candidate_tree
+        if row.expectedFinalPresence == "present"
+        else scope.memory_comparison_tree
+    )
+    root = Path(scope.pair_identity.memoryRoot)
+    path = row.identity.memoryRootRelativePath
+    result = run_git(root, ["show", f"{tree}:{path}"])
+    if result.returncode != 0:
+        raise ValueError("cannot read exact governed artifact for curator candidate mapping")
+    if run_git(root, ["cat-file", "-e", f"{tree}:{LAYOUT_MARKER_PATH}"]).returncode != 0:
+        return parse_table_metadata_text(result.stdout)
+    sidecar = run_git(root, ["show", f"{tree}:{card_sidecar_path(path)}"])
+    onboarding = Path(scope.pair_identity.onboardingRoot).relative_to(root).as_posix()
+    return converted_card_metadata(
+        path, onboarding, sidecar.stdout if sidecar.returncode == 0 else None
+    )
 
 
 def _prepared_code_input(scope: MemoryScope) -> MemoryCensusCodeInput | None:

@@ -64,6 +64,11 @@ from agents_remember.application.knowledge_worklist.leaf import (
     worklist_path,
 )
 from agents_remember.application.knowledge_worklist.registry import ITEM_KINDS
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    run_git,
+)
 from agents_remember.kernel.recorded_reads import recorded_reads
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
@@ -77,7 +82,8 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
     knowledge_tree_from_git,
 )
 from agents_remember.memory_quality.knowledge_worklist_section import item_facts
-from agents_remember.models.knowledge_files.documents import history_path
+from agents_remember.models.knowledge_files.documents import history_path, owner_history_attempt
+from agents_remember.models.knowledge_files.history import is_closed_history, writable_attempt
 from agents_remember.worktrees.knowledge_gate import parent_memory_tip as contract_parent_memory_tip
 from agents_remember.worktrees.knowledge_validation import LayoutProbeError
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -369,7 +375,7 @@ def _item_findings(
     context = _candidate(trees, owner)
     if isinstance(context, GateFinding):
         return [context]
-    where = history_path(owner) if owner else "knowledge/history"
+    where = _writable_history(context, owner, trees) if owner else "knowledge/history"
     try:
         decided = _decided(items, context, where)
     except GitReadFailed as error:  # never decided on a read that did not happen (never memoised)
@@ -385,6 +391,44 @@ def _item_findings(
             )
         )
     return findings + decided
+
+
+def _writable_history(context: GateContext, owner: str, trees: GateTrees) -> str:
+    """The history file a row answering this leaf's items goes to, as the writer chooses it.
+
+    An attempt is frozen once it is closed in the comparison base (the parent line's memory tip,
+    which holds a reopened leaf's closed attempts), exactly as the writer reads its base; an attempt
+    only the candidate closes -- this closeout's own -- is still the one the rows go to. So the
+    message names a reopened leaf's latest attempt file, and a leaf never reopened its one file.
+    Without a comparison base, the candidate's own flags stand in.
+    """
+
+    closed = {
+        attempt: history.closed
+        if not trees.validation_bases
+        else _closed_in_bases(trees, history_path(owner, attempt))
+        for path, history in context.candidate.parsed.history_files.items()
+        if (attempt := owner_history_attempt(path, owner)) is not None
+    }
+    return history_path(owner, writable_attempt(closed))
+
+
+def _closed_in_bases(trees: GateTrees, path: str) -> bool:
+    """Whether a comparison base holds ``path`` as a closed history file (unreadable: not closed;
+    the answer only names a file in a message)."""
+
+    for base in trees.validation_bases:
+        try:
+            shown = run_git(
+                trees.memory_repository,
+                ["cat-file", "blob", f"{base}:{path}"],
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if shown.returncode == 0 and is_closed_history(shown.stdout.encode("utf-8")):
+            return True
+    return False
 
 
 def _decided(

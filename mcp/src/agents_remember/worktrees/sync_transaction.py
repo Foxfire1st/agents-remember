@@ -6,8 +6,14 @@ from pathlib import Path
 
 from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.worktree import SyncKnowledgeConflict, SyncSide
+from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, cutover_lock_refusal
 from agents_remember.worktrees.knowledge_conflict import RefusedKnowledgeStage
-from agents_remember.worktrees.knowledge_validation import PairedCode
+from agents_remember.worktrees.knowledge_crossing import CrossingSyncError, merge_base
+from agents_remember.worktrees.knowledge_validation import (
+    LayoutProbeError,
+    PairedCode,
+    has_layout_marker,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_authority import (
@@ -257,6 +263,48 @@ def _admit_and_run(
     return _run_automatic(contract, store, record, fetch)
 
 
+def _cutover_locked(
+    memory: SyncSideRecord | None, fetch: dict[str, object]
+) -> WorktreeCommandResult | None:
+    """MIK-R09 rule 6: a memory sync between unconverted sides waits for the crossing sync.
+
+    It refuses, before anything moves, only when no side (own, incoming and, for a merge, their
+    base) holds the layout marker and the repository holds converted memory elsewhere. A crossing
+    sync -- some side converted -- is never refused, and a code-only sync (``skip-memory``) is not
+    a memory sync.
+    """
+
+    if memory is None or memory.plan in {"already-current", "skip"}:
+        return None
+    repository = Path(memory.repository)
+    sides = [memory.preSyncHead, memory.sourceCommit]
+    try:
+        if memory.plan == "merge":
+            sides.append(merge_base(repository, *sides))  # a series side has no worktree yet
+        if any(has_layout_marker(repository, side) for side in sides):
+            return None
+    except (LayoutProbeError, CrossingSyncError) as error:
+        refusal: str | None = (
+            "worktree_sync refuses: it cannot tell whether a memory side holds the layout marker "
+            f"({error}), and an unanswered probe is never read as unconverted memory"
+        )
+    else:
+        refusal = cutover_lock_refusal(
+            repository,
+            operation="worktree_sync",
+            line=f"{memory.workBranch} ({memory.worktree})",
+        )
+    if refusal is None:
+        return None
+    return command_result(
+        2,
+        f"sync-{CUTOVER_LOCK_CODE}",
+        "The memory sync is refused: its memory is unconverted and must cross the boundary first.",
+        fetch,
+        detail=refusal,
+    )
+
+
 def _admit_participating_sides(
     contract: WorktreeContract,
     code: SyncSideRecord,
@@ -266,7 +314,9 @@ def _admit_participating_sides(
 ) -> tuple[SyncSideRecord, SyncSideRecord | None] | WorktreeCommandResult:
     """Refuse, preview, or park: everything that precedes the journaled admission."""
 
-    preflight = _preflight_participating_sides(code, memory, fetch)
+    preflight = _cutover_locked(memory, fetch) or _preflight_participating_sides(
+        code, memory, fetch
+    )
     if preflight is not None:
         return preflight
     if args.dry_run:

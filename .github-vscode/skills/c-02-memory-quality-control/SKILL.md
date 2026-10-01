@@ -114,6 +114,16 @@ undocumented historical files from flooding the report.
 
 ### 3. Understand Drift Classifications
 
+**On converted memory** (the tree holds the knowledge layout marker), the checks below that read the legacy card
+format report `not-applicable-converted`:
+- currentness comes from anchors instead: the `knowledge.converted` check runs the knowledge validator, and stale
+  sidecar references are reported, never failed;
+- every changed source file is answered through the onboarding gate (MIK-R30): a counted change of its card, or an
+  `onboarding_trace` row;
+- cards and their references are authored as the c-05 skill's converted-card workflow describes.
+
+The rest of this section describes unconverted memory.
+
 Primary drift detection supports sidecar Markdown onboarding under the resolved
 external-memory onboarding root. It classifies file-level onboarding, root repo overviews, route-local
 overviews, and repo entity catalogs when those artifacts carry supported
