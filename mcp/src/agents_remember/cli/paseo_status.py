@@ -1,13 +1,15 @@
 """What the Paseo runtime says about one role agent, and the execution status that follows.
 
 A refresh reads the agent once through the bridge (``agent-state``) and maps the answer through
-one ordered, first-match table (:data:`STATUS_TABLE`, PNT-R07 item 1). The read has no effect on
+one ordered, first-match table (:data:`STATUS_TABLE`: PNT-R07 item 1, followed by the two rows
+ruled for the states that table does not name). The read has no effect on
 the agent. Revive is the one call here that changes anything (``agent-resume``): it opens the
 closed session of the same agent and returns the same kind of answer.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -20,6 +22,8 @@ SUMMARY_LIMIT = 3000
 _TEXT_LIMIT = 800
 # The runtime's word for a live agent whose harness process is not running.
 _CLOSED = "closed"
+# How the last turn of an idle agent ended, in the bridge's words.
+_TURN_STATES = frozenset({"none", "replied", "unreplied"})
 # The receipt statuses of a launch whose turn was still open when the session closed.
 _TURN_OPEN_STATUSES = frozenset({"running", "starting"})
 
@@ -29,7 +33,8 @@ class AgentReading:
     """One answer of the runtime about one agent.
 
     ``reachable`` is false when there is no usable answer; ``unreachable_reason`` then says why.
-    ``lifecycle`` is the runtime's own status word. ``last_turn`` is known only for an idle agent
+    ``lifecycle`` is the runtime's own status word; ``attention`` its own mark on the agent
+    (``finished``, ``error``, ``permission``). ``last_turn`` is known only for an idle agent
     with an open session: ``none`` (no turn yet), ``replied`` (the turn ended with the agent's
     reply, ``final_text``) or ``unreplied`` (it ended without one, as a cancelled turn does).
     """
@@ -42,6 +47,7 @@ class AgentReading:
     pending_permission: str | None = None
     turn_active: bool = False
     error: str | None = None
+    attention: str | None = None
     last_turn: Literal["none", "replied", "unreplied"] | None = None
     final_text: str | None = None
 
@@ -49,13 +55,26 @@ class AgentReading:
     def session_closed(self) -> bool:
         return self.lifecycle == _CLOSED
 
+    @property
+    def last_turn_failed(self) -> bool:
+        """An agent that is not in the error state but whose last turn failed.
+
+        The runtime says so with its error text, or, when that text is gone (it does not outlive
+        a closed session), with its error mark on an agent whose last turn left no reply.
+        """
+
+        return self.error is not None or (
+            self.lifecycle == "idle" and self.attention == "error" and self.last_turn == "unreplied"
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class StatusRow:
     """What one row of the table says about the execution.
 
     ``None`` keeps what the receipt holds: its status, its detail, its ``canRevive`` flag. Only
-    row 10 carries a result summary, and only row 1 marks the host unreachable.
+    row 10 carries a result summary, and only row 1 marks the host unreachable. Rows 12 and 13
+    are not in the packet's table: they keep the status and say what the runtime reports.
     """
 
     number: int
@@ -78,7 +97,8 @@ class _Known:
 _Matches = Callable[[AgentReading, _Known], bool]
 _Outcome = Callable[[AgentReading, _Known], StatusRow]
 
-# PNT-R07 item 1, in table order. The first row whose condition holds decides.
+# PNT-R07 item 1, in table order, then the two ruled rows. The first row whose condition holds
+# decides; the last row holds for every reading, so one always does.
 STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
     (
         lambda reading, _known: not reading.reachable,
@@ -118,10 +138,8 @@ STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
         lambda _reading, _known: StatusRow(7, "running", "a turn is in progress", False),
     ),
     (
-        lambda reading, _known: reading.lifecycle == "error" or reading.error is not None,
-        lambda reading, _known: StatusRow(
-            8, "failed", reading.error or "the agent is in an error state", False
-        ),
+        lambda reading, _known: reading.lifecycle == "error" or reading.last_turn_failed,
+        lambda reading, _known: StatusRow(8, "failed", _failure_detail(reading), False),
     ),
     (
         lambda reading, _known: reading.lifecycle == "idle" and reading.last_turn == "unreplied",
@@ -143,23 +161,36 @@ STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
         lambda reading, _known: reading.lifecycle == "idle" and reading.last_turn == "none",
         lambda _reading, _known: StatusRow(11, "running", "started; no turn yet", False),
     ),
+    (
+        lambda reading, _known: reading.lifecycle == "initializing",
+        lambda _reading, _known: StatusRow(12, detail="the agent is starting", can_revive=False),
+    ),
+    (
+        lambda _reading, _known: True,
+        lambda reading, _known: StatusRow(
+            13, detail=f"unrecognised agent state: {reading.lifecycle}", can_revive=False
+        ),
+    ),
 )
+
+
+def _failure_detail(reading: AgentReading) -> str:
+    """Row 8's detail: the runtime's message, said to be of the last turn when the agent is idle."""
+
+    if reading.lifecycle == "error":
+        return reading.error or "the agent is in an error state"
+    return f"last turn failed: {reading.error}" if reading.error else "last turn failed"
 
 
 def status_row(
     reading: AgentReading, previous_status: str, resume_refusal: str | None = None
 ) -> StatusRow:
-    """The first row of the table that matches the reading.
-
-    A state the table does not name (the runtime's ``initializing``, or a word this build does not
-    know) is an answer that cannot be read; it is treated as row 1, like an unreachable host.
-    """
+    """The first row of the table that matches the reading."""
 
     known = _Known(previous_status, resume_refusal)
-    for matches, outcome in STATUS_TABLE:
-        if matches(reading, known):
-            return outcome(reading, known)
-    return StatusRow(1, host_unreachable=True)
+    return next(
+        outcome(reading, known) for matches, outcome in STATUS_TABLE if matches(reading, known)
+    )
 
 
 def read_agent(config: McpRuntimeConfig, agent_id: str) -> AgentReading:
@@ -236,16 +267,42 @@ def _reading(reply: dict[str, Any], agent_id: str) -> AgentReading:
     last_turn = agent.get("lastTurn")
     turn_state = last_turn.get("state") if isinstance(last_turn, dict) else None
     final_text = last_turn.get("text") if isinstance(last_turn, dict) else None
-    error = agent.get("lastError")
+    if turn_state not in _TURN_STATES and lifecycle == "idle" and not agent.get("archivedAt"):
+        # The bridge reads the last turn of every idle agent; without it the reply is incomplete.
+        return _no_answer("the bridge returned an idle agent without its last turn")
+    attention = agent.get("attentionReason")
     return AgentReading(
         archived=bool(agent.get("archivedAt")),
         lifecycle=lifecycle,
         pending_permission=_pending_permission(agent.get("pendingPermissions")),
         turn_active=agent.get("turnActive") is True,
-        error=error[:_TEXT_LIMIT] if isinstance(error, str) and error else None,
-        last_turn=turn_state if turn_state in {"none", "replied", "unreplied"} else None,
+        error=_error_message(agent.get("lastError")),
+        attention=attention if isinstance(attention, str) and attention else None,
+        last_turn=turn_state if turn_state in _TURN_STATES else None,
         final_text=final_text if isinstance(final_text, str) else None,
     )
+
+
+def _error_message(error: Any) -> str | None:
+    """The runtime's error text; of an error document with a message, that message.
+
+    A provider's refusal arrives as a JSON document such as
+    ``{"type": "error", "status": 400, "error": {"message": "…"}}``.
+    """
+
+    if not isinstance(error, str) or not error:
+        return None
+    try:
+        document = json.loads(error)
+    except ValueError:
+        document = None
+    if isinstance(document, dict):
+        inner = document.get("error")
+        for holder in (inner, document):
+            message = holder.get("message") if isinstance(holder, dict) else None
+            if isinstance(message, str) and message:
+                return message[:_TEXT_LIMIT]
+    return error[:_TEXT_LIMIT]
 
 
 def _pending_permission(pending: Any) -> str | None:

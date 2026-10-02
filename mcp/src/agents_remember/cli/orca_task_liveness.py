@@ -27,6 +27,18 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest
 
 _CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
+
+
+class HostUnreachableRefusal(HTTPException):
+    """A request refused because the runtime gave no usable answer for it.
+
+    The dispatch route answers it with ``hostUnreachable: true`` beside the detail.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=409, detail=detail)
+
+
 # The receipt fields a row may change; a refresh that changes none of them writes nothing.
 _ROW_FIELDS = ("status", "detail", "canRevive", "result", "resumeRefused")
 
@@ -51,6 +63,15 @@ def _reconcile_prior_execution(
         return JSONResponse(_refresh_execution(config, path, current))
     # The open-execution rule is applied to what the agent is doing now, not to the saved status.
     status = _refresh_execution(config, path, current)
+    if status.get("hostUnreachable") is True:
+        # The agent could not be read, so nobody knows whether the execution is open: its saved
+        # status may be stale, and a new launch would archive an agent that is at work.
+        raise HostUnreachableRefusal(
+            "The Paseo runtime cannot be reached, so the open-execution rule cannot be applied "
+            f"to this AR role selection (request {current.get('requestId')}, last known status "
+            f"{status['status']}); nothing was started or archived. "
+            f"{status['hostUnreachableReason']}"
+        )
     if status["status"] not in {"completed", "failed", "stopped", "rejected"}:
         raise HTTPException(
             status_code=409,
@@ -107,8 +128,7 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
         return {
             **_public_execution(receipt),
             "hostUnreachable": True,
-            "hostUnreachableReason": reading.unreachable_reason
-            or f"the host's answer matches no status row (agent status {reading.lifecycle!r})",
+            "hostUnreachableReason": reading.unreachable_reason,
         }
     before = {field: receipt.get(field) for field in _ROW_FIELDS}
     if row.status is not None:
@@ -146,7 +166,10 @@ def _revive_agent(
     reading = read_agent(config, agent_id)
     status = _apply_reading(path, receipt, reading)
     if status.get("hostUnreachable") is True:
-        return _revive_without_host(status["hostUnreachableReason"])
+        raise HostUnreachableRefusal(
+            "The Paseo runtime cannot be reached, so the agent was not revived and the "
+            f"execution is unchanged. {status['hostUnreachableReason']}"
+        )
     if status["canRevive"] is not True:
         if reading.found and not reading.archived and not reading.session_closed:
             return JSONResponse(status)
@@ -156,7 +179,12 @@ def _revive_agent(
         )
     outcome = resume_agent(config, agent_id)
     if not outcome.reading.reachable:
-        return _revive_without_host(str(outcome.reading.unreachable_reason))
+        # The read above was answered and its row is written; whether the runtime resumed the
+        # session is not known.
+        raise HostUnreachableRefusal(
+            "The agent's state was read, but the resume was not confirmed; refresh to see the "
+            f"agent's state. {outcome.reading.unreachable_reason}"
+        )
     if outcome.refusal is not None:
         # The runtime cannot resume this agent. A new agent comes only from a new Start.
         now = _now_iso()
@@ -174,18 +202,3 @@ def _revive_agent(
         receipt["revivedAt"] = _now_iso()
         _write_receipt(path, receipt)
     return JSONResponse(_apply_reading(path, receipt, outcome.reading))
-
-
-def _revive_without_host(reason: str) -> JSONResponse:
-    """Refuse a revive the runtime could not be asked for; the receipt is left as it was."""
-
-    return JSONResponse(
-        {
-            "detail": (
-                "The Paseo runtime cannot be reached, so the agent was not revived and the "
-                f"execution is unchanged. {reason}"
-            ),
-            "hostUnreachable": True,
-        },
-        status_code=409,
-    )

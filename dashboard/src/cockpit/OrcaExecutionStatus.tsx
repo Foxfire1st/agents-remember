@@ -4,6 +4,8 @@
 import type { OrcaScopedExecution } from "./orcaLaunchModel";
 
 export const HOST_UNREACHABLE_LINE = "host unreachable; showing the last known status";
+// The reason of a daemon that does not answer; every other reason is shown beside the line.
+const DAEMON_DOWN_REASON = "paseo_daemon_unreachable";
 
 export function OrcaExecutionStatus({
   execution,
@@ -14,6 +16,7 @@ export function OrcaExecutionStatus({
 }) {
   const summary = execution.result?.summary;
   const report = execution.report;
+  const reason = execution.hostUnreachableReason;
   return (
     <>
       <div className={className} role="status" data-status={execution.status.toLowerCase()} data-testid="orca-execution-status">
@@ -21,8 +24,9 @@ export function OrcaExecutionStatus({
         {execution.detail ? " · " + execution.detail : ""}
       </div>
       {execution.hostUnreachable ? (
-        <div className={className} role="status" data-testid="orca-host-unreachable" title={execution.hostUnreachableReason} style={{ color: "var(--alarm)" }}>
+        <div className={className} role="status" data-testid="orca-host-unreachable" title={reason} style={{ color: "var(--alarm)" }}>
           {HOST_UNREACHABLE_LINE}
+          {reason && !reason.startsWith(DAEMON_DOWN_REASON) ? " (" + reason + ")" : ""}
         </div>
       ) : null}
       {summary ? (

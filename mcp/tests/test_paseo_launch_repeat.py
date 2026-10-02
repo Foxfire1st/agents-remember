@@ -102,7 +102,10 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 self.assertEqual(self.compilations, compiled, "a repeat is not compiled again")
                 created = [call[1] for call in self.runtime.calls if call[0] == "agent-create"]
                 if state == "running":
-                    self.assertEqual(self.runtime.calls, [])
+                    # A launch that is resolved is not repeated; its agent is read once.
+                    self.assertEqual(
+                        self.runtime.calls, [("agent-state", {"agentId": saved["agentId"]})]
+                    )
                 else:
                     # The stored call runs again unchanged: the same agent id, the first message
                     # as saved with its artifact line, the saved recovery note and tool server.
@@ -185,8 +188,8 @@ class ReplacedExecutionTests(RepeatTestCase):
             )
         with self.subTest("an agent still to be archived survives a receipt moved to the history"):
             # A launch that lost against this closed receipt moved it; it never ran a call itself.
-            rejected = self.close_execution(third, "rejected")
-            rejected.update(execution={}, pendingArchiveAgentId=old_agent)
+            rejected = self.receipt(third)
+            rejected.update(status="rejected", execution={}, pendingArchiveAgentId=old_agent)
             orca_task_receipts._write_receipt(path, rejected)
             orca_task_receipts._archive_receipt(path, rejected)
             self.runtime.agents[old_agent]["archivedAt"] = None

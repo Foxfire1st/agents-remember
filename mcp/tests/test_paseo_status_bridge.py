@@ -111,6 +111,7 @@ def state(status: str, **fields: Any) -> dict[str, Any]:
         "turnActive": False,
         "pendingPermissions": [],
         "lastError": None,
+        "attentionReason": None,
         "lastTurn": None,
         **fields,
     }
@@ -212,10 +213,17 @@ class AgentStateScriptTests(unittest.TestCase):
                 ),
             ),
             "an error state": (
-                agent("error", lastError="The model is not supported."),
-                state("error", lastError="The model is not supported."),
+                agent("error", lastError="The model is not supported.", attentionReason="error"),
+                state("error", lastError="The model is not supported.", attentionReason="error"),
+            ),
+            # The runtime's error mark outlives a closed session; its error text does not.
+            "a closed session that keeps the error mark": (
+                agent("closed", attentionReason="error"),
+                state("closed", attentionReason="error"),
             ),
             "a session that is starting": (agent("initializing"), state("initializing")),
+            # The runtime's word is passed through as it is, also one this build does not know.
+            "a state with an unknown word": (agent("hibernating"), state("hibernating")),
         }
         for label, (held, expected) in snapshots.items():
             with self.subTest(label):
@@ -255,6 +263,11 @@ class AgentStateScriptTests(unittest.TestCase):
                 {"state": "unreplied"},
             ),
             "a message without any answer": (ran, [user("go")], {"state": "unreplied"}),
+            "a failed turn after a resume: the error mark and no reply": (
+                {**ran, "attentionReason": "error"},
+                [user("go")],
+                {"state": "unreplied"},
+            ),
             "a turn the timeline no longer shows": (ran, [], {"state": "unreplied"}),
             "a long reply is cut to 3,000 characters": (
                 ran,
@@ -265,7 +278,10 @@ class AgentStateScriptTests(unittest.TestCase):
         for label, (held, timeline, expected) in endings.items():
             with self.subTest(label):
                 answer = self.call("agent-state", holds=held, timeline=timeline)
-                self.assertEqual(answer["agent"], state("idle", lastTurn=expected))
+                mark = held.get("attentionReason")
+                self.assertEqual(
+                    answer["agent"], state("idle", lastTurn=expected, attentionReason=mark)
+                )
                 self.assertEqual(
                     self.recorded(),
                     [READ, {"via": "timeline.refetch", "id": AGENT_ID, "options": TAIL}],
