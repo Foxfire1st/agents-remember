@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -331,6 +332,84 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertEqual(outcome, {"ok": True})
         self.assertLess(time.monotonic() - began, 4)
         os.kill(int((self.root / "left-running.pid").read_text(encoding="utf-8")), signal.SIGKILL)
+
+    def test_a_child_that_ends_without_reading_its_request_is_answered_from_its_reply(
+        self,
+    ) -> None:
+        # More than a pipe holds, so the request cannot be written to a child that reads nothing.
+        identity = TaskIdentity(
+            repo_id="sandbox-app",
+            task_name="sbx-text-helpers",
+            worktree_name="w" * 300_000,
+            leaf_id="SBX-M1-L1",
+            parent_task="sbx-sprint",
+        )
+        early = (
+            'printf \'{"ok": false, "error": {"code": "ended-early", "message": "read nothing"}}\'\n'
+            "echo 'the settings file is gone' >&2\nexit 1"
+        )
+        with self.stand_in(early):
+            outcome = leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, identity)
+
+        self.assertEqual(outcome["state"], "ended-early")
+        self.assertIn("(ended-early): read nothing", outcome["summary"])
+        self.assertIn("The child process said: the settings file is gone", outcome["summary"])
+
+    def test_a_terminal_read_below_the_child_fails_at_once_instead_of_stopping_it(self) -> None:
+        # The backend was started from a terminal: the child is a background process group of
+        # that terminal's session, and something below it asks the terminal for a credential.
+        child = (
+            "import subprocess, sys\n"
+            "from unittest.mock import patch\n"
+            "from agents_remember.cli import leaf_enclosure_start as command\n"
+            "def load(path):\n"
+            "    asked = subprocess.run(['sh', '-c', 'read line < /dev/tty'], check=False)\n"
+            "    raise RuntimeError(f'the terminal read ended with status {asked.returncode}')\n"
+            "with (\n"
+            "    patch.object(command, 'declare_process_role'),\n"
+            "    patch.object(command, 'bind_worktree_services'),\n"
+            "    patch.object(command, 'load_config', load),\n"
+            "):\n"
+            "    raise SystemExit(command.main(['--config', '/sandbox/settings.json']))\n"
+        )
+        backend = (
+            "import fcntl, json, os, subprocess, sys, termios, time\n"
+            "from agents_remember.cli import leaf_enclosure_start as command\n"
+            "_leader, terminal = os.openpty()\n"
+            "fcntl.ioctl(terminal, termios.TIOCSCTTY, 0)\n"
+            "command.START_TIMEOUT_SECONDS = 120\n"
+            "began = time.monotonic()\n"
+            "try:\n"
+            "    done = command._run_child([sys.executable, '-c', sys.argv[1]], json.loads(sys.argv[2]))\n"
+            "    answer = {'status': done.returncode, 'reply': json.loads(done.stdout)}\n"
+            "except subprocess.TimeoutExpired:\n"
+            "    answer = {'cutOff': True}\n"
+            "print(json.dumps({**answer, 'seconds': time.monotonic() - began}))\n"
+        )
+        request = json.dumps(request_of(self.config))
+        # The child's limit lies far above the time a fresh interpreter needs to start on a
+        # loaded machine (21 seconds were measured at a load average of 45 with eight copies of
+        # this module at once): a child that is stopped by its terminal read runs into the
+        # limit, one whose read fails answers long before it.
+        # A session of its own, so that the pseudo-terminal becomes its controlling terminal.
+        completed = subprocess.run(
+            [sys.executable, "-c", backend, child, request],
+            capture_output=True,
+            text=True,
+            check=False,
+            start_new_session=True,
+            timeout=300,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        answer = json.loads(completed.stdout)
+        self.assertNotIn("cutOff", answer, "the child was stopped by its terminal read")
+        self.assertEqual(answer["status"], 1)
+        self.assertEqual(answer["reply"]["error"]["code"], "RuntimeError")
+        self.assertRegex(
+            answer["reply"]["error"]["message"], r"^the terminal read ended with status [1-9]"
+        )
+        self.assertLess(answer["seconds"], 60)
 
     def test_output_that_is_not_utf_8_is_a_refusal_with_the_child_s_last_words(self) -> None:
         garbled = "printf '\\377\\376{'\nprintf 'caf\\351: out of memory' >&2\nexit 1"

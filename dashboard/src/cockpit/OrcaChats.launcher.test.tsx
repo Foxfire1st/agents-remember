@@ -109,6 +109,37 @@ describe("launcher bar and the host catalog", () => {
     await waitFor(() => expect(queryByRole("alert")).toBeNull());
     expect((getByRole("button", { name: "Start Orca" }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("shows a launch in progress as such, not as an error, and reads again", async () => {
+    // The backend's launch lock is held by a launch: the options route marks its refusal.
+    optionsReplies = [
+      { status: 409, body: { detail: "An AR-to-Orca launch or result check is already in progress.", launchInProgress: true } },
+      optionsReply({ agent: "codex", model: null, effort: null, available: true }),
+    ];
+    const { getByRole, findByTestId, queryByRole, queryByTestId } = renderLauncher();
+
+    const line = await findByTestId("orca-launch-in-progress");
+    expect(line.getAttribute("role")).toBe("status");
+    expect(line.textContent).toBe("A launch is in progress in this dashboard; this is read again when it has answered.");
+    expect(queryByRole("alert")).toBeNull();
+    expect(optionsRequests).toEqual([{ role: "architect" }]);
+    expect((getByRole("button", { name: "Start Orca" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // No click: the launcher reads again by itself, and the line goes when the read succeeds.
+    await waitFor(() => expect(optionsRequests.length).toBe(2), { timeout: 4000 });
+    await waitFor(() => expect(queryByTestId("orca-launch-in-progress")).toBeNull());
+    expect(queryByRole("alert")).toBeNull();
+    expect((getByRole("button", { name: "Start Orca" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps showing another refusal of the options route as an error", async () => {
+    optionsReplies = [{ status: 409, body: { detail: "The selected Projects repository is not admitted by MCP settings." } }];
+    const { findByRole, queryByTestId } = renderLauncher();
+
+    expect((await findByRole("alert")).textContent).toContain("(HTTP 409): The selected Projects repository is not admitted");
+    expect(queryByTestId("orca-launch-in-progress")).toBeNull();
+    expect(optionsRequests.length).toBe(1);
+  });
 });
 
 describe("launchChoiceProblem", () => {

@@ -80,6 +80,8 @@ SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
 _CANDIDATE_LIMIT = 24
 # Receipt statuses of an execution that has no live agent to ask about.
 _NO_AGENT_STATUSES = frozenset({"stopped", "rejected"})
+# The receipt statuses of a start that has not answered yet, or answered without a result.
+_UNFINISHED_START_STATUSES = frozenset({"starting", "unknown"})
 _PROJECTS = "Projects"
 
 # Who may start what (PNT-R06 item 4); a role that is not listed may start none.
@@ -385,8 +387,8 @@ def _started(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> dict[str
     artifact = receipt.get("handoverArtifact")
     next_action = {
         "running": None,
-        "rejected": "No agent exists under agentId. Resolve the reason in detail, then start "
-        "again with a new request id.",
+        "rejected": "The launch is closed and agentId names no agent that can be used. Resolve "
+        "the reason in detail, then start again with a new request id.",
         "unknown": f"Call {ROLE_START_TOOL} again with the same request id and selection: it "
         "reconciles the same agent and never creates a second.",
     }[launch]
@@ -464,10 +466,23 @@ def _resolve_recipient(
             "both and not neither. No other argument names a recipient."
         )
     recipient = (
-        _recipient_by_selection(config, call) if by_selection else _recipient_by_id(config, call)
+        _recipient_by_selection(config, call, binding.agent_id)
+        if by_selection
+        else _recipient_by_id(config, call)
     )
     if recipient.agent_id == binding.agent_id:
         raise _not_found("The recipient this resolves to is the calling agent itself.")
+    if recipient.receipt.get("status") in _UNFINISHED_START_STATUSES:
+        # Until its start has answered, an agent may not have its first message; a message
+        # that reaches it first would take that message's place.
+        raise _Refused(
+            "recipient-busy",
+            f"Agent {recipient.agent_id} is not ready for a message: its start has not finished "
+            f"(execution status {recipient.receipt.get('status')}).",
+            "Send the message again once the start of that agent has answered running. A start "
+            f"that answered unknown is repeated with {ROLE_START_TOOL} by the agent that made it.",
+            recipientAgentId=recipient.agent_id,
+        )
     return recipient
 
 
@@ -546,14 +561,17 @@ def _readable_receipt(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _recipient_by_selection(config: McpRuntimeConfig, call: RoleMessageCall) -> _Recipient:
+def _recipient_by_selection(
+    config: McpRuntimeConfig, call: RoleMessageCall, caller_id: str
+) -> _Recipient:
     """The live agent of the selection's executions; several live agents are never chosen among.
 
     A task-bound selection has one current execution; its agent is the recipient when it is live,
     and otherwise the most recent earlier execution whose agent is live. A taskless role can have
     several live agents; then the recipient is ambiguous. Of a taskless role every execution that
     is not already stopped or rejected is asked about; when there are more of those than are
-    asked about, the address is ambiguous as well.
+    asked about, the address is ambiguous as well. The caller's own execution is no candidate:
+    a role address means another agent of that role.
     """
 
     try:
@@ -571,6 +589,8 @@ def _recipient_by_selection(config: McpRuntimeConfig, call: RoleMessageCall) -> 
         detail = error.detail if isinstance(error, HTTPException) else error
         raise _not_found(f"The recipient selection cannot be resolved: {detail}") from error
     taskless = selection.role in TASKLESS_ROLES
+    own = [r for r in receipts if r.get("agentId") == caller_id]
+    receipts = [r for r in receipts if r.get("agentId") != caller_id]
     if taskless:
         # An execution already stopped or rejected has no live agent to ask about.
         receipts = [r for r in receipts if r.get("status") not in _NO_AGENT_STATUSES]
@@ -595,7 +615,8 @@ def _recipient_by_selection(config: McpRuntimeConfig, call: RoleMessageCall) -> 
         return live[0]
     if archived is not None:
         raise _archived(archived)
-    raise _not_found(f"No live {selection.role} agent is recorded for this selection.")
+    other = " other than the calling agent" if own else ""
+    raise _not_found(f"No live {selection.role} agent{other} is recorded for this selection.")
 
 
 def _live_agents(
@@ -662,7 +683,11 @@ def _deliver(
     if delivery.get("refused") == "closed":
         _resume(config, recipient)
         resumed = True
-        delivery = _send(config, payload)
+        # A session that was just opened starts its tool servers anew: the send waits for them,
+        # as a launch does before the first message, when the recipient was given a tool server.
+        tool_server = recipient.receipt.get("toolServer")
+        waits = isinstance(tool_server, dict) and tool_server.get("applied") is True
+        delivery = _send(config, {**payload, "afterResume": True} if waits else payload)
     if delivery.get("delivered") is not True:
         raise _undelivered(recipient.agent_id, delivery)
     taken = delivery.get("taken")
@@ -705,7 +730,7 @@ def _deliver(
     }
 
 
-def _send(config: McpRuntimeConfig, payload: dict[str, str]) -> dict[str, Any]:
+def _send(config: McpRuntimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
     """One delivery attempt; a turn that changed under the send is tried once more."""
 
     for attempt in (1, 2):

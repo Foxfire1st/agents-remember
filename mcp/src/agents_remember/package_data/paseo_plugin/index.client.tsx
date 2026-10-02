@@ -22,7 +22,8 @@ import { arEmbedList } from "./shared/rpc";
 //   client/look.ts    stored settings and chrome: theme, fonts, sidebar, header row; who wrote them
 //   client/load.ts    once per page load: first-visit repair, the one reload, which look runs
 //   client/bridge.ts  the control channel with the dashboard and who the parent page is
-//   client/start.ts   the decision: which parent is trusted and what follows (nothing unsupported)
+//   client/start.ts   the decision: which parent is trusted and what follows (it reads the
+//                     page's origin and nothing else)
 //
 // The AR look and the control channel apply only inside a frame whose parent origin the embed
 // list pairs with this page's origin. Anywhere else the plugin changes nothing, except that it

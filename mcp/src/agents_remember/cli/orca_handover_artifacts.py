@@ -68,15 +68,27 @@ def first_message(reference: dict[str, Any], content: str) -> str:
     return f"{artifact_line(reference)}\n{content}"
 
 
-def restore_handover_artifact(reference: dict[str, Any], message: str) -> None:
+def restore_handover_artifact(reference: dict[str, Any], message: str, *, receipt: Path) -> None:
     """Before a saved first message is sent again, make sure its artifact still holds it.
 
     A missing artifact is written again from the saved message; one whose content differs is
     refused. The file is the one the reference's own ``path`` leads to, and no other. Each
     refusal says what has to be put right before the same request is retried: a retry is the
-    only way on for a request that has its receipt.
+    only way on for a request that has its receipt. ``receipt`` is the file the reference was
+    read from; a reference that lacks one of its parts is refused by that name.
     """
 
+    missing = [
+        key
+        for key in ("path", "canonicalPath", "sha256")
+        if not isinstance(reference.get(key), str) or not reference[key]
+    ]
+    if missing:
+        raise ValueError(
+            f"The receipt {receipt} records the handover artifact of this request without its "
+            f"{', '.join(missing)}, so the saved first message cannot be checked against its "
+            "file and nothing was sent. Put the reference back as the launch wrote it and retry."
+        )
     line, separator, content = message.partition("\n")
     body = content.encode("utf-8")
     if (
@@ -85,11 +97,16 @@ def restore_handover_artifact(reference: dict[str, Any], message: str) -> None:
         or hashlib.sha256(body).hexdigest() != reference["sha256"]
     ):
         raise ValueError("The saved first message does not match its handover artifact reference.")
-    canonical = _canonical(Path(reference["path"]))
+    given = Path(reference["path"])
+    canonical = _canonical(given)
     if canonical.as_posix() != reference["canonicalPath"]:
+        # Where nothing links the given path to another place, it leads to itself.
+        leads = (
+            "no longer leads to that file" if canonical == given else f"now leads to {canonical}"
+        )
         raise ValueError(
             f"The handover artifact of this request is recorded at {reference['canonicalPath']}, "
-            f"but the path the agent was given, {reference['path']}, now leads to {canonical}. "
+            f"but the path the agent was given, {reference['path']}, {leads}. "
             "Put back what that path ran through (for a leaf role, the report-access link of its "
             "enclosure) and retry."
         )

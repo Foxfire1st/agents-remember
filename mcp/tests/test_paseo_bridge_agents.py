@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from agents_remember.cli import paseo_bridge
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -23,6 +25,20 @@ SERVER_ID = "srv_configured"
 AGENT_ID = "f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607"
 OTHER_AGENT_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 MISSING_AGENT_ID = "9f8e7d6c-5b4a-4c3d-9e2f-1a0b9c8d7e6f"
+# The time the script gives an agent's tool servers before the first message, read from the
+# script: the fake client records the beginning and the end of a wait of exactly this length and
+# ends it at once. What the script does before the wait has ended is recorded between the two.
+TOOL_SERVER_START_MS = int(
+    re.findall(
+        r"^const TOOL_SERVER_START_MS = (\d+)$",
+        Path(paseo_bridge.__file__).with_name("paseo_bridge.mjs").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )[0]
+)
+WAITED = [
+    {"via": "wait", "ms": TOOL_SERVER_START_MS},
+    {"via": "wait-ended", "ms": TOOL_SERVER_START_MS},
+]
 
 FAKE_DAEMON_CLIENT = """
 import { createHash } from 'node:crypto'
@@ -32,20 +48,29 @@ export const agents = new Map(Object.entries(scenario.agents ?? {}))
 export function record(call) {
   appendFileSync(process.env.FAKE_PASEO_RECORD, JSON.stringify(call) + '\\n')
 }
-// One creation, through the public client ('public') or the daemon client ('daemon'). The first
-// message is recorded by size and digest only.
+// A wait of the length the scenario names is recorded when it begins and when it ends, and ends
+// at once; every other timer runs.
+const realSetTimeout = globalThis.setTimeout
+globalThis.setTimeout = (callback, ms, ...rest) => {
+  if (ms !== scenario.endsWaitsOf) return realSetTimeout(callback, ms, ...rest)
+  record({ via: 'wait', ms })
+  return realSetTimeout(() => {
+    record({ via: 'wait-ended', ms })
+    callback(...rest)
+  }, 0)
+}
+// A message is recorded by size and digest only.
+export function measured(message) {
+  return message === undefined ? null : {
+    bytes: Buffer.byteLength(message),
+    sha256: createHash('sha256').update(message).digest('hex')
+  }
+}
+// One creation, through the public client ('public') or the daemon client ('daemon'), with the
+// message it carried, if it carried one.
 export function create(via, options, workspaceId, cwd) {
   const { prompt, initialPrompt, ...rest } = options
-  const message = prompt ?? initialPrompt
-  record({
-    via,
-    workspaceId,
-    options: rest,
-    prompt: message === undefined ? null : {
-      bytes: Buffer.byteLength(message),
-      sha256: createHash('sha256').update(message).digest('hex')
-    }
-  })
+  record({ via, workspaceId, options: rest, prompt: measured(prompt ?? initialPrompt) })
   const [provider, model] = String(options.config.provider).split('/')
   const agent = {
     id: scenario.createdId ?? options.agentId,
@@ -57,9 +82,10 @@ export function create(via, options, workspaceId, cwd) {
     labels: options.labels,
     workspaceId,
     cwd,
-    status: 'running',
+    status: 'idle',
     archivedAt: null,
     createdAt: '2026-10-02T00:00:00.000Z',
+    lastUserMessageAt: null,
     persistence: { internal: true }
   }
   if (scenario.createError && !scenario.agentExistsAfterError) throw new Error(scenario.createError)
@@ -81,7 +107,7 @@ export class DaemonClient {
 }
 """
 FAKE_CLIENT_ROOT = """
-import { agents, create, record, scenario } from './daemon-client.js'
+import { agents, create, measured, record, scenario } from './daemon-client.js'
 export function createPaseoApi(daemon) {
   return {
     dispose: async () => {},
@@ -135,6 +161,18 @@ export function createPaseoApi(daemon) {
           const agent = agents.get(scenario.resolves?.[id] ?? id)
           if (!agent) throw new Error(`Agent not found: ${id}`)
           return { agent, project: null }
+        },
+        send: async (message, options) => {
+          record({ via: 'send', id, options, message: measured(message) })
+          if (scenario.sendError) throw new Error(scenario.sendError)
+        },
+        timeline: {
+          // Reading the timeline of a closed session is the runtime's resume.
+          refetch: async (options) => {
+            record({ via: 'timeline.refetch', id, options })
+            if (scenario.resumeError) throw new Error(scenario.resumeError)
+            return { entries: [], hasOlder: false }
+          }
         },
         archive: async () => {
           record({ via: 'archive', id })
@@ -200,7 +238,11 @@ class AgentCommandScriptTests(unittest.TestCase):
 
     def call(self, command: str, payload: dict[str, Any], **scenario: Any) -> dict[str, Any]:
         scenario_path = self.root / "scenario.json"
-        base = {"url": "ws://127.0.0.1:6835/ws", "serverId": SERVER_ID}
+        base = {
+            "url": "ws://127.0.0.1:6835/ws",
+            "serverId": SERVER_ID,
+            "endsWaitsOf": TOOL_SERVER_START_MS,
+        }
         scenario_path.write_text(json.dumps({**base, **scenario}), encoding="utf-8")
         (self.root / "record.jsonl").write_text("", encoding="utf-8")
         environment = {
@@ -283,7 +325,7 @@ class AgentCommandScriptTests(unittest.TestCase):
             "labels": labels,
             "workspaceId": "wks_fake",
             "cwd": "/work/folder",
-            "status": "running",
+            "status": "idle",
             "archivedAt": None,
             "createdAt": "2026-10-02T00:00:00.000Z",
         }
@@ -291,7 +333,7 @@ class AgentCommandScriptTests(unittest.TestCase):
         with self.subTest("a model: the public client, with the provider's default mode"):
             reply = self.call("agent-create", payload)
             self.assertEqual(reply, {"serverId": SERVER_ID, "existing": False, "agent": agent})
-            (creation,) = self.recorded()
+            creation, *afterwards = self.recorded()
             self.assertEqual(
                 creation["options"],
                 {
@@ -302,7 +344,9 @@ class AgentCommandScriptTests(unittest.TestCase):
                 },
             )
             self.assertEqual((creation["via"], creation["workspaceId"]), ("public", "wks_fake"))
-            self.assertEqual(creation["prompt"]["bytes"], len(b"first message"))
+            # The creation carries no message; the first message follows it as a message.
+            self.assertIsNone(creation["prompt"])
+            self.assertEqual([row["via"] for row in afterwards], ["wait", "wait-ended", "send"])
         with self.subTest("no model: the daemon client, and the runtime's own defaults"):
             modelless = {key: value for key, value in payload.items() if key != "model"}
             del modelless["thinkingOptionId"], modelless["prompt"]
@@ -327,21 +371,23 @@ class AgentCommandScriptTests(unittest.TestCase):
                 },
             )
             self.assertEqual((creation["via"], creation["prompt"]), ("daemon", None))
-        stored = {**agent, "status": "idle", "internal": "not passed on"}
+        stored = {**agent, "internal": "not passed on"}
         with self.subTest("an agent that already has the id is returned and nothing is created"):
             reply = self.call("agent-create", payload, agents={AGENT_ID: stored})
+            self.assertEqual(reply, {"serverId": SERVER_ID, "existing": True, "agent": agent})
             self.assertEqual(
-                reply,
-                {"serverId": SERVER_ID, "existing": True, "agent": {**agent, "status": "idle"}},
+                [row["via"] for row in self.recorded()], ["wait", "wait-ended", "send"]
             )
-            self.assertEqual(self.recorded(), [])
         with self.subTest("an error although the agent exists afterwards"):
             reply = self.call(
-                "agent-create", payload, createError="prompt refused", agentExistsAfterError=True
+                "agent-create", payload, createError="record lost", agentExistsAfterError=True
             )
             self.assertEqual(
                 (reply["existing"], reply["agent"]["id"], reply["creationError"]),
-                (True, AGENT_ID, "prompt refused"),
+                (True, AGENT_ID, "record lost"),
+            )
+            self.assertEqual(
+                [row["via"] for row in self.recorded()], ["public", "wait", "wait-ended", "send"]
             )
         refused: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {
             "the runtime refuses and no agent exists": (
@@ -401,6 +447,137 @@ class AgentCommandScriptTests(unittest.TestCase):
             str(self.failure("agent-create", payload, createError="Provider x is not configured")),
             "Provider x is not configured",
         )
+
+    def test_the_first_message_follows_the_creation_and_goes_to_an_agent_that_has_none(
+        self,
+    ) -> None:
+        servers = {
+            "agents-remember-task": {
+                "type": "stdio",
+                "command": "/build/.venv/bin/python",
+                "args": ["-m", "agents_remember.mcp"],
+                "env": {"AR_ROLE": "worker"},
+            }
+        }
+        payload: dict[str, Any] = {
+            "agentId": AGENT_ID,
+            "idempotencyKey": "ar-role-launch:request-1",
+            "workspaceId": "wks_fake",
+            "provider": "codex",
+            "model": "gpt-a",
+            "title": "Worker · 01_LEAF",
+            "labels": {},
+            "prompt": "first message",
+            "mcpServers": servers,
+        }
+        # The message id is the same on every run of the call: the runtime delivers a message id
+        # once, also to two calls that run at the same time. The steer behaviour keeps the
+        # runtime from cancelling a turn that runs by then.
+        sent = {
+            "via": "send",
+            "id": AGENT_ID,
+            "options": {
+                "messageId": "ar-role-launch:request-1:first-message",
+                "activeTurnBehavior": "steer",
+            },
+            "message": {
+                "bytes": len(b"first message"),
+                "sha256": hashlib.sha256(b"first message").hexdigest(),
+            },
+        }
+        resumed = {
+            "via": "timeline.refetch",
+            "id": AGENT_ID,
+            "options": {"direction": "tail", "limit": 1},
+        }
+        self.assertEqual(TOOL_SERVER_START_MS, 6000)
+        with self.subTest("a new agent with tool servers: created, given the time, then sent to"):
+            self.call("agent-create", payload)
+            creation, *afterwards = self.recorded()
+            self.assertEqual((creation["via"], creation["prompt"]), ("public", None))
+            self.assertEqual(afterwards, [*WAITED, sent])
+        with self.subTest("the same through the daemon client"):
+            modelless = {key: value for key, value in payload.items() if key != "model"}
+            self.call("agent-create", modelless)
+            creation, *afterwards = self.recorded()
+            self.assertEqual((creation["via"], creation["prompt"]), ("daemon", None))
+            self.assertEqual(afterwards, [*WAITED, sent])
+        with self.subTest("an agent without tool servers is sent to at once"):
+            for without in ({}, {"mcpServers": {}}):
+                bare = {key: value for key, value in payload.items() if key != "mcpServers"}
+                self.call("agent-create", {**bare, **without})
+                self.assertEqual(self.recorded()[1:], [sent])
+        with self.subTest("no first message: the agent is left idle"):
+            idle = {key: value for key, value in payload.items() if key != "prompt"}
+            self.call("agent-create", idle)
+            self.assertEqual([row["via"] for row in self.recorded()], ["public"])
+        live = {"id": AGENT_ID, "provider": "codex", "status": "idle", "archivedAt": None}
+        messaged = {"lastUserMessageAt": "2026-10-02T00:00:05.000Z"}
+        repeats: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {
+            # The call that created it ended before it sent the message.
+            "an agent that never had a message": (live, [*WAITED, sent]),
+            "the same with its session closed: opened first": (
+                {**live, "status": "closed"},
+                [resumed, *WAITED, sent],
+            ),
+            # An agent that has had a message has its first message: nothing is sent, waited
+            # for or opened.
+            "an agent that has a message": ({**live, **messaged}, []),
+            "the same with its session closed": ({**live, **messaged, "status": "closed"}, []),
+            "the same mid-turn": ({**live, **messaged, "status": "running"}, []),
+            # Sending to an archived agent would make the runtime un-archive it.
+            "an archived agent": ({**live, "archivedAt": "2026-10-02T01:00:00.000Z"}, []),
+        }
+        for label, (held, expected) in repeats.items():
+            with self.subTest(f"a repeat finds {label}"):
+                reply = self.call("agent-create", payload, agents={AGENT_ID: held})
+                self.assertEqual((reply["existing"], reply["agent"]["id"]), (True, AGENT_ID))
+                self.assertEqual(self.recorded(), expected)
+        with self.subTest("the runtime does not take the message: a repeat can send it"):
+            failure = self.failure(
+                "agent-create", payload, sendError="agent_request_outcome_unknown"
+            )
+            self.assertEqual(
+                (failure.code, str(failure)),
+                (
+                    "paseo_first_message_undelivered",
+                    f"Agent {AGENT_ID} exists in the Paseo runtime, but its first message was "
+                    "not delivered (agent_request_outcome_unknown). Repeat the request to send "
+                    "it.",
+                ),
+            )
+        with self.subTest("a closed session that cannot be opened: no repeat can send it"):
+            # A harness can keep nothing of a session that never ran a turn.
+            failure = self.failure(
+                "agent-create",
+                payload,
+                agents={AGENT_ID: {**live, "status": "closed"}},
+                resumeError="no rollout found for thread id 0199",
+            )
+            self.assertEqual(
+                (failure.code, str(failure)),
+                (
+                    "paseo_agent_without_message_lost",
+                    f"Agent {AGENT_ID} exists in the Paseo runtime without its first message, "
+                    "and its closed session cannot be opened again (no rollout found for "
+                    "thread id 0199).",
+                ),
+            )
+            # Nothing was waited for and nothing was sent.
+            self.assertEqual(self.recorded(), [resumed])
+            lost = self.failure(
+                "agent-create",
+                payload,
+                agents={AGENT_ID: {**live, "status": "closed"}},
+                resumeError="socket closed",
+                connectionLost=True,
+            )
+            self.assertEqual(lost.code, "paseo_daemon_unreachable")
+        with self.subTest("the connection is lost while the message is sent"):
+            failure = self.failure(
+                "agent-create", payload, sendError="socket closed", connectionLost=True
+            )
+            self.assertEqual(failure.code, "paseo_daemon_unreachable")
 
     def test_agent_get_and_archive_address_exactly_one_agent(self) -> None:
         live = {"id": AGENT_ID, "provider": "codex", "status": "idle", "archivedAt": None}
@@ -496,9 +673,9 @@ class AgentCommandScriptTests(unittest.TestCase):
         reply = self.call("agent-create", payload)
 
         self.assertEqual((reply["existing"], reply["agent"]["id"]), (False, AGENT_ID))
-        (creation,) = self.recorded()
+        creation, sent = self.recorded()
         self.assertEqual(
-            creation["prompt"],
+            sent["message"],
             {"bytes": 300_000, "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest()},
         )
         # A payload without a note and tool servers gives the runtime neither.

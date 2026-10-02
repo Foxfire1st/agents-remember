@@ -46,15 +46,30 @@
 //            creation the runtime refuses, with no agent under the id afterwards, fails with
 //            `paseo_call_failed`. Without `model` the creation goes through the daemon client
 //            (below), because the public client requires a provider/model pair; the provider
-//            then applies its own default model. `prompt` is the first message; without it the
-//            agent is created idle. `systemPrompt` and `mcpServers` are stored by the runtime
-//            with the agent and applied again whenever it resumes the agent's session: the text
-//            is added to the provider's system-level instructions where the provider has such,
-//            and each tool server is started for the agent with exactly the given command and
-//            environment. `parentAgentId` names the agent that starts this one: the runtime
-//            records it as the new agent's parent (the label `paseo.parent-agent-id`, which
-//            AGENT's `labels` shows) and refuses the creation when it has no such agent loaded.
-//            The agent still runs in `workspaceId`, not in the parent's workspace.
+//            then applies its own default model. `systemPrompt` and `mcpServers` are stored by
+//            the runtime with the agent and applied again whenever it resumes the agent's
+//            session: the text is added to the provider's system-level instructions where the
+//            provider has such, and each tool server is started for the agent with exactly the
+//            given command and environment. `parentAgentId` names the agent that starts this one:
+//            the runtime records it as the new agent's parent (the label `paseo.parent-agent-id`,
+//            which AGENT's `labels` shows) and refuses the creation when it has no such agent
+//            loaded. The agent still runs in `workspaceId`, not in the parent's workspace.
+//            `prompt` is the first message; without it the agent is left idle. The agent is
+//            always created without a message, and the first message is sent to it afterwards
+//            under a message id derived from `idempotencyKey`. A repeat of the call sends the
+//            message to an agent that has had no message yet and nothing to one that has had
+//            one; the runtime, which delivers a message id once, keeps two calls that run at the
+//            same time from delivering it twice. An agent with tool servers is first given
+//            TOOL_SERVER_START_MS, counted from this call's creation or lookup of it, and a
+//            closed session is opened before that time starts: a harness that starts its tool
+//            servers with the session offers a turn only the tools of the servers that have
+//            answered when the turn begins, and the runtime reports nothing about them. An
+//            archived agent is sent nothing. A first message that the runtime does not accept
+//            for an agent that exists fails with `paseo_first_message_undelivered`; a repeat of
+//            the call sends it. A closed session of an agent without a message that the runtime
+//            cannot open again fails with `paseo_agent_without_message_lost`: no repeat can
+//            deliver the message to that agent, and the caller starts a new one. `agent` is the
+//            agent as created or found, before the message.
 //
 //   agent-get  {agentId: string}
 //            -> {serverId, agent: AGENT | null}
@@ -97,7 +112,7 @@
 //   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
 //   the last turn ended without one, which is what a cancelled turn leaves behind.
 //
-//   agent-send  {agentId: string, text: string, messageId: string}
+//   agent-send  {agentId: string, text: string, messageId: string, afterResume?: boolean}
 //            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
 //                                     turnId: string | null}
 //                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
@@ -122,7 +137,10 @@
 //            A connection lost while the message is being sent fails with
 //            `paseo_send_outcome_unknown`: the runtime may have accepted it. Once the runtime
 //            has accepted the message the command answers `delivered: true`, also when the
-//            lookup afterwards fails (`turnId` is then null).
+//            lookup afterwards fails (`turnId` is then null). `afterResume` says that the
+//            caller has just resumed the agent's session and that the agent has tool servers:
+//            the command then waits TOOL_SERVER_START_MS before it looks at the agent, for the
+//            reason given under `agent-create`.
 //
 //   agent-wait  {agentId: string, messageId?: string, turnId?: string, steered?: boolean,
 //                waitMs?: number}
@@ -224,6 +242,12 @@ const TURN_GAP_POLL_MS = 250
 const REPLY_TAIL = 200
 const REPLY_TEXT_LIMIT = 20000
 const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canceled: 'cancelled' }
+// agent-create and agent-send: how long an agent with tool servers is given between the opening
+// of its session and a message, and what makes the first message's id out of the idempotency
+// key. The build's tool server had answered its tool list 2.2 s after the creation of one agent,
+// 3.2 s with three agents created at once and 5.3 s with six (261001-PNT master pass, 2026-10-02).
+const TOOL_SERVER_START_MS = 6000
+const FIRST_MESSAGE_SUFFIX = ':first-message'
 // Standard output carries the reply and nothing else: the client's log lines, and anything a
 // command or a package prints through the console, go to standard error.
 const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
@@ -373,20 +397,25 @@ async function openWorkspace({ api, daemon }, input) {
 async function createAgent({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const request = agentCreation(input, agentId)
+  const serverId = serverIdOf(daemon)
   const present = await findAgent(api, daemon, agentId)
-  if (present) return { serverId: serverIdOf(daemon), existing: true, agent: projectAgent(present) }
+  if (present) {
+    await sendFirstMessage(api, daemon, present, request)
+    return { serverId, existing: true, agent: projectAgent(present) }
+  }
   let created
   try {
     created = await request.create(api, daemon)
   } catch (error) {
     // The runtime answered with an error. Whether an agent exists under the id decides what that
-    // means: it exists (a repeat that lost its creation record, or a first prompt that failed
-    // after the agent was created), or the runtime refused the creation.
+    // means: it exists (a repeat that lost its creation record), or the runtime refused the
+    // creation.
     if (daemon.getConnectionState().status !== 'connected') throw error
     const after = await findAgent(api, daemon, agentId)
     if (!after) throw error
+    await sendFirstMessage(api, daemon, after, request)
     return {
-      serverId: serverIdOf(daemon),
+      serverId,
       existing: true,
       agent: projectAgent(after),
       creationError: text(error?.message ?? error)
@@ -398,7 +427,54 @@ async function createAgent({ api, daemon }, input) {
       'The Paseo runtime created an agent under another id than the one given.'
     )
   }
-  return { serverId: serverIdOf(daemon), existing: false, agent: projectAgent(created) }
+  await sendFirstMessage(api, daemon, created, request)
+  return { serverId, existing: false, agent: projectAgent(created) }
+}
+
+// Send the first message of a launch to an agent that has had no message yet. An agent that
+// has had a message is taken to have this one. That holds as long as nothing else reaches the
+// agent before its launch has answered: the role-message tool refuses a recipient whose start
+// has not finished, but a message typed into the agent's own chat in that time comes first. The
+// message id is the same on every run: the runtime keeps a delivery record per agent and message
+// id, and two calls that run at once deliver it once. A closed session is opened first, so that
+// its tool servers start before the wait: reading the timeline is the runtime's resume. A session
+// that cannot be opened has its own failure: a harness may keep nothing of a session that never
+// ran a turn, and then no repeat can deliver the message.
+async function sendFirstMessage(api, daemon, agent, request) {
+  if (!request.prompt || nonEmpty(agent.archivedAt) || nonEmpty(agent.lastUserMessageAt)) return
+  const handle = api.agents.ref(agent.id)
+  if (agent.status === CLOSED_SESSION) {
+    try {
+      await handle.timeline.refetch({ direction: 'tail', limit: 1 })
+    } catch (error) {
+      if (daemon.getConnectionState().status !== 'connected') throw error
+      throw failure(
+        'paseo_agent_without_message_lost',
+        `Agent ${agent.id} exists in the Paseo runtime without its first message, and its ` +
+          `closed session cannot be opened again (${text(error?.message ?? error)}).`
+      )
+    }
+  }
+  try {
+    if (request.hasToolServers) await toolServerStart()
+    // With the steer behaviour: should a turn run by now, the runtime's default would cancel it.
+    await handle.send(request.prompt, {
+      messageId: request.firstMessageId,
+      activeTurnBehavior: 'steer'
+    })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_first_message_undelivered',
+      `Agent ${agent.id} exists in the Paseo runtime, but its first message was not delivered ` +
+        `(${text(error?.message ?? error)}). Repeat the request to send it.`
+    )
+  }
+}
+
+// The time a session's tool servers are given to start before a message begins a turn.
+function toolServerStart() {
+  return new Promise((resolve) => setTimeout(resolve, TOOL_SERVER_START_MS))
 }
 
 // Check the payload and return how the agent is created: through the public client, or, for a
@@ -409,11 +485,8 @@ function agentCreation(input, agentId) {
   const model = optionalText(input, 'model')
   const thinkingOptionId = optionalText(input, 'thinkingOptionId')
   const prompt = optionalText(input, 'prompt')
-  const shared = {
-    agentId,
-    idempotencyKey: requiredText(input, 'idempotencyKey'),
-    labels: requiredLabels(input)
-  }
+  const idempotencyKey = requiredText(input, 'idempotencyKey')
+  const shared = { agentId, idempotencyKey, labels: requiredLabels(input) }
   const title = requiredText(input, 'title')
   const parentAgentId = optionalText(input, 'parentAgentId')
   const systemPrompt = optionalText(input, 'systemPrompt')
@@ -445,6 +518,10 @@ function agentCreation(input, agentId) {
     ...(mcpServers ? { mcpServers } : {})
   }
   return {
+    prompt,
+    firstMessageId: `${idempotencyKey}${FIRST_MESSAGE_SUFFIX}`,
+    hasToolServers: mcpServers !== null && Object.keys(mcpServers).length > 0,
+    // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
     async create(api, daemon) {
       const workspace = api.workspaces.ref(workspaceId)
       if (model) {
@@ -452,8 +529,7 @@ function agentCreation(input, agentId) {
           ...shared,
           config: { provider: `${provider}/${model}`, ...kept },
           title,
-          ...(parentAgentId ? { parent: parentAgentId } : {}),
-          ...(prompt ? { prompt } : {})
+          ...(parentAgentId ? { parent: parentAgentId } : {})
         })
         return handle.current()
       }
@@ -463,8 +539,7 @@ function agentCreation(input, agentId) {
         ...shared,
         config: { provider, cwd, title, ...kept },
         workspaceId,
-        ...(parentAgentId ? { callerAgentId: parentAgentId } : {}),
-        ...(prompt ? { initialPrompt: prompt } : {})
+        ...(parentAgentId ? { callerAgentId: parentAgentId } : {})
       })
     }
   }
@@ -587,6 +662,7 @@ async function sendToAgent({ api, daemon }, input) {
   const messageId = requiredText(input, 'messageId')
   const serverId = serverIdOf(daemon)
   const refused = (reason, detail) => ({ serverId, delivery: { delivered: false, refused: reason, detail } })
+  if (input.afterResume === true) await toolServerStart()
   const before = await findAgent(api, daemon, agentId)
   if (!before) return refused('not-found', 'the host has no such agent')
   if (nonEmpty(before.archivedAt)) return refused('archived', 'the agent is archived')

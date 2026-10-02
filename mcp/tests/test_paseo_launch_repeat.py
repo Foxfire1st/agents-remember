@@ -225,6 +225,55 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.dispatch(self.request("orchestrator"))
             self.assertNotIn("agent-archive", [call[0] for call in self.runtime.calls])
 
+    def test_an_agent_that_cannot_be_opened_before_its_first_message_closes_the_launch(
+        self,
+    ) -> None:
+        # The runtime was stopped between the creation and the first message.
+        request = self.request("manager")
+        self.runtime.fail("agent-create", "paseo_daemon_unreachable", after_effect=True)
+        self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+        lost = self.receipt(request)["agentId"]
+        self.assertIn(lost, self.runtime.agents)
+        # The repeat: the harness kept nothing of a session that never ran a turn.
+        said = (
+            f"Agent {lost} exists in the Paseo runtime without its first message, and its "
+            "closed session cannot be opened again (no rollout found for thread id 0199)."
+        )
+        self.runtime.fail("agent-create", "paseo_agent_without_message_lost", said)
+
+        status, public = self.dispatch(request)
+
+        self.assertEqual((status, public["status"]), (502, "rejected"))
+        self.assertEqual(
+            public["detail"],
+            "The agent of this launch never got its first message and the Paseo runtime cannot "
+            "open its session again, so this launch is closed. Start the role again; that "
+            f"launch archives the agent. {said}",
+        )
+        # Start is offered; a Retry or a Revive of this execution is not.
+        self.assertEqual(
+            (public["canStart"], public["canRetry"], public["canRevive"]), (True, False, False)
+        )
+        receipt = self.receipt(request)
+        self.assertEqual(
+            (receipt["pendingArchiveAgentId"], receipt["hostAgentExists"]), (lost, True)
+        )
+        self.assertNotIn("replayRequest", receipt)
+        self.assertEqual(receipt["execution"], {})
+        with self.subTest("the next Start archives the agent and creates its own"):
+            self.runtime.calls.clear()
+            again = self.request("manager")
+            self.assertEqual(self.dispatch(again)[1]["status"], "running")
+            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": lost}))
+            self.assertIsNotNone(self.runtime.agents[lost]["archivedAt"])
+            self.assertNotEqual(self.receipt(again)["agentId"], lost)
+        with self.subTest("a first message the runtime did not take stays retryable"):
+            other = self.request("orchestrator")
+            self.runtime.fail("agent-create", "paseo_first_message_undelivered")
+            status, public = self.dispatch(other)
+            self.assertEqual((status, public["status"], public["canRetry"]), (202, "unknown", True))
+            self.assertNotIn("pendingArchiveAgentId", self.receipt(other))
+
     def lose_against(
         self, competitor: dict[str, Any], mine: Any, binding_first: bool = False
     ) -> Any:
@@ -273,6 +322,25 @@ class ReplacedExecutionTests(RepeatTestCase):
                 self.assertIn(str(mine.request_id), own.name)
                 self.assertEqual(own.read_text(encoding="utf-8"), self.prompt)
                 self.receipt_path(mine).unlink(missing_ok=True)
+        with self.subTest("what stands at the address cannot be read: the file stays"):
+            # Nothing proves that no receipt names the file, so the loser does not remove it.
+            mine = self.request("manager")
+            place = orca_task_routes._place_message_binding_projection
+
+            def something_unreadable_appears(*args: Any) -> bool:
+                created = place(*args)
+                self.receipt_path(mine).write_text("{", encoding="utf-8")
+                return created
+
+            with patch.object(
+                orca_task_routes,
+                "_place_message_binding_projection",
+                side_effect=something_unreadable_appears,
+            ):
+                refused = self.refused(mine)
+            self.assertIn("receipt is unreadable", str(refused.detail))
+            self.assertIn(str(mine.request_id), self.binding_files())
+            self.receipt_path(mine).unlink()
         with self.subTest("the refusal of the loser is another one than a conflict"):
             # Whatever refuses the loser, the rule is the same: its own file goes, a shared one stays.
             mine = self.request("manager")
@@ -415,6 +483,14 @@ class ReusedRequestIdTests(RepeatTestCase):
         # The archived execution's binding file is untouched, and a new request id starts.
         self.assertEqual(self.binding_bytes(first), saved)
         self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
+        with self.subTest("a link at the archived execution's name counts, wherever it leads"):
+            linked = self.request("worker")
+            history = self.receipt_path(first).parent / "history"
+            (history / f"{linked.request_id}.json").symlink_to(history / "gone.json")
+            before = self.state()
+            refused = self.refused(linked)
+            self.assertIn("belongs to an archived execution", str(refused.detail))
+            self.assertEqual(self.state(), before)
         with self.subTest("a taskless role keeps no history"):
             architect = self.request("architect")
             self.dispatch(architect)
@@ -438,11 +514,53 @@ class ReusedRequestIdTests(RepeatTestCase):
         self.assertEqual(self.state(), before)
         self.assertEqual(self.enclosures.start_calls, [])
         self.assertFalse(self.enclosures.group.exists())
-        with self.subTest("a binding file that cannot be read refuses nothing by itself"):
-            unreadable = self.request("orchestrator")
-            self.binding_directory().joinpath(f"{unreadable.request_id}.json").write_text("{")
-            refused = self.refused(unreadable)
-            self.assertIn("different immutable message-binding", str(refused.detail))
+
+    def test_a_binding_file_that_does_not_record_the_selection_refuses_before_an_enclosure(
+        self,
+    ) -> None:
+        # A leaf role: its preparation would create the enclosure.
+        place: dict[str, Any] = {
+            "text that is no JSON": lambda path: path.write_text("{", encoding="utf-8"),
+            "bytes that are no UTF-8": lambda path: path.write_bytes(b"\xff\xfe{"),
+            "a list": lambda path: path.write_text("[]", encoding="utf-8"),
+            "an object without a selection": lambda path: path.write_text(
+                '{"role": "worker"}', encoding="utf-8"
+            ),
+            "a selection that is no object": lambda path: path.write_text(
+                '{"selection": "worker"}', encoding="utf-8"
+            ),
+            "a directory": lambda path: path.mkdir(),
+        }
+        self.binding_directory().mkdir(parents=True)
+        for label, write in place.items():
+            with self.subTest(label):
+                request = self.request("worker")
+                file = self.binding_directory() / f"{request.request_id}.json"
+                write(file)
+                before = self.state()
+
+                refused = self.refused(request)
+
+                self.assertEqual(refused.status_code, 409)
+                self.assertEqual(
+                    str(refused.detail),
+                    f"Request id {request.request_id} already has a message-binding file that "
+                    f"does not record this AR role selection ({file}); nothing was prepared for "
+                    "this request. Start again under a new request id.",
+                )
+                self.assertEqual(self.state(), before)
+                self.assertEqual(self.enclosures.start_calls, [])
+                self.assertFalse(self.enclosures.group.exists())
+        with self.subTest("the file of an earlier attempt of the same request refuses nothing"):
+            request = self.request("worker")
+            ended = RuntimeError("the process ended before its receipt was created")
+            with (
+                patch.object(orca_task_routes, "_create_receipt", side_effect=ended),
+                self.assertRaises(RuntimeError),
+            ):
+                self.dispatch(request)
+            self.assertIn(str(request.request_id), self.binding_files())
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
 
 
 class RuntimeReplyTests(RepeatTestCase):

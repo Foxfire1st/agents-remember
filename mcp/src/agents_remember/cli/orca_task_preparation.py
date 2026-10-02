@@ -39,7 +39,10 @@ from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_chi
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.cli.orca_task_receipts import (
+    _bind_task_report_access,
+    _message_binding_projection_reference,
+)
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.controlplane.durable_store import declared_process_role
@@ -367,24 +370,6 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     return workspace
 
 
-def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
-    """Expose only this task's canonical reports from inside its enclosure group folder."""
-    link = workspace / "task-reports"
-    target = task_reports.resolve()
-    if link.is_symlink():
-        if link.resolve() != target:
-            raise ValueError(
-                "The enclosure task-report link points outside the selected task's report folder."
-            )
-        return link
-    if link.exists():
-        raise ValueError(
-            "The enclosure task-report path is occupied by a non-link; refusing to replace it."
-        )
-    link.symlink_to(target, target_is_directory=True)
-    return link
-
-
 def _ensure_leaf_enclosure(
     config: McpRuntimeConfig,
     leaf: ResolvedTaskDocument,
@@ -587,8 +572,10 @@ def _compile_handover(
                 "for this assignment. After a start or "
                 "a resume a tool server can take some seconds to appear: if a call to "
                 f"{TOOL_SERVER_NAME} is not available, make the call once more before reporting "
-                "the server missing, and report that instead of substituting another. For a "
-                "leaf, pass the exact arMcpContext.readerArguments; "
+                "the server missing, and report that instead of substituting another. A harness "
+                "may list the tools of this server under a prefixed name in which the hyphens of "
+                "the server's name are underscores, so look a tool up by the tool's own name. "
+                "For a leaf, pass the exact arMcpContext.readerArguments; "
                 "add the requested files list to read_ar_files. If either tool schema lacks the "
                 "declared task_context fields, stop and report the missing AR reader "
                 "capability; do not drop task_context or substitute another root."
@@ -606,9 +593,19 @@ def _compile_handover(
                     f"{ROLE_MESSAGE_TOOL} on {TOOL_SERVER_NAME} sends one message to one role "
                     "agent, addressed by its agent id or by its role plus task references. The "
                     "recipient reads your role, task and agent id in the first line. It never "
-                    "interrupts a running turn. With wait it returns the recipient's reply, or "
-                    "says that a permission is pending or that the time was up; the message "
-                    "stays delivered then, and the recipient can answer you with "
+                    "interrupts a running turn. A recipient that waits for a permission "
+                    "decision is refused as busy, because a message would answer the permission "
+                    "with a denial: the developer answers it in that agent's chat. A recipient "
+                    "whose start has not finished is refused as busy as well, and a role "
+                    "address never means the caller itself. With wait it returns when the turn "
+                    "that took the message has ended: the recipient's final text, or that the "
+                    "turn failed or was cancelled; or it says that a permission is pending or "
+                    "that the time was up, and the message stays delivered then. It can answer "
+                    "accepted without a text when the host cannot say which turn took the "
+                    "message, and the text of a message delivered during a turn can be the "
+                    "running turn's own; detail says which. Do not wait on an agent that may be "
+                    "waiting on you: two agents that wait on each other both stand still until "
+                    "one wait runs out. The recipient can answer you with "
                     f"{ROLE_MESSAGE_TOOL} addressed to your agent id. A refusal names its "
                     "reason: act on that reason, never guess a recipient, and never start a "
                     "second agent for an uncertain result. Do not create or message role agents "

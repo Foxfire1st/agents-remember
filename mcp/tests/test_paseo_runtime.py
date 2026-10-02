@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any, ClassVar
@@ -791,7 +792,14 @@ class PaseoRuntimeTests(unittest.TestCase):
             sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
             child = subprocess.Popen(sleeper, env={"PASEO_HOME": home.as_posix()})
             try:
+                # A start returns before the new program's command line and environment are
+                # in place; until then /proc shows both empty.
+                deadline = time.monotonic() + 10
                 facts = read_process(child.pid)
+                while facts is not None and not (facts.command_line and facts.paseo_home):
+                    self.assertLess(time.monotonic(), deadline, "the child never showed in /proc")
+                    time.sleep(0.005)
+                    facts = read_process(child.pid)
                 assert facts is not None
                 self.assertEqual(facts.paseo_home, home.as_posix())
                 self.assertTrue(facts.command_line.startswith(sys.executable))

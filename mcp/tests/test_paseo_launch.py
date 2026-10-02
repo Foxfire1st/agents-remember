@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.application.orca_task_context import OrcaRoleContext
+from agents_remember.application.orca_task_context import OrcaRoleContext, selection_binding
 from agents_remember.cli import (
     leaf_enclosure_start,
     orca_task_preparation,
@@ -98,6 +98,8 @@ NO_ANSWER_CODES = (
     "paseo_bridge_invalid_reply",
     "paseo_bridge_unavailable",
     "paseo_agent_lookup_failed",
+    # The agent exists and did not take its first message; the repeat of the call sends it.
+    "paseo_first_message_undelivered",
 )
 
 
@@ -384,9 +386,11 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
                 if resolved is not None
             ]
         )
+        # As the preparation writes it: the binding records the selection it was made for.
         binding = {
             "requestId": str(request.request_id),
             "role": context.role,
+            "selection": selection_binding(context),
             "taskDocumentDigest": documents,
         }
         return {
@@ -995,7 +999,8 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             ),
             "same request id, another selection": (
                 self.request("reviewer", running.request_id),
-                "already has a different immutable message-binding projection",
+                f"Request id {running.request_id} is already bound to another AR role selection "
+                "(worker); nothing was prepared for this request.",
             ),
             "new request id while the execution runs": (
                 self.request("worker"),

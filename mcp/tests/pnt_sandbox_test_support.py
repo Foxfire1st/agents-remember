@@ -11,11 +11,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import random
 import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -142,10 +144,76 @@ REPOSITORY = f"repositories.{REPOSITORY_ID}"
 TASK_ROOT = f"{REPOSITORY}.taskRoot (receipts and reports of task-bound roles)"
 
 
-def free_port() -> int:
+# One claim per port a run has picked, held while the run's process lives.
+_PORT_CLAIMS: list[socket.socket] = []
+# How many ports below the system's own range the test ports are drawn from.
+_PORT_STRETCH = 12000
+
+
+def _candidate_port() -> int:
+    """A port number to try: one the system does not hand out by itself, where that is known.
+
+    A program that binds port 0 is given a port of the system's range. A port below that range
+    is therefore not taken by such a program between the moment a test picks it and the moment
+    the test's process listens on it.
+    """
+    try:
+        text = Path("/proc/sys/net/ipv4/ip_local_port_range").read_text(encoding="utf-8")
+        lowest = int(text.split()[0])
+    except (OSError, ValueError, IndexError):
+        lowest = 0
+    if lowest - _PORT_STRETCH > 1024:
+        return random.randrange(lowest - _PORT_STRETCH, lowest)
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
+
+
+def free_port() -> int:
+    """A port nothing listens on and no other run of these modules has picked.
+
+    The port is not held between the pick and the process that is to listen on it, so a second
+    run could pick the same number in that time. Each run therefore claims the number under a
+    name that every process of this machine sees (an abstract socket name), and looks for
+    another port when the name is taken or the port is in use.
+    """
+    while True:
+        port = _candidate_port()
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        claim = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            claim.bind(f"\0ar-pnt-sandbox-test-port-{port}")
+        except OSError:
+            claim.close()
+            continue
+        _PORT_CLAIMS.append(claim)
+        return port
+
+
+def release_port(port: int) -> None:
+    """Give up this run's claim on a port it picked."""
+    name = f"\0ar-pnt-sandbox-test-port-{port}".encode()
+    for claim in [held for held in _PORT_CLAIMS if held.getsockname() == name]:
+        _PORT_CLAIMS.remove(claim)
+        claim.close()
+
+
+def ended(pid: int, seconds: float = 10.0) -> bool:
+    """Wait until a killed session leader and what it started have left the process table.
+
+    A kill returns before the process is gone: for a moment it is still read from ``/proc`` as
+    running, and a port it listened on is still held.
+    """
+    deadline = time.monotonic() + seconds
+    while procfs.read_identity(pid) is not None or procfs.session_members(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.005)
+    return True
 
 
 class SandboxCase(unittest.TestCase):
@@ -158,6 +226,8 @@ class SandboxCase(unittest.TestCase):
         self.layout = SandboxLayout(
             self.root / "sandbox", paseo_port=free_port(), dashboard_port=free_port()
         )
+        for port in (self.layout.paseo_port, self.layout.dashboard_port):
+            self.addCleanup(release_port, port)
         self.checkout = self.root / "checkout"
         for name in PNT_BUILD_FILES:
             (self.checkout / name).parent.mkdir(parents=True, exist_ok=True)
@@ -195,6 +265,12 @@ class SandboxCase(unittest.TestCase):
         identity = procfs.started_identity(process.pid, argv)
         assert identity is not None
         return identity
+
+    def end(self, identity: ProcessIdentity) -> None:
+        """Kill a child of this test with its session, and return when both are gone."""
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(identity.pid, signal.SIGKILL)
+        self.assertTrue(ended(identity.pid), f"process {identity.pid} did not end")
 
     @staticmethod
     def _reap(process: subprocess.Popen[bytes]) -> None:
@@ -353,7 +429,8 @@ class FakeOperations(Operations):
         stopped, self.supervisor = self.supervisor, None
         if stopped is None:
             return {"ok": True, "action": "not running", "pid": None}
-        os.killpg(stopped.pid, signal.SIGKILL)
+        # The real command answers when the daemon has ended, its port given up.
+        self.case.end(stopped)
         return {"ok": True, "action": "stopped", "pid": stopped.pid}
 
     def spawn_dashboard(self, checkout: Path) -> ProcessIdentity:

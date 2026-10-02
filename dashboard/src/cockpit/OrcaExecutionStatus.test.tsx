@@ -83,6 +83,8 @@ describe("launcher bar and the execution's state", () => {
   let results: OrcaScopedExecution[] = [];
   let dispatched: Record<string, unknown>[] = [];
   let dispatchReply: { status: number; body: unknown } = { status: 200, body: {} };
+  // How many of the next result reads meet the backend's launch lock, held by a launch.
+  let lockedResults = 0;
 
   // `saved` is what the options route returns: the taskless executions, or the selection's one.
   function renderLauncher(saved: OrcaScopedExecution, taskDocuments: TaskDocNode[] = []) {
@@ -92,6 +94,10 @@ describe("launcher bar and the execution's state", () => {
       const sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       if (url === "/api/orca/launcher/options") return new Response(JSON.stringify(sent.role === "architect" ? { ...catalog, executions: [saved] } : { ...catalog, execution: saved }));
       if (url === "/api/orca/result") {
+        if (lockedResults > 0) {
+          lockedResults -= 1;
+          return new Response(JSON.stringify({ detail: "An AR-to-Orca launch or result check is already in progress.", launchInProgress: true }), { status: 409 });
+        }
         const next = results.length > 1 ? results.shift() : results[0];
         return new Response(JSON.stringify(next));
       }
@@ -107,6 +113,7 @@ describe("launcher bar and the execution's state", () => {
   beforeEach(() => {
     results = [];
     dispatched = [];
+    lockedResults = 0;
     sessionStorage.clear();
   });
 
@@ -125,6 +132,23 @@ describe("launcher bar and the execution's state", () => {
     await waitFor(() => expect((getByRole("button", { name: "Refresh Orca result" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(getByRole("button", { name: "Refresh Orca result" }));
     await waitFor(() => expect(getByTestId("orca-result-summary").textContent).toBe("Last reply: AGAIN"));
+  });
+
+  it("shows a result read that meets a running launch as a launch in progress and reads again", async () => {
+    results = [execution({ status: "running", detail: "a turn is in progress" }), execution({ status: "completed", canStart: true, result: { summary: "DONE" } })];
+    const { findByTestId, getByTestId, getByRole, queryByRole, queryByTestId } = renderLauncher(execution({}));
+    await waitFor(async () => expect((await findByTestId("orca-execution-status")).textContent).toContain("running"));
+
+    lockedResults = 1;
+    fireEvent.click(getByRole("button", { name: "Refresh Orca result" }));
+
+    expect((await findByTestId("orca-launch-in-progress")).textContent).toContain("A launch is in progress");
+    expect(queryByRole("alert")).toBeNull();
+    // The execution shown stays; the launcher reads again by itself.
+    expect(getByTestId("orca-execution-status").textContent).toContain("running");
+    await waitFor(() => expect(getByTestId("orca-result-summary").textContent).toBe("Last reply: DONE"), { timeout: 4000 });
+    expect(queryByTestId("orca-launch-in-progress")).toBeNull();
+    expect(queryByRole("alert")).toBeNull();
   });
 
   it("shows the host-unreachable line from a refresh and keeps the last known status", async () => {

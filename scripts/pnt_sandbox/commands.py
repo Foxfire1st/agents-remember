@@ -160,7 +160,7 @@ def start(
     layout: SandboxLayout, checkout_path: Path, ops: Operations, out: Out, eve_project: Path
 ) -> int:
     checkout = require_checkout(checkout_path)
-    builder.require_sandbox_directory(layout)
+    builder.require_sandbox_directory(layout, "start")
     with sandbox_lock(layout, "start") as held:
         ops.held_lock = held
         try:
@@ -321,12 +321,20 @@ def _undo(
         out(f"dashboard: {_stop_process_tree(started.dashboard)} (pid {started.dashboard.pid})")
         if ProcessIdentity.from_record(record.get("dashboard")) == started.dashboard:
             record.pop("dashboard", None)
-    if started.paseo and ops.paseo_supervisor() is not None:
-        stopped = ops.paseo(checkout, "stop", 120)
-        out(f"paseo runtime: {stopped.get('action')} (pid {stopped.get('pid')})")
-        recorded = ProcessIdentity.from_record(record.get("paseo"))
-        if recorded is not None and recorded == started.recorded_paseo:
-            record.pop("paseo", None)
+    supervisor = ops.paseo_supervisor() if started.paseo else None
+    if supervisor is not None:
+        try:
+            stopped = ops.paseo(checkout, "stop", 120)
+        except StepFailed as failure:
+            stopped = {"ok": False, "error": {"message": str(failure)}}
+        if stopped.get("ok") is True:
+            out(f"paseo runtime: {stopped.get('action')} (pid {stopped.get('pid')})")
+            recorded = ProcessIdentity.from_record(record.get("paseo"))
+            if recorded is not None and recorded == started.recorded_paseo:
+                record.pop("paseo", None)
+        else:
+            # The entry of the runtime stays: it is this run's, and the next stop reads it.
+            out(f"paseo runtime: STILL RUNNING (pid {supervisor.pid}): {_error_text(stopped)}")
     write_record(layout, record)
 
 
@@ -431,6 +439,8 @@ def stop(layout: SandboxLayout, ops: Operations, out: Out) -> int:
     if not layout.root.exists():
         out(f"no sandbox at {layout.root}")
         return 0
+    if read_marker(layout) is None:
+        raise SandboxRefusal(f"{layout.root} is not a sandbox this tool built; nothing was stopped")
     with sandbox_lock(layout, "stop"):
         return _stop(layout, ops, out)
 

@@ -98,7 +98,9 @@ _Matches = Callable[[AgentReading, _Known], bool]
 _Outcome = Callable[[AgentReading, _Known], StatusRow]
 
 # PNT-R07 item 1, in table order, then the two ruled rows. The first row whose condition holds
-# decides; the last row holds for every reading, so one always does.
+# decides; the last row holds for every reading, so one always does. Row 11 is also what an agent
+# reads between its creation and its first message, which a launch sends as a step of its own:
+# the agent is idle and no message was ever recorded for it, so no turn has ended.
 STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
     (
         lambda reading, _known: not reading.reachable,

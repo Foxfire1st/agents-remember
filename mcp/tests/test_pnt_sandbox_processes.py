@@ -5,6 +5,7 @@ See ``pnt_sandbox_test_support.py`` for the fake and its real child processes.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -42,6 +43,15 @@ from pnt_sandbox_test_support import (
     verified_supervisor,
     write_record,
 )
+
+
+def open_files(pid: int) -> set[str]:
+    """What the descriptors of a process point at; one it closed since the listing is skipped."""
+    targets: set[str] = set()
+    for entry in Path(f"/proc/{pid}/fd").iterdir():
+        with contextlib.suppress(OSError):
+            targets.add(os.readlink(entry))
+    return targets
 
 
 class StartAndStopTests(SandboxCase):
@@ -234,6 +244,52 @@ class StartAndStopTests(SandboxCase):
         record = read_record(self.layout)
         self.assertEqual({name: record.get(name) for name in others}, others)
 
+    def test_a_failed_start_whose_runtime_cannot_be_stopped_says_so_and_keeps_its_record(
+        self,
+    ) -> None:
+        self.mark_built()
+
+        class Unstoppable(FakeOperations):
+            report: dict[str, Any] | None = None
+
+            def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
+                if command != "stop":
+                    return super().paseo(checkout, command, timeout)
+                self.note("paseo stop", checkout)
+                if self.report is None:
+                    raise StepFailed("paseo stop", "no report from the command: timed out")
+                return self.report
+
+        refusing = {"ok": False, "error": {"message": "the daemon did not end"}}
+        for report, said in (
+            (None, "no report from the command: timed out"),
+            (refusing, "the daemon did not end"),
+        ):
+            with self.subTest(said):
+                ops = Unstoppable(self, answers=False)
+                ops.report = report
+
+                self.assertEqual(self.start(ops), 1)
+
+                assert ops.supervisor is not None and ops.dashboard is not None
+                self.assertEqual(ops.calls[-1], "paseo stop")
+                self.assertIn(
+                    f"paseo runtime: STILL RUNNING (pid {ops.supervisor.pid}): {said}", self.lines
+                )
+                # The dashboard this start started is gone from the record; the runtime, which
+                # still runs, stays in it, and the lock is released.
+                record = read_record(self.layout)
+                self.assertNotIn("dashboard", record)
+                self.assertEqual(record["paseo"], ops.supervisor.as_record())
+                self.assertFalse(is_running(ops.dashboard))
+                self.assertTrue(is_running(ops.supervisor))
+                self.assertFalse(self.layout.lock_file.exists())
+                # The next stop stops the runtime.
+                later = FakeOperations(self)
+                later.supervisor = ops.supervisor
+                self.assertEqual(self.stop(later), 0)
+                self.assertFalse(is_running(ops.supervisor))
+
     def test_a_provision_without_a_report_is_undone_only_when_it_started_the_daemon(self) -> None:
         self.mark_built()
 
@@ -330,7 +386,7 @@ class StartAndStopTests(SandboxCase):
                 self.assertIn("'stop', then 'start'", str(refused.exception))
                 self.assertEqual(ops.calls, [])
                 self.assertTrue(is_running(supervisor))
-                os.kill(supervisor.pid, signal.SIGKILL)
+                self.end(supervisor)
 
     def test_stop_signals_only_the_process_start_recorded(self) -> None:
         self.mark_built()
@@ -421,7 +477,7 @@ class StartAndStopTests(SandboxCase):
         self.assertTrue(is_running(unrecorded))
         self.assertTrue(self.layout.marker.is_file())
         self.assertIn("was not deleted", self.lines[-1])
-        os.kill(unrecorded.pid, signal.SIGKILL)
+        self.end(unrecorded)
 
         # The same for a supervisor of this home that the home's own record does not name.
         stray = self.supervisor(listening=False)
@@ -431,7 +487,7 @@ class StartAndStopTests(SandboxCase):
             self.start(ops)
         self.assertEqual(ops.calls, [])
         self.assertTrue(is_running(stray))
-        os.kill(stray.pid, signal.SIGKILL)
+        self.end(stray)
 
         # A runtime that does not stop keeps the directory as well.
 
@@ -550,7 +606,7 @@ class StartAndStopTests(SandboxCase):
             rf"'start' \(pid {os.getpid()}, since [^)]+\), with its 'paseo provision' run "
             rf"\(pid {child}\);",
         )
-        held_by_child = {os.readlink(entry) for entry in Path(f"/proc/{child}/fd").iterdir()}
+        held_by_child = open_files(child)
         self.assertIn(path.as_posix(), held_by_child)
         release.touch()
         thread.join()
@@ -598,7 +654,7 @@ class StartAndStopTests(SandboxCase):
         self.assertTrue(path.is_file())
         self.assertNotIn("paseo provision", ops.calls)
         self.assertNotIn("paseo stop", ops.calls)
-        os.kill(own.pid, signal.SIGKILL)
+        self.end(own)
 
         # A record that names no process is deleted, and the command says so.
         for unusable in ("not a record", '{"pid": true}', '{"pid": 1}'):
