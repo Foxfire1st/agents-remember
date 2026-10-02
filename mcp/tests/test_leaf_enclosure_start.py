@@ -5,8 +5,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import signal
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -178,6 +181,18 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
         ):
             build_parser().parse_args([leaf_enclosure_start.COMMAND, "--config", "/settings"])
         self.assertIn("invalid choice", refused.getvalue())
+        # It is the internal command only as the first argument; anywhere else it is an argument
+        # of the public command before it.
+        with (
+            patch.object(leaf_enclosure_start, "main") as internal,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            main(["paseo", "status", leaf_enclosure_start.COMMAND, "--config", "/settings"])
+        internal.assert_not_called()
+        with patch.object(leaf_enclosure_start, "main", return_value=7) as internal:
+            self.assertEqual(main([leaf_enclosure_start.COMMAND, "--config", "/settings"]), 7)
+        internal.assert_called_once_with(["--config", "/settings"])
 
 
 class LeafEnclosureChildProcessTests(unittest.TestCase):
@@ -197,6 +212,22 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         script.chmod(0o755)
         return patch.object(leaf_enclosure_start.sys, "executable", script.as_posix())
 
+    def gone(self, name: str) -> bool:
+        """Whether the process whose id the stand-in wrote to ``name`` has ended."""
+
+        pid = int((self.root / name).read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split(") ")[1][0]
+            except OSError:
+                return True
+            if state == "Z":
+                return True
+            time.sleep(0.05)
+        os.kill(pid, signal.SIGKILL)
+        return False
+
     def test_the_real_child_answers_through_the_build_s_own_command_line(self) -> None:
         started: list[tuple[list[str], dict[str, Any]]] = []
         real_popen = subprocess.Popen
@@ -205,7 +236,15 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             started.append((argv, options))
             return real_popen(argv, **options)
 
-        with patch.object(leaf_enclosure_start.subprocess, "Popen", popen):
+        # The backend's working directory can be a folder agents write into. A module lying there
+        # under the name of one the command imports is not loaded in its place.
+        folder = self.root / "a-folder-agents-write-into"
+        folder.mkdir()
+        (folder / "json.py").write_text("raise SystemExit('the decoy was imported')\n", "utf-8")
+        with (
+            patch.object(leaf_enclosure_start.subprocess, "Popen", popen),
+            contextlib.chdir(folder),
+        ):
             outcome = leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, IDENTITY)
             unknown = leaf_enclosure_start.start_leaf_enclosure_in_child(
                 backend_config(self.root, repository=False), IDENTITY
@@ -215,11 +254,13 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertEqual(outcome["state"], "ConfigError")
         self.assertIn("MCP settings file does not exist", outcome["summary"])
         self.assertIn(self.config.config_path.as_posix(), outcome["summary"])
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual([entry.name for entry in self.root.iterdir()], [folder.name])
+        self.assertEqual([entry.name for entry in folder.iterdir()], ["json.py"])
         ((argv, options),) = started
         self.assertEqual(
             argv[1:],
             [
+                "-P",
                 "-m",
                 "agents_remember.cli",
                 "start-leaf-enclosure",
@@ -227,41 +268,69 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
                 self.config.config_path.as_posix(),
             ],
         )
-        # A session of its own; the backend's own environment and working directory; no roots
-        # on the command line.
-        self.assertIs(options["start_new_session"], True)
-        self.assertFalse({"env", "cwd"} & set(options))
+        # A process group of its own inside the backend's session; the backend's own environment
+        # and working directory; no roots on the command line.
+        self.assertEqual(options["process_group"], 0)
+        self.assertFalse({"env", "cwd", "start_new_session"} & set(options))
         # A backend that does not know the repository starts no process at all.
         self.assertEqual(unknown["state"], "leaf_enclosure_repository_unknown")
 
-    def test_a_start_cut_off_at_the_limit_leaves_no_process_behind(self) -> None:
+    def test_a_start_cut_off_at_the_limit_leaves_no_process_of_its_group_behind(self) -> None:
+        # The child and what it started both ignore the polite signal; only the forceful one ends
+        # them. The child records its own session and group.
         stuck = (
-            "sleep 300 &\necho $! > started-by-the-child.pid\necho $$ > child.pid\n"
+            "trap '' TERM\n(trap '' TERM; exec sleep 300) &\necho $! > started-by-the-child.pid\n"
+            "echo $$ > child.pid\nps -o sid=,pgid= -p $$ > child.ids\n"
             "echo 'git fetch: still receiving objects' >&2\nwait"
         )
+        answered: dict[str, Any] = {}
+        caller = threading.Thread(
+            target=lambda: answered.update(
+                leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, IDENTITY)
+            ),
+            daemon=True,
+        )
         with self.stand_in(stuck), patch.object(leaf_enclosure_start, "START_TIMEOUT_SECONDS", 1):
+            caller.start()
+            caller.join(10)
+            in_time = not caller.is_alive()
+            if not in_time:
+                # Only the forceful signal ends these processes; without it the caller waits on.
+                for name in ("child.pid", "started-by-the-child.pid"):
+                    os.kill(int((self.root / name).read_text(encoding="utf-8")), signal.SIGKILL)
+                caller.join(10)
+
+        self.assertTrue(in_time, "the cut-off did not end processes that ignore the polite signal")
+        outcome = answered
+        self.assertEqual(outcome["state"], "leaf_enclosure_start_timeout")
+        self.assertIn(
+            "was cut off after 1 seconds, together with its process group", outcome["summary"]
+        )
+        self.assertIn("may have left a half-made enclosure", outcome["summary"])
+        self.assertIn("repaired or abandoned with AR's worktree tools", outcome["summary"])
+        self.assertNotIn("later Start completes", outcome["summary"])
+        self.assertIn("The child process said: git fetch: still receiving", outcome["summary"])
+        for name in ("child.pid", "started-by-the-child.pid"):
+            self.assertTrue(self.gone(name), f"{name}: the process survived the cut-off")
+        # The child was in the caller's session and led a group of its own.
+        session, group = (self.root / "child.ids").read_text(encoding="utf-8").split()
+        child = (self.root / "child.pid").read_text(encoding="utf-8").strip()
+        self.assertEqual(int(session), os.getsid(0))
+        self.assertEqual(group, child)
+        self.assertNotEqual(int(group), os.getpgid(0))
+
+    def test_the_reply_of_a_child_that_ended_is_not_held_back_by_what_it_left_running(self) -> None:
+        lingering = "sleep 30 &\necho $! > left-running.pid\nprintf '{\"ok\": true}'\nexit 0"
+        with (
+            self.stand_in(lingering),
+            patch.object(leaf_enclosure_start, "START_TIMEOUT_SECONDS", 8),
+        ):
             began = time.monotonic()
             outcome = leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, IDENTITY)
 
-        self.assertLess(time.monotonic() - began, 10)
-        self.assertEqual(outcome["state"], "leaf_enclosure_start_timeout")
-        self.assertIn(
-            "was cut off after 1 seconds, together with every process", outcome["summary"]
-        )
-        self.assertIn(
-            "may have left partial state, which a later Start completes", outcome["summary"]
-        )
-        self.assertIn("The child process said: git fetch: still receiving", outcome["summary"])
-        for name in ("child.pid", "started-by-the-child.pid"):
-            pid = int((self.root / name).read_text(encoding="utf-8"))
-            deadline = time.monotonic() + 5
-            while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
-                state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split(") ")[1][0]
-                if state == "Z":
-                    break
-                time.sleep(0.05)
-            alive = Path(f"/proc/{pid}").exists() and state != "Z"
-            self.assertFalse(alive, f"{name}: the process survived the cut-off")
+        self.assertEqual(outcome, {"ok": True})
+        self.assertLess(time.monotonic() - began, 4)
+        os.kill(int((self.root / "left-running.pid").read_text(encoding="utf-8")), signal.SIGKILL)
 
     def test_output_that_is_not_utf_8_is_a_refusal_with_the_child_s_last_words(self) -> None:
         garbled = "printf '\\377\\376{'\nprintf 'caf\\351: out of memory' >&2\nexit 1"
@@ -272,10 +341,19 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertIn("status 1 and no readable reply", outcome["summary"])
         self.assertIn("The child process said: caf", outcome["summary"])
         self.assertIn(": out of memory", outcome["summary"])
-        long_winded = "printf '%2000s' x >&2\nexit 1"
+
+    def test_a_refusal_keeps_to_800_characters_and_ends_with_the_child_s_last_words(self) -> None:
+        long_message = json.dumps(
+            {"ok": False, "error": {"code": "refused", "message": "m" * 3000}}
+        )
+        long_winded = f"printf '%s' '{long_message}'\nprintf '%2000s' 'the last words' >&2\nexit 1"
         with self.stand_in(long_winded):
             outcome = leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, IDENTITY)
-        self.assertLessEqual(len(outcome["summary"]), 800)
+
+        self.assertEqual(outcome["state"], "refused")
+        self.assertEqual(len(outcome["summary"]), 800)
+        self.assertTrue(outcome["summary"].endswith("the last words"))
+        self.assertIn("(refused): mmmm", outcome["summary"])
 
 
 if __name__ == "__main__":

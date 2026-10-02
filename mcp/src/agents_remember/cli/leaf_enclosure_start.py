@@ -5,7 +5,7 @@ A worktree start writes stores whose declared writer is the tool-server role
 start is refused. When a launch from the dashboard has to create a leaf's enclosure, the backend
 therefore runs AR's existing worktree start in a child process, which ends when the start is done:
 
-    <this interpreter> -m agents_remember.cli start-leaf-enclosure --config <settings file>
+    <this interpreter> -P -m agents_remember.cli start-leaf-enclosure --config <settings file>
 
 The settings file is the one the backend itself was started with (``config.config_path``). The
 request is one JSON object on standard input: the identity of the start (``repoId``, ``taskName``,
@@ -26,6 +26,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +41,6 @@ COMMAND = "start-leaf-enclosure"
 # A start that takes longer is cut off, with everything it started, and counts as refused.
 START_TIMEOUT_SECONDS = 120
 ROOTS_DIFFER = "leaf_enclosure_roots_differ"
-# How long the ended process group is waited for before its output is given up.
-_REAP_SECONDS = 5
 _TEXT_LIMIT = 800
 _ERROR_OUTPUT_TAIL = 300
 _IDENTITY_FIELDS = ("repoId", "taskName", "worktreeName", "leafId", "parentTask")
@@ -71,15 +70,18 @@ def start_leaf_enclosure_in_child(
         "parentTask": identity.parent_task,
         **roots,
     }
-    argv = [sys.executable, "-m", "agents_remember.cli", COMMAND]
+    # -P: the child inherits the working directory, which can be a folder agents write into; a
+    # module lying there must not be imported in place of the build's or the interpreter's own.
+    argv = [sys.executable, "-P", "-m", "agents_remember.cli", COMMAND]
     try:
         completed = _run_child([*argv, "--config", config.config_path.as_posix()], request)
     except subprocess.TimeoutExpired as expired:
         return _refused(
             "leaf_enclosure_start_timeout",
             f"the worktree start was cut off after {START_TIMEOUT_SECONDS} seconds, together "
-            "with every process it had started. It may have left partial state, which a later "
-            "Start completes.",
+            "with its process group. It may have left a half-made enclosure: if the next Start "
+            "on this leaf is refused, the enclosure has to be repaired or abandoned with AR's "
+            "worktree tools.",
             expired.stderr,
         )
     except OSError as error:
@@ -105,32 +107,40 @@ def start_leaf_enclosure_in_child(
 
 
 def _run_child(argv: list[str], request: dict[str, Any]) -> subprocess.CompletedProcess[bytes]:
-    """Run the child in a session of its own and end its whole process group at the limit.
+    """Run the child in a process group of its own and end that group at the limit.
 
-    The child inherits this process's environment and working directory. A start that is cut off
-    leaves no process behind that could go on changing a repository after the launch was refused.
+    The child inherits this process's environment and working directory and stays in this
+    process's session, so whatever ends the backend's session ends the child as well. A start that
+    is cut off leaves no process of its group behind that could go on changing a repository after
+    the launch was refused. The reply is read when the child itself has ended: a process it left
+    behind does not hold the answer back.
     """
 
-    child = subprocess.Popen(
-        argv,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    try:
-        output, errors = child.communicate(
-            json.dumps(request).encode("utf-8"), timeout=START_TIMEOUT_SECONDS
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        child = subprocess.Popen(
+            argv, stdin=subprocess.PIPE, stdout=output, stderr=errors, process_group=0
         )
-    except subprocess.TimeoutExpired as expired:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(child.pid, signal.SIGKILL)
         try:
-            _output, errors = child.communicate(timeout=_REAP_SECONDS)
-        except subprocess.TimeoutExpired:
-            errors = b""  # something outside the group still holds the child's pipes
-        raise subprocess.TimeoutExpired(argv, START_TIMEOUT_SECONDS, stderr=errors) from expired
-    return subprocess.CompletedProcess(argv, child.returncode, output, errors)
+            with contextlib.suppress(BrokenPipeError):
+                assert child.stdin is not None
+                child.stdin.write(json.dumps(request).encode("utf-8"))
+                child.stdin.close()
+            child.wait(timeout=START_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as expired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+            raise subprocess.TimeoutExpired(
+                argv, START_TIMEOUT_SECONDS, stderr=_written(errors)
+            ) from expired
+        return subprocess.CompletedProcess(
+            argv, child.returncode, _written(output), _written(errors)
+        )
+
+
+def _written(stream: Any) -> bytes:
+    stream.seek(0)
+    return stream.read()
 
 
 def _held_roots(config: McpRuntimeConfig, repo_id: str) -> dict[str, str | None] | None:
