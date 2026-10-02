@@ -22,7 +22,10 @@ import type { PluginPage, StorageLike } from "./page";
 //     may not have written yet on a first visit and whose default is "open", and the app
 //     writing its whole panel state on any panel change;
 //   - the test ids "composer-dock-header" (workspace header row), "menu-button" (the app's own
-//     sidebar toggle) and "sidebar-footer" (present while the sidebar is shown).
+//     sidebar toggle) and "sidebar-footer" (present while the sidebar is shown);
+//   - the wall clock (`Date.now()`) being one clock for every tab of the browser: the record
+//     keeps the time of the last write of the stored settings (load.ts compares it with the
+//     moment a page began to load).
 
 export const PLUGIN_ID = "ar-plugin";
 export const THEME_ID = "agents-remember";
@@ -62,6 +65,10 @@ export interface StandaloneLook {
   // observed it) proves nothing: see `lookWriter`.
   stored: Writer;
   seen?: Record<string, unknown>;
+  // When the stored settings were last written, as far as the record knows (`Date.now()`): by
+  // this plugin storing the AR look or putting the user's back, or by a recorded write of the
+  // app. A page that began to load before that may run another look than the store holds now.
+  at?: number;
   // The same for the sidebar's stored state.
   sidebar?: { stored: Writer; seen: boolean | null };
 }
@@ -166,6 +173,7 @@ export function applyEmbedLook(storage: StorageLike): string[] {
       agentListOpen: usersSidebar ? flag : own.agentListOpen,
       stored: "frame",
       seen: { ...EMBED_LOOK },
+      at: changed.length > 0 ? Date.now() : own?.at,
       sidebar: { stored: changed.length > 0 || !usersSidebar ? "frame" : "user", seen: closes ? false : flag },
     } satisfies StandaloneLook);
     if (changed.length > 0) {
@@ -184,14 +192,20 @@ export function applyEmbedLook(storage: StorageLike): string[] {
  * wrote is the user's: it is left alone and remembered. The memory itself is kept, because a
  * frame that is still open may store the AR look again.
  *
- * `changed`: something stored changed, so the page has to load again. `usersLook`: the look this
- * page started with was the user's already (its settings were not touched).
+ * `changed`: something stored changed, so the page has to load again. `usersLook`: the stored
+ * settings were the user's already and were not touched. `at`: when they had last been written
+ * before this call, if the record knows (the caller compares it with the moment the page began
+ * to load).
  */
-export function restoreStandaloneLook(storage: StorageLike): { changed: boolean; usersLook: boolean } {
+export function restoreStandaloneLook(storage: StorageLike): {
+  changed: boolean;
+  usersLook: boolean;
+  at: number | null;
+} {
   try {
     const own = readStandaloneLook(storage);
     // Nothing remembered: no frame shared this storage, the look is the user's.
-    if (!own) return { changed: false, usersLook: true };
+    if (!own) return { changed: false, usersLook: true, at: null };
     const settings = readJson(storage, APP_SETTINGS_KEY) ?? {};
     let lookChanged = false;
     if (lookWriter(own, settings) === "frame") {
@@ -214,11 +228,13 @@ export function restoreStandaloneLook(storage: StorageLike): { changed: boolean;
       agentListOpen: framesSidebar ? own.agentListOpen : flag,
       stored: "user",
       seen: lookOf(settings),
+      at: lookChanged ? Date.now() : own.at,
       sidebar: { stored: "user", seen: sidebarFlag(storage) },
     } satisfies StandaloneLook);
-    return { changed: lookChanged || sidebarChanged, usersLook: !lookChanged };
+    const at = typeof own.at === "number" ? own.at : null;
+    return { changed: lookChanged || sidebarChanged, usersLook: !lookChanged, at };
   } catch {
-    return { changed: false, usersLook: false };
+    return { changed: false, usersLook: false, at: null };
   }
 }
 
@@ -238,7 +254,8 @@ export function recordAppWrite(storage: StorageLike, usersLook: boolean, key: st
     if (key === APP_SETTINGS_KEY) {
       const look = lookOf(written ?? {});
       const appSettings = usersLook ? look : own.appSettings;
-      writeJson(storage, STANDALONE_LOOK_KEY, { ...own, appSettings, stored, seen: look } satisfies StandaloneLook);
+      const record = { ...own, appSettings, stored, seen: look, at: Date.now() } satisfies StandaloneLook;
+      writeJson(storage, STANDALONE_LOOK_KEY, record);
     } else {
       const flag = flagOf(written);
       const agentListOpen = usersLook ? flag : own.agentListOpen;

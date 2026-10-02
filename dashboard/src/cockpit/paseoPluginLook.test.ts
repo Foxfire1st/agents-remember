@@ -68,6 +68,7 @@ describe("the look stored for the frame and the look remembered for a standalone
       agentListOpen: true,
       stored: "frame",
       seen: EMBED_LOOK,
+      at: Date.now(),
       sidebar: { stored: "frame", seen: false },
     };
     expect(memoryOf(tab)).toEqual(remembered);
@@ -93,7 +94,7 @@ describe("the look stored for the frame and the look remembered for a standalone
     const tab = newTab({ theme: "dark" });
     applyEmbedLook(tab.local);
 
-    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: true, usersLook: false });
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: false });
     expect(settingsOf(tab)).toEqual({ theme: "dark", language: "system" });
     expect(sidebarOf(tab)).toBe(true);
     expect(memoryOf(tab)).toEqual({
@@ -101,13 +102,14 @@ describe("the look stored for the frame and the look remembered for a standalone
       agentListOpen: true,
       stored: "user",
       seen: { theme: "dark" },
+      at: Date.now(),
       sidebar: { stored: "user", seen: true },
     });
     // Nothing left to put back: the page that loads now runs the user's look.
-    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: false, usersLook: true });
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: false, usersLook: true });
     // A tab that never shared storage with a frame has nothing remembered and is left alone.
     const untouched = newTab(OWN_LOOK);
-    expect(restoreStandaloneLook(untouched.local)).toEqual({ changed: false, usersLook: true });
+    expect(restoreStandaloneLook(untouched.local)).toMatchObject({ changed: false, usersLook: true });
     expect(memoryOf(untouched)).toBeNull();
     expect(settingsOf(untouched)).toEqual({ ...OWN_LOOK, language: "system" });
   });
@@ -147,7 +149,7 @@ describe("the look stored for the frame and the look remembered for a standalone
       expect(settingsOf(frameFirst)).toEqual({ ...OWN_LOOK, language: "system" });
 
       // Standalone load first: the whole look goes back to the user's, nothing of the AR look stays.
-      expect(restoreStandaloneLook(tab.local)).toEqual({ changed: true, usersLook: false });
+      expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: false });
       expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
       expect(applyEmbedLook(tab.local)).toHaveLength(4);
       expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
@@ -165,10 +167,10 @@ describe("the look stored for the frame and the look remembered for a standalone
 
     // The tab's next load leaves the settings alone. Only the sidebar, which the frame closed
     // when it stored its look and nobody has written since, is put back.
-    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: true, usersLook: true });
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: true });
     expect(settingsOf(tab)).toEqual({ ...usersNewLook, language: "system" });
     expect(sidebarOf(tab)).toBe(true);
-    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: false, usersLook: true });
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: false, usersLook: true });
 
     // The other order: the frame loads first and remembers the look that write left.
     const other = newTab(DEFAULT_LOOK);
@@ -198,7 +200,7 @@ describe("the look stored for the frame and the look remembered for a standalone
     expect(applyEmbedLook(tab.local)).toEqual(["uiFontFamily", "monoFontFamily"]);
     expect(memoryOf(tab)).toMatchObject({ appSettings: HAND_PICKED, stored: "frame" });
     // And the standalone tab gets it back, with the user's font.
-    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: true, usersLook: false });
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: false });
     expect(settingsOf(tab)).toEqual({ ...HAND_PICKED, language: "system" });
 
     // A font typed there afterwards survives, also once the user has switched to another theme
@@ -222,23 +224,39 @@ describe("the look stored for the frame and the look remembered for a standalone
     expect(memoryOf(frameWrote)?.stored).toBe("user");
     // At a standalone load it is put back to the user's look ...
     const standaloneFirst: Tab = { local: Object.assign(new MemoryStorage(), { items: new Map(frameWrote.local.items) }), session: frameWrote.session };
-    expect(restoreStandaloneLook(standaloneFirst.local)).toEqual({ changed: true, usersLook: false });
+    expect(restoreStandaloneLook(standaloneFirst.local)).toMatchObject({ changed: true, usersLook: false });
     expect(settingsOf(standaloneFirst)).toEqual({ ...OWN_LOOK, language: "system" });
     // ... and at a frame load it is not remembered.
     expect(applyEmbedLook(frameWrote.local)).toEqual(["theme"]);
     expect(memoryOf(frameWrote)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
 
+    // One AR value is enough to make a store the frame's: either font alone, or the AR theme alone.
+    for (const partly of [
+      { ...OWN_LOOK, monoFontFamily: AR_FONT_STACK },
+      { ...OWN_LOOK, uiFontFamily: AR_FONT_STACK },
+      { ...OWN_LOOK, theme: "plugin", pluginThemeId: EMBED_LOOK.pluginThemeId },
+    ]) {
+      const tab = newTab(OWN_LOOK);
+      applyEmbedLook(tab.local);
+      restoreStandaloneLook(tab.local);
+      paseoWrites(tab, partly);
+      expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: false });
+      expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    }
+
     // Mark "frame" and a store with nothing of the AR look: a standalone page wrote it. The theme
     // id alone does not make it the AR look: the app keeps the id when another theme is chosen.
+    // Nor does the plugin theme being selected, when the id is another plugin's theme.
     for (const usersNewLook of [
       { ...DEFAULT_LOOK, theme: "light", uiFontFamily: "Verdana" },
       { theme: "dark", pluginThemeId: EMBED_LOOK.pluginThemeId, uiFontFamily: "Tahoma", monoFontFamily: "" },
+      { theme: "plugin", pluginThemeId: "other-plugin/theme/solar", uiFontFamily: "Tahoma", monoFontFamily: "" },
     ]) {
       const userWrote = newTab(DEFAULT_LOOK, false);
       applyEmbedLook(userWrote.local);
       paseoWrites(userWrote, usersNewLook);
       const frameFirst: Tab = { local: Object.assign(new MemoryStorage(), { items: new Map(userWrote.local.items) }), session: userWrote.session };
-      expect(restoreStandaloneLook(userWrote.local)).toEqual({ changed: false, usersLook: true });
+      expect(restoreStandaloneLook(userWrote.local)).toMatchObject({ changed: false, usersLook: true });
       expect(settingsOf(userWrote)).toEqual({ ...usersNewLook, language: "system" });
       expect(memoryOf(userWrote)).toMatchObject({ appSettings: usersNewLook, stored: "user" });
       expect(applyEmbedLook(frameFirst.local).length).toBeGreaterThan(0);
@@ -254,14 +272,14 @@ describe("the look stored for the frame and the look remembered for a standalone
     };
     // Mark "frame", settings a standalone page wrote: adopted, and the sidebar the frame closed is put back.
     const adopted = legacy("frame", { ...DEFAULT_LOOK, uiFontFamily: "Verdana" }, false);
-    expect(restoreStandaloneLook(adopted.local)).toEqual({ changed: true, usersLook: true });
+    expect(restoreStandaloneLook(adopted.local)).toMatchObject({ changed: true, usersLook: true });
     expect(settingsOf(adopted)).toEqual({ ...DEFAULT_LOOK, uiFontFamily: "Verdana", language: "system" });
     expect(sidebarOf(adopted)).toBe(true);
     expect(memoryOf(adopted)).toMatchObject({ appSettings: { ...DEFAULT_LOOK, uiFontFamily: "Verdana" }, stored: "user" });
     // Mark "user" (or none at all), settings partly the AR look: restored, the sidebar left alone.
     for (const mark of ["user", undefined]) {
       const restored = legacy(mark, CYCLED_IN_FRAME, false);
-      expect(restoreStandaloneLook(restored.local)).toEqual({ changed: true, usersLook: false });
+      expect(restoreStandaloneLook(restored.local)).toMatchObject({ changed: true, usersLook: false });
       expect(settingsOf(restored)).toEqual({ ...OWN_LOOK, language: "system" });
       expect(sidebarOf(restored)).toBe(false);
       // The same record at a frame load: the partly-AR store is not remembered.
@@ -307,11 +325,65 @@ describe("the look stored for the frame and the look remembered for a standalone
     applyEmbedLook(tab.local);
     expect(memoryOf(tab)?.agentListOpen).toBe(false);
 
-    // A sidebar state nobody recorded goes with the settings' mark: the frame's is put back.
+    // A sidebar state nobody recorded goes with the settings' mark. Mark "user": a page of the
+    // user's look wrote it (the user reopened the sidebar while the plugin was off). It is left
+    // alone and remembered as the user's.
+    restoreStandaloneLook(tab.local);
+    expect(memoryOf(tab)).toMatchObject({ stored: "user", agentListOpen: false, sidebar: { stored: "user", seen: false } });
+    tab.local.put(PANEL_STATE_KEY, panelState(true));
+    expect(restoreStandaloneLook(tab.local).changed).toBe(false);
+    expect(sidebarOf(tab)).toBe(true);
+    expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "user", seen: true } });
+    applyEmbedLook(tab.local);
+    expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "frame", seen: false } });
+
+    // Mark "frame": the frame's is put back.
     tab.local.put(PANEL_STATE_KEY, panelState(true));
     tab.local.put(STANDALONE_LOOK_KEY, { ...memoryOf(tab), agentListOpen: false, sidebar: { stored: "user", seen: false } });
     expect(restoreStandaloneLook(tab.local).changed).toBe(true);
     expect(sidebarOf(tab)).toBe(false);
+  });
+
+  it("keeps the time of the last write of the stored settings", () => {
+    const tab = newTab(OWN_LOOK);
+    const t0 = Date.now();
+    applyEmbedLook(tab.local);
+    expect(memoryOf(tab)?.at).toBe(t0);
+    // A frame load that finds its own look writes nothing and keeps the time.
+    vi.advanceTimersByTime(1000);
+    applyEmbedLook(tab.local);
+    expect(memoryOf(tab)?.at).toBe(t0);
+    // Putting the user's look back is a write; the answer names the time before it.
+    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: true, usersLook: false, at: t0 });
+    expect(memoryOf(tab)?.at).toBe(t0 + 1000);
+    // Nothing to put back: no write, the time stays and is reported.
+    vi.advanceTimersByTime(1000);
+    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: false, usersLook: true, at: t0 + 1000 });
+    expect(memoryOf(tab)?.at).toBe(t0 + 1000);
+    // A recorded settings write of the app is a write, from either kind of page; a panel write is not.
+    recordedWrite(tab, true, { ...OWN_LOOK, theme: "light" });
+    expect(memoryOf(tab)?.at).toBe(t0 + 2000);
+    vi.advanceTimersByTime(1000);
+    recordedSidebar(tab, true, false);
+    expect(memoryOf(tab)?.at).toBe(t0 + 2000);
+    recordedWrite(tab, false, CYCLED_IN_FRAME);
+    expect(memoryOf(tab)?.at).toBe(t0 + 3000);
+    // A record without the time (an earlier version's) says so.
+    tab.local.put(STANDALONE_LOOK_KEY, { appSettings: OWN_LOOK, agentListOpen: true, stored: "user", seen: OWN_LOOK });
+    paseoWrites(tab, OWN_LOOK);
+    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: false, usersLook: true, at: null });
+    expect(restoreStandaloneLook(newTab(OWN_LOOK).local)).toEqual({ changed: false, usersLook: true, at: null });
+  });
+
+  it("does not say a page runs the user's look when the record could not be written", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    const put = tab.local.setItem.bind(tab.local);
+    tab.local.setItem = (key, value) => {
+      if (key === STANDALONE_LOOK_KEY) throw new Error("the storage is full");
+      put(key, value);
+    };
+    expect(restoreStandaloneLook(tab.local)).toEqual({ changed: false, usersLook: false, at: null });
   });
 
   it("records nothing for other keys, unreadable values, or a storage no frame ever shared", () => {

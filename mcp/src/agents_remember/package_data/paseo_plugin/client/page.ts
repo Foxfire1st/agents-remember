@@ -1,5 +1,6 @@
 // The browser objects the client part touches, gathered once and passed in. Nothing else in the
-// client part reads a global, so its logic runs in a test against plain objects.
+// client part reads a browser global, so its logic runs in a test against plain objects. (The
+// one built-in used outside this file is the wall clock, `Date.now()`, in look.ts and load.ts.)
 //
 // UNSUPPORTED Paseo behaviour this file relies on:
 //   - the browser globals themselves. Paseo documents them as unavailable to plugin code (they
@@ -47,8 +48,8 @@ const WRITE_WATCH = "__arPluginWrites";
 
 interface WriteWatch {
   /** The function the storage's prototype had before it was wrapped. */
-  setItem: (this: unknown, key: string, value: string) => void;
-  wrapper: (this: unknown, key: string, value: string) => void;
+  setItem: (this: unknown, ...args: unknown[]) => unknown;
+  wrapper: (this: unknown, ...args: unknown[]) => unknown;
   listener: WriteListener | null;
 }
 
@@ -59,14 +60,16 @@ function watchWrites(web: any, listener: WriteListener): () => void {
     const created: WriteWatch = {
       setItem: proto.setItem,
       listener: null,
-      wrapper(this: unknown, key: string, value: string): void {
-        created.setItem.call(this, key, value);
-        if (this !== web.localStorage || !created.listener) return;
+      wrapper(this: unknown, ...args: unknown[]): unknown {
+        // The call goes on exactly as it came (receiver and arguments), so whatever the original
+        // does with it, a refusal included, is what the caller gets.
+        const result = Reflect.apply(created.setItem, this, args);
         try {
-          created.listener(String(key), String(value));
+          if (this === web.localStorage && created.listener) created.listener(String(args[0]), String(args[1]));
         } catch {
           // Observing must never break the app's own write.
         }
+        return result;
       },
     };
     proto.setItem = created.wrapper;

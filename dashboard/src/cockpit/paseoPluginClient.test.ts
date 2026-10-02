@@ -444,6 +444,128 @@ describe("which look a page runs, and recording the app's writes in it", () => {
     expect(loadState(frame.page).usersLook).toBe(false);
   });
 
+  it("does not take a page for the user's look when the store was written after the page began to load", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    vi.advanceTimersByTime(10_000);
+    // Two standalone tabs begin to load at the same moment. The store holds the AR look, and the
+    // app of each tab reads it. Each tab has its own session.
+    const began = Date.now();
+    const tabOf = (): Tab => ({ local: tab.local, session: new MemoryStorage() });
+    const [firstTab, secondTab] = [tabOf(), tabOf()];
+    const first = pageLoad(firstTab, { framedBy: null, beganAt: began });
+    const second = pageLoad(secondTab, { framedBy: null, beganAt: began });
+    // The first tab's plugin runs, puts the user's look back and reloads its page.
+    vi.advanceTimersByTime(400);
+    takeOwnLookBack(first.page);
+    expect(first.replace).toHaveBeenCalledTimes(1);
+    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    // The second tab's plugin runs after that. Nothing has to be put back any more, but the
+    // page started with the AR look: it loads once more and is not a page of the user's look.
+    vi.advanceTimersByTime(30);
+    watchAppWrites(second.page);
+    takeOwnLookBack(second.page);
+    expect(second.replace).toHaveBeenCalledExactlyOnceWith(WORKSPACE_URL);
+    expect(loadState(second.page).usersLook).toBe(false);
+    // The load that follows began after the write: the user's look, and no further reload.
+    vi.advanceTimersByTime(20);
+    const reloaded = pageLoad(secondTab, { framedBy: null });
+    takeOwnLookBack(reloaded.page);
+    expect(reloaded.replace).not.toHaveBeenCalled();
+    expect(loadState(reloaded.page).usersLook).toBe(true);
+    // Until the stale page is gone, what its app writes (the AR look with one change) is not
+    // remembered as the user's.
+    second.appWrites(APP_SETTINGS_KEY, CYCLED_IN_FRAME);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
+  });
+
+  it("where a stale page is refused its reload, it stays a page that does not run the user's look", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    vi.advanceTimersByTime(10_000);
+    const began = Date.now();
+    vi.advanceTimersByTime(400);
+    restoreStandaloneLook(tab.local); // (another tab put the user's look back)
+    vi.advanceTimersByTime(30);
+    // This load is the plugin's own reload already, and it began before that write.
+    const session = new MemoryStorage();
+    session.setItem(RELOAD_FLAG, JSON.stringify({ parent: null }));
+    const stale = pageLoad({ local: tab.local, session }, { framedBy: null, beganAt: began });
+    watchAppWrites(stale.page);
+    takeOwnLookBack(stale.page);
+    expect(stale.replace).not.toHaveBeenCalled();
+    expect(loadState(stale.page).usersLook).toBe(false);
+    stale.appWrites(APP_SETTINGS_KEY, CYCLED_IN_FRAME);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
+    // The plugin evaluated again in that page: still not the user's look, still no reload.
+    takeOwnLookBack(stale.page);
+    expect(loadState(stale.page).usersLook).toBe(false);
+  });
+
+  it("does not reload a page for a write that came before the app of that page read the store", () => {
+    const loadAfterWrite = (msBeforeWrite: number) => {
+      const tab = newTab(OWN_LOOK);
+      applyEmbedLook(tab.local);
+      vi.advanceTimersByTime(10_000);
+      const began = Date.now();
+      vi.advanceTimersByTime(msBeforeWrite);
+      restoreStandaloneLook(tab.local);
+      vi.advanceTimersByTime(400);
+      const load = pageLoad({ local: tab.local, session: new MemoryStorage() }, { framedBy: null, beganAt: began });
+      takeOwnLookBack(load.page);
+      return { reloads: load.replace.mock.calls.length, usersLook: loadState(load.page).usersLook };
+    };
+    // Up to 50 ms after the page began, the app has not read the store yet.
+    expect(loadAfterWrite(0)).toEqual({ reloads: 0, usersLook: true });
+    expect(loadAfterWrite(50)).toEqual({ reloads: 0, usersLook: true });
+    expect(loadAfterWrite(51)).toEqual({ reloads: 1, usersLook: false });
+  });
+
+  it("a later evaluation in the same page does not reload it for the page's own writes", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    restoreStandaloneLook(tab.local);
+    vi.advanceTimersByTime(10_000);
+    const solo = pageLoad(tab, { framedBy: null });
+    watchAppWrites(solo.page);
+    takeOwnLookBack(solo.page);
+    expect(loadState(solo.page).usersLook).toBe(true);
+    // The user changes a setting in this page: the store is written long after the page began.
+    vi.advanceTimersByTime(5_000);
+    const chosen = { ...OWN_LOOK, theme: "light" };
+    solo.appWrites(APP_SETTINGS_KEY, chosen);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: chosen, stored: "user", at: Date.now() });
+    // The plugin is evaluated again in the same page.
+    vi.advanceTimersByTime(1_000);
+    takeOwnLookBack(solo.page);
+    expect(solo.replace).not.toHaveBeenCalled();
+    expect(loadState(solo.page).usersLook).toBe(true);
+  });
+
+  it("treats a record without the time, or a page without a clock, as before", () => {
+    const withoutTime = newTab(OWN_LOOK);
+    applyEmbedLook(withoutTime.local);
+    restoreStandaloneLook(withoutTime.local);
+    const record = { ...memoryOf(withoutTime) };
+    delete record.at;
+    withoutTime.local.put(STANDALONE_LOOK_KEY, record);
+    const old = pageLoad(withoutTime, { framedBy: null, beganAt: Date.now() - 60_000 });
+    takeOwnLookBack(old.page);
+    expect(old.replace).not.toHaveBeenCalled();
+    expect(loadState(old.page).usersLook).toBe(true);
+
+    const noClock = newTab(OWN_LOOK);
+    applyEmbedLook(noClock.local);
+    restoreStandaloneLook(noClock.local);
+    const load = pageLoad(noClock, { framedBy: null, beganAt: Date.now() - 60_000 });
+    load.page.performance.now = () => {
+      throw new Error("no clock");
+    };
+    takeOwnLookBack(load.page);
+    expect(load.replace).not.toHaveBeenCalled();
+    expect(loadState(load.page).usersLook).toBe(true);
+  });
+
   it("works without watching where the write cannot be wrapped", () => {
     const load = pageLoad(newTab());
     load.page.watchWrites = () => {
@@ -472,8 +594,13 @@ describe("seeing the app's own storage writes (the real page)", () => {
     expect(seen).toEqual([[APP_SETTINGS_KEY, '{"theme":"light"}', '{"theme":"light"}']]);
     // Not the session's writes, and not what the plugin itself writes through its page object.
     sessionStorage.setItem(RELOAD_FLAG, "{}");
+    expect(sessionStorage.getItem(RELOAD_FLAG)).toBe("{}");
+    expect(localStorage.getItem(RELOAD_FLAG)).toBeNull();
+    sessionStorage.setItem(APP_SETTINGS_KEY, '{"theme":"dark"}');
+    expect(localStorage.getItem(APP_SETTINGS_KEY)).toBe('{"theme":"light"}');
     page.localStorage.setItem(STANDALONE_LOOK_KEY, "{}");
     expect(localStorage.getItem(STANDALONE_LOOK_KEY)).toBe("{}");
+    expect(sessionStorage.getItem(STANDALONE_LOOK_KEY)).toBeNull();
     expect(seen).toHaveLength(1);
 
     stop();
@@ -506,6 +633,40 @@ describe("seeing the app's own storage writes (the real page)", () => {
     expect(seen).toEqual([PANEL_STATE_KEY]);
     stopSecond();
     expect(Storage.prototype.setItem).toBe(original);
+  });
+
+  it("passes a call on as it came: what the original refuses stays refused", () => {
+    const page = currentPage();
+    if (!page) throw new Error("the test environment has no page");
+    // What the storage does with a one-argument call and with a foreign receiver, unwrapped.
+    const refusal = (call: () => void): string | null => {
+      try {
+        call();
+        return null;
+      } catch (error) {
+        return (error as Error).name;
+      }
+    };
+    const oneArgument = () => (localStorage.setItem as (key: string) => void)("ar-one-argument");
+    const foreignReceiver = () => Storage.prototype.setItem.call({}, "ar-foreign", "1");
+    const symbolValue = () => (localStorage.setItem as (key: string, value: unknown) => void)("ar-symbol", Symbol("x"));
+    expect(refusal(oneArgument)).toBe("TypeError");
+    expect(refusal(foreignReceiver)).toBe("TypeError");
+    expect(refusal(symbolValue)).toBe("TypeError");
+
+    const seen: string[] = [];
+    const stop = page.watchWrites((key) => seen.push(key));
+    expect(refusal(oneArgument)).toBe("TypeError");
+    expect(localStorage.getItem("ar-one-argument")).toBeNull();
+    expect(refusal(foreignReceiver)).toBe("TypeError");
+    expect(refusal(symbolValue)).toBe("TypeError");
+    expect(localStorage.getItem("ar-symbol")).toBeNull();
+    expect(seen).toEqual([]);
+    // Values go on unconverted too: the storage itself makes the strings.
+    (localStorage.setItem as (key: string, value: unknown) => void)("ar-number", 7);
+    expect(localStorage.getItem("ar-number")).toBe("7");
+    expect(seen).toEqual(["ar-number"]);
+    stop();
   });
 
   it("leaves the function alone on stopping when something else has wrapped it since", () => {
@@ -570,14 +731,17 @@ describe("starting the client part: which parent is trusted and what follows", (
     expect(first.replace).toHaveBeenCalledExactlyOnceWith(WORKSPACE_URL);
     expect(first.posted).toEqual([]);
 
-    // The load that follows: nothing before the list answers, then ready to that parent.
+    // The load that follows: nothing before the list answers (the app's writes are not watched
+    // either), then ready to that parent.
     const frame = pageLoad(fresh);
     const stop = startClientPart(frame.page, client, listed());
     expect(frame.posted).toEqual([]);
     expect(frame.listening()).toBe(0);
+    expect(frame.watched()).toBe(false);
     await flush();
     expect(frame.posted).toEqual(ready);
     expect(frame.listening()).toBe(1);
+    expect(frame.watched()).toBe(true);
     expect(loadState(frame.page).trustedParent).toBe(DASHBOARD);
     // What the app writes in that page is recorded as the frame's.
     frame.appWrites(APP_SETTINGS_KEY, CYCLED_IN_FRAME);
@@ -607,6 +771,8 @@ describe("starting the client part: which parent is trusted and what follows", (
       expect(loadState(frame.page).trustedParent).toBeNull();
       expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
       expect(frame.replace).toHaveBeenCalledTimes(1);
+      // As in a standalone tab, the app's writes are watched from here on.
+      expect(frame.watched()).toBe(true);
     }
     // The same for a listed dashboard origin that frames the page from an unlisted look-alike.
     const tab = framedTab();
@@ -636,6 +802,7 @@ describe("starting the client part: which parent is trusted and what follows", (
       expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
       expect(memoryOf(tab)).toBeNull();
       expect(loadState(frame.page).usersLook).toBeNull();
+      expect(frame.watched()).toBe(false);
     }
   });
 
@@ -649,6 +816,7 @@ describe("starting the client part: which parent is trusted and what follows", (
     expect(frame.posted).toEqual([]);
     expect(frame.replace).not.toHaveBeenCalled();
     expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
+    expect(frame.watched()).toBe(false);
   });
 
   it("evaluated again in the same page: no gap in the channel, and the list has the last word", async () => {
@@ -664,6 +832,7 @@ describe("starting the client part: which parent is trusted and what follows", (
     startClientPart(frame.page, client, () => new Promise((resolve) => (answer = resolve)));
     expect(frame.posted).toEqual(ready);
     expect(frame.listening()).toBe(1);
+    expect(frame.watched()).toBe(true);
     // ... and the list, which no longer has the parent, takes the channel and the look away.
     await flush();
     answer([]);
@@ -681,6 +850,26 @@ describe("starting the client part: which parent is trusted and what follows", (
     await flush();
     expect(frame.posted).toEqual([]);
     expect(frame.listening()).toBe(0);
+    expect(frame.watched()).toBe(false);
+  });
+
+  it("evaluated again where the list cannot be read any more: what the page is stays known, its writes stay watched", async () => {
+    // A standalone-like page (an unlisted parent) and a listed frame, each settled by a first evaluation.
+    for (const first of [async () => [], listed()]) {
+      const frame = pageLoad(framedTab());
+      const stopFirst = startClientPart(frame.page, client, first);
+      await flush();
+      stopFirst();
+      const usersLook = loadState(frame.page).usersLook;
+      expect(usersLook).not.toBeNull();
+      loadState(frame.page).trustedParent = null;
+      const stop = startClientPart(frame.page, client, () => Promise.reject(new Error("rpc failed")));
+      await flush();
+      expect(frame.watched()).toBe(true);
+      expect(loadState(frame.page).usersLook).toBe(usersLook);
+      stop();
+      expect(frame.watched()).toBe(false);
+    }
   });
 
   it("stopped before the list answers: the late answer does nothing", async () => {
