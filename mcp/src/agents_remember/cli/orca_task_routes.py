@@ -24,10 +24,7 @@ from agents_remember.application.orca_task_context import (
     selection_binding,
 )
 from agents_remember.cli.orca_handover_artifacts import first_message, write_handover_artifact
-from agents_remember.cli.orca_runtime import (
-    HOST_CALL_NOT_AVAILABLE,
-    OrcaRuntimeFailure,
-)
+from agents_remember.cli.orca_runtime import OrcaRuntimeFailure
 from agents_remember.cli.orca_runtime import (
     configured_frame_url as _configured_frame_url,
 )
@@ -73,6 +70,7 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_catalog import provider_accepts_tool_servers
 from agents_remember.cli.paseo_launch import (
     RoleLaunch,
+    StartingAgent,
     applied_to_agent,
     build_launch_call,
     mint_agent_id,
@@ -102,14 +100,8 @@ class _PreparedRoleStart:
     message_binding_projection: dict[str, str]
     # The agent of the closed execution this start replaces on a task-bound selection.
     replaces_agent_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class NativeRoleSessionPreparation:
-    execution: dict[str, Any]
-    request_id: uuid.UUID
-    handover_reference: dict[str, str]
-    handover_artifact: dict[str, Any]
+    # The role agent that asked for this start; none for a start from the launcher.
+    started_by: StartingAgent | None = None
 
 
 def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
@@ -180,13 +172,24 @@ def _orca_options_endpoint(
         _DISPATCH_LOCK.release()
 
 
-def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
+def _orca_dispatch_endpoint(
+    config: McpRuntimeConfig,
+    request: OrcaDispatchRequest,
+    *,
+    started_by: StartingAgent | None = None,
+) -> JSONResponse:
+    """Start or revive one role execution; the launcher's route and the role-start tool end here.
+
+    ``started_by`` is the role agent on whose behalf the start runs. The preparation, the launch,
+    the receipt, the reconciliation of a repeated request and the lock are the same either way.
+    """
+
     _require_paseo_runtime(config)
     _acquire_dispatch_lock()
     try:
         if request.action == "revive":
             return _revive_execution(config, request)
-        return _start_execution(config, request)
+        return _start_execution(config, request, started_by)
     except (
         OSError,
         ValueError,
@@ -301,10 +304,14 @@ def _reserve_message_binding_projection(
     return reference, replaces_agent_id, None
 
 
-def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
+def _start_execution(
+    config: McpRuntimeConfig,
+    request: OrcaDispatchRequest,
+    started_by: StartingAgent | None = None,
+) -> JSONResponse:
     context = resolve_orca_role_context(config, request)
     binding = selection_binding(request)
-    request_digest = _request_digest(context, request)
+    request_digest = _request_digest(context, request, started_by.agent_id if started_by else None)
     if request.role in TASKLESS_ROLES:
         _migrate_taskless_legacy_receipt(config, request)
     path = _receipt_path(
@@ -319,6 +326,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         context,
         agent_override=request.agent_override,
         request_id=request.request_id,
+        started_by=started_by,
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
@@ -337,24 +345,9 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         role_handover=role_handover,
         message_binding_projection=projection_reference,
         replaces_agent_id=replaces_agent_id,
+        started_by=started_by,
     )
     return _launch_prepared_role_session(start, prompt=prompt)
-
-
-def prepare_idle_native_role_session(
-    config: McpRuntimeConfig, request: OrcaDispatchRequest
-) -> NativeRoleSessionPreparation:
-    """Refuse the ONT start of a role by another agent; PNT-R06 replaces it.
-
-    ONT parked an idle session for a native Orca Task to start later. Paseo has no such Task, and
-    a launch now creates the agent with its first message, so this entry has nothing to prepare.
-    """
-
-    del config, request
-    raise OrcaRuntimeFailure(
-        HOST_CALL_NOT_AVAILABLE,
-        "Starting a role agent from another agent has no Paseo path yet: it arrives with PNT-R06.",
-    )
 
 
 def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> JSONResponse:
@@ -382,6 +375,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             settings_file=start.config.config_path,
             accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
             replaces_agent_id=start.replaces_agent_id,
+            parent_agent_id=start.started_by.agent_id if start.started_by else None,
         )
     )
     receipt: dict[str, Any] = {
@@ -417,6 +411,8 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             else {}
         ),
         "agentId": agent_id,
+        # The role agent that started this one; a start from the launcher has no parent.
+        **({"parentAgentId": start.started_by.agent_id} if start.started_by else {}),
         "status": "starting",
         "createdAt": _now_iso(),
         "workspace": workspace,

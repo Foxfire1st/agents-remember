@@ -437,7 +437,14 @@ def _receipt_address_matches(
     return receipt.get("selection") == selection_binding(selection) and request_matches
 
 
-def _request_digest(context: OrcaRoleContext, request: OrcaDispatchRequest) -> str:
+def _request_digest(
+    context: OrcaRoleContext, request: OrcaDispatchRequest, parent_agent_id: str | None = None
+) -> str:
+    """What one request id is bound to: the selection, the override, and the starting agent.
+
+    A start from the launcher has no starting agent and keeps the digest it always had.
+    """
+
     override = (
         request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
         if request.agent_override
@@ -447,6 +454,7 @@ def _request_digest(context: OrcaRoleContext, request: OrcaDispatchRequest) -> s
         {
             "selection": selection_binding(context),
             "agentOverride": override,
+            **({"parentAgentId": parent_agent_id} if parent_agent_id else {}),
         }
     )
 

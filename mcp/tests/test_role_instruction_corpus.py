@@ -398,7 +398,7 @@ def test_manifest_carries_routing_metadata_not_copied_payloads(tmp_path: Path) -
 def test_every_role_source_is_concise_and_well_formed() -> None:
     """Every role is a concise, parseable source with its own duties and no inherited core.
 
-    The native Orca capsule ruling supersedes the old fixed section order and minimum-length
+    The compact role-capsule ruling supersedes the old fixed section order and minimum-length
     convention. This check protects actual source identity and self-containment while role-specific
     contract tests cover the duties that matter.
     """

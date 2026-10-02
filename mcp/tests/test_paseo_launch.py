@@ -25,7 +25,7 @@ from agents_remember.cli import (
     paseo_launch,
     paseo_status,
 )
-from agents_remember.cli.orca_runtime import HOST_CALL_NOT_AVAILABLE, OrcaRuntimeFailure, digest
+from agents_remember.cli.orca_runtime import digest
 from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
@@ -655,13 +655,6 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
             self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(list(self.root.rglob("*-native-executions")), [])
-
-    def test_the_idle_start_of_ont_refuses_by_name_until_role_start_arrives(self) -> None:
-        with self.assertRaises(OrcaRuntimeFailure) as raised:
-            orca_task_routes.prepare_idle_native_role_session(self.config, self.request("worker"))
-        self.assertEqual(raised.exception.code, HOST_CALL_NOT_AVAILABLE)
-        self.assertIn("PNT-R06", str(raised.exception))
-        self.assertEqual(self.runtime.calls, [])
 
 
 class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
