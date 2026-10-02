@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -42,16 +43,20 @@ RUNNER = "names the Paseo command-line runner"
 SCRIPT = "names the bridge script"
 ADDRESS = "reads the runtime's address or install prefix"
 SHELL = "runs paseo from a shell script"
+MANIFEST = "names paseo in a manifest"
 
 RULES: dict[str, re.Pattern[str]] = {
     PACKAGE: re.compile(r"getpaseo"),
+    # The program by a path that ends in it, by a look-up, or through a package runner.
     PROGRAM: re.compile(
         r"\.bin[/\\\"', ]+paseo\b"
-        r"|which\(\s*[\"']paseo[\"']"
+        r"|which\(\s*[\"']paseo\b"
         r"|\b(?:npx|bunx|npm exec|pnpm dlx)\s+(?:-\S+\s+)*paseo\b"
+        r"|\bbin[/\\]paseo\b|\}[/\\]paseo\b|[\"'`][/\\]paseo[\"'`]"
+        r"|[\"'`]paseo\.(?:cmd|exe)[\"'`]"
     ),
     LITERAL: re.compile(r"""["'`]paseo["'`]"""),
-    COMMAND_LINE: re.compile(r"""["'`]paseo\s+[a-z-]"""),
+    COMMAND_LINE: re.compile(r"""["'`]paseo\s"""),
     RUNNER: re.compile(r"\bpaseo_command\b|\bPaseoCli\b"),
     SCRIPT: re.compile(r"paseo_bridge\.mjs|paseo_bridge\.__file__"),
     # AR_PASEO_AGENT_ID is the agent binding of design contract C5, not an address of the runtime.
@@ -59,11 +64,17 @@ RULES: dict[str, re.Pattern[str]] = {
         r"\.install_prefix\b|\binstallPrefix\b|\bAR_PASEO_(?!AGENT_ID\b)"
         r"|\.listen(?:_host|_port)?\b(?!\()"
     ),
-    # A command word that is paseo or ends in /paseo, at the start of a command.
+    # A command word that is paseo or ends in /paseo, at the start of a command or after leading
+    # NAME=value words; or a variable that is given the program.
     SHELL: re.compile(
-        r"(?m)(?:^|[;|&(`]|\$\(|\b(?:then|do|else|exec|env|nohup|sudo|time)\s)\s*"
-        r"[\"']?(?:[^\s\"';|&]*/)?paseo[\"']?(?:\s|$)"
+        r"(?m)(?:^|[;|&(`{!]|\$\("
+        r"|\b(?:if|elif|while|until|then|do|else|exec|env|nohup|sudo|time|command|xargs)\s"
+        r"|\btimeout\s+\S+\s)"
+        r"\s*(?:[A-Za-z_]\w*=\S*\s+)*[\"']?(?:[^\s\"';|&]*/)?paseo[\"']?(?:\s|$)"
+        r"|\b[A-Za-z_]\w*=[\"']?(?:[^\s\"';|&]*/)?paseo[\"']?(?:\s|$)"
     ),
+    # In a manifest: the word paseo on its own, as in a script entry or a dependency name.
+    MANIFEST: re.compile(r"(?<![\w@/-])paseo(?![\w-])"),
 }
 
 # Per rule and per file: a use of one of these names that is AR's own. An entry for a file that a
@@ -79,6 +90,12 @@ ALLOWED: dict[str, dict[str, str]] = {
     },
     COMMAND_LINE: {
         SANDBOX + "commands.py": "step names and output lines about AR's own `paseo` sub-commands",
+        SANDBOX + "operations.py": "the step name of AR's own `paseo <command>` sub-command",
+    },
+    RUNNER: {
+        CLI + "paseo_process_record.py": (
+            "PNT-R01: imports the failure class from the runner's module; it starts nothing"
+        ),
     },
     ADDRESS: {
         CLI + "paseo_catalog.py": "the catalog cache is keyed by the runtime it was read from",
@@ -100,26 +117,32 @@ SHELL_INTERPRETER = re.compile(r"\A#!.*\b(?:sh|bash|dash|ksh|zsh)\b")
 TEST_PATHS = re.compile(r"^mcp/tests/|^dashboard/e2e/|\.test\.[cm]?[jt]sx?$")
 
 
-def is_scanned(path: str, text: str) -> bool:
-    """Whether the scan reads this file: code, a manifest, or a script without a suffix."""
+def may_be_scanned(path: str) -> bool:
+    """By its path alone: outside the boundary and the tests, and of a kind the scan reads."""
 
     if path in BOUNDARY_FILES or path.startswith(tuple(BOUNDARY_DIRECTORIES)):
         return False
     if TEST_PATHS.search(path):
         return False
-    suffix = Path(path).suffix
-    if suffix in CODE_SUFFIXES | SHELL_SUFFIXES or Path(path).name in MANIFEST_NAMES:
-        return True
-    return suffix == "" and text.startswith("#!")
+    return (
+        Path(path).suffix in CODE_SUFFIXES | SHELL_SUFFIXES | {""}
+        or Path(path).name in MANIFEST_NAMES
+    )
+
+
+def is_scanned(path: str, text: str) -> bool:
+    """Whether the scan reads this file: code, a manifest, or a script without a suffix."""
+
+    return may_be_scanned(path) and (Path(path).suffix != "" or text.startswith("#!"))
 
 
 def second_paths_to_paseo(path: str, text: str) -> list[str]:
     """The rules a scanned file trips and is not allowed to trip."""
 
     if Path(path).name in MANIFEST_NAMES:
-        names = [PACKAGE]
+        names = [PACKAGE, MANIFEST]
     else:
-        names = [name for name in RULES if name != SHELL]
+        names = [name for name in RULES if name not in (SHELL, MANIFEST)]
         if Path(path).suffix in SHELL_SUFFIXES or SHELL_INTERPRETER.search(text):
             names.append(SHELL)
             text = "\n".join(
@@ -144,12 +167,8 @@ def scan_tree(root: Path) -> tuple[int, dict[str, list[str]]]:
     offenders: dict[str, list[str]] = {}
     for path in listed:
         file = root / path
-        if not path or path in BOUNDARY_FILES or not file.is_file():
-            continue
-        if (
-            Path(path).suffix not in CODE_SUFFIXES | SHELL_SUFFIXES | {""}
-            and Path(path).name not in MANIFEST_NAMES
-        ):
+        # Only the path decides which files are opened; is_scanned then decides on the content.
+        if not path or not may_be_scanned(path) or not file.is_file():
             continue
         text = file.read_text(encoding="utf-8", errors="replace")
         if not is_scanned(path, text):
@@ -307,6 +326,113 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
         '"dependencies": { "@getpaseo/client": "0.11.0-beta.2" }',
         (PACKAGE,),
     ),
+    # Review R2, plants Q04 to Q08, Q10, Q11, Q14, Q31 to Q35 and Q38.
+    "Q04 a path below a bin directory variable": (
+        PY,
+        'bin_dir = prefix / "node_modules" / ".bin"\n'
+        'subprocess.run([f"{bin_dir}/paseo", "provider", "models", provider])',
+        (PROGRAM,),
+    ),
+    "Q05 a command line with the sub-command in a variable": (
+        PY,
+        'subprocess.run(shlex.split(f"paseo {command} --json"))',
+        (COMMAND_LINE,),
+    ),
+    "Q06 a percent-formatted command line": (
+        PY,
+        'subprocess.run("paseo %s --json" % command, shell=True)',
+        (COMMAND_LINE,),
+    ),
+    "Q07 a str.format command line": (
+        PY,
+        'subprocess.run("paseo {} --json".format(command), shell=True)',
+        (COMMAND_LINE,),
+    ),
+    "Q08 a concatenated command line": (
+        PY,
+        'subprocess.run("paseo " + " ".join(arguments), shell=True)',
+        (COMMAND_LINE,),
+    ),
+    "Q10 an absolute path to the program": (
+        PY,
+        'subprocess.run(["/usr/local/bin/paseo", "provider", "ls", "--json"])',
+        (PROGRAM,),
+    ),
+    "Q11 the Windows program name": (
+        PY,
+        'subprocess.run([shutil.which("paseo.cmd"), "provider", "ls", "--json"])',
+        (PROGRAM,),
+    ),
+    "Q14 a package.json script": (
+        "dashboard/zz/package.json",
+        '{"name": "zz", "private": true, "scripts": {"providers": "paseo provider ls --json"}}',
+        (MANIFEST,),
+    ),
+    "Q31 shell: if": (
+        "scripts/zz-paseo.sh",
+        "#!/bin/sh\nif paseo daemon status --json >/dev/null; then\n  echo up\nfi\n",
+        (SHELL,),
+    ),
+    "Q32 shell: an environment assignment before the command": (
+        "scripts/zz-paseo.sh",
+        '#!/bin/sh\nPASEO_HOME="$1" paseo provider ls --json\n',
+        (SHELL,),
+    ),
+    "Q33 shell: a timeout wrapper": (
+        "scripts/zz-paseo.sh",
+        "#!/bin/sh\ntimeout 30 paseo provider ls --json\n",
+        (SHELL,),
+    ),
+    "Q34 shell: the program name in a variable": (
+        "scripts/zz-paseo.sh",
+        "#!/bin/sh\nPASEO=paseo\n$PASEO provider ls --json\n",
+        (SHELL,),
+    ),
+    "Q35 shell: a while condition": (
+        "scripts/zz-paseo.sh",
+        "#!/bin/sh\nwhile ! paseo daemon status >/dev/null 2>&1; do sleep 1; done\n",
+        (SHELL,),
+    ),
+    "Q38 a template literal command line": (
+        MJS,
+        "export const run = (command) => execSync(`paseo ${command} --json`);",
+        (COMMAND_LINE,),
+    ),
+    "the program name with a Windows suffix": (
+        PY,
+        'subprocess.run(["paseo.exe", "provider", "ls", "--json"])',
+        (PROGRAM,),
+    ),
+    "the program looked up under another suffix": (
+        PY,
+        'program = shutil.which("paseo.bat")',
+        (PROGRAM,),
+    ),
+    "the program appended to a directory": (
+        PY,
+        'subprocess.run([str(bin_dir) + "/paseo", "provider", "ls", "--json"])',
+        (PROGRAM,),
+    ),
+    **{
+        f"shell: {line}": ("scripts/zz-paseo.sh", f"#!/bin/sh\n{line}\n", (SHELL,))
+        for line in (
+            "{ paseo daemon status; } >/dev/null",
+            "if false; then :; elif paseo daemon status; then echo up; fi",
+            "until paseo daemon status; do sleep 1; done",
+            "command paseo provider ls --json",
+            "echo codex | xargs paseo provider models",
+        )
+    },
+    "a manifest dependency named paseo": (
+        "tools/zz/requirements.txt",
+        "paseo==0.11.0\n",
+        (MANIFEST,),
+    ),
+    "a variable that only looks like the agent binding": (
+        PY,
+        'ids = os.environ["AR_PASEO_AGENT_IDS"]',
+        (ADDRESS,),
+    ),
     "a shell pipeline": (
         "scripts/zz-paseo.sh",
         "#!/bin/sh\n# paseo provider ls\nmodels=$(cd /tmp && paseo provider models codex | head -1)\n",
@@ -377,6 +503,12 @@ class SinglePathTests(unittest.TestCase):
         time from pieces smaller than the names the rules look for; a program path or address
         that arrives as an argument or in the environment; and a boundary file that hands its
         runner or the settings' address out under another name.
+
+        Also open: file kinds the scan does not read (data files such as other `.json` and
+        `.toml` files, a `Makefile` or `justfile`, `.ps1` scripts, workflow files, `.html`
+        pages); a file that is allowed for a rule using that rule again for a second path; and
+        an address read from the raw settings mapping, or held under one of AR's own names (the
+        frame URL of the embed list, the sandbox layout's listen address).
         """
 
         for label, (path, text, rules) in PLANTS.items():
@@ -396,6 +528,68 @@ class SinglePathTests(unittest.TestCase):
             for path, reason in files.items():
                 self.assertNotIn(path, BOUNDARY_FILES)
                 self.assertGreater(len(reason), 20, f"{path} is allowed without a reason")
+
+    def test_the_tree_scan_reports_exactly_the_planted_files(self) -> None:
+        planted: dict[str, tuple[str, list[str]]] = {
+            CLI + "zz_models.py": ('subprocess.run(["paseo", "provider", "ls"])\n', [LITERAL]),
+            "dashboard/src/cockpit/zzPaseo.tsx": (
+                'import { createPaseoClient } from "@getpaseo/client";\n',
+                [PACKAGE],
+            ),
+            "dashboard/scripts/zz-paseo.mjs": (
+                "export const run = (command) => execSync(`paseo ${command} --json`);\n",
+                [COMMAND_LINE],
+            ),
+            "scripts/zz-paseo.sh": (
+                "#!/bin/sh\nif paseo daemon status; then echo up; fi\n",
+                [SHELL],
+            ),
+            "scripts/zz-paseo": (
+                '#!/usr/bin/env bash\nPASEO_HOME="$1" paseo provider ls\n',
+                [SHELL],
+            ),
+            "dashboard/zz/package.json": (
+                '{"scripts": {"providers": "paseo provider ls"}}\n',
+                [MANIFEST],
+            ),
+            "tools/zz/pyproject.toml": ('dependencies = ["paseo"]\n', [MANIFEST]),
+            "tools/zz/requirements.txt": ("getpaseo-client==0.11.0\n", [PACKAGE]),
+            CLI + "tests/zz_models.py": ("cli = PaseoCli(settings)\n", [RUNNER]),
+            "mcp/src/agents_remember/package_data/other/zz.mjs": (
+                'import "@getpaseo/client";\n',
+                [PACKAGE],
+            ),
+            "scripts/zz_untracked.py": ('url = f"ws://{settings.listen}/ws"\n', [ADDRESS]),
+        }
+        untracked = {"scripts/zz_untracked.py"}
+        clean = {
+            CLI + "zz_catalog.py": 'reply = bridge_call(config, "catalog", {})\n',
+            CLI + "__main__.py": 'paseo = sub.add_parser("paseo")\n',
+        }
+        unread = {
+            CLI + "paseo_command.py": 'class PaseoCli:\n    program = "paseo"\n',
+            "mcp/src/agents_remember/package_data/paseo_plugin/index.server.ts": (
+                'import { definePlugin } from "@getpaseo/plugin";\n'
+            ),
+            "mcp/tests/test_zz.py": 'ARGV = ["paseo", "provider", "ls"]\n',
+            "node_modules/@getpaseo/client/index.js": "export const name = '@getpaseo/client'\n",
+            "docs/zz.md": "Run `paseo provider ls --json`.\n",
+            ".gitignore": "node_modules/\n",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "-q", root.as_posix()], check=True)
+            files = {**{path: text for path, (text, _rules) in planted.items()}, **clean, **unread}
+            for path, text in files.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text, encoding="utf-8")
+            tracked = sorted(set(files) - untracked - {"node_modules/@getpaseo/client/index.js"})
+            subprocess.run(["git", "-C", root.as_posix(), "add", "--", *tracked], check=True)
+
+            scanned, offenders = scan_tree(root)
+
+        self.assertEqual(offenders, {path: rules for path, (_text, rules) in planted.items()})
+        self.assertEqual(scanned, len(planted) + len(clean))
 
 
 if __name__ == "__main__":

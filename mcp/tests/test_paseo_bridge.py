@@ -65,6 +65,30 @@ def started_runtime(root: Path, **overrides: Any) -> McpRuntimeConfig:
     return runtime_config(root, settings)
 
 
+# What Node 22 really prints for an uncaught error and for a thrown value that is not an error
+# (captured from runs; only the script path is shortened).
+NODE_CRASH_REPORT = """file:///opt/ar/cli/paseo_bridge.mjs:58
+setTimeout(() => { throw new TypeError('the daemon answered with a frame the client cannot read') }, 0)
+                   ^
+
+TypeError: the daemon answered with a frame the client cannot read
+    at Timeout._onTimeout (file:///opt/ar/cli/paseo_bridge.mjs:58:26)
+    at listOnTimeout (node:internal/timers:585:17)
+    at process.processTimers (node:internal/timers:521:7)
+
+Node.js v22.23.2
+"""
+NODE_THROWN_VALUE_REPORT = """
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+the client gave up
+(Use `node --trace-uncaught ...` to show where the exception was thrown)
+
+Node.js v22.23.2
+"""
+
+
 class BridgeProcessTests(unittest.TestCase):
     def test_unconfigured_or_never_started_runtime_refuses_before_any_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -161,17 +185,39 @@ class BridgeProcessTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, "paseo_bridge_unavailable")
             run.assert_not_called()
 
-            crashed = reply(1, "", stderr="at frame\n" * 400 + "TypeError: boom\n")
-            with (
-                self.subTest("a crash keeps the end of its standard error"),
-                patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
-                patch.object(paseo_bridge.subprocess, "run", return_value=crashed),
-                self.assertRaises(PaseoBridgeFailure) as raised,
-            ):
-                bridge_call(config, "catalog", {})
-            self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
-            self.assertTrue(str(raised.exception).endswith("TypeError: boom"))
-            self.assertLessEqual(len(str(raised.exception)), 300)
+            long_error = "RangeError: " + "x" * 500
+            reports = {
+                "a crash report carries its error line": (
+                    NODE_CRASH_REPORT,
+                    "TypeError: the daemon answered with a frame the client cannot read",
+                ),
+                "the last error line is the cause, not one logged earlier": (
+                    "Error: socket closed (a line the client logged)\n" + NODE_CRASH_REPORT,
+                    "TypeError: the daemon answered with a frame the client cannot read",
+                ),
+                "an error line is cut to 200 characters": (long_error + "\n", long_error[:200]),
+                "without an error line the end of the text is kept, minus the stack": (
+                    NODE_THROWN_VALUE_REPORT,
+                    "node:internal/modules/run_main:123\n    triggerUncaughtException(\n    ^\n"
+                    "the client gave up\n"
+                    "(Use `node --trace-uncaught ...` to show where the exception was thrown)",
+                ),
+            }
+            for label, (stderr, cause) in reports.items():
+                with (
+                    self.subTest(label),
+                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge.subprocess, "run", return_value=reply(1, "", stderr=stderr)
+                    ),
+                    self.assertRaises(PaseoBridgeFailure) as raised,
+                ):
+                    bridge_call(config, "catalog", {})
+                self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
+                message = str(raised.exception)
+                self.assertTrue(message.endswith("Its standard error says: " + cause), message)
+                self.assertNotIn("Node.js v", message)
+                self.assertNotIn("node:internal/timers", message)
 
     def test_a_call_that_does_not_end_is_stopped_and_reported_as_a_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -212,7 +258,8 @@ export class DaemonClient {
     const logger = this.config.logger ?? { info: (_fields, line) => process.stdout.write(line + '\\n') }
     logger.info({ url: this.config.url }, 'connecting')
     console.log('a line a package prints through the console')
-    if (scenario.connect === 'hang') await new Promise(() => {})
+    if (scenario.connect === 'crash') setTimeout(() => { throw new TypeError(scenario.crash) }, 0)
+    if (scenario.connect) await new Promise(() => {})
     if (this.config.reconnect?.enabled !== false) throw new Error('the bridge must not reconnect')
     if (scenario.connectError) throw new Error(scenario.connectError)
     if (this.config.url !== scenario.url) throw new Error('unexpected url ' + this.config.url)
@@ -231,7 +278,11 @@ export function createPaseoApi(daemon) {
   return {
     dispose: async () => {},
     providers: {
-      refresh: async () => { refreshed = true; return { acknowledged: true } },
+      refresh: async () => {
+        if (scenario.refresh === 'hang') await never()
+        refreshed = true
+        return { acknowledged: true }
+      },
       snapshot: async () => ({ entries: refreshed ? scenario.refreshedEntries : scenario.entries }),
       // Like the real client: no answer while a provider is still loading.
       waitForReady: async () => {
@@ -326,6 +377,7 @@ class BridgeScriptTests(unittest.TestCase):
             entry("copilot", "unavailable"),
             entry("muse", "error"),
             entry("slow", "loading"),
+            entry("off", "loading", enabled=False),
         ]
         reply = self.call(
             "catalog", {}, entries=entries, refreshedEntries=[entry("late")], models=models
@@ -390,7 +442,11 @@ class BridgeScriptTests(unittest.TestCase):
 
     def test_script_failures_are_named_and_another_daemon_is_refused(self) -> None:
         healthy: dict[str, Any] = {"entries": [entry("codex")], "models": {"codex": {"models": []}}}
-        nothing_ready = [entry("codex", "loading"), entry("omp", "ready", enabled=False)]
+        nothing_ready = [
+            entry("codex", "loading"),
+            entry("omp", "ready", enabled=False),
+            entry("off", "loading", enabled=False),
+        ]
         cases: dict[str, tuple[str, str, dict[str, Any]]] = {
             "another home's daemon": (
                 "paseo_runtime_mismatch",
@@ -425,6 +481,18 @@ class BridgeScriptTests(unittest.TestCase):
                 self.assertEqual(self.refusal(command, **scenario), code)
                 # The script's own budget (1.5 s here) ends the call, not the 60-second stop.
                 self.assertLess(time.monotonic() - started, 5)
+        with self.subTest("a refresh the runtime never answers"):
+            started = time.monotonic()
+            with self.assertRaises(PaseoBridgeFailure) as raised:
+                self.call("catalog", {"refresh": True}, **healthy, refresh="hang")
+            self.assertEqual(raised.exception.code, "paseo_bridge_timeout")
+            self.assertLess(time.monotonic() - started, 5)
+        with self.subTest("a crash of the script carries the error Node reports"):
+            crash = "the daemon answered with a frame the client cannot read"
+            with self.assertRaises(PaseoBridgeFailure) as raised:
+                self.call("catalog", {}, **healthy, connect="crash", crash=crash)
+            self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
+            self.assertTrue(str(raised.exception).endswith("says: TypeError: " + crash))
         with self.subTest("a payload that never arrives is inside the deadline"):
             settings = self.config.paseo_runtime
             assert settings is not None
