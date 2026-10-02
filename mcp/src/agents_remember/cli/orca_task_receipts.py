@@ -185,6 +185,20 @@ def _write_message_binding_projection(
     expected_reference: dict[str, str],
 ) -> dict[str, str]:
     """Create or reuse the exact immutable binding file for one AR request ID."""
+    _place_message_binding_projection(config, request_id, binding, expected_reference)
+    return expected_reference
+
+
+def _place_message_binding_projection(
+    config: McpRuntimeConfig,
+    request_id: uuid.UUID,
+    binding: dict[str, Any],
+    expected_reference: dict[str, str],
+) -> bool:
+    """Create or reuse the binding file of one request id; say whether this call created it.
+
+    Only the launch that created the file may take it back when it is refused afterwards.
+    """
     reference = _message_binding_projection_reference(config, request_id, binding)
     if reference != expected_reference:
         raise ValueError("The message-binding projection reference does not match its content.")
@@ -192,7 +206,7 @@ def _write_message_binding_projection(
     body = _message_binding_projection_bytes(binding)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if _existing_message_binding_projection_matches(path, body):
-        return reference
+        return False
 
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -207,9 +221,10 @@ def _write_message_binding_projection(
                 raise ValueError(
                     "This request ID already has a different immutable message-binding projection."
                 ) from None
+            return False
     finally:
         Path(temporary).unlink(missing_ok=True)
-    return reference
+    return True
 
 
 def _verify_message_binding_projection(
@@ -613,6 +628,42 @@ def _archived_receipt_agent_id(path: Path, selection: OrcaSelection) -> str | No
     if not archived:
         return None
     return _replaced_agent_id(max(archived, key=lambda row: str(row.get("createdAt", ""))))
+
+
+def _refuse_reused_request_id(
+    config: McpRuntimeConfig, path: Path, request: OrcaDispatchRequest
+) -> None:
+    """Refuse a request id that already belongs elsewhere, before anything is prepared for it.
+
+    Called for a request that has no receipt at its address. Its id may be the id of an archived
+    execution of the task folder, which can neither be launched again nor archived a second
+    time, or of a request on another selection, whose message-binding file is written once.
+    """
+
+    archived = path.parent / "history" / f"{request.request_id}.json"
+    if archived.exists() or archived.is_symlink():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Request id {request.request_id} belongs to an archived execution of this "
+                "AR role selection's task folder; start again under a new request id."
+            ),
+        )
+    try:
+        bound = json.loads(
+            _message_binding_projection_path(config, request.request_id).read_text("utf-8")
+        )
+    except (OSError, ValueError):
+        return
+    selection = bound.get("selection") if isinstance(bound, dict) else None
+    if isinstance(selection, dict) and selection != selection_binding(request):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Request id {request.request_id} is already bound to another AR role selection "
+                f"({selection.get('role')}); nothing was prepared for this request."
+            ),
+        )
 
 
 def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uuid.UUID) -> None:

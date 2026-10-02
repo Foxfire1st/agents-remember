@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import test_paseo_launch as launch
+from agents_remember.application.orca_task_context import selection_binding
 from agents_remember.cli import orca_task_receipts, orca_task_routes
 from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_launch import agent_title
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from fastapi import HTTPException
 
 SCHEMA = "ar-orca-native-execution/v1"
 
@@ -30,7 +33,11 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
         assert request.request_id is not None
         self.compilations += 1
         prepared = super().compile_handover(request)
-        binding = {**prepared["messageBindingProjection"]["binding"], "capsuleDigest": self.capsule}
+        binding = {
+            **prepared["messageBindingProjection"]["binding"],
+            "capsuleDigest": self.capsule,
+            "selection": selection_binding(request.context),
+        }
         prepared["capsuleDigest"] = self.capsule
         prepared["messageBindingProjection"] = {
             "requestId": str(request.request_id),
@@ -55,9 +62,26 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
         self.capsule = f"capsule-digest-{uuid.uuid4().hex[:6]}"
         self.prompt = f"A first message compiled later ({self.capsule})."
 
+    def binding_directory(self) -> Path:
+        reports = self.config.coordination_root / "notes" / "reports"
+        return reports / "paseo-native-executions" / "message-bindings"
+
     def binding_files(self) -> set[str]:
-        directory = self.config.coordination_root / "notes/reports/paseo-native-executions"
-        return {path.stem for path in (directory / "message-bindings").glob("*.json")}
+        return {path.stem for path in self.binding_directory().glob("*.json")}
+
+    def binding_bytes(self, request: Any) -> bytes:
+        return (self.binding_directory() / f"{request.request_id}.json").read_bytes()
+
+    def launch_that_stays_starting(self, request: Any) -> dict[str, Any]:
+        """A launch whose process ends after its receipt is written; returns that receipt."""
+
+        crash = RuntimeError("the process ended here")
+        with (
+            patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+            self.assertRaises(RuntimeError),
+        ):
+            self.dispatch(request)
+        return self.receipt(request)
 
 
 class RepeatAfterChangeTests(RepeatTestCase):
@@ -114,7 +138,7 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 self.assertIn("already bound to different", str(self.refused(changed).detail))
                 other = "system-specialist" if role == "architect" else "reviewer"
                 elsewhere = self.refused(self.request(other, request.request_id))
-                self.assertIn("different immutable message-binding", str(elsewhere.detail))
+                self.assertIn("already bound to another AR role selection", str(elsewhere.detail))
                 self.close_execution(request, "completed")
 
 
@@ -178,54 +202,209 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.dispatch(self.request("orchestrator"))
             self.assertNotIn("agent-archive", [call[0] for call in self.runtime.calls])
 
-    def test_a_launch_that_loses_takes_its_message_binding_file_back(self) -> None:
-        write_binding = orca_task_routes._write_message_binding_projection
+    def lose_against(
+        self, competitor: dict[str, Any], mine: Any, binding_first: bool = False
+    ) -> Any:
+        """Another process creates its receipt while this launch writes its binding file.
 
-        def lose_against(competitor: dict[str, Any], mine: Any) -> Any:
-            path = self.receipt_path(mine)
+        With ``binding_first`` this launch has written the file before the other receipt appears.
+        """
 
-            def another_process_starts_first(*args: Any) -> dict[str, str]:
+        place = orca_task_routes._place_message_binding_projection
+        path = self.receipt_path(mine)
+
+        def another_process_starts_first(*args: Any) -> bool:
+            if binding_first:
+                created = place(*args)
                 self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
-                return write_binding(*args)
+                return created
+            self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
+            return place(*args)
 
-            return patch.object(
-                orca_task_routes,
-                "_write_message_binding_projection",
-                side_effect=another_process_starts_first,
-            )
+        return patch.object(
+            orca_task_routes,
+            "_place_message_binding_projection",
+            side_effect=another_process_starts_first,
+        )
 
-        def competitor(request_id: uuid.UUID, status: str) -> dict[str, Any]:
-            return {
-                "schema": SCHEMA,
-                "requestId": str(request_id),
-                "role": "manager",
-                "status": status,
-                "execution": {},
-            }
+    def competitor(self, request_id: uuid.UUID, status: str) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA,
+            "requestId": str(request_id),
+            "role": "manager",
+            "status": status,
+            "requestDigest": "the digest of another override",
+            "execution": {},
+        }
 
+    def test_a_launch_that_loses_takes_back_the_binding_file_it_created(self) -> None:
         for status in ("starting", "rejected"):
             with self.subTest("another request wins", status=status):
                 mine = self.request("manager")
-                with lose_against(competitor(uuid.uuid4(), status), mine):
+                with self.lose_against(self.competitor(uuid.uuid4(), status), mine):
                     self.assertEqual(self.refused(mine).status_code, 409)
                 self.assertNotIn(str(mine.request_id), self.binding_files())
                 self.receipt_path(mine).unlink(missing_ok=True)
-        with self.subTest("the same request wins in another process: its file stays"):
+        with self.subTest("the refusal of the loser is another one than a conflict"):
+            # Whatever refuses the loser, the rule is the same: its own file goes, a shared one stays.
             mine = self.request("manager")
-            theirs = self.request("manager", mine.request_id)
-            crash = RuntimeError("the other process is still at work")
+            unreachable = HTTPException(status_code=503, detail="the host cannot be reached")
             with (
-                patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
-                self.assertRaises(RuntimeError),
+                self.lose_against(self.competitor(uuid.uuid4(), "starting"), mine),
+                patch.object(
+                    orca_task_routes, "_reconcile_prior_execution", side_effect=[None, unreachable]
+                ),
             ):
-                self.dispatch(theirs)
-            winner = self.receipt(theirs)
-            self.receipt_path(theirs).unlink()
-            with lose_against(winner, mine):
+                self.assertEqual(self.refused(mine).status_code, 503)
+            self.assertNotIn(str(mine.request_id), self.binding_files())
+            self.receipt_path(mine).unlink()
+
+    def test_a_launch_that_loses_leaves_a_binding_file_that_is_not_its_own(self) -> None:
+        with self.subTest("the same request wins in another process and this one converges"):
+            mine = self.request("manager")
+            winner = self.launch_that_stays_starting(self.request("manager", mine.request_id))
+            saved = self.binding_bytes(mine)
+            self.receipt_path(mine).unlink()
+            with self.lose_against(winner, mine):
                 status, public = self.dispatch(mine)
             self.assertEqual((status, public["status"]), (200, "running"))
             self.assertEqual(public["execution"]["agentId"], winner["agentId"])
+            self.assertEqual(self.binding_bytes(mine), saved)
+            self.close_execution(mine, "completed")
+        with self.subTest("the winner has this request id and another override"):
+            theirs = self.request("manager")
+            winner = self.launch_that_stays_starting(theirs)
+            saved = self.binding_bytes(theirs)
+            self.receipt_path(theirs).unlink()
+            mine = self.request("manager", theirs.request_id, agentId="codex", effortId="high")
+            with self.lose_against(winner, mine):
+                refused = self.refused(mine)
+            self.assertIn("already bound to different", str(refused.detail))
+            # The winner's receipt names this file; it is there, byte for byte.
+            self.assertEqual(self.binding_bytes(theirs), saved)
+            self.assertEqual(self.receipt(theirs), winner)
+            self.receipt_path(theirs).unlink()
+        with self.subTest("this launch wrote the file first and the winner's receipt names it"):
+            mine = self.request("manager")
+            with self.lose_against(
+                self.competitor(mine.request_id, "starting"), mine, binding_first=True
+            ):
+                refused = self.refused(mine)
+            self.assertIn("already bound to different", str(refused.detail))
             self.assertIn(str(mine.request_id), self.binding_files())
+            unreachable = HTTPException(status_code=503, detail="the host cannot be reached")
+            self.receipt_path(mine).unlink()
+            again = self.request("manager", mine.request_id)
+            with (
+                self.lose_against(self.competitor(mine.request_id, "starting"), again),
+                patch.object(
+                    orca_task_routes, "_reconcile_prior_execution", side_effect=[None, unreachable]
+                ),
+            ):
+                self.assertEqual(self.refused(again).status_code, 503)
+            self.assertIn(str(mine.request_id), self.binding_files())
+
+    def test_a_binding_file_is_this_launch_s_only_when_this_launch_created_it(self) -> None:
+        with self.subTest("a file left by an earlier attempt of the request is not taken back"):
+            mine = self.request("manager")
+            ended = RuntimeError("the process ended before its receipt was created")
+            with (
+                patch.object(orca_task_routes, "_create_receipt", side_effect=ended),
+                self.assertRaises(RuntimeError),
+            ):
+                self.dispatch(mine)
+            saved = self.binding_bytes(mine)
+            with self.lose_against(self.competitor(uuid.uuid4(), "starting"), mine):
+                self.assertEqual(self.refused(mine).status_code, 409)
+            self.assertEqual(self.binding_bytes(mine), saved)
+        with self.subTest("the writer says whether it created the file"):
+            request_id = uuid.uuid4()
+            binding = {"requestId": str(request_id), "role": "manager"}
+            reference = _message_binding_projection_reference(self.config, request_id, binding)
+            place = orca_task_receipts._place_message_binding_projection
+            self.assertIs(place(self.config, request_id, binding, reference), True)
+            self.assertIs(place(self.config, request_id, binding, reference), False)
+            # Another process writes the same file between this call's look and its own write.
+            raced = uuid.uuid4()
+            binding = {"requestId": str(raced), "role": "manager"}
+            reference = _message_binding_projection_reference(self.config, raced, binding)
+            real_link = orca_task_receipts.os.link
+
+            def the_other_process_is_first(source: Any, target: Any, **options: Any) -> None:
+                real_link(source, target, **options)
+                raise FileExistsError(target)
+
+            with patch.object(orca_task_receipts.os, "link", the_other_process_is_first):
+                self.assertIs(place(self.config, raced, binding, reference), False)
+            self.assertEqual(
+                orca_task_receipts._write_message_binding_projection(
+                    self.config, raced, binding, reference
+                ),
+                reference,
+            )
+
+
+class ReusedRequestIdTests(RepeatTestCase):
+    def state(self) -> tuple[list[str], int, int, int]:
+        files = sorted(path.as_posix() for path in self.root.rglob("*") if path.is_file())
+        return files, self.compilations, len(self.runtime.calls), len(self.enclosures.start_calls)
+
+    def test_the_id_of_an_archived_execution_is_refused_before_anything_is_prepared(self) -> None:
+        first = self.request("worker")
+        self.dispatch(first)
+        self.close_execution(first, "completed")
+        saved = self.binding_bytes(first)
+        with self.subTest("a newer execution is at the address"):
+            self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
+            before = self.state()
+            refused = self.refused(self.request("worker", first.request_id))
+            self.assertEqual(refused.status_code, 409)
+            self.assertIn(
+                f"Request id {first.request_id} belongs to an archived execution",
+                str(refused.detail),
+            )
+            self.assertEqual(self.state(), before)
+        with self.subTest("no receipt is at the address"):
+            newer = self.receipt_path(first)
+            orca_task_receipts._archive_receipt(
+                newer, {**json.loads(newer.read_text("utf-8")), "status": "completed"}
+            )
+            before = self.state()
+            refused = self.refused(self.request("worker", first.request_id))
+            self.assertIn("belongs to an archived execution", str(refused.detail))
+            self.assertIn("start again under a new request id", str(refused.detail))
+            self.assertEqual(self.state(), before)
+        # The archived execution's binding file is untouched, and a new request id starts.
+        self.assertEqual(self.binding_bytes(first), saved)
+        self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
+        with self.subTest("a taskless role keeps no history"):
+            architect = self.request("architect")
+            self.dispatch(architect)
+            self.assertEqual(self.dispatch(architect)[1]["status"], "running")
+
+    def test_an_id_bound_to_another_selection_is_refused_before_an_enclosure_is_created(
+        self,
+    ) -> None:
+        architect = self.request("architect")
+        self.dispatch(architect)
+        before = self.state()
+
+        refused = self.refused(self.request("worker", architect.request_id))
+
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn(
+            f"Request id {architect.request_id} is already bound to another AR role selection "
+            "(architect); nothing was prepared",
+            str(refused.detail),
+        )
+        self.assertEqual(self.state(), before)
+        self.assertEqual(self.enclosures.start_calls, [])
+        self.assertFalse(self.enclosures.group.exists())
+        with self.subTest("a binding file that cannot be read refuses nothing by itself"):
+            unreadable = self.request("orchestrator")
+            self.binding_directory().joinpath(f"{unreadable.request_id}.json").write_text("{")
+            refused = self.refused(unreadable)
+            self.assertIn("different immutable message-binding", str(refused.detail))
 
 
 class RuntimeReplyTests(RepeatTestCase):

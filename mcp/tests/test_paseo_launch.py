@@ -608,6 +608,7 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
                 argv,
                 [
                     sys.executable,
+                    "-P",
                     "-m",
                     "agents_remember.cli",
                     "start-leaf-enclosure",
@@ -683,7 +684,8 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
                 (
                     "leaf_enclosure_start_timeout",
                     "was cut off after 120 seconds",
-                    "may have left partial state, which a later Start completes",
+                    "may have left a half-made enclosure",
+                    "repaired or abandoned with AR's worktree tools",
                     "The child process said: git fetch: still receiving",
                 ),
             ),
@@ -997,21 +999,21 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                     "status": status,
                     "execution": {},
                 }
-                write_binding = orca_task_routes._write_message_binding_projection
+                write_binding = orca_task_routes._place_message_binding_projection
 
                 def another_process_starts_first(
                     *args: Any,
                     path: Path = path,
                     competitor: dict[str, Any] = competitor,
                     write_binding: Any = write_binding,
-                ) -> dict[str, str]:
+                ) -> bool:
                     # This launch has found no receipt; the other process creates its own now.
                     self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
                     return write_binding(*args)
 
                 with patch.object(
                     orca_task_routes,
-                    "_write_message_binding_projection",
+                    "_place_message_binding_projection",
                     side_effect=another_process_starts_first,
                 ):
                     error = self.refused(mine)

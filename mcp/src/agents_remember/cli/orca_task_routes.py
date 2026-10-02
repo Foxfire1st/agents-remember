@@ -56,15 +56,16 @@ from agents_remember.cli.orca_task_receipts import (
     _execute_prepared_launch,
     _migrate_taskless_legacy_receipt,
     _now_iso,
+    _place_message_binding_projection,
     _public_execution,
     _read_receipt,
     _receipt_address_matches,
     _receipt_path,
+    _refuse_reused_request_id,
     _replaced_agent_id,
     _request_digest,
     _taskless_execution_receipts,
     _verify_message_binding_projection,
-    _write_message_binding_projection,
     _write_receipt,
 )
 from agents_remember.cli.paseo_bridge import (
@@ -99,6 +100,8 @@ class _PreparedRoleStart:
     message_binding_projection: dict[str, str]
     # The agent of the closed execution this start replaces on a task-bound selection.
     replaces_agent_id: str | None = None
+    # Whether this start created the request's message-binding file (it may then take it back).
+    created_message_binding: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,11 +274,12 @@ def _reserve_message_binding_projection(
     request: OrcaDispatchRequest,
     request_digest: str,
     prepared: dict[str, Any],
-) -> tuple[dict[str, str], str | None, JSONResponse | None]:
+) -> tuple[dict[str, str], str | None, bool, JSONResponse | None]:
     """Settle the receipt already at this address and write the message-binding file.
 
-    Returns the binding reference, the agent of a closed execution this request replaces, and the
-    response when the request is answered by the existing receipt instead of a new launch.
+    Returns the binding reference, the agent of a closed execution this request replaces, whether
+    this call created the binding file, and the response when the request is answered by the
+    existing receipt instead of a new launch.
     """
 
     binding, reference = _prepared_message_binding_projection(prepared, request.request_id)
@@ -291,9 +295,27 @@ def _reserve_message_binding_projection(
         replaces_agent_id = None
     prior = _reconcile_prior_execution(config, path, request, request_digest)
     if prior is not None:
-        return reference, None, prior
-    _write_message_binding_projection(config, request.request_id, binding, reference)
-    return reference, replaces_agent_id, None
+        return reference, None, False, prior
+    created = _place_message_binding_projection(config, request.request_id, binding, reference)
+    return reference, replaces_agent_id, created, None
+
+
+def _take_back_message_binding(start: _PreparedRoleStart) -> None:
+    """Remove the message-binding file of a start that lost the creation of its receipt.
+
+    Only a file this start created is removed, and only while no receipt at the address carries
+    the request id: a file that was there before belongs to another execution of that id (the
+    winner's, or an archived one), and a winner with the same id names the file in its receipt.
+    """
+
+    if not start.created_message_binding:
+        return
+    try:
+        if _receipt_carries_request(start.receipt_path, start.request):
+            return
+    except HTTPException:
+        return  # the receipt cannot be read, so nothing proves the file is this start's alone
+    _discard_message_binding_projection(start.config, start.request.request_id)
 
 
 def _receipt_carries_request(path: Path, request: OrcaDispatchRequest) -> bool:
@@ -317,6 +339,9 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         prior = _reconcile_prior_execution(config, path, request, request_digest)
         if prior is not None:
             return prior
+    # A request id that belongs to an archived execution, or to another selection, is refused
+    # here: before an enclosure is created or anything else is prepared for it.
+    _refuse_reused_request_id(config, path, request)
     role_handover = prepare_orca_role_handover(
         config,
         context,
@@ -325,8 +350,8 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
-    projection_reference, replaces_agent_id, prior = _reserve_message_binding_projection(
-        config, path, request, request_digest, prepared
+    projection_reference, replaces_agent_id, created_binding, prior = (
+        _reserve_message_binding_projection(config, path, request, request_digest, prepared)
     )
     if prior is not None:
         return prior
@@ -340,6 +365,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         role_handover=role_handover,
         message_binding_projection=projection_reference,
         replaces_agent_id=replaces_agent_id,
+        created_message_binding=created_binding,
     )
     return _launch_prepared_role_session(start, prompt=prompt)
 
@@ -433,12 +459,11 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
                 start.config, start.receipt_path, request, start.request_digest
             )
         except HTTPException:
-            _discard_message_binding_projection(start.config, request.request_id)
+            _take_back_message_binding(start)
             raise
         if prior is not None:
             return prior
-        # No execution carries this request id, so its message-binding file goes with it.
-        _discard_message_binding_projection(start.config, request.request_id)
+        _take_back_message_binding(start)
         raise HTTPException(
             status_code=409,
             detail="Another launch of this AR role selection started at the same moment; refresh and start again.",
