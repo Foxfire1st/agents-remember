@@ -84,19 +84,32 @@ class GivenToAgentExpectations(unittest.TestCase):
     ) -> dict[str, Any]:
         """The one tool server a launch defines: the launching build's, with the agent's binding."""
 
-        references = {
-            REFERENCES[label][0]: json.dumps(
+        # Every reference variable is set; one the selection does not have is empty.
+        references = {variable: "" for variable, _name in REFERENCES.values()}
+        for label, key in task_labels.items():
+            references[REFERENCES[label][0]] = json.dumps(
                 dict(zip(("repository", "path"), key.split("/", 1), strict=True)),
                 separators=(",", ":"),
             )
-            for label, key in task_labels.items()
-        }
         return {
             "type": "stdio",
             "command": sys.executable,
-            "args": ["-m", "agents_remember.mcp", "--config", self.config.config_path.as_posix()],
+            # The working directory is kept off the module search path.
+            "args": [
+                "-P",
+                "-m",
+                "agents_remember.mcp",
+                "--config",
+                self.config.config_path.as_posix(),
+            ],
             "env": {
                 "PYTHONPATH": self.source.parent.as_posix(),
+                # What the launching process has of these, the fixture sets both.
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
+                # No seat identity reaches the tool server from the harness that starts it.
+                "AR_SPAWN_ROLE": "",
+                "AR_HOSTED_SESSION_ID": "",
                 "AR_PASEO_AGENT_ID": agent_id,
                 "AR_ROLE": request.role,
                 "AR_REQUEST_ID": str(request.request_id),

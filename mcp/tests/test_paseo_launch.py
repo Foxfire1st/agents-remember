@@ -274,8 +274,17 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.source = self.root / "build" / "src" / "agents_remember"
         self.replace(paseo_launch, "launching_source_root", return_value=self.source)
         # A launch writes no harness configuration; the user's home is watched for one as well.
+        # The launching process has both variables that keep a process from writing into the
+        # checkout it runs from.
         (self.root / "home").mkdir()
-        home = patch.dict(os.environ, {"HOME": (self.root / "home").as_posix()})
+        home = patch.dict(
+            os.environ,
+            {
+                "HOME": (self.root / "home").as_posix(),
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
+            },
+        )
         home.start()
         self.addCleanup(home.stop)
 

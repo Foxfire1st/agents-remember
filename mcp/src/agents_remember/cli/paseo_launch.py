@@ -15,6 +15,7 @@ not accepting tool servers.
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from dataclasses import dataclass
@@ -45,8 +46,11 @@ _TEXT_LIMIT = 800
 # The module that starts this build's tool server.
 _TOOL_SERVER_MODULE = "agents_remember.mcp"
 RECOVERY_NOTE_LIMIT = 600
-# Below this length a shortened task reference no longer identifies its document.
-_SHORTEST_REFERENCE = 16
+# A shortened part of a task reference keeps its leading id, at most this many characters of it.
+_LONGEST_LEADING_ID = 12
+# Variables that keep a process from writing into the checkout it runs from. A harness need not
+# pass them on, so the definition carries them when the launching process has them.
+_WRITE_AVOIDING_VARIABLES = ("GIT_OPTIONAL_LOCKS", "PYTHONPYCACHEPREFIX")
 TOOL_SERVER_APPLIED = "tool server applied"
 TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
 
@@ -142,23 +146,29 @@ def tool_server_definition(settings_file: Path, binding: AgentBinding) -> dict[s
     """The tool server of this build, started with this build's source and settings.
 
     It is the interpreter that runs this process, the tool server's module, and the settings file
-    this process was started with. When this build's package is a source tree outside the
-    interpreter's own installation, the definition names that tree, so that the server loads the
-    same source as the process that launched the agent.
+    this process was started with. The interpreter is told not to put the working directory on
+    its module search path: the server starts in the agent's folder, and nothing in that folder
+    may stand in for the build or for a module the build imports. The source path variable is
+    always set: to this build's source tree when the package is a checkout outside the
+    interpreter's own installation, and to nothing when the interpreter's own installation holds
+    it, so that no inherited value puts another source tree in front.
     """
 
     interpreter = sys.executable
     if not interpreter:
         raise ValueError("This process cannot name its Python interpreter for the tool server.")
     package = launching_source_root()
-    source: dict[str, str] = {}
-    if not package.is_relative_to(Path(sys.prefix).resolve()):
-        source["PYTHONPATH"] = package.parent.as_posix()
+    installed = package.is_relative_to(Path(sys.prefix).resolve())
+    kept = {name: os.environ[name] for name in _WRITE_AVOIDING_VARIABLES if os.environ.get(name)}
     return {
         "type": "stdio",
         "command": interpreter,
-        "args": ["-m", _TOOL_SERVER_MODULE, "--config", settings_file.as_posix()],
-        "env": {**source, **binding.environment()},
+        "args": ["-P", "-m", _TOOL_SERVER_MODULE, "--config", settings_file.as_posix()],
+        "env": {
+            "PYTHONPATH": "" if installed else package.parent.as_posix(),
+            **kept,
+            **binding.environment(),
+        },
     }
 
 
@@ -172,7 +182,7 @@ def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
     """Role, task references, and where the complete first message is stored; no task content.
 
     The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The artifact's path and SHA-256
-    are always complete; task references that would not fit are shortened in the middle.
+    are always complete; task references that would not fit are shortened (``_fitted``).
     """
 
     references = [
@@ -197,11 +207,7 @@ def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
         )
 
     keys = [key for _label, key in references]
-    text = note(keys)
-    if len(text) > RECOVERY_NOTE_LIMIT and keys:
-        room = (RECOVERY_NOTE_LIMIT - len(note(["" for _key in keys]))) // len(keys)
-        if room >= _SHORTEST_REFERENCE:
-            text = note([_shortened(key, room) for key in keys])
+    text = note(_fitted(keys, RECOVERY_NOTE_LIMIT - len(note(["" for _key in keys]))))
     if len(text) > RECOVERY_NOTE_LIMIT:
         raise ValueError(
             f"The recovery note of this launch cannot name its handover artifact within "
@@ -210,11 +216,73 @@ def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
     return text
 
 
-def _shortened(reference: str, room: int) -> str:
-    if len(reference) <= room:
+def _fitted(references: list[str], room: int) -> list[str]:
+    """The references as the note names them in ``room`` characters: whole, or shortened.
+
+    The others are shortened before the most specific reference, the last one: it stays whole
+    while the others can still be named in their shortest form, and is cut only by what is then
+    still missing. Room that a short reference does not need goes to the others.
+    """
+
+    lengths = [len(reference) for reference in references]
+    if not references or sum(lengths) <= room:
+        return references
+    floors = [len(_shortened(reference, 0)) for reference in references]
+    specific = min(lengths[-1], max(room - sum(floors[:-1]), floors[-1]))
+    widths = [*_shares(room - specific, floors[:-1], lengths[:-1]), specific]
+    return [
+        _shortened(reference, width) for reference, width in zip(references, widths, strict=True)
+    ]
+
+
+def _shares(room: int, floors: list[int], caps: list[int]) -> list[int]:
+    """Divide ``room`` among parts that each take at least their floor and at most their cap.
+
+    The parts that need least are served first, so what they leave over goes to the others.
+    """
+
+    widths = list(floors)
+    spare = room - sum(floors)
+    wanting = sorted(
+        (index for index in range(len(caps)) if caps[index] > floors[index]),
+        key=lambda index: caps[index] - floors[index],
+    )
+    for served, index in enumerate(wanting):
+        grant = min(caps[index] - floors[index], max(spare, 0) // (len(wanting) - served))
+        widths[index] += grant
+        spare -= grant
+    return widths
+
+
+def _shortened(reference: str, width: int) -> str:
+    """``reference`` in at most ``width`` characters, or in its shortest form if that is longer.
+
+    The repository name stays whole. Each part after it, the task folder and the document, keeps
+    at least its leading id and ends in an ellipsis where it was cut.
+    """
+
+    if len(reference) <= width:
         return reference
-    head = (room - 1) // 3
-    return f"{reference[:head]}…{reference[len(reference) - (room - 1 - head) :]}"
+    repository, *parts = reference.split("/")
+    lengths = [len(part) for part in parts]
+    floors = [min(len(part), len(_leading_id(part)) + 1) for part in parts]
+    widths = _shares(width - len(repository) - len(parts), floors, lengths)
+    return "/".join(
+        [
+            repository,
+            *(
+                part if size >= len(part) else f"{part[: size - 1]}…"
+                for part, size in zip(parts, widths, strict=True)
+            ),
+        ]
+    )
+
+
+def _leading_id(part: str) -> str:
+    """What identifies a folder or document among its siblings: the text before its slug."""
+
+    head = part.split("_", 1)[0] if "_" in part else part.split(".", 1)[0]
+    return head[:_LONGEST_LEADING_ID]
 
 
 def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:

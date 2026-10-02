@@ -21,12 +21,32 @@ from mcp import ClientSession, StdioServerParameters
 START_TIMEOUT_SECONDS = 120
 
 
+# What a harness that passes its own environment on could hand the tool server: another source
+# tree, a seat identity, and task references of some other launch.
+INHERITED = {
+    "PYTHONPATH": "/another/ar/checkout/mcp/src",
+    "AR_SPAWN_ROLE": "worker",
+    "AR_HOSTED_SESSION_ID": "seat-of-another-launch",
+    "AR_MASTER_REF": '{"repository":"sandbox-app","path":"other-master/task.json"}',
+    "AR_TASK_REF": '{"repository":"sandbox-app","path":"other-master/01_other-leaf.json"}',
+}
+# Files an agent could leave in its working directory: a package named like the build's, and a
+# module named like one the tool server imports. Loaded, either would end the server at once.
+DECOYS = {
+    "agents_remember/__init__.py": "raise SystemExit('the decoy package was loaded')\n",
+    "agents_remember/mcp/__init__.py": "",
+    "agents_remember/mcp/__main__.py": "raise SystemExit('the decoy module was run')\n",
+    "json.py": "raise SystemExit('the loose json.py was loaded')\n",
+}
+
+
 async def _server_info(definition: dict[str, Any], cwd: Path) -> dict[str, Any]:
-    # A harness adds the definition's environment to its own and starts the command.
+    # A harness adds the definition's environment to its own and starts the command in the
+    # agent's working directory.
     server = StdioServerParameters(
         command=definition["command"],
         args=definition["args"],
-        env={**os.environ, **definition["env"]},
+        env={**os.environ, **INHERITED, **definition["env"]},
         cwd=cwd,
     )
     async with stdio_client(server) as (reader, writer), ClientSession(reader, writer) as session:
@@ -45,6 +65,10 @@ class ToolServerStartTests(unittest.TestCase):
             root = Path(temporary).resolve()
             for folder in ("coordination", "projects", "settings"):
                 (root / folder).mkdir()
+            for name, text in DECOYS.items():
+                decoy = root / "projects" / name
+                decoy.parent.mkdir(parents=True, exist_ok=True)
+                decoy.write_text(text, encoding="utf-8")
             settings = root / "settings" / "agents-remember-settings.json"
             settings.write_text(
                 json.dumps(
@@ -75,7 +99,9 @@ class ToolServerStartTests(unittest.TestCase):
             )
 
         self.assertTrue(info["ok"])
-        # The server that answers is this build's: same source tree, the settings it was given.
+        # The server that answers is this build's, although its working directory holds a package
+        # and a module of the same names: same source tree, the settings it was given. Its
+        # binding is the launch's alone, with nothing of what it inherited.
         self.assertEqual(info["servingBuild"]["packageRoot"], launching_source_root().as_posix())
         self.assertEqual(info["configPath"], settings.as_posix())
         self.assertEqual(info["coordinationRoot"], (root / "coordination").as_posix())
