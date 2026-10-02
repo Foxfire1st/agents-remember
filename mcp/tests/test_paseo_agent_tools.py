@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 import re
@@ -44,16 +45,22 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from test_paseo_launch import PaseoLaunchTestCase
 
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
-# The code a launch runs through: every module of the seam, found by name, so that a new one is
-# scanned without anyone listing it. It serves every harness alike, so it names none.
+# The code a launch runs through: every module of the seam, found by name, every script beside
+# the bridge, and every module of the package that imports one of the seam's modules, so that new
+# code is scanned without anyone listing it. It serves every harness alike, so it names none.
 LAUNCH_CODE_PATTERNS = (
     "cli/paseo_*.py",
     "cli/orca_*.py",
     "cli/leaf_enclosure_start.py",
-    "cli/paseo_bridge.mjs",
+    "cli/paseo_*.mjs",
     "application/agent_binding.py",
     "application/orca_task_context.py",
 )
+# The one place in the scanned code where a harness's name stays: the dashboard command's help
+# text for --config names the folder in which its settings discovery looks. It is a folder name
+# the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
+# go without changing that help text.
+NAMED_EXCEPTIONS = {"cli/dashboard.py": ".claude/mcp/agents-remember-settings.json"}
 HARNESS_NAMES = ("codex", "claude", "pi", "hermes", "eve", "opencode", "copilot", "omp")
 # A word ends at anything that is not a letter, at an underscore and at a change of case, so a
 # harness's name is found inside an identifier too.
@@ -86,9 +93,44 @@ BINDING_VARIABLES = (
 SEAT_VARIABLES = ("AR_SPAWN_ROLE", "AR_HOSTED_SESSION_ID")
 
 
-def harness_names_in(text: str) -> list[str]:
+def harness_names_in(text: str, excepted: str = "") -> list[str]:
     scanned = text.replace(INHERITED_IDENTIFIER, "")
+    if excepted:
+        scanned = scanned.replace(excepted, "")
     return [word for word in WORD.findall(scanned) if word.lower() in HARNESS_NAMES]
+
+
+def module_name(package: Path, path: Path) -> str:
+    return ".".join((package.name, *path.relative_to(package).with_suffix("").parts))
+
+
+def imported_names(package: Path, path: Path) -> set[str]:
+    """Every dotted name a module imports, relative imports resolved against its own place."""
+
+    own = module_name(package, path).split(".")
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = own[: len(own) - node.level] if node.level else []
+            module = ".".join([*base, *(node.module.split(".") if node.module else [])])
+            names.add(module)
+            names.update(f"{module}.{alias.name}" for alias in node.names)
+    return names
+
+
+def launch_code(package: Path) -> list[Path]:
+    """The files the harness-name scan reads: the seam, and the modules that import it."""
+
+    seam = {path for pattern in LAUNCH_CODE_PATTERNS for path in package.glob(pattern)}
+    modules = {module_name(package, path) for path in seam if path.suffix == ".py"}
+    importers = {
+        path
+        for path in package.rglob("*.py")
+        if path not in seam and modules & imported_names(package, path)
+    }
+    return sorted(seam | importers)
 
 
 def binding(role: str = "worker", *references: TaskDocumentRef) -> AgentBinding:
@@ -357,13 +399,13 @@ class RecoveryNoteTests(unittest.TestCase):
         self.assertEqual(RECOVERY_NOTE_LIMIT, 600)
 
     def test_a_note_that_would_not_fit_shortens_the_less_specific_references_first(self) -> None:
-        # Names as the live task tree has them: references of 56, 72 and 123 characters and an
-        # artifact path of 224, for which the unshortened note has 684.
+        # The longest note of the live task tree: references of 56, 64 and 123 characters and an
+        # artifact path of 218, for which the unshortened note has 670.
         references = [
             TaskDocumentRef(repository="agents-remember", path=path)
             for path in (
                 "260713_improved-agentic-system/task.json",
-                "260921_complete-code-and-intent-review-round-2/task.json",
+                "260921_complete-code-and-intent-review/task.json",
                 "260921_complete-code-and-intent-review/"
                 "28_curated-foundation-from-code-external-sources-and-onboarding.json",
             )
@@ -371,50 +413,92 @@ class RecoveryNoteTests(unittest.TestCase):
         path = (
             "/home/firefox/projects/ar-coordination/worktrees/agents-remember/"
             "28_curated-foundation-from-code-external-60ff47641f-ar/task-reports/orca-native/"
-            "260921-ICR-L28-reviewer-00000000-0000-0000-0000-000000000000-fix-2.handover.txt"
+            "260921-ICR-L28-reviewer-00000000-0000-0000-0000-000000000000.handover.txt"
         )
         sizes = ([len(reference.key) for reference in references], len(path))
-        self.assertEqual(sizes, ([56, 72, 123], 224))
-        tail = (
-            f" Assignment file: {path} (SHA-256 {SHA}). Reload that file whenever your "
-            "assignment is not in your context."
-        )
-        note = recovery_note(context("reviewer", *references), {"path": path, "sha256": SHA})
-        # Path and digest are whole. Sprint and master keep the repository and the leading id of
-        # folder and file; the leaf, cut last, loses only the end of its slug.
+        self.assertEqual(sizes, ([56, 64, 123], 218))
+        reviewer = context("reviewer", *references)
+        leaf = references[2].key
+        note = recovery_note(reviewer, {"path": path, "sha256": SHA})
+        # Path, digest and the leaf reference are whole. Sprint and master end at their task
+        # folder, whose document they name, and keep its leading id and the start of its slug.
         self.assertEqual(
             note,
-            "AR role agent: reviewer. Sprint agents-remember/260713…/task…. Master "
-            "agents-remember/260921…/task…. Task agents-remember/"
-            "260921_complete-code-and-intent-review/"
-            "28_curated-foundation-from-code-external-sources-and-…." + tail,
+            "AR role agent: reviewer. Sprint agents-remember/260713_i…. Master "
+            f"agents-remember/260921_c…. Task {leaf}. Assignment file: {path} (SHA-256 {SHA}). "
+            "Reload that file whenever your assignment is not in your context.",
         )
         self.assertEqual(len(note), 600)
 
-        with self.subTest("the most specific reference stays whole while the others can be named"):
-            note = recovery_note(
-                context("reviewer", *references),
-                {"path": path[:-60] + ".handover.txt", "sha256": SHA},
-            )
+        whole = len(recovery_note(reviewer, artifact_with_path_of(100))) - 100
+        # Characters over the limit -> what the note then reads for sprint and master.
+        steps = {
+            # The document name of the sprint goes first, as a whole.
+            1: "Sprint agents-remember/260713_improved-agentic-system. Master "
+            "agents-remember/260921_complete-code-and-intent-review/task.json.",
+            # Then the master's; both folders are still whole.
+            20: "Sprint agents-remember/260713_improved-agentic-system. Master "
+            "agents-remember/260921_complete-code-and-intent-review.",
+            # Only then are the folders' slugs cut, the longer one first.
+            21: "Sprint agents-remember/260713_improved-agentic-system. Master "
+            "agents-remember/260921_complete-code-and-intent-revi….",
+            40: "Sprint agents-remember/260713_improved-agentic…. Master "
+            "agents-remember/260921_complete-code-an….",
+            # The shortest form of both: repository and the folder's leading id.
+            74: "Sprint agents-remember/260713…. Master agents-remember/260921….",
+        }
+        for over, shown in steps.items():
+            with self.subTest("the less specific references give way first", over=over):
+                note = recovery_note(reviewer, artifact_with_path_of(600 - whole + over))
+                self.assertIn(f". {shown} Task {leaf}. Assignment file: ", note)
+                self.assertLessEqual(len(note), 600)
+        with self.subTest("the leaf is cut only when the others are at their shortest"):
+            note = recovery_note(reviewer, artifact_with_path_of(600 - whole + 76))
             self.assertIn(
-                " Sprint agents-remember/260713_improved-ag…/task.json. Master "
-                "agents-remember/260921_complete-cod…/task.json. Task "
-                f"{references[2].key}. Assignment file: ",
+                ". Sprint agents-remember/260713…. Master agents-remember/260921…. Task "
+                f"{leaf[:-3]}…. Assignment file: ",
                 note,
             )
             self.assertEqual(len(note), 600)
         with self.subTest("room a short reference does not use goes to the others"):
-            mixed = context("reviewer", SPRINT, *references[1:])
+            longer = TaskDocumentRef(
+                repository="agents-remember",
+                path="260921_complete-code-and-intent-review-round-2/task.json",
+            )
+            mixed = context("reviewer", SPRINT, longer, references[2])
             whole = len(recovery_note(mixed, artifact_with_path_of(100))) - 100
             note = recovery_note(mixed, artifact_with_path_of(600 - whole + 24))
             self.assertIn(
-                " Sprint agents-remember/sprint/task.json. Master "
-                "agents-remember/260921_complete-code-…/task.json. Task "
-                f"{references[2].key}. Assignment file: ",
+                ". Sprint agents-remember/sprint. Master "
+                f"agents-remember/260921_complete-code-and-intent-review-ro…. Task {leaf}. ",
                 note,
             )
             self.assertEqual(len(note), 600)
-        with self.subTest("a single reference is the most specific one"):
+        with self.subTest("a part without a slug is whole or at its shortest, never cut inside"):
+            plain = context(
+                "worker",
+                *(
+                    TaskDocumentRef(repository="sandbox-app", path=path)
+                    for path in (
+                        "sbx-sprint/task.json",
+                        "sbx-text-helpers/task.json",
+                        "sbx-text-helpers/01_slugify.json",
+                    )
+                ),
+            )
+            whole = len(recovery_note(plain, artifact_with_path_of(100))) - 100
+            forms = {
+                11: "Sprint sandbox-app/sbx-sprint. Master sandbox-app/sbx-text-helpers. "
+                "Task sandbox-app/sbx-text-helpers/01_slugify.json.",
+                21: "Sprint sandbox-app/sbx-sprint. Master sandbox-app/sbx-text-hel…. "
+                "Task sandbox-app/sbx-text-helpers/01_slugify.json.",
+                24: "Sprint sandbox-app/sbx-sprint. Master sandbox-app/sbx-text-hel…. "
+                "Task sandbox-app/sbx-text-hel…/01_slugify.json.",
+            }
+            for over, shown in forms.items():
+                note = recovery_note(plain, artifact_with_path_of(600 - whole + over))
+                self.assertIn(f". {shown} Assignment file: ", note)
+        with self.subTest("a single reference is the most specific one and keeps its document"):
             long_sprint = TaskDocumentRef(
                 repository="agents-remember", path=f"260713_{'improved-' * 30}system/task.json"
             )
@@ -422,8 +506,7 @@ class RecoveryNoteTests(unittest.TestCase):
                 context("orchestrator", long_sprint), {"path": path, "sha256": SHA}
             )
             self.assertRegex(
-                note,
-                r"\. Sprint agents-remember/260713_(improved-)+i[a-z]*…/task\.json\. Assignment",
+                note, r"\. Sprint agents-remember/260713_(improved-)+i[a-z]*…/task…\. Assignment"
             )
             self.assertEqual(len(note), 600)
 
@@ -439,21 +522,23 @@ class RecoveryNoteTests(unittest.TestCase):
         with self.subTest("references are whole at 600 and shortened from 601"):
             at_limit = recovery_note(full, artifact_with_path_of(600 - whole))
             self.assertEqual((len(at_limit), "…" in at_limit), (600, False))
+            self.assertIn(" Sprint agents-remember/sprint/task.json. ", at_limit)
+            # A part without a slug is never cut inside: the sprint's document name goes whole.
             over = recovery_note(full, artifact_with_path_of(601 - whole))
-            self.assertEqual(len(over), 600)
             self.assertIn(
-                " Sprint agents-remember/sprint/task.js…. Master agents-remember/master/task.json. "
+                " Sprint agents-remember/sprint. Master agents-remember/master/task.json. "
                 "Task agents-remember/master/01_leaf.json. ",
                 over,
             )
+            self.assertEqual(len(over), 591)
         with self.subTest("the shortest form keeps repository and leading ids; beyond it, refusal"):
-            # 'sprint' and 'master' have no id to be cut down to; the documents do.
+            # 'sprint' and 'master' have no slug to be cut; the leaf keeps its number.
             shortest = (
-                " Sprint agents-remember/sprint/task…. Master agents-remember/master/task…. "
+                " Sprint agents-remember/sprint. Master agents-remember/master. "
                 "Task agents-remember/master/01…. "
             )
-            saved = sum(len(reference.key) for reference in (SPRINT, MASTER, LEAF)) - 82
-            self.assertEqual(saved, 17)
+            saved = sum(len(reference.key) for reference in (SPRINT, MASTER, LEAF)) - 70
+            self.assertEqual(saved, 29)
             note = recovery_note(full, artifact_with_path_of(600 - whole + saved))
             self.assertIn(shortest, note)
             self.assertEqual(len(note), 600)
@@ -527,23 +612,45 @@ class HandoverArtifactTests(unittest.TestCase):
             self.assertEqual(stored.read_bytes(), body)
             self.assertEqual([entry.name for entry in stored.parent.iterdir()], [stored.name])
         with self.subTest("a saved message that is not the artifact's is refused"):
-            elsewhere = self.root / "elsewhere.handover.txt"
             mismatches = {
-                "no artifact line": (reference, content),
-                "another content": (reference, f"{line}\n{content} changed"),
-                "the line alone": (reference, line),
+                "no artifact line": content,
+                "another content": f"{line}\n{content} changed",
+                "the line alone": line,
                 # The content alone would pass the digest; the line has to be the artifact's.
-                "another first line": (reference, f"AR handover artifact: elsewhere.\n{content}"),
-                # A reference whose resolved path is not where its own path leads.
-                "another target": ({**reference, "canonicalPath": elsewhere.as_posix()}, message),
+                "another first line": f"AR handover artifact: elsewhere.\n{content}",
             }
-            for label, (given, saved) in mismatches.items():
+            for label, saved in mismatches.items():
                 with (
                     self.subTest(label),
                     self.assertRaisesRegex(ValueError, "does not match its handover artifact"),
                 ):
-                    restore_handover_artifact(given, saved)
+                    restore_handover_artifact(reference, saved)
+        with self.subTest("a path that no longer leads to the recorded file is named as such"):
+            # A reference whose recorded file is not where its own path leads: nothing is
+            # written there, and the refusal names both places.
+            elsewhere = self.root / "elsewhere.handover.txt"
+            refusal = (
+                f"The handover artifact of this request is recorded at {elsewhere}, but the path "
+                f"the agent was given, {reference['path']}, now leads to {stored}. Put back what "
+                "that path ran through (for a leaf role, the report-access link of its "
+                "enclosure) and retry."
+            )
+            with self.assertRaisesRegex(ValueError, re.escape(refusal)):
+                restore_handover_artifact(
+                    {**reference, "canonicalPath": elsewhere.as_posix()}, message
+                )
             self.assertFalse(elsewhere.exists())
+        with self.subTest("a retry over a changed artifact says how the retry gets through"):
+            stored.unlink()
+            stored.write_text("another assignment", encoding="utf-8")
+            refusal = (
+                f"The handover artifact {stored} no longer holds the first message saved for "
+                "this request. Delete that file and retry; the retry writes it again from the "
+                "saved message."
+            )
+            with self.assertRaisesRegex(ValueError, re.escape(refusal)):
+                restore_handover_artifact(reference, message)
+            self.assertEqual(stored.read_text(encoding="utf-8"), "another assignment")
         with self.subTest("a lost artifact is written again from the saved message"):
             stored.unlink()
             restore_handover_artifact(reference, message)
@@ -646,22 +753,6 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             artifact.unlink()
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
-        with self.subTest("a retry refuses an artifact whose content was changed"):
-            request = self.request("orchestrator")
-            self.runtime.fail("agent-create", "paseo_daemon_unreachable")
-            self.dispatch(request)
-            artifact = Path(self.artifact(request)["path"])
-            artifact.unlink()
-            artifact.write_text("another assignment", encoding="utf-8")
-            saved = self.receipt_path(request).read_bytes()
-            calls = len(self.runtime.calls)
-            error = self.refused(request)
-            self.assertEqual(error.status_code, 409)
-            self.assertIn(f"different handover content in {artifact}", str(error.detail))
-            self.assertIn("under a new request id", str(error.detail))
-            self.assertEqual(len(self.runtime.calls), calls)
-            self.assertEqual(self.receipt_path(request).read_bytes(), saved)
-            self.assertEqual(artifact.read_text(encoding="utf-8"), "another assignment")
         for label, content, launches in (
             ("the same content is reused", self.prompt, True),
             ("different content is refused before a receipt", "an earlier compilation", False),
@@ -688,10 +779,51 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 self.assertEqual(artifact.read_text(encoding="utf-8"), content)
                 self.assertEqual(artifact.stat().st_ino, written.st_ino)
 
-    def test_a_leaf_agent_is_given_its_paths_through_the_report_access_link(self) -> None:
-        def compiled_for_the_enclosure(handover: OrcaHandoverRequest) -> dict[str, Any]:
-            # As the real compilation does for a leaf role: the report lies behind the link that
-            # the leaf's enclosure holds to its task's report folder.
+    def test_a_retry_over_a_changed_or_lost_artifact_says_and_does_what_gets_it_through(
+        self,
+    ) -> None:
+        # A task-bound and a taskless role: the retry's check is the same for both.
+        for role in ("orchestrator", "architect"):
+            with self.subTest("a retry refuses an artifact whose content was changed", role=role):
+                request = self.request(role)
+                self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+                self.dispatch(request)
+                artifact = Path(self.artifact(request)["path"])
+                artifact.unlink()
+                artifact.write_text("another assignment", encoding="utf-8")
+                saved = self.receipt_path(request).read_bytes()
+                calls = len(self.runtime.calls)
+                error = self.refused(request)
+                self.assertEqual(error.status_code, 409)
+                # A new request id would be refused for a selection with an open execution;
+                # the refusal names what lets this retry through.
+                self.assertEqual(
+                    str(error.detail),
+                    f"The handover artifact {artifact} no longer holds the first message saved "
+                    "for this request. Delete that file and retry; the retry writes it again "
+                    "from the saved message.",
+                )
+                self.assertEqual(len(self.runtime.calls), calls)
+                self.assertEqual(self.receipt_path(request).read_bytes(), saved)
+                self.assertEqual(artifact.read_text(encoding="utf-8"), "another assignment")
+                # And that is what lets it through.
+                artifact.unlink()
+                self.assertEqual(self.dispatch(request)[1]["status"], "running")
+                self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
+        with self.subTest("a taskless retry writes a lost artifact again"):
+            request = self.request("system-specialist")
+            self.runtime.fail("agent-create", "paseo_bridge_timeout")
+            self.dispatch(request)
+            artifact = Path(self.artifact(request)["path"])
+            artifact.unlink()
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
+
+    def compile_for_the_enclosure(self) -> None:
+        """Compile as the real compilation does for a leaf role: the report lies behind the link
+        that the leaf's enclosure holds to its task's report folder."""
+
+        def compiled(handover: OrcaHandoverRequest) -> dict[str, Any]:
             access = Path(handover.workspace["taskReportAccessRoot"])
             report = access / "orca-native" / f"01_LEAF-worker-{handover.request_id}.md"
             return {
@@ -700,7 +832,49 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 "canonicalTaskReportPath": report.resolve().as_posix(),
             }
 
-        self.replace(orca_task_preparation, "_compile_handover", compiled_for_the_enclosure)
+        self.replace(orca_task_preparation, "_compile_handover", compiled)
+
+    def test_a_leaf_retry_puts_a_missing_report_access_link_back(self) -> None:
+        self.compile_for_the_enclosure()
+        request = self.request("worker")
+        self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+        self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+        saved = self.receipt(request)
+        reference = saved["handoverArtifact"]
+        link = self.enclosures.group / "task-reports"
+        stored = Path(reference["canonicalPath"])
+        written = stored.stat()
+        with self.subTest("something else at the link's name is refused, and named"):
+            link.unlink()
+            link.mkdir()
+            calls = len(self.runtime.calls)
+            error = self.refused(request)
+            self.assertEqual(error.status_code, 409)
+            self.assertEqual(
+                str(error.detail),
+                f"The handover artifact of this request is recorded at {stored}, but the path "
+                f"the agent was given, {reference['path']}, now leads to "
+                f"{link / 'orca-native' / stored.name}. Put back what that path ran through "
+                "(for a leaf role, the report-access link of its enclosure) and retry.",
+            )
+            self.assertEqual(len(self.runtime.calls), calls)
+            self.assertEqual(list(link.iterdir()), [])
+            link.rmdir()
+        with self.subTest("a missing link is bound again, as the first launch bound it"):
+            self.assertFalse(link.exists())
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(link.resolve(), stored.parent.parent)
+            self.assertEqual(Path(reference["path"]).read_text(encoding="utf-8"), self.prompt)
+            self.assertEqual(
+                (stored.stat().st_ino, stored.stat().st_mtime_ns),
+                (written.st_ino, written.st_mtime_ns),
+            )
+            created = self.runtime.launch_calls()[-1][1]
+            self.assertEqual(created["prompt"], saved["replayRequest"]["agent"]["prompt"])
+
+    def test_a_leaf_agent_is_given_its_paths_through_the_report_access_link(self) -> None:
+        self.compile_for_the_enclosure()
         request = self.request("worker")
 
         self.assertEqual(self.dispatch(request)[1]["status"], "running")
@@ -738,26 +912,29 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
 
 class NoHarnessNameTests(unittest.TestCase):
     def test_the_launch_code_names_no_harness(self) -> None:
-        scanned = sorted(
-            {path for pattern in LAUNCH_CODE_PATTERNS for path in PACKAGE.glob(pattern)}
-        )
-        # The pattern finds the seam's modules, the ones of this leaf among them.
+        scanned = launch_code(PACKAGE)
+        names = [path.relative_to(PACKAGE).as_posix() for path in scanned]
+        # The patterns find the seam's modules, the ones of this leaf among them; the import rule
+        # adds the modules that use them: the tool server's tools and the dashboard command.
         for expected in (
-            "paseo_launch.py",
-            "paseo_catalog.py",
-            "paseo_bridge.mjs",
-            "orca_task_routes.py",
-            "orca_task_receipts.py",
-            "orca_task_preparation.py",
-            "orca_handover_artifacts.py",
-            "leaf_enclosure_start.py",
-            "agent_binding.py",
+            "cli/paseo_launch.py",
+            "cli/paseo_catalog.py",
+            "cli/paseo_bridge.mjs",
+            "cli/orca_task_routes.py",
+            "cli/orca_task_receipts.py",
+            "cli/orca_task_preparation.py",
+            "cli/orca_handover_artifacts.py",
+            "cli/leaf_enclosure_start.py",
+            "application/agent_binding.py",
+            "mcp/tools/core.py",
+            "cli/dashboard.py",
         ):
-            self.assertIn(expected, [path.name for path in scanned])
-        for path in scanned:
-            with self.subTest(path.name):
-                found = sorted(set(harness_names_in(path.read_text(encoding="utf-8"))))
-                self.assertEqual(found, [], f"{path.name} names a harness: {found}")
+            self.assertIn(expected, names)
+        for path, name in zip(scanned, names, strict=True):
+            with self.subTest(name):
+                text = path.read_text(encoding="utf-8")
+                found = sorted(set(harness_names_in(text, NAMED_EXCEPTIONS.get(name, ""))))
+                self.assertEqual(found, [], f"{name} names a harness: {found}")
         # The scan sees what it is meant to catch, inside an identifier too, and passes the one
         # inherited identifier and words that merely contain a harness's letters.
         caught: dict[str, list[str]] = {
@@ -770,9 +947,40 @@ class NoHarnessNameTests(unittest.TestCase):
             "capsule.codex_delivery.trusted_instructions": [],
             "an api key, several steps, an event and every option": [],
         }
-        for text, names in caught.items():
+        for text, harnesses in caught.items():
             with self.subTest(text):
-                self.assertEqual(harness_names_in(text), names)
+                self.assertEqual(harness_names_in(text), harnesses)
+        # The named exception covers its one phrase and nothing else in that file.
+        phrase = NAMED_EXCEPTIONS["cli/dashboard.py"]
+        self.assertEqual(harness_names_in(f"the nearest {phrase}", phrase), [])
+        self.assertEqual(harness_names_in(f"{phrase} for claude", phrase), ["claude"])
+
+    def test_the_scan_finds_code_that_uses_the_seam_without_being_listed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            package = Path(temporary) / "agents_remember"
+            tuple_of_names = 'WITHOUT_TOOL_SERVERS = ("eve", "hermes")\n'
+            files = {
+                "cli/paseo_launch.py": "def build():\n    return {}\n",
+                # Seam code by its use, not by its name: each imports a scanned module.
+                "cli/role_tool_rules.py": "from agents_remember.cli import paseo_launch\n",
+                "application/launch_rules.py": "import agents_remember.cli.paseo_launch\n",
+                "mcp/tools/role_agents.py": "from ...cli.paseo_launch import build\n",
+                "cli/sibling_rules.py": "from . import paseo_launch\n",
+                # A script beside the bridge.
+                "cli/paseo_bridge_rules.mjs": "export const rules = {}\n",
+                # Not launch code: it imports nothing of the seam.
+                "kernel/harness_table.py": "import json\n",
+            }
+            for name, text in files.items():
+                path = package / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text + tuple_of_names, encoding="utf-8")
+            scanned = [path.relative_to(package).as_posix() for path in launch_code(package)]
+            self.assertEqual(scanned, sorted(set(files) - {"kernel/harness_table.py"}))
+            for path in launch_code(package):
+                self.assertEqual(
+                    harness_names_in(path.read_text(encoding="utf-8")), ["eve", "hermes"]
+                )
 
 
 if __name__ == "__main__":
