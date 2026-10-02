@@ -292,7 +292,7 @@ class HandoverTextWordingTests(unittest.TestCase):
             host["arMcpUsage"],
         )
         self.assertIn(
-            "wait a few seconds and call once more, then report it missing", host["arMcpUsage"]
+            "make the call once more before reporting the server missing", host["arMcpUsage"]
         )
         self.assertEqual(
             {key: host["roleTools"][key] for key in ("toolServer", "start", "message")},

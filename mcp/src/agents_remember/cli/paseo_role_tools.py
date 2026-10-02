@@ -18,6 +18,7 @@ carried out is a refusal that names its one reason.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Iterator, Mapping
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
@@ -255,12 +257,37 @@ def _start_role(
     # time of this call; this process keeps no catalog between calls.
     forget_launcher_catalogs()
     try:
-        _orca_dispatch_endpoint(config, request, started_by=starting_agent(config, binding))
+        response = _orca_dispatch_endpoint(
+            config, request, started_by=starting_agent(config, binding)
+        )
     except HTTPException as error:
         raise _start_refusal(error) from error
     finally:
         forget_launcher_catalogs()
+    unread = _host_not_read(response)
+    if unread is not None:
+        raise _host_unreachable(f"{unread} Nothing was recorded for this request.")
     return _started(config, request, binding)
+
+
+def _host_not_read(response: JSONResponse) -> str | None:
+    """The start path's answer that the selection's agent could not be read, when it is that.
+
+    A new start on a selection that has an execution needs that execution's current state; while
+    the host gives no answer the start path refuses, marks the answer and records nothing.
+    """
+
+    try:
+        answer = json.loads(bytes(response.body))
+    except ValueError:
+        return None
+    if (
+        isinstance(answer, dict)
+        and answer.get("hostUnreachable") is True
+        and "status" not in answer
+    ):
+        return str(answer.get("detail") or "")
+    return None
 
 
 def _agent_override(call: RoleStartCall) -> dict[str, str] | None:

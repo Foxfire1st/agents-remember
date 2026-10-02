@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import threading
 import unittest
 import uuid
@@ -13,6 +14,7 @@ from typing import Any, cast, get_args
 from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
     ROLE_VARIABLE,
+    SPRINT_REF_VARIABLE,
     TOOL_SERVER_NAME,
     AgentBinding,
 )
@@ -328,6 +330,20 @@ class RoleStartTests(RoleToolsTestCase):
                 "caller-has-no-binding",
                 "was not started by an AR role launch",
             ),
+            # The binding reader refuses a binding that does not fit its role's class; the tool
+            # passes that refusal on and adds no check of its own.
+            "a binding whose references do not fit its role": (
+                lambda: start_role(
+                    self.config,
+                    RoleStartCall(role="worker", request_id=uuid.uuid4(), **selection_of("worker")),
+                    environment={
+                        **self.architect.environment(),
+                        SPRINT_REF_VARIABLE: json.dumps(SPRINT_REF.model_dump(mode="json")),
+                    },
+                ),
+                "caller-has-no-binding",
+                "does not carry the task references of a architect",
+            ),
             "no Paseo runtime configured": (
                 lambda: start_role(
                     runtime_config(self.root, configured=False),
@@ -372,6 +388,11 @@ class RoleStartTests(RoleToolsTestCase):
             self.assertEqual((self.receipt_files(), self.runtime.agents), ([], {}))
         with self.subTest("a second start on an open task-bound execution"):
             first = self.start(self.architect, "worker")
+            # While the host cannot say what the open execution's agent is doing, nothing starts.
+            self.runtime.fail("agent-state", "paseo_daemon_unreachable", "connection refused")
+            unread = self.refusal(self.start(self.architect, "worker"), "host-unreachable")
+            self.assertIn("connection refused", unread["detail"])
+            self.assertEqual(list(self.runtime.agents), [first["agentId"]])
             again = self.refusal(self.start(self.architect, "worker"), "launch-refused")
             self.assertIn(
                 f"already has an open execution (request {first['requestId']}", again["detail"]
@@ -425,12 +446,6 @@ class RoleStartTests(RoleToolsTestCase):
         )
         return ResolvedTaskDocument(ref=document.ref, path=document.path, document=edited)
 
-    # On the base this leaf was built on, a repeat of a task-bound request recompiles the handover
-    # and is refused once a selected task document has changed ("This request ID is already bound
-    # to different native message data."). The launch leaf's fix reconciles such a repeat from the
-    # receipt; the role-start tool goes through the same entry, so this case passes with that fix.
-    # Remove the marker when it is merged.
-    @unittest.expectedFailure
     def test_a_task_bound_repeat_after_a_changed_task_document_reconciles_the_same_agent(
         self,
     ) -> None:
@@ -438,10 +453,16 @@ class RoleStartTests(RoleToolsTestCase):
         first = self.start(self.architect, "worker", request_id=request_id)
         self.leaf = self.changed(self.leaf)
 
+        self.runtime.calls.clear()
+
         repeat = self.start(self.architect, "worker", request_id=request_id)
 
         self.assertEqual((repeat["status"], repeat.get("agentId")), ("running", first["agentId"]))
         self.assertEqual(list(self.runtime.agents), [first["agentId"]])
+        # The repeat is answered from its receipt: nothing is compiled or launched again, and the
+        # agent is read once.
+        self.assertEqual(self.runtime.calls, [("agent-state", {"agentId": first["agentId"]})])
+        self.assertEqual(len(self.enclosures.start_calls), 1)
 
 
 class RoleMessageTests(RoleToolsTestCase):
