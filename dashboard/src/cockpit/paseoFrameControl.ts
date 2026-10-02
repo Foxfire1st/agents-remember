@@ -38,11 +38,13 @@ export interface PaseoFramePane {
 export class PaseoFrameControl {
   private available: AvailablePaseoFrame | null = null;
   private control: PaseoControlState = "waiting";
-  // The agent of the displayed execution; the agent the frame showed, refused or was loaded
-  // with; and the agent of a request the frame has not answered yet.
+  // The agent of the displayed execution; the agent the frame answered for (shown, archived or
+  // gone); the agent of a request the frame has not answered yet; and the agent the frame's
+  // current URL names.
   private wanted: PaseoAgentTarget | null = null;
   private settled: string | null = null;
   private pending: string | null = null;
+  private loaded: string | null = null;
   private deadline: number | null = null;
   private scope: string | null = null;
   private seenAgent: string | null = null;
@@ -51,17 +53,17 @@ export class PaseoFrameControl {
 
   /**
    * The frame route named a frame: load it and wait for the application's ready report. The
-   * first load opens the Projects workspace, and the displayed agent then arrives by message,
-   * which also tells whether it still exists. A reload after Retry names the agent in the URL,
-   * so the frame lands on it even when the control channel stays down.
+   * first load opens the Projects workspace. A reload after Retry names the displayed agent in
+   * the URL, so the frame lands on it even when the control channel stays down. Either way the
+   * agent is asked for by message once the channel is ready: only that answer tells whether the
+   * agent still exists.
    */
   start(available: AvailablePaseoFrame, afterRetry: boolean): void {
     this.available = available;
-    const wanted = afterRetry ? this.wanted : null;
     this.pending = null;
-    this.settled = wanted?.agentId ?? null;
+    this.settled = null;
     this.setControl("waiting");
-    this.load(wanted);
+    this.load(afterRetry ? this.wanted : null);
     this.arm();
   }
 
@@ -88,6 +90,7 @@ export class PaseoFrameControl {
     this.seenAgent = target.agentId;
     this.wanted = target;
     this.settled = null;
+    this.loaded = null;
     this.pane.setAgentProblem(null);
     this.sync();
   }
@@ -130,8 +133,9 @@ export class PaseoFrameControl {
 
   /**
    * Bring the frame to the wanted agent: by message while the control channel is ready, by
-   * loading the agent's URL when it is unavailable. While the application is still expected to
-   * report ready nothing happens; the report, or its deadline, calls this again.
+   * loading the agent's URL when it is unavailable (once: a frame whose URL already names the
+   * agent is left alone). While the application is still expected to report ready nothing
+   * happens; the report, or its deadline, calls this again.
    */
   private sync(): void {
     const { available, wanted } = this;
@@ -142,8 +146,7 @@ export class PaseoFrameControl {
       this.pending = wanted.agentId;
       this.arm();
       frameWindow.postMessage({ type: "ar.open", agentId: wanted.agentId }, available.frameOrigin);
-    } else if (this.control === "unavailable") {
-      this.settled = wanted.agentId;
+    } else if (this.control === "unavailable" && this.loaded !== wanted.agentId) {
       this.load(wanted);
     }
   }
@@ -151,6 +154,7 @@ export class PaseoFrameControl {
   private load(wanted: PaseoAgentTarget | null): void {
     const { available } = this;
     if (!available) return;
+    this.loaded = wanted?.agentId ?? null;
     this.pane.setFrame((current) => ({
       src: paseoFrameUrl(available, wanted),
       generation: (current?.generation ?? 0) + 1,

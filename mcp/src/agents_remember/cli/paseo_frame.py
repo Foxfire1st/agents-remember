@@ -8,6 +8,9 @@ execution it displays.
 
 An unavailable frame names exactly one reason, checked in this order: no Paseo runtime is
 configured, the request's dashboard origin is not in the embed list, or the daemon is unreachable.
+The reason is the state; ``detail`` adds only what the reason does not say (which file, which
+origin, what the bridge reported), so a reader that prints both prints nothing twice. A request
+that a page of another site made the browser send is answered like an unlisted origin.
 
 The runtime itself is reached only through the bridge. Whether its daemon answers, its server id
 and the workspace of the Projects folder come from one function, :func:`host_frame_facts`, which
@@ -27,16 +30,13 @@ from fastapi import Request
 from agents_remember.cli.orca_task_preparation import _workspace_folder
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_launch import _opened_workspace_id
-from agents_remember.kernel.primitives.paseo_runtime_settings import (
-    NO_PASEO_RUNTIME_CONFIGURED,
-    PaseoRuntimeSettings,
-)
+from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 REASON_NOT_CONFIGURED = "not-configured"
 REASON_ORIGIN_NOT_LISTED = "origin-not-listed"
 REASON_UNREACHABLE = "unreachable"
-ORIGIN_NOT_LISTED_TEXT = "embedded chat is not configured for this address"
+CROSS_SITE_DETAIL = "the request came from a page of another site (Sec-Fetch-Site: cross-site)"
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _DETAIL_LIMIT = 300
 
@@ -126,6 +126,24 @@ def frame_base_url_for(settings: PaseoRuntimeSettings, dashboard_origin: str | N
     return None
 
 
+def frame_answer(
+    config: McpRuntimeConfig,
+    request: Request,
+    *,
+    host: HostFrameFactsCall | None = None,
+) -> dict[str, Any]:
+    """The frame route's answer for one request.
+
+    A browser marks a request that a page of another site caused with ``Sec-Fetch-Site:
+    cross-site``. Such a GET carries the dashboard's own ``Host`` and no ``Origin``, so it would
+    look like the dashboard asking; it gets no frame and the runtime is not asked. Same-origin
+    and same-site requests, and callers that send no such header, are judged by their origin.
+    """
+    if request.headers.get("sec-fetch-site", "").strip().lower() == "cross-site":
+        return _unavailable(REASON_ORIGIN_NOT_LISTED, CROSS_SITE_DETAIL)
+    return frame_descriptor(config, request_dashboard_origin(request), host=host)
+
+
 def frame_descriptor(
     config: McpRuntimeConfig,
     dashboard_origin: str | None,
@@ -136,15 +154,14 @@ def frame_descriptor(
     settings = config.paseo_runtime
     if settings is None:
         return _unavailable(
-            REASON_NOT_CONFIGURED,
-            f"{NO_PASEO_RUNTIME_CONFIGURED}: {config.config_path} has no paseoRuntime block",
+            REASON_NOT_CONFIGURED, f"{config.config_path} has no paseoRuntime block"
         )
     frame_base_url = frame_base_url_for(settings, dashboard_origin)
     if frame_base_url is None:
         return _unavailable(
             REASON_ORIGIN_NOT_LISTED,
-            f"{ORIGIN_NOT_LISTED_TEXT}: {dashboard_origin or 'this request'} is not a dashboard "
-            "origin in paseoRuntime.embed",
+            f"{dashboard_origin or 'the origin of this request'} is not a dashboard origin in "
+            "paseoRuntime.embed",
         )
     # The runtime is asked only for a listed origin.
     try:
@@ -153,13 +170,10 @@ def frame_descriptor(
         facts = HostFrameFacts(reachable=False, detail=str(error))
     if not facts.reachable:
         return _unavailable(
-            REASON_UNREACHABLE,
-            f"the Paseo daemon is unreachable: {(facts.detail or 'no answer')[:_DETAIL_LIMIT]}",
+            REASON_UNREACHABLE, (facts.detail or "the daemon gave no answer")[:_DETAIL_LIMIT]
         )
     if not facts.server_id:
-        return _unavailable(
-            REASON_UNREACHABLE, "the Paseo daemon answered without naming its server id"
-        )
+        return _unavailable(REASON_UNREACHABLE, "the daemon answered without naming its server id")
     workspace_id = facts.projects_workspace_id or None
     return {
         "available": True,

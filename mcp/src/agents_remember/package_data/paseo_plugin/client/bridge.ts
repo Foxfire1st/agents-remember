@@ -1,5 +1,5 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { PLUGIN_ID, setWorkspaceHeaderHidden } from "./look";
+import type { PluginPage } from "./page";
 
 // The control channel between the AR dashboard and the app it frames.
 //
@@ -9,9 +9,12 @@ import { PLUGIN_ID, setWorkspaceHeaderHidden } from "./look";
 //
 // Each side names the other's origin when it posts and checks it when it receives; neither uses
 // a wildcard, and no message carries a secret. Navigation itself goes through supported plugin
-// interfaces (a contributed screen and its `navigation` prop). UNSUPPORTED here: listening for
-// `message` events and reading `location.ancestorOrigins`, which Paseo documents as unavailable
-// to plugin code because they do not exist on iOS and Android.
+// interfaces (a contributed screen and its `navigation` prop, and the public SDK for the checks).
+//
+// UNSUPPORTED Paseo behaviour this file relies on: `message` events and `parent.postMessage`
+// being available to plugin code; `location.ancestorOrigins` and `document.referrer` naming the
+// page that frames the app; the text "not found" in the SDK's error for a missing agent; and
+// Paseo's web UI letting itself be framed at all (it sends no frame-ancestors restriction).
 
 export const OPEN_SCREEN_ID = "open";
 
@@ -20,12 +23,24 @@ export interface EmbedEntry {
   frameBaseUrl: string;
 }
 
-// The plugin tsconfig deliberately has no DOM lib; reach the browser globals untyped.
-const web = globalThis as any;
+/** What the bridge uses of the plugin's client context (a `PluginClientContext` satisfies it). */
+export interface BridgeClient {
+  paseo: {
+    agents: {
+      ref(agentId: string): {
+        refresh(): Promise<unknown>;
+        readonly archivedAt: unknown;
+        readonly workspaceId: string | null;
+      };
+    };
+    workspaces: { ref(workspaceId: string): { refresh(): Promise<unknown> } };
+  };
+  openScreen(input: { screenId: string; params?: Record<string, string> }): void;
+}
 
 function originOf(value: string): string | null {
   try {
-    return new web.URL(value).origin;
+    return new URL(value).origin;
   } catch {
     return null;
   }
@@ -33,37 +48,69 @@ function originOf(value: string): string | null {
 
 /**
  * The origin of the page that frames this one: `null` at top level (a standalone tab),
- * `undefined` when the page is framed and the browser does not say by whom.
+ * `undefined` when the page is framed and nothing says by whom.
+ *
+ * `carriedParent` is the origin the page verified before this plugin reloaded it. It is used
+ * only when the page is framed and the browser names no parent (no `ancestorOrigins`, and a
+ * referrer that after the reload is the page's own origin). It is a candidate like the others:
+ * the caller still checks it against the embed list on every load.
  */
-export function framingOrigin(): string | null | undefined {
+export function framingOrigin(
+  page: PluginPage,
+  carriedParent: string | null,
+): string | null | undefined {
   let framed = true;
   try {
-    framed = web.window.parent !== web.window;
+    framed = page.window.parent !== page.window;
   } catch {
     // A parent that cannot even be compared is still a parent.
   }
   if (!framed) return null;
-  const ancestors = web.location.ancestorOrigins;
+  const ancestors = page.location.ancestorOrigins;
   if (ancestors && ancestors.length > 0) return ancestors[0];
-  // Browsers without ancestorOrigins: the referrer names the parent only until this frame
-  // navigates itself, after which it names this page's own origin and proves nothing.
-  const referrer = web.document.referrer ? originOf(web.document.referrer) : null;
-  return referrer && referrer !== web.location.origin ? referrer : undefined;
+  const referrer = page.document.referrer ? originOf(page.document.referrer) : null;
+  if (referrer && referrer !== page.location.origin) return referrer;
+  return carriedParent ?? undefined;
 }
 
 /** Whether the embed list pairs this parent origin with the origin this page is served from. */
-export function isListedParent(embed: readonly EmbedEntry[], parentOrigin: string): boolean {
+export function isListedParent(
+  embed: readonly EmbedEntry[],
+  parentOrigin: string,
+  ownOrigin: string,
+): boolean {
   return embed.some(
     (entry) =>
-      originOf(entry.dashboardOrigin) === parentOrigin &&
-      originOf(entry.frameBaseUrl) === web.location.origin,
+      originOf(entry.dashboardOrigin) === parentOrigin && originOf(entry.frameBaseUrl) === ownOrigin,
   );
 }
 
+/** Only the listed parent itself: no other origin, and no other window of that origin. */
+export function isParentMessage(
+  event: { origin: string; source: unknown },
+  parentOrigin: string,
+  parentWindow: unknown,
+): boolean {
+  return event.origin === parentOrigin && event.source === parentWindow;
+}
+
+function errorText(error: unknown): string {
+  return String((error as { message?: unknown } | null)?.message ?? error);
+}
+
 /** Start answering the listed parent. Returns the function that stops it. */
-export function installBridge(client: PluginClientContext, parentOrigin: string): () => void {
+export function installBridge(
+  client: BridgeClient,
+  page: PluginPage,
+  parentOrigin: string,
+): () => void {
   const post = (payload: Record<string, unknown>) => {
-    web.window.parent.postMessage({ source: PLUGIN_ID, ...payload }, parentOrigin);
+    page.window.parent.postMessage({ source: PLUGIN_ID, ...payload }, parentOrigin);
+  };
+  // The stamp makes every request a new set of screen params, so asking for what was shown last
+  // navigates again after the user moved elsewhere in the app.
+  const open = (params: Record<string, string>) => {
+    client.openScreen({ screenId: OPEN_SCREEN_ID, params: { ...params, at: String(Date.now()) } });
   };
 
   const openAgent = async (agentId: string) => {
@@ -71,7 +118,7 @@ export function installBridge(client: PluginClientContext, parentOrigin: string)
     try {
       await agent.refresh();
     } catch (error) {
-      const message = String((error as Error)?.message ?? error);
+      const message = errorText(error);
       const code = /not found/i.test(message) ? "agent-not-found" : "open-failed";
       post({ type: "error", code, agentId, message });
       return;
@@ -80,15 +127,28 @@ export function installBridge(client: PluginClientContext, parentOrigin: string)
       post({ type: "error", code: "agent-archived", agentId, message: "the agent is archived" });
       return;
     }
-    // The stamp makes every request a new set of screen params, so asking for the agent that
-    // was shown last navigates again after the user moved elsewhere in the app.
-    client.openScreen({ screenId: OPEN_SCREEN_ID, params: { agentId, at: String(Date.now()) } });
+    open({ agentId });
     post({ type: "shown", agentId, workspaceId: agent.workspaceId });
   };
 
-  const onMessage = (event: any) => {
-    // Only the listed parent itself: no other origin, and no other window of that origin.
-    if (event.origin !== parentOrigin || event.source !== web.window.parent) return;
+  const openWorkspace = async (workspaceId: string) => {
+    let workspace: unknown = null;
+    let failure = "the runtime has no such workspace";
+    try {
+      workspace = await client.paseo.workspaces.ref(workspaceId).refresh();
+    } catch (error) {
+      failure = errorText(error);
+    }
+    if (!workspace) {
+      post({ type: "error", code: "workspace-not-found", workspaceId, message: failure });
+      return;
+    }
+    open({ workspaceId });
+    post({ type: "shown", workspaceId });
+  };
+
+  const onMessage = (event: { origin: string; source: unknown; data: any }) => {
+    if (!isParentMessage(event, parentOrigin, page.window.parent)) return;
     const message = event.data;
     if (!message || typeof message !== "object") return;
     if (message.type === "ar.ping") {
@@ -96,20 +156,18 @@ export function installBridge(client: PluginClientContext, parentOrigin: string)
     } else if (message.type === "ar.open" && typeof message.agentId === "string") {
       void openAgent(message.agentId);
     } else if (message.type === "ar.open" && typeof message.workspaceId === "string") {
-      const workspaceId: string = message.workspaceId;
-      client.openScreen({ screenId: OPEN_SCREEN_ID, params: { workspaceId, at: String(Date.now()) } });
-      post({ type: "shown", workspaceId });
+      void openWorkspace(message.workspaceId);
     } else if (message.type === "ar.open") {
       post({ type: "error", code: "open-failed", message: "ar.open names no agent or workspace" });
     }
   };
 
-  web.window.addEventListener("message", onMessage);
-  setWorkspaceHeaderHidden(true);
+  page.window.addEventListener("message", onMessage);
+  setWorkspaceHeaderHidden(page.document, true);
   post({ type: "ready" });
 
   return () => {
-    web.window.removeEventListener("message", onMessage);
-    setWorkspaceHeaderHidden(false);
+    page.window.removeEventListener("message", onMessage);
+    setWorkspaceHeaderHidden(page.document, false);
   };
 }

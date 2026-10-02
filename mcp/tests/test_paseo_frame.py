@@ -28,6 +28,8 @@ from fastapi.testclient import TestClient
 SERVER_ID = "srv_frameTest"
 LOCAL = PaseoEmbedEntry("http://127.0.0.1:9797", "http://127.0.0.1:6820")
 REMOTE = PaseoEmbedEntry("https://box.tailnet.ts.net", "https://box.tailnet.ts.net:8443/")
+# Written the way a person may write it: the lookup compares origins, not their spelling.
+SPELLED = PaseoEmbedEntry("HTTPS://Desk.Example:443", "https://frames.example")
 
 
 def runtime_settings(root: Path) -> PaseoRuntimeSettings:
@@ -37,7 +39,7 @@ def runtime_settings(root: Path) -> PaseoRuntimeSettings:
         listen="127.0.0.1:6820",
         version="0.11.0-beta.2",
         providers={},
-        embed=(LOCAL, REMOTE),
+        embed=(LOCAL, REMOTE, SPELLED),
     )
 
 
@@ -133,6 +135,8 @@ class PaseoFrameTests(unittest.TestCase):
             },
         )
         self.assertEqual(remote["frameBaseUrl"], "https://box.tailnet.ts.net:8443")
+        spelled = frame_descriptor(config, "https://desk.example", host=reachable)
+        self.assertEqual(spelled["frameBaseUrl"], "https://frames.example")
         # No secret: nothing of the daemon home (credential, key pair) is in the answer.
         self.assertNotIn(settings.home.as_posix(), json.dumps([local, remote]))
 
@@ -142,13 +146,29 @@ class PaseoFrameTests(unittest.TestCase):
             asked.append(asked_config.workspace_root)
             return reachable(asked_config)
 
-        for origin in ("http://localhost:9797", "http://127.0.0.1:9798", "http://evil.test", None):
+        unlisted = (
+            "http://localhost:9797",
+            "http://127.0.0.1:9798",
+            "http://evil.test",
+            # Look-alikes that begin with, or contain, a listed origin.
+            "http://127.0.0.1:97970",
+            "http://127.0.0.1:9797.evil.test",
+            "https://box.tailnet.ts.net.evil.test",
+            "https://evil.test/?https://box.tailnet.ts.net",
+            None,
+        )
+        for origin in unlisted:
             with self.subTest(origin=origin):
                 answer = frame_descriptor(config, origin, host=recording)
-                self.assertEqual(answer["available"], False)
-                self.assertEqual(answer["reason"], "origin-not-listed")
-                self.assertIn("embedded chat is not configured for this address", answer["detail"])
-                self.assertNotIn("frameBaseUrl", answer)
+                self.assertEqual(
+                    answer,
+                    {
+                        "available": False,
+                        "reason": "origin-not-listed",
+                        "detail": f"{origin or 'the origin of this request'} is not a dashboard "
+                        "origin in paseoRuntime.embed",
+                    },
+                )
         self.assertEqual(asked, [], "an unlisted origin must not even reach the runtime")
         frame_descriptor(config, "http://127.0.0.1:9797", host=recording)
         self.assertEqual(asked, [config.workspace_root])
@@ -157,9 +177,14 @@ class PaseoFrameTests(unittest.TestCase):
         unconfigured = frame_descriptor(
             runtime_config(self.root, None), "http://127.0.0.1:9797", host=reachable
         )
-        self.assertEqual(unconfigured["available"], False)
-        self.assertEqual(unconfigured["reason"], "not-configured")
-        self.assertIn("no Paseo runtime configured", unconfigured["detail"])
+        self.assertEqual(
+            unconfigured,
+            {
+                "available": False,
+                "reason": "not-configured",
+                "detail": f"{self.root / 'settings' / 'ar.json'} has no paseoRuntime block",
+            },
+        )
 
         config = runtime_config(self.root, runtime_settings(self.root))
 
@@ -180,6 +205,8 @@ class PaseoFrameTests(unittest.TestCase):
                 self.assertEqual(down["reason"], "unreachable")
                 self.assertIn(expected, down["detail"])
                 self.assertNotIn("frameBaseUrl", down)
+                # The reason is the state; the detail does not say it a second time.
+                self.assertNotIn("unreachable", down["detail"])
 
     def test_frame_stays_available_without_a_projects_workspace(self) -> None:
         config = runtime_config(self.root, runtime_settings(self.root))
@@ -209,6 +236,12 @@ class PaseoFrameTests(unittest.TestCase):
             # A cross-origin caller is judged by its own origin, not by the host it called.
             ("http://127.0.0.1:9797", {"Origin": "http://evil.test"}, None),
             ("http://localhost:9797", {"Origin": "http://127.0.0.1:9797"}, "http://127.0.0.1:6820"),
+            # An Origin header that names no origin (a sandboxed or redirected caller sends
+            # "null") is not replaced by the host that was called.
+            ("http://127.0.0.1:9797", {"Origin": "null"}, None),
+            ("http://127.0.0.1:9797", {"Sec-Fetch-Site": "same-origin"}, "http://127.0.0.1:6820"),
+            ("http://127.0.0.1:9797", {"Sec-Fetch-Site": "same-site"}, "http://127.0.0.1:6820"),
+            ("http://127.0.0.1:9797", {"Sec-Fetch-Site": "none"}, "http://127.0.0.1:6820"),
         ]
         with patch.object(paseo_frame, "host_frame_facts", reachable):
             for base_url, headers, expected in cases:
@@ -323,13 +356,30 @@ class WiredHostFactsTests(unittest.TestCase):
         bridge = FakeBridge()
         unconfigured = self.ask(bridge, runtime_config(self.root, None))
         self.assertEqual(unconfigured["reason"], "not-configured")
-        self.assertIn("no Paseo runtime configured", unconfigured["detail"])
+        self.assertIn("has no paseoRuntime block", unconfigured["detail"])
 
         app = FastAPI()
         orca_task_routes.register_orca_task_routes(app, self.config)
         with patch.object(paseo_frame, "bridge_call", bridge):
             unlisted = TestClient(app, base_url="http://localhost:9797").get("/api/orca/frame")
         self.assertEqual(unlisted.json()["reason"], "origin-not-listed")
+        self.assertEqual(bridge.calls, [])
+        # A GET that a page of another site made the browser send carries the dashboard's own
+        # Host and no Origin. It gets no frame and causes no call to the runtime.
+        with patch.object(paseo_frame, "bridge_call", bridge):
+            for marker in ("cross-site", "Cross-Site"):
+                forged = TestClient(app, base_url="http://127.0.0.1:9797").get(
+                    "/api/orca/frame", headers={"Sec-Fetch-Site": marker}
+                )
+                self.assertEqual(
+                    forged.json(),
+                    {
+                        "available": False,
+                        "reason": "origin-not-listed",
+                        "detail": "the request came from a page of another site "
+                        "(Sec-Fetch-Site: cross-site)",
+                    },
+                )
         self.assertEqual(bridge.calls, [])
         # Asked directly without a runtime, the function reports the bridge's own refusal.
         direct = host_frame_facts(runtime_config(self.root, None))

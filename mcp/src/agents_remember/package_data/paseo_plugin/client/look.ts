@@ -1,33 +1,35 @@
+import type { PluginPage, StorageLike } from "./page";
+
 // The look of the app inside the AR dashboard's frame, and giving a standalone tab its own back.
 //
-// UNSUPPORTED Paseo behaviour, all of it in this file: Paseo has no plugin interface for selecting
-// a theme, setting fonts or hiding chrome. The client bundle is evaluated inside the app page, so
-// on web it can reach the page's storage and DOM. What this file relies on:
+// UNSUPPORTED Paseo behaviour this file relies on. Paseo has no plugin interface for selecting a
+// theme, setting fonts or hiding chrome; a Paseo release can change any of these:
 //   - localStorage["@paseo:app-settings"]: theme, pluginThemeId, uiFontFamily, monoFontFamily;
-//   - localStorage["panel-state"].state.desktop.agentListOpen (the left sidebar);
+//   - the app reading that store once, when its page loads, and writing its WHOLE in-memory
+//     settings back on any settings change (which is how a tab that runs one look can overwrite
+//     the other look in a storage both share);
+//   - localStorage["panel-state"].state.desktop.agentListOpen (the left sidebar), which the app
+//     may not have written yet on a first visit and whose default is "open";
 //   - the test ids "composer-dock-header" (workspace header row), "menu-button" (the app's own
-//     sidebar toggle) and "sidebar-footer" (present while the sidebar is shown);
-//   - the app reading both stores once, when its page loads.
-// A Paseo release can change any of them. The supported parts (the theme contribution, the screen
-// and its navigation) are in index.client.tsx.
+//     sidebar toggle) and "sidebar-footer" (present while the sidebar is shown).
 
 export const PLUGIN_ID = "ar-plugin";
 export const THEME_ID = "agents-remember";
 // The dashboard's own stack (dashboard/src/styles/tokens.css, --font-mono).
 export const AR_FONT_STACK = 'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace';
 
-const APP_SETTINGS_KEY = "@paseo:app-settings";
-const PANEL_STATE_KEY = "panel-state";
+export const APP_SETTINGS_KEY = "@paseo:app-settings";
+export const PANEL_STATE_KEY = "panel-state";
 // The look the user had outside the frame, kept so a standalone tab can take it back.
-const STANDALONE_LOOK_KEY = "ar-plugin:standalone-look";
-const RELOAD_GUARD_KEY = "ar-plugin:reloaded-at";
-const RELOAD_GUARD_MS = 15000;
+export const STANDALONE_LOOK_KEY = "ar-plugin:standalone-look";
 const HEADER_STYLE_ID = "ar-plugin-embed-style";
 const HIDE_HEADER_CSS = '[data-testid="composer-dock-header"]{display:none !important}';
+// What the app shows while it has stored no sidebar state yet.
+const SIDEBAR_OPEN_BY_DEFAULT = true;
 const SIDEBAR_SETTLE_MS = 250;
 const SIDEBAR_ATTEMPTS = 24;
 
-const EMBED_LOOK: Record<string, string> = {
+export const EMBED_LOOK: Readonly<Record<string, string>> = {
   theme: "plugin",
   pluginThemeId: `${PLUGIN_ID}/theme/${THEME_ID}`,
   uiFontFamily: AR_FONT_STACK,
@@ -35,77 +37,92 @@ const EMBED_LOOK: Record<string, string> = {
 };
 const LOOK_KEYS = Object.keys(EMBED_LOOK);
 
-interface StandaloneLook {
+export interface StandaloneLook {
   // Only the keys the settings held; a key missing here was missing there.
   appSettings: Record<string, unknown>;
+  // `null`: the app had stored no sidebar state yet, so the user's sidebar was the default.
   agentListOpen: boolean | null;
-  // Whose look the storage holds now: the frame's after this plugin stored the AR look, the
-  // user's after a standalone tab took its own back. While it is the frame's, whatever the
-  // settings hold (also a change made inside the frame) is never mistaken for the user's look.
+  // Which page last stored a look: the frame (this plugin stored the AR look) or a standalone
+  // tab (it took the user's look back). It is a hint, not proof: see `isUsersLook`.
   stored: "frame" | "user";
 }
 
-// The plugin tsconfig deliberately has no DOM lib; reach the browser globals untyped.
-const web = globalThis as any;
-
-function readJson(key: string): any {
+function readJson(storage: StorageLike, key: string): any {
   try {
-    const raw = web.localStorage.getItem(key);
+    const raw = storage.getItem(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
-function writeJson(key: string, value: unknown): void {
-  web.localStorage.setItem(key, JSON.stringify(value));
+function writeJson(storage: StorageLike, key: string, value: unknown): void {
+  storage.setItem(key, JSON.stringify(value));
 }
 
-function sidebarFlag(panel: any): boolean | null {
-  const open = panel?.state?.desktop?.agentListOpen;
+function sidebarFlag(storage: StorageLike): boolean | null {
+  const open = readJson(storage, PANEL_STATE_KEY)?.state?.desktop?.agentListOpen;
   return typeof open === "boolean" ? open : null;
 }
 
-function setSidebarFlag(open: boolean): void {
-  const panel = readJson(PANEL_STATE_KEY);
+function setSidebarFlag(storage: StorageLike, open: boolean): void {
+  const panel = readJson(storage, PANEL_STATE_KEY);
   if (panel?.state?.desktop && panel.state.desktop.agentListOpen !== open) {
     panel.state.desktop.agentListOpen = open;
-    writeJson(PANEL_STATE_KEY, panel);
+    writeJson(storage, PANEL_STATE_KEY, panel);
   }
 }
 
-function readStandaloneLook(): StandaloneLook | null {
-  const own = readJson(STANDALONE_LOOK_KEY);
+function readStandaloneLook(storage: StorageLike): StandaloneLook | null {
+  const own = readJson(storage, STANDALONE_LOOK_KEY);
   return own && typeof own.appSettings === "object" && own.appSettings !== null ? own : null;
 }
 
+function lookOf(settings: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    LOOK_KEYS.filter((key) => key in settings).map((key) => [key, settings[key]]),
+  );
+}
+
 /**
- * Store the AR look for the next page load and report which settings had to change. When the
- * storage holds the user's own look (a first use in a frame, or a standalone tab took it back
- * since), that look is remembered before it is replaced.
+ * Whether the stored settings were written by a page that runs the user's own look. A page
+ * inside the frame runs the AR look, and the app writes all of its in-memory settings at once,
+ * so whatever such a page writes leaves at least one of the four look settings at its AR value.
+ * Settings with none of them at the AR value therefore come from a standalone tab, whatever the
+ * mark says: the tab may have been loaded before the frame stored the AR look.
  */
-export function applyEmbedLook(): string[] {
+function isUsersLook(settings: Record<string, unknown>): boolean {
+  return LOOK_KEYS.every((key) => settings[key] !== EMBED_LOOK[key]);
+}
+
+/**
+ * Inside a listed frame: store the AR look for the next page load and report which settings had
+ * to change. The user's own look is remembered before it is replaced: when no frame has stored
+ * a look yet, when a standalone tab took its look back since, and when the stored settings are
+ * a standalone tab's (see `isUsersLook`). A change made inside the frame is not remembered.
+ */
+export function applyEmbedLook(storage: StorageLike): string[] {
   try {
-    const settings = readJson(APP_SETTINGS_KEY) ?? {};
+    const settings = readJson(storage, APP_SETTINGS_KEY) ?? {};
     const changed = LOOK_KEYS.filter((key) => settings[key] !== EMBED_LOOK[key]);
-    const own = readStandaloneLook();
-    if (own?.stored !== "frame" && changed.length > 0) {
-      writeJson(STANDALONE_LOOK_KEY, {
-        appSettings: Object.fromEntries(
-          LOOK_KEYS.filter((key) => key in settings).map((key) => [key, settings[key]]),
-        ),
-        agentListOpen: sidebarFlag(readJson(PANEL_STATE_KEY)),
+    const own = readStandaloneLook(storage);
+    if (changed.length > 0 && (own?.stored !== "frame" || isUsersLook(settings))) {
+      writeJson(storage, STANDALONE_LOOK_KEY, {
+        appSettings: lookOf(settings),
+        // The sidebar's stored state cannot be attributed while the mark says "frame": keep
+        // what was remembered for the standalone tab.
+        agentListOpen: own?.stored === "frame" ? own.agentListOpen : sidebarFlag(storage),
         stored: "frame",
       } satisfies StandaloneLook);
     } else if (own && own.stored !== "frame") {
       // A frame that was still open stored the AR look again after a standalone tab took its
       // own back: the storage is the frame's again, the remembered look stays the user's.
-      writeJson(STANDALONE_LOOK_KEY, { ...own, stored: "frame" } satisfies StandaloneLook);
+      writeJson(storage, STANDALONE_LOOK_KEY, { ...own, stored: "frame" } satisfies StandaloneLook);
     }
     if (changed.length === 0) return changed;
-    writeJson(APP_SETTINGS_KEY, { ...settings, ...EMBED_LOOK });
+    writeJson(storage, APP_SETTINGS_KEY, { ...settings, ...EMBED_LOOK });
     // The page is about to load again, so the sidebar can start closed instead of closing late.
-    setSidebarFlag(false);
+    setSidebarFlag(storage, false);
     return changed;
   } catch {
     return [];
@@ -113,84 +130,82 @@ export function applyEmbedLook(): string[] {
 }
 
 /**
- * Outside a frame of a listed dashboard: when the storage holds the frame's look and the user's
- * own is remembered, put the user's own back. Returns whether a stored setting changed. The
- * memory itself is kept, because a frame that is still open may store the AR look again.
+ * Outside a frame of a listed dashboard: put the user's own look back when the storage holds
+ * the frame's. Returns whether anything stored changed (the page then has to load again).
+ *
+ * Settings that are the user's already (see `isUsersLook`) are never touched: they are adopted
+ * as the remembered look instead, so a look the user set in a standalone tab while a frame's
+ * mark was on the shared storage survives. The sidebar's stored state is put back whenever the
+ * mark says the frame stored a look, because the frame closed it then. The memory itself is
+ * kept, because a frame that is still open may store the AR look again.
  */
-export function restoreStandaloneLook(): boolean {
+export function restoreStandaloneLook(storage: StorageLike): boolean {
   try {
-    const own = readStandaloneLook();
+    const own = readStandaloneLook(storage);
     if (!own) return false;
-    const settings = readJson(APP_SETTINGS_KEY) ?? {};
+    const settings = readJson(storage, APP_SETTINGS_KEY) ?? {};
+    const usersLook = isUsersLook(settings);
     const framesLook = LOOK_KEYS.every((key) => settings[key] === EMBED_LOOK[key]);
-    if (own.stored !== "frame" && !framesLook) return false;
+    if (own.stored !== "frame" && (usersLook || !framesLook)) return false;
     let changed = false;
-    for (const key of LOOK_KEYS) {
-      if (key in own.appSettings ? settings[key] === own.appSettings[key] : !(key in settings)) continue;
-      if (key in own.appSettings) settings[key] = own.appSettings[key];
-      else delete settings[key];
-      changed = true;
+    if (!usersLook) {
+      for (const key of LOOK_KEYS) {
+        if (key in own.appSettings ? settings[key] === own.appSettings[key] : !(key in settings)) continue;
+        if (key in own.appSettings) settings[key] = own.appSettings[key];
+        else delete settings[key];
+        changed = true;
+      }
+      if (changed) writeJson(storage, APP_SETTINGS_KEY, settings);
     }
-    if (changed) writeJson(APP_SETTINGS_KEY, settings);
-    // The sidebar is put back only when the frame itself last wrote the storage; otherwise its
-    // stored state is already the user's.
-    if (own.stored === "frame" && typeof own.agentListOpen === "boolean") {
-      changed = sidebarFlag(readJson(PANEL_STATE_KEY)) !== own.agentListOpen || changed;
-      setSidebarFlag(own.agentListOpen);
+    if (own.stored === "frame") {
+      const open = own.agentListOpen ?? SIDEBAR_OPEN_BY_DEFAULT;
+      const stored = sidebarFlag(storage);
+      // Nothing stored still means the default: there is nothing to put back.
+      if (stored !== null && stored !== open) {
+        setSidebarFlag(storage, open);
+        changed = true;
+      }
     }
-    writeJson(STANDALONE_LOOK_KEY, { ...own, stored: "user" } satisfies StandaloneLook);
+    writeJson(storage, STANDALONE_LOOK_KEY, {
+      appSettings: usersLook ? lookOf(settings) : own.appSettings,
+      agentListOpen: own.agentListOpen,
+      stored: "user",
+    } satisfies StandaloneLook);
     return changed;
   } catch {
     return false;
   }
 }
 
-/**
- * Load `url` in place of this page, at most once per 15 seconds per tab, so a look or a route
- * that cannot be established never becomes a reload loop. Returns whether the page is leaving.
- */
-export function reloadOnce(url: string): boolean {
-  try {
-    const last = Number(web.sessionStorage.getItem(RELOAD_GUARD_KEY) ?? 0);
-    if (Date.now() - last <= RELOAD_GUARD_MS) return false;
-    web.sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now()));
-  } catch {
-    return false;
-  }
-  web.location.replace(url);
-  return true;
-}
-
-export function setWorkspaceHeaderHidden(hidden: boolean): void {
-  const existing = web.document.getElementById(HEADER_STYLE_ID);
+export function setWorkspaceHeaderHidden(document: PluginPage["document"], hidden: boolean): void {
+  const existing = document.getElementById(HEADER_STYLE_ID);
   if (!hidden) {
     existing?.remove();
     return;
   }
   if (existing) return;
-  const style = web.document.createElement("style");
+  const style = document.createElement("style");
   style.id = HEADER_STYLE_ID;
   style.textContent = HIDE_HEADER_CSS;
-  web.document.head.appendChild(style);
+  document.head.appendChild(style);
 }
 
 /**
  * Close the left sidebar once the workspace is on screen, through the app's own toggle, when the
  * page loaded with it open. It runs once per page load: afterwards the sidebar is the user's
- * (Paseo's shortcut reopens it). Returns a function that stops waiting.
+ * (Paseo's shortcut reopens it).
  */
-export function closeSidebarAtLoad(): () => void {
+export function closeSidebarAtLoad(page: PluginPage): void {
   let attempts = 0;
-  const timer = web.setInterval(() => {
+  const timer = page.window.setInterval(() => {
     attempts += 1;
-    const toggle = web.document.querySelector('[data-testid="menu-button"]');
+    const toggle = page.document.querySelector('[data-testid="menu-button"]');
     if (toggle) {
-      const footer = web.document.querySelector('[data-testid="sidebar-footer"]');
+      const footer = page.document.querySelector('[data-testid="sidebar-footer"]');
       if (footer && footer.getBoundingClientRect().width > 0) toggle.click();
-      web.clearInterval(timer);
+      page.window.clearInterval(timer);
     } else if (attempts >= SIDEBAR_ATTEMPTS) {
-      web.clearInterval(timer);
+      page.window.clearInterval(timer);
     }
   }, SIDEBAR_SETTLE_MS);
-  return () => web.clearInterval(timer);
 }

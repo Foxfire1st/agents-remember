@@ -65,7 +65,7 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     require_bridge_runtime,
 )
-from agents_remember.cli.paseo_frame import frame_descriptor, request_dashboard_origin
+from agents_remember.cli.paseo_frame import frame_answer
 from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call, mint_agent_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
@@ -115,7 +115,7 @@ def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
 
 def orca_frame(config: McpRuntimeConfig, request: Request) -> JSONResponse:
     """Where this dashboard origin frames the Paseo web UI, or why it cannot (always HTTP 200)."""
-    return JSONResponse(frame_descriptor(config, request_dashboard_origin(request)))
+    return JSONResponse(frame_answer(config, request))
 
 
 def _bind_frame_endpoint(config: McpRuntimeConfig):

@@ -687,11 +687,10 @@ function OrcaChatsPane({
   const selectionComplete = launchSelectionComplete(selection);
 
   // The frame follows the execution the launcher bar displays status for. Its host fields are
-  // read from the receipt itself, so the frame is not steered away while launch options reload.
+  // read from the receipt itself (for a taskless role the options answer puts the saved
+  // execution of the active request there), else from the options answer of a task-bound role.
   const frameScope = useMemo(() => JSON.stringify(currentDocumentScope), [currentDocumentScope]);
-  const frameTarget = paseoAgentTarget(
-    isTasklessOrcaRole(selection.role) ? selectedTasklessExecution : executionReceipt ?? options?.execution,
-  );
+  const frameTarget = paseoAgentTarget(executionReceipt ?? options?.execution);
 
   useEffect(() => {
     if (!active || !selectionComplete) return;

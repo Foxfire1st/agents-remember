@@ -16,6 +16,8 @@ export interface AvailablePaseoFrame {
   frameOrigin: string;
   serverId: string;
   projectsWorkspaceId: string | null;
+  /** Why the route named no Projects workspace; `null` when it named one. */
+  projectsWorkspaceDetail: string | null;
 }
 
 export type PaseoFrameDescriptor =
@@ -80,6 +82,7 @@ function availableFrame(answer: Record<string, unknown>): PaseoFrameDescriptor {
     frameOrigin,
     serverId,
     projectsWorkspaceId: text(answer.projectsWorkspaceId) ?? null,
+    projectsWorkspaceDetail: text(answer.projectsWorkspaceId) ? null : text(answer.projectsWorkspaceDetail) ?? null,
   };
 }
 
@@ -95,6 +98,10 @@ export function parseFrameDescriptor(value: unknown): PaseoFrameDescriptor {
 /**
  * The URL the frame loads: the agent's tab in its workspace, the agent's own route when its
  * workspace is not known, else the Projects workspace, else the application's start page.
+ *
+ * These are routes of Paseo's web application (`/h/<serverId>/workspace/<id>?open=agent:<id>`
+ * and `/h/<serverId>/agent/<id>`), not a documented interface: a Paseo release can change them.
+ * Showing an agent by message does not use them.
  */
 export function paseoFrameUrl(descriptor: AvailablePaseoFrame, target: PaseoAgentTarget | null): string {
   const host = descriptor.frameBaseUrl + "/h/" + encodeURIComponent(descriptor.serverId);

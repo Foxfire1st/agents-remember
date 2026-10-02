@@ -36,7 +36,8 @@ function stubBackend(frameAnswers: Answer[], other: Record<string, Route> = {}) 
     const route = url === "/api/orca/frame" ? (queue.length > 1 ? queue.shift() : queue[0]) : other[url];
     if (!route) throw new Error("unexpected request " + url);
     const body = typeof route === "function" ? route(JSON.parse(String(init?.body ?? "{}")) as Answer) : route;
-    return { ok: true, status: 200, json: async () => body } as Response;
+    const status = typeof body.httpStatus === "number" ? body.httpStatus : 200;
+    return { ok: status < 400, status, json: async () => body } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -105,8 +106,8 @@ describe("frame route answers without a frame", () => {
 
     const block = getByTestId("paseo-frame-unavailable");
     expect(block.getAttribute("data-reason")).toBe(reason);
-    expect(block.textContent).toContain(headline);
-    expect(block.textContent).toContain("detail for " + reason);
+    // The state's own sentence, then what the backend adds, then the control: each once.
+    expect([...block.children].map((child) => child.textContent)).toEqual([headline, "detail for " + reason, "Retry"]);
     expect(container.querySelector("iframe")).toBeNull();
 
     fireEvent.click(getByRole("button", { name: "Retry" }));
@@ -114,6 +115,16 @@ describe("frame route answers without a frame", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(queryByTestId("paseo-frame-unavailable")).toBeNull();
     expect(frameElement(container).getAttribute("src")).toBe(PROJECTS_URL);
+  });
+
+  it("mounts no frame for an answer that is not available, whatever else it carries", async () => {
+    stubBackend([
+      { available: false, reason: "origin-not-listed", detail: "x", frameBaseUrl: FRAME_ORIGIN, serverId: "srv_test" },
+    ]);
+    const { container, getByTestId } = render(<PaseoChatFrame active scope="s" target={null} />);
+    await settle();
+    expect(getByTestId("paseo-frame-unavailable").getAttribute("data-reason")).toBe("origin-not-listed");
+    expect(container.querySelector("iframe")).toBeNull();
   });
 
   it("asks nothing until the pane is first active, and treats an unreadable answer as the backend failing", async () => {
@@ -133,7 +144,7 @@ describe("frame route answers without a frame", () => {
 describe("embedded frame and its control channel", () => {
   it("frames the Projects workspace with clipboard access for the embedded origin only", async () => {
     stubBackend([AVAILABLE]);
-    const { container, getByTestId } = render(<PaseoChatFrame active scope="s" target={null} />);
+    const { container, getByTestId, queryByTestId } = render(<PaseoChatFrame active scope="s" target={null} />);
     await settle();
 
     const frame = frameElement(container);
@@ -141,8 +152,35 @@ describe("embedded frame and its control channel", () => {
     expect(frame.getAttribute("allow")).toBe(`clipboard-read ${FRAME_ORIGIN}; clipboard-write ${FRAME_ORIGIN}`);
     expect(frame.getAttribute("allow")).not.toContain("*");
     expect(frame.hasAttribute("allowfullscreen")).toBe(false);
+    // The embedded application learns the parent's origin, and nothing more, from the referrer.
+    expect(frame.getAttribute("referrerpolicy")).toBe("origin");
     expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("waiting");
     expect(getByTestId("paseo-frame-connecting")).not.toBeNull();
+    expect(queryByTestId("paseo-frame-workspace-problem")).toBeNull();
+  });
+
+  it("says why when the route could not name the Projects workspace, and frames the start page", async () => {
+    stubBackend([{ ...AVAILABLE, projectsWorkspaceId: null, projectsWorkspaceDetail: "Directory not found: /projects" }]);
+    const { container, getByTestId } = render(<PaseoChatFrame active scope="s" target={null} />);
+    await settle();
+
+    expect(frameElement(container).getAttribute("src")).toBe(FRAME_ORIGIN + "/");
+    expect(getByTestId("paseo-frame-workspace-problem").textContent).toBe(
+      "The Projects workspace could not be opened: Directory not found: /projects",
+    );
+  });
+
+  it("stays ready with nothing to show: the 10-second deadline belongs to the load, not to the pane", async () => {
+    expect(PASEO_CONTROL_TIMEOUT_MS).toBe(10_000);
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId, queryByTestId } = render(<PaseoChatFrame active scope="s" target={null} />);
+    await settle();
+    await settle(9_000);
+    deliver(frameElement(container), plugin({ type: "ready" }));
+    await settle(60_000);
+
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("ready");
+    expect(queryByTestId("paseo-frame-control-banner")).toBeNull();
   });
 
   it("shows the displayed execution's agent by message, without reloading the frame", async () => {
@@ -215,6 +253,9 @@ describe("embedded frame and its control channel", () => {
 
     deliver(frame, plugin({ type: "ready" }), { origin: "http://evil.test" });
     deliver(frame, plugin({ type: "ready" }), { origin: "http://127.0.0.1:6821" });
+    // Look-alikes that begin with the frame's origin.
+    deliver(frame, plugin({ type: "ready" }), { origin: FRAME_ORIGIN + "0" });
+    deliver(frame, plugin({ type: "ready" }), { origin: FRAME_ORIGIN + ".evil.test" });
     deliver(frame, plugin({ type: "ready" }), { source: window });
     deliver(frame, plugin({ type: "ready" }), { source: null });
     deliver(frame, { type: "ready" });
@@ -231,6 +272,40 @@ describe("embedded frame and its control channel", () => {
     // The request is still unanswered for the real frame: a forged "shown" did not settle it.
     deliver(frame, plugin({ type: "ready" }));
     expect(posts).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes an answer only for the request that is pending", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, queryByTestId, getByTestId } = render(
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    expect(posts).toHaveBeenCalledTimes(1);
+
+    // Answers that name another agent neither settle the request nor blame its agent.
+    deliver(frame, plugin({ type: "error", code: "agent-archived", agentId: WORKER.agentId }));
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+    deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
+    // Still pending: the error for the requested agent is taken.
+    deliver(frame, plugin({ type: "error", code: "agent-archived", agentId: ARCHITECT.agentId }));
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("archived");
+  });
+
+  it("ignores an error when no request is pending", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, queryByTestId } = render(<PaseoChatFrame active scope="architect" target={ARCHITECT} />);
+    await settle();
+    const frame = frameElement(container);
+    watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
+
+    deliver(frame, plugin({ type: "error", code: "agent-archived", agentId: ARCHITECT.agentId }));
+    deliver(frame, plugin({ type: "error", code: "open-failed" }));
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
   });
 
   it.each([
@@ -284,12 +359,19 @@ describe("control channel unavailable", () => {
     expect(frameElement(container)).not.toBe(before);
     expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
 
-    // A late ready report ends the state without touching the frame.
+    // The frame's URL already names the agent: another deadline does not load it again.
     const loaded = frameElement(container);
+    await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
+    expect(frameElement(container)).toBe(loaded);
+
+    // A late ready report ends the state without reloading the frame. The agent is then asked
+    // for by message, because only that answer tells whether it still exists.
     const latePosts = watchPosts(loaded);
     deliver(loaded, plugin({ type: "ready" }));
     expect(queryByTestId("paseo-frame-control-banner")).toBeNull();
-    expect(latePosts).not.toHaveBeenCalled();
+    expect(latePosts).toHaveBeenCalledTimes(1);
+    expect(latePosts).toHaveBeenCalledWith({ type: "ar.open", agentId: WORKER.agentId }, FRAME_ORIGIN);
+    deliver(loaded, plugin({ type: "shown", agentId: WORKER.agentId }));
     expect(frameElement(container)).toBe(loaded);
 
     await settle(PASEO_CONTROL_TIMEOUT_MS);
@@ -318,9 +400,30 @@ describe("control channel unavailable", () => {
     // The reloaded frame names the agent itself, so it lands there with or without the channel.
     expect(reloaded.getAttribute("src")).toBe(WORKER_URL);
     expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("waiting");
+    // Once the channel is ready the agent is still asked for, so that archived or gone is said.
     const reloadedPosts = watchPosts(reloaded);
     deliver(reloaded, plugin({ type: "ready" }));
-    expect(reloadedPosts).not.toHaveBeenCalled();
+    expect(reloadedPosts).toHaveBeenCalledTimes(1);
+    expect(reloadedPosts).toHaveBeenCalledWith({ type: "ar.open", agentId: WORKER.agentId }, FRAME_ORIGIN);
+    deliver(reloaded, plugin({ type: "error", code: "agent-archived", agentId: WORKER.agentId }));
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("archived");
+    expect(frameElement(container)).toBe(reloaded);
+    expect(reloaded.getAttribute("src")).toBe(WORKER_URL);
+  });
+
+  it("after Retry without the channel, the frame that names the agent is not loaded a second time", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByRole, getByTestId } = render(<PaseoChatFrame active scope="worker" target={WORKER} />);
+    await settle();
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(frameElement(container).getAttribute("src")).toBe(WORKER_URL);
+
+    fireEvent.click(getByRole("button", { name: "Retry" }));
+    await settle();
+    const reloaded = frameElement(container);
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(frameElement(container)).toBe(reloaded);
   });
 });
 
@@ -359,8 +462,9 @@ describe("Chats pane wiring", () => {
       "/api/orca/launcher/options": (request) =>
         request.role === "orchestrator"
           ? { ...catalog, execution: sprintExecution }
-          : { ...catalog, executions: [execution] },
-      "/api/orca/result": execution,
+          : { ...catalog, executions: request.role === "architect" ? [execution] : [] },
+      // No result is served: the taskless execution is known from the options answer alone.
+      "/api/orca/result": { httpStatus: 404, detail: "no result" },
     });
     const { container, getByLabelText, getByRole } = render(
       <ChatsModePanels
@@ -389,13 +493,24 @@ describe("Chats pane wiring", () => {
     expect(frameElement(container)).toBe(frame);
     expect(posts).toHaveBeenCalledTimes(1);
 
+    // Another selection without an execution leaves the frame; choosing the first selection
+    // again asks for its agent again, although it is the agent that was shown last.
+    fireEvent.change(getByLabelText("Role"), { target: { value: "system-specialist" } });
+    await settle();
+    expect(posts).toHaveBeenCalledTimes(1);
+    fireEvent.change(getByLabelText("Role"), { target: { value: "architect" } });
+    await settle();
+    expect(posts).toHaveBeenCalledTimes(2);
+    expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: ARCHITECT.agentId }, FRAME_ORIGIN);
+    deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
+
     // A task-bound selection: choosing it displays its execution, and the frame follows.
     fireEvent.change(getByLabelText("Role"), { target: { value: "orchestrator" } });
     await settle();
-    expect(posts).toHaveBeenCalledTimes(1);
+    expect(posts).toHaveBeenCalledTimes(2);
     fireEvent.change(getByLabelText("AR sprint"), { target: { value: "0" } });
     await settle();
-    expect(posts).toHaveBeenCalledTimes(2);
+    expect(posts).toHaveBeenCalledTimes(3);
     expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: WORKER.agentId }, FRAME_ORIGIN);
     expect(frameElement(container)).toBe(frame);
     expect(frame.getAttribute("src")).toBe(PROJECTS_URL);

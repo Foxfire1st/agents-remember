@@ -240,6 +240,11 @@ function EmbeddedFrame({
       {agentProblem ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">{agentProblem}</div>
       ) : null}
+      {available.projectsWorkspaceDetail ? (
+        <div role="status" className={frameNotice} data-testid="paseo-frame-workspace-problem">
+          The Projects workspace could not be opened: {available.projectsWorkspaceDetail}
+        </div>
+      ) : null}
       <iframe
         key={frame.generation}
         ref={frameRef}

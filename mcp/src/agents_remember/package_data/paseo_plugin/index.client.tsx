@@ -2,35 +2,30 @@ import type { PluginClientContext, PluginScreenProps } from "@getpaseo/plugin/cl
 import { useEffect } from "react";
 import { View } from "react-native";
 import { OPEN_SCREEN_ID, framingOrigin, installBridge, isListedParent } from "./client/bridge";
-import {
-  THEME_ID,
-  applyEmbedLook,
-  closeSidebarAtLoad,
-  reloadOnce,
-  restoreStandaloneLook,
-} from "./client/look";
+import { bootstrapEmbed, loadState, takeOwnLookBack } from "./client/load";
+import { THEME_ID } from "./client/look";
+import { currentPage } from "./client/page";
 import { arEmbedList } from "./shared/rpc";
 
 // AR plugin, client part (PNT-R05). Installed and loaded by `agents-remember paseo provision`.
 //
-// Supported Paseo interfaces used here: the theme contribution, the contributed screen with its
-// `navigation` prop, `client.openScreen`, `client.rpc` and `client.paseo`. Everything that reaches
-// the page (storage, DOM, `message` events) is unsupported and is kept in client/look.ts and
-// client/bridge.ts, which say what they rely on.
+// This file uses supported Paseo interfaces only: the theme contribution, the contributed screen
+// with its `navigation` prop, `client.openScreen`, `client.rpc` and `client.paseo`. Everything
+// that reaches the page is unsupported and lives in four files, each of which lists what it
+// relies on:
+//   client/page.ts    the browser objects themselves (window, document, location, the storages)
+//   client/look.ts    stored settings and chrome: theme, fonts, sidebar, header row
+//   client/load.ts    once per page load: first-visit repair and the one reload
+//   client/bridge.ts  the control channel with the dashboard and who the parent page is
 //
 // The AR look and the control channel apply only inside a frame whose parent origin the embed
 // list pairs with this page's origin. Anywhere else the plugin changes nothing, except that it
 // gives a standalone tab its own look back when the browser shares storage with such a frame.
-
-// One page load = one document; the entry is evaluated again on every workspace switch and
-// plugin reload, so what must happen once per load is flagged on the document's global.
-const BOOTSTRAPPED = "__arPluginBootstrapped";
-const TRUSTED_PARENT = "__arPluginTrustedParent";
-// Where the app sends a deep link while it does not know the serving daemon yet (a first visit).
-const BOUNCE_PATHS = ["/welcome", "/open-project"];
-
-// The plugin tsconfig deliberately has no DOM lib; reach the browser globals untyped.
-const web = globalThis as any;
+//
+// Type check: `npm install && npm run typecheck` in a copy of this directory (it needs the dev
+// dependencies of package.json, which the repository does not carry: no gate can install them
+// without the network). The files under client/ import nothing from Paseo and are type-checked
+// and tested by the dashboard's own gate (dashboard/src/cockpit/paseoPluginClient.test.ts).
 
 /**
  * Supported navigation: a contributed screen receives its params and the client-owned
@@ -44,38 +39,6 @@ function OpenTarget({ params, navigation, theme }: PluginScreenProps) {
     else if (workspaceId) navigation.openWorkspace({ workspaceId });
   }, [agentId, workspaceId, at, navigation]);
   return <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }} />;
-}
-
-/** The URL this page was asked to load, even if the app has since redirected away from it. */
-function requestedUrl(): string {
-  try {
-    const entry = web.performance.getEntriesByType("navigation")[0];
-    const url = new web.URL(entry?.name ?? web.location.href);
-    if (url.origin === web.location.origin && url.pathname.startsWith("/h/")) return url.href;
-  } catch {
-    // fall through
-  }
-  return web.location.href;
-}
-
-/**
- * Once per page load inside a listed frame: store the AR look and repair a first-visit deep
- * link. Both take effect only when the page loads, so this may replace the page, once. Returns
- * whether the page is leaving.
- */
-function bootstrapEmbed(): boolean {
-  if (web[BOOTSTRAPPED]) return false;
-  web[BOOTSTRAPPED] = true;
-  const changed = applyEmbedLook();
-  const requested = requestedUrl();
-  const bounced = requested !== web.location.href && BOUNCE_PATHS.includes(web.location.pathname);
-  if ((changed.length > 0 || bounced) && reloadOnce(requested)) return true;
-  closeSidebarAtLoad();
-  return false;
-}
-
-function takeOwnLookBack(): void {
-  if (restoreStandaloneLook()) reloadOnce(web.location.href);
 }
 
 export default function contribute(client: PluginClientContext) {
@@ -96,7 +59,8 @@ export default function contribute(client: PluginClientContext) {
   });
   client.addScreen({ id: OPEN_SCREEN_ID, title: "Opening", Component: OpenTarget });
 
-  if (typeof web.window === "undefined" || typeof web.document === "undefined") return () => {};
+  const page = currentPage();
+  if (!page) return () => {};
 
   let live = true;
   let removeBridge: (() => void) | null = null;
@@ -105,28 +69,29 @@ export default function contribute(client: PluginClientContext) {
     removeBridge = null;
   };
   const embed = (parentOrigin: string) => {
-    if (!live || removeBridge || bootstrapEmbed()) return;
-    removeBridge = installBridge(client, parentOrigin);
+    if (!live || removeBridge || bootstrapEmbed(page, parentOrigin)) return;
+    removeBridge = installBridge(client, page, parentOrigin);
   };
 
-  const parentOrigin = framingOrigin();
+  const load = loadState(page);
+  const parentOrigin = framingOrigin(page, load.carriedParent);
   if (parentOrigin === null) {
-    takeOwnLookBack();
+    takeOwnLookBack(page);
   } else if (parentOrigin !== undefined) {
     // A re-evaluation in the same page reuses the answer this page already verified, so the
     // channel has no gap; the list is then asked again and has the last word.
-    if (web[TRUSTED_PARENT] === parentOrigin) embed(parentOrigin);
+    if (load.trustedParent === parentOrigin) embed(parentOrigin);
     client
       .rpc(arEmbedList, {})
       .then((answer) => {
         if (!live) return;
-        if (isListedParent(answer.embed, parentOrigin)) {
-          web[TRUSTED_PARENT] = parentOrigin;
+        if (isListedParent(answer.embed, parentOrigin, page.location.origin)) {
+          load.trustedParent = parentOrigin;
           embed(parentOrigin);
         } else {
-          web[TRUSTED_PARENT] = undefined;
+          load.trustedParent = null;
           dropBridge();
-          takeOwnLookBack();
+          takeOwnLookBack(page);
         }
       })
       .catch(() => {
