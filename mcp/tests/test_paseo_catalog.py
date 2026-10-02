@@ -49,7 +49,9 @@ CATALOG: dict[str, Any] = {
 }
 
 
-def runtime_config(root: Path, *, listen: str | None = "127.0.0.1:6833") -> McpRuntimeConfig:
+def runtime_config(
+    root: Path, *, listen: str | None = "127.0.0.1:6833", **overrides: str
+) -> McpRuntimeConfig:
     settings = (
         parse_paseo_runtime_settings(
             {
@@ -59,6 +61,7 @@ def runtime_config(root: Path, *, listen: str | None = "127.0.0.1:6833") -> McpR
                 "version": "0.11.0-beta.2",
                 "providers": {},
                 "embed": [],
+                **overrides,
             }
         )
         if listen
@@ -182,14 +185,27 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertNotEqual(refreshed["catalogOrigin"], first["catalogOrigin"])
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
 
-        other_runtime = runtime_config(self.root, listen="127.0.0.1:6834")
-        elsewhere = self.options(defaults(), config=other_runtime)
-        self.assertEqual(len(bridge.calls), 3)
-        self.assertNotEqual(elsewhere["catalogOrigin"], refreshed["catalogOrigin"])
+        other_runtimes = {
+            "listen": runtime_config(self.root, listen="127.0.0.1:6834"),
+            "home": runtime_config(self.root, home=(self.root / "other-home").as_posix()),
+            "installPrefix": runtime_config(
+                self.root, installPrefix=(self.root / "other-prefix").as_posix()
+            ),
+            "version": runtime_config(self.root, version="0.11.0-beta.3"),
+        }
+        origins = {refreshed["catalogOrigin"]}
+        for calls, (differs, other_runtime) in enumerate(other_runtimes.items(), start=3):
+            with self.subTest(f"a runtime with another {differs} has its own catalog"):
+                elsewhere = self.options(defaults(), config=other_runtime)
+                self.assertEqual(len(bridge.calls), calls)
+                self.assertNotIn(elsewhere["catalogOrigin"], origins)
+                origins.add(elsewhere["catalogOrigin"])
+        self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
+        self.assertEqual(len(bridge.calls), 6)
 
         forget_launcher_catalogs()
         resolve_agent_selection(self.config, defaults(), HARNESS_ORDER, None)
-        self.assertEqual(bridge.calls[3:], [("catalog", {})], "a launch must load an empty cache")
+        self.assertEqual(bridge.calls[6:], [("catalog", {})], "a launch must load an empty cache")
 
     def test_an_unoffered_default_is_flagged_and_never_replaced(self) -> None:
         self.bridge()
@@ -356,6 +372,17 @@ class LaunchValidationTests(PaseoCatalogTestCase):
         with self.subTest("unoffered default model"), self.assertRaises(ValueError) as raised:
             resolve_agent_selection(self.config, defaults("codex", "gpt-z"), HARNESS_ORDER, None)
         self.assertIn("'gpt-z'", str(raised.exception))
+        unoffered_default_efforts = (
+            defaults("codex", "gpt-a", "max"),
+            defaults("codex", "gpt-b", "low"),
+        )
+        for role_defaults in unoffered_default_efforts:
+            with (
+                self.subTest("unoffered default effort", defaults=role_defaults),
+                self.assertRaises(LaunchSelectionRefused) as raised,
+            ):
+                resolve_agent_selection(self.config, role_defaults, HARNESS_ORDER, None)
+            self.assertEqual(raised.exception.code, "effort_not_offered")
         with self.subTest("model on a model-less provider"):
             with self.assertRaises(LaunchSelectionRefused) as raised:
                 resolve_agent_selection(
