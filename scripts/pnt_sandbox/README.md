@@ -106,9 +106,11 @@ root the dashboard and the tool server would use for the sandbox settings:
 
 The check passes only when each of them resolves inside the sandbox directory, every root the
 resolver is expected to report is there, the dashboard port is 9797 and not auto-started, the
-Paseo listen address is `127.0.0.1:6820`, the Paseo version is the pinned one and both embed
-entries frame `http://127.0.0.1:6820`. A root that is outside or cannot be resolved fails the
-check and is named. A later change that moves one of the build's functions used by
+Paseo listen address is `127.0.0.1:6820`, the Paseo version is the pinned one, both embed
+entries frame `http://127.0.0.1:6820` and the settings file's provider entry for Pi is exactly
+the one this tool writes (see Pi below): a settings file from which that entry was dropped or
+changed fails `check` and `start` under the key `paseoRuntime.providers.pi`. A root that is
+outside or cannot be resolved fails the check and is named. A later change that moves one of the build's functions used by
 `build_roots.py` makes that root unresolved until the script is updated.
 
 ## Processes

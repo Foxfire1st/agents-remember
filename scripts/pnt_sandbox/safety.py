@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .layout import PASEO_VERSION, SandboxLayout, embed_entries
+from .layout import PASEO_VERSION, SandboxLayout, embed_entries, pi_provider_entry
 
 SETTINGS_KEY = "configPath"
 # What the check must have seen at least (PNT-R11 item 4), whatever the resolver says it
@@ -85,6 +85,9 @@ def expected_values(layout: SandboxLayout) -> dict[str, Any]:
         "paseoRuntime.listen": layout.paseo_listen,
         "paseoRuntime.version": PASEO_VERSION,
         "paseoRuntime.embed": embed_entries(layout),
+        # Without this entry a Pi agent of the sandbox loads the developer's Pi extensions,
+        # through which it can reach the installed AR server on the live roots.
+        "paseoRuntime.providers.pi": pi_provider_entry(),
     }
 
 

@@ -213,6 +213,11 @@ PI_COMMAND = (
 )
 
 
+def pi_provider_entry() -> dict[str, Any]:
+    """The sandbox's provider entry for Pi; the safety check requires exactly this one."""
+    return {"command": list(PI_COMMAND)}
+
+
 def provider_entries(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
     """The provider entries of the sandbox's Paseo runtime.
 
@@ -226,7 +231,7 @@ def provider_entries(layout: SandboxLayout, eve_env_file: Path | None) -> dict[s
     """
     providers: dict[str, Any] = {
         "hermes": {"extends": "acp", "label": "Hermes", "command": ["hermes", "acp"]},
-        "pi": {"command": list(PI_COMMAND)},
+        "pi": pi_provider_entry(),
     }
     if eve_env_file is not None:
         providers["eve"] = {

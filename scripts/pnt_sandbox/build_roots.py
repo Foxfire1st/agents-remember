@@ -153,6 +153,7 @@ def resolve_roots(config_path: str) -> dict[str, Any]:
         "paseoRuntime.listen": paseo.listen if paseo else None,
         "paseoRuntime.version": paseo.version if paseo else None,
         "paseoRuntime.embed": paseo.embed_payload() if paseo else None,
+        "paseoRuntime.providers.pi": paseo.providers.get("pi") if paseo else None,
         "repositories": sorted(config.repositories),
     }
     return report

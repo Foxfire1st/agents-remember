@@ -38,6 +38,7 @@ from pnt_sandbox_test_support import (
     foreign_variables,
     launcher_scrub,
     location_refusal,
+    pi_provider_entry,
     port_holders,
     port_state,
     procfs,
@@ -173,6 +174,20 @@ class SafetyCheckTests(SandboxCase):
                 report = self.good_roots()
                 report["values"][key] = value
                 self.assertEqual(self.found(report), [key])
+
+        # The Pi provider entry is the fixture's or the check fails: without it a sandbox Pi
+        # agent loads the developer's extensions, which reach the installed AR server.
+        pi_entry = "paseoRuntime.providers.pi"
+        self.assertEqual(self.good_roots()["values"][pi_entry], pi_provider_entry())
+        changed = {"command": ["pi", "--no-extensions", "-e", "builtin:mcp"]}
+        for label, value in (("dropped", None), ("changed", changed), ("emptied", {})):
+            with self.subTest(pi_entry=label):
+                report = self.good_roots()
+                report["values"][pi_entry] = value
+                self.assertEqual(self.found(report), [pi_entry])
+        unreported = self.good_roots()
+        del unreported["values"][pi_entry]
+        self.assertEqual(self.found(unreported), [pi_entry])
 
         promised = self.good_roots()
         promised["expected"] = ["observerRoot"]
