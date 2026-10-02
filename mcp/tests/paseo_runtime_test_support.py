@@ -12,12 +12,18 @@ import copy
 import hashlib
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from agents_remember.cli.paseo_command import CommandResult
 from agents_remember.cli.paseo_plugin_files import PLUGIN_ID, embed_path, tree_digest
+from agents_remember.cli.paseo_process_record import (
+    PROCESS_RECORD,
+    SUPERVISOR_TITLE,
+    ProcessFacts,
+    ProcessUnreadable,
+)
 from agents_remember.cli.paseo_provision import DaemonSetting
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
@@ -28,6 +34,7 @@ PINNED = "0.11.0-beta.2"
 # Stands for a harness key in a provider entry: it must reach the daemon's file and nothing else.
 SECRET = "pnt-provider-value-7f3a"
 OTHER_SECRET = "pnt-provider-value-91c2"
+SUPERVISOR_PID = 4242
 START_ONLY = ("daemon.listen", "features.webUi", "features.dictation", "features.voiceMode")
 LIVE = ("daemon.relay.enabled", "pluginsEnabled", "agents.providers")
 MUTATING = {
@@ -111,14 +118,22 @@ class FakePaseo:
         self.settings = settings
         self.calls: list[list[str]] = []
         self.daemon: dict[str, Any] | None = None
+        # The process table: what each live process id is. ``None`` stands for a process of
+        # another user, whose command line and environment cannot be read.
+        self.processes: dict[int, ProcessFacts | None] = {}
+        self.signalled: list[int] = []
         self.plugins: dict[str, dict[str, Any]] = {}
         self.events: list[tuple[str, str | None]] = []
         self.answers: dict[tuple[str, str], CommandResult] = {}
+        # Something else writes the daemon file while one Paseo call runs (once per entry).
+        self.during: dict[tuple[str, str], Callable[[], None]] = {}
         self.plugin_error: str | None = None
         self.plugins_unreachable = False
         self.npm_fails = False
         self.npm_installs: str | None = None
         self.port_held = False
+        # A failed start whose supervisor did not exit by itself.
+        self.lingering_supervisor = False
         self.speech_downloaded = False
         self.interrupt_at: int | None = None
 
@@ -140,6 +155,7 @@ class FakePaseo:
         assert argv[-2:] == ["--home", self.settings.home.as_posix()], argv
         assert "--host" not in argv, argv
         kind = (argv[1], argv[2])
+        self.during.pop(kind, lambda: None)()
         invalid = self.invalid_config()
         if invalid and argv[1] != "plugin" and kind != ("daemon", "stop"):
             return refused("UNKNOWN_ERROR", invalid)
@@ -147,6 +163,43 @@ class FakePaseo:
             return self.answers[kind]
         handler = getattr(self, "_" + "_".join(kind).replace("-", "_"))
         return handler(argv[3:-2])
+
+    def reader(self, pid: int) -> ProcessFacts | None:
+        """What ``/proc`` says about a process id of the fake's process table."""
+        if pid not in self.processes:
+            return None
+        facts = self.processes[pid]
+        if facts is None:
+            raise ProcessUnreadable("Permission denied")
+        return facts
+
+    @property
+    def record_file(self) -> Path:
+        return self.settings.home / PROCESS_RECORD
+
+    def record(self, pid: int, *alive_as: ProcessFacts | None) -> None:
+        """Make the home's process record name ``pid``: a live process when facts are given."""
+        self.settings.home.mkdir(parents=True, exist_ok=True)
+        listen = self.configured("daemon.listen")
+        self.record_file.write_text(json.dumps({"pid": pid, "listen": listen}), encoding="utf-8")
+        if alive_as:
+            self.processes[pid] = alive_as[0]
+
+    def supervisor(self, home: Path | None = None) -> ProcessFacts:
+        return ProcessFacts(SUPERVISOR_TITLE, (home or self.settings.home).as_posix())
+
+    def recorded_pid(self) -> int | None:
+        """The live process Paseo would act on: any live id the record names."""
+        if not self.record_file.is_file():
+            return None
+        pid = json.loads(self.record_file.read_text(encoding="utf-8"))["pid"]
+        return pid if pid in self.processes else None
+
+    def kill_daemon(self) -> None:
+        """The daemon is gone and took its record with it."""
+        self.daemon = None
+        self.processes.pop(SUPERVISOR_PID, None)
+        self.record_file.unlink(missing_ok=True)
 
     def kinds(self, start: int = 0) -> list[tuple[str, str]]:
         """(group, verb) of every call from ``start``: ``("plugin", "reload")`` and so on."""
@@ -190,7 +243,7 @@ class FakePaseo:
         self.settings.home.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self.config_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(config, indent=2))
+            handle.write(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
 
     def write(self, path: str, value: Any) -> None:
         config = self.config
@@ -215,7 +268,7 @@ class FakePaseo:
         providers = self.configured("agents.providers") or {}
         for provider_id, entry in providers.items():
             if entry.get("extends") == "nope":
-                return f"[Config] Invalid config:\n  - agents.providers.{provider_id}.extends"
+                return f"[Config] Invalid config in {self.config_file}:\n  - agents.providers.{provider_id}.extends"
         return None
 
     # -- the daemon --------------------------------------------------------------------------
@@ -230,6 +283,7 @@ class FakePaseo:
             "started_with": copy.deepcopy({key: self.configured(key) for key in START_ONLY}),
             "live": copy.deepcopy({key: self.configured(key) for key in LIVE}),
         }
+        self.record(SUPERVISOR_PID, self.supervisor())
         for entry in self.plugins.values():
             self._load(entry)
 
@@ -246,7 +300,9 @@ class FakePaseo:
             "daemon": self.running(),
             "plugin": {key: entry.get(key) for key in ("path", "status", "loaded")},
             "leftovers": sorted(path.name for path in self.settings.install_prefix.glob(".ar-*"))
-            + sorted(path.name for path in home.rglob("*previous*")),
+            + sorted(path.name for path in home.rglob("*previous*"))
+            + sorted(path.name for path in home.rglob("*.sha256"))
+            + sorted(path.name for path in home.rglob(".config*.tmp")),
         }
 
     def _load(self, entry: dict[str, Any]) -> None:
@@ -283,8 +339,12 @@ class FakePaseo:
         return ok("added 297 packages")
 
     def _daemon_status(self, _args: list[str]) -> CommandResult:
-        if self.daemon is None:
+        pid = self.recorded_pid()
+        if pid is None:
             return ok({"localDaemon": "stopped", "listen": None, "pid": None})
+        if self.daemon is None:
+            # Paseo takes any live process the record names for the daemon.
+            return ok({"localDaemon": "running", "pid": pid, "connectedDaemon": "unreachable"})
         return ok(
             {
                 "localDaemon": "running",
@@ -324,18 +384,28 @@ class FakePaseo:
         )
 
     def _daemon_start(self, _args: list[str]) -> CommandResult:
+        if self.recorded_pid() is not None:
+            return ok({"action": "already_running", "pid": self.recorded_pid()})
         if self.port_held:
+            if self.lingering_supervisor:
+                self.record(SUPERVISOR_PID, self.supervisor())
             return refused("DAEMON_START_FAILED", "listen EADDRINUSE: address already in use")
         self.start()
         self.events.append(("start", self.version_at(self.settings.install_prefix)))
         return ok({"action": "started"})
 
     def _daemon_stop(self, _args: list[str]) -> CommandResult:
-        if self.daemon is None:
+        # As Paseo does: SIGTERM to whatever live process the record names, then drop the record.
+        pid = self.recorded_pid()
+        self.record_file.unlink(missing_ok=True)
+        if pid is None:
             return ok({"action": "not_running", "pid": None})
-        self.daemon = None
-        self.events.append(("stop", self.version_at(self.settings.install_prefix)))
-        return ok({"action": "stopped", "pid": 4242})
+        self.signalled.append(pid)
+        del self.processes[pid]
+        if pid == SUPERVISOR_PID:
+            self.daemon = None
+            self.events.append(("stop", self.version_at(self.settings.install_prefix)))
+        return ok({"action": "stopped", "pid": pid})
 
     def _plugin_ls(self, _args: list[str]) -> CommandResult:
         if self.daemon is None or self.plugins_unreachable:
