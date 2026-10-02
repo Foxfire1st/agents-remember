@@ -37,6 +37,7 @@ from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
 from agents_remember.cli.orca_task_liveness import (
+    HostUnreachableRefusal,
     _reconcile_prior_execution,
     _recorded_agent_id,
     _refresh_execution,
@@ -185,6 +186,8 @@ def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchReque
         if request.action == "revive":
             return _revive_execution(config, request)
         return _start_execution(config, request)
+    except HostUnreachableRefusal as refusal:
+        return JSONResponse({"detail": refusal.detail, "hostUnreachable": True}, status_code=409)
     except (
         OSError,
         ValueError,

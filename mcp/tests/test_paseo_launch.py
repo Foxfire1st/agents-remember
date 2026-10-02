@@ -207,9 +207,11 @@ class FakeRuntime:
             "id": agent["id"],
             "status": agent["status"],
             "archivedAt": agent["archivedAt"],
-            "turnActive": agent["status"] == "running" and not permissions,
+            # A pending permission request belongs to a turn that is still active.
+            "turnActive": agent["status"] == "running",
             "pendingPermissions": permissions,
             "lastError": agent.get("lastError"),
+            "attentionReason": agent.get("attentionReason"),
             # The last turn is readable only while the agent is idle with an open session.
             "lastTurn": agent.get("lastTurn", {"state": "none"})
             if agent["status"] == "idle"

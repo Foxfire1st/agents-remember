@@ -24,6 +24,7 @@ from agents_remember.cli import (
     orca_task_routes,
     paseo_catalog,
     paseo_launch,
+    paseo_status,
 )
 from agents_remember.cli.orca_runtime import digest
 from agents_remember.cli.orca_task_preparation import (
@@ -537,8 +538,13 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
 
 
-def _bridge_whose_first_creation_gets_no_answer(agents: dict[str, dict[str, Any]]) -> Any:
-    """A stand-in for ``bridge_call``: a catalog, a workspace, and creations after one timeout."""
+def _bridge_whose_first_creation_gets_no_answer(
+    agents: dict[str, dict[str, Any]], reads: list[str]
+) -> Any:
+    """A stand-in for ``bridge_call``: a catalog, a workspace, and creations after one timeout.
+
+    A created agent is reported as running its first turn when its state is read.
+    """
 
     answers = [PaseoBridgeFailure("paseo_bridge_timeout", "no answer in time")]
 
@@ -547,6 +553,10 @@ def _bridge_whose_first_creation_gets_no_answer(agents: dict[str, dict[str, Any]
             return {"providers": [{"id": "codex", "label": "Codex", "models": []}]}
         if command == "workspace-open":
             return {"serverId": "srv", "workspace": {"id": "wks", "directory": payload["cwd"]}}
+        if command == "agent-state":
+            reads.append(payload["agentId"])
+            state = {"id": payload["agentId"], "status": "running", "turnActive": True}
+            return {"serverId": "srv", "agent": state if payload["agentId"] in agents else None}
         if answers:
             raise answers.pop()
         agents[payload["agentId"]] = payload
@@ -561,7 +571,8 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
 
     def test_a_repeat_runs_the_stored_call_after_the_leaf_document_was_edited(self) -> None:
         agents: dict[str, dict[str, Any]] = {}
-        bridge = _bridge_whose_first_creation_gets_no_answer(agents)
+        reads: list[str] = []
+        bridge = _bridge_whose_first_creation_gets_no_answer(agents, reads)
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -651,6 +662,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                     patch.dict(checkout_coordination._declared, {"mode": "test"}),
                     patch.object(paseo_catalog, "bridge_call", bridge),
                     patch.object(paseo_launch, "bridge_call", bridge),
+                    patch.object(paseo_status, "bridge_call", bridge),
                 ):
                     config = load_config(settings_path)
                     first_status, first = dispatch()
@@ -687,7 +699,11 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
         self.assertEqual(
             agents[saved["agentId"]]["prompt"], saved["replayRequest"]["agent"]["prompt"]
         )
-        self.assertEqual((third_status, third), (200, second))
+        # A further repeat finds the launch resolved: it starts nothing and reads the agent once.
+        self.assertEqual((third_status, third["status"]), (200, "running"))
+        self.assertEqual(third["execution"], second["execution"])
+        self.assertEqual(reads, [saved["agentId"]])
+        self.assertEqual(list(agents), [saved["agentId"]])
 
 
 class LeafEnclosureSprintBindingTests(unittest.TestCase):

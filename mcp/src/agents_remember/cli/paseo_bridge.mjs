@@ -71,7 +71,9 @@
 //            `resumed: false` with the runtime's text in `error`. `agent` is the state afterwards.
 //
 //   STATE is {id, status, archivedAt, turnActive, pendingPermissions: [{name, kind}], lastError,
-//   lastTurn}. `status` is the runtime's own word (initializing, idle, running, error, closed).
+//   attentionReason, lastTurn}. `status` is the runtime's own word (initializing, idle, running,
+//   error, closed). `attentionReason` is the runtime's own mark on the agent (finished, error,
+//   permission, or null); it is the one trace of a failed turn that outlives a closed session.
 //   `lastTurn` is null unless the agent is idle with an open session; then it is
 //   {state: 'none'} when the agent has not run a turn, {state: 'replied', text} when the timeline
 //   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
@@ -410,6 +412,7 @@ async function agentState(api, agent) {
       kind: request?.kind ?? null
     })),
     lastError: nonEmpty(agent.lastError) ? text(agent.lastError) : null,
+    attentionReason: nonEmpty(agent.attentionReason),
     lastTurn: readable ? await lastTurn(api, agent) : null
   }
 }

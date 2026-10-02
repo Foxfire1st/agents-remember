@@ -52,6 +52,18 @@ describe("status lines of an execution", () => {
     expect(getByTestId("orca-execution-status").textContent).toBe("Current Orca execution: completed");
   });
 
+  it("shows the reason beside the line when the daemon answered or something else failed", () => {
+    const reasons = ["paseo_bridge_timeout: The bridge call ran out of time.", "paseo_runtime_mismatch: The daemon at ws://127.0.0.1:6840/ws is another runtime.", "the bridge returned an unreadable agent state"];
+    for (const reason of reasons) {
+      const { getByTestId, unmount } = render(<OrcaExecutionStatus execution={execution({ status: "completed", hostUnreachable: true, hostUnreachableReason: reason })} className="meta" />);
+      expect(getByTestId("orca-host-unreachable").textContent).toBe(HOST_UNREACHABLE_LINE + " (" + reason + ")");
+      unmount();
+    }
+    // Without a reason the line stands alone.
+    const { getByTestId } = render(<OrcaExecutionStatus execution={execution({ hostUnreachable: true })} className="meta" />);
+    expect(getByTestId("orca-host-unreachable").textContent).toBe(HOST_UNREACHABLE_LINE);
+  });
+
   it("offers Revive only for a revivable execution", () => {
     const onRevive = vi.fn();
     const { queryByRole, getByRole, rerender } = render(<OrcaReviveControl execution={execution({})} enabled className="button" onRevive={onRevive} />);

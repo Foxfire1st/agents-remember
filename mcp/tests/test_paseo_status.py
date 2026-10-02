@@ -54,8 +54,12 @@ class StatusTestCase(PaseoLaunchTestCase):
         self.runtime.calls.clear()
         return request
 
-    def saved(self, request: OrcaDispatchRequest) -> bytes:
-        return self.receipt_path(request).read_bytes()
+    def saved(self, request: OrcaDispatchRequest) -> tuple[bytes, int, int]:
+        """The receipt file as it is: its bytes, and the inode and time any rewrite would change."""
+
+        path = self.receipt_path(request)
+        stat = path.stat()
+        return path.read_bytes(), stat.st_ino, stat.st_mtime_ns
 
     @staticmethod
     def revival(request: OrcaDispatchRequest) -> OrcaDispatchRequest:
@@ -227,15 +231,37 @@ class StatusTableTests(StatusTestCase):
 
     def test_row_08_an_error_state_or_a_failed_last_turn_is_failed(self) -> None:
         message = "The 'gpt-z' model is not supported."
+        document = {
+            "type": "error",
+            "status": 400,
+            "error": {"type": "invalid_request_error", "message": message},
+        }
         failures: dict[str, tuple[dict[str, Any], str]] = {
             "the agent is in an error state": ({"status": "error", "lastError": message}, message),
             "the last turn failed and the agent is idle": (
                 {"status": "idle", "lastTurn": REPLIED, "lastError": message},
-                message,
+                f"last turn failed: {message}",
             ),
             "an error state without a message": (
                 {"status": "error"},
                 "the agent is in an error state",
+            ),
+            # After a restart the error text is gone; the runtime's error mark is not.
+            "an idle agent marked with an error whose last turn left no reply": (
+                {
+                    "status": "idle",
+                    "lastTurn": {"state": "unreplied"},
+                    "attentionReason": "error",
+                },
+                "last turn failed",
+            ),
+            "an error document: its message is shown": (
+                {"status": "error", "lastError": json.dumps(document)},
+                message,
+            ),
+            "a text that only looks like a document is shown as it is": (
+                {"status": "error", "lastError": '{"type": "error"'},
+                '{"type": "error"',
             ),
         }
         for label, (state, detail) in failures.items():
@@ -246,9 +272,17 @@ class StatusTableTests(StatusTestCase):
 
                 self.assert_row(public, request, status="failed", detail=detail, can_revive=False)
                 self.assertTrue(public["canStart"])
+        with self.subTest(
+            "the error mark alone, on a turn that ended with a reply, is not a failure"
+        ):
+            request = self.launched(status="idle", lastTurn=REPLIED, attentionReason="error")
+            self.assertEqual(self.refresh(request)["status"], "completed")
 
     def test_row_09_a_cancelled_last_turn_is_stopped(self) -> None:
-        request = self.launched(status="idle", lastTurn={"state": "unreplied"})
+        # A cancelled turn carries the same mark as a finished one.
+        request = self.launched(
+            status="idle", lastTurn={"state": "unreplied"}, attentionReason="finished"
+        )
 
         public = self.refresh(request)
 
@@ -294,6 +328,8 @@ class StatusTableTests(StatusTestCase):
         for previous, state in (
             ("running", {}),
             ("completed", {"status": "idle", "lastTurn": REPLIED}),
+            # Revive was on offer for the closed session; a session that is starting is not closed.
+            ("interrupted", {"status": "closed"}),
         ):
             with self.subTest(previous=previous):
                 request = self.launched(**state)
@@ -335,6 +371,17 @@ class StatusTableTests(StatusTestCase):
         )
         self.assertEqual(public["result"], before["result"])
         self.assertEqual(public["canStart"], before["canStart"])
+        with self.subTest("an execution that was revivable is not while the state is unknown"):
+            closed = self.launched("manager", status="closed")
+            self.assertIs(self.refresh(closed)["canRevive"], True)
+            self.agent_of(closed)["status"] = "hibernating"
+            self.assert_row(
+                self.refresh(closed),
+                closed,
+                status="interrupted",
+                detail="unrecognised agent state: hibernating",
+                can_revive=False,
+            )
 
     def test_the_first_matching_row_decides(self) -> None:
         with self.subTest("closed and archived together is row 3, not row 4"):
@@ -384,8 +431,11 @@ class RefreshTests(StatusTestCase):
                 # Result, the options load, and a repeat of the resolved request all refresh.
                 self.refresh(request)
                 orca_task_routes._orca_options_endpoint(self.config, options)
+                written = self.saved(request)
                 self.dispatch(request)
 
+                # A refresh that finds nothing new does not write the receipt again.
+                self.assertEqual(self.saved(request), written)
                 self.assertEqual(self.commands().count("agent-state"), 3)
                 self.assertLessEqual(set(self.commands()), READ_COMMANDS)
                 # Nothing was sent, resumed or un-archived: the runtime holds what it held.
@@ -548,6 +598,34 @@ class RefreshTests(StatusTestCase):
             )
             self.assertEqual(self.commands(), ["agent-state"])
             self.assertEqual(self.receipt(previous)["status"], "running")
+
+    def test_a_new_start_is_refused_while_the_execution_s_agent_cannot_be_read(self) -> None:
+        previous = self.launched(status="idle", lastTurn=REPLIED)
+        self.assertEqual(self.refresh(previous)["status"], "completed")
+        saved = self.saved(previous)
+        bindings = self.config.coordination_root / "notes/reports/paseo-native-executions"
+        binding_files = sorted((bindings / "message-bindings").glob("*.json"))
+        # The saved status is closed, but the agent may be in a further turn: nobody can tell.
+        self.agent_of(previous)["status"] = "running"
+        self.runtime.calls.clear()
+        self.runtime.fail("agent-state", "paseo_bridge_timeout", "The bridge call ran out of time.")
+
+        status, body = self.dispatch(self.request("worker"))
+
+        self.assertEqual(status, 409)
+        self.assertIs(body["hostUnreachable"], True)
+        self.assertIn("the open-execution rule cannot be applied", body["detail"])
+        self.assertIn(f"request {previous.request_id}, last known status completed", body["detail"])
+        self.assertIn("paseo_bridge_timeout: The bridge call ran out of time.", body["detail"])
+        # Nothing was archived or created, in the runtime or on disk.
+        self.assertEqual(self.commands(), ["agent-state"])
+        self.assertEqual(self.saved(previous), saved)
+        self.assertFalse((self.receipt_path(previous).parent / "history").exists())
+        self.assertEqual(sorted((bindings / "message-bindings").glob("*.json")), binding_files)
+        self.assertEqual(len(self.runtime.agents), 1)
+        with self.subTest("once the host answers, the rule is applied to what the agent is doing"):
+            error = self.refused(self.request("worker"))
+            self.assertIn("status running", str(error.detail))
 
     def test_without_a_configured_runtime_refresh_and_revive_refuse_naming_that(self) -> None:
         request = self.launched(status="closed")
@@ -724,11 +802,40 @@ class ReviveTests(StatusTestCase):
                 self.assertNotIn("revivedAt", self.receipt(request))
                 self.assertEqual(self.agent_of(request)["status"], "closed")
                 if command == "agent-state":
+                    self.assertIn("the execution is unchanged", body["detail"])
                     self.assertEqual(self.saved(request), saved)
                 else:
-                    # The read before the resume found the session closed; the resume wrote nothing.
+                    # The read was answered and its row is written; only the resume is in doubt,
+                    # and the answer does not call the execution unchanged.
+                    self.assertIn(
+                        "the resume was not confirmed; refresh to see the agent's state",
+                        body["detail"],
+                    )
+                    self.assertNotIn("unchanged", body["detail"])
                     self.assertEqual(self.receipt(request)["status"], "interrupted")
                     self.assertIs(self.receipt(request)["canRevive"], True)
+
+    def test_a_session_opened_between_the_read_and_the_resume_is_not_recorded_as_revived(
+        self,
+    ) -> None:
+        request = self.launched(status="closed", lastTurn=REPLIED)
+        agent = self.agent_of(request)
+        read = self.runtime._agent_state
+
+        def read_then_opened_in_the_chat(payload: dict[str, Any]) -> dict[str, Any]:
+            reply = read(payload)
+            agent["status"] = "idle"
+            return reply
+
+        self.runtime._agent_state = read_then_opened_in_the_chat  # type: ignore[method-assign]
+
+        status, public = self.revive(request)
+
+        self.assertEqual((status, public["status"], public["canRevive"]), (200, "completed", False))
+        self.assertEqual(self.commands(), ["agent-state", "agent-resume"])
+        # The runtime resumed nothing for this call, so no revival is recorded.
+        self.assertNotIn("revivedAt", public)
+        self.assertNotIn("revivedAt", self.receipt(request))
 
 
 if __name__ == "__main__":
