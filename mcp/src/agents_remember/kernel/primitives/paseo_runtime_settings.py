@@ -9,6 +9,7 @@ whole; when it is present every fact is required. Absence is the named state
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,9 @@ NO_PASEO_RUNTIME_CONFIGURED = "no Paseo runtime configured"
 _EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
 _LISTEN_ADDRESS = re.compile(r"(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<port>\d{1,5})")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+_HOST_NAME = re.compile(r"[a-z0-9.-]+")
+# A last label a browser reads as a number makes the whole host an IPv4 address.
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
 
 
 class PaseoRuntimeSettingsError(AgentsRememberError):
@@ -180,11 +184,12 @@ def _embed_entry(value: object, index: int) -> PaseoEmbedEntry:
             "port, without a path, query or credentials"
         )
     canonical = _canonical_origin(origin)
-    if origin != canonical or not origin.isascii():
-        hint = f"; write {canonical}" if canonical.isascii() else ""
+    if origin != canonical:
+        hint = "" if canonical is None else f"; write {canonical}"
         raise PaseoRuntimeSettingsError(
             f"{label}.dashboardOrigin must be the origin exactly as a browser reports it: "
-            f"lower-case ASCII scheme and host, no default port{hint}"
+            "lower-case scheme and host of a-z, 0-9, dot and hyphen, an IP address in its "
+            f"canonical form, no default port{hint}"
         )
     frame_base_url = value["frameBaseUrl"]
     if not _is_web_url(frame_base_url, origin_only=False):
@@ -209,11 +214,46 @@ def _is_web_url(value: object, *, origin_only: bool) -> bool:
     return not (origin_only and parts.path)
 
 
-def _canonical_origin(origin: str) -> str:
-    """A validated origin as a browser serialises it, which is what later code compares with."""
+def _canonical_origin(origin: str) -> str | None:
+    """A validated origin as a browser serialises it, which is what later code compares with.
+
+    ``None`` when the host is one a browser would report in another shape that cannot simply be
+    named: characters outside a-z, 0-9, dot and hyphen, or a number that is not a dotted quad.
+    """
     parts = urlsplit(origin)
-    host = parts.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
+    host = _canonical_host(parts.hostname or "")
+    if host is None:
+        return None
     port = "" if parts.port in (None, _DEFAULT_PORTS[parts.scheme]) else f":{parts.port}"
     return f"{parts.scheme}://{host}{port}"
+
+
+def _canonical_host(host: str) -> str | None:
+    if ":" in host:
+        try:
+            return f"[{_compressed_ipv6(ipaddress.IPv6Address(host))}]"
+        except ValueError:
+            return None
+    if _HOST_NAME.fullmatch(host) is None:
+        return None
+    if _NUMERIC_LABEL.fullmatch(host.rstrip(".").rsplit(".", 1)[-1]) is None:
+        return host
+    try:
+        return str(ipaddress.IPv4Address(host))
+    except ValueError:
+        return None
+
+
+def _compressed_ipv6(address: ipaddress.IPv6Address) -> str:
+    """Hexadecimal groups with the first longest run of zero groups collapsed, as browsers do."""
+    groups = [f"{(int(address) >> shift) & 0xFFFF:x}" for shift in range(112, -16, -16)]
+    start, length = 0, 1
+    for index in range(8):
+        run = 0
+        while index + run < 8 and groups[index + run] == "0":
+            run += 1
+        if run > length:
+            start, length = index, run
+    if length == 1:
+        return ":".join(groups)
+    return ":".join(groups[:start]) + "::" + ":".join(groups[start + length :])

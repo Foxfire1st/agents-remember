@@ -74,17 +74,29 @@ def read_identity(pid: int) -> ProcessIdentity | None:
     return ProcessIdentity(pid, stat.start_ticks, argv)
 
 
-def environment_value(pid: int, name: str) -> str | None:
-    """One variable of a process's environment; ``None`` when unset or not readable."""
+def environment(pid: int) -> dict[str, str] | None:
+    """The environment a process was started with; ``None`` when it is gone or not readable."""
     try:
         raw = (PROC / str(pid) / "environ").read_bytes()
     except OSError:
         return None
-    prefix = f"{name}=".encode()
-    for entry in raw.split(b"\0"):
-        if entry.startswith(prefix):
-            return entry[len(prefix) :].decode("utf-8", "replace")
-    return None
+    entries = (entry.decode("utf-8", "replace").partition("=") for entry in raw.split(b"\0"))
+    return {name: value for name, separator, value in entries if separator}
+
+
+def working_directory(pid: int) -> Path | None:
+    try:
+        return Path(os.readlink(PROC / str(pid) / "cwd"))
+    except OSError:
+        return None
+
+
+def boot_id() -> str:
+    """Identifies this boot: start times in clock ticks repeat across reboots, this does not."""
+    try:
+        return (PROC / "sys" / "kernel" / "random" / "boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def is_running(identity: ProcessIdentity | None) -> bool:

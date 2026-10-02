@@ -8,6 +8,8 @@
 // the session directory must be that directory. This launcher changes into the application
 // directory and rewrites the session directory of `session/new` and `session/load` requests.
 // The env file holds the developer's model keys; it is read at launch and never copied.
+// `removed-variables.json`, written beside this launcher by the sandbox build, names the
+// variables an env file may not set.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -34,8 +36,28 @@ if (!versionOnly && (!app || !existsSync(app))) {
   console.error(`eve-acp-launcher: no Eve application directory at ${app ?? "(--app missing)"}`);
   process.exit(2);
 }
-const envFile = given["--env-file"];
-const fileEnv = envFile && existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
+// The env file is laid over the environment the sandbox prepared. It may add keys; it may not
+// bring back a variable the sandbox removes or sets, listed beside this launcher at build time.
+function fileEnvironment(envFile) {
+  if (!envFile || !existsSync(envFile)) return {};
+  const scrub = JSON.parse(
+    readFileSync(new URL("./removed-variables.json", import.meta.url), "utf8"),
+  );
+  const refused = (name) =>
+    scrub.names.includes(name) || scrub.prefixes.some((prefix) => name.startsWith(prefix));
+  const entries = Object.entries(parseEnv(readFileSync(envFile, "utf8")));
+  return Object.fromEntries(entries.filter(([name]) => !refused(name)));
+}
+
+let fileEnv = {};
+if (!versionOnly) {
+  try {
+    fileEnv = fileEnvironment(given["--env-file"]);
+  } catch (error) {
+    console.error(`eve-acp-launcher: cannot read the env file safely: ${error.message}`);
+    process.exit(2);
+  }
+}
 
 const child = versionOnly
   ? spawn(eve, ["--version"], { stdio: ["pipe", "inherit", "inherit"] })
