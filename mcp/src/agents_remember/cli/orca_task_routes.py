@@ -73,6 +73,11 @@ from agents_remember.cli.orca_task_receipts import (
     _write_message_binding_projection,
     _write_receipt,
 )
+from agents_remember.cli.paseo_bridge import (
+    BRIDGE_TIMEOUT,
+    RUNTIME_NOT_CONFIGURED,
+    PaseoBridgeFailure,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaDispatchRequest,
@@ -82,6 +87,8 @@ from agents_remember.models.orca_launcher import (
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
+# How a failed bridge call answers a launcher route; every other bridge failure is a bad gateway.
+_BRIDGE_FAILURE_STATUS = {RUNTIME_NOT_CONFIGURED: 503, BRIDGE_TIMEOUT: 504}
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +161,6 @@ def _bind_result_endpoint(config: McpRuntimeConfig):
 def _orca_options_endpoint(
     config: McpRuntimeConfig, request: OrcaLauncherOptionsRequest
 ) -> JSONResponse:
-    _require_pairing()
     _acquire_dispatch_lock()
     try:
         context = resolve_orca_role_context(config, request)
@@ -172,6 +178,8 @@ def _orca_options_endpoint(
                 _refresh_execution(config, receipt_path, receipt) if receipt else None
             )
         return JSONResponse(response)
+    except PaseoBridgeFailure as error:
+        raise _bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
@@ -185,6 +193,8 @@ def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchReque
         if request.action == "revive":
             return _revive_execution(config, request)
         return _start_execution(config, request)
+    except PaseoBridgeFailure as error:
+        raise _bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
@@ -577,6 +587,12 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
     }
     _write_receipt(path, receipt)
     return JSONResponse(_public_execution(receipt))
+
+
+def _bridge_http_error(error: PaseoBridgeFailure) -> HTTPException:
+    """A failed bridge call as a route error whose text names the state (the launcher shows it)."""
+
+    return HTTPException(status_code=_BRIDGE_FAILURE_STATUS.get(error.code, 502), detail=str(error))
 
 
 def _acquire_dispatch_lock() -> None:

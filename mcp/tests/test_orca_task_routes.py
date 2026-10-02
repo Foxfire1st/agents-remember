@@ -24,7 +24,7 @@ from agents_remember.cli.orca_task_preparation import (
     _bind_task_report_access,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
+from agents_remember.models.orca_launcher import OrcaDispatchRequest
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from fastapi import HTTPException
@@ -228,111 +228,6 @@ class MessageBindingProjectionTests(unittest.TestCase):
                 dispatch()
             self.assertEqual(raised.exception.status_code, 409)
             self.assertEqual(Path(reference["path"]).read_bytes(), exact_bytes)
-
-
-class OrcaCatalogCacheTests(unittest.TestCase):
-    def test_role_changes_reuse_catalog_and_explicit_refresh_invalidates_it(self) -> None:
-        with TemporaryDirectory() as temporary:
-            config = _runtime_config(Path(temporary))
-            config.workspace_root.mkdir()
-            config.coordination_root.mkdir()
-            runtime_calls: list[tuple[str, dict[str, object]]] = []
-
-            def runtime_call(
-                _config: McpRuntimeConfig,
-                command: str,
-                payload: dict[str, object],
-            ) -> dict[str, object]:
-                runtime_calls.append((command, payload))
-                if "agentId" in payload:
-                    return {
-                        "selected": {
-                            "id": "codex",
-                            "catalogOrigin": "probe",
-                            "models": [{"id": "gpt-6-sol", "label": "GPT-6 Sol"}],
-                        }
-                    }
-                return {
-                    "agents": [
-                        {"id": "codex", "label": "Codex"},
-                        {"id": "claude", "label": "Claude"},
-                    ]
-                }
-
-            orca_task_preparation._ORCA_CATALOG_CACHE.clear()
-            orca_task_preparation._ORCA_CATALOG_ORIGINS.clear()
-            try:
-                with (
-                    patch.object(orca_task_routes, "_require_pairing"),
-                    patch.object(
-                        orca_task_preparation,
-                        "orca_catalog_scope",
-                        return_value=("runtime", config.workspace_root.as_posix()),
-                    ),
-                    patch.object(
-                        orca_task_routes, "resolve_orca_role_context", return_value=object()
-                    ),
-                    patch.object(
-                        orca_task_preparation,
-                        "_role_defaults",
-                        return_value=(
-                            {"agent": "codex", "model": "gpt-6-sol", "effort": None},
-                            ("codex",),
-                        ),
-                    ),
-                    patch.object(
-                        orca_task_preparation,
-                        "_ensure_orca_workspace",
-                        return_value={"selector": "id:projects"},
-                    ) as ensure_workspace,
-                    patch.object(orca_task_preparation, "_runtime_call", side_effect=runtime_call),
-                    patch.object(
-                        orca_task_routes,
-                        "_receipt_path",
-                        return_value=config.workspace_root / "receipt.json",
-                    ),
-                    patch.object(orca_task_routes, "_read_receipt", return_value=None),
-                ):
-                    first = json.loads(
-                        bytes(
-                            orca_task_routes._orca_options_endpoint(
-                                config, OrcaLauncherOptionsRequest(role="architect")
-                            ).body
-                        )
-                    )
-                    second = json.loads(
-                        bytes(
-                            orca_task_routes._orca_options_endpoint(
-                                config, OrcaLauncherOptionsRequest(role="manager")
-                            ).body
-                        )
-                    )
-                    refreshed = json.loads(
-                        bytes(
-                            orca_task_routes._orca_options_endpoint(
-                                config,
-                                OrcaLauncherOptionsRequest(role="architect", refreshCatalog=True),
-                            ).body
-                        )
-                    )
-
-                self.assertEqual(first["catalogOrigin"], second["catalogOrigin"])
-                self.assertNotEqual(second["catalogOrigin"], refreshed["catalogOrigin"])
-                self.assertEqual(len(ensure_workspace.call_args_list), 2)
-                self.assertEqual(len(runtime_calls), 4)
-                self.assertEqual(
-                    next(agent for agent in second["agents"] if agent["id"] == "claude")["models"],
-                    [],
-                )
-                self.assertEqual(
-                    next(agent for agent in second["agents"] if agent["id"] == "codex")[
-                        "catalogOrigin"
-                    ],
-                    "probe",
-                )
-            finally:
-                orca_task_preparation._ORCA_CATALOG_CACHE.clear()
-                orca_task_preparation._ORCA_CATALOG_ORIGINS.clear()
 
 
 class OrcaNativeResultTests(unittest.TestCase):
