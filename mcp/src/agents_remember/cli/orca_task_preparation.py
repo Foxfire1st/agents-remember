@@ -15,6 +15,7 @@ from agents_remember.application.orca_task_context import (
     ROLE_LEVELS,
     TASKLESS_ROLES,
     OrcaRoleContext,
+    resolve_orca_role_context,
     selection_binding,
 )
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
@@ -28,17 +29,20 @@ from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.application.worktree_tools import worktree_start_tool, worktree_status_tool
+from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
+from agents_remember.controlplane.durable_store import declared_process_role
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaAgentOverride,
     OrcaLauncherOptionsRequest,
     OrcaRole,
+    OrcaSelection,
 )
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
@@ -108,6 +112,10 @@ def prepare_orca_role_handover(
         config, defaults, harness_order, agent_override
     )
     workspace = _resolve_workspace(config, context)
+    if context.role in LEAF_ROLES:
+        # Creating the enclosure records it in the leaf's task document. The handover describes
+        # the documents as they stand now, so the same request compiles to the same binding again.
+        context = _current_role_context(config, context)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         OrcaHandoverRequest(
@@ -129,6 +137,20 @@ def prepare_orca_role_handover(
         ar_mcp_context=ar_mcp_context,
         handover=handover,
         request_id=request_id,
+    )
+
+
+def _current_role_context(config: McpRuntimeConfig, context: OrcaRoleContext) -> OrcaRoleContext:
+    """Resolve the selection's task documents again, as they are on disk at this moment."""
+
+    return resolve_orca_role_context(
+        config,
+        OrcaSelection(
+            role=context.role,
+            sprintDocumentRef=context.sprint.ref if context.sprint else None,
+            masterDocumentRef=context.master.ref if context.master else None,
+            taskDocumentRef=context.task.ref if context.task else None,
+        ),
     )
 
 
@@ -341,7 +363,7 @@ def _ensure_leaf_enclosure(
         TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
     )
     if status.get("ok") is not True and not contract_path.exists():
-        created = worktree_start_tool(
+        created = _start_leaf_enclosure(
             config,
             TaskIdentity(
                 repo_id=leaf.ref.repository,
@@ -353,7 +375,6 @@ def _ensure_leaf_enclosure(
                 leaf_id=leaf.document.id,
                 parent_task=parent_task,
             ),
-            execution=StartExecution(skip_provider_setup=True),
         )
         if created.get("ok") is not True:
             raise ValueError(
@@ -372,6 +393,19 @@ def _ensure_leaf_enclosure(
             str(status.get("detail") or "AR could not resolve the selected leaf enclosure.")
         )
     return contract_path, status
+
+
+def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> dict[str, Any]:
+    """Create the enclosure with AR's worktree start, in the process entitled to run it.
+
+    The dashboard backend is not a writer of the worktree stores, so from there the start runs in
+    a short-lived child process of this build. Every other process calls the worktree owner
+    directly.
+    """
+
+    if declared_process_role() == "dashboard":
+        return start_leaf_enclosure_in_child(config, identity)
+    return worktree_start_tool(config, identity, execution=StartExecution(skip_provider_setup=True))
 
 
 def _workspace_folder(path: Path) -> dict[str, str]:

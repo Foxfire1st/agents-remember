@@ -14,6 +14,7 @@ import argparse
 from agents_remember.cli import (
     dashboard,
     knowledge_ingest,
+    leaf_enclosure_start,
     memory_backfill,
     memory_citations,
     paseo_runtime,
@@ -53,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paseo_runtime.add_arguments(paseo)
     paseo.set_defaults(func=paseo_runtime.run)
+    # Internal: the dashboard backend runs it as a child process; it has no help entry.
+    enclosure = sub.add_parser(leaf_enclosure_start.COMMAND)
+    leaf_enclosure_start.add_arguments(enclosure)
+    enclosure.set_defaults(func=leaf_enclosure_start.run)
     return parser
 
 

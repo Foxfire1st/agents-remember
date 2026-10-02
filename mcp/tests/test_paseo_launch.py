@@ -1,24 +1,29 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from agents_remember.application.orca_task_context import OrcaRoleContext
 from agents_remember.cli import (
+    leaf_enclosure_start,
     orca_task_preparation,
     orca_task_receipts,
     orca_task_routes,
     paseo_catalog,
     paseo_launch,
 )
-from agents_remember.cli.orca_runtime import HOST_CALL_NOT_AVAILABLE, OrcaRuntimeFailure
+from agents_remember.cli.orca_runtime import HOST_CALL_NOT_AVAILABLE, OrcaRuntimeFailure, digest
 from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
@@ -29,7 +34,9 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
+from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from fastapi import HTTPException
 
 REPO = "agents-remember"
@@ -168,6 +175,8 @@ class FakeEnclosures:
         self.started = False
         self.start_calls: list[Any] = []
         self.start_result: dict[str, Any] = {"ok": True}
+        # Called when a start succeeds: the real start records the enclosure in the leaf document.
+        self.on_start: Any = None
 
     def status(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
         if not self.started:
@@ -185,6 +194,8 @@ class FakeEnclosures:
             for path in (self.group / "code", self.group / "memory"):
                 path.mkdir(parents=True)
             self.started = True
+            if self.on_start is not None:
+                self.on_start()
         return self.start_result
 
 
@@ -244,9 +255,11 @@ class PaseoLaunchTestCase(unittest.TestCase):
         self.leaf = resolved_document(self.config, LEAF_REF, "01_LEAF")
         forget_launcher_catalogs()
         self.addCleanup(forget_launcher_catalogs)
+        self.enclosures.on_start = self.record_enclosure_in_leaf
         self.resolve_context = self.replace(
             orca_task_routes, "resolve_orca_role_context", side_effect=self.context
         )
+        self.replace(orca_task_preparation, "resolve_orca_role_context", side_effect=self.context)
         self.replace(paseo_catalog, "bridge_call", self.runtime)
         self.replace(paseo_launch, "bridge_call", self.runtime)
         self.replace(orca_task_preparation, "worktree_status_tool", self.enclosures.status)
@@ -267,15 +280,40 @@ class PaseoLaunchTestCase(unittest.TestCase):
         task = self.leaf if "taskDocumentRef" in refs else None
         return OrcaRoleContext(selection.role, sprint, master, task, task or master or sprint)
 
+    def record_enclosure_in_leaf(self) -> None:
+        """What AR's worktree start does to the leaf's task document."""
+
+        contract = leaf_enclosure_path(self.leaf.path.parent, self.leaf.document.id)
+        enclosure = TaskEnclosureRef(
+            leafId=self.leaf.document.id, enclosurePath=contract.as_posix()
+        )
+        self.leaf = ResolvedTaskDocument(
+            ref=self.leaf.ref,
+            path=self.leaf.path,
+            document=self.leaf.document.model_copy(update={"enclosures": [enclosure]}),
+        )
+
     def compile_handover(self, request: OrcaHandoverRequest) -> dict[str, Any]:
         assert request.request_id is not None
         report = (self.root / "reports" / f"{request.request_id}.md").as_posix()
-        binding = {"requestId": str(request.request_id), "role": request.context.role}
+        context = request.context
+        documents = digest(
+            [
+                resolved.document.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for resolved in (context.sprint, context.master, context.task)
+                if resolved is not None
+            ]
+        )
+        binding = {
+            "requestId": str(request.request_id),
+            "role": context.role,
+            "taskDocumentDigest": documents,
+        }
         return {
             "prompt": self.prompt,
             "capsuleOperation": "planning",
             "capsuleDigest": "capsule-digest",
-            "taskDocumentDigest": "task-document-digest",
+            "taskDocumentDigest": documents,
             "taskReportPath": report,
             "canonicalTaskReportPath": report,
             "arMcpContext": request.ar_mcp_context,
@@ -527,6 +565,139 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
         self.assertEqual(raised.exception.code, HOST_CALL_NOT_AVAILABLE)
         self.assertIn("PNT-R06", str(raised.exception))
         self.assertEqual(self.runtime.calls, [])
+
+
+class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
+    """The worktree start runs in a child process when, and only when, the backend is the dashboard."""
+
+    def child_process(self, outcome: Any = None) -> list[tuple[list[str], dict[str, Any]]]:
+        """Replace the child process; without an outcome it creates the enclosure and says ok."""
+
+        calls: list[tuple[list[str], dict[str, Any]]] = []
+
+        def run(argv: list[str], **kwargs: Any) -> Any:
+            calls.append((argv, kwargs))
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is not None:
+                return outcome
+            self.enclosures.start(None, "started by the child process")
+            return SimpleNamespace(returncode=0, stdout='{"ok": true}\n')
+
+        fake = SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired)
+        self.replace(leaf_enclosure_start, "subprocess", fake)
+        return calls
+
+    def test_only_the_dashboard_process_starts_the_enclosure_in_a_child_process(self) -> None:
+        with self.subTest("the dashboard process"):
+            role = self.replace(
+                orca_task_preparation, "declared_process_role", return_value="dashboard"
+            )
+            calls = self.child_process()
+            request = self.request("worker")
+
+            status, public = self.dispatch(request)
+
+            self.assertEqual((status, public["status"]), (200, "running"))
+            ((argv, options),) = calls
+            self.assertEqual(
+                argv,
+                [
+                    sys.executable,
+                    "-m",
+                    "agents_remember.cli",
+                    "start-leaf-enclosure",
+                    "--config",
+                    self.config.config_path.as_posix(),
+                ],
+            )
+            worktree_name = (
+                f"{slugify('01_leaf')}-{hashlib.sha256(LEAF_REF.key.encode()).hexdigest()[:10]}"
+            )
+            self.assertEqual(
+                json.loads(options["input"]),
+                {
+                    "repoId": REPO,
+                    "taskName": "master",
+                    "worktreeName": worktree_name,
+                    "leafId": "01_LEAF",
+                    "parentTask": "sprint",
+                },
+            )
+            self.assertEqual(options["timeout"], 120)
+            # The child gets the backend's own environment and no roots: only the settings file.
+            self.assertNotIn("env", options)
+            self.assertNotIn("cwd", options)
+            # The worktree owner was not called in this process.
+            self.assertEqual(self.enclosures.start_calls, ["started by the child process"])
+            self.assertEqual(
+                self.runtime.launch_calls()[0],
+                ("workspace-open", {"cwd": self.enclosures.group.as_posix()}),
+            )
+            self.assertEqual(self.dispatch(self.request("reviewer"))[0], 200)
+            self.assertEqual(len(calls), 1, "an existing enclosure is found, not started again")
+            role.return_value = None
+        for role_name in (None, "mcp"):
+            with self.subTest("another process", role=role_name):
+                self.enclosures = FakeEnclosures(self.root / f"other-{role_name}")
+                self.replace(orca_task_preparation, "worktree_status_tool", self.enclosures.status)
+                self.replace(orca_task_preparation, "worktree_start_tool", self.enclosures.start)
+                self.replace(orca_task_preparation, "declared_process_role", return_value=role_name)
+                calls = self.child_process(AssertionError("no child process is started here"))
+                (identity,) = (
+                    self.enclosures.start_calls
+                    if orca_task_preparation._ensure_leaf_enclosure(
+                        self.config, self.leaf, parent_task="sprint"
+                    )
+                    else []
+                )
+                self.assertEqual((identity.leaf_id, identity.parent_task), ("01_LEAF", "sprint"))
+                self.assertEqual(calls, [])
+
+    def test_a_child_that_refuses_fails_or_does_not_end_refuses_the_launch(self) -> None:
+        self.replace(orca_task_preparation, "declared_process_role", return_value="dashboard")
+        refusal = json.dumps(
+            {
+                "ok": False,
+                "error": {
+                    "code": "atomic-series-admission-failed",
+                    "message": "Atomic-series admission refused: the base branch is missing.",
+                },
+            }
+        )
+        outcomes: dict[str, tuple[Any, tuple[str, ...]]] = {
+            "the child refuses": (
+                SimpleNamespace(returncode=1, stdout=refusal),
+                ("atomic-series-admission-failed", "the base branch is missing."),
+            ),
+            "the child does not end in time": (
+                subprocess.TimeoutExpired("python", 120),
+                ("leaf_enclosure_start_timeout", "did not end within 120 seconds"),
+            ),
+            "the child ends without a reply": (
+                SimpleNamespace(returncode=1, stdout="Traceback (most recent call last):"),
+                ("leaf_enclosure_start_unreadable", "status 1"),
+            ),
+            "the child says ok but failed": (
+                SimpleNamespace(returncode=3, stdout='{"ok": true}'),
+                ("leaf_enclosure_start_unreadable", "status 3"),
+            ),
+            "the child cannot be started": (
+                OSError("no such interpreter"),
+                ("leaf_enclosure_start_unavailable", "no such interpreter"),
+            ),
+        }
+        for label, (outcome, reasons) in outcomes.items():
+            with self.subTest(label):
+                calls = self.child_process(outcome)
+                error = self.refused(self.request("worker"))
+                self.assertEqual(error.status_code, 409)
+                for reason in reasons:
+                    self.assertIn(reason, str(error.detail))
+                self.assertEqual(len(calls), 1)
+        self.assertEqual(self.enclosures.start_calls, [])
+        self.assertEqual(self.runtime.launch_calls(), [])
+        self.assertEqual(list(self.root.rglob("*-native-executions")), [])
 
 
 class LaunchOutcomeTests(PaseoLaunchTestCase):
