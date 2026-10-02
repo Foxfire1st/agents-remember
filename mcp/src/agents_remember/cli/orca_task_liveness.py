@@ -1,4 +1,9 @@
-"""Refresh and reconcile saved Orca execution outcomes without redispatching."""
+"""Refresh a saved execution from its agent's state, and reconcile a new request with it.
+
+Every refresh reads the agent once and applies the first matching row of the status table
+(``paseo_status``, PNT-R07). The read changes nothing in the runtime; the receipt is rewritten
+only when the row changes what it holds, and never when the host cannot be reached.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +13,6 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from agents_remember.cli.orca_runtime import (
-    OrcaRuntimeFailure,
-)
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
 from agents_remember.cli.orca_task_receipts import (
     _archive_receipt,
     _execute_prepared_launch,
@@ -22,8 +21,14 @@ from agents_remember.cli.orca_task_receipts import (
     _read_receipt,
     _write_receipt,
 )
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
+from agents_remember.cli.paseo_status import AgentReading, read_agent, resume_agent, status_row
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest
+
+_CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
+# The receipt fields a row may change; a refresh that changes none of them writes nothing.
+_ROW_FIELDS = ("status", "detail", "canRevive", "result", "resumeRefused")
 
 
 def _reconcile_prior_execution(
@@ -44,6 +49,7 @@ def _reconcile_prior_execution(
         if current.get("status") in {"starting", "unknown"}:
             return _execute_prepared_launch(config, path, current)
         return JSONResponse(_refresh_execution(config, path, current))
+    # The open-execution rule is applied to what the agent is doing now, not to the saved status.
     status = _refresh_execution(config, path, current)
     if status["status"] not in {"completed", "failed", "stopped", "rejected"}:
         raise HTTPException(
@@ -63,141 +69,123 @@ def _refresh_execution(
     path: Path,
     receipt: dict[str, Any],
 ) -> dict[str, Any]:
-    if receipt.get("status") in {"completed", "failed", "stopped", "rejected"}:
+    """Read the execution's agent once and report the row that applies.
+
+    An execution for which the runtime confirmed no agent has nothing to read and is returned as
+    saved: a ``rejected`` launch created none, and a launch that is still unresolved is settled
+    only by a retry of its saved call.
+    """
+
+    agent_id = _recorded_agent_id(receipt)
+    if agent_id is None:
         return _public_execution(receipt)
+    return _apply_reading(path, receipt, read_agent(config, agent_id))
+
+
+def _recorded_agent_id(receipt: dict[str, Any]) -> str | None:
+    """The id of the agent the runtime confirmed for this execution, if it confirmed one."""
+
     reference = receipt.get("execution")
-    if not isinstance(reference, dict) or reference.get("kind") not in {"terminal", "structured"}:
-        # A Paseo agent's state is read by PNT-R07's refresh; until then the receipt stands as saved.
-        return _public_execution(receipt)
-    try:
-        if reference.get("kind") == "terminal":
-            _refresh_terminal_execution(config, receipt)
-        else:
-            _refresh_structured_session(config, receipt)
-    except (KeyError, OrcaRuntimeFailure, ValueError) as error:
-        if getattr(error, "code", None) == "terminal_gone":
-            receipt.update(
-                status="stopped",
-                detail="Orca reports terminal_gone for this saved execution; the native terminal is no longer present.",
-                terminalObservedAt=_now_iso(),
-                updatedAt=_now_iso(),
-            )
-        else:
-            receipt.update(
-                status="unknown",
-                detail=f"Live refresh is inconclusive ({getattr(error, 'code', 'runtime-read')}); the saved native execution reference remains attached to this AR selection.",
-                updatedAt=_now_iso(),
-            )
-    _write_receipt(path, receipt)
+    if isinstance(reference, dict) and reference.get("kind") == PASEO_AGENT_KIND:
+        agent_id = reference.get("agentId")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+    return None
+
+
+def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -> dict[str, Any]:
+    """Write what the matching row says into the receipt and return the public execution."""
+
+    refusal = receipt.get("resumeRefused")
+    row = status_row(
+        reading,
+        str(receipt.get("status")),
+        refusal.get("reason") if isinstance(refusal, dict) else None,
+    )
+    if row.host_unreachable:
+        # The saved receipt stays as it is; only this answer says that it is the last known state.
+        return {
+            **_public_execution(receipt),
+            "hostUnreachable": True,
+            "hostUnreachableReason": reading.unreachable_reason
+            or f"the host's answer matches no status row (agent status {reading.lifecycle!r})",
+        }
+    before = {field: receipt.get(field) for field in _ROW_FIELDS}
+    if row.status is not None:
+        receipt["status"] = row.status
+    if row.detail is not None:
+        receipt["detail"] = row.detail
+    if row.can_revive is not None:
+        receipt["canRevive"] = row.can_revive
+    if row.summary is not None:
+        receipt["result"] = {"summary": row.summary}
+    if reading.found and not reading.session_closed:
+        # The session is open again, so an earlier refusal to resume it no longer describes it.
+        receipt.pop("resumeRefused", None)
+    if before != {field: receipt.get(field) for field in _ROW_FIELDS}:
+        now = _now_iso()
+        receipt["updatedAt"] = now
+        closed_now = before["status"] != receipt["status"] or before["result"] != receipt.get(
+            "result"
+        )
+        if closed_now and receipt["status"] in _CLOSED_STATUSES:
+            receipt["terminalObservedAt"] = now
+        _write_receipt(path, receipt)
     return _public_execution(receipt)
 
 
-def _refresh_terminal_execution(config: McpRuntimeConfig, receipt: dict[str, Any]) -> None:
-    reference = receipt.get("execution")
-    handle = reference.get("handle") if isinstance(reference, dict) else None
-    if not isinstance(handle, str) or not handle:
-        receipt.update(
-            status="unknown",
-            detail="The saved terminal reference is incomplete; its live state cannot be verified.",
-            updatedAt=_now_iso(),
+def _revive_agent(
+    config: McpRuntimeConfig, path: Path, receipt: dict[str, Any], agent_id: str
+) -> JSONResponse:
+    """Resume the recorded agent's closed session, then report it by the row that applies.
+
+    The agent is read first, so that only a session the table calls revivable is resumed: an open
+    session is left alone and answered with the refreshed execution.
+    """
+
+    reading = read_agent(config, agent_id)
+    status = _apply_reading(path, receipt, reading)
+    if status.get("hostUnreachable") is True:
+        return _revive_without_host(status["hostUnreachableReason"])
+    if status["canRevive"] is not True:
+        if reading.found and not reading.archived and not reading.session_closed:
+            return JSONResponse(status)
+        raise HTTPException(
+            status_code=409,
+            detail=f"This execution cannot be revived: {status.get('detail')}.",
         )
-        return
-    terminal_result = _runtime_call(config, "terminal-show", {"handle": handle})
-    terminal = terminal_result.get("terminal")
-    agent_result = _runtime_call(config, "terminal-status", {"handle": handle})
-    agent_status = agent_result.get("agentStatus")
-    if not isinstance(terminal, dict) or not isinstance(agent_status, dict):
+    outcome = resume_agent(config, agent_id)
+    if not outcome.reading.reachable:
+        return _revive_without_host(str(outcome.reading.unreachable_reason))
+    if outcome.refusal is not None:
+        # The runtime cannot resume this agent. A new agent comes only from a new Start.
+        now = _now_iso()
         receipt.update(
-            status="unknown",
-            detail="Orca returned incomplete terminal and agent status evidence; the saved session may still exist.",
-            updatedAt=_now_iso(),
+            status="failed",
+            detail=outcome.refusal,
+            canRevive=False,
+            resumeRefused={"reason": outcome.refusal, "at": now},
+            terminalObservedAt=now,
+            updatedAt=now,
         )
-        return
-    if terminal.get("handle") not in {None, handle} or agent_status.get("handle") not in {
-        None,
-        handle,
-    }:
-        receipt.update(
-            status="unknown",
-            detail="Orca's terminal status did not match the saved execution handle; the live state is unknown.",
-            updatedAt=_now_iso(),
-        )
-        return
-    connected = terminal.get("connected") is True
-    running = agent_status.get("isRunningAgent")
-    if connected and running is True:
-        receipt.update(
-            status="running",
-            detail="Orca confirms this exact native terminal is connected and its agent status is running.",
-            updatedAt=_now_iso(),
-        )
-    elif connected and running is False:
-        receipt.update(
-            status="stopped",
-            detail="Orca confirms the saved terminal is connected but its agent is no longer running.",
-            terminalObservedAt=_now_iso(),
-            updatedAt=_now_iso(),
-        )
-    else:
-        receipt.update(
-            status="unknown",
-            detail="Orca's agent status is not corroborated by a connected terminal; live state remains unknown.",
-            updatedAt=_now_iso(),
-        )
+        _write_receipt(path, receipt)
+        return JSONResponse(_public_execution(receipt))
+    if outcome.resumed:
+        receipt["revivedAt"] = _now_iso()
+        _write_receipt(path, receipt)
+    return JSONResponse(_apply_reading(path, receipt, outcome.reading))
 
 
-def _refresh_structured_session(config: McpRuntimeConfig, receipt: dict[str, Any]) -> None:
-    reference = receipt["execution"]
-    session_id = reference["sessionId"]
-    status = _runtime_call(config, "agent-history", {"sessionId": session_id})
-    state = status.get("status")
-    turn_state = status.get("turnState")
-    outcome = status.get("turnOutcome")
-    if status.get("lastAssistantMessage"):
-        receipt["result"] = {"summary": status["lastAssistantMessage"]}
-    if state in {"working", "attention"} or turn_state == "running":
-        receipt.update(
-            status="running",
-            detail="The Orca structured session is active; continue or inspect it in native Chats.",
-            updatedAt=_now_iso(),
-        )
-        return
-    if turn_state == "completed" and outcome in {"success", "failure", "cancellation"}:
-        terminal_status = "completed" if outcome == "success" else "failed"
-        receipt.update(
-            status=terminal_status,
-            detail="Orca observed the native agent turn complete; AR review and acceptance remain pending.",
-            terminalObservedAt=_now_iso(),
-            updatedAt=_now_iso(),
-        )
-        return
-    if turn_state in {"interrupted", "unverifiable"}:
-        candidates = _runtime_call(config, "restart-resumable", {})
-        sessions = candidates.get("sessions", [])
-        exact = next(
-            (
-                row
-                for row in sessions
-                if isinstance(row, dict)
-                and row.get("sessionId") == session_id
-                and row.get("workspaceId") == reference.get("worktreeId")
-                and row.get("agent") == receipt.get("agent", {}).get("id")
+def _revive_without_host(reason: str) -> JSONResponse:
+    """Refuse a revive the runtime could not be asked for; the receipt is left as it was."""
+
+    return JSONResponse(
+        {
+            "detail": (
+                "The Paseo runtime cannot be reached, so the agent was not revived and the "
+                f"execution is unchanged. {reason}"
             ),
-            None,
-        )
-        receipt.update(
-            status="interrupted",
-            canRevive=exact is not None,
-            detail=(
-                "Orca offers this exact structured session for native resume."
-                if exact is not None
-                else "The session was interrupted, but Orca has no exact validated resume offer."
-            ),
-            updatedAt=_now_iso(),
-        )
-        return
-    receipt.update(
-        status="running",
-        detail="The native structured session is retained; its turn outcome is not yet terminal.",
-        updatedAt=_now_iso(),
+            "hostUnreachable": True,
+        },
+        status_code=409,
     )

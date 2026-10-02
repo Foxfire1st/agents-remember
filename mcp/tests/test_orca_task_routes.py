@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import stat
 import unittest
 import uuid
@@ -13,7 +12,6 @@ from unittest.mock import patch
 from agents_remember.application.orca_task_context import OrcaRoleContext, selection_binding
 from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli import (
-    orca_runtime,
     orca_task_liveness,
     orca_task_preparation,
     orca_task_receipts,
@@ -361,70 +359,6 @@ class OrcaNativeResultTests(unittest.TestCase):
             public = orca_task_receipts._public_execution(receipt)
             self.assertEqual(public["status"], "running")
             self.assertTrue(public["report"]["available"])
-
-    def test_saved_terminal_refresh_uses_native_auth_and_keeps_disconnect_unknown(self) -> None:
-        with TemporaryDirectory() as temporary:
-            path = Path(temporary) / "receipt.json"
-            config = _runtime_config(Path(temporary))
-            receipt = {
-                "schema": "ar-orca-native-execution/v1",
-                "requestId": str(uuid.uuid4()),
-                "role": "architect",
-                "status": "running",
-                "execution": {"kind": "terminal", "handle": "term_saved", "worktreeId": "projects"},
-            }
-            with (
-                patch.dict(os.environ, {"ORCA_PAIRING_CODE": ""}),
-                patch.object(
-                    orca_task_liveness,
-                    "_runtime_call",
-                    side_effect=[
-                        {
-                            "terminal": {
-                                "handle": "term_saved",
-                                "connected": False,
-                                "writable": False,
-                                "exitCause": {"kind": "operator_close"},
-                            }
-                        },
-                        orca_runtime.OrcaRuntimeFailure("terminal_gone", "gone"),
-                    ],
-                ) as runtime_call,
-            ):
-                stopped = orca_task_liveness._refresh_execution(config, path, dict(receipt))
-            self.assertEqual(stopped["status"], "stopped")
-            self.assertIn("terminal_gone", stopped["detail"])
-            self.assertEqual(
-                [call.args[1] for call in runtime_call.call_args_list],
-                ["terminal-show", "terminal-status"],
-            )
-            self.assertEqual(stopped["requestId"], receipt["requestId"])
-
-            with (
-                patch.dict(os.environ, {"ORCA_PAIRING_CODE": ""}),
-                patch.object(
-                    orca_task_liveness,
-                    "_runtime_call",
-                    side_effect=[
-                        {
-                            "terminal": {
-                                "handle": "term_saved",
-                                "connected": False,
-                                "writable": False,
-                            }
-                        },
-                        {
-                            "agentStatus": {
-                                "handle": "term_saved",
-                                "isRunningAgent": True,
-                                "status": "working",
-                            }
-                        },
-                    ],
-                ),
-            ):
-                uncertain = orca_task_liveness._refresh_execution(config, path, dict(receipt))
-            self.assertEqual(uncertain["status"], "unknown")
 
 
 class OrcaProjectDispatchTests(unittest.TestCase):

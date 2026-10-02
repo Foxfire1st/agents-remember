@@ -51,6 +51,31 @@
 //   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
 //   effective one.
 //
+//   agent-state  {agentId: string}
+//            -> {serverId, agent: STATE | null}
+//            What the runtime reports about the agent with exactly that id, archived or not; null
+//            when it has none. A read with no effect on the agent: nothing is sent, resumed or
+//            un-archived. The runtime keeps no outcome of the last turn, so that is taken from the
+//            end of the agent's timeline, and the timeline is read only while the agent is idle
+//            with an open session: reading the timeline of a closed session makes the runtime
+//            resume it.
+//
+//   agent-resume  {agentId: string}
+//            -> {serverId, agent: STATE | null, resume: {attempted: boolean, resumed: boolean,
+//                error?: string}}
+//            Opens the closed session of a live agent as the same agent, without a message. The
+//            runtime loads an agent when its timeline is read; that read is the resume. An agent
+//            that is missing, archived or already open is left alone (`attempted: false`), and
+//            nothing is ever created or un-archived. A resume the runtime refuses is
+//            `resumed: false` with the runtime's text in `error`. `agent` is the state afterwards.
+//
+//   STATE is {id, status, archivedAt, turnActive, pendingPermissions: [{name, kind}], lastError,
+//   lastTurn}. `status` is the runtime's own word (initializing, idle, running, error, closed).
+//   `lastTurn` is null unless the agent is idle with an open session; then it is
+//   {state: 'none'} when the agent has not run a turn, {state: 'replied', text} when the timeline
+//   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
+//   the last turn ended without one, which is what a cancelled turn leaves behind.
+//
 // The runtime is addressed by the environment paseo_bridge.py derives from `paseoRuntime`:
 //   AR_PASEO_INSTALL_PREFIX  install prefix; the client package is loaded from its node_modules
 //   AR_PASEO_URL             ws://<listen>/ws
@@ -77,7 +102,9 @@ const COMMANDS = {
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'agent-get': getAgent,
-  'agent-archive': archiveAgent
+  'agent-archive': archiveAgent,
+  'agent-state': readAgentState,
+  'agent-resume': resumeAgent
 }
 
 const DEFAULT_DEADLINE_MS = 55000
@@ -89,6 +116,13 @@ const CLOSE_TIMEOUT_MS = 1000
 const LISTING_RESERVE_MS = 10000
 const REPLY_RESERVE_MS = 2000
 const MESSAGE_LIMIT = 800
+// agent-state and agent-resume: the runtime's word for an agent without a running harness
+// process, the timeline entries that mark the end of a turn, how many entries are read from the
+// end, and the length of the reply text that is returned.
+const CLOSED_SESSION = 'closed'
+const TURN_ITEMS = new Set(['user_message', 'assistant_message', 'tool_call'])
+const TIMELINE_TAIL = 20
+const FINAL_TEXT_LIMIT = 3000
 
 await main()
 
@@ -286,6 +320,87 @@ async function archiveAgent({ api, daemon }, input) {
   }
   const result = await api.agents.ref(agentId).archive()
   return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }
+}
+
+async function readAgentState({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const agent = await findAgent(api, daemon, agentId)
+  return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
+}
+
+async function resumeAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  const untouched = { attempted: false, resumed: false }
+  if (!agent) return { serverId, agent: null, resume: untouched }
+  if (nonEmpty(agent.archivedAt) || agent.status !== CLOSED_SESSION) {
+    // Reading the timeline of an archived agent would load it, and an open session needs nothing.
+    return { serverId, agent: await agentState(api, agent), resume: untouched }
+  }
+  let refusal = null
+  try {
+    await api.agents.ref(agentId).timeline.refetch({ direction: 'tail', limit: 1 })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    refusal = text(error?.message ?? error) || 'The Paseo runtime did not resume the agent.'
+  }
+  const after = await findAgent(api, daemon, agentId)
+  return {
+    serverId,
+    agent: after ? await agentState(api, after) : null,
+    resume: {
+      attempted: true,
+      resumed: Boolean(after) && after.status !== CLOSED_SESSION,
+      ...(refusal ? { error: refusal } : {})
+    }
+  }
+}
+
+// What the runtime says about one agent, plus how its last turn ended when that can be read
+// without loading the agent: only an idle agent has an open session and no turn in progress.
+async function agentState(api, agent) {
+  const permissions = Array.isArray(agent.pendingPermissions) ? agent.pendingPermissions : []
+  const readable = agent.status === 'idle' && !nonEmpty(agent.archivedAt)
+  return {
+    id: agent.id,
+    status: agent.status ?? null,
+    archivedAt: agent.archivedAt ?? null,
+    turnActive: Boolean(agent.activeTurn),
+    pendingPermissions: permissions.map((request) => ({
+      name: nonEmpty(request?.name) ?? nonEmpty(request?.title) ?? 'a tool',
+      kind: request?.kind ?? null
+    })),
+    lastError: nonEmpty(agent.lastError) ? text(agent.lastError) : null,
+    lastTurn: readable ? await lastTurn(api, agent) : null
+  }
+}
+
+// How the last turn ended, from the end of the timeline. A turn that finished ends with the
+// agent's reply. The runtime records no cancellation; a cancelled turn leaves a user message or a
+// tool call as the last entry instead. Entries of other kinds (reasoning, to-do lists, compaction)
+// say nothing about the end of a turn and are skipped.
+async function lastTurn(api, agent) {
+  const page = await api.agents
+    .ref(agent.id)
+    .timeline.refetch({ direction: 'tail', limit: TIMELINE_TAIL, projection: 'projected' })
+  const kinds = (Array.isArray(page?.entries) ? page.entries : [])
+    .map((entry) => entry?.item)
+    .filter((item) => TURN_ITEMS.has(item?.type))
+  if (kinds.length === 0) {
+    const ran = nonEmpty(agent.lastUserMessageAt) || page?.hasOlder === true
+    return { state: ran ? 'unreplied' : 'none' }
+  }
+  let first = kinds.length
+  while (first > 0 && kinds[first - 1].type === 'assistant_message') first -= 1
+  const reply = kinds
+    .slice(first)
+    .map((item) => (typeof item.text === 'string' ? item.text : ''))
+    .join('')
+  if (!reply.trim()) return { state: 'unreplied' }
+  // Cut by code points: twice the limit in UTF-16 units always holds the first 3,000 of them.
+  const head = Array.from(reply.slice(0, 2 * FINAL_TEXT_LIMIT)).slice(0, FINAL_TEXT_LIMIT)
+  return { state: 'replied', text: head.join('') }
 }
 
 // The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an
