@@ -154,6 +154,65 @@ class RoleMessageTests(RoleToolsTestCase):
             self.runtime.fail("agent-state", "paseo_daemon_unreachable", "connection refused")
             self.refusal(self.message(worker, role="architect"), "host-unreachable")
 
+    def test_the_caller_is_no_candidate_of_its_own_role_address(self) -> None:
+        _first, one = self.started("architect", status="idle")
+        _second, two = self.started("architect", status="idle")
+        caller = binding("architect", agent_id=one)
+        self.runtime.calls.clear()
+
+        result = self.message(caller, role="architect")
+
+        # The other architect is the one recipient; the caller's own agent is not even read.
+        self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", two))
+        self.assertEqual(self.asked_about(), [two])
+        self.assertEqual((self.received(one), len(self.received(two))), ([], 1))
+        with self.subTest("alone in its role, it has no recipient"):
+            self.runtime.agents[two].update(status="closed", archivedAt=ARCHIVED_AT)
+            _third, gone = self.started("architect", status="idle")
+            self.runtime.agents.pop(gone)
+            result = self.refusal(self.message(caller, role="architect"), "recipient-archived")
+            self.assertEqual(result["recipientAgentId"], two)
+            self.runtime.agents.pop(two)
+            result = self.refusal(self.message(caller, role="architect"), "recipient-not-found")
+            self.assertEqual(
+                result["detail"],
+                "No live architect agent other than the calling agent is recorded for this "
+                "selection.",
+            )
+        with self.subTest("by its own agent id it is still told that it names itself"):
+            result = self.refusal(self.message(caller, agent_id=one), "recipient-not-found")
+            self.assertIn("is the calling agent itself", result["detail"])
+
+    def test_a_recipient_whose_start_has_not_finished_is_refused_as_busy(self) -> None:
+        # Until its start has answered, an agent may not have its first message yet.
+        request, worker = self.started(status="idle")
+        saved = self.receipt(request)
+        for status in ("starting", "unknown"):
+            for address in ({"agent_id": worker}, {"role": "worker", **selection_of("worker")}):
+                with self.subTest(status=status, by=sorted(address)[0]):
+                    orca_task_receipts._write_receipt(
+                        self.receipt_path(request), {**saved, "status": status}
+                    )
+                    self.runtime.calls.clear()
+                    result = self.refusal(self.message(self.architect, **address), "recipient-busy")
+                    self.assertEqual(
+                        result["detail"],
+                        f"Agent {worker} is not ready for a message: its start has not finished "
+                        f"(execution status {status}).",
+                    )
+                    self.assertIn("answered running", result["nextAction"])
+                    self.assertEqual(result["recipientAgentId"], worker)
+                    self.assertNotIn("permission", result)
+                    # Nothing was sent, resumed or waited for.
+                    self.assertEqual(
+                        {command for command, _p in self.runtime.calls} - {"agent-state"}, set()
+                    )
+                    self.assertEqual(self.received(worker), [])
+        with self.subTest("once the start has answered, the message is delivered"):
+            orca_task_receipts._write_receipt(self.receipt_path(request), saved)
+            result = self.message(self.architect, agent_id=worker)
+            self.assertEqual((result["status"], len(self.received(worker))), ("accepted", 1))
+
     def asked_about(self) -> list[str]:
         return [
             payload["agentId"]
@@ -406,6 +465,37 @@ class RoleMessageTests(RoleToolsTestCase):
         self.assertEqual(
             [command for command, _p in self.runtime.calls], ["agent-state", "agent-send"]
         )
+
+    def test_the_send_after_a_resume_waits_for_a_recipients_tool_server(self) -> None:
+        request, worker = self.started(status="closed")
+        receipt = self.receipt(request)
+        applied = receipt["toolServer"]
+        self.assertTrue(applied["applied"])
+        self.runtime.calls.clear()
+
+        self.message(self.architect, agent_id=worker)
+
+        # The send after the resume asks the bridge to give the recipient's tool server its
+        # time first; the send that found the session closed does not.
+        first, _resume, second = (payload for _command, payload in self.runtime.calls)
+        self.assertNotIn("afterResume", first)
+        self.assertEqual(second, {**first, "afterResume": True})
+        for label, without in {"not applied": {**applied, "applied": False}, "none": None}.items():
+            with self.subTest("a recipient without a tool server is not waited for", case=label):
+                receipt["toolServer"] = without
+                orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
+                self.runtime.agents[worker].update(status="closed", received=[])
+                self.runtime.calls.clear()
+                result = self.message(self.architect, agent_id=worker)
+                self.assertEqual((result["status"], result["resumed"]), ("accepted", True))
+                sends = [p for command, p in self.runtime.calls if command == "agent-send"]
+                self.assertEqual(len(sends), 2)
+                self.assertFalse(any("afterResume" in payload for payload in sends))
+        with self.subTest("an open session is sent to at once"):
+            self.runtime.agents[worker].update(status="idle", received=[])
+            self.runtime.calls.clear()
+            self.message(self.architect, agent_id=worker)
+            self.assertEqual([p.get("afterResume") for _c, p in self.runtime.calls], [None])
 
     def test_a_closed_session_is_resumed_first_under_the_scope_check_of_revive(self) -> None:
         request, worker = self.started(status="closed")

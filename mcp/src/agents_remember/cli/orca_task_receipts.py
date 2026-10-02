@@ -91,15 +91,23 @@ def _execute_prepared_launch(
         _write_receipt(path, receipt)
         return JSONResponse(_public_execution(receipt))
     if outcome.kind == "refused":
-        if not outcome.predecessor_settled:
+        if outcome.lost_agent_id:
+            # The agent exists and can never be given its first message; the next launch on
+            # this selection archives it, as it archives the agent of an execution it replaces.
+            receipt["pendingArchiveAgentId"] = outcome.lost_agent_id
+        elif not outcome.predecessor_settled:
             # The agent this launch was to replace is still live; the next launch archives it.
             receipt["pendingArchiveAgentId"] = launch_call["archiveAgentId"]
         receipt.update(
             status="rejected",
-            hostAgentExists=False,
+            hostAgentExists=outcome.lost_agent_id is not None,
             detail=(
-                "The Paseo runtime refused the launch; no agent exists under the minted agent "
-                f"id. {outcome.message}"
+                "The agent of this launch never got its first message and the Paseo runtime "
+                "cannot open its session again, so this launch is closed. Start the role "
+                f"again; that launch archives the agent. {outcome.message}"
+                if outcome.lost_agent_id
+                else "The Paseo runtime refused the launch; no agent exists under the minted "
+                f"agent id. {outcome.message}"
             ),
             updatedAt=_now_iso(),
         )

@@ -43,8 +43,17 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 19
 LIFECYCLE_ARTIFACT_COUNT = 69
-LIFECYCLE_CATALOG_SHA256 = "4c1b5f02fab374f307febc6ec859e12b1e9cc83a4ebd198310702d29acfe8908"
+LIFECYCLE_CATALOG_SHA256 = "09cb0ac89fb4d3699c20a84227dc6ddcd3c1c84149b119a50311afe71ea39d66"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+The ``261001-PNT`` master pass's fix round then completed three consumer lists so that both
+integration cases below pass on the merged tree: the two rows this line had inherited incomplete
+(``curator_coherence_test_support.py`` gained three consumers, the node lockfile fourteen: every
+test module that reaches the dispatch route reaches the portable profile runtime the lockfile is
+an input of) and the pass's own ``paseo_launch_test_support.py`` row, which the merge of the
+role-start leaf had left one consumer short (``test_paseo_role_messages.py``). Eighteen consumer
+lines, no new artifact and no new contract: the counts stay 19 and 69; the digest this value
+replaces was ``4c1b5f02…``.
 
 The ``261001-PNT`` master pass registered the three support modules that line's leaves introduced
 without a row: ``mcp/tests/paseo_runtime_test_support.py`` (L1),

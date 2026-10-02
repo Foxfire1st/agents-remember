@@ -1,6 +1,7 @@
 // The browser objects the client part touches, gathered once and passed in. Nothing else in the
 // client part reads a browser global, so its logic runs in a test against plain objects. (The
-// one built-in used outside this file is the wall clock, `Date.now()`, in look.ts and load.ts.)
+// built-ins used outside this file are the wall clock, `Date.now()`, in look.ts, load.ts and
+// bridge.ts, and the `URL` constructor, in load.ts and bridge.ts.)
 //
 // UNSUPPORTED Paseo behaviour this file relies on:
 //   - the browser globals themselves. Paseo documents them as unavailable to plugin code (they

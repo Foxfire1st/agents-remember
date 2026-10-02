@@ -140,7 +140,9 @@ export function takeOwnLookBack(page: PluginPage): void {
  * early in the load and the plugin runs later, so a store that holds the user's look now does
  * not prove the page started with it: another tab may have put that look back in between (two
  * standalone tabs opened at the same moment while the store held the AR look). A wrong "yes"
- * costs one more load; it never makes a page count as running the user's look.
+ * costs one more load. Where that load is refused, the page stays counted as not running the
+ * user's look, and a theme or font the user chooses in it is put back at the next standalone
+ * load. It never makes a page count as running the user's look.
  */
 function writtenSinceLoadBegan(page: PluginPage, at: number | null): boolean {
   if (at === null) return false;

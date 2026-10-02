@@ -225,6 +225,55 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.dispatch(self.request("orchestrator"))
             self.assertNotIn("agent-archive", [call[0] for call in self.runtime.calls])
 
+    def test_an_agent_that_cannot_be_opened_before_its_first_message_closes_the_launch(
+        self,
+    ) -> None:
+        # The runtime was stopped between the creation and the first message.
+        request = self.request("manager")
+        self.runtime.fail("agent-create", "paseo_daemon_unreachable", after_effect=True)
+        self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+        lost = self.receipt(request)["agentId"]
+        self.assertIn(lost, self.runtime.agents)
+        # The repeat: the harness kept nothing of a session that never ran a turn.
+        said = (
+            f"Agent {lost} exists in the Paseo runtime without its first message, and its "
+            "closed session cannot be opened again (no rollout found for thread id 0199)."
+        )
+        self.runtime.fail("agent-create", "paseo_agent_without_message_lost", said)
+
+        status, public = self.dispatch(request)
+
+        self.assertEqual((status, public["status"]), (502, "rejected"))
+        self.assertEqual(
+            public["detail"],
+            "The agent of this launch never got its first message and the Paseo runtime cannot "
+            "open its session again, so this launch is closed. Start the role again; that "
+            f"launch archives the agent. {said}",
+        )
+        # Start is offered; a Retry or a Revive of this execution is not.
+        self.assertEqual(
+            (public["canStart"], public["canRetry"], public["canRevive"]), (True, False, False)
+        )
+        receipt = self.receipt(request)
+        self.assertEqual(
+            (receipt["pendingArchiveAgentId"], receipt["hostAgentExists"]), (lost, True)
+        )
+        self.assertNotIn("replayRequest", receipt)
+        self.assertEqual(receipt["execution"], {})
+        with self.subTest("the next Start archives the agent and creates its own"):
+            self.runtime.calls.clear()
+            again = self.request("manager")
+            self.assertEqual(self.dispatch(again)[1]["status"], "running")
+            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": lost}))
+            self.assertIsNotNone(self.runtime.agents[lost]["archivedAt"])
+            self.assertNotEqual(self.receipt(again)["agentId"], lost)
+        with self.subTest("a first message the runtime did not take stays retryable"):
+            other = self.request("orchestrator")
+            self.runtime.fail("agent-create", "paseo_first_message_undelivered")
+            status, public = self.dispatch(other)
+            self.assertEqual((status, public["status"], public["canRetry"]), (202, "unknown", True))
+            self.assertNotIn("pendingArchiveAgentId", self.receipt(other))
+
     def lose_against(
         self, competitor: dict[str, Any], mine: Any, binding_first: bool = False
     ) -> Any:

@@ -193,9 +193,32 @@ class InstructionFileWordingTests(unittest.TestCase):
             "call it again with the same request ID",
             "takes the message up without its turn being cancelled",
             "A role started from the dashboard works directly with the developer and needs no parent.",
+            # What the message tool answers, as its own description says it.
+            "A role address never means you yourself.",
+            "A recipient that waits for a permission decision is refused as busy as well, "
+            "because a message would answer the permission with a denial: the developer answers "
+            "it in that agent's chat, then send again.",
+            "So is a recipient whose start has not finished.",
+            "saying that the turn failed or was cancelled",
+            "It can also return `accepted` without a text, when the host cannot say which turn "
+            "took the message; read the reply later then.",
+            "The text of a message delivered during a turn can be that running turn's own; "
+            "`detail` says so.",
+            "Do not wait on an agent that may be waiting on you: two agents that wait on each "
+            "other both stand still until one wait runs out.",
         ):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, coordination)
+        architect = " ".join(role_text("architect").split())
+        for sentence in (
+            "A recipient that waits for a permission decision, or whose start has not finished, "
+            "is refused as busy",
+            "its final text, or that the turn failed or was cancelled, a pending permission, or "
+            "a timeout; `accepted` without a text means that the reply is to be read later.",
+            "Do not wait on an agent that may be waiting on you.",
+        ):
+            with self.subTest(role="architect", sentence=sentence[:40]):
+                self.assertIn(sentence, architect)
 
     def test_the_workers_report_names_its_agent_id(self) -> None:
         # Where the report of the previous host named the execution, it names the agent.
@@ -378,6 +401,13 @@ class HandoverTextWordingTests(unittest.TestCase):
         self.assertIn(
             "make the call once more before reporting the server missing", host["arMcpUsage"]
         )
+        # A lookup by the server's name as it is spelled here can find nothing in a tool list.
+        self.assertIn(
+            "A harness may list the tools of this server under a prefixed name in which the "
+            "hyphens of the server's name are underscores, so look a tool up by the tool's own "
+            "name.",
+            host["arMcpUsage"],
+        )
         self.assertEqual(
             {key: host["roleTools"][key] for key in ("toolServer", "start", "message")},
             {"toolServer": TOOL_SERVER, "start": "role_start", "message": "role_message"},
@@ -389,6 +419,17 @@ class HandoverTextWordingTests(unittest.TestCase):
             "It never interrupts a running turn.",
             "repeat the same id to reconcile an uncertain start",
             "an agent created another way has no capsule and no binding",
+            "A recipient that waits for a permission decision is refused as busy, because a "
+            "message would answer the permission with a denial: the developer answers it in "
+            "that agent's chat.",
+            "A recipient whose start has not finished is refused as busy as well, and a role "
+            "address never means the caller itself.",
+            "the recipient's final text, or that the turn failed or was cancelled",
+            "It can answer accepted without a text when the host cannot say which turn took "
+            "the message, and the text of a message delivered during a turn can be the running "
+            "turn's own; detail says which.",
+            "Do not wait on an agent that may be waiting on you: two agents that wait on each "
+            "other both stand still until one wait runs out.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, usage)
@@ -462,6 +503,12 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
                 "because a message would answer the permission with a denial: the developer "
                 "answers it in the recipient's chat, then send again.",
             ),
+            (
+                "role_message",
+                "A recipient whose start has not finished is refused as recipient-busy as well.",
+            ),
+            ("role_message", "An address by role never means the caller itself."),
+            ("role_start", "rejected (the launch is closed; no usable agent exists)"),
         ):
             with self.subTest(tool=name, sentence=sentence[:40]):
                 self.assertIn(sentence, told[name])

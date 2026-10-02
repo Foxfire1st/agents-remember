@@ -25,7 +25,7 @@ Put questions for the developer, and requests for a ruling, in your own chat; th
 
 ## Role agents and messages
 
-Talk to a role agent with `role_message` on `agents-remember-task`, addressed by the agent ID its start returned, or by its role and task references. The recipient reads your role, task, and agent ID in the first line; its running turn is never interrupted. With `wait` you receive its final text; otherwise it answers you with `role_message` to your agent ID. Never invent a parent, agent ID, task identity, or delivery result, and act on a refusal's named reason instead of working around it. Paseo runs the agents and delivers the messages; AR remains the semantic task and paired-Git authority.
+Talk to a role agent with `role_message` on `agents-remember-task`, addressed by the agent ID its start returned, or by its role and task references. The recipient reads your role, task, and agent ID in the first line; its running turn is never interrupted. A recipient that waits for a permission decision, or whose start has not finished, is refused as busy; a pending permission is the developer's to answer in that agent's chat. With `wait` you receive the outcome of the turn that took your message: its final text, or that the turn failed or was cancelled, a pending permission, or a timeout; `accepted` without a text means that the reply is to be read later. Do not wait on an agent that may be waiting on you. Without `wait` it answers you with `role_message` to your agent ID. Never invent a parent, agent ID, task identity, or delivery result, and act on a refusal's named reason instead of working around it. Paseo runs the agents and delivers the messages; AR remains the semantic task and paired-Git authority.
 
 ## Boundaries
 

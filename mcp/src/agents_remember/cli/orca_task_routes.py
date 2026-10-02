@@ -105,14 +105,6 @@ class _PreparedRoleStart:
     created_message_binding: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class NativeRoleSessionPreparation:
-    execution: dict[str, Any]
-    request_id: uuid.UUID
-    handover_reference: dict[str, str]
-    handover_artifact: dict[str, Any]
-
-
 def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     app.add_api_route("/api/orca/frame", _bind_frame_endpoint(config), methods=["GET"])
     app.add_api_route(
@@ -182,6 +174,8 @@ def _orca_options_endpoint(
         finally:
             _DISPATCH_LOCK.release()
         return JSONResponse(response)
+    except LaunchLockBusy as busy:
+        return busy.read_answer()
     except PaseoBridgeFailure as error:
         raise _bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
@@ -232,7 +226,10 @@ def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) 
     except PaseoBridgeFailure as error:
         raise _bridge_http_error(error) from error
     # The lock is held for the receipt and the one bridge call of the refresh, nothing longer.
-    _acquire_dispatch_lock()
+    try:
+        _acquire_dispatch_lock()
+    except LaunchLockBusy as busy:
+        return busy.read_answer()
     try:
         if request.role in TASKLESS_ROLES:
             if request.request_id is None:
@@ -582,6 +579,18 @@ class LaunchLockBusy(HTTPException):
     def __init__(self) -> None:
         super().__init__(
             status_code=409, detail="An AR-to-Orca launch or result check is already in progress."
+        )
+
+    def read_answer(self) -> JSONResponse:
+        """The answer of a route that only reads: the refusal, marked as a launch in progress.
+
+        A launch holds the lock for as long as it runs, which includes the time it gives the
+        agent's tool server. The launcher takes the mark for "read again shortly", not for an
+        error of the selection it shows.
+        """
+
+        return JSONResponse(
+            {"detail": self.detail, "launchInProgress": True}, status_code=self.status_code
         )
 
 

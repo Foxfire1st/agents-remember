@@ -54,9 +54,10 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
 
         One call resolves or creates the leaf enclosure, compiles the role's first message,
         records the launch and creates the agent in Paseo. It returns agentId, reportPath,
-        handoverArtifactPath and status: running (the agent exists), rejected (the host refused;
-        no agent exists) or unknown (no usable answer; repeat the same request_id). A call that
-        is not carried out answers status refused with the reason in refusal and detail.
+        handoverArtifactPath and status: running (the agent exists), rejected (the launch is
+        closed; no usable agent exists) or unknown (no usable answer; repeat the same
+        request_id). A call that is not carried out answers status refused with the reason in
+        refusal and detail.
 
         Starts run one at a time. A call waits up to 60 seconds for another start of this tool
         server to end; after that it is refused as launch-refused and nextAction says to call
@@ -103,8 +104,9 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         running turn or in a turn of its own right after it. A recipient that waits for a
         permission decision is refused as recipient-busy, because a message would answer the
         permission with a denial: the developer answers it in the recipient's chat, then send
-        again. A recipient whose session is closed is resumed first; an archived or missing
-        recipient is refused and stays as it is.
+        again. A recipient whose start has not finished is refused as recipient-busy as well.
+        A recipient whose session is closed is resumed first; an archived or missing recipient
+        is refused and stays as it is. An address by role never means the caller itself.
 
         Without wait the call returns status accepted once the host accepted the message. With
         wait it returns when the turn that consumed the message ends: turn-finished with its

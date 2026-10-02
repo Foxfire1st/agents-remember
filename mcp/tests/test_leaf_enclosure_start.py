@@ -377,7 +377,7 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             "from agents_remember.cli import leaf_enclosure_start as command\n"
             "_leader, terminal = os.openpty()\n"
             "fcntl.ioctl(terminal, termios.TIOCSCTTY, 0)\n"
-            "command.START_TIMEOUT_SECONDS = 6\n"
+            "command.START_TIMEOUT_SECONDS = 120\n"
             "began = time.monotonic()\n"
             "try:\n"
             "    done = command._run_child([sys.executable, '-c', sys.argv[1]], json.loads(sys.argv[2]))\n"
@@ -387,6 +387,10 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             "print(json.dumps({**answer, 'seconds': time.monotonic() - began}))\n"
         )
         request = json.dumps(request_of(self.config))
+        # The child's limit lies far above the time a fresh interpreter needs to start on a
+        # loaded machine (21 seconds were measured at a load average of 45 with eight copies of
+        # this module at once): a child that is stopped by its terminal read runs into the
+        # limit, one whose read fails answers long before it.
         # A session of its own, so that the pseudo-terminal becomes its controlling terminal.
         completed = subprocess.run(
             [sys.executable, "-c", backend, child, request],
@@ -394,7 +398,7 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             text=True,
             check=False,
             start_new_session=True,
-            timeout=60,
+            timeout=300,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -405,7 +409,7 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertRegex(
             answer["reply"]["error"]["message"], r"^the terminal read ended with status [1-9]"
         )
-        self.assertLess(answer["seconds"], 5)
+        self.assertLess(answer["seconds"], 60)
 
     def test_output_that_is_not_utf_8_is_a_refusal_with_the_child_s_last_words(self) -> None:
         garbled = "printf '\\377\\376{'\nprintf 'caf\\351: out of memory' >&2\nexit 1"

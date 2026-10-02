@@ -82,8 +82,8 @@ RoleMessageRefusal = Literal[
 class RoleStartResponse(ToolResponse):
     """One role agent started for a canonical selection, or why it was not.
 
-    ``status`` is the launch status: ``running`` (the host has the agent), ``rejected`` (the host
-    refused; no agent exists under ``agentId``) or ``unknown`` (no usable answer; the same
+    ``status`` is the launch status: ``running`` (the host has the agent), ``rejected`` (the
+    launch is closed; ``agentId`` names no usable agent) or ``unknown`` (no usable answer; the same
     ``requestId`` reconciles the same agent). ``executionStatus`` is what the execution's receipt
     says now, which differs from the launch status once the agent has finished a turn.
     """

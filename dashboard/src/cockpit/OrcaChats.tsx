@@ -230,6 +230,7 @@ function OrcaRoleLauncher({
   retryRequestId,
   optionsError,
   executionError,
+  launchInProgress,
   onSelectionChange,
   onLaunch,
   onRevive,
@@ -250,6 +251,7 @@ function OrcaRoleLauncher({
   retryRequestId?: string;
   optionsError: string | null;
   executionError: string | null;
+  launchInProgress: boolean;
   onSelectionChange: (selection: OrcaLaunchSelection) => void;
   onLaunch: (selection: OrcaLaunchSelection) => Promise<void>;
   onRevive: (selection: OrcaLaunchSelection) => Promise<void>;
@@ -546,10 +548,16 @@ function OrcaRoleLauncher({
         <div className={orcaLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>{executionError}</div>
       ) : null}
       {optionsLoading ? <div className={orcaLauncherMeta} role="status">Loading Orca launch options…</div> : null}
+      {launchInProgress && !optionsLoading ? (
+        <div className={orcaLauncherMeta} role="status" data-testid="orca-launch-in-progress">A launch is in progress in this dashboard; this is read again when it has answered.</div>
+      ) : null}
     </div>
   );
 
 }
+
+// How soon the options are read again after the backend answered that a launch is in progress.
+const LAUNCH_REREAD_MS = 1500;
 
 function OrcaChatsPane({
   active,
@@ -571,6 +579,8 @@ function OrcaChatsPane({
   const [executionState, setExecutionState] = useState<{ scope: OrcaDocumentScope; value: OrcaExecutionReceipt } | null>(null);
   const [executionErrorState, setExecutionErrorState] = useState<{ scope: OrcaDocumentScope; message: string; sticky?: boolean } | null>(null);
   const [busyScope, setBusyScope] = useState<OrcaLaunchSelection | null>(null);
+  const [launchWaitScope, setLaunchWaitScope] = useState<OrcaDocumentScope | null>(null);
+  const rereadTimer = useRef<number | undefined>(undefined);
   const [tasklessActiveRequests, setTasklessActiveRequests] = useState(readTasklessActiveRequests);
   const sentCatalogRefresh = useRef(0);
   const currentSelectionRef = useRef(selection);
@@ -626,6 +636,16 @@ function OrcaChatsPane({
     : null;
   const optionsLoading = Boolean(optionsLoadingScope && sameOrcaOptionsScope(optionsLoadingScope, currentOptionsScope));
   const busy = Boolean(busyScope && sameOrcaDocumentScope(orcaDocumentScope(busyScope), currentDocumentScope));
+  const launchInProgress = Boolean(launchWaitScope && sameOrcaDocumentScope(launchWaitScope, currentDocumentScope));
+  // A launch holds the backend's launch lock for as long as it runs, and the options and result
+  // routes answer that with a mark of their own. That is no error of the selection shown: the
+  // launcher says so and reads again shortly, until the launch has answered.
+  const waitForLaunch = useCallback((scope: OrcaDocumentScope) => {
+    setLaunchWaitScope(scope);
+    window.clearTimeout(rereadTimer.current);
+    rereadTimer.current = window.setTimeout(() => setOptionsRefresh((current) => current + 1), LAUNCH_REREAD_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(rereadTimer.current), []);
   const optionsError = optionsErrorState && sameOrcaOptionsScope(optionsErrorState.scope, currentOptionsScope)
     ? optionsErrorState.message
     : null;
@@ -701,8 +721,10 @@ function OrcaChatsPane({
       signal: controller.signal,
     }).then(async (response) => {
       if (!response.ok) {
-        const value = (await response.json().catch(() => ({}))) as { detail?: unknown };
-        if (isCurrentOptionsScope(requestScope)) {
+        const value = (await response.json().catch(() => ({}))) as { detail?: unknown; launchInProgress?: unknown };
+        if (isCurrentOptionsScope(requestScope) && value.launchInProgress === true) {
+          waitForLaunch(currentDocumentScope);
+        } else if (isCurrentOptionsScope(requestScope)) {
           setOptionsErrorState({
             scope: requestScope,
             message: typeof value.detail === "string"
@@ -714,6 +736,7 @@ function OrcaChatsPane({
       }
       const value = (await response.json()) as OrcaLauncherOptions;
       if (!isCurrentOptionsScope(requestScope)) return;
+      setLaunchWaitScope(null);
       setOptionsState({ scope: requestScope, value });
       setRoleDefaultsCache((current) => ({
         ...current,
@@ -760,7 +783,7 @@ function OrcaChatsPane({
       if (!controller.signal.aborted && isCurrentOptionsScope(requestScope)) setOptionsLoadingScope(null);
     });
     return () => controller.abort();
-  }, [active, selectionComplete, currentDocumentScope, currentOptionsScope, optionsRefresh, catalogRefresh, isCurrentOptionsScope]);
+  }, [active, selectionComplete, currentDocumentScope, currentOptionsScope, optionsRefresh, catalogRefresh, isCurrentOptionsScope, waitForLaunch]);
 
   async function fetchExecutionResult(
     requestScope: OrcaDocumentScope,
@@ -804,8 +827,12 @@ function OrcaChatsPane({
         }
         return;
       }
-      const value = (await response.json()) as OrcaExecutionReceipt | { detail?: unknown };
+      const value = (await response.json()) as OrcaExecutionReceipt | { detail?: unknown; launchInProgress?: unknown };
       if (!isCurrentExecutionTarget(requestScope, requestId)) return;
+      if (!response.ok && "launchInProgress" in value && value.launchInProgress === true) {
+        waitForLaunch(requestScope);
+        return;
+      }
       if (!response.ok) {
         setExecutionErrorState({
           scope: requestScope,
@@ -1048,6 +1075,7 @@ function OrcaChatsPane({
         retryRequestId={retryRequestId}
         optionsError={optionsError}
         executionError={executionError}
+        launchInProgress={launchInProgress}
         onSelectionChange={onSelectionChange}
         onLaunch={onLaunch}
         onRevive={onRevive}

@@ -18,7 +18,11 @@ from agents_remember.cli import (
 )
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_status import SUMMARY_LIMIT, AgentReading, status_row
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
+from agents_remember.models.orca_launcher import (
+    OrcaDispatchRequest,
+    OrcaLauncherOptionsRequest,
+    OrcaResultRequest,
+)
 from fastapi import HTTPException
 from test_paseo_launch import LEAF_REF, ROLE_REFS, PaseoLaunchTestCase, runtime_config
 
@@ -511,12 +515,35 @@ class RefreshTests(StatusTestCase):
             with self.assertRaises(HTTPException):
                 orca_task_routes._orca_options_endpoint(self.config, options)
             self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
-        # While another launch or check holds the lock, a refresh refuses and calls nothing.
+        # While another launch or check holds the lock, a refresh and the options route refuse
+        # and call nothing. Both mark the refusal as a launch in progress, which the launcher
+        # shows as such and not as an error; a Start is refused as before.
+        forget_launcher_catalogs()
         self.runtime.calls.clear()
-        with orca_task_routes._DISPATCH_LOCK, self.assertRaises(HTTPException) as busy:
-            self.refresh(request)
-        self.assertEqual(busy.exception.status_code, 409)
-        self.assertEqual(self.runtime.calls, [])
+        result = OrcaResultRequest.model_validate(
+            {"role": "worker", "requestId": request.request_id, **ROLE_REFS["worker"]}
+        )
+        with orca_task_routes._DISPATCH_LOCK:
+            answers = [
+                orca_task_routes._orca_result_endpoint(self.config, result),
+                orca_task_routes._orca_options_endpoint(self.config, options),
+            ]
+            with self.assertRaises(orca_task_routes.LaunchLockBusy):
+                orca_task_routes._orca_dispatch_endpoint(self.config, self.request("worker"))
+            self.assertTrue(orca_task_routes._DISPATCH_LOCK.locked())
+        for answer in answers:
+            self.assertEqual(
+                (answer.status_code, json.loads(bytes(answer.body))),
+                (
+                    409,
+                    {
+                        "detail": "An AR-to-Orca launch or result check is already in progress.",
+                        "launchInProgress": True,
+                    },
+                ),
+            )
+        self.assertEqual(self.commands(), ["catalog"])
+        self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
 
     def test_a_launch_that_is_unresolved_or_rejected_has_no_agent_to_read(self) -> None:
         with self.subTest("an unresolved launch stays retryable"):

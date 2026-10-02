@@ -7,6 +7,8 @@ the agent of the execution this launch replaces (when there is one), obtain the 
 role's folder, and create the agent in it. The third command also sends the first message, once
 the agent exists and its tool servers have had time to start, and a repeat sends it to an agent
 that never received it; a first message the runtime did not take leaves the launch unresolved.
+An agent whose closed session the runtime cannot open again before it ever got that message is
+lost: the launch is closed as refused and names the agent, which the next launch archives.
 
 The call also carries what the agent is given beside its first message: one tool-server
 definition, the tool server of this build under a fixed name with the agent's binding in its
@@ -31,6 +33,7 @@ import agents_remember
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
 from agents_remember.application.orca_task_context import OrcaRoleContext
 from agents_remember.cli.paseo_bridge import (
+    AGENT_WITHOUT_MESSAGE_LOST,
     BRIDGE_INVALID_REPLY,
     BRIDGE_REFUSED,
     PaseoBridgeFailure,
@@ -73,7 +76,8 @@ class LaunchOutcome:
     """What one run of a stored launch call established.
 
     ``created``: the agent exists in the runtime; ``execution`` and ``applied`` say where and with
-    what. ``refused``: the runtime answered and no agent exists under the minted id.
+    what. ``refused``: the runtime answered and no agent exists under the minted id, or the one
+    that exists never got its first message and cannot be opened again (``lost_agent_id``).
     ``no-answer``: nothing usable came back, so the agent may or may not exist.
     """
 
@@ -85,6 +89,8 @@ class LaunchOutcome:
     warning: str | None = None
     # False while the agent this launch replaces has not been archived in the runtime.
     predecessor_settled: bool = True
+    # The agent of a refused launch that exists in the runtime and is still to be archived.
+    lost_agent_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,11 +434,13 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
         created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
         return _created_outcome(created, agent_id, workspace_id)
     except PaseoBridgeFailure as error:
+        lost = error.code == AGENT_WITHOUT_MESSAGE_LOST
         return LaunchOutcome(
-            kind="refused" if error.code == BRIDGE_REFUSED else "no-answer",
+            kind="refused" if lost or error.code == BRIDGE_REFUSED else "no-answer",
             code=error.code,
             message=str(error)[:_TEXT_LIMIT],
             predecessor_settled=predecessor_settled,
+            lost_agent_id=agent_id if lost else None,
         )
 
 

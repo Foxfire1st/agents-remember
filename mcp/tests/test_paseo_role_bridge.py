@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -28,6 +29,14 @@ MESSAGE_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 ARCHIVED_AT = "2026-10-02T01:00:00.000Z"
 TURN = {"turnId": "turn-7", "startedAt": "2026-10-02T01:00:00.000Z"}
 TAIL = {"direction": "tail", "limit": 200, "projection": "projected"}
+# The time the script gives an agent's tool servers before a message, read from the script.
+TOOL_SERVER_START_MS = int(
+    re.findall(
+        r"^const TOOL_SERVER_START_MS = (\d+)$",
+        Path(paseo_bridge.__file__).with_name("paseo_bridge.mjs").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )[0]
+)
 READ = {"via": "refresh", "id": AGENT_ID}
 
 FAKE_DAEMON_CLIENT = """
@@ -36,6 +45,17 @@ export const scenario = JSON.parse(readFileSync(process.env.FAKE_PASEO_SCENARIO,
 export const agents = new Map(Object.entries(scenario.agents ?? {}))
 export function record(call) {
   appendFileSync(process.env.FAKE_PASEO_RECORD, JSON.stringify(call) + '\\n')
+}
+// A wait of the length the scenario names is recorded when it begins and when it ends, and ends
+// at once; every other timer runs.
+const realSetTimeout = globalThis.setTimeout
+globalThis.setTimeout = (callback, ms, ...rest) => {
+  if (ms !== scenario.endsWaitsOf) return realSetTimeout(callback, ms, ...rest)
+  record({ via: 'wait', ms })
+  return realSetTimeout(() => {
+    record({ via: 'wait-ended', ms })
+    callback(...rest)
+  }, 0)
 }
 export class DaemonClient {
   constructor(config) { this.config = config; this.state = { status: 'idle' } }
@@ -262,13 +282,37 @@ class RoleBridgeScriptTestCase(unittest.TestCase):
 
 
 class AgentSendScriptTests(RoleBridgeScriptTestCase):
-    def send(self, **scenario: Any) -> dict[str, Any]:
+    def send(self, after_resume: Any = None, **scenario: Any) -> dict[str, Any]:
         payload = {
             "agentId": AGENT_ID,
             "text": "From architect\nreport your plan",
             "messageId": MESSAGE_ID,
+            **({} if after_resume is None else {"afterResume": after_resume}),
         }
         return self.call("agent-send", payload, **scenario)["delivery"]
+
+    def test_a_send_after_a_resume_gives_the_tool_servers_their_time_first(self) -> None:
+        # The caller has just opened the session of an agent that has tool servers: the command
+        # waits as long as a launch does before the first message, and only then looks at the
+        # agent and sends.
+        started = {"status": "running", "activeTurn": TURN}
+        waited = [{"via": "wait", "ms": TOOL_SERVER_START_MS}]
+        waited.append({"via": "wait-ended", "ms": TOOL_SERVER_START_MS})
+        delivery = self.send(
+            True, holds=agent("idle"), afterSend=started, endsWaitsOf=TOOL_SERVER_START_MS
+        )
+        self.assertEqual(delivery, {"delivered": True, "taken": "started", "turnId": "turn-7"})
+        vias = [call["via"] for call in self.recorded()]
+        self.assertEqual(vias[:4], ["wait", "wait-ended", "refresh", "send"])
+        self.assertEqual(self.recorded("wait", "wait-ended"), waited)
+        with self.subTest("an agent that is refused is refused after the wait"):
+            delivery = self.send(True, holds=agent("closed"), endsWaitsOf=TOOL_SERVER_START_MS)
+            self.assertEqual(delivery["refused"], "closed")
+            self.assertEqual(self.recorded(), [*waited, READ])
+        for label, flag in {"no flag": None, "false": False, "a text": "true"}.items():
+            with self.subTest("without the flag nothing is waited for", flag=label):
+                self.send(flag, holds=agent("idle"), endsWaitsOf=TOOL_SERVER_START_MS)
+                self.assertEqual(self.recorded("wait", "wait-ended"), [])
 
     def test_only_a_live_agent_with_an_open_session_is_sent_to(self) -> None:
         refused = {

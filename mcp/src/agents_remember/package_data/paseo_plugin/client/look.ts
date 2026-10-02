@@ -18,6 +18,8 @@ import type { PluginPage, StorageLike } from "./page";
 //     writing through the same store (a look changed there is recorded as the frame's);
 //   - the app keeping `pluginThemeId` when another theme is chosen: the id counts as the AR
 //     look only together with `theme: "plugin"` (content rule, used only when no record holds);
+//   - the id under which the app knows a plugin's theme, `<plugin id>/theme/<theme id>`, which
+//     EMBED_LOOK composes;
 //   - localStorage["panel-state"].state.desktop.agentListOpen (the left sidebar), which the app
 //     may not have written yet on a first visit and whose default is "open", and the app
 //     writing its whole panel state on any panel change;

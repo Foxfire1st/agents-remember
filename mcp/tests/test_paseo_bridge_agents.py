@@ -26,7 +26,8 @@ AGENT_ID = "f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607"
 OTHER_AGENT_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 MISSING_AGENT_ID = "9f8e7d6c-5b4a-4c3d-9e2f-1a0b9c8d7e6f"
 # The time the script gives an agent's tool servers before the first message, read from the
-# script: the fake client records a wait of exactly this length and ends it at once.
+# script: the fake client records the beginning and the end of a wait of exactly this length and
+# ends it at once. What the script does before the wait has ended is recorded between the two.
 TOOL_SERVER_START_MS = int(
     re.findall(
         r"^const TOOL_SERVER_START_MS = (\d+)$",
@@ -34,7 +35,10 @@ TOOL_SERVER_START_MS = int(
         re.MULTILINE,
     )[0]
 )
-WAIT = {"via": "wait", "ms": TOOL_SERVER_START_MS}
+WAITED = [
+    {"via": "wait", "ms": TOOL_SERVER_START_MS},
+    {"via": "wait-ended", "ms": TOOL_SERVER_START_MS},
+]
 
 FAKE_DAEMON_CLIENT = """
 import { createHash } from 'node:crypto'
@@ -44,12 +48,16 @@ export const agents = new Map(Object.entries(scenario.agents ?? {}))
 export function record(call) {
   appendFileSync(process.env.FAKE_PASEO_RECORD, JSON.stringify(call) + '\\n')
 }
-// A wait of the length the scenario names is recorded and ends at once; every other timer runs.
+// A wait of the length the scenario names is recorded when it begins and when it ends, and ends
+// at once; every other timer runs.
 const realSetTimeout = globalThis.setTimeout
 globalThis.setTimeout = (callback, ms, ...rest) => {
   if (ms !== scenario.endsWaitsOf) return realSetTimeout(callback, ms, ...rest)
   record({ via: 'wait', ms })
-  return realSetTimeout(callback, 0, ...rest)
+  return realSetTimeout(() => {
+    record({ via: 'wait-ended', ms })
+    callback(...rest)
+  }, 0)
 }
 // A message is recorded by size and digest only.
 export function measured(message) {
@@ -338,7 +346,7 @@ class AgentCommandScriptTests(unittest.TestCase):
             self.assertEqual((creation["via"], creation["workspaceId"]), ("public", "wks_fake"))
             # The creation carries no message; the first message follows it as a message.
             self.assertIsNone(creation["prompt"])
-            self.assertEqual([row["via"] for row in afterwards], ["wait", "send"])
+            self.assertEqual([row["via"] for row in afterwards], ["wait", "wait-ended", "send"])
         with self.subTest("no model: the daemon client, and the runtime's own defaults"):
             modelless = {key: value for key, value in payload.items() if key != "model"}
             del modelless["thinkingOptionId"], modelless["prompt"]
@@ -367,7 +375,9 @@ class AgentCommandScriptTests(unittest.TestCase):
         with self.subTest("an agent that already has the id is returned and nothing is created"):
             reply = self.call("agent-create", payload, agents={AGENT_ID: stored})
             self.assertEqual(reply, {"serverId": SERVER_ID, "existing": True, "agent": agent})
-            self.assertEqual([row["via"] for row in self.recorded()], ["wait", "send"])
+            self.assertEqual(
+                [row["via"] for row in self.recorded()], ["wait", "wait-ended", "send"]
+            )
         with self.subTest("an error although the agent exists afterwards"):
             reply = self.call(
                 "agent-create", payload, createError="record lost", agentExistsAfterError=True
@@ -376,7 +386,9 @@ class AgentCommandScriptTests(unittest.TestCase):
                 (reply["existing"], reply["agent"]["id"], reply["creationError"]),
                 (True, AGENT_ID, "record lost"),
             )
-            self.assertEqual([row["via"] for row in self.recorded()], ["public", "wait", "send"])
+            self.assertEqual(
+                [row["via"] for row in self.recorded()], ["public", "wait", "wait-ended", "send"]
+            )
         refused: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {
             "the runtime refuses and no agent exists": (
                 "paseo_call_failed",
@@ -483,13 +495,13 @@ class AgentCommandScriptTests(unittest.TestCase):
             self.call("agent-create", payload)
             creation, *afterwards = self.recorded()
             self.assertEqual((creation["via"], creation["prompt"]), ("public", None))
-            self.assertEqual(afterwards, [WAIT, sent])
+            self.assertEqual(afterwards, [*WAITED, sent])
         with self.subTest("the same through the daemon client"):
             modelless = {key: value for key, value in payload.items() if key != "model"}
             self.call("agent-create", modelless)
             creation, *afterwards = self.recorded()
             self.assertEqual((creation["via"], creation["prompt"]), ("daemon", None))
-            self.assertEqual(afterwards, [WAIT, sent])
+            self.assertEqual(afterwards, [*WAITED, sent])
         with self.subTest("an agent without tool servers is sent to at once"):
             for without in ({}, {"mcpServers": {}}):
                 bare = {key: value for key, value in payload.items() if key != "mcpServers"}
@@ -503,10 +515,10 @@ class AgentCommandScriptTests(unittest.TestCase):
         messaged = {"lastUserMessageAt": "2026-10-02T00:00:05.000Z"}
         repeats: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {
             # The call that created it ended before it sent the message.
-            "an agent that never had a message": (live, [WAIT, sent]),
+            "an agent that never had a message": (live, [*WAITED, sent]),
             "the same with its session closed: opened first": (
                 {**live, "status": "closed"},
-                [resumed, WAIT, sent],
+                [resumed, *WAITED, sent],
             ),
             # An agent that has had a message has its first message: nothing is sent, waited
             # for or opened.
@@ -521,25 +533,46 @@ class AgentCommandScriptTests(unittest.TestCase):
                 reply = self.call("agent-create", payload, agents={AGENT_ID: held})
                 self.assertEqual((reply["existing"], reply["agent"]["id"]), (True, AGENT_ID))
                 self.assertEqual(self.recorded(), expected)
-        undelivered: dict[str, dict[str, Any]] = {
-            "the runtime does not take the message": {"sendError": "agent_request_outcome_unknown"},
-            "the closed session cannot be opened": {
-                "agents": {AGENT_ID: {**live, "status": "closed"}},
-                "resumeError": "session file is gone",
-            },
-        }
-        for label, scenario in undelivered.items():
-            with self.subTest(label):
-                failure = self.failure("agent-create", payload, **scenario)
-                reason = scenario.get("sendError") or scenario["resumeError"]
-                self.assertEqual(
-                    (failure.code, str(failure)),
-                    (
-                        "paseo_first_message_undelivered",
-                        f"Agent {AGENT_ID} exists in the Paseo runtime, but its first message "
-                        f"was not delivered ({reason}). Repeat the request to send it.",
-                    ),
-                )
+        with self.subTest("the runtime does not take the message: a repeat can send it"):
+            failure = self.failure(
+                "agent-create", payload, sendError="agent_request_outcome_unknown"
+            )
+            self.assertEqual(
+                (failure.code, str(failure)),
+                (
+                    "paseo_first_message_undelivered",
+                    f"Agent {AGENT_ID} exists in the Paseo runtime, but its first message was "
+                    "not delivered (agent_request_outcome_unknown). Repeat the request to send "
+                    "it.",
+                ),
+            )
+        with self.subTest("a closed session that cannot be opened: no repeat can send it"):
+            # A harness can keep nothing of a session that never ran a turn.
+            failure = self.failure(
+                "agent-create",
+                payload,
+                agents={AGENT_ID: {**live, "status": "closed"}},
+                resumeError="no rollout found for thread id 0199",
+            )
+            self.assertEqual(
+                (failure.code, str(failure)),
+                (
+                    "paseo_agent_without_message_lost",
+                    f"Agent {AGENT_ID} exists in the Paseo runtime without its first message, "
+                    "and its closed session cannot be opened again (no rollout found for "
+                    "thread id 0199).",
+                ),
+            )
+            # Nothing was waited for and nothing was sent.
+            self.assertEqual(self.recorded(), [resumed])
+            lost = self.failure(
+                "agent-create",
+                payload,
+                agents={AGENT_ID: {**live, "status": "closed"}},
+                resumeError="socket closed",
+                connectionLost=True,
+            )
+            self.assertEqual(lost.code, "paseo_daemon_unreachable")
         with self.subTest("the connection is lost while the message is sent"):
             failure = self.failure(
                 "agent-create", payload, sendError="socket closed", connectionLost=True
