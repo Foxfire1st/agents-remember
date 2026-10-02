@@ -11,7 +11,8 @@ configured, the request's dashboard origin is not in the embed list, or the daem
 
 The runtime itself is reached only through the bridge. Whether its daemon answers, its server id
 and the workspace of the Projects folder come from one function, :func:`host_frame_facts`, which
-is the single place this module touches the host.
+is the single place this module touches the host. Nothing is cached: the dashboard asks once when
+the pane is first opened and once per Retry, and each ask reads the runtime as it is then.
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from agents_remember.cli.orca_task_preparation import _workspace_folder
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.cli.paseo_launch import _opened_workspace_id
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     NO_PASEO_RUNTIME_CONFIGURED,
     PaseoRuntimeSettings,
@@ -33,7 +37,6 @@ REASON_NOT_CONFIGURED = "not-configured"
 REASON_ORIGIN_NOT_LISTED = "origin-not-listed"
 REASON_UNREACHABLE = "unreachable"
 ORIGIN_NOT_LISTED_TEXT = "embedded chat is not configured for this address"
-BRIDGE_NOT_WIRED = "the frame route is not wired to the Paseo bridge in this build"
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _DETAIL_LIMIT = 300
 
@@ -57,19 +60,26 @@ HostFrameFactsCall = Callable[[McpRuntimeConfig], HostFrameFacts]
 def host_frame_facts(config: McpRuntimeConfig) -> HostFrameFacts:
     """Ask the configured runtime, through the bridge, for the facts the frame needs.
 
-    NOT WIRED YET: the bridge (``cli/paseo_bridge.py``, ``bridge_call``) is not in this leaf's
-    base, so this answers "unreachable" until it is. This is the one function to fill in:
-
-    1. Reachability and server id: one read-only bridge command that returns the daemon's server
-       id. A bridge failure (daemon down, timeout) is ``HostFrameFacts(reachable=False,
-       detail=<the failure's message>)``.
-    2. The workspace of the Projects folder (``config.workspace_root``): the reuse-or-create
-       bridge command the launch uses. Its failure does not fail the frame: return the server id
-       with ``projects_workspace_id=None`` and the failure's message as ``detail``.
+    Two bridge calls. ``runtime-info`` answers with the daemon's server id; its failure, whatever
+    the reason, means no frame can be offered and its message says why. ``workspace-open`` then
+    reuses or creates the workspace of the Projects folder, the same folder and the same call a
+    Projects-altitude launch uses. A failure of this second call does not fail the frame: the
+    frame then opens the application without naming a workspace.
     """
-    return HostFrameFacts(
-        reachable=False, detail=f"{BRIDGE_NOT_WIRED} (settings: {config.config_path})"
-    )
+    try:
+        server_id = bridge_call(config, "runtime-info", {}).get("serverId")
+    except PaseoBridgeFailure as error:
+        return HostFrameFacts(reachable=False, detail=str(error))
+    if not isinstance(server_id, str) or not server_id:
+        return HostFrameFacts(reachable=True)
+    try:
+        folder = _workspace_folder(config.workspace_root)["path"]
+        workspace_id = _opened_workspace_id(
+            bridge_call(config, "workspace-open", {"cwd": folder}), folder
+        )
+    except (PaseoBridgeFailure, OSError) as error:
+        return HostFrameFacts(reachable=True, server_id=server_id, detail=str(error))
+    return HostFrameFacts(reachable=True, server_id=server_id, projects_workspace_id=workspace_id)
 
 
 def normalise_origin(value: str | None) -> str | None:
