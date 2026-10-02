@@ -16,12 +16,12 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
 LAUNCH_CODE_PATTERNS = (
     "cli/paseo_*.py",
     "cli/paseo_*/**/*.py",
-    "cli/orca_*.py",
-    "cli/orca_*/**/*.py",
+    "cli/role_*.py",
+    "cli/role_*/**/*.py",
     "cli/leaf_enclosure_start.py",
     "cli/*.mjs",
     "application/agent_binding.py",
-    "application/orca_task_context.py",
+    "application/role_launch_context.py",
 )
 # Modules the seam imports that are core modules of the line this build was copied from. Each
 # names a harness for a purpose of its own, and no launch decision of this build reads the name.
@@ -124,15 +124,15 @@ class NoHarnessNameTests(unittest.TestCase):
             "cli/paseo_launch.py",
             "cli/paseo_catalog.py",
             "cli/paseo_bridge.mjs",
-            "cli/orca_task_routes.py",
-            "cli/orca_task_receipts.py",
-            "cli/orca_task_preparation.py",
-            "cli/orca_handover_artifacts.py",
+            "cli/role_launch_routes.py",
+            "cli/role_launch_receipts.py",
+            "cli/role_launch_preparation.py",
+            "cli/role_handover_artifacts.py",
             "cli/leaf_enclosure_start.py",
             "application/agent_binding.py",
             "mcp/tools/core.py",
             "cli/dashboard.py",
-            "models/orca_launcher.py",
+            "models/role_launcher.py",
             "kernel/primitives/paseo_runtime_settings.py",
         ):
             self.assertIn(expected, names)
@@ -193,7 +193,7 @@ class NoHarnessNameTests(unittest.TestCase):
                     "from agents_remember.errors import AgentsRememberError\n"
                 ),
                 # Seam code by its use, not by its name: each imports a scanned module.
-                "cli/role_tool_rules.py": "from agents_remember.cli import paseo_launch\n",
+                "cli/start_tool_rules.py": "from agents_remember.cli import paseo_launch\n",
                 "mcp/tools/role_agents.py": "from ...cli.paseo_launch import build\n",
                 "cli/sibling_rules.py": "from . import paseo_launch\n",
                 # Helper modules that import nothing of the seam: the launch imports them.
@@ -204,7 +204,7 @@ class NoHarnessNameTests(unittest.TestCase):
                 "cli/paseo_bridge_rules.mjs": "export const rules = {}\n",
                 "cli/bridge_rules.mjs": "export const rules = {}\n",
                 "cli/paseo_rules/__init__.py": "import json\n",
-                "cli/orca_rules/tables.py": "import json\n",
+                "cli/role_rules/tables.py": "import json\n",
             }
             not_launch_code = {
                 # It imports nothing of the seam and the seam does not import it.

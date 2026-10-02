@@ -21,17 +21,17 @@ from types import SimpleNamespace
 from typing import Any, get_args
 from unittest.mock import patch
 
-from agents_remember.application.orca_task_context import OrcaRoleContext
-from agents_remember.cli import orca_task_preparation
-from agents_remember.cli.orca_task_preparation import (
-    OrcaHandoverRequest,
+from agents_remember.application.role_launch_context import RoleLaunchContext
+from agents_remember.cli import role_launch_preparation
+from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_launch_preparation import (
+    RoleHandoverRequest,
     _ar_mcp_context,
     _compile_handover,
 )
-from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
-from agents_remember.models.orca_launcher import OrcaRole
+from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument
@@ -59,14 +59,14 @@ FORBIDDEN = (
     "message_parent",
     "message_child",
 )
-# The report directory of a role keeps its ONT name until the rename leaf (PNT-R08, master
-# decision of 2026-10-02T03:16). It reaches the handover only as this segment of the report and
-# artifact paths, which is taken out before the search; with the directory renamed this is a no-op.
-RETAINED_REPORT_DIRECTORY = "/orca-native/"
+# The report directory of a role, as a segment of the report and artifact paths in a handover. It
+# carried the previous host's name until the rename leaf (PNT-R08); the search below now reads
+# the whole text, this segment included.
+REPORT_DIRECTORY = "/role-launch/"
 
 TOOL_SERVER = "agents-remember-task"
 OTHER_INSTALLATION = "agents-remember"
-LAUNCHER_ROLES: tuple[str, ...] = get_args(OrcaRole)
+LAUNCHER_ROLES: tuple[str, ...] = get_args(LauncherRole)
 STARTERS = ("architect", "orchestrator", "manager")
 _NAMED_TOOL = re.compile("`(" + "|".join(sorted(map(re.escape, PUBLIC_TOOLS))) + ")`")
 
@@ -76,10 +76,6 @@ def forbidden_in(text: str) -> list[str]:
 
     folded = text.casefold()
     return [word for word in FORBIDDEN if word.casefold() in folded]
-
-
-def without_retained_paths(text: str) -> str:
-    return text.replace(RETAINED_REPORT_DIRECTORY, "/")
 
 
 def instruction_files() -> list[Path]:
@@ -230,6 +226,24 @@ class InstructionFileWordingTests(unittest.TestCase):
             implementation,
         )
 
+    def test_the_curator_is_not_told_to_run_the_command_of_another_installation(self) -> None:
+        # The knowledge writer is a sub-command of an AR installation's own command line, and
+        # the command a session finds is the developer's installation, on the live roots.
+        for relative in instruction_files():
+            with self.subTest(file=relative.as_posix()):
+                self.assertNotIn("agents-remember knowledge-ingest", read(relative))
+        curation = " ".join(read(LIFECYCLE / "operations" / "curation.md").split())
+        for label, text in (("role", role_text("curator")), ("operation", curation)):
+            with self.subTest(told=label):
+                self.assertIn(
+                    "No tool of `agents-remember-task` writes them, and an `agents-remember` "
+                    "command on this machine belongs to another installation and must not be "
+                    "run for this assignment: the writer is not available to you on this line, "
+                    "so name the records that have to be written in your report and say that "
+                    "they were not written.",
+                    text,
+                )
+
     def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(self) -> None:
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
         for role in LAUNCHER_ROLES:
@@ -293,22 +307,22 @@ class HandoverTextWordingTests(unittest.TestCase):
             # A leaf's readers are confined to its enclosure, which this test does not create.
             ("task_scoped_mcp_config_for_reader", lambda config, **_scope: config),
         ):
-            patcher = patch.object(orca_task_preparation, name, stub)
+            patcher = patch.object(role_launch_preparation, name, stub)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def launch_of(self, role: str) -> tuple[OrcaRoleContext, dict[str, str]]:
+    def launch_of(self, role: str) -> tuple[RoleLaunchContext, dict[str, str]]:
         """The documents and the folder of one launch: taskless, sprint-bound or leaf-bound."""
 
         root = self.config.coordination_root
         workspace = {"path": self.config.workspace_root.as_posix()}
         if role in {"architect", "system-specialist"}:
-            return OrcaRoleContext(role, None, None, None, None), workspace  # type: ignore[arg-type]
+            return RoleLaunchContext(role, None, None, None, None), workspace  # type: ignore[arg-type]
         sprint = task_document(
             TaskDocumentRef(repository="repo", path="sprint/task.json"), "SPRINT", root
         )
         if role == "orchestrator":
-            return OrcaRoleContext(role, sprint, None, None, sprint), workspace  # type: ignore[arg-type]
+            return RoleLaunchContext(role, sprint, None, None, sprint), workspace  # type: ignore[arg-type]
         master = task_document(
             TaskDocumentRef(repository="repo", path="master/task.json"), "MASTER", root
         )
@@ -321,12 +335,12 @@ class HandoverTextWordingTests(unittest.TestCase):
             "contractPath": (enclosure / "contract.json").as_posix(),
             "taskReportAccessRoot": (leaf.path.parent / "notes" / "reports").as_posix(),
         }
-        return OrcaRoleContext(role, sprint, master, leaf, leaf), workspace  # type: ignore[arg-type]
+        return RoleLaunchContext(role, sprint, master, leaf, leaf), workspace  # type: ignore[arg-type]
 
     def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
         context, workspace = self.launch_of(role)
         prepared = _compile_handover(
-            OrcaHandoverRequest(
+            RoleHandoverRequest(
                 config=self.config,
                 context=context,
                 workspace=workspace,
@@ -347,12 +361,9 @@ class HandoverTextWordingTests(unittest.TestCase):
         ):
             with self.subTest(label):
                 prompt, handover = self.compiled(role, started_by)
-                self.assertIn(RETAINED_REPORT_DIRECTORY, prompt)
-                self.assertEqual(forbidden_in(without_retained_paths(prompt)), [])
-                self.assertEqual(
-                    forbidden_in(without_retained_paths(json.dumps(handover, ensure_ascii=False))),
-                    [],
-                )
+                self.assertIn(REPORT_DIRECTORY, prompt)
+                self.assertEqual(forbidden_in(prompt), [])
+                self.assertEqual(forbidden_in(json.dumps(handover, ensure_ascii=False)), [])
                 # The first message carries the reader context the launch compiled.
                 self.assertIn(handover["arMcpContext"]["missingCapabilityAction"], prompt)
 

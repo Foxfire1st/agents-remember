@@ -3,47 +3,47 @@ import { css, cva } from "../../styled-system/css";
 import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import { sameTaskDocumentRef } from "../data/taskIdentity";
-import { OrcaExecutionStatus, OrcaReviveControl } from "./OrcaExecutionStatus";
+import { RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
 import {
-  EMPTY_ORCA_EFFORTS,
-  EMPTY_ORCA_MODELS,
-  ORCA_ROLES,
-  isTasklessOrcaRole,
-  isUncertainOrcaExecution,
+  EMPTY_ROLE_EFFORTS,
+  EMPTY_ROLE_MODELS,
+  LAUNCHER_ROLES,
+  isTasklessRole,
+  isUncertainRoleExecution,
   launchChoiceProblem,
   launchSelectionComplete,
   masterOptionsForSprint,
-  mergeOrcaAgentInventory,
+  mergeRoleAgentInventory,
   optionIndex,
-  orcaAgentOverrideFor,
-  orcaDocumentScope,
-  orcaOptionsScope,
+  roleAgentOverrideFor,
+  roleDocumentScope,
+  roleOptionsScope,
   readTasklessActiveRequests,
   refAtOptionIndex,
   roleDefaultsCacheKey,
   roleNeedsMaster,
   roleNeedsSprint,
   roleNeedsTask,
-  sameOrcaDocumentScope,
-  sameOrcaLaunchSelection,
-  sameOrcaOptionsScope,
+  sameRoleDocumentScope,
+  sameRoleLaunchSelection,
+  sameRoleOptionsScope,
   sprintOptionsForDocs,
   tasklessRequestStorageKey,
   taskOptionsForMaster,
   taskRefIdentity,
-  type OrcaAction,
-  type OrcaAgentChoice,
-  type OrcaAgentInventory,
-  type OrcaDocumentScope,
-  type OrcaExecutionReceipt,
-  type OrcaLaunchSelection,
-  type OrcaLauncherOptions,
-  type OrcaOptionsScope,
-  type OrcaRole,
-  type OrcaRoleDefaults,
-  type OrcaScopedExecution,
-  type OrcaTasklessActiveRequest,
-} from "./orcaLaunchModel";
+  type RoleAction,
+  type RoleAgentChoice,
+  type RoleAgentInventory,
+  type RoleDocumentScope,
+  type RoleExecutionReceipt,
+  type RoleLaunchSelection,
+  type RoleLauncherOptions,
+  type RoleOptionsScope,
+  type LauncherRole,
+  type RoleDefaults,
+  type RoleScopedExecution,
+  type RoleTasklessActiveRequest,
+} from "./roleLaunchModel";
 import { PaseoChatFrame } from "./PaseoChatFrame";
 import { paseoAgentTarget } from "./paseoFrameModel";
 
@@ -80,7 +80,7 @@ const chatsModePanel = css({
   minHeight: "0",
   minWidth: "0",
 });
-const orcaPane = css({
+const rolePane = css({
   display: "flex",
   flex: "1",
   flexDirection: "column",
@@ -90,7 +90,7 @@ const orcaPane = css({
   border: "1px solid var(--grid)",
   background: "var(--bg-panel)",
 });
-const orcaLauncherGrid = css({
+const roleLauncherGrid = css({
   display: "flex",
   flexWrap: "wrap",
   alignItems: "flex-end",
@@ -102,7 +102,7 @@ const orcaLauncherGrid = css({
   borderBottom: "1px solid var(--grid)",
   background: "var(--bg-panel)",
 });
-const orcaLauncherField = css({
+const roleLauncherField = css({
   display: "grid",
   flex: "0 0 auto",
   gap: "0.22rem",
@@ -112,14 +112,14 @@ const orcaLauncherField = css({
   letterSpacing: "0.035em",
   textTransform: "uppercase",
 });
-const orcaLauncherRoleField = css({ width: "8rem" });
-const orcaLauncherSprintField = css({ width: "8rem" });
-const orcaLauncherMasterField = css({ width: "8.75rem" });
-const orcaLauncherTaskField = css({ width: "9.5rem" });
-const orcaLauncherAgentField = css({ width: "9.5rem" });
-const orcaLauncherModelField = css({ width: "10rem" });
-const orcaLauncherEffortField = css({ width: "8rem" });
-const orcaLauncherSelect = css({
+const roleLauncherRoleField = css({ width: "8rem" });
+const roleLauncherSprintField = css({ width: "8rem" });
+const roleLauncherMasterField = css({ width: "8.75rem" });
+const roleLauncherTaskField = css({ width: "9.5rem" });
+const roleLauncherAgentField = css({ width: "9.5rem" });
+const roleLauncherModelField = css({ width: "10rem" });
+const roleLauncherEffortField = css({ width: "8rem" });
+const roleLauncherSelect = css({
   appearance: "none",
   width: "100%",
   minWidth: "0",
@@ -156,7 +156,7 @@ const orcaLauncherSelect = css({
   },
   _disabled: { opacity: "0.58", cursor: "not-allowed" },
 });
-const orcaLauncherButton = cva({
+const roleLauncherButton = cva({
   base: {
     display: "inline-flex",
     alignItems: "center",
@@ -202,14 +202,14 @@ const orcaLauncherButton = cva({
     },
   },
 });
-const orcaLauncherActions = css({
+const roleLauncherActions = css({
   display: "flex",
   alignItems: "center",
   flexWrap: "wrap",
   gap: "0.35rem",
   minWidth: "0",
 });
-const orcaLauncherMeta = css({
+const roleLauncherMeta = css({
   flex: "1 0 100%",
   minWidth: "0",
   color: "muted",
@@ -217,7 +217,7 @@ const orcaLauncherMeta = css({
   lineHeight: "1.35",
   overflowWrap: "anywhere",
 });
-function OrcaRoleLauncher({
+function RoleLauncher({
   taskDocuments,
   series,
   roleDefaults,
@@ -241,10 +241,10 @@ function OrcaRoleLauncher({
 }: {
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
-  roleDefaults: OrcaRoleDefaults;
-  agents: OrcaAgentChoice[];
-  selection: OrcaLaunchSelection;
-  currentScopedExecution?: OrcaScopedExecution;
+  roleDefaults: RoleDefaults;
+  agents: RoleAgentChoice[];
+  selection: RoleLaunchSelection;
+  currentScopedExecution?: RoleScopedExecution;
   optionsReady: boolean;
   optionsLoading: boolean;
   busy: boolean;
@@ -252,10 +252,10 @@ function OrcaRoleLauncher({
   optionsError: string | null;
   executionError: string | null;
   launchInProgress: boolean;
-  onSelectionChange: (selection: OrcaLaunchSelection) => void;
-  onLaunch: (selection: OrcaLaunchSelection) => Promise<void>;
-  onRevive: (selection: OrcaLaunchSelection) => Promise<void>;
-  onRetry: (selection: OrcaLaunchSelection, requestId: string) => Promise<void>;
+  onSelectionChange: (selection: RoleLaunchSelection) => void;
+  onLaunch: (selection: RoleLaunchSelection) => Promise<void>;
+  onRevive: (selection: RoleLaunchSelection) => Promise<void>;
+  onRetry: (selection: RoleLaunchSelection, requestId: string) => Promise<void>;
   onRefreshOptions: () => void;
   onRefreshCatalog: () => void;
   onRefreshResult: () => void;
@@ -292,15 +292,15 @@ function OrcaRoleLauncher({
 
   const selectedAgentId = selection.agentOverride?.agentId ?? roleDefaults.agent ?? "";
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
-  const models = selectedAgent?.models ?? EMPTY_ORCA_MODELS;
+  const models = selectedAgent?.models ?? EMPTY_ROLE_MODELS;
   const defaultModel = models.find((model) => model.id === roleDefaults.model);
   const selectedModelId = selection.agentOverride?.modelId ?? defaultModel?.id ?? "";
   const selectedModel = models.find((model) => model.id === selectedModelId);
-  const efforts = selectedModel?.efforts ?? EMPTY_ORCA_EFFORTS;
+  const efforts = selectedModel?.efforts ?? EMPTY_ROLE_EFFORTS;
   const defaultEffort = efforts.find((effort) => effort.id === (roleDefaults.effort ?? selectedModel?.defaultEffort));
   const selectedAgentLabel = agents.find((agent) => agent.id === roleDefaults.agent)?.label ?? roleDefaults.agent;
-  const launchSelection: OrcaLaunchSelection = {
-    ...orcaDocumentScope(selection),
+  const launchSelection: RoleLaunchSelection = {
+    ...roleDocumentScope(selection),
     ...(selection.agentOverride ? { agentOverride: selection.agentOverride } : {}),
   };
   const complete = launchSelectionComplete(launchSelection);
@@ -308,9 +308,9 @@ function OrcaRoleLauncher({
   const liveOccupant = ["accepted", "unknown", "running", "starting"].includes(status ?? "");
   const canRetry = optionsReady && complete && !busy && currentScopedExecution?.canRetry === true && Boolean(retryRequestId);
   const retrySelection = currentScopedExecution?.retryPayload ?? launchSelection;
-  const canRetrySelection = sameOrcaDocumentScope(orcaDocumentScope(retrySelection), orcaDocumentScope(launchSelection));
+  const canRetrySelection = sameRoleDocumentScope(roleDocumentScope(retrySelection), roleDocumentScope(launchSelection));
   const choiceProblem = optionsReady ? launchChoiceProblem(roleDefaults, agents, selection.agentOverride) : null;
-  const canStart = !choiceProblem && (isTasklessOrcaRole(role)
+  const canStart = !choiceProblem && (isTasklessRole(role)
     ? optionsReady && complete && !busy && !["starting", "unknown"].includes(status ?? "")
     : optionsReady && complete && !busy && !liveOccupant && !canRetry && currentScopedExecution?.canStart !== false);
   // Every refresh re-reads the agent, so Result is offered for any execution, closed ones included.
@@ -318,7 +318,7 @@ function OrcaRoleLauncher({
 
   useEffect(() => {
     if (!optionsReady) return;
-    const activeScope = orcaDocumentScope(selection);
+    const activeScope = roleDocumentScope(selection);
     if (selection.agentOverride && !agents.some((agent) => agent.id === selection.agentOverride?.agentId)) {
       onSelectionChange({ ...activeScope, agentOverride: undefined });
       return;
@@ -342,25 +342,25 @@ function OrcaRoleLauncher({
   }, [optionsReady, agents, models, efforts, selection, onSelectionChange]);
 
   return (
-    <div className={orcaLauncherGrid} data-testid="orca-role-launcher">
-      <label className={`${orcaLauncherField} ${orcaLauncherRoleField}`}>
+    <div className={roleLauncherGrid} data-testid="role-launcher">
+      <label className={`${roleLauncherField} ${roleLauncherRoleField}`}>
         Role
         <select
-          className={orcaLauncherSelect}
-          id="orca-role"
-          title={ORCA_ROLES.find((option) => option.id === role)?.label ?? role}
+          className={roleLauncherSelect}
+          id="launcher-role"
+          title={LAUNCHER_ROLES.find((option) => option.id === role)?.label ?? role}
           value={role}
-          disabled={busy || optionsLoading || (!isTasklessOrcaRole(role) && currentScopedExecution?.canRetry === true)}
-          onChange={(event) => onSelectionChange({ role: event.target.value as OrcaRole })}
+          disabled={busy || optionsLoading || (!isTasklessRole(role) && currentScopedExecution?.canRetry === true)}
+          onChange={(event) => onSelectionChange({ role: event.target.value as LauncherRole })}
         >
-          {ORCA_ROLES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          {LAUNCHER_ROLES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </select>
       </label>
       {roleNeedsSprint(role) ? (
-        <label className={`${orcaLauncherField} ${orcaLauncherSprintField}`}>
+        <label className={`${roleLauncherField} ${roleLauncherSprintField}`}>
           Sprint
           <select
-            className={orcaLauncherSelect}
+            className={roleLauncherSelect}
             aria-label="AR sprint"
             value={optionIndex(sprintOptions, sprintDocumentRef)}
             title={taskRefIdentity(sprintDocumentRef)}
@@ -380,10 +380,10 @@ function OrcaRoleLauncher({
         </label>
       ) : null}
       {roleNeedsMaster(role) && sprintDocumentRef ? (
-        <label className={`${orcaLauncherField} ${orcaLauncherMasterField}`}>
+        <label className={`${roleLauncherField} ${roleLauncherMasterField}`}>
           Master
           <select
-            className={orcaLauncherSelect}
+            className={roleLauncherSelect}
             aria-label="AR master"
             value={optionIndex(masterOptions, masterDocumentRef)}
             title={taskRefIdentity(masterDocumentRef)}
@@ -407,10 +407,10 @@ function OrcaRoleLauncher({
         </label>
       ) : null}
       {roleNeedsTask(role) && masterDocumentRef ? (
-        <label className={`${orcaLauncherField} ${orcaLauncherTaskField}`}>
+        <label className={`${roleLauncherField} ${roleLauncherTaskField}`}>
           Task
           <select
-            className={orcaLauncherSelect}
+            className={roleLauncherSelect}
             aria-label="AR task"
             value={optionIndex(taskOptions, taskDocumentRef)}
             title={taskRefIdentity(taskDocumentRef)}
@@ -434,11 +434,11 @@ function OrcaRoleLauncher({
           </select>
         </label>
       ) : null}
-      <label className={`${orcaLauncherField} ${orcaLauncherAgentField}`}>
+      <label className={`${roleLauncherField} ${roleLauncherAgentField}`}>
         Agent override
         <select
-          className={orcaLauncherSelect}
-          aria-label="Orca agent override"
+          className={roleLauncherSelect}
+          aria-label="Role agent override"
           value={selection.agentOverride?.agentId ?? ""}
           disabled={!optionsReady || !agents.length || optionsLoading || busy || currentScopedExecution?.canRetry === true}
           onChange={(event) => {
@@ -455,11 +455,11 @@ function OrcaRoleLauncher({
           {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.label}</option>)}
         </select>
       </label>
-      <label className={`${orcaLauncherField} ${orcaLauncherModelField}`}>
+      <label className={`${roleLauncherField} ${roleLauncherModelField}`}>
         Model override
         <select
-          className={orcaLauncherSelect}
-          aria-label="Orca model override"
+          className={roleLauncherSelect}
+          aria-label="Role model override"
           title={selection.agentOverride ? "Use the selected agent's default model" : "Use the model configured for this AR role"}
           value={selection.agentOverride?.modelId ?? ""}
           disabled={!optionsReady || !selectedAgent || !models.length || optionsLoading || busy || currentScopedExecution?.canRetry === true}
@@ -468,7 +468,7 @@ function OrcaRoleLauncher({
             const agentId = selection.agentOverride?.agentId ?? selectedAgentId;
             onSelectionChange({
               ...launchSelection,
-              agentOverride: orcaAgentOverrideFor(agentId, modelId || undefined, undefined, roleDefaults),
+              agentOverride: roleAgentOverrideFor(agentId, modelId || undefined, undefined, roleDefaults),
             });
           }}
         >
@@ -485,11 +485,11 @@ function OrcaRoleLauncher({
         </select>
       </label>
       {selectedModel && efforts.length ? (
-        <label className={`${orcaLauncherField} ${orcaLauncherEffortField}`}>
+        <label className={`${roleLauncherField} ${roleLauncherEffortField}`}>
           Effort override
           <select
-            className={orcaLauncherSelect}
-            aria-label="Orca effort override"
+            className={roleLauncherSelect}
+            aria-label="Role effort override"
             title={selection.agentOverride ? "Use the selected model's default effort" : "Use the effort configured for this AR role or model"}
             value={selection.agentOverride?.effortId ?? ""}
             disabled={busy || currentScopedExecution?.canRetry === true}
@@ -497,7 +497,7 @@ function OrcaRoleLauncher({
               const agentId = selection.agentOverride?.agentId ?? selectedAgentId;
               onSelectionChange({
                 ...launchSelection,
-                agentOverride: orcaAgentOverrideFor(
+                agentOverride: roleAgentOverrideFor(
                   agentId,
                   selection.agentOverride?.modelId,
                   event.target.value || undefined,
@@ -513,17 +513,17 @@ function OrcaRoleLauncher({
           </select>
         </label>
       ) : null}
-      <div className={orcaLauncherActions}>
-        <button className={orcaLauncherButton({ tone: "primary" })} type="button" aria-label="Start Orca" title="Start Orca" disabled={!canStart} onClick={() => void onLaunch(launchSelection)}>Start</button>
+      <div className={roleLauncherActions}>
+        <button className={roleLauncherButton({ tone: "primary" })} type="button" aria-label="Start role" title="Start role" disabled={!canStart} onClick={() => void onLaunch(launchSelection)}>Start</button>
         {canRetry && canRetrySelection && retryRequestId ? (
-          <button className={orcaLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry Orca" title="Retry the same saved Orca request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
+          <button className={roleLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry role launch" title="Retry the same saved launch request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
         ) : null}
-        <OrcaReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={orcaLauncherButton({ tone: "secondary" })} onRevive={() => void onRevive(launchSelection)} />
-        {canRefreshResult ? <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca result" title="Refresh Orca result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
-        <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
+        <RoleReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={roleLauncherButton({ tone: "secondary" })} onRevive={() => void onRevive(launchSelection)} />
+        {canRefreshResult ? <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role result" title="Refresh role result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
+        <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
       </div>
       {selection.agentOverride && selectedAgent ? (
-        <div className={orcaLauncherMeta} role="status" data-testid="orca-capability-summary">
+        <div className={roleLauncherMeta} role="status" data-testid="role-capability-summary">
           {"Using " + selectedAgent.label +
             (selectedModel ? " · " + selectedModel.label : roleDefaults.model ? " · role model " + roleDefaults.model : "") +
             (selectedModel
@@ -534,22 +534,22 @@ function OrcaRoleLauncher({
         </div>
       ) : null}
       {choiceProblem || selectedAgent?.listingError ? (
-        <div className={orcaLauncherMeta} role="alert" data-testid="orca-choice-problem" style={{ color: "var(--alarm)" }}>
+        <div className={roleLauncherMeta} role="alert" data-testid="role-choice-problem" style={{ color: "var(--alarm)" }}>
           {[choiceProblem, selectedAgent?.listingError ? "Models of " + selectedAgent.label + " could not be listed: " + selectedAgent.listingError : null].filter(Boolean).join(" ")}
         </div>
       ) : null}
-      {currentScopedExecution ? <OrcaExecutionStatus execution={currentScopedExecution} className={orcaLauncherMeta} /> : null}
+      {currentScopedExecution ? <RoleExecutionStatus execution={currentScopedExecution} className={roleLauncherMeta} /> : null}
       {optionsError ? (
-        <div className={orcaLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>
-          {optionsError} <button className={orcaLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button>
+        <div className={roleLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>
+          {optionsError} <button className={roleLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button>
         </div>
       ) : null}
       {executionError ? (
-        <div className={orcaLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>{executionError}</div>
+        <div className={roleLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>{executionError}</div>
       ) : null}
-      {optionsLoading ? <div className={orcaLauncherMeta} role="status">Loading Orca launch options…</div> : null}
+      {optionsLoading ? <div className={roleLauncherMeta} role="status">Loading role launch options…</div> : null}
       {launchInProgress && !optionsLoading ? (
-        <div className={orcaLauncherMeta} role="status" data-testid="orca-launch-in-progress">A launch is in progress in this dashboard; this is read again when it has answered.</div>
+        <div className={roleLauncherMeta} role="status" data-testid="role-launch-in-progress">A launch is in progress in this dashboard; this is read again when it has answered.</div>
       ) : null}
     </div>
   );
@@ -559,7 +559,7 @@ function OrcaRoleLauncher({
 // How soon the options are read again after the backend answered that a launch is in progress.
 const LAUNCH_REREAD_MS = 1500;
 
-function OrcaChatsPane({
+function RoleChatsPane({
   active,
   taskDocuments,
   series,
@@ -568,18 +568,18 @@ function OrcaChatsPane({
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
 }) {
-  const [selection, setSelection] = useState<OrcaLaunchSelection>({ role: "architect" });
+  const [selection, setSelection] = useState<RoleLaunchSelection>({ role: "architect" });
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
-  const [optionsState, setOptionsState] = useState<{ scope: OrcaOptionsScope; value: OrcaLauncherOptions } | null>(null);
-  const [agentInventory, setAgentInventory] = useState<OrcaAgentInventory | null>(null);
-  const [roleDefaultsCache, setRoleDefaultsCache] = useState<Record<string, OrcaRoleDefaults>>({});
-  const [optionsLoadingScope, setOptionsLoadingScope] = useState<OrcaOptionsScope | null>(null);
-  const [optionsErrorState, setOptionsErrorState] = useState<{ scope: OrcaOptionsScope; message: string } | null>(null);
-  const [executionState, setExecutionState] = useState<{ scope: OrcaDocumentScope; value: OrcaExecutionReceipt } | null>(null);
-  const [executionErrorState, setExecutionErrorState] = useState<{ scope: OrcaDocumentScope; message: string; sticky?: boolean } | null>(null);
-  const [busyScope, setBusyScope] = useState<OrcaLaunchSelection | null>(null);
-  const [launchWaitScope, setLaunchWaitScope] = useState<OrcaDocumentScope | null>(null);
+  const [optionsState, setOptionsState] = useState<{ scope: RoleOptionsScope; value: RoleLauncherOptions } | null>(null);
+  const [agentInventory, setAgentInventory] = useState<RoleAgentInventory | null>(null);
+  const [roleDefaultsCache, setRoleDefaultsCache] = useState<Record<string, RoleDefaults>>({});
+  const [optionsLoadingScope, setOptionsLoadingScope] = useState<RoleOptionsScope | null>(null);
+  const [optionsErrorState, setOptionsErrorState] = useState<{ scope: RoleOptionsScope; message: string } | null>(null);
+  const [executionState, setExecutionState] = useState<{ scope: RoleDocumentScope; value: RoleExecutionReceipt } | null>(null);
+  const [executionErrorState, setExecutionErrorState] = useState<{ scope: RoleDocumentScope; message: string; sticky?: boolean } | null>(null);
+  const [busyScope, setBusyScope] = useState<RoleLaunchSelection | null>(null);
+  const [launchWaitScope, setLaunchWaitScope] = useState<RoleDocumentScope | null>(null);
   const rereadTimer = useRef<number | undefined>(undefined);
   const [tasklessActiveRequests, setTasklessActiveRequests] = useState(readTasklessActiveRequests);
   const sentCatalogRefresh = useRef(0);
@@ -588,7 +588,7 @@ function OrcaChatsPane({
   const tasklessActiveRequestsRef = useRef(tasklessActiveRequests);
   tasklessActiveRequestsRef.current = tasklessActiveRequests;
   const currentDocumentScope = useMemo(
-    () => orcaDocumentScope(selection),
+    () => roleDocumentScope(selection),
     [
       selection.role,
       selection.sprintDocumentRef?.repository,
@@ -600,22 +600,22 @@ function OrcaChatsPane({
     ],
   );
   const currentOptionsScope = useMemo(
-    () => orcaOptionsScope(selection),
+    () => roleOptionsScope(selection),
     [currentDocumentScope, selection.agentOverride?.agentId],
   );
   const isCurrentOptionsScope = useCallback(
-    (scope: OrcaOptionsScope) => sameOrcaOptionsScope(orcaOptionsScope(currentSelectionRef.current), scope),
+    (scope: RoleOptionsScope) => sameRoleOptionsScope(roleOptionsScope(currentSelectionRef.current), scope),
     [],
   );
-  const isCurrentExecutionTarget = useCallback((scope: OrcaDocumentScope, requestId?: string) => {
-    if (!sameOrcaDocumentScope(orcaDocumentScope(currentSelectionRef.current), scope)) return false;
-    return !isTasklessOrcaRole(scope.role) || tasklessActiveRequestsRef.current[scope.role]?.requestId === requestId;
+  const isCurrentExecutionTarget = useCallback((scope: RoleDocumentScope, requestId?: string) => {
+    if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), scope)) return false;
+    return !isTasklessRole(scope.role) || tasklessActiveRequestsRef.current[scope.role]?.requestId === requestId;
   }, []);
   const updateTasklessActiveRequest = useCallback((
-    role: OrcaRole,
-    request: OrcaTasklessActiveRequest | undefined,
+    role: LauncherRole,
+    request: RoleTasklessActiveRequest | undefined,
   ) => {
-    if (!isTasklessOrcaRole(role)) return;
+    if (!isTasklessRole(role)) return;
     const current = tasklessActiveRequestsRef.current;
     const next = { ...current };
     if (request) {
@@ -631,32 +631,32 @@ function OrcaChatsPane({
       setExecutionErrorState((error) => error?.scope.role === role ? null : error);
     }
   }, []);
-  const options = optionsState && sameOrcaOptionsScope(optionsState.scope, currentOptionsScope)
+  const options = optionsState && sameRoleOptionsScope(optionsState.scope, currentOptionsScope)
     ? optionsState.value
     : null;
-  const optionsLoading = Boolean(optionsLoadingScope && sameOrcaOptionsScope(optionsLoadingScope, currentOptionsScope));
-  const busy = Boolean(busyScope && sameOrcaDocumentScope(orcaDocumentScope(busyScope), currentDocumentScope));
-  const launchInProgress = Boolean(launchWaitScope && sameOrcaDocumentScope(launchWaitScope, currentDocumentScope));
+  const optionsLoading = Boolean(optionsLoadingScope && sameRoleOptionsScope(optionsLoadingScope, currentOptionsScope));
+  const busy = Boolean(busyScope && sameRoleDocumentScope(roleDocumentScope(busyScope), currentDocumentScope));
+  const launchInProgress = Boolean(launchWaitScope && sameRoleDocumentScope(launchWaitScope, currentDocumentScope));
   // A launch holds the backend's launch lock for as long as it runs, and the options and result
   // routes answer that with a mark of their own. That is no error of the selection shown: the
   // launcher says so and reads again shortly, until the launch has answered.
-  const waitForLaunch = useCallback((scope: OrcaDocumentScope) => {
+  const waitForLaunch = useCallback((scope: RoleDocumentScope) => {
     setLaunchWaitScope(scope);
     window.clearTimeout(rereadTimer.current);
     rereadTimer.current = window.setTimeout(() => setOptionsRefresh((current) => current + 1), LAUNCH_REREAD_MS);
   }, []);
   useEffect(() => () => window.clearTimeout(rereadTimer.current), []);
-  const optionsError = optionsErrorState && sameOrcaOptionsScope(optionsErrorState.scope, currentOptionsScope)
+  const optionsError = optionsErrorState && sameRoleOptionsScope(optionsErrorState.scope, currentOptionsScope)
     ? optionsErrorState.message
     : null;
-  const activeTasklessRequest = isTasklessOrcaRole(selection.role)
+  const activeTasklessRequest = isTasklessRole(selection.role)
     ? tasklessActiveRequests[selection.role]
     : undefined;
-  const savedTasklessExecution = isTasklessOrcaRole(selection.role) && activeTasklessRequest
+  const savedTasklessExecution = isTasklessRole(selection.role) && activeTasklessRequest
     ? options?.executions?.find((execution) => execution.requestId === activeTasklessRequest.requestId)
     : undefined;
-  const executionReceipt = executionState && sameOrcaDocumentScope(executionState.scope, currentDocumentScope) &&
-    (!isTasklessOrcaRole(selection.role) || executionState.value.requestId === activeTasklessRequest?.requestId)
+  const executionReceipt = executionState && sameRoleDocumentScope(executionState.scope, currentDocumentScope) &&
+    (!isTasklessRole(selection.role) || executionState.value.requestId === activeTasklessRequest?.requestId)
     ? executionState.value
     : null;
   const pendingTasklessExecution = activeTasklessRequest?.pending && !executionReceipt && !savedTasklessExecution
@@ -671,10 +671,10 @@ function OrcaChatsPane({
       }
     : undefined;
   const selectedTasklessExecution = executionReceipt ?? savedTasklessExecution;
-  const executionError = executionErrorState && sameOrcaDocumentScope(executionErrorState.scope, currentDocumentScope)
+  const executionError = executionErrorState && sameRoleDocumentScope(executionErrorState.scope, currentDocumentScope)
     ? executionErrorState.message
     : null;
-  const currentScopedExecution = !optionsLoading && isTasklessOrcaRole(selection.role)
+  const currentScopedExecution = !optionsLoading && isTasklessRole(selection.role)
     ? selectedTasklessExecution
       ? {
           ...selectedTasklessExecution,
@@ -687,7 +687,7 @@ function OrcaChatsPane({
     ? executionReceipt
     : !optionsLoading ? options?.execution ?? undefined : undefined;
   const retryRequestId = currentScopedExecution?.canRetry &&
-    (!isTasklessOrcaRole(selection.role) || Boolean(currentScopedExecution.retryPayload))
+    (!isTasklessRole(selection.role) || Boolean(currentScopedExecution.retryPayload))
     ? currentScopedExecution.requestId
     : undefined;
   const selectionComplete = launchSelectionComplete(selection);
@@ -712,9 +712,9 @@ function OrcaChatsPane({
     setOptionsErrorState(null);
     setOptionsLoadingScope(requestScope);
     setExecutionState((current) =>
-      current && sameOrcaDocumentScope(current.scope, currentDocumentScope) ? null : current,
+      current && sameRoleDocumentScope(current.scope, currentDocumentScope) ? null : current,
     );
-    void fetch("/api/orca/launcher/options", {
+    void fetch("/api/role-launch/options", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -728,13 +728,13 @@ function OrcaChatsPane({
           setOptionsErrorState({
             scope: requestScope,
             message: typeof value.detail === "string"
-              ? "Could not load Orca launch options (HTTP " + response.status + "): " + value.detail
-              : "Could not load Orca launch options (HTTP " + response.status + ").",
+              ? "Could not load role launch options (HTTP " + response.status + "): " + value.detail
+              : "Could not load role launch options (HTTP " + response.status + ").",
           });
         }
         return;
       }
-      const value = (await response.json()) as OrcaLauncherOptions;
+      const value = (await response.json()) as RoleLauncherOptions;
       if (!isCurrentOptionsScope(requestScope)) return;
       setLaunchWaitScope(null);
       setOptionsState({ scope: requestScope, value });
@@ -742,13 +742,13 @@ function OrcaChatsPane({
         ...current,
         [roleDefaultsCacheKey(currentDocumentScope)]: value.roleDefaults,
       }));
-      setAgentInventory((current) => mergeOrcaAgentInventory(
+      setAgentInventory((current) => mergeRoleAgentInventory(
         current,
         value,
         requestScope.agentId ?? value.roleDefaults.agent,
         refreshAgentCatalog,
       ));
-      if (isTasklessOrcaRole(requestScope.role)) {
+      if (isTasklessRole(requestScope.role)) {
         const role = requestScope.role;
         const executions = value.executions ?? [];
         const activeRequest = tasklessActiveRequestsRef.current[role];
@@ -756,7 +756,7 @@ function OrcaChatsPane({
           ? executions.find((execution) => execution.requestId === activeRequest?.requestId)
           : undefined;
         if (savedExecution?.requestId) {
-          const pending = isUncertainOrcaExecution(savedExecution);
+          const pending = isUncertainRoleExecution(savedExecution);
           updateTasklessActiveRequest(role, pending
             ? {
                 requestId: savedExecution.requestId,
@@ -776,7 +776,7 @@ function OrcaChatsPane({
       if (isCurrentOptionsScope(requestScope)) {
         setOptionsErrorState({
           scope: requestScope,
-          message: "Could not load Orca launch options. Check the dashboard connection and retry.",
+          message: "Could not load role launch options. Check the dashboard connection and retry.",
         });
       }
     }).finally(() => {
@@ -786,20 +786,20 @@ function OrcaChatsPane({
   }, [active, selectionComplete, currentDocumentScope, currentOptionsScope, optionsRefresh, catalogRefresh, isCurrentOptionsScope, waitForLaunch]);
 
   async function fetchExecutionResult(
-    requestScope: OrcaDocumentScope,
+    requestScope: RoleDocumentScope,
     reportNotFound: boolean,
     requestId?: string,
   ): Promise<void> {
-    if (isTasklessOrcaRole(requestScope.role) && !requestId) return;
+    if (isTasklessRole(requestScope.role) && !requestId) return;
     try {
-      const response = await fetch("/api/orca/result", {
+      const response = await fetch("/api/role-launch/result", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...requestScope, ...(requestId ? { requestId } : {}) }),
       });
       if (response.status === 404) {
         if (!isCurrentExecutionTarget(requestScope, requestId)) return;
-        const activeRequest = isTasklessOrcaRole(requestScope.role)
+        const activeRequest = isTasklessRole(requestScope.role)
           ? tasklessActiveRequestsRef.current[requestScope.role]
           : undefined;
         if (activeRequest?.pending && activeRequest.requestId === requestId) {
@@ -808,7 +808,7 @@ function OrcaChatsPane({
             scope: requestScope,
             value: {
               status: "unknown",
-              detail: "No saved Orca receipt was found for this request yet.",
+              detail: "No saved role execution receipt was found for this request yet.",
               requestId,
               ...(retryPayload ? { retryPayload } : {}),
               canStart: false,
@@ -822,12 +822,12 @@ function OrcaChatsPane({
             scope: requestScope,
             message: activeRequest?.pending
               ? "No receipt was found yet. Retry will reuse the same saved request."
-              : "No saved Orca result is available for this request yet.",
+              : "No saved role result is available for this request yet.",
           });
         }
         return;
       }
-      const value = (await response.json()) as OrcaExecutionReceipt | { detail?: unknown; launchInProgress?: unknown };
+      const value = (await response.json()) as RoleExecutionReceipt | { detail?: unknown; launchInProgress?: unknown };
       if (!isCurrentExecutionTarget(requestScope, requestId)) return;
       if (!response.ok && "launchInProgress" in value && value.launchInProgress === true) {
         waitForLaunch(requestScope);
@@ -837,24 +837,24 @@ function OrcaChatsPane({
         setExecutionErrorState({
           scope: requestScope,
           message: typeof value.detail === "string"
-            ? "Could not read the Orca result (HTTP " + response.status + "): " + value.detail
-            : "Could not read the Orca result (HTTP " + response.status + ").",
+            ? "Could not read the role result (HTTP " + response.status + "): " + value.detail
+            : "Could not read the role result (HTTP " + response.status + ").",
         });
         return;
     }
     if (!("status" in value) || typeof value.status !== "string") {
-      setExecutionErrorState({ scope: requestScope, message: "The Orca result did not contain an execution status." });
+      setExecutionErrorState({ scope: requestScope, message: "The role result did not contain an execution status." });
       return;
       }
-      const receipt = value as OrcaExecutionReceipt;
+      const receipt = value as RoleExecutionReceipt;
       if (requestId && receipt.requestId !== requestId) {
-        setExecutionErrorState({ scope: requestScope, message: "The Orca result did not match the selected request." });
+        setExecutionErrorState({ scope: requestScope, message: "The role result did not match the selected request." });
         return;
       }
       setExecutionState({ scope: requestScope, value: receipt });
-      if (isTasklessOrcaRole(requestScope.role) && receipt.requestId) {
+      if (isTasklessRole(requestScope.role) && receipt.requestId) {
         const current = tasklessActiveRequestsRef.current[requestScope.role];
-        const pending = isUncertainOrcaExecution(receipt);
+        const pending = isUncertainRoleExecution(receipt);
         updateTasklessActiveRequest(requestScope.role, pending
           ? {
               requestId: receipt.requestId,
@@ -871,7 +871,7 @@ function OrcaChatsPane({
       if (isCurrentExecutionTarget(requestScope, requestId)) {
         setExecutionErrorState({
           scope: requestScope,
-          message: "Could not read the Orca result. Check the dashboard connection and refresh it.",
+          message: "Could not read the role result. Check the dashboard connection and refresh it.",
         });
       }
     }
@@ -888,27 +888,27 @@ function OrcaChatsPane({
   async function refreshResult(): Promise<void> {
     if (!selectionComplete || busy || optionsLoading) return;
     const selected = selection;
-    const requestScope = orcaDocumentScope(selected);
-    const requestId = isTasklessOrcaRole(selected.role)
+    const requestScope = roleDocumentScope(selected);
+    const requestId = isTasklessRole(selected.role)
       ? tasklessActiveRequestsRef.current[selected.role]?.requestId
       : currentScopedExecution?.requestId;
-    if (isTasklessOrcaRole(selected.role) && !requestId) return;
+    if (isTasklessRole(selected.role) && !requestId) return;
     setBusyScope(selected);
     setExecutionErrorState(null);
     try {
       await fetchExecutionResult(requestScope, true, requestId);
     } finally {
-      if (sameOrcaLaunchSelection(currentSelectionRef.current, selected)) setBusyScope(null);
+      if (sameRoleLaunchSelection(currentSelectionRef.current, selected)) setBusyScope(null);
     }
   }
 
   async function dispatch(
-    action: OrcaAction,
-    launchSelection: OrcaLaunchSelection,
+    action: RoleAction,
+    launchSelection: RoleLaunchSelection,
     replayRequestId?: string,
   ): Promise<void> {
     if (!active || busy || !options || !launchSelectionComplete(launchSelection)) return;
-    const tasklessRole = isTasklessOrcaRole(launchSelection.role);
+    const tasklessRole = isTasklessRole(launchSelection.role);
     const activeTasklessRequest = tasklessRole
       ? tasklessActiveRequestsRef.current[launchSelection.role]
       : undefined;
@@ -924,9 +924,9 @@ function OrcaChatsPane({
     if (action === "revive" && currentScopedExecution?.canRevive !== true) return;
     if (action === "revive" && tasklessRole && (!replayRequestId || currentScopedExecution?.requestId !== replayRequestId)) return;
     const selected = launchSelection;
-    const requestScope = orcaDocumentScope(selected);
+    const requestScope = roleDocumentScope(selected);
     const requestId = replayRequestId ?? crypto.randomUUID();
-    const savedLaunchSelection: OrcaLaunchSelection = {
+    const savedLaunchSelection: RoleLaunchSelection = {
       ...requestScope,
       ...(selected.agentOverride ? { agentOverride: selected.agentOverride } : {}),
     };
@@ -948,28 +948,28 @@ function OrcaChatsPane({
     setBusyScope(selected);
     setExecutionErrorState(null);
     try {
-      const response = await fetch("/api/orca/dispatch", {
+      const response = await fetch("/api/role-launch/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
-      const value = (await response.json()) as OrcaExecutionReceipt | { detail?: unknown };
-      if (!sameOrcaDocumentScope(orcaDocumentScope(currentSelectionRef.current), requestScope)) return;
+      const value = (await response.json()) as RoleExecutionReceipt | { detail?: unknown };
+      if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) return;
       if (response.status === 409 && "detail" in value && typeof value.detail === "string") {
         setExecutionErrorState({
           scope: requestScope,
-          message: "Orca could not accept this launch (HTTP 409): " + value.detail,
+          message: "The role launch was not accepted (HTTP 409): " + value.detail,
           sticky: true,
         });
       } else if ("status" in value && typeof value.status === "string") {
-        const receipt = value as OrcaExecutionReceipt;
+        const receipt = value as RoleExecutionReceipt;
         if (tasklessRole && receipt.requestId !== requestId) {
-          setExecutionErrorState({ scope: requestScope, message: "The Orca receipt did not match this request." });
+          setExecutionErrorState({ scope: requestScope, message: "The role execution receipt did not match this request." });
           return;
         }
         setExecutionState({ scope: requestScope, value: receipt });
         if (tasklessRole && receipt.requestId) {
-          const pending = isUncertainOrcaExecution(receipt);
+          const pending = isUncertainRoleExecution(receipt);
           updateTasklessActiveRequest(selected.role, pending
             ? {
                 requestId: receipt.requestId,
@@ -986,8 +986,8 @@ function OrcaChatsPane({
             : {
                 scope: requestScope,
                 message: typeof value.detail === "string"
-                  ? "Orca could not accept this handover (HTTP " + response.status + "): " + value.detail
-                  : "Orca could not accept this handover (HTTP " + response.status + ").",
+                  ? "The role handover was not accepted (HTTP " + response.status + "): " + value.detail
+                  : "The role handover was not accepted (HTTP " + response.status + ").",
               },
         );
       } else {
@@ -1011,13 +1011,13 @@ function OrcaChatsPane({
         setExecutionErrorState({
           scope: requestScope,
           message: response.status >= 500
-            ? "Orca returned HTTP " + response.status + "; execution state is unknown. Refresh the AR result before retrying."
-            : "Orca rejected the handover (HTTP " + response.status + ").",
+            ? "The role launch returned HTTP " + response.status + "; execution state is unknown. Refresh the AR result before retrying."
+            : "The role handover was rejected (HTTP " + response.status + ").",
         });
       }
       await fetchExecutionResult(requestScope, false, tasklessRole ? requestId : undefined);
     } catch {
-      if (!sameOrcaDocumentScope(orcaDocumentScope(currentSelectionRef.current), requestScope)) return;
+      if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) return;
       setExecutionState({
         scope: requestScope,
         value: {
@@ -1032,18 +1032,18 @@ function OrcaChatsPane({
       });
       setExecutionErrorState({
         scope: requestScope,
-        message: "The Orca request did not return. Its state is unknown; refresh the AR result before retrying.",
+        message: "The role launch request did not return. Its state is unknown; refresh the AR result before retrying.",
       });
       await fetchExecutionResult(requestScope, false, tasklessRole ? requestId : undefined);
     } finally {
-      if (sameOrcaDocumentScope(orcaDocumentScope(currentSelectionRef.current), requestScope)) {
+      if (sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) {
         setBusyScope(null);
         setOptionsRefresh((current) => current + 1);
       }
     }
   }
 
-  const onSelectionChange = useCallback((next: OrcaLaunchSelection) => {
+  const onSelectionChange = useCallback((next: RoleLaunchSelection) => {
     setSelection(next);
   }, []);
   const roleDefaults = options?.roleDefaults ?? roleDefaultsCache[roleDefaultsCacheKey(currentDocumentScope)] ?? {};
@@ -1051,18 +1051,18 @@ function OrcaChatsPane({
     ? agentInventory.agents
     : options?.agents ?? agentInventory?.agents ?? [];
   const optionsReady = Boolean(options && !optionsLoading);
-  const onLaunch = (launchSelection: OrcaLaunchSelection) => dispatch("start", launchSelection);
-  const onRevive = (launchSelection: OrcaLaunchSelection) => dispatch(
+  const onLaunch = (launchSelection: RoleLaunchSelection) => dispatch("start", launchSelection);
+  const onRevive = (launchSelection: RoleLaunchSelection) => dispatch(
     "revive",
     launchSelection,
-    isTasklessOrcaRole(launchSelection.role) ? currentScopedExecution?.requestId : undefined,
+    isTasklessRole(launchSelection.role) ? currentScopedExecution?.requestId : undefined,
   );
-  const onRetry = (launchSelection: OrcaLaunchSelection, requestId: string) =>
+  const onRetry = (launchSelection: RoleLaunchSelection, requestId: string) =>
     dispatch("start", launchSelection, requestId);
 
   return (
-    <section aria-label="Native Orca chats" className={orcaPane} data-testid="orca-chats-pane">
-      <OrcaRoleLauncher
+    <section aria-label="Role chats" className={rolePane} data-testid="role-chats-pane">
+      <RoleLauncher
         taskDocuments={taskDocuments}
         series={series}
         roleDefaults={roleDefaults}
@@ -1104,20 +1104,20 @@ export function ChatsModePanels({
   series: SeriesNode[];
   contextMaster: string | undefined;
 }) {
-  const [chatsMode, setChatsMode] = useState<"orca" | "ar">("orca");
+  const [chatsMode, setChatsMode] = useState<"role" | "ar">("role");
   return (
     <>
       <div role="tablist" aria-label="Chats mode" className={chatsModeTabs}>
         <button
-          id="chats-mode-orca"
+          id="chats-mode-role"
           type="button"
           role="tab"
-          aria-selected={chatsMode === "orca"}
-          aria-controls="chats-panel-orca"
-          className={chatsModeTab({ selected: chatsMode === "orca" })}
-          onClick={() => setChatsMode("orca")}
+          aria-selected={chatsMode === "role"}
+          aria-controls="chats-panel-role"
+          className={chatsModeTab({ selected: chatsMode === "role" })}
+          onClick={() => setChatsMode("role")}
         >
-          Orca
+          Role chats
         </button>
         <button
           id="chats-mode-ar"
@@ -1132,14 +1132,14 @@ export function ChatsModePanels({
         </button>
       </div>
       <div
-        id="chats-panel-orca"
+        id="chats-panel-role"
         role="tabpanel"
-        aria-labelledby="chats-mode-orca"
-        aria-hidden={chatsMode !== "orca"}
-        style={{ display: chatsMode === "orca" ? "flex" : "none" }}
+        aria-labelledby="chats-mode-role"
+        aria-hidden={chatsMode !== "role"}
+        style={{ display: chatsMode === "role" ? "flex" : "none" }}
         className={chatsModePanel}
       >
-        <OrcaChatsPane active={active && chatsMode === "orca"} taskDocuments={taskDocuments} series={series} />
+        <RoleChatsPane active={active && chatsMode === "role"} taskDocuments={taskDocuments} series={series} />
       </div>
       <div
         id="chats-panel-ar"

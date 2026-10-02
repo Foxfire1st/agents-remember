@@ -57,9 +57,6 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-# Native Orca launch is one optional AR-owned dependency. Paths select its pinned source tree and
-# user profile; pairing credentials stay in Orca's existing profile/environment configuration.
-KNOWN_ORCA_RUNTIME_FIELDS = frozenset({"runtimeRoot", "userDataPath"})
 # Completion-seat cleanup is boot-snapshot MCP authority. The two historical edge gates keep
 # their names for compatibility; ``autoCloseCompletedSeats`` selects retire (default) versus the
 # old landed/archive behavior when an enabled completion edge runs. The legacy autoRetire* names
@@ -120,14 +117,6 @@ class OrchestrationSettings:
 
 
 @dataclass(frozen=True)
-class OrcaRuntimeSettings:
-    """One shared Orca RuntimeClient endpoint and profile selected by AR settings."""
-
-    runtime_root: Path
-    user_data_path: Path
-
-
-@dataclass(frozen=True)
 class RetirementSettings:
     """The optional ``retirement`` settings object: completion-seat cleanup.
 
@@ -162,7 +151,6 @@ class McpRuntimeConfig:
         default_factory=ProviderDegradationSettings
     )
     retirement: RetirementSettings = field(default_factory=RetirementSettings)
-    orca_runtime: OrcaRuntimeSettings | None = None
     # ``None`` is the named state "no Paseo runtime configured" (paseo_runtime_settings.py).
     paseo_runtime: PaseoRuntimeSettings | None = None
 
@@ -314,7 +302,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         config_path=config_path,
     )
     retirement = parse_retirement_settings(data.get("retirement"))
-    orca_runtime = parse_orca_runtime_settings(data.get("orcaRuntime"))
     paseo_runtime = _paseo_runtime_block(data)
 
     return McpRuntimeConfig(
@@ -332,7 +319,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         orchestration=orchestration,
         provider_degradation=provider_degradation,
         retirement=retirement,
-        orca_runtime=orca_runtime,
         paseo_runtime=paseo_runtime,
     )
 
@@ -352,22 +338,6 @@ def _paseo_runtime_block(data: dict[str, Any]) -> PaseoRuntimeSettings | None:
         return parse_paseo_runtime_settings(data.get("paseoRuntime"))
     except PaseoRuntimeSettingsError as error:
         raise ConfigError(str(error)) from error
-
-
-def parse_orca_runtime_settings(raw: object) -> OrcaRuntimeSettings | None:
-    """Parse the optional AR-owned pinned Orca source/profile path pair."""
-
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ConfigError("orcaRuntime must be an object")
-    unknown = sorted(set(raw) - KNOWN_ORCA_RUNTIME_FIELDS)
-    if unknown:
-        raise ConfigError("unsupported orcaRuntime setting(s): " + ", ".join(unknown))
-    return OrcaRuntimeSettings(
-        runtime_root=required_absolute_path(raw, "runtimeRoot", owner="orcaRuntime"),
-        user_data_path=required_absolute_path(raw, "userDataPath", owner="orcaRuntime"),
-    )
 
 
 def _parse_repository_entry(

@@ -31,7 +31,7 @@ from typing import Any, Literal
 
 import agents_remember
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
-from agents_remember.application.orca_task_context import OrcaRoleContext
+from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.cli.paseo_bridge import (
     AGENT_WITHOUT_MESSAGE_LOST,
     BRIDGE_INVALID_REPLY,
@@ -111,7 +111,7 @@ def mint_agent_id() -> str:
     return str(uuid.uuid4())
 
 
-def agent_title(context: OrcaRoleContext) -> str:
+def agent_title(context: RoleLaunchContext) -> str:
     """``<Role> · <id of the most specific task document>``; ``<Role> · Projects`` when taskless."""
 
     role = context.role.replace("-", " ").capitalize()
@@ -119,7 +119,7 @@ def agent_title(context: OrcaRoleContext) -> str:
     return f"{role} · {subject}"[:_TITLE_LIMIT]
 
 
-def agent_labels(context: OrcaRoleContext, request_id: uuid.UUID) -> dict[str, str]:
+def agent_labels(context: RoleLaunchContext, request_id: uuid.UUID) -> dict[str, str]:
     """The role, each task reference of the selection, and the request id."""
 
     references = (
@@ -140,7 +140,7 @@ class RoleLaunch:
 
     agent_id: str
     request_id: uuid.UUID
-    context: OrcaRoleContext
+    context: RoleLaunchContext
     folder: str
     provider: str
     session_options: dict[str, str]
@@ -211,7 +211,7 @@ def launching_source_root() -> Path:
     return Path(agents_remember.__file__).resolve().parent
 
 
-def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
+def recovery_note(context: RoleLaunchContext, artifact: dict[str, Any]) -> str:
     """Role, task references, and where the complete first message is stored; no task content.
 
     The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The artifact's path and SHA-256
@@ -430,7 +430,7 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
             bridge_call(config, "agent-archive", {"agentId": predecessor})
             predecessor_settled = True
         opened = bridge_call(config, "workspace-open", {"cwd": folder})
-        workspace_id = _opened_workspace_id(opened, folder)
+        workspace_id = opened_workspace_id(opened, folder)
         created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
         return _created_outcome(created, agent_id, workspace_id)
     except PaseoBridgeFailure as error:
@@ -444,7 +444,7 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
         )
 
 
-def _opened_workspace_id(reply: dict[str, Any], folder: str) -> str:
+def opened_workspace_id(reply: dict[str, Any], folder: str) -> str:
     workspace = reply.get("workspace")
     workspace_id = workspace.get("id") if isinstance(workspace, dict) else None
     directory = workspace.get("directory") if isinstance(workspace, dict) else None

@@ -24,7 +24,7 @@ from agents_remember.application.task_docs.task_execution_registration import (
 )
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
-from agents_remember.cli.orca_task_routes import register_orca_task_routes
+from agents_remember.cli.role_launch_routes import register_role_launch_routes
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
@@ -111,7 +111,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         capsule_launch=partial(compile_launch_capsule, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
-        extra_api_routes=partial(register_orca_task_routes, config=config),
+        extra_api_routes=partial(register_role_launch_routes, config=config),
     )
 
 

@@ -37,7 +37,8 @@ _CODE_LIMIT = 100
 _MESSAGE_LIMIT = 800
 _STDERR_TAIL = 200
 # A Node crash report is: source line, caret, the error line, stack frames, the version line.
-_ERROR_LINE = re.compile(r"^\S*Error\b.*", re.MULTILINE)
+# A process Node ends itself (out of memory) says why in a line that begins with FATAL ERROR.
+_ERROR_LINE = re.compile(r"^(?:\S*Error\b|FATAL ERROR\b).*", re.MULTILINE)
 _REPORT_NOISE = re.compile(r"\s+at .*|\s*|Node\.js v\S+")
 
 RUNTIME_NOT_CONFIGURED = PaseoRuntimeNotConfigured.code
@@ -78,6 +79,9 @@ def bridge_call(
             [node, script.as_posix(), command],
             input=json.dumps(payload, ensure_ascii=False),
             encoding="utf-8",
+            # Output that is not UTF-8 is read with replacement characters: it then fails as an
+            # unreadable reply, a named failure, instead of leaving this call as a decoding error.
+            errors="replace",
             capture_output=True,
             check=False,
             timeout=PASEO_BRIDGE_TIMEOUT_SECONDS,

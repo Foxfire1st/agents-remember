@@ -86,7 +86,7 @@ const frameButton = css({
 });
 
 function fetchFrameDescriptor(): Promise<PaseoFrameDescriptor> {
-  return fetch("/api/orca/frame")
+  return fetch("/api/role-launch/frame")
     .then(async (response) => parseFrameDescriptor(await response.json().catch(() => null)))
     .catch(() => parseFrameDescriptor(null));
 }
@@ -248,7 +248,7 @@ function EmbeddedFrame({
       <iframe
         key={frame.generation}
         ref={frameRef}
-        title="Native Orca chats"
+        title="Role chats"
         src={frame.src}
         referrerPolicy="origin"
         allow={"clipboard-read " + available.frameOrigin + "; clipboard-write " + available.frameOrigin}

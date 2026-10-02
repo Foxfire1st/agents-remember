@@ -27,9 +27,9 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from agents_remember.cli.orca_task_preparation import _workspace_folder
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
-from agents_remember.cli.paseo_launch import _opened_workspace_id
+from agents_remember.cli.paseo_launch import opened_workspace_id
+from agents_remember.cli.role_launch_preparation import workspace_folder
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
@@ -73,8 +73,8 @@ def host_frame_facts(config: McpRuntimeConfig) -> HostFrameFacts:
     if not isinstance(server_id, str) or not server_id:
         return HostFrameFacts(reachable=True)
     try:
-        folder = _workspace_folder(config.workspace_root)["path"]
-        workspace_id = _opened_workspace_id(
+        folder = workspace_folder(config.workspace_root)["path"]
+        workspace_id = opened_workspace_id(
             bridge_call(config, "workspace-open", {"cwd": folder}), folder
         )
     except (PaseoBridgeFailure, OSError) as error:

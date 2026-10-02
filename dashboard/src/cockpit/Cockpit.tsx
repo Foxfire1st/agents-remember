@@ -10,7 +10,7 @@ import {
 import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
-import { ChatsModePanels } from "./OrcaChats";
+import { ChatsModePanels } from "./RoleChats";
 import {
   preferLiveSession,
   startCatalogPollDriver,

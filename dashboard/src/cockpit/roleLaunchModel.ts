@@ -8,10 +8,10 @@ import { sameTaskDocumentRef, taskDocSelectionKey, taskDocumentRefForDoc } from 
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import type { TaskDocumentRef } from "../types/terminalCatalog";
 
-export type OrcaRole = "architect" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
-export type OrcaAction = "start" | "revive";
+export type LauncherRole = "architect" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
+export type RoleAction = "start" | "revive";
 
-export const ORCA_ROLES: { id: OrcaRole; label: string }[] = [
+export const LAUNCHER_ROLES: { id: LauncherRole; label: string }[] = [
   { id: "architect", label: "Architect" },
   { id: "system-specialist", label: "System specialist" },
   { id: "orchestrator", label: "Orchestrator" },
@@ -21,35 +21,35 @@ export const ORCA_ROLES: { id: OrcaRole; label: string }[] = [
   { id: "curator", label: "Curator" },
 ];
 
-export interface OrcaTaskOption {
+export interface RoleTaskOption {
   doc: TaskDocNode;
   ref: TaskDocumentRef;
 }
 
-export interface OrcaEffortChoice {
+export interface RoleEffortChoice {
   id: string;
   label: string;
 }
 
-export interface OrcaModelChoice {
+export interface RoleModelChoice {
   id: string;
   label: string;
-  efforts?: OrcaEffortChoice[];
+  efforts?: RoleEffortChoice[];
   defaultEffort?: string;
 }
 
-export const EMPTY_ORCA_MODELS: OrcaModelChoice[] = [];
-export const EMPTY_ORCA_EFFORTS: OrcaEffortChoice[] = [];
+export const EMPTY_ROLE_MODELS: RoleModelChoice[] = [];
+export const EMPTY_ROLE_EFFORTS: RoleEffortChoice[] = [];
 
-export interface OrcaAgentChoice {
+export interface RoleAgentChoice {
   id: string;
   label: string;
-  models: OrcaModelChoice[];
+  models: RoleModelChoice[];
   /** Set when the host could not list this agent's models; the agent stays selectable. */
   listingError?: string;
 }
 
-export interface OrcaRoleDefaults {
+export interface RoleDefaults {
   agent?: string;
   model?: string;
   effort?: string;
@@ -57,17 +57,17 @@ export interface OrcaRoleDefaults {
   available?: boolean;
 }
 
-export interface OrcaAgentOverride {
+export interface RoleAgentOverride {
   agentId: string;
   modelId?: string;
   effortId?: string;
 }
 
-export interface OrcaScopedExecution {
+export interface RoleScopedExecution {
   status: string;
   detail?: string;
   requestId?: string;
-  retryPayload?: OrcaLaunchSelection;
+  retryPayload?: RoleLaunchSelection;
   canStart: boolean;
   canRevive: boolean;
   canRetry?: boolean;
@@ -80,68 +80,75 @@ export interface OrcaScopedExecution {
   hostUnreachableReason?: string;
 }
 
-export interface OrcaLaunchSelection {
-  role: OrcaRole;
+export interface RoleLaunchSelection {
+  role: LauncherRole;
   sprintDocumentRef?: TaskDocumentRef;
   masterDocumentRef?: TaskDocumentRef;
   taskDocumentRef?: TaskDocumentRef;
-  agentOverride?: OrcaAgentOverride;
+  agentOverride?: RoleAgentOverride;
 }
 
-export interface OrcaDocumentScope {
-  role: OrcaRole;
+export interface RoleDocumentScope {
+  role: LauncherRole;
   sprintDocumentRef?: TaskDocumentRef;
   masterDocumentRef?: TaskDocumentRef;
   taskDocumentRef?: TaskDocumentRef;
 }
 
-export interface OrcaOptionsScope extends OrcaDocumentScope {
+export interface RoleOptionsScope extends RoleDocumentScope {
   agentId?: string;
 }
 
-export interface OrcaLauncherOptions {
-  roleDefaults: OrcaRoleDefaults;
-  agents: OrcaAgentChoice[];
-  execution?: OrcaScopedExecution | null;
-  executions?: OrcaExecutionReceipt[];
+export interface RoleLauncherOptions {
+  roleDefaults: RoleDefaults;
+  agents: RoleAgentChoice[];
+  execution?: RoleScopedExecution | null;
+  executions?: RoleExecutionReceipt[];
   catalogOrigin?: string;
 }
 
-export interface OrcaAgentInventory {
+export interface RoleAgentInventory {
   catalogOrigin: string;
-  agents: OrcaAgentChoice[];
+  agents: RoleAgentChoice[];
 }
 
-export interface OrcaExecutionReceipt extends OrcaScopedExecution {
-  result?: { summary?: string; status?: string; outcome?: string; filesModified?: string[] };
-  execution?: { kind?: string; handle?: string; sessionId?: string; worktreeId?: string };
+/** The host fields of an execution: the agent the host runs for it (`kind: "paseo-agent"`). */
+export interface RoleExecutionHost {
+  kind?: string;
+  serverId?: string;
+  workspaceId?: string;
+  agentId?: string;
 }
 
-export interface OrcaTasklessActiveRequest {
+export interface RoleExecutionReceipt extends RoleScopedExecution {
+  execution?: RoleExecutionHost;
+}
+
+export interface RoleTasklessActiveRequest {
   requestId: string;
   pending?: boolean;
-  retryPayload?: OrcaLaunchSelection;
+  retryPayload?: RoleLaunchSelection;
 }
 
-export function isUncertainOrcaExecution(execution: OrcaScopedExecution): boolean {
+export function isUncertainRoleExecution(execution: RoleScopedExecution): boolean {
   return execution.canRetry === true || ["starting", "unknown"].includes(execution.status.toLowerCase());
 }
 
-export function taskOptionsForDocs(docs: TaskDocNode[]): OrcaTaskOption[] {
+export function taskOptionsForDocs(docs: TaskDocNode[]): RoleTaskOption[] {
   return docs.flatMap((doc) => {
     const ref = taskDocumentRefForDoc(doc);
     return ref ? [{ doc, ref }] : [];
   });
 }
 
-export function sprintOptionsForDocs(taskDocuments: TaskDocNode[]): OrcaTaskOption[] {
+export function sprintOptionsForDocs(taskDocuments: TaskDocNode[]): RoleTaskOption[] {
   return taskOptionsForDocs(taskDocuments.filter(isOrchestrationDoc));
 }
 
 export function masterOptionsForSprint(
   taskDocuments: TaskDocNode[],
   sprint: TaskDocNode | undefined,
-): OrcaTaskOption[] {
+): RoleTaskOption[] {
   if (!sprint) return [];
   const sprintSelection = taskDocSelectionKey(sprint.docPath);
   const repositoryDocs = taskDocuments.filter((doc) => doc.repository === sprint.repository);
@@ -156,7 +163,7 @@ export function taskOptionsForMaster(
   taskDocuments: TaskDocNode[],
   series: SeriesNode[],
   master: TaskDocNode | undefined,
-): OrcaTaskOption[] {
+): RoleTaskOption[] {
   if (!master) return [];
   const masterDocPaths = new Set(taskDocuments.filter((doc) => doc.kind === "master").map((doc) => doc.docPath));
   const parentSelection = taskDocSelectionKey(master.docPath);
@@ -166,12 +173,12 @@ export function taskOptionsForMaster(
   ));
 }
 
-export function optionIndex(options: OrcaTaskOption[], ref: TaskDocumentRef | undefined): string {
+export function optionIndex(options: RoleTaskOption[], ref: TaskDocumentRef | undefined): string {
   const index = ref ? options.findIndex((option) => sameTaskDocumentRef(option.ref, ref)) : -1;
   return index < 0 ? "" : String(index);
 }
 
-export function refAtOptionIndex(options: OrcaTaskOption[], value: string): TaskDocumentRef | undefined {
+export function refAtOptionIndex(options: RoleTaskOption[], value: string): TaskDocumentRef | undefined {
   if (value === "") return undefined;
   const index = Number(value);
   return Number.isInteger(index) ? options[index]?.ref : undefined;
@@ -181,20 +188,20 @@ export function taskRefIdentity(ref: TaskDocumentRef | undefined): string | unde
   return ref ? ref.repository + "/" + ref.path : undefined;
 }
 
-export function roleNeedsSprint(role: OrcaRole): boolean {
+export function roleNeedsSprint(role: LauncherRole): boolean {
   return role !== "architect" && role !== "system-specialist";
 }
 
-export function isTasklessOrcaRole(role: OrcaRole): boolean {
+export function isTasklessRole(role: LauncherRole): boolean {
   return role === "architect" || role === "system-specialist";
 }
 
-export function tasklessRequestStorageKey(role: OrcaRole): string {
-  return "ar-orca-taskless-request-v1:" + role;
+export function tasklessRequestStorageKey(role: LauncherRole): string {
+  return "ar-role-taskless-request-v1:" + role;
 }
 
-export function readTasklessActiveRequests(): Partial<Record<OrcaRole, OrcaTasklessActiveRequest>> {
-  const active: Partial<Record<OrcaRole, OrcaTasklessActiveRequest>> = {};
+export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleTasklessActiveRequest>> {
+  const active: Partial<Record<LauncherRole, RoleTasklessActiveRequest>> = {};
   for (const role of ["architect", "system-specialist"] as const) {
     const stored = sessionStorage.getItem(tasklessRequestStorageKey(role));
     if (!stored) continue;
@@ -205,7 +212,7 @@ export function readTasklessActiveRequests(): Partial<Record<OrcaRole, OrcaTaskl
         retryPayload?: unknown;
       };
       if (typeof value.requestId !== "string" || !value.requestId) continue;
-      const payload = value.retryPayload as OrcaLaunchSelection | undefined;
+      const payload = value.retryPayload as RoleLaunchSelection | undefined;
       active[role] = {
         requestId: value.requestId,
         ...(value.pending === true ? { pending: true } : {}),
@@ -225,15 +232,15 @@ export function readTasklessActiveRequests(): Partial<Record<OrcaRole, OrcaTaskl
   return active;
 }
 
-export function roleNeedsMaster(role: OrcaRole): boolean {
+export function roleNeedsMaster(role: LauncherRole): boolean {
   return role === "manager" || role === "worker" || role === "reviewer" || role === "curator";
 }
 
-export function roleNeedsTask(role: OrcaRole): boolean {
+export function roleNeedsTask(role: LauncherRole): boolean {
   return role === "worker" || role === "reviewer" || role === "curator";
 }
 
-export function orcaDocumentScope(selection: OrcaLaunchSelection): OrcaDocumentScope {
+export function roleDocumentScope(selection: RoleLaunchSelection): RoleDocumentScope {
   return {
     role: selection.role,
     ...(roleNeedsSprint(selection.role) && selection.sprintDocumentRef
@@ -248,31 +255,31 @@ export function orcaDocumentScope(selection: OrcaLaunchSelection): OrcaDocumentS
   };
 }
 
-export function orcaOptionsScope(selection: OrcaLaunchSelection): OrcaOptionsScope {
+export function roleOptionsScope(selection: RoleLaunchSelection): RoleOptionsScope {
   return {
-    ...orcaDocumentScope(selection),
+    ...roleDocumentScope(selection),
     ...(selection.agentOverride?.agentId ? { agentId: selection.agentOverride.agentId } : {}),
   };
 }
 
-export function launchSelectionComplete(selection: OrcaLaunchSelection): boolean {
+export function launchSelectionComplete(selection: RoleLaunchSelection): boolean {
   return (!roleNeedsSprint(selection.role) || Boolean(selection.sprintDocumentRef)) &&
     (!roleNeedsMaster(selection.role) || Boolean(selection.masterDocumentRef)) &&
     (!roleNeedsTask(selection.role) || Boolean(selection.taskDocumentRef));
 }
 
-export function roleDefaultsCacheKey(scope: OrcaDocumentScope): string {
+export function roleDefaultsCacheKey(scope: RoleDocumentScope): string {
   const effectiveRef = scope.taskDocumentRef ?? scope.masterDocumentRef ?? scope.sprintDocumentRef;
   return scope.role + "::" + (effectiveRef?.repository ?? "projects");
 }
 
-export function mergeOrcaAgentInventory(
-  previous: OrcaAgentInventory | null,
-  options: OrcaLauncherOptions,
+export function mergeRoleAgentInventory(
+  previous: RoleAgentInventory | null,
+  options: RoleLauncherOptions,
   selectedAgentId: string | undefined,
   refresh: boolean,
-): OrcaAgentInventory {
-  const catalogOrigin = options.catalogOrigin ?? previous?.catalogOrigin ?? "active-orca-runtime";
+): RoleAgentInventory {
+  const catalogOrigin = options.catalogOrigin ?? previous?.catalogOrigin ?? "active-runtime";
   if (!previous || previous.catalogOrigin !== catalogOrigin || refresh) {
     return { catalogOrigin, agents: options.agents };
   }
@@ -296,19 +303,19 @@ export function sameOptionalTaskDocumentRef(
   return left && right ? sameTaskDocumentRef(left, right) : left === right;
 }
 
-export function sameOrcaDocumentScope(left: OrcaDocumentScope, right: OrcaDocumentScope): boolean {
+export function sameRoleDocumentScope(left: RoleDocumentScope, right: RoleDocumentScope): boolean {
   return left.role === right.role &&
     sameOptionalTaskDocumentRef(left.sprintDocumentRef, right.sprintDocumentRef) &&
     sameOptionalTaskDocumentRef(left.masterDocumentRef, right.masterDocumentRef) &&
     sameOptionalTaskDocumentRef(left.taskDocumentRef, right.taskDocumentRef);
 }
 
-export function sameOrcaOptionsScope(left: OrcaOptionsScope, right: OrcaOptionsScope): boolean {
-  return sameOrcaDocumentScope(left, right) && left.agentId === right.agentId;
+export function sameRoleOptionsScope(left: RoleOptionsScope, right: RoleOptionsScope): boolean {
+  return sameRoleDocumentScope(left, right) && left.agentId === right.agentId;
 }
 
-export function sameOrcaLaunchSelection(left: OrcaLaunchSelection, right: OrcaLaunchSelection): boolean {
-  return sameOrcaDocumentScope(orcaDocumentScope(left), orcaDocumentScope(right)) &&
+export function sameRoleLaunchSelection(left: RoleLaunchSelection, right: RoleLaunchSelection): boolean {
+  return sameRoleDocumentScope(roleDocumentScope(left), roleDocumentScope(right)) &&
     left.agentOverride?.agentId === right.agentOverride?.agentId &&
     left.agentOverride?.modelId === right.agentOverride?.modelId &&
     left.agentOverride?.effortId === right.agentOverride?.effortId;
@@ -321,9 +328,9 @@ export function sameOrcaLaunchSelection(left: OrcaLaunchSelection, right: OrcaLa
  * effort only on the role's model, and a value the catalog does not offer is never replaced.
  */
 export function launchChoiceProblem(
-  defaults: OrcaRoleDefaults,
-  agents: OrcaAgentChoice[],
-  override: OrcaAgentOverride | undefined,
+  defaults: RoleDefaults,
+  agents: RoleAgentChoice[],
+  override: RoleAgentOverride | undefined,
 ): string | null {
   if (!override) return unofferedRoleDefault(defaults);
   const agent = agents.find((choice) => choice.id === override.agentId);
@@ -338,7 +345,7 @@ function roleValue(applies: boolean, value: string | undefined): string | undefi
   return applies && value ? value : undefined;
 }
 
-function unofferedRoleDefault(defaults: OrcaRoleDefaults): string | null {
+function unofferedRoleDefault(defaults: RoleDefaults): string | null {
   if (defaults.available !== false) return null;
   const configured = [defaults.agent, defaults.model, defaults.effort].filter(Boolean).join(" · ");
   return configured
@@ -347,7 +354,7 @@ function unofferedRoleDefault(defaults: OrcaRoleDefaults): string | null {
 }
 
 function unofferedModelOrEffort(
-  agent: OrcaAgentChoice,
+  agent: RoleAgentChoice,
   modelId: string | undefined,
   effortId: string | undefined,
 ): string | null {
@@ -360,12 +367,12 @@ function unofferedModelOrEffort(
   return null;
 }
 
-export function orcaAgentOverrideFor(
+export function roleAgentOverrideFor(
   agentId: string | undefined,
   modelId: string | undefined,
   effortId: string | undefined,
-  defaults: OrcaRoleDefaults,
-): OrcaAgentOverride | undefined {
+  defaults: RoleDefaults,
+): RoleAgentOverride | undefined {
   if (!agentId) return undefined;
   if (agentId === defaults.agent && (!modelId || modelId === defaults.model) && (!effortId || effortId === defaults.effort)) {
     return undefined;

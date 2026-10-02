@@ -221,9 +221,9 @@ def advertised_tool_names() -> set[str]:
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
 #
-# 74 on the PNT line: the ONT line registered `orca_role_prepare` without this edit (73 against
-# the 72 written here, so this case failed on that base), and PNT-R06 removes that tool and adds
-# `role_start` and `role_message`.
+# 74 on the PNT line: the ONT line registered its role-preparation tool without this edit (73
+# against the 72 written here, so this case failed on that base), and PNT-R06 removes that tool
+# and adds `role_start` and `role_message`.
 ROSTER_SIZE = 74
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
@@ -232,8 +232,8 @@ ROSTER_SIZE = 74
 # nothing, and the derivation below is what makes a silent change fail.
 #
 # 21 modules and 98 handlers on the PNT line: the ONT line added one module with one handler
-# (`orca_handover.py`) without this edit; PNT-R06 replaces it with `role_agents.py`, whose two
-# handlers are `role_start_payload` and `role_message_payload`.
+# (its role-preparation tool) without this edit; PNT-R06 replaces it with `role_agents.py`, whose
+# two handlers are `role_start_payload` and `role_message_payload`.
 TOOL_MODULE_COUNT = 21
 TOOL_HANDLER_COUNT = 98
 

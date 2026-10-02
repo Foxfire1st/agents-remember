@@ -15,28 +15,27 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.application.orca_task_context import OrcaRoleContext, selection_binding
+from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
 from agents_remember.cli import (
     leaf_enclosure_start,
-    orca_task_preparation,
-    orca_task_receipts,
-    orca_task_routes,
     paseo_catalog,
     paseo_launch,
     paseo_status,
+    role_launch_preparation,
+    role_launch_receipts,
+    role_launch_routes,
 )
-from agents_remember.cli.orca_runtime import digest
-from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import agent_title
+from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
+from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.models.orca_launcher import (
-    OrcaDispatchRequest,
-    OrcaLauncherOptionsRequest,
-    OrcaResultRequest,
+from agents_remember.models.role_launcher import (
+    RoleDispatchRequest,
+    RoleLauncherOptionsRequest,
+    RoleResultRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
@@ -319,17 +318,21 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.addCleanup(forget_launcher_catalogs)
         self.enclosures.on_start = self.record_enclosure_in_leaf
         self.resolve_context = self.replace(
-            orca_task_routes, "resolve_orca_role_context", side_effect=self.context
+            role_launch_routes, "resolve_role_launch_context", side_effect=self.context
         )
-        self.replace(orca_task_preparation, "resolve_orca_role_context", side_effect=self.context)
+        self.replace(
+            role_launch_preparation, "resolve_role_launch_context", side_effect=self.context
+        )
         self.replace(paseo_catalog, "bridge_call", self.runtime)
         self.replace(paseo_launch, "bridge_call", self.runtime)
         self.replace(paseo_status, "bridge_call", self.runtime)
-        self.replace(orca_task_preparation, "worktree_status_tool", self.enclosures.status)
-        self.replace(orca_task_preparation, "worktree_start_tool", self.enclosures.start)
-        self.replace(orca_task_preparation, "_compile_handover", self.compile_handover)
-        self.replace(orca_task_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"})
-        self.replace(orca_task_preparation, "_role_defaults", return_value=ROLE_DEFAULTS)
+        self.replace(role_launch_preparation, "worktree_status_tool", self.enclosures.status)
+        self.replace(role_launch_preparation, "worktree_start_tool", self.enclosures.start)
+        self.replace(role_launch_preparation, "_compile_handover", self.compile_handover)
+        self.replace(
+            role_launch_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"}
+        )
+        self.replace(role_launch_preparation, "_role_defaults", return_value=ROLE_DEFAULTS)
         # The source tree of the launching build, as a checkout outside the interpreter has it.
         self.source = self.root / "build" / "src" / "agents_remember"
         self.replace(paseo_launch, "launching_source_root", return_value=self.source)
@@ -355,12 +358,12 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.addCleanup(patcher.stop)
         return patcher.start()
 
-    def context(self, _config: McpRuntimeConfig, selection: Any) -> OrcaRoleContext:
+    def context(self, _config: McpRuntimeConfig, selection: Any) -> RoleLaunchContext:
         refs = ROLE_REFS[selection.role]
         sprint = self.sprint if "sprintDocumentRef" in refs else None
         master = self.master if "masterDocumentRef" in refs else None
         task = self.leaf if "taskDocumentRef" in refs else None
-        return OrcaRoleContext(selection.role, sprint, master, task, task or master or sprint)
+        return RoleLaunchContext(selection.role, sprint, master, task, task or master or sprint)
 
     def record_enclosure_in_leaf(self) -> None:
         """What AR's worktree start does to the leaf's task document."""
@@ -375,7 +378,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
             document=self.leaf.document.model_copy(update={"enclosures": [enclosure]}),
         )
 
-    def compile_handover(self, request: OrcaHandoverRequest) -> dict[str, Any]:
+    def compile_handover(self, request: RoleHandoverRequest) -> dict[str, Any]:
         assert request.request_id is not None
         report = (self.root / "reports" / f"{request.request_id}.md").as_posix()
         context = request.context
@@ -409,7 +412,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         }
 
     def request(self, role: str, request_id: uuid.UUID | None = None, **override: str) -> Any:
-        return OrcaDispatchRequest.model_validate(
+        return RoleDispatchRequest.model_validate(
             {
                 "role": role,
                 "requestId": request_id or uuid.uuid4(),
@@ -419,38 +422,38 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         )
 
     def dispatch(
-        self, request: OrcaDispatchRequest, config: McpRuntimeConfig | None = None
+        self, request: RoleDispatchRequest, config: McpRuntimeConfig | None = None
     ) -> tuple[int, dict[str, Any]]:
-        response = orca_task_routes._orca_dispatch_endpoint(config or self.config, request)
+        response = role_launch_routes._role_launch_dispatch_endpoint(config or self.config, request)
         return response.status_code, json.loads(bytes(response.body))
 
-    def refused(self, request: OrcaDispatchRequest, **kwargs: Any) -> HTTPException:
+    def refused(self, request: RoleDispatchRequest, **kwargs: Any) -> HTTPException:
         with self.assertRaises(HTTPException) as raised:
             self.dispatch(request, **kwargs)
         return raised.exception
 
-    def receipt_path(self, request: OrcaDispatchRequest) -> Path:
+    def receipt_path(self, request: RoleDispatchRequest) -> Path:
         taskless = not ROLE_REFS[request.role]
-        return orca_task_receipts._receipt_path(
+        return role_launch_receipts._receipt_path(
             self.config, request, request.request_id if taskless else None
         )
 
-    def receipt(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+    def receipt(self, request: RoleDispatchRequest) -> dict[str, Any]:
         return json.loads(self.receipt_path(request).read_text(encoding="utf-8"))
 
-    def agent_of(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+    def agent_of(self, request: RoleDispatchRequest) -> dict[str, Any]:
         """The fake runtime's record of the agent this execution launched."""
 
         return self.runtime.agents[self.receipt(request)["execution"]["agentId"]]
 
     def refresh(
-        self, request: OrcaDispatchRequest, config: McpRuntimeConfig | None = None
+        self, request: RoleDispatchRequest, config: McpRuntimeConfig | None = None
     ) -> dict[str, Any]:
         """Press Result: the result route for the execution of this request."""
 
-        response = orca_task_routes._orca_result_endpoint(
+        response = role_launch_routes._role_launch_result_endpoint(
             config or self.config,
-            OrcaResultRequest.model_validate(
+            RoleResultRequest.model_validate(
                 {
                     "role": request.role,
                     "requestId": request.request_id,
@@ -460,7 +463,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         )
         return json.loads(bytes(response.body))
 
-    def close_execution(self, request: OrcaDispatchRequest, status: str) -> dict[str, Any]:
+    def close_execution(self, request: RoleDispatchRequest, status: str) -> dict[str, Any]:
         """Let the agent end its turn so that a refresh closes the execution with this status."""
 
         self.agent_of(request).update(CLOSING_STATES[status])
@@ -514,9 +517,9 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             with self.subTest(role):
                 request = self.request(role)
                 # Selecting in the launcher creates no enclosure; only Start does.
-                options = orca_task_routes._orca_options_endpoint(
+                options = role_launch_routes._role_launch_options_endpoint(
                     self.config,
-                    OrcaLauncherOptionsRequest.model_validate({"role": role, **ROLE_REFS[role]}),
+                    RoleLauncherOptionsRequest.model_validate({"role": role, **ROLE_REFS[role]}),
                 )
                 self.assertEqual(len(json.loads(bytes(options.body))["agents"]), 2)
                 self.assertEqual(self.enclosures.start_calls, [])
@@ -602,7 +605,6 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.enclosures.start_calls[0].leaf_id, "01_LEAF")
         self.assertEqual(self.enclosures.start_calls[0].parent_task, "sprint")
-        self.assertEqual(list(self.root.rglob("orca-native-executions")), [])
         bindings = self.config.coordination_root / "notes/reports/paseo-native-executions"
         self.assertEqual(len(list((bindings / "message-bindings").glob("*.json"))), 4)
         titles = {
@@ -614,32 +616,21 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             {"Reviewer · 01_LEAF", "Curator · 01_LEAF"},
         )
 
-    def test_two_taskless_agents_coexist_and_ont_receipts_are_never_read(self) -> None:
+    def test_two_taskless_agents_coexist(self) -> None:
+        # That receipts of the line this build was copied from are never read is shown where
+        # that line's names may be written: test_previous_host_removed.py.
         first, second = self.request("architect"), self.request("architect")
         worker = self.request("worker")
-        ont = self.config.coordination_root / "notes" / "reports" / "orca-native-executions"
-        leaf_ont = self.leaf.path.parent / "notes" / "reports" / "orca-native-executions"
-        saved = {"schema": "ar-orca-native-execution/v1", "status": "running", "role": "architect"}
-        ont_files = {
-            ont / self.receipt_path(first).relative_to(ont.with_name("paseo-native-executions")),
-            ont / "architect-legacy.json",
-            ont / "history" / f"{uuid.uuid4()}.json",
-            leaf_ont / self.receipt_path(worker).name,
-        }
-        for path in ont_files:
-            orca_task_receipts._write_receipt(path, {**saved, "requestId": str(uuid.uuid4())})
-        before = {path: path.read_bytes() for path in ont_files}
 
         for request in (first, second, worker):
             self.assertEqual(self.dispatch(request)[0], 200)
 
-        self.assertEqual({path: path.read_bytes() for path in ont_files}, before)
         agents = [self.receipt(request)["execution"] for request in (first, second)]
         self.assertEqual(len({agent["agentId"] for agent in agents}), 2)
         self.assertEqual({agent["workspaceId"] for agent in agents}, {"wks_1"})
         self.assertEqual(len(self.runtime.agents), 3)
-        options = orca_task_routes._orca_options_endpoint(
-            self.config, OrcaLauncherOptionsRequest(role="architect")
+        options = role_launch_routes._role_launch_options_endpoint(
+            self.config, RoleLauncherOptionsRequest(role="architect")
         )
         executions = json.loads(bytes(options.body))["executions"]
         self.assertEqual(
@@ -702,7 +693,7 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
     def test_only_the_dashboard_process_starts_the_enclosure_in_a_child_process(self) -> None:
         with self.subTest("the dashboard process"):
             role = self.replace(
-                orca_task_preparation, "declared_process_role", return_value="dashboard"
+                role_launch_preparation, "declared_process_role", return_value="dashboard"
             )
             calls = self.child_process()
             request = self.request("worker")
@@ -752,13 +743,17 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
         for role_name in (None, "mcp"):
             with self.subTest("another process", role=role_name):
                 self.enclosures = FakeEnclosures(self.root / f"other-{role_name}")
-                self.replace(orca_task_preparation, "worktree_status_tool", self.enclosures.status)
-                self.replace(orca_task_preparation, "worktree_start_tool", self.enclosures.start)
-                self.replace(orca_task_preparation, "declared_process_role", return_value=role_name)
+                self.replace(
+                    role_launch_preparation, "worktree_status_tool", self.enclosures.status
+                )
+                self.replace(role_launch_preparation, "worktree_start_tool", self.enclosures.start)
+                self.replace(
+                    role_launch_preparation, "declared_process_role", return_value=role_name
+                )
                 calls = self.child_process(AssertionError("no child process is started here"))
                 (identity,) = (
                     self.enclosures.start_calls
-                    if orca_task_preparation._ensure_leaf_enclosure(
+                    if role_launch_preparation._ensure_leaf_enclosure(
                         self.config, self.leaf, parent_task="sprint"
                     )
                     else []
@@ -767,7 +762,7 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
                 self.assertEqual(calls, [])
 
     def test_a_child_that_refuses_fails_or_does_not_end_refuses_the_launch(self) -> None:
-        self.replace(orca_task_preparation, "declared_process_role", return_value="dashboard")
+        self.replace(role_launch_preparation, "declared_process_role", return_value="dashboard")
         refusal = json.dumps(
             {
                 "ok": False,
@@ -966,14 +961,14 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             request = self.request("architect")
             crash = RuntimeError("the backend process ended here")
             with (
-                patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+                patch.object(role_launch_receipts, "run_launch_call", side_effect=crash),
                 self.assertRaises(RuntimeError),
             ):
                 self.dispatch(request)
             saved = self.receipt(request)
             self.assertEqual(saved["status"], "starting")
             self.assertNotIn(saved["agentId"], self.runtime.agents)
-            self.assertTrue(orca_task_receipts._public_execution(saved)["canRetry"])
+            self.assertTrue(role_launch_receipts._public_execution(saved)["canRetry"])
 
             status, public = self.dispatch(request)
 
@@ -1109,13 +1104,12 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
     def test_a_task_bound_receipt_is_created_exclusively(self) -> None:
         with self.subTest("of many simultaneous creations exactly one succeeds"):
             path = self.root / "race" / "worker-selection.json"
-            receipts = [
-                {"schema": "ar-orca-native-execution/v1", "requestId": str(n)} for n in range(24)
-            ]
+            receipts = [{"schema": "ar-role-execution/v1", "requestId": str(n)} for n in range(24)]
             with ThreadPoolExecutor(max_workers=24) as pool:
                 created = list(
                     pool.map(
-                        lambda receipt: orca_task_receipts._create_receipt(path, receipt), receipts
+                        lambda receipt: role_launch_receipts._create_receipt(path, receipt),
+                        receipts,
                     )
                 )
             self.assertEqual(created.count(True), 1)
@@ -1133,13 +1127,13 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 theirs = self.request("worker")
                 path = self.receipt_path(mine)
                 competitor = {
-                    "schema": "ar-orca-native-execution/v1",
+                    "schema": "ar-role-execution/v1",
                     "requestId": str(theirs.request_id),
                     "role": "worker",
                     "status": status,
                     "execution": {},
                 }
-                write_binding = orca_task_routes._place_message_binding_projection
+                write_binding = role_launch_routes._place_message_binding_projection
 
                 def another_process_starts_first(
                     *args: Any,
@@ -1148,11 +1142,11 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                     write_binding: Any = write_binding,
                 ) -> bool:
                     # This launch has found no receipt; the other process creates its own now.
-                    self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
+                    self.assertTrue(role_launch_receipts._create_receipt(path, competitor))
                     return write_binding(*args)
 
                 with patch.object(
-                    orca_task_routes,
+                    role_launch_routes,
                     "_place_message_binding_projection",
                     side_effect=another_process_starts_first,
                 ):

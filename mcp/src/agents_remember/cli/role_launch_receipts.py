@@ -1,7 +1,7 @@
 """Durable request-addressed execution receipts and public projections.
 
-Receipts of this line live under ``paseo-native-executions``; nothing here reads the
-``orca-native-executions`` directory the ONT line wrote.
+Receipts of this line live under ``paseo-native-executions`` and carry this line's schema name;
+nothing here reads a receipt directory of the line this build was copied from.
 """
 
 from __future__ import annotations
@@ -20,35 +20,42 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from agents_remember.application.orca_task_context import (
+from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
-    OrcaRoleContext,
+    RoleLaunchContext,
     selection_binding,
 )
-from agents_remember.cli.orca_handover_artifacts import restore_handover_artifact
-from agents_remember.cli.orca_runtime import (
-    digest as _digest,
-)
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, run_launch_call
+from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import (
-    OrcaDispatchRequest,
-    OrcaResultRequest,
-    OrcaSelection,
+from agents_remember.models.role_launcher import (
+    RoleDispatchRequest,
+    RoleResultRequest,
+    RoleSelection,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 # Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
 EXECUTIONS_DIRECTORY = "paseo-native-executions"
+# The schema name every receipt of this line carries; a file without it is not read as a receipt.
+RECEIPT_SCHEMA = "ar-role-execution/v1"
 # The link in a leaf's enclosure group folder through which its agents reach the task's reports.
 REPORT_ACCESS_LINK = "task-reports"
+
+
+def digest(value: Any) -> str:
+    """The SHA-256 of a value's canonical JSON text: sorted keys, no spaces, UTF-8."""
+
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
 class _TasklessLegacyMigration:
     config: McpRuntimeConfig
-    selection: OrcaSelection
+    selection: RoleSelection
     legacy: Path
     expected_selection: dict[str, Any]
     seen_ids: set[str]
@@ -92,8 +99,9 @@ def _execute_prepared_launch(
         return JSONResponse(_public_execution(receipt))
     if outcome.kind == "refused":
         if outcome.lost_agent_id:
-            # The agent exists and can never be given its first message; the next launch on
-            # this selection archives it, as it archives the agent of an execution it replaces.
+            # The agent exists and can never be given its first message; the next launch on a
+            # task-bound selection archives it, as it archives the agent of an execution it
+            # replaces. A later start of a taskless role archives nothing.
             receipt["pendingArchiveAgentId"] = outcome.lost_agent_id
         elif not outcome.predecessor_settled:
             # The agent this launch was to replace is still live; the next launch archives it.
@@ -103,8 +111,8 @@ def _execute_prepared_launch(
             hostAgentExists=outcome.lost_agent_id is not None,
             detail=(
                 "The agent of this launch never got its first message and the Paseo runtime "
-                "cannot open its session again, so this launch is closed. Start the role "
-                f"again; that launch archives the agent. {outcome.message}"
+                "cannot open its session again, so this launch is closed. "
+                f"{_lost_agent_advice(receipt, outcome.lost_agent_id)} {outcome.message}"
                 if outcome.lost_agent_id
                 else "The Paseo runtime refused the launch; no agent exists under the minted "
                 f"agent id. {outcome.message}"
@@ -124,6 +132,18 @@ def _execute_prepared_launch(
     )
     _write_receipt(path, receipt)
     return JSONResponse(_public_execution(receipt), status_code=202)
+
+
+def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
+    """What becomes of an agent that can never be given its first message, by role class."""
+
+    if receipt.get("role") in TASKLESS_ROLES:
+        # A taskless role keeps one receipt per request, and no later start archives an agent.
+        return (
+            "Start the role again; a start of this role archives no agent, so archive agent "
+            f"{lost_agent_id} in Paseo by hand."
+        )
+    return "Start the role again; that launch archives the agent."
 
 
 def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
@@ -214,17 +234,17 @@ def _replaced_agent_id(receipt: dict[str, Any]) -> str | None:
 
 def _receipt_path(
     config: McpRuntimeConfig,
-    selection: OrcaSelection,
+    selection: RoleSelection,
     request_id: uuid.UUID | None = None,
 ) -> Path:
     if selection.role in TASKLESS_ROLES:
         if request_id is None:
-            raise ValueError("A taskless Orca receipt requires its durable requestId.")
+            raise ValueError("A taskless role execution receipt requires its durable requestId.")
         return _taskless_session_directory(config, selection.role) / f"{request_id}.json"
     return _legacy_receipt_path(config, selection)
 
 
-def _legacy_receipt_path(config: McpRuntimeConfig, selection: OrcaSelection) -> Path:
+def _legacy_receipt_path(config: McpRuntimeConfig, selection: RoleSelection) -> Path:
     topology = TaskDocumentTopology(config.coordination_root)
     role = selection.role
     ref = (
@@ -236,7 +256,7 @@ def _legacy_receipt_path(config: McpRuntimeConfig, selection: OrcaSelection) -> 
         if role == "orchestrator"
         else None
     )
-    key = _digest(selection_binding(selection))[:24]
+    key = digest(selection_binding(selection))[:24]
     if ref:
         parent = topology.path_for_ref(ref).parent
         return parent / "notes" / "reports" / EXECUTIONS_DIRECTORY / f"{role}-{key}.json"
@@ -247,7 +267,9 @@ def _legacy_receipt_path(config: McpRuntimeConfig, selection: OrcaSelection) -> 
 
 def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
     if role not in TASKLESS_ROLES:
-        raise ValueError("Per-request Orca receipts are reserved for taskless project roles.")
+        raise ValueError(
+            "Per-request role execution receipts are reserved for taskless project roles."
+        )
     return config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / role / "sessions"
 
 
@@ -262,17 +284,6 @@ def _message_binding_projection_reference(
         "path": path.as_posix(),
         "sha256": hashlib.sha256(body).hexdigest(),
     }
-
-
-def _write_message_binding_projection(
-    config: McpRuntimeConfig,
-    request_id: uuid.UUID,
-    binding: dict[str, Any],
-    expected_reference: dict[str, str],
-) -> dict[str, str]:
-    """Create or reuse the exact immutable binding file for one AR request ID."""
-    _place_message_binding_projection(config, request_id, binding, expected_reference)
-    return expected_reference
 
 
 def _place_message_binding_projection(
@@ -359,7 +370,7 @@ def _existing_message_binding_projection_matches(path: Path, expected: bytes) ->
     return True
 
 
-def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: OrcaSelection) -> None:
+def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: RoleSelection) -> None:
     """Move the bounded old taskless receipt set to request-ID addresses once."""
     if selection.role not in TASKLESS_ROLES:
         return
@@ -467,7 +478,7 @@ def _move_taskless_legacy_receipts(pending: list[tuple[Path, Path]]) -> None:
 
 
 def _taskless_execution_receipts(
-    config: McpRuntimeConfig, selection: OrcaSelection
+    config: McpRuntimeConfig, selection: RoleSelection
 ) -> list[tuple[Path, dict[str, Any]]]:
     directory = _taskless_session_directory(config, selection.role)
     try:
@@ -476,11 +487,11 @@ def _taskless_execution_receipts(
         return []
     except OSError as error:
         raise HTTPException(
-            status_code=409, detail="Taskless Orca sessions cannot be inspected safely."
+            status_code=409, detail="Taskless role executions cannot be inspected safely."
         ) from error
     if not stat.S_ISDIR(mode):
         raise HTTPException(
-            status_code=409, detail="The taskless Orca session store is not a directory."
+            status_code=409, detail="The taskless role execution store is not a directory."
         )
     expected_selection = selection_binding(selection)
     records: list[tuple[Path, dict[str, Any]]] = []
@@ -492,7 +503,8 @@ def _taskless_execution_receipts(
             request_id = uuid.UUID(str(receipt.get("requestId")))
         except (ValueError, TypeError, AttributeError) as error:
             raise HTTPException(
-                status_code=409, detail="A saved taskless Orca receipt has no valid requestId."
+                status_code=409,
+                detail="A saved taskless role execution receipt has no valid requestId.",
             ) from error
         if (
             path.name != f"{request_id}.json"
@@ -502,7 +514,7 @@ def _taskless_execution_receipts(
         ):
             raise HTTPException(
                 status_code=409,
-                detail="A saved taskless Orca receipt does not match its request address and role selection.",
+                detail="A saved taskless role execution receipt does not match its request address and role selection.",
             )
         records.append((path, receipt))
     return sorted(
@@ -513,25 +525,25 @@ def _taskless_execution_receipts(
 
 
 def _receipt_address_matches(
-    receipt: dict[str, Any], selection: OrcaDispatchRequest | OrcaResultRequest
+    receipt: dict[str, Any], selection: RoleDispatchRequest | RoleResultRequest
 ) -> bool:
     request_id = selection.request_id
     if selection.role in TASKLESS_ROLES:
         request_matches = request_id is not None and receipt.get("requestId") == str(request_id)
-    elif isinstance(selection, OrcaDispatchRequest) and selection.action == "revive":
+    elif isinstance(selection, RoleDispatchRequest) and selection.action == "revive":
         request_matches = True
     else:
         request_matches = request_id is None or receipt.get("requestId") == str(request_id)
     return receipt.get("selection") == selection_binding(selection) and request_matches
 
 
-def _request_digest(context: OrcaRoleContext, request: OrcaDispatchRequest) -> str:
+def _request_digest(context: RoleLaunchContext, request: RoleDispatchRequest) -> str:
     override = (
         request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
         if request.agent_override
         else None
     )
-    return _digest(
+    return digest(
         {
             "selection": selection_binding(context),
             "agentOverride": override,
@@ -612,24 +624,24 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
     except OSError as error:
         raise HTTPException(
             status_code=409,
-            detail="The saved Orca execution receipt cannot be inspected; reconcile it before launching.",
+            detail="The saved role execution receipt cannot be inspected; reconcile it before launching.",
         ) from error
     if not stat.S_ISREG(mode):
         raise HTTPException(
             status_code=409,
-            detail="The Orca execution receipt is not a regular file; refusing a new launch.",
+            detail="The role execution receipt is not a regular file; refusing a new launch.",
         )
     try:
         receipt = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise HTTPException(
             status_code=409,
-            detail="The Orca execution receipt is unreadable; reconcile it before launching.",
+            detail="The role execution receipt is unreadable; reconcile it before launching.",
         ) from error
-    if not isinstance(receipt, dict) or receipt.get("schema") != "ar-orca-native-execution/v1":
+    if not isinstance(receipt, dict) or receipt.get("schema") != RECEIPT_SCHEMA:
         raise HTTPException(
             status_code=409,
-            detail="The Orca execution receipt is malformed; reconcile it before launching.",
+            detail="The role execution receipt is malformed; reconcile it before launching.",
         )
     return receipt
 
@@ -682,16 +694,16 @@ def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
     request_id = receipt.get("requestId")
     if not isinstance(request_id, str):
         raise ValueError(
-            "The prior Orca receipt has no request identity and cannot be archived safely."
+            "The prior role execution receipt has no request identity and cannot be archived safely."
         )
     history = path.parent / "history" / f"{request_id}.json"
     if history.exists():
-        raise ValueError("A prior Orca execution archive already has this request identity.")
+        raise ValueError("A prior role execution archive already has this request identity.")
     history.parent.mkdir(parents=True, exist_ok=True)
     path.replace(history)
 
 
-def _archived_receipt_agent_id(path: Path, selection: OrcaSelection) -> str | None:
+def _archived_receipt_agent_id(path: Path, selection: RoleSelection) -> str | None:
     """The agent to archive when a task-bound selection has no receipt but an archived one.
 
     The newest receipt in the history that belongs to this selection names it, as
@@ -716,7 +728,7 @@ def _archived_receipt_agent_id(path: Path, selection: OrcaSelection) -> str | No
 
 
 def _refuse_reused_request_id(
-    config: McpRuntimeConfig, path: Path, request: OrcaDispatchRequest
+    config: McpRuntimeConfig, path: Path, request: RoleDispatchRequest
 ) -> None:
     """Refuse a request id that already belongs elsewhere, before anything is prepared for it.
 

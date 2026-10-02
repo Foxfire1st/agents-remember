@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.application.orca_task_context import LEAF_ROLES, ROLE_LEVELS, TASKLESS_ROLES
+from agents_remember.application.role_launch_context import LEAF_ROLES, ROLE_LEVELS, TASKLESS_ROLES
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # The name under which every launched agent is given the tool server of the launching build.

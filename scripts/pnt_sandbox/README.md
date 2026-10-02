@@ -98,7 +98,7 @@ root the dashboard and the tool server would use for the sandbox settings:
 
 - every path the loaded configuration holds, under whatever key (coordination root, Projects
   folder `workspaceRoot`, transcript and skill roots, repository and memory roots, provider
-  roots, the Paseo home and prefix, and for example an `orcaRuntime` block);
+  roots, the Paseo home and prefix);
 - the roots the build derives: task root, leaf enclosures, receipts, reports, observer and
   dashboard directories, the agentic settings file, the Dagger authority root, and what the
   build's context resolver answers for each repository.

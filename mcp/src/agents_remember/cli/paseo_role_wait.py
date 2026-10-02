@@ -11,8 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.cli.orca_task_preparation import ROLE_MESSAGE_TOOL
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.cli.role_launch_preparation import ROLE_MESSAGE_TOOL
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 # One bridge call of a wait: well inside the limit every bridge call has to end within.

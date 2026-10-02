@@ -30,24 +30,12 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
-from agents_remember.application.orca_task_context import (
+from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
-    resolve_orca_role_context,
+    resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.cli.orca_task_preparation import (
-    ROLE_MESSAGE_TOOL,
-    ROLE_START_TOOL,
-    _verify_leaf_revival_scope,
-)
-from agents_remember.cli.orca_task_receipts import (
-    EXECUTIONS_DIRECTORY,
-    _read_receipt,
-    _receipt_path,
-    _taskless_execution_receipts,
-)
-from agents_remember.cli.orca_task_routes import LaunchLockBusy, _orca_dispatch_endpoint
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     BRIDGE_TIMEOUT,
@@ -60,13 +48,25 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.role_launch_preparation import (
+    ROLE_MESSAGE_TOOL,
+    ROLE_START_TOOL,
+    _verify_leaf_revival_scope,
+)
+from agents_remember.cli.role_launch_receipts import (
+    EXECUTIONS_DIRECTORY,
+    _read_receipt,
+    _receipt_path,
+    _taskless_execution_receipts,
+)
+from agents_remember.cli.role_launch_routes import LaunchLockBusy, _role_launch_dispatch_endpoint
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
 from agents_remember.models.role_agents import (
     MAX_WAIT_SECONDS,
     RoleMessageCall,
     RoleStartCall,
 )
+from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
@@ -183,7 +183,7 @@ def sender_line(sender: StartingAgent) -> str:
 # ---------------------------------------------------------------------------------------------
 
 
-def start_rule_violation(binding: AgentBinding, selection: OrcaSelection) -> tuple[str, str] | None:
+def start_rule_violation(binding: AgentBinding, selection: RoleSelection) -> tuple[str, str] | None:
     """The rule a start would violate, as (refusal, the rule in words); ``None`` when allowed."""
 
     allowed = MAY_START.get(binding.role, ())
@@ -239,7 +239,7 @@ def _start_role(
     config: McpRuntimeConfig, call: RoleStartCall, binding: AgentBinding
 ) -> dict[str, Any]:
     try:
-        request = OrcaDispatchRequest.model_validate(
+        request = RoleDispatchRequest.model_validate(
             {
                 "role": call.role,
                 "sprintDocumentRef": call.sprint_document_ref,
@@ -263,7 +263,7 @@ def _start_role(
     # time of this call; this process keeps no catalog between calls.
     forget_launcher_catalogs()
     try:
-        response = _orca_dispatch_endpoint(
+        response = _role_launch_dispatch_endpoint(
             config,
             request,
             started_by=starting_agent(config, binding),
@@ -359,7 +359,7 @@ def _host_unreachable(detail: str) -> _Refused:
     )
 
 
-def _started(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> dict[str, Any]:
+def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str, Any]:
     """The tool's answer, read from the receipt the start path wrote for this request."""
 
     try:
@@ -575,7 +575,7 @@ def _recipient_by_selection(
     """
 
     try:
-        selection = OrcaSelection.model_validate(
+        selection = RoleSelection.model_validate(
             {
                 "role": call.role,
                 "sprintDocumentRef": call.sprint_document_ref,
@@ -583,7 +583,7 @@ def _recipient_by_selection(
                 "taskDocumentRef": call.task_document_ref,
             }
         )
-        resolve_orca_role_context(config, selection)
+        resolve_role_launch_context(config, selection)
         receipts = _selection_receipts(config, selection)
     except (ValidationError, ValueError, TaskDocumentRefError, HTTPException) as error:
         detail = error.detail if isinstance(error, HTTPException) else error
@@ -646,7 +646,7 @@ def _live_agents(
     return live, archived
 
 
-def _selection_receipts(config: McpRuntimeConfig, selection: OrcaSelection) -> list[dict[str, Any]]:
+def _selection_receipts(config: McpRuntimeConfig, selection: RoleSelection) -> list[dict[str, Any]]:
     """The selection's executions, the current one first, then earlier ones newest first."""
 
     if selection.role in TASKLESS_ROLES:
@@ -763,8 +763,8 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
     receipt = recipient.receipt
     if receipt.get("role") in LEAF_ROLES:
         try:
-            selection = OrcaSelection.model_validate(receipt.get("selection"))
-            _verify_leaf_revival_scope(resolve_orca_role_context(config, selection), receipt)
+            selection = RoleSelection.model_validate(receipt.get("selection"))
+            _verify_leaf_revival_scope(resolve_role_launch_context(config, selection), receipt)
         except (ValidationError, ValueError, TaskDocumentRefError) as error:
             raise _Refused(
                 "scope-check-failed",

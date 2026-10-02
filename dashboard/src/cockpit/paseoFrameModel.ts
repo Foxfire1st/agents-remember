@@ -2,6 +2,8 @@
 // host fields of an execution, the frame URLs built from them, and the messages the AR plugin
 // sends up from inside the frame. Pure functions only; PaseoChatFrame.tsx owns the state.
 
+import type { RoleExecutionHost } from "./roleLaunchModel";
+
 /** The agent of an execution, as its public execution names it (`execution.kind: "paseo-agent"`). */
 export interface PaseoAgentTarget {
   agentId: string;
@@ -53,7 +55,8 @@ function text(value: unknown): string | undefined {
  */
 export function paseoAgentTarget(execution: unknown): PaseoAgentTarget | null {
   const receipt = record(execution);
-  const host = record(receipt?.execution);
+  // Read as untrusted JSON, under the field names the execution's host type declares.
+  const host: Partial<Record<keyof RoleExecutionHost, unknown>> | null = record(receipt?.execution);
   const agentId = text(host?.agentId);
   if (!receipt || host?.kind !== "paseo-agent" || !agentId) return null;
   if (typeof receipt.status === "string" && receipt.status.toLowerCase() === "rejected") return null;

@@ -13,7 +13,9 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from agents_remember.cli.orca_task_receipts import (
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
+from agents_remember.cli.paseo_status import AgentReading, read_agent, resume_agent, status_row
+from agents_remember.cli.role_launch_receipts import (
     _archive_receipt,
     _execute_prepared_launch,
     _now_iso,
@@ -21,10 +23,8 @@ from agents_remember.cli.orca_task_receipts import (
     _read_receipt,
     _write_receipt,
 )
-from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
-from agents_remember.cli.paseo_status import AgentReading, read_agent, resume_agent, status_row
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaDispatchRequest
+from agents_remember.models.role_launcher import RoleDispatchRequest
 
 _CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
 
@@ -46,7 +46,7 @@ _ROW_FIELDS = ("status", "detail", "canRevive", "result", "resumeRefused")
 def _reconcile_prior_execution(
     config: McpRuntimeConfig,
     path: Path,
-    request: OrcaDispatchRequest,
+    request: RoleDispatchRequest,
     request_digest: str,
 ) -> JSONResponse | None:
     current = _read_receipt(path)

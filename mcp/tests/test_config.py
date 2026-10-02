@@ -49,38 +49,6 @@ def settings_payload(root: Path) -> dict:
 
 
 class McpConfigTests(unittest.TestCase):
-    def test_optional_orca_runtime_configuration_is_typed_and_fail_loud(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
-            payload = settings_payload(root)
-
-            write_json(path, payload)
-            self.assertIsNone(load_config(path).orca_runtime)
-
-            payload["orcaRuntime"] = {
-                "runtimeRoot": (root / "orca-source").as_posix(),
-                "userDataPath": (root / "orca-profile").as_posix(),
-            }
-            write_json(path, payload)
-            configured = load_config(path).orca_runtime
-            self.assertIsNotNone(configured)
-            self.assertEqual(configured.runtime_root, root / "orca-source")
-            self.assertEqual(configured.user_data_path, root / "orca-profile")
-
-            payload["orcaRuntime"] = {"runtimeRoot": (root / "orca-source").as_posix()}
-            write_json(path, payload)
-            with self.assertRaisesRegex(ConfigError, "must define userDataPath"):
-                load_config(path)
-
-            payload["orcaRuntime"] = {
-                "runtimeRoot": "relative/orca-source",
-                "userDataPath": (root / "orca-profile").as_posix(),
-            }
-            write_json(path, payload)
-            with self.assertRaisesRegex(ConfigError, "must be an absolute path"):
-                load_config(path)
-
     def test_optional_paseo_runtime_block_is_exact_and_fail_loud(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()

@@ -233,7 +233,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
 
         try:
             # The in-memory protocol session exercises registered handlers without launching the
-            # stdio server, Orca, or any Git operation.
+            # stdio server, the host runtime, or any Git operation.
             asyncio.run(exercise_protocol())
         finally:
             for marker in created:

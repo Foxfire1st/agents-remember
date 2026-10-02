@@ -14,11 +14,6 @@ from typing import Any
 from unittest.mock import patch
 
 from agents_remember.cli import paseo_bridge
-from agents_remember.cli.orca_runtime import (
-    HOST_CALL_NOT_AVAILABLE,
-    OrcaRuntimeFailure,
-    runtime_call,
-)
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
@@ -77,6 +72,18 @@ TypeError: the daemon answered with a frame the client cannot read
     at process.processTimers (node:internal/timers:521:7)
 
 Node.js v22.23.2
+"""
+# Node's report of a process it ended itself: the reason line, then native frames (shortened).
+NODE_OUT_OF_MEMORY_REPORT = """
+<--- Last few GCs --->
+
+[4242:0x5f1c] 1820 ms: Mark-Compact 60.1 (62.9) -> 59.8 (63.4) MB, 20.52 / 0.00 ms
+
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0xe16044 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 2: 0x11e0dd0 v8::Utils::ReportOOMFailure(v8::internal::Isolate*, char const*) [node]
 """
 NODE_THROWN_VALUE_REPORT = """
 node:internal/modules/run_main:123
@@ -196,6 +203,17 @@ class BridgeProcessTests(unittest.TestCase):
                     "TypeError: the daemon answered with a frame the client cannot read",
                 ),
                 "an error line is cut to 200 characters": (long_error + "\n", long_error[:200]),
+                "a process Node ended itself carries its reason line": (
+                    NODE_OUT_OF_MEMORY_REPORT,
+                    "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of "
+                    "memory",
+                ),
+                "without an error line stack frames are dropped and the end is kept": (
+                    "the client wrote this before it died: " + "y" * 300 + "\n"
+                    "    at Timeout._onTimeout (file:///opt/ar/cli/paseo_bridge.mjs:58:26)\n"
+                    "    at listOnTimeout (node:internal/timers:585:17)\n\nNode.js v22.23.2\n",
+                    "y" * 200,
+                ),
                 "without an error line the end of the text is kept, minus the stack": (
                     NODE_THROWN_VALUE_REPORT,
                     "node:internal/modules/run_main:123\n    triggerUncaughtException(\n    ^\n"
@@ -218,6 +236,51 @@ class BridgeProcessTests(unittest.TestCase):
                 self.assertTrue(message.endswith("Its standard error says: " + cause), message)
                 self.assertNotIn("Node.js v", message)
                 self.assertNotIn("node:internal/timers", message)
+            for label, stderr in {
+                "empty standard error": "",
+                "only stack frames and the version line": (
+                    "    at listOnTimeout (node:internal/timers:585:17)\n\nNode.js v22.23.2\n"
+                ),
+            }.items():
+                with (
+                    self.subTest("no cause is appended", stderr=label),
+                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge.subprocess, "run", return_value=reply(1, "", stderr=stderr)
+                    ),
+                    self.assertRaises(PaseoBridgeFailure) as raised,
+                ):
+                    bridge_call(config, "catalog", {})
+                self.assertEqual(
+                    str(raised.exception),
+                    "The Paseo bridge call 'catalog' returned an unreadable reply.",
+                )
+
+    def test_output_that_is_not_utf8_is_an_unreadable_reply_not_a_decoding_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = started_runtime(root)
+            for stream, redirect in (("standard output", ""), ("standard error", " >&2")):
+                writer = root / f"node-{len(redirect)}"
+                writer.write_text(
+                    f"#!/bin/sh\nprintf 'Error: cut \\377\\376 here\\n'{redirect}\nexit 1\n",
+                    encoding="utf-8",
+                )
+                writer.chmod(0o755)
+                with (
+                    self.subTest(stream),
+                    patch.object(paseo_bridge.shutil, "which", return_value=writer.as_posix()),
+                    self.assertRaises(PaseoBridgeFailure) as raised,
+                ):
+                    bridge_call(config, "catalog", {})
+                self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
+                if redirect:
+                    self.assertTrue(
+                        str(raised.exception).endswith(
+                            "Its standard error says: Error: cut \ufffd\ufffd here"
+                        ),
+                        str(raised.exception),
+                    )
 
     def test_a_call_that_does_not_end_is_stopped_and_reported_as_a_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -237,15 +300,6 @@ class BridgeProcessTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 10)
             pid = int((root / "pid").read_text(encoding="utf-8"))
             self.assertFalse(Path(f"/proc/{pid}").exists(), "the stuck bridge process survived")
-
-    def test_host_calls_without_a_paseo_command_refuse_with_a_named_reason(self) -> None:
-        config = runtime_config(Path("/trusted"), None)
-        for command in ("workspaces", "launch-replay", "agent-history", "restart-continue"):
-            with self.subTest(command), self.assertRaises(OrcaRuntimeFailure) as raised:
-                runtime_call(config, command, {})
-            self.assertEqual(raised.exception.code, HOST_CALL_NOT_AVAILABLE)
-            self.assertIn(repr(command), str(raised.exception))
-            self.assertIn("PNT-R03", str(raised.exception))
 
 
 FAKE_DAEMON_CLIENT = """

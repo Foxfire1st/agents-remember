@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.cli import orca_task_routes, paseo_frame
+from agents_remember.cli import paseo_frame, role_launch_routes
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_frame import (
     HostFrameFacts,
@@ -226,7 +226,7 @@ class PaseoFrameTests(unittest.TestCase):
     def test_route_reads_the_dashboard_origin_from_the_request(self) -> None:
         config = runtime_config(self.root, runtime_settings(self.root))
         app = FastAPI()
-        orca_task_routes.register_orca_task_routes(app, config)
+        role_launch_routes.register_role_launch_routes(app, config)
         cases = [
             # (base URL the browser used, extra headers, expected frame base URL or None)
             ("http://127.0.0.1:9797", {}, "http://127.0.0.1:6820"),
@@ -247,7 +247,7 @@ class PaseoFrameTests(unittest.TestCase):
             for base_url, headers, expected in cases:
                 with self.subTest(base_url=base_url, headers=headers):
                     response = TestClient(app, base_url=base_url).get(
-                        "/api/orca/frame", headers=headers
+                        "/api/role-launch/frame", headers=headers
                     )
                     self.assertEqual(response.status_code, 200)
                     answer = response.json()
@@ -277,9 +277,11 @@ class WiredHostFactsTests(unittest.TestCase):
 
     def ask(self, bridge: FakeBridge, config: McpRuntimeConfig | None = None) -> dict[str, Any]:
         app = FastAPI()
-        orca_task_routes.register_orca_task_routes(app, config or self.config)
+        role_launch_routes.register_role_launch_routes(app, config or self.config)
         with patch.object(paseo_frame, "bridge_call", bridge):
-            response = TestClient(app, base_url="http://127.0.0.1:9797").get("/api/orca/frame")
+            response = TestClient(app, base_url="http://127.0.0.1:9797").get(
+                "/api/role-launch/frame"
+            )
         self.assertEqual(response.status_code, 200)
         return response.json()
 
@@ -359,9 +361,11 @@ class WiredHostFactsTests(unittest.TestCase):
         self.assertIn("has no paseoRuntime block", unconfigured["detail"])
 
         app = FastAPI()
-        orca_task_routes.register_orca_task_routes(app, self.config)
+        role_launch_routes.register_role_launch_routes(app, self.config)
         with patch.object(paseo_frame, "bridge_call", bridge):
-            unlisted = TestClient(app, base_url="http://localhost:9797").get("/api/orca/frame")
+            unlisted = TestClient(app, base_url="http://localhost:9797").get(
+                "/api/role-launch/frame"
+            )
         self.assertEqual(unlisted.json()["reason"], "origin-not-listed")
         self.assertEqual(bridge.calls, [])
         # A GET that a page of another site made the browser send carries the dashboard's own
@@ -369,7 +373,7 @@ class WiredHostFactsTests(unittest.TestCase):
         with patch.object(paseo_frame, "bridge_call", bridge):
             for marker in ("cross-site", "Cross-Site"):
                 forged = TestClient(app, base_url="http://127.0.0.1:9797").get(
-                    "/api/orca/frame", headers={"Sec-Fetch-Site": marker}
+                    "/api/role-launch/frame", headers={"Sec-Fetch-Site": marker}
                 )
                 self.assertEqual(
                     forged.json(),

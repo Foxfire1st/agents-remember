@@ -8,7 +8,10 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.application.orca_task_context import OrcaRoleContext, resolve_orca_role_context
+from agents_remember.application.role_launch_context import (
+    RoleLaunchContext,
+    resolve_role_launch_context,
+)
 from agents_remember.application.skill_resources import CapsuleCompileRequest, compile_task_capsule
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
@@ -19,43 +22,42 @@ from agents_remember.application.task_docs.task_doc_tools import (
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_task
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli import (
-    orca_task_preparation,
-    orca_task_receipts,
-    orca_task_routes,
     paseo_catalog,
     paseo_launch,
     paseo_status,
+    role_launch_preparation,
+    role_launch_receipts,
+    role_launch_routes,
 )
-from agents_remember.cli.orca_runtime import digest
-from agents_remember.cli.orca_task_preparation import (
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
+from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
-    OrcaHandoverRequest,
+    RoleHandoverRequest,
     _bind_task_report_access,
     _compile_handover,
     _ensure_leaf_enclosure,
     _resolve_workspace,
     _role_report_path,
-    prepare_orca_role_handover,
+    prepare_role_handover,
     role_start_operation,
 )
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
-from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
-from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
+from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
+from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
-from test_role_instruction_wording import forbidden_in, without_retained_paths
+from test_role_instruction_wording import forbidden_in
 from test_worktree_support import open_external_contract_fixture
 
 
-class OrcaScopedCapsuleBindingTests(unittest.TestCase):
+class RoleScopedCapsuleBindingTests(unittest.TestCase):
     def test_leaf_roles_compile_contract_repo_identity_with_scoped_context_and_reports(  # noqa: PLR0915
         self,
     ) -> None:
@@ -175,9 +177,9 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             }
             for role in ("worker", "reviewer", "curator"):
                 with self.subTest(role=role):
-                    context = resolve_orca_role_context(
+                    context = resolve_role_launch_context(
                         base_config,
-                        OrcaSelection(
+                        RoleSelection(
                             role=role,
                             sprintDocumentRef=sprint_ref,
                             masterDocumentRef=master_ref,
@@ -185,7 +187,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         ),
                     )
                     request_id = uuid.uuid4()
-                    ar_mcp_context = orca_task_preparation._ar_mcp_context(
+                    ar_mcp_context = role_launch_preparation._ar_mcp_context(
                         base_config,
                         context,
                         workspace,
@@ -193,7 +195,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     bind_worktree_services(build_default_worktree_services())
                     try:
                         prepared = _compile_handover(
-                            OrcaHandoverRequest(
+                            RoleHandoverRequest(
                                 config=base_config,
                                 context=context,
                                 workspace=workspace,
@@ -248,7 +250,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         "you do not attach this record to a message", message_binding["use"]
                     )
                     # The compiled first message of a real leaf role: capsule and handover.
-                    self.assertEqual(forbidden_in(without_retained_paths(prepared["prompt"])), [])
+                    self.assertEqual(forbidden_in(prepared["prompt"]), [])
                     role_tools = handover["host"]["roleTools"]
                     self.assertEqual(
                         (role_tools["toolServer"], role_tools["start"], role_tools["message"]),
@@ -410,31 +412,30 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             workspace_root = config.workspace_root
             workspace_root.mkdir(parents=True)
             request_id = uuid.uuid4()
-            context = resolve_orca_role_context(
+            context = resolve_role_launch_context(
                 config,
-                OrcaSelection(role="architect"),
+                RoleSelection(role="architect"),
             )
             workspace = {"path": workspace_root.as_posix()}
             defaults = {"agent": "codex", "model": None, "effort": None}
             session_options = {"model": "gpt-6-sol"}
-            agent_arg_tokens = ()
 
             with (
                 patch.object(
-                    orca_task_preparation, "_resolve_workspace", return_value=workspace
+                    role_launch_preparation, "_resolve_workspace", return_value=workspace
                 ) as resolve_workspace,
                 patch.object(
-                    orca_task_preparation,
+                    role_launch_preparation,
                     "_role_defaults",
                     return_value=(defaults, ("codex",)),
                 ),
                 patch.object(
-                    orca_task_preparation,
-                    "_resolve_agent_selection",
-                    return_value=("codex", session_options, agent_arg_tokens),
+                    role_launch_preparation,
+                    "resolve_agent_selection",
+                    return_value=("codex", session_options),
                 ) as resolve_agent,
             ):
-                role_handover = prepare_orca_role_handover(
+                role_handover = prepare_role_handover(
                     config,
                     context,
                     agent_override=None,
@@ -453,9 +454,8 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                 role_handover.workspace,
                 role_handover.agent_id,
                 role_handover.session_options,
-                role_handover.agent_arg_tokens,
             ),
-            (context, workspace, "codex", session_options, agent_arg_tokens),
+            (context, workspace, "codex", session_options),
         )
         resolve_workspace.assert_called_once_with(config, context)
         resolve_agent.assert_called_once_with(config, defaults, ("codex",), None)
@@ -507,7 +507,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertTrue(
             prepared["prompt"].startswith("AR ROLE BRIEF: the dashboard launcher started this role")
         )
-        self.assertEqual(forbidden_in(without_retained_paths(prepared["prompt"])), [])
+        self.assertEqual(forbidden_in(prepared["prompt"]), [])
         source = handover["host"]["instructionSource"]
         self.assertEqual(source["kind"], "compiled-role-operation-capsule")
         self.assertEqual(source["role"], "architect")
@@ -633,7 +633,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 },
             }
             settings_path.write_text(json.dumps(settings), encoding="utf-8")
-            request = OrcaDispatchRequest.model_validate(
+            request = RoleDispatchRequest.model_validate(
                 {
                     "role": "worker",
                     "requestId": uuid.uuid4(),
@@ -651,7 +651,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
             )
 
             def dispatch() -> tuple[int, dict[str, Any]]:
-                response = orca_task_routes._orca_dispatch_endpoint(config, request)
+                response = role_launch_routes._role_launch_dispatch_endpoint(config, request)
                 return response.status_code, json.loads(bytes(response.body))
 
             forget_launcher_catalogs()
@@ -665,16 +665,16 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 ):
                     config = load_config(settings_path)
                     first_status, first = dispatch()
-                    receipt_path = orca_task_receipts._receipt_path(config, request)
+                    receipt_path = role_launch_receipts._receipt_path(config, request)
                     saved = json.loads(receipt_path.read_text(encoding="utf-8"))
                     # One ordinary edit of the leaf's task document, as an agent or a person makes.
                     edited = {**leaf, "title": "Repeat after an edit, with a decision added"}
                     write_task_doc(
                         contract.task_root, TaskDocument.model_validate({**edited, **shared})
                     )
-                    recompiled = prepare_orca_role_handover(
+                    recompiled = prepare_role_handover(
                         config,
-                        resolve_orca_role_context(config, request),
+                        resolve_role_launch_context(config, request),
                         agent_override=request.agent_override,
                         request_id=request.request_id,
                     ).handover
@@ -789,16 +789,16 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             }
             statuses = iter(({"ok": False}, status))
 
-            context = OrcaRoleContext(
+            context = RoleLaunchContext(
                 role="worker", sprint=sprint, master=master, task=leaf, effective_task=leaf
             )
             with (
                 patch(
-                    "agents_remember.cli.orca_task_preparation.worktree_status_tool",
+                    "agents_remember.cli.role_launch_preparation.worktree_status_tool",
                     side_effect=lambda *_args: next(statuses),
                 ),
                 patch(
-                    "agents_remember.cli.orca_task_preparation.worktree_start_tool",
+                    "agents_remember.cli.role_launch_preparation.worktree_start_tool",
                     return_value={"ok": True},
                 ) as start,
             ):
@@ -834,11 +834,11 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "agents_remember.cli.orca_task_preparation.worktree_status_tool",
+                    "agents_remember.cli.role_launch_preparation.worktree_status_tool",
                     return_value=status,
                 ),
                 patch(
-                    "agents_remember.cli.orca_task_preparation.worktree_start_tool"
+                    "agents_remember.cli.role_launch_preparation.worktree_start_tool"
                 ) as reuse_start,
             ):
                 contract_path, reused_status = _ensure_leaf_enclosure(
@@ -849,7 +849,7 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             reuse_start.assert_not_called()
 
 
-class OrcaReportPathIsolationTests(unittest.TestCase):
+class RoleReportPathIsolationTests(unittest.TestCase):
     @staticmethod
     def _resolved_document(
         root: Path, *, task_path: str, document_id: str, kind: str
@@ -894,7 +894,7 @@ class OrcaReportPathIsolationTests(unittest.TestCase):
             )
             manager_reports: list[Path] = []
             for master in masters:
-                context = OrcaRoleContext(
+                context = RoleLaunchContext(
                     role="manager",
                     sprint=sprint,
                     master=master,
@@ -912,7 +912,7 @@ class OrcaReportPathIsolationTests(unittest.TestCase):
                 report.write_text(f"original {master.document.id}\n", encoding="utf-8")
                 manager_reports.append(report)
 
-            retry_context = OrcaRoleContext(
+            retry_context = RoleLaunchContext(
                 role="manager",
                 sprint=sprint,
                 master=masters[0],
@@ -951,7 +951,7 @@ class OrcaReportPathIsolationTests(unittest.TestCase):
                 "taskReportRoot": reports.resolve().as_posix(),
                 "taskReportAccessRoot": report_access.as_posix(),
             }
-            context = OrcaRoleContext(
+            context = RoleLaunchContext(
                 role="worker",
                 sprint=sprint,
                 master=master,

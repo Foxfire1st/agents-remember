@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, get_args
 
-from agents_remember.cli import orca_task_receipts, paseo_role_tools
+from agents_remember.cli import paseo_role_tools, role_launch_receipts
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
 from agents_remember.models.role_agents import (
     RoleMessageCall,
@@ -117,7 +117,7 @@ class RoleMessageTests(RoleToolsTestCase):
         with self.subTest("a selection that cannot be resolved"):
             self.replace(
                 paseo_role_tools,
-                "resolve_orca_role_context",
+                "resolve_role_launch_context",
                 side_effect=ValueError("worker requires a canonical task selection."),
             )
             result = self.refusal(
@@ -190,7 +190,7 @@ class RoleMessageTests(RoleToolsTestCase):
         for status in ("starting", "unknown"):
             for address in ({"agent_id": worker}, {"role": "worker", **selection_of("worker")}):
                 with self.subTest(status=status, by=sorted(address)[0]):
-                    orca_task_receipts._write_receipt(
+                    role_launch_receipts._write_receipt(
                         self.receipt_path(request), {**saved, "status": status}
                     )
                     self.runtime.calls.clear()
@@ -209,7 +209,7 @@ class RoleMessageTests(RoleToolsTestCase):
                     )
                     self.assertEqual(self.received(worker), [])
         with self.subTest("once the start has answered, the message is delivered"):
-            orca_task_receipts._write_receipt(self.receipt_path(request), saved)
+            role_launch_receipts._write_receipt(self.receipt_path(request), saved)
             result = self.message(self.architect, agent_id=worker)
             self.assertEqual((result["status"], len(self.received(worker))), ("accepted", 1))
 
@@ -483,7 +483,7 @@ class RoleMessageTests(RoleToolsTestCase):
         for label, without in {"not applied": {**applied, "applied": False}, "none": None}.items():
             with self.subTest("a recipient without a tool server is not waited for", case=label):
                 receipt["toolServer"] = without
-                orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
+                role_launch_receipts._write_receipt(self.receipt_path(request), receipt)
                 self.runtime.agents[worker].update(status="closed", received=[])
                 self.runtime.calls.clear()
                 result = self.message(self.architect, agent_id=worker)
@@ -520,7 +520,7 @@ class RoleMessageTests(RoleToolsTestCase):
             receipt["arMcpContext"]["taskContext"]["contract_path"] = (
                 "/enclosures/moved/contract.json"
             )
-            orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
+            role_launch_receipts._write_receipt(self.receipt_path(request), receipt)
             self.runtime.calls.clear()
             result = self.refusal(
                 self.message(self.architect, agent_id=worker), "scope-check-failed"
@@ -532,7 +532,7 @@ class RoleMessageTests(RoleToolsTestCase):
                 (self.runtime.agents[worker]["status"], self.received(worker)), ("closed", [])
             )
             receipt["arMcpContext"]["taskContext"] = current
-            orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
+            role_launch_receipts._write_receipt(self.receipt_path(request), receipt)
         with self.subTest("an agent the host cannot resume: its reason, and nothing is relaunched"):
             self.runtime.agents[worker]["resumeRefusal"] = NO_ROLLOUT
             self.runtime.calls.clear()

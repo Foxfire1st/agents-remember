@@ -20,26 +20,26 @@ from agents_remember.application.agent_binding import (
     AgentBinding,
     read_agent_binding,
 )
-from agents_remember.application.orca_task_context import OrcaRoleContext
+from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.cli import (
-    orca_handover_artifacts,
-    orca_task_preparation,
-    orca_task_receipts,
     paseo_launch,
+    role_handover_artifacts,
+    role_launch_preparation,
+    role_launch_receipts,
 )
-from agents_remember.cli.orca_handover_artifacts import (
+from agents_remember.cli.paseo_launch import (
+    RECOVERY_NOTE_LIMIT,
+    recovery_note,
+    tool_server_definition,
+)
+from agents_remember.cli.role_handover_artifacts import (
     MAX_HANDOVER_ARTIFACT_BYTES,
     artifact_line,
     first_message,
     restore_handover_artifact,
     write_handover_artifact,
 )
-from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
-from agents_remember.cli.paseo_launch import (
-    RECOVERY_NOTE_LIMIT,
-    recovery_note,
-    tool_server_definition,
-)
+from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.core import server_info_payload
 from agents_remember.models.core import ServingBuildPayload
@@ -81,14 +81,14 @@ def binding(role: str = "worker", *references: TaskDocumentRef) -> AgentBinding:
         agent_id="f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607",
         role=role,
         request_id="0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-        report_path="/group/task-reports/orca-native/01_LEAF-worker.md",
+        report_path="/group/task-reports/role-launch/01_LEAF-worker.md",
         sprint_ref=sprint,
         master_ref=master,
         task_ref=task,
     )
 
 
-def context(role: str, *references: TaskDocumentRef) -> OrcaRoleContext:
+def context(role: str, *references: TaskDocumentRef) -> RoleLaunchContext:
     documents = [
         ResolvedTaskDocument(
             ref=reference,
@@ -107,7 +107,7 @@ def context(role: str, *references: TaskDocumentRef) -> OrcaRoleContext:
         for reference in references
     ]
     sprint, master, task = (*documents, None, None, None)[:3]
-    return OrcaRoleContext(role, sprint, master, task, task or master or sprint)  # type: ignore[arg-type]
+    return RoleLaunchContext(role, sprint, master, task, task or master or sprint)  # type: ignore[arg-type]
 
 
 def reference_json(reference: TaskDocumentRef) -> str:
@@ -315,14 +315,14 @@ class ToolServerDefinitionTests(unittest.TestCase):
 def artifact_with_path_of(length: int) -> dict[str, str]:
     """An artifact reference whose path has exactly ``length`` characters."""
 
-    stem = "/group/task-reports/orca-native/"
+    stem = "/group/task-reports/role-launch/"
     return {"path": stem + "p" * (length - len(stem) - 13) + ".handover.txt", "sha256": SHA}
 
 
 class RecoveryNoteTests(unittest.TestCase):
     def test_the_note_names_role_references_and_artifact_within_600_characters(self) -> None:
         artifact = {
-            "path": "/group/task-reports/orca-native/01_LEAF-worker.handover.txt",
+            "path": "/group/task-reports/role-launch/01_LEAF-worker.handover.txt",
             "sha256": SHA,
         }
         tail = (
@@ -354,7 +354,7 @@ class RecoveryNoteTests(unittest.TestCase):
         ]
         path = (
             "/home/firefox/projects/ar-coordination/worktrees/agents-remember/"
-            "28_curated-foundation-from-code-external-60ff47641f-ar/task-reports/orca-native/"
+            "28_curated-foundation-from-code-external-60ff47641f-ar/task-reports/role-launch/"
             "260921-ICR-L28-reviewer-00000000-0000-0000-0000-000000000000.handover.txt"
         )
         sizes = ([len(reference.key) for reference in references], len(path))
@@ -537,17 +537,17 @@ class HandoverArtifactTests(unittest.TestCase):
 
     def test_the_artifact_is_written_once_beside_the_report_and_named_by_one_line(self) -> None:
         reports, access = self.linked_report_folder()
-        report = (access / "orca-native" / "01_LEAF-worker-request.md").as_posix()
+        report = (access / "role-launch" / "01_LEAF-worker-request.md").as_posix()
         content = "Compiled capsule · 役割\n\nAR owner assignment and canonical task handover:\n{}"
         body = content.encode("utf-8")
 
         reference = write_handover_artifact(report, content)
 
-        stored = reports / "orca-native" / "01_LEAF-worker-request.handover.txt"
+        stored = reports / "role-launch" / "01_LEAF-worker-request.handover.txt"
         self.assertEqual(
             reference,
             {
-                "path": (access / "orca-native" / "01_LEAF-worker-request.handover.txt").as_posix(),
+                "path": (access / "role-launch" / "01_LEAF-worker-request.handover.txt").as_posix(),
                 "canonicalPath": stored.as_posix(),
                 "sha256": hashlib.sha256(body).hexdigest(),
                 "bytes": len(body),
@@ -632,7 +632,7 @@ class HandoverArtifactTests(unittest.TestCase):
 
     def test_a_retry_names_a_damaged_reference_and_a_path_that_leads_to_itself(self) -> None:
         _reports, access = self.linked_report_folder()
-        report = (access / "orca-native" / "01_LEAF-worker-request.md").as_posix()
+        report = (access / "role-launch" / "01_LEAF-worker-request.md").as_posix()
         content = "Compiled capsule and handover."
         reference = write_handover_artifact(report, content)
         message = first_message(reference, content)
@@ -682,18 +682,18 @@ class HandoverArtifactTests(unittest.TestCase):
 
     def test_the_artifact_is_a_regular_file_of_bounded_size(self) -> None:
         reports, access = self.linked_report_folder()
-        (reports / "orca-native").mkdir()
+        (reports / "role-launch").mkdir()
         content = "Compiled capsule and handover."
         with self.subTest("something else at the artifact's path is refused"):
-            (reports / "orca-native" / "01_LEAF-worker-request.handover.txt").mkdir()
+            (reports / "role-launch" / "01_LEAF-worker-request.handover.txt").mkdir()
             with self.assertRaisesRegex(ValueError, "not a regular file"):
                 write_handover_artifact(
-                    (access / "orca-native" / "01_LEAF-worker-request.md").as_posix(), content
+                    (access / "role-launch" / "01_LEAF-worker-request.md").as_posix(), content
                 )
         with self.subTest("a link at the artifact's own name is not followed"):
             outside = self.root / "outside.txt"
-            linked = (access / "orca-native" / "02_LEAF-worker-request.md").as_posix()
-            (reports / "orca-native" / "02_LEAF-worker-request.handover.txt").symlink_to(outside)
+            linked = (access / "role-launch" / "02_LEAF-worker-request.md").as_posix()
+            (reports / "role-launch" / "02_LEAF-worker-request.handover.txt").symlink_to(outside)
             with self.assertRaisesRegex(ValueError, "not a regular file"):
                 write_handover_artifact(linked, content)
             self.assertFalse(outside.exists())
@@ -730,7 +730,7 @@ class HandoverArtifactTests(unittest.TestCase):
                     return error
 
             with (
-                patch.object(orca_handover_artifacts.tempfile, "mkstemp", mkstemp),
+                patch.object(role_handover_artifacts.tempfile, "mkstemp", mkstemp),
                 ThreadPoolExecutor(max_workers=writers) as pool,
             ):
                 return list(pool.map(write, contents))
@@ -847,16 +847,16 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         """Compile as the real compilation does for a leaf role: the report lies behind the link
         that the leaf's enclosure holds to its task's report folder."""
 
-        def compiled(handover: OrcaHandoverRequest) -> dict[str, Any]:
+        def compiled(handover: RoleHandoverRequest) -> dict[str, Any]:
             access = Path(handover.workspace["taskReportAccessRoot"])
-            report = access / "orca-native" / f"01_LEAF-worker-{handover.request_id}.md"
+            report = access / "role-launch" / f"01_LEAF-worker-{handover.request_id}.md"
             return {
                 **self.compile_handover(handover),
                 "taskReportPath": report.as_posix(),
                 "canonicalTaskReportPath": report.resolve().as_posix(),
             }
 
-        self.replace(orca_task_preparation, "_compile_handover", compiled)
+        self.replace(role_launch_preparation, "_compile_handover", compiled)
 
     def unresolved_leaf_launch(self) -> tuple[Any, dict[str, Any], Path, Path]:
         """A worker launch that stays unresolved: its request, receipt, link and stored artifact."""
@@ -903,7 +903,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             link.symlink_to(nowhere)
             self.assertEqual(
                 self.refused_with_nothing_sent(request),
-                f"{recorded} now leads to {nowhere / 'orca-native' / stored.name}. {put_back}",
+                f"{recorded} now leads to {nowhere / 'role-launch' / stored.name}. {put_back}",
             )
             self.assertEqual(os.readlink(link), nowhere.as_posix())
             self.assertFalse(nowhere.exists())
@@ -948,7 +948,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 "workspace": {**workspace, "taskReportAccessRoot": renamed.as_posix()},
                 "handoverArtifact": {
                     **reference,
-                    "path": (renamed / "orca-native" / stored.name).as_posix(),
+                    "path": (renamed / "role-launch" / stored.name).as_posix(),
                 },
             },
             "the link in another folder than the workspace": {
@@ -957,13 +957,13 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             "an artifact path that leaves the link again": {
                 "handoverArtifact": {
                     **reference,
-                    "path": f"{link.as_posix()}/../task-reports/orca-native/{stored.name}",
+                    "path": f"{link.as_posix()}/../task-reports/role-launch/{stored.name}",
                 }
             },
         }
         for label, changed in disagreeing.items():
             with self.subTest(label):
-                orca_task_receipts._write_receipt(path, {**saved, **changed})
+                role_launch_receipts._write_receipt(path, {**saved, **changed})
                 self.refused_with_nothing_sent(request)
                 # No link was made, at the enclosure or anywhere the receipt names.
                 self.assertFalse(link.is_symlink() or link.exists())
@@ -971,7 +971,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 self.assertEqual(list(foreign.iterdir()), [])
         with self.subTest("an artifact reference that lacks a part is refused by the receipt"):
             damaged = {key: value for key, value in reference.items() if key != "canonicalPath"}
-            orca_task_receipts._write_receipt(path, {**saved, "handoverArtifact": damaged})
+            role_launch_receipts._write_receipt(path, {**saved, "handoverArtifact": damaged})
             self.assertIn(
                 f"The receipt {path} records the handover artifact of this request without its "
                 "canonicalPath,",
@@ -979,7 +979,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             )
             self.assertFalse(link.is_symlink() or link.exists())
         with self.subTest("the receipt as the launch wrote it gets the retry through"):
-            orca_task_receipts._write_receipt(path, saved)
+            role_launch_receipts._write_receipt(path, saved)
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertEqual(os.readlink(link), workspace["taskReportRoot"])
 
@@ -990,8 +990,8 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.assertEqual(self.dispatch(request)[1]["status"], "running")
 
         name = f"01_LEAF-worker-{request.request_id}"
-        link = self.enclosures.group / "task-reports" / "orca-native"
-        canonical = self.leaf.path.parent / "notes" / "reports" / "orca-native"
+        link = self.enclosures.group / "task-reports" / "role-launch"
+        canonical = self.leaf.path.parent / "notes" / "reports" / "role-launch"
         self.assertNotEqual(link, canonical)
         self.assertEqual(link.resolve(), canonical)
         created = self.runtime.launch_calls()[-1][1]
