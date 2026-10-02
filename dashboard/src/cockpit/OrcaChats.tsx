@@ -9,6 +9,7 @@ import {
   ORCA_ROLES,
   isTasklessOrcaRole,
   isUncertainOrcaExecution,
+  launchChoiceProblem,
   launchSelectionComplete,
   masterOptionsForSprint,
   mergeOrcaAgentInventory,
@@ -305,9 +306,10 @@ function OrcaRoleLauncher({
   const canRetry = optionsReady && complete && !busy && currentScopedExecution?.canRetry === true && Boolean(retryRequestId);
   const retrySelection = currentScopedExecution?.retryPayload ?? launchSelection;
   const canRetrySelection = sameOrcaDocumentScope(orcaDocumentScope(retrySelection), orcaDocumentScope(launchSelection));
-  const canStart = isTasklessOrcaRole(role)
+  const choiceProblem = optionsReady ? launchChoiceProblem(roleDefaults, agents, selection.agentOverride) : null;
+  const canStart = !choiceProblem && (isTasklessOrcaRole(role)
     ? optionsReady && complete && !busy && !["starting", "unknown"].includes(status ?? "")
-    : optionsReady && complete && !busy && !liveOccupant && !canRetry && currentScopedExecution?.canStart !== false;
+    : optionsReady && complete && !busy && !liveOccupant && !canRetry && currentScopedExecution?.canStart !== false);
   const canRevive = optionsReady && complete && !busy && currentScopedExecution?.canRevive === true;
   const canRefreshResult = complete && ["accepted", "running", "starting", "unknown"].includes(status ?? "");
 
@@ -517,19 +519,22 @@ function OrcaRoleLauncher({
           <button className={orcaLauncherButton({ tone: "secondary" })} type="button" aria-label="Revive Orca" title="Revive Orca" disabled={!canRevive} onClick={() => void onRevive(launchSelection)}>Revive</button>
         ) : null}
         {canRefreshResult ? <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca result" title="Refresh Orca result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
-        <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca agents" title="Refresh agent catalog" disabled={!optionsReady || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
+        <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
       </div>
-      {selection.agentOverride || (!selectedAgent && roleDefaults.agent) ? (
+      {selection.agentOverride && selectedAgent ? (
         <div className={orcaLauncherMeta} role="status" data-testid="orca-capability-summary">
-          {selectedAgent
-            ? "Using " + selectedAgent.label +
-              (selectedModel ? " · " + selectedModel.label : roleDefaults.model ? " · role model " + roleDefaults.model : "") +
-              (selectedModel
-                ? selectedModel.efforts?.length
-                  ? " · " + (defaultEffort?.label ?? selectedModel.efforts.length + " effort choices")
-                  : " · no effort choices"
-                : "")
-            : "Role default agent " + roleDefaults.agent + " is absent from the live catalog."}
+          {"Using " + selectedAgent.label +
+            (selectedModel ? " · " + selectedModel.label : roleDefaults.model ? " · role model " + roleDefaults.model : "") +
+            (selectedModel
+              ? selectedModel.efforts?.length
+                ? " · " + (defaultEffort?.label ?? selectedModel.efforts.length + " effort choices")
+                : " · no effort choices"
+              : "")}
+        </div>
+      ) : null}
+      {choiceProblem || selectedAgent?.listingError ? (
+        <div className={orcaLauncherMeta} role="alert" data-testid="orca-choice-problem" style={{ color: "var(--alarm)" }}>
+          {[choiceProblem, selectedAgent?.listingError ? "Models of " + selectedAgent.label + " could not be listed: " + selectedAgent.listingError : null].filter(Boolean).join(" ")}
         </div>
       ) : null}
       {currentScopedExecution ? (

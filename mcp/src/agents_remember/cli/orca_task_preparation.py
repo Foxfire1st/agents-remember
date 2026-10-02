@@ -31,11 +31,8 @@ from agents_remember.application.worktree_tools import worktree_start_tool, work
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_runtime import orca_catalog_scope
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
@@ -48,9 +45,6 @@ from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
-
-_ORCA_CATALOG_CACHE: dict[tuple[str, str, str | None], dict[str, Any]] = {}
-_ORCA_CATALOG_ORIGINS: dict[tuple[str, str], str] = {}
 
 ROLE_START_OPERATIONS: dict[OrcaRole, CapsuleOperation] = {
     "architect": "planning",
@@ -108,11 +102,12 @@ def prepare_orca_role_handover(
 ) -> PreparedOrcaRoleHandover:
     """Prepare the existing canonical role handover and exact native launch inputs."""
 
-    workspace = _resolve_workspace(config, context)
+    # The selection is validated against the cached catalog before anything is created for it.
     defaults, harness_order = _role_defaults(config, context)
     agent_id, session_options, agent_arg_tokens = _resolve_agent_selection(
-        config, workspace["selector"], defaults, harness_order, agent_override
+        config, defaults, harness_order, agent_override
     )
+    workspace = _resolve_workspace(config, context)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         OrcaHandoverRequest(
@@ -142,53 +137,10 @@ def _launcher_catalog(
     context: OrcaRoleContext,
     request: OrcaLauncherOptionsRequest,
 ) -> dict[str, Any]:
+    """Role defaults plus the Paseo runtime's cached catalog; only an explicit refresh rediscovers."""
+
     defaults, harness_order = _role_defaults(config, context)
-    runtime_key, workspace_key = orca_catalog_scope(config)
-    scope = (runtime_key, workspace_key)
-    if request.refresh_catalog:
-        for key in tuple(_ORCA_CATALOG_CACHE):
-            if key[:2] == scope:
-                del _ORCA_CATALOG_CACHE[key]
-        _ORCA_CATALOG_ORIGINS[scope] = f"orca:{uuid.uuid4().hex}"
-    catalog_origin = _ORCA_CATALOG_ORIGINS.setdefault(scope, f"orca:{uuid.uuid4().hex}")
-    workspace: dict[str, str] | None = None
-    agent_catalog = _ORCA_CATALOG_CACHE.get((*scope, None))
-    if agent_catalog is None:
-        workspace = _ensure_orca_workspace(config, config.workspace_root)
-        catalog = _runtime_call(config, "catalog", {"workspaceSelector": workspace["selector"]})
-        agent_catalog = {"agents": catalog.get("agents", [])}
-        _ORCA_CATALOG_CACHE[(*scope, None)] = agent_catalog
-    installed = _agent_ids(agent_catalog)
-    defaults["agent"] = _configured_or_detected_agent(defaults["agent"], harness_order, installed)
-    selected_agent = request.agent_id or defaults["agent"]
-    agents = agent_catalog.get("agents", [])
-    selected_catalog: dict[str, Any] | None = None
-    if selected_agent:
-        selected_catalog = _ORCA_CATALOG_CACHE.get((*scope, selected_agent))
-        if selected_catalog is None:
-            if workspace is None:
-                workspace = _ensure_orca_workspace(config, config.workspace_root)
-            result = _runtime_call(
-                config,
-                "catalog",
-                {"workspaceSelector": workspace["selector"], "agentId": selected_agent},
-            )
-            selected = result.get("selected")
-            if isinstance(selected, dict):
-                selected_catalog = selected
-                _ORCA_CATALOG_CACHE[(*scope, selected_agent)] = selected_catalog
-    if isinstance(selected_catalog, dict):
-        agents = [
-            {**agent, **selected_catalog}
-            if isinstance(agent, dict) and agent.get("id") == selected_agent
-            else agent
-            for agent in agents
-        ]
-    return {
-        "roleDefaults": defaults,
-        "agents": _public_agent_options(agents),
-        "catalogOrigin": catalog_origin,
-    }
+    return launcher_options(config, defaults, harness_order, refresh=request.refresh_catalog)
 
 
 def _role_defaults(
@@ -208,100 +160,20 @@ def _role_defaults(
     )
 
 
-def _agent_ids(catalog: dict[str, Any]) -> set[str]:
-    rows = catalog.get("agents", [])
-    if not isinstance(rows, list):
-        return set()
-    return {row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
-
-
-def _public_agent_options(agents: Any) -> list[dict[str, Any]]:
-    if not isinstance(agents, list):
-        return []
-    return [
-        {
-            **agent,
-            "models": agent.get("models") if isinstance(agent.get("models"), list) else [],
-        }
-        for agent in agents
-        if isinstance(agent, dict)
-    ]
-
-
-def _configured_or_detected_agent(
-    configured: str | None, harness_order: tuple[str, ...], installed: set[str]
-) -> str | None:
-    if configured:
-        return configured
-    return next((harness for harness in harness_order if harness in installed), None)
-
-
 def _resolve_agent_selection(
     config: McpRuntimeConfig,
-    selector: str,
     defaults: dict[str, str | None],
     harness_order: tuple[str, ...],
     override: OrcaAgentOverride | None,
 ) -> tuple[str, dict[str, str], tuple[str, ...]]:
-    available = _runtime_call(config, "catalog", {"workspaceSelector": selector})
-    installed = _agent_ids(available)
-    default_agent = _configured_or_detected_agent(defaults["agent"], harness_order, installed)
-    agent_id = override.agent_id if override else default_agent
-    if not agent_id:
-        raise ValueError(
-            "No Orca agent is selected. Configure the AR role harness or choose an installed Orca agent."
-        )
-    catalog = _runtime_call(
-        config,
-        "catalog",
-        {"workspaceSelector": selector, "agentId": agent_id},
-    )
-    selected = catalog.get("selected")
-    if not isinstance(selected, dict):
-        raise ValueError(f"The selected Orca agent {agent_id!r} is not installed on this runtime.")
-    models = selected.get("models", []) if isinstance(selected, dict) else []
-    same_default_agent = agent_id == default_agent
-    model_id = (override.model_id if override and override.model_id else None) or (
-        defaults["model"] if same_default_agent else None
-    )
-    effort_id = (override.effort_id if override and override.effort_id else None) or (
-        defaults["effort"] if same_default_agent and model_id == defaults["model"] else None
-    )
-    if effort_id and not model_id:
-        raise ValueError("An effort selection requires a model selection.")
-    model = next(
-        (item for item in models if isinstance(item, dict) and item.get("id") == model_id), None
-    )
-    if model_id and selected.get("catalogOrigin") != "probe":
-        raise ValueError(
-            "Orca has no live model probe for this agent, so its model selection cannot be validated."
-        )
-    if model_id and model is None:
-        raise ValueError(
-            f"Orca's live model probe does not advertise {model_id!r} for agent {agent_id!r}."
-        )
-    if effort_id and not any(
-        isinstance(effort, dict) and effort.get("id") == effort_id
-        for effort in (model or {}).get("efforts", [])
-    ):
-        raise ValueError(f"Orca does not advertise effort {effort_id!r} for the selected model.")
-    options = {key: value for key, value in (("model", model_id), ("effort", effort_id)) if value}
-    agent_args: tuple[str, ...] = ()
-    if model_id:
-        resolved = _runtime_call(
-            config,
-            "option-launch",
-            {"agentId": agent_id, "sessionOptions": options},
-        )
-        applied = resolved.get("appliedValues", {})
-        if applied.get("model") != model_id or (effort_id and applied.get("effort") != effort_id):
-            raise ValueError(
-                "Orca's native option resolver cannot apply the selected model or effort."
-            )
-        args = resolved.get("args", [])
-        if isinstance(args, list) and all(isinstance(arg, str) for arg in args) and args:
-            agent_args = tuple(args)
-    return agent_id, options, agent_args
+    """Validate the requested agent, model and effort against the Paseo runtime's catalog.
+
+    Paseo takes the model and effort as data when the agent is created, so no harness argument
+    tokens are derived any more; the empty tuple keeps the prepared-handover shape.
+    """
+
+    agent_id, options = resolve_agent_selection(config, defaults, harness_order, override)
+    return agent_id, options, ()
 
 
 def _ar_mcp_context(
@@ -393,8 +265,14 @@ def _verify_leaf_revival_scope(
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
+    """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
+
+    Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
+    runtime when the launch call runs; no workspace id is kept.
+    """
+
     if context.role not in LEAF_ROLES:
-        return _ensure_orca_workspace(config, config.workspace_root)
+        return _workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
     contract_path, status = _ensure_leaf_enclosure(
         config,
@@ -404,7 +282,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
-    workspace = _ensure_orca_workspace(config, group)
+    workspace = _workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = _bind_task_report_access(group, task_reports)
@@ -496,42 +374,11 @@ def _ensure_leaf_enclosure(
     return contract_path, status
 
 
-def _ensure_orca_workspace(config: McpRuntimeConfig, path: Path) -> dict[str, str]:
+def _workspace_folder(path: Path) -> dict[str, str]:
+    # The runtime keys a workspace by the path text, so the folder is always its resolved path.
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    workspaces = _runtime_call(config, "workspaces", {})
-    matches = _matching_workspace(workspaces, root)
-    if not matches:
-        _runtime_call(config, "add-folder", {"path": root.as_posix(), "displayName": root.name})
-        workspaces = _runtime_call(config, "workspaces", {})
-        matches = _matching_workspace(workspaces, root)
-    if len(matches) != 1:
-        raise ValueError(f"Orca must expose exactly one registered workspace for {root}.")
-    workspace_id = matches[0]["id"]
-    return {
-        "id": workspace_id,
-        "selector": f"id:{workspace_id}",
-        "path": root.as_posix(),
-    }
-
-
-def _matching_workspace(payload: dict[str, Any], target: Path) -> list[dict[str, str]]:
-    rows = payload.get("worktrees", [])
-    if not isinstance(rows, list):
-        return []
-    matches: list[dict[str, str]] = []
-    for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
-            continue
-        path = row.get("path")
-        if not isinstance(path, str):
-            continue
-        try:
-            if Path(path).resolve() == target:
-                matches.append({"id": row["id"]})
-        except OSError:
-            continue
-    return matches
+    return {"path": root.as_posix()}
 
 
 def _compile_handover(

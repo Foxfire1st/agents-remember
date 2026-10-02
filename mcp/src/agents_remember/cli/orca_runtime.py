@@ -1,21 +1,22 @@
-"""Pinned public Orca RuntimeClient boundary."""
+"""What is left of the ONT host boundary until the Paseo leaves replace its callers.
+
+The Orca bridge script is gone: the launcher catalog, the agent, model and effort validation and
+the launch reach the host through ``paseo_bridge.py``, and a launch needs no pairing. The status
+and revive call sites that still import :func:`runtime_call` have no Paseo command yet; they are
+refused here with a named reason until PNT-R07 moves them onto the bridge.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import shutil
-import subprocess
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import HTTPException
-
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-ORCA_RUNTIME_TIMEOUT_SECONDS = 180
+HOST_CALL_NOT_AVAILABLE = "host_call_not_available"
 
 
 def runtime_call(
@@ -23,51 +24,14 @@ def runtime_call(
     command: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    settings = config.orca_runtime
-    if settings is None:
-        raise OrcaRuntimeFailure(
-            "native_runtime_configuration_missing",
-            "Native Orca launch requires orcaRuntime.runtimeRoot and orcaRuntime.userDataPath "
-            "in the shared Agents Remember MCP settings.",
-        )
-    node = shutil.which("node")
-    script = Path(__file__).with_name("orca_runtime_capabilities.mjs")
-    if not node or not script.is_file():
-        raise OrcaRuntimeFailure(
-            "runtime_boundary_unavailable", "The pinned Orca RuntimeClient boundary is unavailable."
-        )
-    env = dict(os.environ)
-    env.pop("AR_ORCA_CLI", None)
-    env["AR_ORCA_RUNTIME_ROOT"] = settings.runtime_root.as_posix()
-    env["ORCA_USER_DATA_PATH"] = settings.user_data_path.as_posix()
-    try:
-        response = subprocess.run(
-            [node, script.as_posix(), command],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=ORCA_RUNTIME_TIMEOUT_SECONDS,
-            env=env,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise OrcaRuntimeFailure(
-            "runtime_unavailable", "The paired Orca runtime did not answer the requested operation."
-        ) from error
-    try:
-        result = json.loads(response.stdout)
-    except json.JSONDecodeError as error:
-        raise OrcaRuntimeFailure(
-            "runtime_invalid_response", "The Orca runtime boundary returned an invalid response."
-        ) from error
-    if response.returncode != 0 or not isinstance(result, dict):
-        error = result.get("error") if isinstance(result, dict) else None
-        if isinstance(error, dict):
-            code = str(error.get("code") or "orca_runtime_refused")[:100]
-            message = str(error.get("message") or "Orca refused the operation.")[:800]
-            raise OrcaRuntimeFailure(code, message)
-        raise OrcaRuntimeFailure("orca_runtime_refused", "Orca refused the operation.")
-    return result
+    """Refuse an ONT host call that the Paseo bridge does not serve yet."""
+
+    del config, payload
+    raise OrcaRuntimeFailure(
+        HOST_CALL_NOT_AVAILABLE,
+        f"The host call {command!r} belonged to the removed Orca bridge and has no Paseo "
+        "bridge command yet: launching arrives with PNT-R03, status and revive with PNT-R07.",
+    )
 
 
 def digest(value: Any) -> str:
@@ -94,29 +58,6 @@ def configured_pairing_code() -> str | None:
         or os.environ.get("ORCA_REMOTE_PAIRING", "").strip()
     )
     return value or None
-
-
-def orca_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str]:
-    pairing = configured_pairing_code() or ""
-    runtime = config.orca_runtime
-    runtime_key = digest(
-        {
-            "pairingFingerprint": hashlib.sha256(pairing.encode("utf-8")).hexdigest(),
-            "frameUrl": configured_frame_url(),
-            "environment": os.environ.get("ORCA_ENVIRONMENT", "").strip() or None,
-            "runtimeRoot": runtime.runtime_root.as_posix() if runtime else None,
-            "userDataPath": runtime.user_data_path.as_posix() if runtime else None,
-        }
-    )
-    return runtime_key, config.workspace_root.resolve().as_posix()
-
-
-def require_pairing() -> None:
-    if not configured_pairing_code():
-        raise HTTPException(
-            status_code=503,
-            detail="The dashboard process has no explicit Orca pairing; no session was started.",
-        )
 
 
 class OrcaRuntimeFailure(RuntimeError):

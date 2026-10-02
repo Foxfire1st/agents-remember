@@ -45,12 +45,16 @@ export interface OrcaAgentChoice {
   id: string;
   label: string;
   models: OrcaModelChoice[];
+  /** Set when the host could not list this agent's models; the agent stays selectable. */
+  listingError?: string;
 }
 
 export interface OrcaRoleDefaults {
   agent?: string;
   model?: string;
   effort?: string;
+  /** False when the host's catalog does not offer this default; it is never replaced. */
+  available?: boolean;
 }
 
 export interface OrcaAgentOverride {
@@ -301,6 +305,52 @@ export function sameOrcaLaunchSelection(left: OrcaLaunchSelection, right: OrcaLa
     left.agentOverride?.agentId === right.agentOverride?.agentId &&
     left.agentOverride?.modelId === right.agentOverride?.modelId &&
     left.agentOverride?.effortId === right.agentOverride?.effortId;
+}
+
+/**
+ * Why Start must stay disabled for the current agent, model and effort, or null when the host's
+ * catalog offers them. Without an override this is the backend's `available` flag. With one it
+ * mirrors the backend's launch validation: the role's model applies only on the role's agent, its
+ * effort only on the role's model, and a value the catalog does not offer is never replaced.
+ */
+export function launchChoiceProblem(
+  defaults: OrcaRoleDefaults,
+  agents: OrcaAgentChoice[],
+  override: OrcaAgentOverride | undefined,
+): string | null {
+  if (!override) return unofferedRoleDefault(defaults);
+  const agent = agents.find((choice) => choice.id === override.agentId);
+  if (!agent) return "Agent " + override.agentId + " is not offered by the Paseo runtime.";
+  const modelId = override.modelId || roleValue(override.agentId === defaults.agent, defaults.model);
+  const onRoleModel = override.agentId === defaults.agent && modelId === roleValue(true, defaults.model);
+  return unofferedModelOrEffort(agent, modelId, override.effortId || roleValue(onRoleModel, defaults.effort));
+}
+
+/** A role default that applies; the backend sends an unset default as null, read here as unset. */
+function roleValue(applies: boolean, value: string | undefined): string | undefined {
+  return applies && value ? value : undefined;
+}
+
+function unofferedRoleDefault(defaults: OrcaRoleDefaults): string | null {
+  if (defaults.available !== false) return null;
+  const configured = [defaults.agent, defaults.model, defaults.effort].filter(Boolean).join(" · ");
+  return configured
+    ? "Role default " + configured + " is not offered by the Paseo runtime; pick an agent, model or effort it offers."
+    : "No agent is configured for this role; pick an agent the Paseo runtime offers.";
+}
+
+function unofferedModelOrEffort(
+  agent: OrcaAgentChoice,
+  modelId: string | undefined,
+  effortId: string | undefined,
+): string | null {
+  if (!modelId) return effortId ? "Effort " + effortId + " needs a model; pick a model." : null;
+  const model = agent.models.find((choice) => choice.id === modelId);
+  if (!model) return "Model " + modelId + " is not offered for " + agent.label + "; pick a model it offers.";
+  if (effortId && !(model.efforts ?? []).some((choice) => choice.id === effortId)) {
+    return "Effort " + effortId + " is not offered for " + model.label + "; pick an effort it offers.";
+  }
+  return null;
 }
 
 export function orcaAgentOverrideFor(

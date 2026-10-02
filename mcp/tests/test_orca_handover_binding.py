@@ -153,8 +153,6 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             task_reports = contract.task_root / "notes" / "reports"
             task_reports.mkdir(parents=True, exist_ok=True)
             workspace = {
-                "id": "fixture-workspace",
-                "selector": "id:fixture-workspace",
                 "path": workspace_path.as_posix(),
                 "contractPath": contract.contract_path.as_posix(),
                 "codeRoot": contract.code_worktree.as_posix(),
@@ -408,14 +406,10 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                 config,
                 OrcaSelection(role="architect"),
             )
-            workspace = {
-                "id": "projects-fixture",
-                "selector": "id:projects-fixture",
-                "path": workspace_root.as_posix(),
-            }
+            workspace = {"path": workspace_root.as_posix()}
             defaults = {"agent": "codex", "model": None, "effort": None}
             session_options = {"model": "gpt-6-sol"}
-            agent_arg_tokens = ("--model", "gpt-6-sol")
+            agent_arg_tokens = ()
 
             with (
                 patch.object(
@@ -456,9 +450,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             (context, workspace, "codex", session_options, agent_arg_tokens),
         )
         resolve_workspace.assert_called_once_with(config, context)
-        resolve_agent.assert_called_once_with(
-            config, workspace["selector"], defaults, ("codex",), None
-        )
+        resolve_agent.assert_called_once_with(config, defaults, ("codex",), None)
 
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")
@@ -615,10 +607,6 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             }
             statuses = iter(({"ok": False}, status))
 
-            def ensure_workspace(path: Path) -> dict[str, str]:
-                path.mkdir(parents=True, exist_ok=True)
-                return {"id": "projects", "selector": "id:projects", "path": path.as_posix()}
-
             context = OrcaRoleContext(
                 role="worker", sprint=sprint, master=master, task=leaf, effective_task=leaf
             )
@@ -631,13 +619,16 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
                     "agents_remember.cli.orca_task_preparation.worktree_start_tool",
                     return_value={"ok": True},
                 ) as start,
-                patch(
-                    "agents_remember.cli.orca_task_preparation._ensure_orca_workspace",
-                    side_effect=ensure_workspace,
-                ),
             ):
-                _resolve_workspace(config, context)
+                workspace = _resolve_workspace(config, context)
 
+            # The leaf runs in its enclosure group folder; no host workspace id is resolved here.
+            self.assertEqual(workspace["path"], group.resolve().as_posix())
+            self.assertEqual(workspace["codeRoot"], code.resolve().as_posix())
+            self.assertFalse({"id", "selector"} & set(workspace))
+            self.assertEqual(
+                (group / "task-reports").resolve(), (task_root / "notes" / "reports").resolve()
+            )
             identity = start.call_args.args[1]
             self.assertEqual(identity.repo_id, "agents-remember")
             self.assertEqual(identity.task_name, "master")

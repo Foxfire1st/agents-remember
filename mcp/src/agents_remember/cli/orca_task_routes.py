@@ -1,16 +1,13 @@
-"""AR's role-aware launcher seam for native Orca sessions.
+"""AR's role-aware launcher seam for role agents in the Paseo runtime.
 
-AR resolves the role hierarchy, paired leaf workspace, task capsule, and report scope. Orca owns
-the actual agent session and its runtime identity. Receipts retain only that execution reference;
-they never update AR task, review, curation, or Git state.
+AR resolves the role hierarchy, the role's folder, the task capsule and the report scope, chooses
+the agent id and records the launch. Paseo owns the agent session. Receipts retain only that
+execution reference; they never update AR task, review, curation, or Git state.
 """
 
 from __future__ import annotations
 
-import json
-import shlex
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,19 +23,12 @@ from agents_remember.application.orca_task_context import (
     resolve_orca_role_context,
     selection_binding,
 )
-from agents_remember.cli.orca_handover_artifacts import (
-    build_role_handover_artifact,
-    read_role_handover_artifact,
-    write_role_handover_artifact,
-)
 from agents_remember.cli.orca_runtime import (
+    HOST_CALL_NOT_AVAILABLE,
     OrcaRuntimeFailure,
 )
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
-)
-from agents_remember.cli.orca_runtime import (
-    require_pairing as _require_pairing,
 )
 from agents_remember.cli.orca_runtime import (
     runtime_call as _runtime_call,
@@ -54,6 +44,7 @@ from agents_remember.cli.orca_task_preparation import (
     prepare_orca_role_handover,
 )
 from agents_remember.cli.orca_task_receipts import (
+    _create_receipt,
     _execute_prepared_launch,
     _migrate_taskless_legacy_receipt,
     _now_iso,
@@ -61,13 +52,21 @@ from agents_remember.cli.orca_task_receipts import (
     _read_receipt,
     _receipt_address_matches,
     _receipt_path,
+    _replaced_agent_id,
     _request_digest,
     _taskless_execution_receipts,
     _verify_message_binding_projection,
     _write_message_binding_projection,
     _write_receipt,
 )
+from agents_remember.cli.paseo_bridge import (
+    BRIDGE_TIMEOUT,
+    RUNTIME_NOT_CONFIGURED,
+    PaseoBridgeFailure,
+    require_bridge_runtime,
+)
 from agents_remember.cli.paseo_frame import frame_descriptor, request_dashboard_origin
+from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call, mint_agent_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaDispatchRequest,
@@ -77,6 +76,8 @@ from agents_remember.models.orca_launcher import (
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
+# How a failed bridge call answers a launcher route; every other bridge failure is a bad gateway.
+_BRIDGE_FAILURE_STATUS = {RUNTIME_NOT_CONFIGURED: 503, BRIDGE_TIMEOUT: 504}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +90,8 @@ class _PreparedRoleStart:
     receipt_path: Path
     role_handover: PreparedOrcaRoleHandover
     message_binding_projection: dict[str, str]
+    # The agent of the closed execution this start replaces on a task-bound selection.
+    replaces_agent_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,13 +100,6 @@ class NativeRoleSessionPreparation:
     request_id: uuid.UUID
     handover_reference: dict[str, str]
     handover_artifact: dict[str, Any]
-
-
-def _json_response_payload(response: JSONResponse) -> Any:
-    body = response.body
-    if isinstance(body, memoryview):
-        body = body.tobytes()
-    return json.loads(body)
 
 
 def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
@@ -153,7 +149,6 @@ def _bind_result_endpoint(config: McpRuntimeConfig):
 def _orca_options_endpoint(
     config: McpRuntimeConfig, request: OrcaLauncherOptionsRequest
 ) -> JSONResponse:
-    _require_pairing()
     _acquire_dispatch_lock()
     try:
         context = resolve_orca_role_context(config, request)
@@ -171,6 +166,8 @@ def _orca_options_endpoint(
                 _refresh_execution(config, receipt_path, receipt) if receipt else None
             )
         return JSONResponse(response)
+    except PaseoBridgeFailure as error:
+        raise _bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
@@ -178,13 +175,21 @@ def _orca_options_endpoint(
 
 
 def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
-    _require_pairing()
+    _require_paseo_runtime(config)
     _acquire_dispatch_lock()
     try:
         if request.action == "revive":
             return _revive_execution(config, request)
         return _start_execution(config, request)
-    except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
+    except (
+        OSError,
+        ValueError,
+        TaskDocumentRefError,
+        OrcaRuntimeFailure,
+        PaseoBridgeFailure,
+    ) as error:
+        # Nothing was recorded for this request. The launcher shows the reason of a 409; a bridge
+        # failure reaches this point only while the selection is validated, before a receipt.
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
         _DISPATCH_LOCK.release()
@@ -263,20 +268,29 @@ def _reserve_message_binding_projection(
     request: OrcaDispatchRequest,
     request_digest: str,
     prepared: dict[str, Any],
-) -> tuple[dict[str, str], JSONResponse | None]:
+) -> tuple[dict[str, str], str | None, JSONResponse | None]:
+    """Settle the receipt already at this address and write the message-binding file.
+
+    Returns the binding reference, the agent of a closed execution this request replaces, and the
+    response when the request is answered by the existing receipt instead of a new launch.
+    """
+
     binding, reference = _prepared_message_binding_projection(prepared, request.request_id)
-    _verify_prior_message_binding_projection(
-        config, _read_receipt(path), request, binding, reference
+    current = _read_receipt(path)
+    _verify_prior_message_binding_projection(config, current, request, binding, reference)
+    replaces_agent_id = (
+        _replaced_agent_id(current)
+        if current and current.get("requestId") != str(request.request_id)
+        else None
     )
     prior = _reconcile_prior_execution(config, path, request, request_digest)
     if prior is not None:
-        return reference, prior
+        return reference, None, prior
     _write_message_binding_projection(config, request.request_id, binding, reference)
-    return reference, None
+    return reference, replaces_agent_id, None
 
 
 def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
-    _require_pairing()
     context = resolve_orca_role_context(config, request)
     binding = selection_binding(request)
     request_digest = _request_digest(context, request)
@@ -297,7 +311,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
-    projection_reference, prior = _reserve_message_binding_projection(
+    projection_reference, replaces_agent_id, prior = _reserve_message_binding_projection(
         config, path, request, request_digest, prepared
     )
     if prior is not None:
@@ -311,6 +325,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         receipt_path=path,
         role_handover=role_handover,
         message_binding_projection=projection_reference,
+        replaces_agent_id=replaces_agent_id,
     )
     return _launch_prepared_role_session(start, prompt=prompt)
 
@@ -318,124 +333,28 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
 def prepare_idle_native_role_session(
     config: McpRuntimeConfig, request: OrcaDispatchRequest
 ) -> NativeRoleSessionPreparation:
-    """Start an idle native leaf session and persist its complete AR role handover."""
+    """Refuse the ONT start of a role by another agent; PNT-R06 replaces it.
 
-    if request.role not in LEAF_ROLES:
-        raise ValueError(
-            "Native task preparation is available only for Worker, Reviewer, and Curator roles."
-        )
-    _acquire_dispatch_lock()
-    try:
-        context = resolve_orca_role_context(config, request)
-        binding = selection_binding(context)
-        path = _receipt_path(config, request)
-        role_handover = prepare_orca_role_handover(
-            config,
-            context,
-            agent_override=request.agent_override,
-            request_id=request.request_id,
-            entry_mode="native-orca-task",
-        )
-        prepared = role_handover.handover
-        request_digest = _digest(
-            {
-                "selection": binding,
-                "agentOverride": (
-                    request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
-                    if request.agent_override
-                    else None
-                ),
-                "taskDocumentDigest": prepared["taskDocumentDigest"],
-                "capsuleDigest": prepared["capsuleDigest"],
-                "capsuleOperation": prepared["capsuleOperation"],
-                "workspace": role_handover.workspace,
-                "agent": role_handover.agent_id,
-                "sessionOptions": role_handover.session_options,
-                "arMcpContext": prepared.get("arMcpContext"),
-            }
-        )
-        message_binding_projection, prior = _reserve_message_binding_projection(
-            config, path, request, request_digest, prepared
-        )
-        if prior is not None:
-            receipt = _read_receipt(path)
-            reference = receipt.get("handoverProjection") if receipt else None
-            if (
-                receipt is None
-                or receipt.get("nativeSessionPurpose") != "idle-native-task"
-                or not isinstance(reference, dict)
-                or not isinstance(reference.get("path"), str)
-                or not isinstance(reference.get("sha256"), str)
-            ):
-                raise ValueError(
-                    "An existing role session has no prepared native handover; use its native Orca identity without attaching a new task."
-                )
-            report = receipt.get("report")
-            report_path = report.get("path") if isinstance(report, dict) else None
-            if not isinstance(report_path, str):
-                raise ValueError(
-                    "The existing native role session has no canonical task report path."
-                )
-            artifact = read_role_handover_artifact(report_path, reference)
-            return NativeRoleSessionPreparation(
-                execution=_json_response_payload(prior),
-                request_id=uuid.UUID(str(receipt["requestId"])),
-                handover_reference=reference,
-                handover_artifact=artifact,
-            )
-        artifact = build_role_handover_artifact(role_handover)
-        handover_reference = write_role_handover_artifact(prepared["taskReportPath"], artifact)
-        start = _PreparedRoleStart(
-            config=config,
-            request=request,
-            context=context,
-            binding=binding,
-            request_digest=request_digest,
-            receipt_path=path,
-            role_handover=role_handover,
-            message_binding_projection=message_binding_projection,
-        )
-        response = _launch_prepared_role_session(
-            start,
-            prompt=None,
-            handover_projection=handover_reference,
-        )
-        return NativeRoleSessionPreparation(
-            execution=_json_response_payload(response),
-            request_id=request.request_id,
-            handover_reference=handover_reference,
-            handover_artifact=artifact,
-        )
-    finally:
-        _DISPATCH_LOCK.release()
+    ONT parked an idle session for a native Orca Task to start later. Paseo has no such Task, and
+    a launch now creates the agent with its first message, so this entry has nothing to prepare.
+    """
+
+    del config, request
+    raise OrcaRuntimeFailure(
+        HOST_CALL_NOT_AVAILABLE,
+        "Starting a role agent from another agent has no Paseo path yet: it arrives with PNT-R06.",
+    )
 
 
-def _launch_prepared_role_session(
-    start: _PreparedRoleStart,
-    *,
-    prompt: str | None,
-    handover_projection: dict[str, str] | None = None,
-) -> JSONResponse:
+def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> JSONResponse:
     request = start.request
     role_handover = start.role_handover
     workspace = role_handover.workspace
-    agent_id = role_handover.agent_id
+    provider = role_handover.agent_id
     session_options = role_handover.session_options
-    agent_args = shlex.join(role_handover.agent_arg_tokens)
     prepared = role_handover.handover
-    operation_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}"
-    launch_request: dict[str, Any] = {
-        "operationId": operation_id,
-        "agent": agent_id,
-        "target": {"kind": "existing", "worktree": workspace["selector"]},
-        "launchSource": "agents-remember-role-launcher",
-    }
-    if prompt is not None:
-        launch_request["prompt"] = {"text": prompt, "delivery": "submit"}
-    if session_options:
-        launch_request["sessionOptions"] = session_options
-    if agent_args:
-        launch_request["agentArgs"] = agent_args
+    # The agent id is chosen here: before the receipt is written and before the runtime is called.
+    agent_id = mint_agent_id()
     receipt: dict[str, Any] = {
         "schema": "ar-orca-native-execution/v1",
         "requestId": str(request.request_id),
@@ -450,7 +369,7 @@ def _launch_prepared_role_session(
                 "capsuleDigest": prepared["capsuleDigest"],
                 "capsuleOperation": prepared["capsuleOperation"],
                 "workspace": workspace,
-                "agent": agent_id,
+                "agent": provider,
                 "sessionOptions": session_options,
                 "arMcpContext": prepared.get("arMcpContext"),
             }
@@ -468,27 +387,42 @@ def _launch_prepared_role_session(
             if isinstance(prepared.get("arMcpContext"), dict)
             else {}
         ),
-        **({"handoverProjection": handover_projection} if handover_projection else {}),
-        **({"nativeSessionPurpose": "idle-native-task"} if prompt is None else {}),
-        "operationId": operation_id,
+        "agentId": agent_id,
         "status": "starting",
         "createdAt": _now_iso(),
         "workspace": workspace,
-        "agent": {"id": agent_id, **session_options},
+        "agent": {"id": provider, **session_options},
         "requestedAgentOverride": (
             request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
             if request.agent_override
             else None
         ),
         "execution": {},
-        "replayRequest": launch_request,
-        "detail": (
-            "Orca is starting an idle native role session; no native Task or Dispatch has started."
-            if prompt is None
-            else "Orca is starting the native AR role session."
+        "replayRequest": build_launch_call(
+            RoleLaunch(
+                agent_id=agent_id,
+                request_id=request.request_id,
+                context=start.context,
+                folder=workspace["path"],
+                provider=provider,
+                session_options=session_options,
+                prompt=prompt,
+                replaces_agent_id=start.replaces_agent_id,
+            )
         ),
+        "detail": "The Paseo runtime is creating the AR role agent.",
     }
-    _write_receipt(start.receipt_path, receipt)
+    if not _create_receipt(start.receipt_path, receipt):
+        # Another process created a receipt at this address since it was last read here.
+        prior = _reconcile_prior_execution(
+            start.config, start.receipt_path, request, start.request_digest
+        )
+        if prior is not None:
+            return prior
+        raise HTTPException(
+            status_code=409,
+            detail="Another launch of this AR role selection started at the same moment; refresh and start again.",
+        )
     return _execute_prepared_launch(start.config, start.receipt_path, receipt)
 
 
@@ -576,6 +510,21 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
     }
     _write_receipt(path, receipt)
     return JSONResponse(_public_execution(receipt))
+
+
+def _require_paseo_runtime(config: McpRuntimeConfig) -> None:
+    """Refuse a launch before anything is written when the settings name no Paseo runtime."""
+
+    try:
+        require_bridge_runtime(config)
+    except PaseoBridgeFailure as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _bridge_http_error(error: PaseoBridgeFailure) -> HTTPException:
+    """A failed bridge call as a route error whose text names the state (the launcher shows it)."""
+
+    return HTTPException(status_code=_BRIDGE_FAILURE_STATUS.get(error.code, 502), detail=str(error))
 
 
 def _acquire_dispatch_lock() -> None:
