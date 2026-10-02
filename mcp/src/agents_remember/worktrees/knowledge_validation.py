@@ -22,7 +22,7 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.worktrees.services import worktree_services
+from agents_remember.worktrees.services import LeafPublication, worktree_services
 
 
 @dataclass(frozen=True)
@@ -67,17 +67,25 @@ def memory_commit_refusal(
     candidate_tree: str,
     bases: Sequence[str],
     paired_code: PairedCode | None,
-    leaf_publication: bool = False,
+    leaf_publication: bool | LeafPublication = False,
 ) -> str | None:
     """Return why this memory commit is refused, or ``None`` when it may be committed.
 
     ``leaf_publication`` marks a commit that publishes a leaf (closeout, direct landing, a leaf's
     recorded landing): the leaf's own history file is then checked even once it is closed (MIK-R09).
+    A route that knows the commit its candidate sits on hands a :class:`LeafPublication` naming it
+    (``frozen``) instead of ``True``; its ``candidate_tree`` and ``bases`` are then the ones judged.
     """
 
+    publication = (
+        leaf_publication
+        if isinstance(leaf_publication, LeafPublication)
+        else LeafPublication(candidate_tree, tuple(bases))
+    )
     try:
         converted = [
-            has_layout_marker(memory_repository, tree) for tree in (candidate_tree, *bases)
+            has_layout_marker(memory_repository, tree)
+            for tree in (publication.candidate_tree, *publication.bases)
         ]
     except LayoutProbeError as error:
         return f"the knowledge validator (MIK-R22) refuses this memory commit: {error}"
@@ -94,8 +102,14 @@ def memory_commit_refusal(
             "the knowledge validator (MIK-R22) is not bound in this process; a converted memory "
             "commit is never committed unvalidated"
         )
-    route = validator.leaf_refusal if leaf_publication else validator.refusal
-    return route(
+    if leaf_publication:
+        return validator.leaf_refusal(
+            memory_repository=memory_repository,
+            publication=publication,
+            code_repository=paired_code.repository,
+            code_commit=paired_code.commit,
+        )
+    return validator.refusal(
         memory_repository=memory_repository,
         candidate_tree=candidate_tree,
         bases=tuple(bases),

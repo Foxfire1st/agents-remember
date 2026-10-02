@@ -338,7 +338,9 @@ For worktree-backed tasks, pass the configured leaf `series-contract.md` to
 `worktree_closeout_preview` / `worktree_closeout_apply`. Every enabled commit leg requires its own
 explicit nonblank message before authority is acquired. The accepted code/memory input is
 immutable per generation. Preview reports the concrete Git transaction and input conflicts without
-running quality, test, memory, certification, or review tools. Apply uses the existing transaction
+running quality, test, memory, certification, or review tools. On converted memory it does ask the
+mandatory invariant gate: a leaf the apply would refuse is answered `knowledge-gate-refused` with
+the open findings, never `would-closeout` (see `c-12-closeout`). Apply uses the existing transaction
 owner and publishes recoverable per-leg evidence. `cancel` preserves source changes and historical
 evidence; `resume` continues an unfinished commit leg without reconstructing certification history.
 Execute only the advertised task-addressed closeout action through `worktree_operation_control`;

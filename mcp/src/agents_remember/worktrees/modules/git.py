@@ -197,6 +197,17 @@ def stage_worktree_content(repo: Path, *, exclude_paths: tuple[str, ...] = ()) -
     require_git(repo, args)
 
 
+def stage_tree(repo: Path, tree: str) -> None:
+    """Make the index exactly ``tree``, reading nothing from the working tree.
+
+    A commit staged this way records ``tree`` whatever was written to the working tree since the
+    tree was read from it; such a file stays an uncommitted change. The index keeps no stat data,
+    so Git's next comparison with the working tree reads every file once.
+    """
+
+    require_git(repo, ["read-tree", tree])
+
+
 def commit_if_dirty(repo: Path, message: str, *, exclude_paths: tuple[str, ...] = ()) -> str:
     if not has_changes(repo, exclude_paths=exclude_paths):
         return head_commit(repo)

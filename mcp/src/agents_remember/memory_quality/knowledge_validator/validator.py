@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from agents_remember.memory_quality.knowledge_validator import (
     rules_admission as _rules_admission,  # noqa: F401  # registers MIK-R27's admission rules
@@ -52,13 +53,24 @@ from agents_remember.memory_quality.knowledge_validator.report import (
 from agents_remember.memory_quality.knowledge_validator.trees import CodeTree, KnowledgeTree
 
 
+@dataclass(frozen=True)
+class LeafCommit:
+    """A commit that publishes a leaf, with the history files of the commit(s) it sits on.
+
+    ``frozen`` trees are not comparison bases (a leaf's base is its parent line's tip); only their
+    closed history files count: each is frozen like one closed in a base (L37 ruling B).
+    """
+
+    frozen: tuple[KnowledgeTree, ...] = ()
+
+
 def validate_tree(
     candidate: KnowledgeTree,
     *,
     bases: Sequence[KnowledgeTree] = (),
     code: CodeTree | None = None,
     conversion: bool = False,
-    leaf_publication: bool = False,
+    leaf_publication: bool | LeafCommit = False,
 ) -> ValidationReport:
     """Validate ``candidate`` with every registered rule.
 
@@ -67,7 +79,10 @@ def validate_tree(
     existence). ``code`` is the paired code tree; it is required unless ``conversion`` is set, which
     is a standalone conversion's run: it carries anchors and authors none, so none is checked for
     path existence. ``leaf_publication`` marks a commit that publishes a leaf: the history-row rule
-    then reads every history file not closed in a base, whatever its own flag (MIK-R09).
+    then reads every history file not closed in a base, whatever its own flag (MIK-R09). A
+    :class:`LeafCommit` says the same and also hands in the history files of the commit the
+    candidate sits on, when that commit is not a base: a file closed there is frozen like one
+    closed in a base (a leaf that continues after its closeout).
     """
 
     if code is None and not conversion:
@@ -78,7 +93,8 @@ def validate_tree(
         bases=tuple(bases),
         code=code,
         conversion=conversion,
-        leaf_publication=leaf_publication,
+        leaf_publication=bool(leaf_publication),
+        frozen=leaf_publication.frozen if isinstance(leaf_publication, LeafCommit) else (),
     )
     violations = [
         Violation(
@@ -105,7 +121,7 @@ def require_valid_commit(
     *,
     bases: Sequence[KnowledgeTree],
     code: CodeTree,
-    leaf_publication: bool = False,
+    leaf_publication: bool | LeafCommit = False,
 ) -> ValidationReport | None:
     """Validate a memory commit's candidate at a commit route, refusing on any violation.
 

@@ -35,6 +35,7 @@ from agents_remember.models.knowledge_files.history import (
 )
 
 __all__ = [
+    "GUARANTEE_CHANGED",
     "ITEM_KINDS",
     "ItemKind",
     "RowLookup",
@@ -47,6 +48,11 @@ __all__ = [
 ]
 
 RowLookup = Callable[[str, HistoryFile | None], HistoryRow | None]
+
+GUARANTEE_CHANGED: Final = "guarantee-changed"
+"""A ``reached_family`` item's ``reachedBy`` reason, beside ``record-changed``: K_C restates the
+family's guarantee. The gate then holds the family's governing row to ``changed`` (MIK-R09 rule 2;
+L37 ruling of 2026-10-02T01:04:49)."""
 
 
 def subject_row(row_kind: str) -> RowLookup:

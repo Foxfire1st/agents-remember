@@ -45,6 +45,23 @@ Worktree closeout records closeout state in the contract the
 `c-09-git-worktree-manager` skill owns later integration, lifecycle finalization,
 cleanup, and task-document completion.
 
+On converted memory (the memory tree holds `knowledge/layout.json`) both closeout tools ask the
+mandatory invariant gate (MIK-R09) about the leaf's exact code and memory candidate:
+
+- `worktree_closeout_preview` answers `state: "knowledge-gate-refused"` instead of
+  `"would-closeout"` while a worklist item is open, the worklist run is incomplete or the
+  knowledge validator fails. `knowledge_gate.findingCount` and `knowledge_gate.findings` name what
+  is open (at most 50 are listed; `truncated` says so). It asks for no commit approval. Answer
+  the findings, rerun `memory_quality_check`, and preview again.
+- A passing preview carries `knowledge_gate: {"state": "pass"}`.
+- `worktree_closeout_apply` refuses the same leaf with the same findings before it claims the
+  approval or commits either side, and judges the exact memory tree once more at the memory
+  commit. A preview in the same server shortly before the apply saves the apply's first
+  evaluation.
+- The memory commit records exactly the tree the gate judged. A file written to the memory
+  worktree while the closeout runs is either refused ("changed while the gate ran"; rerun) or
+  left as an uncommitted change. It is never committed unjudged.
+
 ## Approval Authority
 
 Closeout is always authority-gated, but the authority is contextual.

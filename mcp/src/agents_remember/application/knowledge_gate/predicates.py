@@ -11,7 +11,9 @@ satisfied. An item whose kind has no predicate is open: nothing that cannot be d
   current (rule 2): its ``covers`` include every entry the facts list as ``touched``,
   ``moved_or_absent`` or ``stale_at_base`` and every added, retired or re-anchored entry; each
   covered entry that still exists in K_C has the MIK-R03 state ``current`` at C; its ``revision``
-  is the invariant's revision in K_C.
+  is the invariant's revision in K_C. While that revision differs from the parent line's, the row
+  is the ``changed`` row of the change (or the ``deleted`` row that retires the invariant): a later
+  row of another disposition cannot govern a changed record.
 * ``reached_family`` -- the leaf's **family row** is current: ``examined`` names exactly the union
   of the family's K_B and K_C members; every examined revision is that member's K_C revision (or the
   member is absent from K_C), so a sibling whose meaning changed after the row reopens it (D7); and
@@ -45,12 +47,18 @@ from agents_remember.application.knowledge_currentness.observe import (
 )
 from agents_remember.application.knowledge_worklist.classify import COVERING_CLASSES
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
-from agents_remember.application.knowledge_worklist.registry import ITEM_KINDS
+from agents_remember.application.knowledge_worklist.registry import GUARANTEE_CHANGED, ITEM_KINDS
 from agents_remember.application.knowledge_worklist.route_conditions import (
     family_route_item_open,
 )
 from agents_remember.memory.knowledge_index import Entry
-from agents_remember.models.knowledge_files.history import FamilyRow, HistoryFile, InvariantRow
+from agents_remember.models.knowledge_files.history import (
+    FamilyRow,
+    HistoryFile,
+    InvariantRow,
+    changed_family_row_violation,
+    changed_record_row_violation,
+)
 from agents_remember.models.knowledge_files.planned import planned_item_open
 from agents_remember.models.knowledge_files.reconsideration import reconsideration_item_open
 from agents_remember.models.knowledge_files.sidecars import ProofEntry
@@ -196,6 +204,12 @@ def invariant_row_open(item: Mapping[str, Any], context: GateContext) -> str | N
             f"row {row.id} records revision {row.revision}, but {subject} is at revision "
             f"{revision} in K_C"
         )
+    record = (item.get("facts") or {}).get("record") or {}
+    hidden = changed_record_row_violation(
+        row, base_revision=record.get("baseRevision"), candidate_revision=revision
+    )
+    if hidden is not None:
+        return f"row {row.id}: {hidden}; restate that changed row so that it governs again"
     stale = _not_current(row, context)
     if stale:
         return f"row {row.id} covers entries not current at C: {'; '.join(stale)}"
@@ -214,12 +228,23 @@ def family_row_open(item: Mapping[str, Any], context: GateContext) -> str | None
     row = None if context.history is None else context.history.row_about(subject)
     if not isinstance(row, FamilyRow):
         return f"the leaf's history file holds no family row about {subject}"
-    members = _ids((item.get("facts") or {}).get("members") or ())
+    facts = item.get("facts") or {}
+    members = _ids(facts.get("members") or ())
     return (
-        _examined_set_reason(row, members)
+        _hidden_guarantee_reason(row, facts.get("reachedBy") or ())
+        or _examined_set_reason(row, members)
         or _moved_members_reason(row, context)
         or _uncovered_members_reason(members, context)
     )
+
+
+def _hidden_guarantee_reason(row: FamilyRow, reached_by: Iterable[Any]) -> str | None:
+    """While K_C restates the family's guarantee, the family's one governing row is ``changed``."""
+
+    hidden = changed_family_row_violation(row, guarantee_changed=GUARANTEE_CHANGED in reached_by)
+    if hidden is None:
+        return None
+    return f"row {row.id}: {hidden}; restate that changed row so that it governs again"
 
 
 def _examined_set_reason(row: FamilyRow, members: set[str]) -> str | None:

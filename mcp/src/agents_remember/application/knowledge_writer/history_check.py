@@ -10,7 +10,10 @@ with the MIK-R07 writer-support checks:
 * :func:`reanchor_mismatches` -- each covered entry's ``after`` equals its anchor in the candidate
   (``absent`` when it is gone), rule 4;
 * :func:`invariant_revision_violation` -- an invariant row's revision is the candidate revision and
-  binds the base revision, rule 2;
+  binds the base revision, rule 2. A ``changed`` row at an unchanged revision is accepted when it
+  restates the revision step of the leaf's governing ``changed`` row in an earlier, frozen attempt
+  (:func:`_restated_revision`): the leaf closed out, was not integrated, and corrects that row's
+  effect, because or reason;
 * :func:`stale_examined_members` -- a family row examined each member at its candidate revision,
   rule 5.
 
@@ -29,6 +32,8 @@ from agents_remember.application.knowledge_writer.memory_state import (
     MergeStageError,
     Owner,
 )
+from agents_remember.models.knowledge_files.canonical import CanonicalFormatError
+from agents_remember.models.knowledge_files.documents import history_path, parse_history_document
 from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     HistoryFile,
@@ -52,7 +57,7 @@ _FROZEN = (
 def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
     """Every row of the owner's history file that the candidate contradicts, as a problem."""
 
-    path, _attempt = state.history_target(owner)
+    path, attempt = state.history_target(owner)
     document = state.document(path)
     if document is None:
         return []
@@ -66,16 +71,54 @@ def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
         for subject in unknown_subjects(history, set(state.records))
     ]
     anchors = _candidate_anchors(state, history)
+    earlier = _earlier_attempts(state, owner, attempt)
     for row in history.rows:
         where = f"{path}: row {row.id} ({row.subject})"
         problems.extend(
             Problem(where, message.replace(_REMEDY, remedy))
-            for message in _row_messages(state, row, anchors)
+            for message in _row_messages(state, row, anchors, earlier)
         )
     return problems
 
 
-def _row_messages(state: MemoryState, row: object, anchors: dict[str, Anchor]) -> Iterator[str]:
+def _earlier_attempts(state: MemoryState, owner: Owner, attempt: int) -> list[HistoryFile]:
+    """The owner's attempts before ``attempt`` as the base holds them, latest first.
+
+    The attempt a leaf writes follows only attempts its base holds closed
+    (:meth:`MemoryState.history_target`), so these are the leaf's frozen files. A wave or a
+    crossing has one file, and so none.
+    """
+
+    files: list[HistoryFile] = []
+    if state.base is None:
+        return files
+    for number in range(attempt - 1, 0, -1):
+        path = history_path(owner.id, number)
+        try:
+            files.append(
+                parse_history_document(path, (state.base.get(path) or b"").decode("utf-8"))
+            )
+        except (UnicodeDecodeError, CanonicalFormatError, ValueError):
+            continue  # the validator names a history file that does not parse
+    return files
+
+
+def _restated_revision(earlier: list[HistoryFile], subject: str) -> int | None:
+    """The revision of the leaf's governing ``changed`` row about ``subject`` in an earlier, frozen
+    attempt: the latest earlier row about it, when that row is a ``changed`` row."""
+
+    for history in earlier:
+        row = history.row_about(subject)
+        if isinstance(row, InvariantRow) and row.disposition == "changed":
+            return row.revision
+        if row is not None:
+            return None
+    return None
+
+
+def _row_messages(
+    state: MemoryState, row: object, anchors: dict[str, Anchor], earlier: list[HistoryFile]
+) -> Iterator[str]:
     if isinstance(row, InvariantRow):
         mismatched = reanchor_mismatches(row, anchors)
         if mismatched:
@@ -86,7 +129,10 @@ def _row_messages(state: MemoryState, row: object, anchors: dict[str, Anchor]) -
         revision = _revision(state, row.subject)
         if revision is not None:
             violation = invariant_revision_violation(
-                row, base_revision=_base_revision(state, row.subject), candidate_revision=revision
+                row,
+                base_revision=_base_revision(state, row.subject),
+                candidate_revision=revision,
+                restated_revision=_restated_revision(earlier, row.subject),
             )
             if violation is not None:
                 yield f"{violation}; {_REMEDY}"

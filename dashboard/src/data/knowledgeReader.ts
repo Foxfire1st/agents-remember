@@ -239,6 +239,8 @@ export interface IncomingLink {
   detail: Record<string, unknown>;
   originPath: string;
   sourceRecord?: RecordSummary;
+  // The record a `history_row` source is about: a row has no page of its own.
+  sourceSubject?: RecordSummary;
   targetRecord?: RecordSummary;
 }
 

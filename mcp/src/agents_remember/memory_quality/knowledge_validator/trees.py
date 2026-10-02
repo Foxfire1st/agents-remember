@@ -195,6 +195,21 @@ def knowledge_tree_from_git(
     return KnowledgeTree(label=label or treeish, files=files)
 
 
+def history_tree_from_git(repository: Path, treeish: str) -> KnowledgeTree:
+    """Only the history files of a commit or tree: all the freeze rules read of a tree that is not
+    a comparison base (the commit a leaf's candidate sits on)."""
+
+    tree = _resolve_tree(repository, treeish)
+    wanted = {
+        path: blob
+        for path, blob in _tree_blobs(repository, tree).items()
+        if path.startswith("knowledge/history/")
+    }
+    contents = read_git_blobs_bytes(repository, wanted.values())
+    files = {path: contents[blob] for path, blob in sorted(wanted.items())}
+    return KnowledgeTree(label=f"history of {treeish}", files=files)
+
+
 def code_tree_from_git(repository: Path, treeish: str, *, label: str | None = None) -> CodePathSet:
     """Return the file paths of a commit or tree in the code ``repository``."""
 

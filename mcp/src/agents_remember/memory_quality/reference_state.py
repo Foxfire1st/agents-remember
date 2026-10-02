@@ -140,14 +140,19 @@ def _anchor_targets(document: dict[str, Any]) -> Iterator[tuple[str, int, dict[s
                     yield f"references.{number}.targets.{index}", 0, {"path": path, **anchor}
 
 
-def check_references(memory_root: Path, code_root: Path) -> dict[str, Any]:
-    """Report every reference anchor's state in the code working tree (report-only)."""
+def check_references(
+    memory_root: Path, code_root: Path, *, only: str | None = None
+) -> dict[str, Any]:
+    """Report every reference anchor's state in the code working tree (report-only).
+
+    ``only`` names one sidecar (memory-root relative): no other sidecar is read or reported.
+    """
 
     files = _WorkingFiles(code_root)
     states: Counter[str] = Counter()
     stale: list[dict[str, Any]] = []
     unreadable: list[str] = []
-    for relative, document in _sidecars(memory_root, unreadable):
+    for relative, document in _sidecars(memory_root, unreadable, only):
         try:
             observed = [
                 (field_name, anchor, anchor_state(anchor["path"], anchor, files))
@@ -238,9 +243,11 @@ def fix_references(
 ) -> dict[str, Any]:
     """Re-record mechanically moved reference anchors; leave every stale one to the curator.
 
-    ``only`` names one sidecar (memory-root relative): no other sidecar is read or rewritten. A
-    sidecar that cannot be read as one is named in ``unreadableSidecars``, never rewritten, and
-    makes the run not ``ok``; the others are still fixed.
+    ``only`` names one sidecar (memory-root relative): no other sidecar is read, rewritten or
+    reported, so ``stale`` then lists that document's stale references and nothing else (L37 P1c,
+    C1: it listed the whole tree's). A sidecar that cannot be read as one is named in
+    ``unreadableSidecars``, never rewritten, and makes the run not ``ok``; the others are still
+    fixed.
     """
 
     files = _WorkingFiles(code_root)
@@ -265,5 +272,5 @@ def fix_references(
         "refreshedAnchors": refreshed,
         "rewrittenSidecars": rewritten,
         "unreadableSidecars": unreadable,
-        "stale": check_references(memory_root, code_root)["reportOnlyFindings"],
+        "stale": check_references(memory_root, code_root, only=only)["reportOnlyFindings"],
     }

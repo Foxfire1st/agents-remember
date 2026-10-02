@@ -69,6 +69,7 @@ from agents_remember.worktrees.services import (
     DirectGateVerdict,
     KnowledgeGatePort,
     LandingGateRequest,
+    LeafPublication,
     worktree_services,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -80,6 +81,7 @@ __all__ = [
     "HistoryClosing",
     "checkout_memory_converted",
     "close_owner_history",
+    "closed_out_memory",
     "converted_memory",
     "direct_closing_receipt",
     "direct_gate_verdict",
@@ -128,6 +130,21 @@ def parent_memory_tip(contract: WorktreeContract) -> str | None:
     if contract.memory_repo_path is None or not contract.memory_source_branch:
         return None
     return branch_commit(contract.memory_repo_path, contract.memory_source_branch)
+
+
+def closed_out_memory(contract: WorktreeContract) -> tuple[str, ...]:
+    """The memory commit of this leaf's completed closeout, when the contract records one.
+
+    A leaf that continues after a closeout that was not integrated sits on that commit. The history
+    file the closeout closed there is frozen, though the parent line -- the validator's base -- does
+    not hold it yet, and the leaf's later rows go to its next attempt file (L37 ruling of
+    2026-10-01T17:17:07, B). Only a recorded closeout freezes: a file closed by a hand commit is
+    still the leaf's own and is read whatever its flag (L09 review R1, finding 1).
+    """
+
+    if contract.closeout_status == "completed" and contract.memory_content_commit:
+        return (contract.memory_content_commit,)
+    return ()
 
 
 def leaf_line(contract: WorktreeContract) -> str:
@@ -297,13 +314,18 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
     port = _port()
     if port is None:
         return GATE_UNBOUND
+    # A leaf's landed commit is judged as its closeout judged it: only what an earlier recorded
+    # closeout of the same leaf closed is frozen (L37 ruling B), which the request names.
+    publication: bool | LeafPublication = bool(request.leaf_owner) and LeafPublication(
+        request.memory_commit, tuple(request.memory_bases), frozen=request.frozen
+    )
     refusals = [
         memory_commit_refusal(
             memory_repository=request.memory_repository,
             candidate_tree=request.memory_commit,
             bases=request.memory_bases,
             paired_code=PairedCode(repository=request.code_repository, commit=request.code_commit),
-            leaf_publication=bool(request.leaf_owner),
+            leaf_publication=publication,
         ),
         port.landing_refusal(request),
     ]

@@ -100,14 +100,65 @@ def citation_fix_payload(
 ) -> dict[str, Any]:
     return _tool_payload(
         "citation_fix",
-        citation_fix_tool(
-            config,
-            repo_id=repo_id,
-            contract_path=contract_path,
-            dry_run=dry_run,
-            operation_scope=operation_scope,
+        bounded_citation_fix(
+            citation_fix_tool(
+                config,
+                repo_id=repo_id,
+                contract_path=contract_path,
+                dry_run=dry_run,
+                operation_scope=operation_scope,
+            )
         ),
     )
+
+
+MAX_INLINE_CITATION_ITEMS = 50
+"""How many entries of each list a converted ``citation_fix`` response carries."""
+
+_CITATION_FIX_LISTS = ("stale", "rewrittenSidecars", "unreadableSidecars")
+_AUTHORING_LISTS = ("authoredCards", "createdSidecars", "unresolvedTargets", "refused")
+
+
+def _bounded_lists(payload: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any]:
+    """``payload`` with each named list capped: its full count, and ``truncated`` when capped."""
+
+    bounded = dict(payload)
+    truncated = []
+    for name in names:
+        items = payload.get(name)
+        if not isinstance(items, list):
+            continue
+        bounded[f"{name}Count"] = len(items)
+        if len(items) > MAX_INLINE_CITATION_ITEMS:
+            bounded[name] = items[:MAX_INLINE_CITATION_ITEMS]
+            truncated.append(name)
+    if truncated:
+        bounded["truncated"] = truncated
+        bounded["truncatedNote"] = (
+            f"each of {', '.join(truncated)} shows its first {MAX_INLINE_CITATION_ITEMS} entries; "
+            "the matching ...Count field is the full number. Name one card (document) for its own "
+            "list, or run `agents-remember memory-citations --fix --dry-run` for the full lists"
+        )
+    return bounded
+
+
+def bounded_citation_fix(payload: dict[str, Any]) -> dict[str, Any]:
+    """A converted tree's ``citation_fix`` result, bounded for transport (L37 P1c, C1).
+
+    A tree-wide run on converted memory names every stale reference, every rewritten sidecar and
+    every authored card: hundreds of entries on a real tree. The response keeps the counts and the
+    first :data:`MAX_INLINE_CITATION_ITEMS` entries of each list and says which lists it capped.
+    An unconverted tree's result has its own, unchanged shape and is passed through: its complete
+    repair list is that fixer's contract (L6-R15).
+    """
+
+    if payload.get("status") != "converted":
+        return payload
+    bounded = _bounded_lists(payload, _CITATION_FIX_LISTS)
+    authoring = payload.get("authoring")
+    if isinstance(authoring, dict):
+        bounded["authoring"] = _bounded_lists(authoring, _AUTHORING_LISTS)
+    return bounded
 
 
 def citation_migrate_payload(

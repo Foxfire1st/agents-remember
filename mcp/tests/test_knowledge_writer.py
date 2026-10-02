@@ -775,6 +775,57 @@ def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path
     assert tree_bytes(world.memory) == before
 
 
+def test_a_cover_revises_a_realization_entrys_rationale_in_place(tmp_path: Path) -> None:
+    """L37 P1c, C5: a rationale that no longer describes the code is corrected under the
+    invariant's row. The entry keeps its ID, role, invariant and anchor. A blank rationale, one
+    beside ``remove`` and one on a proof entry are named problems, and nothing is written."""
+
+    world = build_world(tmp_path)
+    assert _write(world, _conforming()).state == "written"
+    (proof,) = read_json(world.memory, f"onboarding/{TEST_FILE}.json")["proves"]
+    (entry,) = (
+        one
+        for one in read_json(world.memory, f"onboarding/{CODE_FILE}.json")["realizes"]
+        if one["id"] == BASE_REALIZATION
+    )
+    untouched = tree_bytes(world.memory)
+
+    def covering(subject: str, cover: dict[str, Any]) -> dict[str, Any]:
+        reason = "The rationale described the old code."
+        row = {"subject": subject, "disposition": "no_impact", "reason": reason, "covers": [cover]}
+        return {"history": [row]}
+
+    for subject, bad, named in (
+        (BASE_INVARIANT, {"id": BASE_REALIZATION, "rationale": " "}, "non-empty text"),
+        (
+            BASE_INVARIANT,
+            {"id": BASE_REALIZATION, "rationale": "Gone.", "remove": True},
+            "either removes its entry or revises its rationale",
+        ),
+        (proof["invariant"], {"id": proof["id"], "rationale": "It lands."}, "a proof has a facet"),
+    ):
+        refused = _write(world, covering(subject, bad))
+        assert refused.state == "refused", bad
+        assert any(named in one.message for one in refused.problems), refused.render()
+    assert tree_bytes(world.memory) == untouched
+
+    revised = "Returns the pair as one value, so a caller cannot land one half."
+    document = covering(BASE_INVARIANT, {"id": BASE_REALIZATION, "rationale": revised})
+    report = _write(world, document)
+    assert report.state == "written", report.render()
+    (after,) = (
+        one
+        for one in read_json(world.memory, f"onboarding/{CODE_FILE}.json")["realizes"]
+        if one["id"] == BASE_REALIZATION
+    )
+    assert after == {**entry, "rationale": revised} and entry["rationale"] != revised
+    (row,) = read_json(world.memory, f"knowledge/history/{LEAF_ID}.json")["rows"]
+    assert [cover["id"] for cover in row["covers"]] == [BASE_REALIZATION]
+    before = tree_bytes(world.memory)
+    assert _write(world, document).state == "written"  # a rerun changes nothing
+    assert tree_bytes(world.memory) == before
+
+
 R04 = {
     "task": {"repository": "agents-remember", "path": "260928_family"},
     "packet": "requirements/MIK-R04-v2-family-routes.md",

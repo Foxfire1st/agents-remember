@@ -804,7 +804,8 @@ def test_the_closeout_memory_commit_closes_the_history_file_and_validates_its_ex
     }
     closing.restore()
     assert not history.exists()
-    world.rows(*trace_rows(*TRACES))
+    code_commit = commit(world.code, {"pkg/a.py": CODE_A.replace("return 1", "return 3")})
+    _answered(world, world.reanchor("RLZ-A00002"), *trace_rows(*TRACES))  # the gate runs too (P1c)
     open_bytes = history.read_bytes()
     closing = close_owner_history(world.memory, LEAF)
     closed = json.loads(history.read_text())
@@ -812,7 +813,6 @@ def test_the_closeout_memory_commit_closes_the_history_file_and_validates_its_ex
     assert history.read_text() == canonical_text(closed)
     assert leaf_memory_converted(world.contract)
 
-    code_commit = commit(world.code, {"pkg/a.py": CODE_A.replace("return 1", "return 3")})
     write(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"})
     never = mock.Mock(side_effect=AssertionError("committed an invalid tree"))
     with (
@@ -1091,7 +1091,8 @@ def test_the_gate_memo_reuses_a_verdict_only_for_the_identical_inputs(
         assert evaluated.call_count == 7
 
     world.task_document()  # back to the inputs of the second evaluation, whose verdict passed
-    key = memo.memo_key(world.contract, answered, git(world.memory, "rev-parse", "main"))
+    heads = (git(world.memory, "rev-parse", name) for name in ("main", "HEAD"))
+    key = memo.memo_key(world.contract, answered, *heads)
     assert key is not None and memo.remembered(key) is not None  # the passing verdict is kept
     late = time.monotonic() + memo.MAX_AGE_SECONDS + 1
     assert memo.remembered(key, now=late) is None  # and never older than one run's span

@@ -22,6 +22,7 @@ ingest is the production path for unconverted memory, and nothing here changes i
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -91,7 +92,8 @@ class WriteRequest:
     every endpoint is reported unresolved (MIK-R13 rule 4). Never a reason to refuse."""
     worklist: Mapping[str, Any] | None = None
     """The leaf's persisted worklist (MIK-R08): a ``still_rejected`` row refreshes the links whose
-    trigger fired on its item (MIK-R14); without it no link is refreshed."""
+    trigger fired on its item (MIK-R14), and a row whose hand-off names no item lists the items it
+    answers (MIK-R07 rule 1); without it no link is refreshed and no item is filled in."""
     questions: OpenQuestions | None = None
     """The leaf task document's ``openQuestions``, where a ``raise`` row's question goes
     (MIK-R14); without it a ``raise`` is refused."""
@@ -126,6 +128,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         decisions=request.decisions,
         questions=request.questions,
         reconsiderations=_reconsideration_items(request.worklist),
+        worklist_items=_worklist_items(request.worklist),
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
@@ -215,6 +218,24 @@ def _reconsideration_items(worklist: Mapping[str, Any] | None) -> dict[str, Mapp
         for item in items
         if isinstance(item, Mapping) and item.get("kind") == "reconsideration_candidate"
     }
+
+
+_ITEM_ID = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _worklist_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str, str], ...]:
+    """``(kind, subject, id)`` of every well-formed item of the leaf's persisted worklist."""
+
+    items = (worklist or {}).get("items") or ()
+    return tuple(
+        (kind, subject, item_id)
+        for item in items
+        if isinstance(item, Mapping)
+        and isinstance(kind := item.get("kind"), str)
+        and isinstance(subject := item.get("subject"), str)
+        and isinstance(item_id := item.get("id"), str)
+        and _ITEM_ID.fullmatch(item_id)
+    )
 
 
 def _append_raised(request: WriteRequest, raised: list[tuple[str, str]]) -> tuple[Problem, ...]:

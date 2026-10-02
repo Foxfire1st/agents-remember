@@ -130,6 +130,22 @@ class MemoryQualityPort(Protocol):
     ) -> dict[str, Any]: ...
 
 
+@dataclass(frozen=True)
+class LeafPublication:
+    """The memory trees of a commit that publishes a leaf (its closeout, direct landing, or the
+    recorded landing of a leaf).
+
+    ``candidate_tree`` is the exact tree, ``bases`` its comparison bases (the parent line's tip, so
+    every record the leaf made is judged new). ``frozen`` are the commit(s) the candidate sits on
+    when they are not bases: a history file closed there was closed by an earlier closeout of the
+    same leaf that was not integrated, and stays frozen (L37 ruling of 2026-10-01T17:17:07, B).
+    """
+
+    candidate_tree: str
+    bases: tuple[str, ...]
+    frozen: tuple[str, ...] = ()
+
+
 class KnowledgeValidationPort(Protocol):
     """The mandatory knowledge validator (MIK-R22), as a memory commit route calls it.
 
@@ -152,13 +168,13 @@ class KnowledgeValidationPort(Protocol):
         self,
         *,
         memory_repository: Path,
-        candidate_tree: str,
-        bases: Sequence[str],
+        publication: LeafPublication,
         code_repository: Path,
         code_commit: str,
     ) -> str | None:
         """The same, for a commit that publishes a leaf: the leaf's own history file is checked
-        whatever its ``closed`` flag (MIK-R09)."""
+        whatever its ``closed`` flag (MIK-R09), unless it is closed in a base or in the commit the
+        candidate sits on."""
         ...
 
 
@@ -220,6 +236,10 @@ class LandingGateRequest:
     recorded landing. ``code_base`` is the parent line's code tip, whose merge base with
     ``code_commit`` starts the master's net code diff (``None``: no staleness check). A leaf's
     recorded landing names ``leaf_owner``, whose history file must be closed in ``memory_commit``.
+    ``frozen`` are the commits whose closed history files an earlier closeout of that leaf closed
+    (:class:`LeafPublication`): the caller names them only for the memory commit the leaf's
+    contract records as its completed closeout, and a commit made by any other hand freezes
+    nothing (L37 review R5-1).
     """
 
     memory_repository: Path
@@ -229,6 +249,7 @@ class LandingGateRequest:
     code_commit: str
     code_base: str | None = None
     leaf_owner: str | None = None
+    frozen: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

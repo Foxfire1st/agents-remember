@@ -605,7 +605,11 @@ def unknown_subjects(history: HistoryFile, known_record_ids: Collection[str]) ->
 
 
 def invariant_revision_violation(
-    row: InvariantRow, *, base_revision: int | None, candidate_revision: int
+    row: InvariantRow,
+    *,
+    base_revision: int | None,
+    candidate_revision: int,
+    restated_revision: int | None = None,
 ) -> str | None:
     """Return why ``row.revision`` does not bind the invariant's revisions, or ``None``.
 
@@ -614,6 +618,13 @@ def invariant_revision_violation(
     exactly once (MIK-R21 rule 4). ``moved``, ``extended`` and ``no_impact`` leave meaning, and so the
     revision, unchanged. ``deleted`` is not constrained beyond K_C. ``base_revision`` is ``None``
     for an invariant absent from K_B, which needs no row (rule 6).
+
+    ``restated_revision`` is the revision of the owner's governing ``changed`` row in an earlier,
+    frozen attempt of the same leaf (``None`` when it has none). A ``changed`` row at an unchanged
+    revision is accepted only as a restatement of that revision step: the record has not changed
+    since that row (K_C's revision is K_B's) and both rows are at that revision. It corrects the
+    step's effect, because and reason; it is no second change (L37 ruling of 2026-10-01T22:49:36,
+    Q2 a).
     """
 
     if row.revision != candidate_revision:
@@ -621,10 +632,67 @@ def invariant_revision_violation(
     if base_revision is None or row.disposition == "deleted":
         return None
     if row.disposition == "changed" and candidate_revision != base_revision + 1:
+        if candidate_revision == base_revision == restated_revision:
+            return None
         return f"a changed row's revision is the K_B revision {base_revision} plus one"
     if row.disposition != "changed" and candidate_revision != base_revision:
         return f"a {row.disposition} row keeps the K_B revision {base_revision}"
     return None
+
+
+def keeps_change_visible(row: InvariantRow | FamilyRow) -> bool:
+    """Whether ``row`` may govern a record its leaf changed: the ``changed`` row of that change, or
+    the row that retires the record (``deleted`` for an invariant, ``retired`` for a family)."""
+
+    return row.disposition in {"changed", "deleted", "retired"}
+
+
+def changed_record_row_violation(
+    row: InvariantRow, *, base_revision: int | None, candidate_revision: int | None
+) -> str | None:
+    """Return why ``row`` cannot govern an invariant whose revision the leaf changed, or ``None``.
+
+    ``base_revision`` is the invariant's revision on the parent line (the leaf's K_B) and
+    ``candidate_revision`` its revision in K_C. While the two differ, the leaf changed the
+    invariant's meaning, and the leaf's governing row about it -- the latest across its attempt
+    files -- is the ``changed`` row of that change (or the ``deleted`` row that retires it). A
+    later ``no_impact``, ``moved`` or ``extended`` row would replace that judgment and hide the
+    change, so it is refused at the routes (L37 ruling of 2026-10-01T22:49:36, Q2 b). The writer's
+    own form of the rule is :func:`invariant_revision_violation`, against its base.
+    """
+
+    if base_revision is None or candidate_revision is None or base_revision == candidate_revision:
+        return None
+    if keeps_change_visible(row):
+        return None
+    return (
+        f"{_a_row(row)} governs an invariant this leaf changed (revision "
+        f"{base_revision} on the parent line, {candidate_revision} in K_C); the governing row of "
+        "a changed record is its changed row"
+    )
+
+
+def changed_family_row_violation(row: FamilyRow, *, guarantee_changed: bool) -> str | None:
+    """Return why ``row`` cannot govern a family whose guarantee the leaf changed, or ``None``.
+
+    A family has one governing row, the leaf's latest about it (rule 5; MIK-R06 rule 3 reads "the
+    latest family row"). ``guarantee_changed`` says that K_C states another guarantee than the
+    parent line (the leaf's K_B). While it does, the governing row is the ``changed`` row of that
+    change (or the ``retired`` row that retires the family): a ``no_impact``, ``assigned`` or
+    ``rerouted`` row would replace that judgment. Route work is recorded under the ``changed``
+    row, which answers the family's route conditions too (L37 ruling of 2026-10-02T01:04:49).
+    """
+
+    if not guarantee_changed or keeps_change_visible(row):
+        return None
+    return (
+        f"{_a_row(row)} governs a family whose guarantee this leaf changed; the governing row of "
+        "such a family is its changed row, which answers its route conditions too (MIK-R06 rule 3)"
+    )
+
+
+def _a_row(row: HistoryRow) -> str:
+    return f"{'an' if row.disposition[:1] in 'aeiou' else 'a'} {row.disposition} row"
 
 
 def stale_examined_members(row: FamilyRow, candidate_revisions: Mapping[str, int]) -> list[str]:

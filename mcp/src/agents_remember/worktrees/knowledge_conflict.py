@@ -58,11 +58,15 @@ from agents_remember.models.knowledge.merge import (
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 
 __all__ = [
+    "STAGE_DIRECTORY_PREFIX",
     "KnowledgeConflictSettlement",
     "RefusedKnowledgeStage",
     "settle_knowledge_conflict",
     "settle_knowledge_conflicts",
 ]
+
+STAGE_DIRECTORY_PREFIX = "ar-merge-stages-"
+"""The temporary directory one settlement materialises its three stages in, and removes."""
 
 # The three positions a conflicted path occupies in the index, and the stage number Git gives each.
 # ``base`` is the merge base, ``left`` is the side being merged into (ours), ``right`` is the side
@@ -172,13 +176,18 @@ def _common_base(worktree: Path, left: str, right: str) -> str | None:
     return commit
 
 
-def _stage(worktree: Path, path: str, left: str, right: str) -> _Settlement | RefusedKnowledgeStage:
+def _stage(
+    worktree: Path, path: str, commits: tuple[str, str], into: Path
+) -> _Settlement | RefusedKnowledgeStage:
     """Everything the application layer needs for one conflicted path, or why there is none.
 
     Every return here is a different reason the agent keeps the conflict: the file is gone, Git
     cannot name one common base, or a stage will not materialise. The reason is reported rather than
-    collapsed, because "nothing settled" is not something an agent can act on.
+    collapsed, because "nothing settled" is not something an agent can act on. The stages are
+    written under ``into``, which the caller owns and removes.
     """
+
+    left, right = commits
 
     target = worktree / path
     if not target.is_file():
@@ -190,7 +199,7 @@ def _stage(worktree: Path, path: str, left: str, right: str) -> _Settlement | Re
         return RefusedKnowledgeStage(
             path=path, detail="Git cannot name one common base commit for the retained merge"
         )
-    stages = _materialise_stages(path, Path(tempfile.mkdtemp(prefix="ar-merge-stages-")), worktree)
+    stages = _materialise_stages(path, into, worktree)
     if stages is None:
         return RefusedKnowledgeStage(
             path=path, detail="the three index stages could not be materialised byte-for-byte"
@@ -214,16 +223,19 @@ def settle_knowledge_conflict(
     the refusal advertised.
     """
 
-    settlement = _stage(worktree, path, left, right)
-    if isinstance(settlement, RefusedKnowledgeStage):
-        return settlement
-    outcome = merge_conflicted_stages(
-        destination=settlement.target,
-        stages=settlement.stages,
-        repository_root=worktree,
-        commits=ConflictCommits(base=settlement.base_commit, left=left, right=right),
-        reconciliations=tuple(reconciliations),
-    )
+    # The three stage copies are read only by the merge below; its outcome carries no path into
+    # them, so the directory is removed on every way out, a refusal or an error included.
+    with tempfile.TemporaryDirectory(prefix=STAGE_DIRECTORY_PREFIX) as scratch:
+        settlement = _stage(worktree, path, (left, right), Path(scratch))
+        if isinstance(settlement, RefusedKnowledgeStage):
+            return settlement
+        outcome = merge_conflicted_stages(
+            destination=settlement.target,
+            stages=settlement.stages,
+            repository_root=worktree,
+            commits=ConflictCommits(base=settlement.base_commit, left=left, right=right),
+            reconciliations=tuple(reconciliations),
+        )
     if not outcome.settled:
         return RefusedKnowledgeStage(
             path=path,

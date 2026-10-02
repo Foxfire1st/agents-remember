@@ -31,7 +31,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
 from agents_remember.worktrees.ledger_projection import inspect_ledger_projection
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_external import (
+    GATE_NOT_APPLICABLE,
+    candidate_gate_verdict,
     external_closeout_commits,
+    refuse_ungated_candidate,
+    require_gated_recovery,
 )
 from agents_remember.worktrees.modules.closeout_lineage import (
     heal_current_source_lineage,
@@ -261,10 +265,19 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     :func:`require_closeout_publication_authority`: the dry run used to plan a closeout the apply
     then rejected on every completion blocker, which is exactly how a partial master's landing came to
     look available when it was not. A leaf owes nothing there, so no leaf preview changes.
+
+    The same holds for the mandatory invariant gate (MIK-R09): a converted leaf's preview asks the
+    gate the apply's preflight asks, over the same two trees, and answers
+    ``knowledge-gate-refused`` with the findings instead of ``would-closeout`` when it refuses
+    (:func:`_gate_refused_preview`). The verdict is memoised, so the apply that follows does not
+    evaluate it again.
     """
 
     refuse_series_workbench_commit(contract)
     require_closeout_publication_authority(contract)
+    verdict = candidate_gate_verdict(contract, args.candidate_tree or code_candidate_tree(contract))
+    if verdict is not None and verdict != GATE_NOT_APPLICABLE:
+        return _gate_refused_preview(contract, verdict)
     code_dirty = contract.kind == "leaf" and worktree_dirty(contract.code_worktree)
     memory_dirty = (
         contract.kind == "leaf"
@@ -311,6 +324,49 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "proposed_commits": proposed_closeout_commits(
             contract, args, code_dirty, memory_would_commit
         ),
+        # Present on a converted leaf only: an unconverted leaf's preview is what it was.
+        **({} if verdict == GATE_NOT_APPLICABLE else {"knowledge_gate": {"state": "pass"}}),
+    }
+
+
+GATE_REFUSED_PREVIEW = "knowledge-gate-refused"
+MAX_PREVIEW_FINDINGS = 50
+
+
+def _gate_refused_preview(contract, refusal: str) -> dict[str, object]:
+    """The preview of a closeout the mandatory gate refuses: never ``would-closeout``.
+
+    It carries the gate's own sentence, the number of findings and the first
+    :data:`MAX_PREVIEW_FINDINGS` of them (a leaf at intake holds hundreds), and its own next step,
+    so the response is not followed by the hint to ask for the commit approval. The contract's
+    own next call (an apply, or the integration of an earlier closeout) is not offered either.
+    """
+
+    header, *lines = refusal.splitlines()
+    findings = [line.removeprefix("- ") for line in lines if line.startswith("- ")]
+    summary = f"The closeout would be refused, and nothing would be committed: {header}"
+    step = (
+        f"{summary}. Answer each finding (a row through the knowledge writer, or the repair it "
+        "names), rerun memory_quality_check, then preview the closeout again."
+    )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": GATE_REFUSED_PREVIEW,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "knowledge_gate": {
+            "state": "refused",
+            "findingCount": len(findings),
+            "findings": findings[:MAX_PREVIEW_FINDINGS],
+            "truncated": len(findings) > MAX_PREVIEW_FINDINGS,
+        },
+        "nextStep": {"summary": step},
     }
 
 
@@ -555,6 +611,8 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             require_series_contract_authority(current, operation="worktree_closeout")
         else:
             require_ordinary_worktree(current, operation="worktree_closeout")
+        # MIK-R09 rule 5: a recovered closeout finalizes only a memory commit the gate passes.
+        require_gated_recovery(current, commits.codeCommit, commits.memoryContentCommit)
         memory = prove_closeout_recovery_commits(current, commits)
         integration_reopen = completed_integration_reopen(
             current,
@@ -768,6 +826,9 @@ def closeout_result(
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
     contract = _revalidate_candidate(contract, accepted_candidate_tree, dry_run=args.dry_run)
+    # MIK-R09: an open worklist item, an incomplete run or a validator failure refuses the closeout
+    # before it claims its approval or commits either side; the memory commit asks again.
+    refuse_ungated_candidate(contract, accepted_candidate_tree)
 
     return _publish_closeout_candidate(
         contract,
@@ -870,9 +931,7 @@ def _closeout_entry(
     contract = _validate_closeout_source_state(contract, dry_run=args.dry_run)
     refuse_series_workbench_commit(contract)
     if args.dry_run:
-        return (
-            contract,
-            effective_input,
-            WorktreeCommandResult(0, closeout_preview_payload(contract, args)),
-        )
+        preview = closeout_preview_payload(contract, args)
+        refused = preview["state"] == GATE_REFUSED_PREVIEW
+        return contract, effective_input, WorktreeCommandResult(2 if refused else 0, preview)
     return contract, effective_input, None

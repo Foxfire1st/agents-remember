@@ -31,6 +31,7 @@ from agents_remember.kernel import memory_init
 from agents_remember.kernel.coordination_context_resolver import StorageSettings
 from agents_remember.kernel.memory_init import LAYOUT_MARKER_TEXT
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.mcp.tools import memory as memory_tool_payloads
 from agents_remember.memory.conversion import card_authoring
 from agents_remember.memory.conversion.card_authoring import author_card_references
 from agents_remember.memory.conversion.code_objects import CodeObjects
@@ -39,6 +40,10 @@ from agents_remember.memory.conversion.inputs import memory_from_directory, writ
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.memory_quality.converted_cards import converted_card_metadata
 from agents_remember.memory_quality.converted_check import converted_knowledge_check
+from agents_remember.memory_quality.final_certification.catalog import (
+    ReadinessProjectionInput,
+    final_catalog_readiness,
+)
 from agents_remember.memory_quality.knowledge_validator.trees import (
     CodeDirectory,
     knowledge_tree_from_directory,
@@ -169,6 +174,24 @@ def test_memory_quality_reads_the_converted_format(tmp_path: Path) -> None:
         "not-applicable-converted"
     )
     assert "integrity.onboarding_drift_check.summary" not in result["checks"]
+
+    # L37 P1c, C2: the final catalog's drift item is that slot's result under its converted name.
+    # It read ``fail`` with no finding, because nothing is stored under the drift check's name.
+    def drift_item(checks: dict[str, Any]) -> dict[str, Any]:
+        projected = final_catalog_readiness(ReadinessProjectionInput(executed_checks=checks))
+        (item,) = (
+            one for one in cast(list[dict[str, Any]], projected["items"])
+            if one["item"]["itemId"] == "integrity.onboarding_drift_check.summary"
+        )  # fmt: skip
+        return item
+
+    passing = drift_item(result["checks"])
+    assert (passing["status"], passing["findingCount"]) == ("pass", 0)
+    refused = {**result["checks"]["knowledge.converted"], "ok": False, "findingCount": 2}
+    failing = drift_item({**result["checks"], "knowledge.converted": refused})
+    assert (failing["status"], failing["findingCount"]) == ("fail", 2)
+    absent = drift_item({})  # a run that executed neither spelling is still a failure
+    assert (absent["status"], absent["findingCount"]) == ("fail", 0)
 
 
 def test_an_unconverted_leaf_is_refused_only_once_its_official_line_is_converted(
@@ -748,6 +771,111 @@ def test_a_leftover_evidence_line_is_refused_and_only_the_named_card_loses_refer
     named = author_card_references(memory, code.root, only=f"{EXTRA}.md")
     assert named["removedReferences"] == 1
     assert set(json.loads(sidecar.read_text())["references"]) == {"1", "3"}  # never renumbered
+
+
+def test_one_documents_fix_reports_its_own_stale_references_and_the_response_is_bounded(
+    tmp_path: Path,
+) -> None:
+    """L37 P1c, C1: a fix of one document lists that document's stale references, not the tree's;
+    and the MCP response caps every list, says so, and keeps the full counts."""
+
+    code = code_repository(tmp_path / "code")
+    memory = tmp_path / "memory"
+    memory_repository(memory, code)
+    _convert_in_place(memory, code)
+    (code.root / APP).write_text(APP_SOURCE.replace("total * 2", "total * 3"), encoding="utf-8")
+    overview = "onboarding/src/overview.json"
+    tree_wide = {item["path"] for item in fix_references(memory, code.root)["stale"]}
+    assert tree_wide == {APP_SIDECAR, overview}  # beta's body changed: stale in both
+    for sidecar in (APP_SIDECAR, overview):
+        one = fix_references(memory, code.root, only=sidecar)
+        assert {item["path"] for item in one["stale"]} == {sidecar}
+    other = fix_references(memory, code.root, only="onboarding/src/pkg/other.py.json")
+    assert other["ok"] is True and other["stale"] == []  # a current card reports nothing
+    assert check_references(memory, code.root, only=overview)["states"] == {"stale": 1}
+
+    limit = memory_tool_payloads.MAX_INLINE_CITATION_ITEMS
+    many = [{"path": f"onboarding/{index}.json"} for index in range(limit + 70)]
+    full = {
+        "ok": True,
+        "status": "converted",
+        "stale": many,
+        "rewrittenSidecars": [one["path"] for one in many],
+        "unreadableSidecars": [],
+        "authoring": {
+            "authoredCards": ["a.md"] * (limit + 1),
+            "unresolvedTargets": many,
+            "refused": [],
+            "dryRun": False,
+        },
+    }
+    with mock.patch.object(memory_tool_payloads, "citation_fix_tool", return_value=full):
+        sent = memory_tool_payloads.citation_fix_payload(
+            cast(Any, None), "demo", contract_path="contract.md"
+        )
+    assert (len(sent["stale"]), sent["staleCount"]) == (limit, limit + 70)
+    assert sent["stale"] == many[:limit] and sent["unreadableSidecarsCount"] == 0
+    assert (len(sent["rewrittenSidecars"]), sent["rewrittenSidecarsCount"]) == (limit, limit + 70)
+    assert (
+        sent["truncated"] == ["stale", "rewrittenSidecars"] and "first 50" in sent["truncatedNote"]
+    )
+    assert sent["authoring"]["truncated"] == ["authoredCards", "unresolvedTargets"]
+    assert sent["authoring"]["authoredCardsCount"] == limit + 1
+    assert sent["authoring"]["unresolvedTargetsCount"] == limit + 70
+    assert len(sent["authoring"]["unresolvedTargets"]) == limit
+    small = {"ok": True, "status": "converted", "stale": many[:3], "rewrittenSidecars": []}
+    bounded = memory_tool_payloads.bounded_citation_fix(small)
+    assert (
+        bounded["stale"] == many[:3] and bounded["staleCount"] == 3 and "truncated" not in bounded
+    )
+    legacy = {"ok": True, "findings": many}  # an unconverted tree's result keeps its own shape
+    assert memory_tool_payloads.bounded_citation_fix(legacy) is legacy
+
+
+def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(tmp_path: Path) -> None:
+    """L37 P1c, C3: the table reader ends a table only at a blank line, so a second table directly
+    below one reads as its rows. Where either holds citations the card is refused, naming the
+    line, and nothing is written; a card whose tables hold no citations is left alone."""
+
+    code = code_repository(tmp_path / "code")
+    memory = tmp_path / "memory"
+    memory_repository(memory, code)
+    _convert_in_place(memory, code)
+    (code.root / EXTRA).write_text(EXTRA_SOURCE, encoding="utf-8")
+    header = "| Finding | Anchor | Source |\n| --- | --- | --- |\n"
+    row = f"| Extra. | `extra` | {EXTRA}:1-2 |\n"
+    plain = "| Name | Meaning |\n| --- | --- |\n| a | b |\n"
+    two = memory / f"onboarding/{EXTRA}.md"
+    two.write_text(f"# {EXTRA}\n\n{header}{row}{header}{row}", encoding="utf-8")
+    below = memory / "onboarding/src/pkg/below.py.md"
+    below.write_text(f"# below\n\n{plain}{header}{row}", encoding="utf-8")
+    untouched = memory / "onboarding/src/pkg/plain.py.md"
+    untouched.write_text(f"# plain\n\n{plain}{plain}", encoding="utf-8")
+    before = {path: path.read_bytes() for path in (two, below, untouched)}
+
+    report = author_card_references(memory, code.root)
+    refused = {one["card"]: one["reason"] for one in report["refused"]}
+    assert set(refused) == {f"onboarding/{EXTRA}.md", "onboarding/src/pkg/below.py.md"}
+    assert (
+        "line 7 is a table delimiter row inside the table that starts at line 3"
+        in refused[f"onboarding/{EXTRA}.md"]
+    )
+    assert "Put a blank line above line 6" in refused[f"onboarding/{EXTRA}.md"]
+    assert "line 7 is a table delimiter row" in refused["onboarding/src/pkg/below.py.md"]
+    assert report["authoredCards"] == [] and report["authoredReferences"] == 0
+    assert {path: path.read_bytes() for path in before} == before  # nothing written
+    assert not (memory / f"onboarding/{EXTRA}.json").exists()
+
+    two.write_text(f"# {EXTRA}\n\n{header}{row}\n{header}{row}", encoding="utf-8")
+    below.write_text(f"# below\n\n{plain}\n{header}{row}", encoding="utf-8")
+    # A body row whose cells are single dashes is a placeholder row, not a delimiter (review R5-6).
+    dashes = memory / "onboarding/src/pkg/dashes.py.md"
+    dashes.write_text(f"# dashes\n\n{header}{row}| - | - | - |\n{row}", encoding="utf-8")
+    authored = author_card_references(memory, code.root)
+    assert authored["refused"] == [] and authored["authoredReferences"] == 5
+    assert two.read_text(encoding="utf-8") == f"# {EXTRA}\n\n- Extra. [1]\n\n- Extra. [2]\n"
+    assert dashes.read_text(encoding="utf-8") == "# dashes\n\n- Extra. [1]\n-\n- Extra. [2]\n"
+    assert untouched.read_bytes() == before[untouched]
 
 
 @pytest.fixture(autouse=True)

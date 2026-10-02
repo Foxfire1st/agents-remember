@@ -67,6 +67,7 @@ class GateMemoKey:
     memory_tree: str
     contract: str
     parent_memory_tip: str | None
+    leaf_memory_head: str | None
     task_document: str
     build: str
 
@@ -92,9 +93,16 @@ def _digest(data: bytes) -> str:
 
 
 def memo_key(
-    contract: WorktreeContract, candidate: CandidateTrees, parent_memory_tip: str | None
+    contract: WorktreeContract,
+    candidate: CandidateTrees,
+    parent_memory_tip: str | None,
+    leaf_memory_head: str | None = None,
 ) -> GateMemoKey | None:
-    """The key of one evaluation, or ``None`` when an input cannot be identified (no memo then)."""
+    """The key of one evaluation, or ``None`` when an input cannot be identified (no memo then).
+
+    The verdict reads two memory commits beside the candidate: the parent line's tip (the
+    validator's base) and the leaf's own ``HEAD`` (whose closed history files are frozen).
+    """
 
     try:
         contract_bytes = contract.contract_path.read_bytes()
@@ -108,6 +116,7 @@ def memo_key(
         memory_tree=candidate.memory,
         contract=f"{contract.contract_path.as_posix()}@{_digest(contract_bytes)}",
         parent_memory_tip=parent_memory_tip,
+        leaf_memory_head=leaf_memory_head,
         task_document=_digest(document),
         build=build,
     )

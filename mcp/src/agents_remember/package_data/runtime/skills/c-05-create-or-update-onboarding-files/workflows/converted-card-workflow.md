@@ -67,6 +67,9 @@ A converted card is two files at the mirrored path:
      run is not `ok`. The reasons are:
      - its sidecar is not valid JSON, or does not parse as a sidecar, before or after the authoring;
      - a row re-authors `[n]` while another evidence line still cites `[n]` (see below);
+     - a table delimiter row (`| --- | --- |`, every cell three dashes or more) sits inside a table, and that table or the one that starts there
+       is a citation table. These are two tables with no blank line between them, which read as one table. The
+       reason names the line; put a blank line above the second table's header;
    - `unreadableSidecars`: sidecars the re-recording step could not read. They are named and skipped.
 
    The fixer checks every card before it writes anything, so a run never stops half-way with some cards written.

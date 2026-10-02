@@ -826,9 +826,12 @@ def _leaf_landing_lock(
 ) -> str | None:
     """MIK-R09 rule 6 at a leaf's integration: its closed-out memory lands only when converted.
 
-    A leaf's memory commit was gated at its closeout; its landing is refused only by the cutover
-    lock, when neither the landed commit nor the line it lands on holds the layout marker and the
-    repository holds converted memory elsewhere.
+    A leaf's memory commit was gated at its closeout: the worktree closeout runs the mandatory
+    gate over the exact memory tree it commits, over the commit it records when nothing is left to
+    commit, and over a recovered commit (``closeout_external._refuse_ungated_memory``; L37 P1c).
+    Its landing is therefore refused only by the cutover lock, when neither the landed commit nor
+    the line it lands on holds the layout marker and the repository holds converted memory
+    elsewhere.
     """
 
     if not commits.memory_content:

@@ -25,7 +25,6 @@ databases, notes -- contributes to the key only.
 from __future__ import annotations
 
 import hashlib
-import shutil
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from typing import Literal
 
 from agents_remember.kernel.git_command import (
     IsolatedGitState,
+    copy_git_index,
     read_git_blobs_bytes,
     read_git_tree_bytes,
     run_git,
@@ -131,7 +131,9 @@ def _capture(root: Path) -> tuple[str, dict[str, str]]:
         if real_index.is_file():
             # The repository's own index is copied, never used: its stat data lets the capture
             # rehash only the files that changed, and the copy is what the capture then updates.
-            shutil.copyfile(real_index, state.index_path)
+            # The copy keeps the index file's time, or a file rewritten in the second the index
+            # was written would keep its old blob in the key (:func:`copy_git_index`).
+            copy_git_index(real_index, state.index_path)
             _clear_index_flags(root, state)
         _isolated(root, ["add", "--all", "--", "."], state)
         tree_arguments = ["write-tree"] + ([f"--prefix={prefix}"] if prefix else [])

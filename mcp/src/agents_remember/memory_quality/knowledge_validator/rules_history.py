@@ -24,9 +24,32 @@ commit route (carried from the L12 review):
   closeout commit writes ``closed: true`` (MIK-R07 rule 7), so a flag set earlier -- by hand, or
   left by a refused attempt -- is never a waiver.
 * A file closed in a base is frozen (MIK-R22 rule 7 keeps it byte-identical) and historical: its rows
-  describe the tree it closed on. At a master or checkpoint landing, or a sync, the master's leaves'
-  closed files are such records, re-anchor-checked by their own closing commits, and are not
-  re-anchor-checked again (a later leaf may re-anchor an entry an earlier row covered).
+  describe the tree it closed on. The same holds for a file closed in the commit the candidate sits
+  on (``frozen``): an earlier closeout of the same leaf that was not integrated closed it, and the
+  leaf's later rows are in its next attempt file (L37 ruling B). At a master or checkpoint landing,
+  or a sync, the master's leaves' closed files are such records, re-anchor-checked by their own
+  closing commits, and are not re-anchor-checked again (a later leaf may re-anchor an entry an
+  earlier row covered).
+* All of a leaf's attempt files are its history, and the latest judgment governs (L37 ruling B): a
+  row about a subject that a later attempt of the same owner answers again is superseded and is not
+  re-anchor-checked, whether or not its file is frozen. The later row is.
+
+**A change the leaf made stays visible (L37 ruling of 2026-10-01T22:49:36, Q2 b; review R5-2).** At a
+commit that publishes a leaf, every history file not closed in a comparison base holds work that is
+not on the leaf's parent line yet. Among those files, a ``changed`` row about an invariant is the
+judgment of a revision step, with its effect and its because. A later attempt's row about the same
+invariant governs, so it must be a ``changed`` row again (the step restated, or the next step) or
+the ``deleted`` row that retires the record: a ``no_impact``, ``moved`` or ``extended`` row there
+would replace the judgment and is refused (:func:`_hidden_changes`). The gate holds the same rule
+against the record's revision on the parent line (``invariant_row_open``); this one needs no
+converted base, and runs at a leaf's recorded landing, which the worklist does not reach.
+
+A family has one governing row as well (MIK-R07 rule 5; MIK-R06 rule 3 reads "the latest family
+row"), so the same holds for a ``changed`` family row: a later ``no_impact``, ``assigned`` or
+``rerouted`` row would replace it and is refused; the ``changed`` row named again, or the
+``retired`` row, is not. A ``changed`` row answers the family's route conditions too, so route
+work a later attempt does is recorded under it (L37 ruling of 2026-10-02T01:04:49). The gate holds
+the same rule against the guarantee on the parent line (``family_row_open``).
 
 **Rows the merge moved (MIK-R09 Failure and Recovery).** "After a sync, items are recomputed from the
 new base … stale or new items reopen." At a merge, a row that agreed with the entries of a parent
@@ -59,9 +82,11 @@ from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTr
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError
 from agents_remember.models.knowledge_files.documents import parse_history_document
 from agents_remember.models.knowledge_files.history import (
+    FamilyRow,
     HistoryFile,
     InvariantRow,
     is_closed_history,
+    keeps_change_visible,
     reanchor_mismatches,
     sidecar_entry_anchors,
     unknown_subjects,
@@ -85,10 +110,21 @@ def checked_history_files(context: ValidationContext) -> list[tuple[str, History
         if not history.closed:
             checked.append((path, history))
         elif context.leaf_publication and not any(
-            is_closed_history(base.get(path)) for base in context.bases
+            is_closed_history(base.get(path)) for base in context.closed_before
         ):
-            checked.append((path, history))  # the leaf's own file: closed here, not in a base
+            checked.append((path, history))  # the leaf's own file: closed here, not before
     return checked
+
+
+def _governing_attempts(context: ValidationContext) -> dict[tuple[str, str], int]:
+    """``(owner, subject) -> attempt`` of the owner's latest row about the subject in the candidate."""
+
+    latest: dict[tuple[str, str], int] = {}
+    for _path, history in context.parsed.histories:
+        for row in history.rows:
+            key = (history.owner_id, row.subject)
+            latest[key] = max(latest.get(key, 0), history.attempt_number)
+    return latest
 
 
 def _anchors(sidecars: Iterator[FileSidecar] | tuple[FileSidecar, ...]) -> dict[str, Anchor]:
@@ -148,14 +184,73 @@ def _mismatches(context: ValidationContext) -> Iterator[tuple[str, InvariantRow,
         return
     anchors = _candidate_anchors(context)
     parents = [_BaseRows(base) for base in context.bases] if len(context.bases) > 1 else []
+    governing = _governing_attempts(context)
     for path, history in histories:
         for row in history.rows:
             if not isinstance(row, InvariantRow):
                 continue
+            if governing[history.owner_id, row.subject] != history.attempt_number:
+                continue  # a later attempt of the same owner answers the subject again
             mismatched = reanchor_mismatches(row, anchors)
             if mismatched:
                 moved = any(parent.agreed(path, row) for parent in parents)
                 yield path, row, mismatched, moved
+
+
+Judgment = InvariantRow | FamilyRow
+
+
+def _unlanded_judgments(
+    context: ValidationContext,
+) -> Iterator[tuple[tuple[str, str], str, Judgment]]:
+    """``((owner, subject), path, row)`` for every invariant and family row of a history file that
+    no comparison base holds closed, each owner's attempts in order."""
+
+    unlanded = sorted(
+        (
+            (history.owner_id, history.attempt_number, path, history)
+            for path, history in context.parsed.histories
+            if not any(is_closed_history(base.get(path)) for base in context.bases)
+        ),
+        key=lambda one: one[:2],
+    )
+    for owner, _attempt, path, history in unlanded:
+        for row in history.rows:
+            if isinstance(row, InvariantRow | FamilyRow):
+                yield (owner, row.subject), path, row
+
+
+def _hidden_changes(context: ValidationContext) -> Iterator[tuple[str, Judgment, Judgment]]:
+    """``(path, governing row, the changed row it replaces)`` for every invariant and family the
+    publishing leaf changed and then answered again with a row of another disposition (module
+    docstring)."""
+
+    if not context.leaf_publication:
+        return
+    answers: dict[tuple[str, str], list[tuple[str, Judgment]]] = {}
+    for key, path, row in _unlanded_judgments(context):
+        answers.setdefault(key, []).append((path, row))
+    for *earlier, (path, row) in answers.values():
+        hidden = [one for _path, one in earlier if one.disposition == "changed"]
+        if hidden and not keeps_change_visible(row):
+            yield path, row, hidden[-1]
+
+
+def _hidden_change_message(row: Judgment, hidden: Judgment) -> str:
+    if isinstance(hidden, InvariantRow):
+        what = f"(revision {hidden.revision}, effect {hidden.effect})"
+        again = "with the entries this row covers"
+    else:
+        what = "(the family's own change)"
+        again = (
+            "with the members this row examined; a changed row answers the family's route "
+            "conditions too (MIK-R06 rule 3)"
+        )
+    return (
+        f"the {row.disposition} row about {row.subject} replaces this leaf's changed row "
+        f"{hidden.id} {what}; the governing row of a record the leaf changed is its changed row: "
+        f"name that changed row again through the writer, {again}"
+    )
 
 
 def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
@@ -177,6 +272,8 @@ def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
                 "its 'after' anchor in this tree (MIK-R07 rule 4); name the row again through "
                 "the writer so it records the entries' anchors",
             )
+    for path, row, hidden in _hidden_changes(context):
+        yield Finding(path, f"rows.{row.id}.disposition", _hidden_change_message(row, hidden))
 
 
 def check_merged_history_rows(context: ValidationContext) -> Iterator[Finding]:

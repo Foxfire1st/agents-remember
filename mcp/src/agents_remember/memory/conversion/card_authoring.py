@@ -28,8 +28,12 @@ A new card for a new source file is therefore Markdown the curator writes (title
 link, prose and a citation table) and one fixer run.
 
 **Refusals, by name, and nothing of the card is written:** a sidecar that is not valid JSON or does not
-parse as a sidecar, before or after the authoring; and a row that re-authors ``[n]`` while another
-evidence line (``- <finding> [n]``) still cites it, which would silently re-point that line. **Every
+parse as a sidecar, before or after the authoring; a row that re-authors ``[n]`` while another
+evidence line (``- <finding> [n]``) still cites it, which would silently re-point that line; and a
+table delimiter row inside a table one of whose headers is a citation header, which is two tables
+with no blank line between them (the table reader ends a table only at a blank line, so the second
+table's header and delimiter would be authored as findings, or a citation table below another table
+would be skipped). The refusal names the line; a blank line above the second header fixes it. **Every
 card is checked before anything is written**, so a run never stops with some cards written and others
 not: the cards that pass are written, the refused ones are named, and the run reports ``refused``.
 Cards without a citation table are never touched (except the named card's unused references).
@@ -117,6 +121,37 @@ def _citation_columns(header: tables.Row) -> tuple[int, int, int] | None:
         return None
     finding, anchor, source = (columns.index(name) for name in wanted)
     return finding, anchor, source
+
+
+_DELIMITER_CELL = re.compile(r"^:?-{3,}:?$")
+"""A Markdown delimiter cell: three dashes or more, with optional alignment colons. The table
+reader's own pattern takes a single dash, which a body cell may hold (L37 review R5-6)."""
+
+
+def _is_delimiter(row: tables.Row) -> bool:
+    return bool(row.cells) and all(_DELIMITER_CELL.match(cell) for cell in row.cells)
+
+
+def _merged_tables(found: list[tuple[tables.Row, list[tables.Row]]]) -> str | None:
+    """Why a card is refused: a second table starts inside one, and one of the two holds citations.
+
+    A table whose headers are no citation headers is not this fixer's business and is left alone,
+    so no card without a citation table is ever refused here.
+    """
+
+    for header, body in found:
+        for position, row in enumerate(body):
+            if not _is_delimiter(row):
+                continue
+            second = body[position - 1] if position else header
+            if _citation_columns(header) is None and _citation_columns(second) is None:
+                continue
+            return (
+                f"line {row.index + 1} is a table delimiter row inside the table that starts at "
+                f"line {header.index + 1}: two tables with no blank line between them read as "
+                f"one table. Put a blank line above line {second.index + 1}"
+            )
+    return None
 
 
 def _new_sidecar(card: str) -> dict[str, Any]:
@@ -224,7 +259,11 @@ def _load(memory_root: Path, card: str, *, named: bool) -> _Card | None:
     text = (memory_root / card).read_text(encoding="utf-8")
     source = text[:-1] if text.endswith("\n") else text
     lines = source.split("\n")
-    tabled = any(_citation_columns(header) for header, _ in tables.tables(unfenced_lines(lines)))
+    found = tables.tables(unfenced_lines(lines))
+    merged = _merged_tables(found)
+    if merged is not None:
+        raise _Refused(merged)
+    tabled = any(_citation_columns(header) for header, _ in found)
     if not tabled and not named:
         return None
     existing = _existing_sidecar(memory_root, card)

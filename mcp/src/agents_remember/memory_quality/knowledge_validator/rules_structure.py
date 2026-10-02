@@ -114,12 +114,12 @@ def check_bases_converted(context: ValidationContext) -> Iterator[Finding]:
 def check_history_frozen(context: ValidationContext) -> Iterator[Finding]:
     paths = {
         path
-        for tree in (*context.bases, context.candidate)
+        for tree in (*context.closed_before, context.candidate)
         for path in tree.files
         if path.startswith(HISTORY_DIRECTORY)
     }
     for path in sorted(paths):
-        bases = [base.get(path) for base in context.bases]
+        bases = [base.get(path) for base in context.closed_before]
         candidate = context.candidate.get(path)
         if frozen_history_violation(bases, candidate):
             change = "deleted" if candidate is None else "changed"
@@ -127,7 +127,8 @@ def check_history_frozen(context: ValidationContext) -> Iterator[Finding]:
                 path,
                 "",
                 f"this history file is closed in a base and was {change}: a closed history file "
-                "is frozen (MIK-R07 rule 7); a correction belongs to a new leaf's rows",
+                "is frozen (MIK-R07 rule 7); a correction belongs to a new leaf's rows, or to the "
+                "same leaf's next attempt file",
             )
 
 

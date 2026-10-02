@@ -18,12 +18,15 @@ from agents_remember.memory_quality.knowledge_validator.report import KnowledgeV
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
     code_tree_from_git,
+    history_tree_from_git,
     knowledge_tree_from_git,
 )
 from agents_remember.memory_quality.knowledge_validator.validator import (
+    LeafCommit,
     require_valid_commit,
     validation_applies,
 )
+from agents_remember.worktrees.services import LeafPublication
 
 BaseConverter = Callable[..., KnowledgeTree]
 """``(memory_repository, base, *, after, code_repository, code_commit) -> KnowledgeTree``."""
@@ -36,6 +39,7 @@ class _Commit:
     bases: tuple[str, ...]
     code_repository: Path
     code_commit: str
+    frozen: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,52 +70,27 @@ class GitKnowledgeValidation:
         self,
         *,
         memory_repository: Path,
-        candidate_tree: str,
-        bases: Sequence[str],
+        publication: LeafPublication,
         code_repository: Path,
         code_commit: str,
     ) -> str | None:
         """A commit that publishes a leaf: its own history file is read whatever its flag."""
 
         return self._refusal(
-            _Commit(memory_repository, candidate_tree, tuple(bases), code_repository, code_commit),
+            _Commit(
+                memory_repository,
+                publication.candidate_tree,
+                tuple(publication.bases),
+                code_repository,
+                code_commit,
+                frozen=tuple(publication.frozen),
+            ),
             leaf_publication=True,
         )
 
     def _refusal(self, commit: _Commit, *, leaf_publication: bool = False) -> str | None:
-        memory_repository, candidate_tree, bases = (
-            commit.memory_repository,
-            commit.candidate_tree,
-            commit.bases,
-        )
-        code_repository, code_commit = commit.code_repository, commit.code_commit
         try:
-            candidate = knowledge_tree_from_git(
-                memory_repository, candidate_tree, label=f"memory candidate {candidate_tree}"
-            )
-            base_trees = [
-                knowledge_tree_from_git(memory_repository, base, label=f"memory base {base}")
-                for base in bases
-            ]
-            if not validation_applies(candidate, base_trees):
-                return None
-            if candidate.converted and self.base_converter is not None:
-                base_trees = [
-                    tree
-                    if tree.converted
-                    else self.base_converter(
-                        memory_repository,
-                        base,
-                        after=candidate,
-                        code_repository=code_repository,
-                        code_commit=code_commit,
-                    )
-                    for base, tree in zip(bases, base_trees, strict=True)
-                ]
-            code = code_tree_from_git(code_repository, code_commit, label=f"code {code_commit}")
-            require_valid_commit(
-                candidate, bases=base_trees, code=code, leaf_publication=leaf_publication
-            )
+            self._validate(commit, leaf_publication)
         except KnowledgeValidationError as error:
             return str(error)
         except ValueError as error:  # an unreadable tree is refused, never committed unchecked
@@ -122,3 +101,40 @@ class GitKnowledgeValidation:
                 f"failed or timed out ({type(error).__name__}: {error})"
             )
         return None
+
+    def _validate(self, commit: _Commit, leaf_publication: bool) -> None:
+        """Read the commit's trees and validate them; raises on a violation or an unreadable tree."""
+
+        repository = commit.memory_repository
+        candidate = knowledge_tree_from_git(
+            repository, commit.candidate_tree, label=f"memory candidate {commit.candidate_tree}"
+        )
+        bases = [
+            knowledge_tree_from_git(repository, base, label=f"memory base {base}")
+            for base in commit.bases
+        ]
+        if not validation_applies(candidate, bases):
+            return
+        if candidate.converted and self.base_converter is not None:
+            bases = [
+                tree
+                if tree.converted
+                else self.base_converter(
+                    repository,
+                    base,
+                    after=candidate,
+                    code_repository=commit.code_repository,
+                    code_commit=commit.code_commit,
+                )
+                for base, tree in zip(commit.bases, bases, strict=True)
+            ]
+        code = code_tree_from_git(
+            commit.code_repository, commit.code_commit, label=f"code {commit.code_commit}"
+        )
+        frozen = tuple(history_tree_from_git(repository, one) for one in commit.frozen)
+        require_valid_commit(
+            candidate,
+            bases=bases,
+            code=code,
+            leaf_publication=LeafCommit(frozen) if leaf_publication else False,
+        )

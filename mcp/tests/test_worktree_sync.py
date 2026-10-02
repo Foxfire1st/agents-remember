@@ -25,11 +25,12 @@ import pytest
 CONFLICT_ANCHOR_ID = "33333333-3333-4333-8333-333333333333"
 CONFLICT_CLAIM_ID = "44444444-4444-4444-8444-444444444444"
 
+from agents_remember.application.knowledge_merge import KnowledgeStageSettlement
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.models.knowledge.merge import AuthoredReconciliation
-from agents_remember.worktrees import sync_transaction_git
+from agents_remember.worktrees import knowledge_conflict, sync_transaction_git
 from agents_remember.worktrees.integration.closeout.door_evidence import memory_candidate_tree
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
@@ -937,6 +938,52 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertTrue(archived_entry.is_symlink())
             self.assertEqual(Path(os.readlink(archived_entry)), target)
             self.assertEqual(target.read_text(encoding="utf-8"), "do not read or replace\n")
+
+
+def test_the_merge_stage_copies_are_removed_on_every_way_out(tmp_path: Path) -> None:
+    """L37 P1c, C8: a settlement materialises the three index stages of a conflicted path in a
+    temporary directory. Nothing reads them after the merge answered, so the directory is removed
+    whether the merge settled, refused or raised, and when a stage could not be written."""
+
+    repo = tmp_path / "memory"
+    make_repo(repo)
+    commit_file(repo, "knowledge.sqlite", "base")
+    git(repo, "checkout", "-q", "-b", "side")
+    commit_file(repo, "knowledge.sqlite", "right")
+    git(repo, "checkout", "-q", "main")
+    commit_file(repo, "knowledge.sqlite", "left")
+    left, right = git(repo, "rev-parse", "main"), git(repo, "rev-parse", "side")
+    merged = subprocess.run(["git", "merge", "side"], cwd=repo, capture_output=True, check=False)
+    assert merged.returncode == 1  # the path is conflicted: three index stages
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    seen: list[Path] = []
+
+    def merge(*, stages: dict[str, Path], **_rest: object) -> KnowledgeStageSettlement:
+        assert {role: path.read_text() for role, path in stages.items()} == {
+            "base": "base\n",
+            "left": "left\n",
+            "right": "right\n",
+        }
+        seen.extend(scratch.glob(f"{knowledge_conflict.STAGE_DIRECTORY_PREFIX}*"))
+        if len(seen) > 1:
+            raise OSError("the merge failed")
+        return KnowledgeStageSettlement(settled=False, detail="kept for the agent")
+
+    settle = knowledge_conflict.settle_knowledge_conflict
+    with (
+        mock.patch.object(knowledge_conflict.tempfile, "tempdir", str(scratch)),
+        mock.patch.object(knowledge_conflict, "merge_conflicted_stages", merge),
+    ):
+        refused = settle(repo, "knowledge.sqlite", left, right)
+        assert refused is not None and refused.detail == "kept for the agent"
+        with pytest.raises(OSError, match="the merge failed"):
+            settle(repo, "knowledge.sqlite", left, right)
+        with mock.patch.object(knowledge_conflict, "_materialise_stages", return_value=None):
+            unwritten = settle(repo, "knowledge.sqlite", left, right)
+        assert unwritten is not None and "could not be materialised" in unwritten.detail
+    assert len(seen) == 2 and not any(path.exists() for path in seen)
+    assert list(scratch.iterdir()) == []  # no stage directory is left
 
 
 def section(payload: dict[str, object], key: str) -> dict[str, Any]:

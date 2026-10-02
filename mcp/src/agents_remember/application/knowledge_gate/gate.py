@@ -79,11 +79,14 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_validator.trees import (
     code_tree_from_git,
+    history_tree_from_git,
     knowledge_tree_from_git,
 )
+from agents_remember.memory_quality.knowledge_validator.validator import LeafCommit
 from agents_remember.memory_quality.knowledge_worklist_section import item_facts
 from agents_remember.models.knowledge_files.documents import history_path, owner_history_attempt
 from agents_remember.models.knowledge_files.history import is_closed_history, writable_attempt
+from agents_remember.worktrees.knowledge_gate import closed_out_memory
 from agents_remember.worktrees.knowledge_gate import parent_memory_tip as contract_parent_memory_tip
 from agents_remember.worktrees.knowledge_validation import LayoutProbeError
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -151,6 +154,22 @@ class GateTrees:
     validation_bases: tuple[str, ...]
     base_code_commit: str
     cache_directory: Path | None = None
+    leaf_memory_head: str | None = None
+    """The leaf's memory ``HEAD`` commit, the writer's base: once the latest attempt is closed
+    there, or in a base, the writer starts the next attempt file (L37 ruling B). Only the gate's
+    messages read it, to name the file a row goes to."""
+    frozen: tuple[str, ...] = ()
+    """The memory commit of the leaf's completed closeout, when its contract records one: a history
+    file closed there is frozen for the validator though no base holds it."""
+
+
+@dataclass(frozen=True)
+class _MemoryLines:
+    """The two memory commits a leaf's gate reads beside its candidate: the parent line's tip (the
+    validator's base) and the leaf's own ``HEAD`` (what its candidate sits on)."""
+
+    parent_tip: str | None
+    leaf_head: str | None
 
 
 @dataclass(frozen=True)
@@ -254,17 +273,37 @@ def evaluate_leaf_gate(
     unreadable: list[GateFinding] = []
     if parent_memory_tip is None:
         parent_memory_tip, unreadable = _resolved_tip(contract)
-    key = None if unreadable else memo.memo_key(contract, candidate, parent_memory_tip)
+    head = _leaf_memory_head(contract)
+    lines = _MemoryLines(parent_memory_tip, head)
+    key = None if unreadable else memo.memo_key(contract, candidate, parent_memory_tip, head)
     kept = None if key is None else memo.remembered(key)
     if kept is not None:
         _persist(contract, kept.worklist)  # the latest worklist beside the contract stays this one
         return kept
     # Every requirement file the evaluation reads for approval state is recorded with the verdict.
     with recorded_reads() as reads:
-        result = _evaluate(contract, candidate, parent_memory_tip, unreadable)
+        result = _evaluate(contract, candidate, lines, unreadable)
     if key is not None and result is not None:
         memo.remember(key, result, reads)
     return result
+
+
+def _leaf_memory_head(contract: WorktreeContract) -> str | None:
+    """The leaf's memory ``HEAD`` commit, or ``None`` when it cannot be read (nothing is then frozen
+    that a base does not freeze)."""
+
+    worktree = contract.memory_worktree
+    if worktree is None:
+        return None
+    try:
+        head = run_git(
+            worktree,
+            ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return head.stdout.strip() if head.returncode == 0 and head.stdout.strip() else None
 
 
 def _applies(contract: WorktreeContract, candidate: CandidateTrees) -> bool:
@@ -299,7 +338,7 @@ def _persist(contract: WorktreeContract, document: Mapping[str, Any]) -> str | N
 def _evaluate(
     contract: WorktreeContract,
     candidate: CandidateTrees,
-    parent_memory_tip: str | None,
+    lines: _MemoryLines,
     unreadable: list[GateFinding],
 ) -> GateResult | None:
     memory_repository = contract.memory_repo_path or contract.memory_worktree
@@ -312,9 +351,11 @@ def _evaluate(
         code_tree=candidate.code,
         memory_repository=memory_repository,
         memory_tree=candidate.memory,
-        validation_bases=() if parent_memory_tip is None else (parent_memory_tip,),
+        validation_bases=() if lines.parent_tip is None else (lines.parent_tip,),
         base_code_commit=contract.code_base_commit,
         cache_directory=default_base_cache_directory(contract.coordination_root),
+        leaf_memory_head=lines.leaf_head,
+        frozen=closed_out_memory(contract),
     )
     result = judge(document, path, trees, contract.leaf_id or None)
     return replace(result, findings=(*unreadable, *result.findings)) if unreadable else result
@@ -397,27 +438,36 @@ def _writable_history(context: GateContext, owner: str, trees: GateTrees) -> str
     """The history file a row answering this leaf's items goes to, as the writer chooses it.
 
     An attempt is frozen once it is closed in the comparison base (the parent line's memory tip,
-    which holds a reopened leaf's closed attempts), exactly as the writer reads its base; an attempt
-    only the candidate closes -- this closeout's own -- is still the one the rows go to. So the
-    message names a reopened leaf's latest attempt file, and a leaf never reopened its one file.
-    Without a comparison base, the candidate's own flags stand in.
+    which holds a reopened leaf's closed attempts) or in the leaf's memory ``HEAD`` commit (the
+    leaf closed out and continues before it is integrated), exactly as the writer reads its base;
+    an attempt only the uncommitted candidate closes -- this closeout's own -- is still the one the
+    rows go to. So the message names the leaf's latest attempt file, and a leaf that never closed
+    out its one file. Without any commit to read, the candidate's own flags stand in.
     """
 
+    commits = _closing_commits(trees)
     closed = {
         attempt: history.closed
-        if not trees.validation_bases
-        else _closed_in_bases(trees, history_path(owner, attempt))
+        if not commits
+        else _closed_in(trees, commits, history_path(owner, attempt))
         for path, history in context.candidate.parsed.history_files.items()
         if (attempt := owner_history_attempt(path, owner)) is not None
     }
     return history_path(owner, writable_attempt(closed))
 
 
-def _closed_in_bases(trees: GateTrees, path: str) -> bool:
-    """Whether a comparison base holds ``path`` as a closed history file (unreadable: not closed;
+def _closing_commits(trees: GateTrees) -> tuple[str, ...]:
+    """The commits whose closed history files are frozen for the writer: the bases and ``HEAD``."""
+
+    head = (trees.leaf_memory_head,) if trees.leaf_memory_head else ()
+    return (*trees.validation_bases, *head)
+
+
+def _closed_in(trees: GateTrees, commits: tuple[str, ...], path: str) -> bool:
+    """Whether one of ``commits`` holds ``path`` as a closed history file (unreadable: not closed;
     the answer only names a file in a message)."""
 
-    for base in trees.validation_bases:
+    for base in commits:
         try:
             shown = run_git(
                 trees.memory_repository,
@@ -495,7 +545,12 @@ def validation_findings(trees: GateTrees) -> tuple[list[GateFinding], list[GateF
         code = code_tree_from_git(
             trees.code_repository, trees.code_tree, label=f"C {trees.code_tree}"
         )
-        report = validate_tree(candidate, bases=bases, code=code, leaf_publication=True)
+        frozen = tuple(
+            history_tree_from_git(trees.memory_repository, commit) for commit in trees.frozen
+        )
+        report = validate_tree(
+            candidate, bases=bases, code=code, leaf_publication=LeafCommit(frozen)
+        )
     except subprocess.SubprocessError as error:  # a failed or timed-out Git call: incomplete
         return [_unreadable("git", error)], []
     except (OSError, ValueError) as error:

@@ -21,6 +21,7 @@ from agents_remember.memory.knowledge_index import (
     KnowledgeIndexCache,
     MemoryTreeError,
     directory_key,
+    directory_snapshot,
     is_indexed_path,
 )
 from agents_remember.models.knowledge_files import canonical_text
@@ -39,6 +40,7 @@ from knowledge_index_test_support import (
     commit_all,
     git,
     init_repository,
+    rewrite_in_the_second_of_the_index_write,
     write_review_tree,
 )
 
@@ -398,6 +400,33 @@ def test_an_index_flag_never_hides_an_edit_from_the_key(
     # The repository's own index keeps its flag: only the scratch copy was cleared.
     tag = git(memory, "ls-files", "-v", relative)[0]
     assert tag.islower() or tag == "S"
+
+
+def test_a_rewrite_in_the_second_of_the_index_write_is_never_answered_from_the_old_content(
+    memory: Path, cache: KnowledgeIndexCache
+) -> None:
+    """L37 P1c, C11: the capture works on a copy of the repository's index. Git compares a file by
+    content when it may have been rewritten in the second its index was written, and knows that
+    from the index file's own time, so the copy keeps that time. Without it a same-size rewrite in
+    that second kept its old blob: the key, and the cached index served for it, were the previous
+    content's."""
+
+    with cache.for_directory(memory):
+        assert cache.last_outcome is not None and not cache.last_outcome.reused
+        old_key = cache.last_outcome.key
+    with cache.for_directory(memory):  # the control: nothing was rewritten, the index is reused
+        assert (cache.last_outcome.key, cache.last_outcome.reused) == (old_key, True)
+    target = _statement_file(memory)
+    rewrite_in_the_second_of_the_index_write(
+        memory, target, target.read_text("utf-8").replace("changed ones", "altered ones")
+    )
+    key = directory_key(memory)
+    assert key != old_key
+    with cache.for_directory(memory) as index:
+        assert (cache.last_outcome.key, cache.last_outcome.reused) == (key, False)
+        document = index.record(REVIEW_INVARIANT).value.document  # type: ignore[union-attr]
+    assert "beside altered ones" in document["statement"]
+    assert directory_snapshot(memory).key == key  # and never "kept changing"
 
 
 def test_the_index_file_declares_its_format_and_key(

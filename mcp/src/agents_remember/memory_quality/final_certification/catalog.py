@@ -25,6 +25,7 @@ from agents_remember.certification.final_certification_models import (
 )
 from agents_remember.errors import FinalCertificationError
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS, DRIFT_CHECK_NAME
+from agents_remember.memory_quality.converted_check import CONVERTED_KNOWLEDGE_CHECK
 from agents_remember.memory_quality.incremental_scope.affected_models import (
     AffectedClosurePlan,
 )
@@ -174,7 +175,9 @@ def final_catalog_attestation(
     for item in plan.catalog:
         item_id = item.itemId
         if item_id in _STANDARD_CHECK_ID_SET:
-            results.append(_standard_result(item, run.executed_checks[item_id]))
+            results.append(
+                _standard_result(item, _executed_result(run.executed_checks, item_id) or {})
+            )
         elif item_id == MISSING_ONBOARDING_ITEM_ID:
             results.append(_count_result(item, run.missing_onboarding_count, "missing-onboarding"))
         elif item_id == ROUTE_INDEX_ALIGNMENT_ITEM_ID:
@@ -247,9 +250,8 @@ def final_catalog_readiness(inputs: ReadinessProjectionInput) -> dict[str, objec
     for item in catalog:
         item_id = item.itemId
         if item_id in _STANDARD_CHECK_ID_SET:
-            items.append(
-                _project_item(_standard_result(item, inputs.executed_checks.get(item_id, {})))
-            )
+            executed = _executed_result(inputs.executed_checks, item_id)
+            items.append(_project_item(_standard_result(item, executed or {})))
         elif item_id == MISSING_ONBOARDING_ITEM_ID:
             items.append(
                 _project_item(
@@ -325,6 +327,22 @@ def final_catalog_readiness(inputs: ReadinessProjectionInput) -> dict[str, objec
         "finalizationEligible": False,
         "fullFinalRequired": True,
     }
+
+
+def _executed_result(
+    executed_checks: Mapping[str, Mapping[str, Any]], item_id: str
+) -> Mapping[str, Any] | None:
+    """One standard check's executed result, or ``None`` when the run did not execute it.
+
+    On a converted tree the drift slot runs the knowledge validator and stores its result as
+    ``knowledge.converted`` (MIK-R24 rule 5); that result is the drift item's. Looked up under the
+    drift check's own name it was absent, so the item read ``fail`` with no finding (L37 P1c, C2).
+    """
+
+    result = executed_checks.get(item_id)
+    if result is None and item_id == DRIFT_CHECK_NAME:
+        return executed_checks.get(CONVERTED_KNOWLEDGE_CHECK)
+    return result
 
 
 def _standard_result(
@@ -444,7 +462,7 @@ def _require_executed_population(
     planned = {item.itemId for item in plan.catalog if item.itemId in _STANDARD_CHECK_ID_SET}
     if not planned:
         _refuse("gate-five-executed-population-empty", "the final catalog has no standard checks")
-    missing = sorted(planned - set(executed_checks))
+    missing = sorted(one for one in planned if _executed_result(executed_checks, one) is None)
     if missing:
         raise FinalCertificationError(
             "gate-five-executed-population-incomplete",

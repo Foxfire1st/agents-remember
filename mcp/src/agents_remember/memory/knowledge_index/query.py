@@ -262,6 +262,10 @@ class KnowledgeIndex:
     def history_rows_about(self, subject: str) -> Answer[tuple[HistoryRow, ...]]:
         return self._answer(self._history("subject = ?", (subject,)))
 
+    def history_row(self, row_id: str) -> Answer[HistoryRow | None]:
+        rows = self._history("id = ?", (row_id,))
+        return self._answer(rows[0] if rows else None)
+
     def proofs_of(self, invariant_ids: Sequence[str]) -> Answer[tuple[Entry, ...]]:
         """The proof entries of ``invariant_ids`` (MIK-R28 rule 4), by path then entry ID."""
 

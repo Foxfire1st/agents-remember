@@ -149,6 +149,18 @@ class ValidationContext:
     leaf_publication: bool = False
     """The commit publishes a leaf (its closeout, direct landing or recorded landing): every history
     file not closed in a base is its own and is checked whatever its ``closed`` flag (MIK-R09)."""
+    frozen: tuple[KnowledgeTree, ...] = ()
+    """The history files of the commit(s) the candidate sits on, when they are not comparison bases
+    (a leaf's base is its parent line's tip, so that every record it made is judged new). A history
+    file closed there was closed by an earlier closeout of the same leaf that was not integrated:
+    it is frozen and historical exactly like one closed in a base, and the leaf's later rows go to
+    its next attempt file (L37 ruling of 2026-10-01T17:17:07, B)."""
+
+    @property
+    def closed_before(self) -> tuple[KnowledgeTree, ...]:
+        """Every tree whose closed history files are frozen: the bases and :attr:`frozen`."""
+
+        return (*self.bases, *self.frozen)
 
     @cached_property
     def record_ids(self) -> frozenset[str]:

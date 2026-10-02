@@ -21,7 +21,8 @@ nothing.
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
 examined?}``. The writer mints the row ID, fills the invariant's revision and each examined member's
 revision, and writes each covered entry's ``before`` and ``after`` anchor. A cover of a ``moved`` row
-may name another source ``path``: the entry moves there and is re-anchored at C.
+may name another source ``path``: the entry moves there and is re-anchored at C. A cover may carry a
+``rationale``: the covered realization entry keeps its ID and gets that rationale in place.
 
 A string ``"handoff:<key>"`` names the record the same document authors under that key (an entry's
 ``id``, or a record's ``key``) wherever an ID is expected. Reading never resolves anything: it checks
@@ -218,6 +219,8 @@ class CoverRequest:
     remove: bool = False
     path: str | None = None
     """The source path the entry moves to (a ``moved`` row only, MIK-R07 rule 4)."""
+    rationale: str | None = None
+    """The realization entry's revised rationale; the entry keeps its ID (L37 P1c, C5)."""
 
 
 @dataclass(frozen=True)
@@ -560,7 +563,10 @@ def _cover(value: Any, where: str, problems: list[Problem]) -> CoverRequest | No
         return CoverRequest(entry_id=value)
     if not isinstance(value, Mapping):
         problems.append(
-            Problem(where, "a cover is an entry ID or {id, path?, locator?, remove?} or {handoff}")
+            Problem(
+                where,
+                "a cover is an entry ID or {id, path?, locator?, rationale?, remove?} or {handoff}",
+            )
         )
         return None
     handoff = _text(value.get("handoff"))
@@ -573,9 +579,12 @@ def _cover(value: Any, where: str, problems: list[Problem]) -> CoverRequest | No
     remove = value.get("remove") is True
     valid, locator = _cover_locator(value, where, problems)
     valid_path, path = _cover_path(value, remove, where, problems)
-    if not (valid and valid_path):
+    valid_rationale, rationale = _cover_rationale(value, remove, where, problems)
+    if not (valid and valid_path and valid_rationale):
         return None
-    return CoverRequest(entry_id=entry_id, locator=locator, remove=remove, path=path)
+    return CoverRequest(
+        entry_id=entry_id, locator=locator, remove=remove, path=path, rationale=rationale
+    )
 
 
 def _cover_locator(
@@ -612,6 +621,28 @@ def _cover_path(
     except ValueError as error:
         problems.append(Problem(where, f"a cover's path is not a repository path: {error}"))
         return False, None
+
+
+def _cover_rationale(
+    value: Mapping[str, Any], remove: bool, where: str, problems: list[Problem]
+) -> tuple[bool, str | None]:
+    """A cover's ``rationale``: whether it is acceptable, and the text when named.
+
+    The entry's rationale is revised in place under the invariant's row, so a re-anchored entry
+    whose old rationale no longer describes the code keeps its ID. A blank rationale, or one on a
+    cover that removes its entry, is a named problem.
+    """
+
+    if "rationale" not in value:
+        return True, None
+    rationale = _text(value["rationale"])
+    if rationale is None:
+        problems.append(Problem(where, "a cover's rationale is a non-empty text"))
+        return False, None
+    if remove:
+        problems.append(Problem(where, "a cover either removes its entry or revises its rationale"))
+        return False, None
+    return True, rationale
 
 
 def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:

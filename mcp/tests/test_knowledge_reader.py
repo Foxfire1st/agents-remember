@@ -908,6 +908,20 @@ def test_a_decision_truth_view_shows_alternatives_and_derived_supersession(world
     assert [one["id"] for one in newer["decision"]["supersedes"]] == [DECISION]
     before = world.read("record", commit=world.first, record_id=DECISION)["decision"]
     assert before["derivedStatus"] == "active"
+    # L37 P1c, C10 (MIK-R29 rule 5): a history row that names the decision in ``because`` has no
+    # page of its own, so its incoming link carries the record the row is about. The timeline of
+    # that record serves the row whole, its ``because`` included, for the navigation back.
+    page = world.read("record", commit=world.second, record_id=DECISION)
+    (caused,) = (link for link in page["incoming"] if link["sourceKind"] == "history_row")
+    assert (caused["source"], caused["relation"]) == ("ROW-BBBBB1", "because")
+    assert "sourceRecord" not in caused
+    assert (caused["sourceSubject"]["id"], caused["sourceSubject"]["kind"]) == (
+        REVIEW_INVARIANT,
+        "invariant",
+    )
+    subject = world.read("record", commit=world.second, record_id=REVIEW_INVARIANT)
+    (row,) = (one for one in subject["timeline"]["events"] if one.get("row") == "ROW-BBBBB1")
+    assert row["document"]["because"] == [DECISION]
 
 
 def test_incident_and_facet_views_show_every_field_and_typed_links_both_ways(

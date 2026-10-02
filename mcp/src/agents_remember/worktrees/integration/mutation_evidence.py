@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
 import tempfile
 from pathlib import Path
 from typing import cast
 
 from agents_remember.kernel.git_command import (
     IsolatedGitState,
+    copy_git_index,
     run_git,
     run_git_with_isolated_index_and_objects,
 )
@@ -437,7 +437,9 @@ def ephemeral_git_mutation_snapshot(
         root = Path(temp_dir)
         index_path = root / "index"
         if source_index.exists():
-            shutil.copyfile(source_index, index_path)
+            # The copy keeps the index file's time, so a file rewritten in the second the index
+            # was written is still compared by content (:func:`copy_git_index`).
+            copy_git_index(source_index, index_path)
         execution = IsolatedGitState(index_path, root / "objects", common_dir / "objects")
         content_head_tree = None
         if memory_cache:

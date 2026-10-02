@@ -232,6 +232,26 @@ def run_git_with_index(
     )
 
 
+def copy_git_index(source: Path, target: Path) -> None:
+    """Copy a Git index for a disposable capture, keeping the index file's modification time.
+
+    Git trusts an index entry's recorded stat data unless the file may have been rewritten in the
+    second the index was written. Such an entry is "racily clean" and is compared by content, and
+    Git recognises it by its recorded time not being older than the index *file's* own modification
+    time. A plain copy is a new file with a new time: no entry is racily clean any more, and a
+    same-size rewrite made in that second keeps its old blob in whatever ``git add`` then captures.
+    The copy therefore carries the source's time, so Git's own check works on it exactly as on the
+    repository's index. Bytes and time are read from one open file, so an index replaced meanwhile
+    cannot pair one index's bytes with another's time.
+    """
+
+    with source.open("rb") as stream:
+        stamp = os.fstat(stream.fileno())
+        data = stream.read()
+    target.write_bytes(data)
+    os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+
 def run_git_with_isolated_index_and_objects(
     repo_root: Path,
     args: list[str],

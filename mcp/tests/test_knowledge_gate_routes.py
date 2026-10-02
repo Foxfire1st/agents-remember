@@ -192,6 +192,20 @@ def test_a_hand_closed_leaf_file_is_refused_at_closeout_validation_and_record_la
         _record(world, landed)
     assert "RLZ-A00001" in str(refused.value)
 
+    # L37 review R5-1: the same file landed one commit later is refused all the same. A parent
+    # that holds the file closed freezes nothing: only a closeout the contract records does.
+    child = commit(world.memory, {}, trailer=world.code_base)
+    git(world.memory, "checkout", "-q", "-b", "side", world.memory_base)
+    commit(world.memory, {"onboarding/unrelated.md": "# Unrelated\n"})
+    git(world.memory, "checkout", "-q", "leaf")
+    git(
+        world.memory, "merge", "-q", "--no-ff", "-m", f"m\n\nCode-Commit: {world.code_base}", "side"
+    )
+    for later in (child, git(world.memory, "rev-parse", "HEAD")):
+        with pytest.raises(RuntimeError, match="R09-history-rows") as refused:
+            _record(world, later)
+        assert "RLZ-A00001" in str(refused.value)
+
 
 # --------------------------------------------------------------------------------------------------
 # Finding 5: one refusal test per public route entry

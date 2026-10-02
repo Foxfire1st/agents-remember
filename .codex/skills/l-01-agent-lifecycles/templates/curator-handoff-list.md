@@ -549,12 +549,64 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 
 **History.** A history item is `{subject, disposition, reason, items?, …}`:
 
+- `items` names the worklist item IDs the row answers. Leave it out: the writer then lists the
+  items of the leaf's persisted worklist that the row answers. Name an item only where a row kind
+  below asks for it.
 - An invariant row adds `covers`, `effect` and `because`. Each cover is one of:
   - an entry ID, re-anchored at C with its own locator;
   - `{id, locator}`, re-anchored at a new locator;
+  - `{id, rationale: "<text>"}`, which also replaces a realization entry's rationale in place (the
+    entry keeps its ID); use it when the re-anchored code no longer does what the old rationale
+    says. It may stand beside `locator`. A proof entry has a `facet`, not a rationale;
   - `{id, remove: true}`, which removes the entry;
   - `{handoff: "<entry id>"}`, which covers every entry this list wrote for the subject.
-- A family row adds `examined`, the member IDs the curator examined.
+- An invariant whose record this leaf changed is governed by its `changed` row (converted memory).
+  While the record's revision differs from the parent line's, the closeout and a recorded landing
+  are refused if a later `no_impact`, `moved` or `extended` row about it is the leaf's latest row
+  (the gate names the open `touched_invariant` item; the validator reports `R09-history-rows`,
+  "replaces this leaf's changed row"). This matters once the leaf has closed out without being
+  integrated: its rows then go to its next attempt file, and the latest row about a subject
+  governs.
+
+  A row named again replaces the earlier row, and its covers replace the earlier row's. So the
+  row named again must name again every cover the earlier row named, and may add covers for new
+  entry work. If a cover is left out, the gate reopens the item ("does not cover …").
+
+  A `changed` row named again at an unchanged revision may correct `effect`, `because` and
+  `reason`, and may carry covers for entry work (re-anchor, add, remove, revise a rationale); it
+  may not change the revision or stand for a second change of the statement. There:
+  - to correct the `effect`, `because` or `reason` of a change the leaf already made, name the
+    `changed` row again with the corrected values and with every cover the earlier row named.
+    The record is not edited and its revision stays; the writer accepts this only for the
+    revision step the earlier `changed` row made;
+  - to re-anchor, add or remove an entry of that invariant, name the `changed` row again, with
+    its effect and because, with every cover the earlier row named, and with the entries
+    worked on as covers. To move an entry to another file, write a `moved` row with the `path`
+    cover first, then name the `changed` row again in a second run, with every entry of the
+    invariant that the leaf touched as covers: it replaces the `moved` row and covers the moved
+    entry where it now is;
+  - to change the record's meaning again, edit it as usual and write a new `changed` row. The
+    revision goes up once more, so the leaf holds one `changed` row per step.
+- A family row adds `examined`, the member IDs the curator examined. A family has one governing
+  row, the leaf's latest row about it, and that one row answers every item about the family:
+  - its `reached_family` item, through `examined` (every member, at its current revision);
+  - each `family_route_condition` item, through its disposition, which must be `rerouted`,
+    `assigned`, `changed` or `retired`, never `no_impact`.
+
+  So choose the disposition for everything the leaf does to the family:
+  - `changed` when the leaf changes the family's guarantee, also when it assigns or reroutes
+    routes in the same leaf. A `changed` row answers the route conditions too; say in the reason
+    what was done to the routes;
+  - `assigned` or `rerouted` when only the routes change;
+  - `no_impact` when the record is as it was.
+
+  While the family's guarantee differs from the parent line's (the item's facts say
+  `guarantee-changed`), a row of another disposition does not answer the family: the gate holds
+  its `reached_family` item open, and once the leaf has closed out without being integrated the
+  validator reports `R09-history-rows` for a later `no_impact`, `assigned` or `rerouted` row that
+  would replace the `changed` row. Name the `changed` row again, with `examined`. In the same
+  way a later `no_impact` row after an `assigned` or `rerouted` row reopens the route condition:
+  name that row again with its disposition.
 - An onboarding row (MIK-R30, converted memory only) has the subject `onboarding:<source path>` or
   `onboarding:<route>/overview` (`onboarding:overview` for the root route) and the disposition
   `no_impact`, and nothing else. It records that a changed source file's card, or its governing

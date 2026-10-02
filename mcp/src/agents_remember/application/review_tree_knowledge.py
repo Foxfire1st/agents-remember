@@ -57,7 +57,7 @@ from agents_remember.application.review_unexplained_lane import (
 )
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge_index import KnowledgeIndex, is_indexed_path
+from agents_remember.memory.knowledge_index import HistoryRow, KnowledgeIndex, is_indexed_path
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_lane import (
@@ -73,7 +73,11 @@ from agents_remember.models.knowledge.review_trees import (
     ReviewTreesResult,
     ReviewWorklistView,
 )
-from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.documents import (
+    KNOWLEDGE_ROOT,
+    ONBOARDING_ROOT,
+    owner_history_attempt,
+)
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -524,6 +528,9 @@ def _history_rows(
 
     An item names the subject its answering row carries in ``facts.row`` when that is not its own
     subject (an unexplained hunk is answered by a ``hunk:…`` row, MIK-R10), so both are looked up.
+    Of one owner's rows about a subject only its latest attempt's is shown: a leaf that continued
+    after a closeout answers the subject again in its next attempt file, and that judgment governs
+    (L37 ruling B). The superseded row stays in its frozen file and in the knowledge diff.
     """
 
     database = trees.after.database
@@ -544,9 +551,21 @@ def _history_rows(
                     "disposition": row.disposition,
                     "row": row.document,
                 }
-                for row in index.history_rows_about(subject).value
+                for row in _governing(index.history_rows_about(subject).value)
             ]
     return tuple(rows)
+
+
+def _governing(rows: tuple[HistoryRow, ...]) -> Iterator[HistoryRow]:
+    """Each owner's row about one subject from that owner's latest attempt file."""
+
+    attempts = [owner_history_attempt(row.path, row.owner) or 1 for row in rows]
+    latest: dict[str, int] = {}
+    for row, attempt in zip(rows, attempts, strict=True):
+        latest[row.owner] = max(latest.get(row.owner, 0), attempt)
+    for row, attempt in zip(rows, attempts, strict=True):
+        if attempt == latest[row.owner]:
+            yield row
 
 
 def _row_subjects(item: Mapping[str, Any]) -> Iterator[str]:

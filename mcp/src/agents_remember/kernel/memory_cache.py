@@ -41,6 +41,20 @@ def derive_memory_ledger(
     )
 
 
+def ignore_memory_cache(repository: Path) -> None:
+    """Record the cache's ignore rule: the one write :func:`prepare_memory_cache` makes to content.
+
+    A route that judges the exact tree it is about to commit records the rule first, so the tree it
+    judges already holds the line, and restores ``.gitignore`` when it refuses.
+    """
+
+    ignore = repository / ".gitignore"
+    text = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    if f"/{LEDGER_RELATIVE_PATH}" not in text.splitlines():
+        separator = "" if not text or text.endswith("\n") else "\n"
+        atomic_write_text(ignore, f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n")
+
+
 def prepare_memory_cache(repository: Path) -> None:
     """Exclude the cache from the next memory-content commit, retaining its disk copy.
 
@@ -49,11 +63,7 @@ def prepare_memory_cache(repository: Path) -> None:
     cache-only index conflicts; genuine content conflicts remain in the index for Git to refuse.
     """
 
-    ignore = repository / ".gitignore"
-    text = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
-    if f"/{LEDGER_RELATIVE_PATH}" not in text.splitlines():
-        separator = "" if not text or text.endswith("\n") else "\n"
-        atomic_write_text(ignore, f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n")
+    ignore_memory_cache(repository)
     result = run_git(
         repository,
         ["rm", "--cached", "--force", "--ignore-unmatch", "--", LEDGER_RELATIVE_PATH],

@@ -31,6 +31,8 @@ from agents_remember.models.knowledge_files.canonical import format_text
 from agents_remember.models.knowledge_files.history import (
     FAMILY_DISPOSITIONS,
     INVARIANT_DISPOSITIONS,
+    changed_family_row_violation,
+    changed_record_row_violation,
     empty_history,
     invariant_revision_violation,
     is_closed_history,
@@ -308,6 +310,48 @@ def test_revision_binding_for_invariant_and_family_rows() -> None:
     assert violation("no_impact", 2, 2) is None
     assert "keeps the K_B revision" in (violation("moved", 2, 3) or "")
     assert violation("deleted", 2, 3, covers=[], effect="retire") is None
+    # A changed row at an unchanged revision restates the leaf's own changed row of that step only.
+    restated = InvariantRow.model_validate(
+        _invariant_row(disposition="changed", revision=3, effect="replace")
+    )
+    for earlier, accepted in ((3, True), (2, False), (None, False)):
+        answer = invariant_revision_violation(
+            restated, base_revision=3, candidate_revision=3, restated_revision=earlier
+        )
+        assert (answer is None) is accepted, earlier
+    # While the leaf changed the record, only its changed (or deleted) row may govern it.
+    for disposition, base, candidate, refused in (
+        ("no_impact", 1, 2, True),
+        ("moved", 1, 3, True),
+        ("changed", 1, 3, False),
+        ("deleted", 1, 2, False),
+        ("no_impact", 2, 2, False),
+        ("no_impact", None, 1, False),
+        ("no_impact", 1, None, False),
+    ):
+        extra = {"deleted": {"effect": "retire", "covers": []}, "changed": {"effect": "clarify"}}
+        governing = InvariantRow.model_validate(
+            _invariant_row(
+                disposition=disposition, revision=candidate or 1, **extra.get(disposition, {})
+            )
+        )
+        answer = changed_record_row_violation(
+            governing, base_revision=base, candidate_revision=candidate
+        )
+        assert (answer is not None) is refused, (disposition, base, candidate)
+        assert answer is None or f"a {disposition} row governs" in answer
+    # A family whose guarantee the leaf changed is governed by its changed row, or by the row that
+    # retires it; a route row or a no_impact row would replace that judgment.
+    of_families = {
+        disposition: changed_family_row_violation(
+            FamilyRow.model_validate(_family_row(disposition=disposition)), guarantee_changed=True
+        )
+        for disposition in FAMILY_DISPOSITIONS
+    }
+    assert [one for one, why in of_families.items() if why is None] == ["changed", "retired"]
+    assert "an assigned row governs a family whose guarantee" in (of_families["assigned"] or "")
+    unchanged = FamilyRow.model_validate(_family_row())
+    assert changed_family_row_violation(unchanged, guarantee_changed=False) is None
     row = InvariantRow.model_validate(_invariant_row(revision=2))
     assert "not the K_C revision 3" in (
         invariant_revision_violation(row, base_revision=2, candidate_revision=3) or ""

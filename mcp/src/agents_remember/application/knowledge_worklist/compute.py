@@ -67,7 +67,11 @@ from agents_remember.application.knowledge_worklist.reconsideration import (
     ReconsiderationInputs,
     reconsideration_candidates,
 )
-from agents_remember.application.knowledge_worklist.registry import item_id, kinds_document
+from agents_remember.application.knowledge_worklist.registry import (
+    GUARANTEE_CHANGED,
+    item_id,
+    kinds_document,
+)
 from agents_remember.application.knowledge_worklist.route_conditions import (
     ITEM_KIND as ROUTE_CONDITION_KIND,
 )
@@ -478,10 +482,18 @@ class _Run:
             reasons[family].update(f"touched:{one}" for one in touched if one in members)
             if family in knowledge.families:
                 reasons[family].add("record-changed")
+                if self._guarantee_changed(family):
+                    reasons[family].add(GUARANTEE_CHANGED)
         for invariant in stale:
             for family in base.families_of.get(invariant, ()):
                 reasons.setdefault(family, set()).add(f"stale:{invariant}")
         return [self._family_item(family, sorted(why)) for family, why in sorted(reasons.items())]
+
+    def _guarantee_changed(self, family: str) -> bool:
+        """Whether K_C states another guarantee for a K_B family than K_B does."""
+
+        after = self.inputs.candidate.families.get(family)
+        return after is not None and after.guarantee != self.inputs.base.families[family].guarantee
 
     def _family_item(self, family: str, why: list[str]) -> Item:
         base, candidate = self.inputs.base, self.inputs.candidate

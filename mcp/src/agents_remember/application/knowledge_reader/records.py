@@ -182,7 +182,12 @@ def link_document(index: KnowledgeIndex, link: Link) -> dict[str, Any]:
         "detail": link.detail,
         "originPath": link.origin_path,
     }
-    if link.source_kind not in ("file", "route", "history_row"):
+    if link.source_kind == "history_row":
+        # A row has no page of its own: the reader names, and navigates to, the record it is about.
+        row = index.history_row(link.source).value
+        if row is not None:
+            document["sourceSubject"] = record_summary(index, row.subject)
+    elif link.source_kind not in ("file", "route"):
         document["sourceRecord"] = record_summary(index, link.source)
     if link.target_kind == "record":
         document["targetRecord"] = record_summary(index, link.target)

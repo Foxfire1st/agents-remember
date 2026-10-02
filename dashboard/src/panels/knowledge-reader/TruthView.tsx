@@ -3,6 +3,7 @@
 // history rows about it and the log of the entries that realize or prove it.
 import { css } from '../../../styled-system/css';
 import type {
+  LinkTarget,
   RecordViewAnswer,
   StatesHeader,
   Timeline,
@@ -129,6 +130,15 @@ function IncomingSource({ link }: { link: RecordViewAnswer['incoming'][number] }
   if (link.sourceRecord) return <RecordLink summary={link.sourceRecord} />;
   if (link.sourceKind === 'file' || link.sourceKind === 'route') {
     return <PathLink path={link.source} />;
+  }
+  // A history row has no page of its own: the link names the record the row is about and leads
+  // there (MIK-R29 rule 5).
+  if (link.sourceSubject) {
+    return (
+      <>
+        <RecordLink summary={link.sourceSubject} /> <span className={muted}>row {link.source}</span>
+      </>
+    );
   }
   return <span>{link.source}</span>;
 }
@@ -292,12 +302,36 @@ function FamilyPart({ part }: { part: NonNullable<RecordViewAnswer['family']> })
   );
 }
 
+// A history row's `because` (MIK-R07 rule 2): a record ID navigates, a requirement is named.
+function becauseTargets(document: TimelineEvent['document']): LinkTarget[] {
+  const because = document?.because;
+  if (!Array.isArray(because)) return [];
+  return because.map((one) =>
+    typeof one === 'string'
+      ? { kind: 'record', id: one }
+      : { kind: 'requirement', requirement: one as Record<string, unknown> },
+  );
+}
+
 function HistoryLine({ event }: { event: TimelineEvent }) {
   const reason = event.document?.reason;
+  const effect = event.document?.effect;
+  const because = becauseTargets(event.document);
   return (
     <>
       <strong>{event.owner}</strong> {event.disposition}
+      {typeof effect === 'string' ? <span data-testid="history-effect"> · {effect}</span> : null}
       {event.closed === false ? <span className={muted}> (open)</span> : null}
+      {because.length > 0 ? (
+        <div data-testid="history-because">
+          <span className={muted}>because</span>
+          {because.map((target, index) => (
+            <span key={index}>
+              {index > 0 ? ',' : ''} <TargetLink target={target} />
+            </span>
+          ))}
+        </div>
+      ) : null}
       {typeof reason === 'string' ? <div className={muted}>{reason}</div> : null}
     </>
   );

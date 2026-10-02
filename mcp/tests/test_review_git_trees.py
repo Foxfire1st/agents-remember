@@ -895,6 +895,29 @@ def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -
     assert [(row["subject"], row["owner_kind"]) for row in worklist.history_rows] == [
         (FAMILY, "leaf")
     ]
+    # L37 ruling B: the leaf answers the subject again in its next attempt file; that judgment
+    # governs, so it is the one row of this leaf shown. Another owner's row is still shown.
+    again = json.loads(history_file())
+    again["attempt"], again["rows"][0]["id"] = 2, "ROW-2ATTMP"
+    again["rows"][0]["reason"] = "examined again after the closeout"
+    other = json.loads(history_file())
+    other["leaf"], other["rows"][0]["id"] = "260928-MIK-L98", "ROW-0THER1"
+    _write(
+        world.memory_worktree,
+        {
+            f"knowledge/history/{LEAF}-attempt-2.json": canonical_text(again),
+            "knowledge/history/260928-MIK-L98.json": canonical_text(other),
+        },
+    )
+    with mock.patch(
+        "agents_remember.application.review_tree_knowledge.leaf_worklist", return_value=document
+    ):
+        worklist = read_review_trees(world.config, _query()).worklist
+    assert worklist is not None
+    assert sorted((row["id"], row["path"]) for row in worklist.history_rows) == [
+        ("ROW-0THER1", "knowledge/history/260928-MIK-L98.json"),
+        ("ROW-2ATTMP", f"knowledge/history/{LEAF}-attempt-2.json"),
+    ]
 
 
 def test_an_excerpt_longer_than_its_bound_is_a_stated_prefix() -> None:

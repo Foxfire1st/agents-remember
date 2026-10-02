@@ -446,6 +446,90 @@ it('marks the located code lines, and names a timeline source that could not be 
   expect(failed.textContent).toContain('git log timed out');
 });
 
+it('shows a history row with its effect and decision, and a decision with the rows it caused', async () => {
+  type Event = Record<string, unknown> & { source: string; document: Record<string, unknown> };
+  const invariant = captured['record-invariant'] as Body & {
+    timeline: Record<string, unknown> & { events: Event[] };
+  };
+  const historyLine = async (view: ReturnType<typeof open>) =>
+    (await view.findAllByTestId('timeline-event')).find((one) => one.dataset.source === 'history')!;
+
+  // A row with neither an effect nor a because reads as it always did.
+  const plain = await historyLine(open({ view: 'record', id: 'INV-N213W04A' }));
+  expect(within(plain).queryByTestId('history-effect')).toBeNull();
+  expect(within(plain).queryByTestId('history-because')).toBeNull();
+  expect(plain.lastElementChild?.textContent).toBe(
+    "260928-MIK-L29 no_impact (open)SCRATCH: the reader reads this invariant's code and never writes it.",
+  );
+  cleanup();
+
+  const requirement = {
+    task: { repository: REPO, path: '260928_maintained-invariant-knowledge' },
+    packet: 'requirements/MIK-R12-v2-curator-writer-for-all-knowledge-kinds.md',
+    id: 'MIK-R12',
+    version: 'v2',
+  };
+  overrides['record:INV-N213W04A'] = {
+    ...invariant,
+    timeline: {
+      ...invariant.timeline,
+      events: invariant.timeline.events.map((event) =>
+        event.source === 'history'
+          ? {
+              ...event,
+              disposition: 'changed',
+              document: {
+                ...event.document,
+                effect: 'replace',
+                because: [requirement, 'DEC-R29DEC'],
+              },
+            }
+          : event,
+      ),
+    },
+  };
+  const changed = await historyLine(open({ view: 'record', id: 'INV-N213W04A' }));
+  expect(changed.lastElementChild?.textContent).toContain(
+    '260928-MIK-L29 changed · replace (open)',
+  );
+  const because = within(changed).getByTestId('history-because');
+  expect(because.textContent).toContain('requirement MIK-R12@v2');
+  const decision = within(because).getByTestId('record-link');
+  expect(decision.dataset.record).toBe('DEC-R29DEC');
+  fireEvent.click(decision);
+  await waitFor(() => expect(parseReaderHash(window.location.hash)?.id).toBe('DEC-R29DEC'));
+  cleanup();
+
+  // The other direction: the decision's incoming link from that row names the row's subject and
+  // leads to its page. A row served without its subject stays the plain row ID.
+  const link = {
+    source: 'ROW-R29AA2',
+    sourceKind: 'history_row',
+    relation: 'because',
+    targetKind: 'record',
+    target: 'DEC-R29DEC',
+    detail: { id: 'DEC-R29DEC' },
+    originPath: 'knowledge/history/260928-MIK-L29.json',
+  };
+  const subject = { id: 'INV-N213W04A', kind: 'invariant', title: 'SCRATCH subject' };
+  overrides['record:DEC-R29DEC'] = {
+    ...captured['record-decision'],
+    incoming: [
+      { ...link, sourceSubject: subject },
+      { ...link, source: 'ROW-R29AA9' },
+    ],
+  };
+  const page = open({ view: 'record', id: 'DEC-R29DEC' });
+  const [named, unnamed] = [
+    ...(await page.findByTestId('record-incoming')).querySelectorAll('li'),
+  ] as HTMLElement[];
+  expect(named.textContent).toContain('INV-N213W04A · SCRATCH subject row ROW-R29AA2 because');
+  expect(within(unnamed).queryByTestId('record-link')).toBeNull();
+  expect(unnamed.textContent).toContain('ROW-R29AA9 because (history_row');
+  fireEvent.click(within(named).getByTestId('record-link'));
+  await waitFor(() => expect(parseReaderHash(window.location.hash)?.id).toBe('INV-N213W04A'));
+});
+
 it('heads a superseded decision with its derived status', async () => {
   const view = open({ view: 'record', id: 'DEC-R29AAA' });
   const status = await view.findByTestId('record-status');

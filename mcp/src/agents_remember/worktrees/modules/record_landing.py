@@ -31,6 +31,7 @@ from pathlib import Path
 
 from agents_remember.worktrees.knowledge_gate import (
     GateProbeError,
+    closed_out_memory,
     converted_memory,
     landing_gate_refusal,
     leaf_cutover_refusal,
@@ -134,13 +135,15 @@ def _landing_request(
         parents = require_git(repository, ["rev-list", "--parents", "-n", "1", memory_commit])
     except (RuntimeError, subprocess.SubprocessError) as error:
         return f"record_landing refused: the landed memory commit cannot be read: {error}"
+    landed, *made_on = parents.split()
     # The comparison base is the parent line the task last synced from, so every record the task
     # introduced -- in however many of its own commits -- is judged new (MIK-R27, carried from L27).
-    bases = (
-        (contract.memory_base_commit,)
-        if contract.memory_base_commit
-        else tuple(parents.split()[1:])
-    )
+    bases = (contract.memory_base_commit,) if contract.memory_base_commit else tuple(made_on)
+    # Only a closeout the contract records freezes a history file (L09 review R1, finding 1): the
+    # commit that closeout made is judged as the closeout judged it, with what it was made on
+    # frozen. A commit made by any other hand -- a child of it, a merge made afterwards -- freezes
+    # nothing, so every row of the leaf is checked against the landed tree (L37 review R5-1).
+    recorded = landed in closed_out_memory(contract)
     return LandingGateRequest(
         memory_repository=repository,
         memory_commit=memory_commit,
@@ -148,6 +151,7 @@ def _landing_request(
         code_repository=contract.code_repo_path,
         code_commit=code_commit,
         leaf_owner=(contract.leaf_id or contract.task_name) if contract.kind == "leaf" else None,
+        frozen=tuple(made_on) if recorded else (),
     )
 
 

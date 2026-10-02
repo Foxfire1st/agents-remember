@@ -109,11 +109,13 @@ def _unconverted(tmp_path: Path) -> Gated:
 
     world = build_gated(tmp_path)
     git(world.memory, "branch", LINE, world.memory_base)  # another master's converted line
-    for branch in ("main", "leaf"):
-        git(world.memory, "checkout", "-q", branch)
-        git(world.memory, "rm", "-q", "knowledge/layout.json")
-        commit(world.memory, {})
-    world.memory_base = git(world.memory, "rev-parse", "main")
+    git(world.memory, "checkout", "-q", "main")
+    git(world.memory, "rm", "-q", "knowledge/layout.json")
+    world.memory_base = commit(world.memory, {})
+    # One unconverted commit under both branches. Two separate commits are the same commit only
+    # when they fall in the same second; otherwise their merge base is the converted commit, and
+    # the sync is a crossing sync, which is rightly not refused (L37 P1c: this test was flaky).
+    git(world.memory, "checkout", "-q", "-B", "leaf", "main")
     return world
 
 
