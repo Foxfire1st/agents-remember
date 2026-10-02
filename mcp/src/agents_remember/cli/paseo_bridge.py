@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -35,6 +36,9 @@ _SERVER_ID_FILE = "server-id"
 _CODE_LIMIT = 100
 _MESSAGE_LIMIT = 800
 _STDERR_TAIL = 200
+# A Node crash report is: source line, caret, the error line, stack frames, the version line.
+_ERROR_LINE = re.compile(r"^\S*Error\b.*", re.MULTILINE)
+_REPORT_NOISE = re.compile(r"\s+at .*|\s*|Node\.js v\S+")
 
 RUNTIME_NOT_CONFIGURED = PaseoRuntimeNotConfigured.code
 DAEMON_UNREACHABLE = "paseo_daemon_unreachable"
@@ -159,10 +163,20 @@ def _bridge_reply(command: str, completed: subprocess.CompletedProcess[str]) -> 
 def _unreadable_reply(
     command: str, completed: subprocess.CompletedProcess[str]
 ) -> PaseoBridgeFailure:
-    """The script printed no JSON object; the end of its standard error says why it died."""
+    """The script printed no JSON object; its standard error says why it died."""
 
     message = f"The Paseo bridge call {command!r} returned an unreadable reply."
-    tail = (completed.stderr or "").strip()[-_STDERR_TAIL:]
-    if tail:
-        message += f" Its standard error ended with: {tail}"
+    cause = _crash_cause(completed.stderr or "")
+    if cause:
+        message += f" Its standard error says: {cause}"
     return PaseoBridgeFailure(BRIDGE_INVALID_REPLY, message[:_MESSAGE_LIMIT])
+
+
+def _crash_cause(stderr: str) -> str:
+    """The last line that names an error; without one, the end of the text minus the stack."""
+
+    errors = _ERROR_LINE.findall(stderr)
+    if errors:
+        return errors[-1].strip()[:_STDERR_TAIL]
+    kept = [line for line in stderr.splitlines() if not _REPORT_NOISE.fullmatch(line)]
+    return "\n".join(kept).strip()[-_STDERR_TAIL:]
