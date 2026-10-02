@@ -37,6 +37,7 @@ from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from test_paseo_launch import PaseoLaunchTestCase
 
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "cli"
 # The code a launch runs through. It serves every harness alike, so it names none.
@@ -319,6 +320,66 @@ class HandoverArtifactTests(unittest.TestCase):
                     (self.root / "larger.md").as_posix(), "x" * (MAX_HANDOVER_ARTIFACT_BYTES + 1)
                 )
             self.assertFalse((self.root / "larger.handover.txt").exists())
+
+
+class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
+    def test_the_handover_artifact_is_written_once_and_a_repeat_reuses_or_refuses_it(self) -> None:
+        with self.subTest("a retry sends the saved message and finds its artifact unchanged"):
+            request = self.request("worker")
+            self.runtime.fail("agent-create", "paseo_bridge_timeout")
+            self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+            artifact = Path(self.artifact(request)["path"])
+            written = artifact.stat()
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
+            self.assertEqual(second, first)
+            self.assertEqual(
+                (artifact.stat().st_ino, artifact.stat().st_mtime_ns),
+                (written.st_ino, written.st_mtime_ns),
+            )
+        with self.subTest("a retry writes a lost artifact again from the saved message"):
+            request = self.request("manager")
+            self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+            self.dispatch(request)
+            artifact = Path(self.artifact(request)["path"])
+            artifact.unlink()
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
+        with self.subTest("a retry refuses an artifact whose content was changed"):
+            request = self.request("orchestrator")
+            self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+            self.dispatch(request)
+            artifact = Path(self.artifact(request)["path"])
+            artifact.write_text("another assignment", encoding="utf-8")
+            saved = self.receipt_path(request).read_bytes()
+            calls = len(self.runtime.calls)
+            error = self.refused(request)
+            self.assertEqual(error.status_code, 409)
+            self.assertIn("different handover content", str(error.detail))
+            self.assertEqual(len(self.runtime.calls), calls)
+            self.assertEqual(self.receipt_path(request).read_bytes(), saved)
+            self.assertEqual(artifact.read_text(encoding="utf-8"), "another assignment")
+        for label, content, launches in (
+            ("the same content is reused", self.prompt, True),
+            ("different content is refused before a receipt", "an earlier compilation", False),
+        ):
+            with self.subTest("an artifact the request already has", case=label):
+                # The process ended after the artifact was written and before the receipt was.
+                request = self.request("architect")
+                artifact = Path(self.artifact(request)["path"])
+                artifact.write_text(content, encoding="utf-8")
+                written = artifact.stat()
+                self.runtime.calls.clear()
+                if launches:
+                    self.assertEqual(self.dispatch(request)[1]["status"], "running")
+                else:
+                    error = self.refused(request)
+                    self.assertEqual(error.status_code, 409)
+                    self.assertIn("different handover content", str(error.detail))
+                    self.assertEqual(self.runtime.launch_calls(), [])
+                    self.assertFalse(self.receipt_path(request).exists())
+                self.assertEqual(artifact.read_text(encoding="utf-8"), content)
+                self.assertEqual(artifact.stat().st_ino, written.st_ino)
 
 
 class NoHarnessNameTests(unittest.TestCase):
