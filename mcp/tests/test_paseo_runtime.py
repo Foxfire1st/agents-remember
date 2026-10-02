@@ -7,15 +7,16 @@ import json
 import os
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from agents_remember.cli.__main__ import main
-from agents_remember.cli.paseo_command import PaseoRuntimeFailure, run_command
+from agents_remember.cli.paseo_command import CommandResult, PaseoRuntimeFailure, run_command
 from agents_remember.cli.paseo_daemon import runtime_status, stop_runtime
 from agents_remember.cli.paseo_daemon_config import previous_config_path, write_provider_entries
 from agents_remember.cli.paseo_plugin_files import (
@@ -24,11 +25,17 @@ from agents_remember.cli.paseo_plugin_files import (
     plugin_source_root,
     tree_digest,
 )
+from agents_remember.cli.paseo_process_record import (
+    ProcessFacts,
+    inspect_record,
+    read_process,
+)
 from agents_remember.cli.paseo_provision import daemon_settings, provision_runtime
 from paseo_runtime_test_support import (
     OTHER_SECRET,
     PINNED,
     SECRET,
+    SUPERVISOR_PID,
     FakePaseo,
     Interrupted,
     file_states,
@@ -51,16 +58,17 @@ class PaseoRuntimeTests(unittest.TestCase):
         if "plugin_source" not in overrides:
             overrides["plugin_source"] = write_plugin(self.root, "one")
         overrides.setdefault("probe", free)
+        overrides.setdefault("reader", fake.reader)
         return provision_runtime(settings, runner=fake, **overrides)
 
-    def provision_report(self, settings: Any, *, runner: FakePaseo) -> dict[str, Any]:
-        return self.provision(runner, settings=settings)
+    def provision_report(self, settings: Any, *, runner: FakePaseo, reader: Any) -> dict[str, Any]:
+        return self.provision(runner, settings=settings, reader=reader)
 
     def test_fresh_provision_then_a_repeat_that_touches_nothing(self) -> None:
         settings = runtime_settings(self.root)
         fake = FakePaseo(settings)
 
-        report = provision_runtime(settings, runner=fake, probe=free)
+        report = provision_runtime(settings, runner=fake, reader=fake.reader, probe=free)
 
         self.assertTrue(report["ok"], report)
         self.assertEqual(report["daemon"], {"action": "started", "reasons": []})
@@ -130,7 +138,7 @@ class PaseoRuntimeTests(unittest.TestCase):
 
         before = len(fake.calls)
         files = file_states(settings.home, settings.install_prefix)
-        repeat = provision_runtime(settings, runner=fake, probe=free)
+        repeat = provision_runtime(settings, runner=fake, reader=fake.reader, probe=free)
 
         self.assertTrue(repeat["ok"], repeat)
         self.assertFalse(repeat["changed"])
@@ -316,7 +324,10 @@ class PaseoRuntimeTests(unittest.TestCase):
             fake = FakePaseo(settings)
 
             report = provision_runtime(
-                settings, runner=fake, plugin_source=write_plugin(self.root, "one")
+                settings,
+                runner=fake,
+                reader=fake.reader,
+                plugin_source=write_plugin(self.root, "one"),
             )
 
         self.assertFalse(report["ok"])
@@ -329,15 +340,44 @@ class PaseoRuntimeTests(unittest.TestCase):
         # The address is taken between the check and the start: Paseo's own refusal is reported
         # the same way, and the configured port is kept.
         fake.port_held = True
+        fake.lingering_supervisor = True
         raced = provision_runtime(
-            settings, runner=fake, plugin_source=write_plugin(self.root, "one"), probe=free
+            settings,
+            runner=fake,
+            reader=fake.reader,
+            plugin_source=write_plugin(self.root, "one"),
+            probe=free,
         )
 
         self.assertEqual(raced["error"]["code"], "listen_port_in_use")
         self.assertIn("EADDRINUSE", raced["error"]["detail"])
+        # A supervisor the failed start left behind is this home's own, and is stopped.
         self.assertEqual(fake.kinds()[-2:], [("daemon", "start"), ("daemon", "stop")])
+        self.assertEqual((fake.signalled, fake.recorded_pid()), ([SUPERVISOR_PID], None))
         self.assertIsNone(fake.daemon)
         self.assertEqual(fake.configured("daemon.listen"), f"127.0.0.1:{port}")
+
+        # A running daemon of this home excuses the probe only for an address it can hold itself.
+        # Another host on its port, or another port, is probed and refused with nothing touched.
+        fake.port_held = False
+        fake.lingering_supervisor = False
+        self.assertTrue(self.provision(fake)["ok"])
+
+        def held_elsewhere(host: str, probed: int) -> OSError | None:
+            own = (host, probed) == ("127.0.0.1", port)
+            return None if own else OSError(errno.EADDRINUSE, "Address already in use")
+
+        for listen in (f"127.0.0.2:{port}", "127.0.0.1:1"):
+            with self.subTest(listen=listen):
+                before = len(fake.calls)
+                moved = runtime_settings(self.root, listen=listen)
+                report = self.provision(fake, settings=moved, probe=held_elsewhere)
+                self.assertEqual(report["error"]["code"], "listen_port_in_use")
+                self.assertEqual((report["changes"], fake.mutations(before)), ([], []))
+                self.assertEqual(report["daemon"]["action"], "untouched")
+                self.assertEqual(
+                    fake.running()["started_with"]["daemon.listen"], f"127.0.0.1:{port}"
+                )
 
     def test_plugin_load_failure_keeps_the_daemon_up_and_status_says_failed(self) -> None:
         settings = runtime_settings(self.root)
@@ -355,7 +395,7 @@ class PaseoRuntimeTests(unittest.TestCase):
             [c["action"] for c in report["changes"] if c["step"] == "plugin"], ["copied"]
         )
         self.assertIsNotNone(fake.daemon)
-        status = runtime_status(settings, runner=fake)
+        status = runtime_status(settings, runner=fake, reader=fake.reader)
         self.assertTrue(status["running"])
         self.assertEqual(
             status["plugin"], {"id": PLUGIN_ID, "state": "failed", "error": fake.plugin_error}
@@ -368,7 +408,9 @@ class PaseoRuntimeTests(unittest.TestCase):
         self.assertTrue(recovered["ok"], recovered)
         self.assertEqual(recovered["daemon"]["action"], "reloaded")
         self.assertEqual(recovered["changes"], [{"step": "plugin", "action": "reloaded"}])
-        self.assertEqual(runtime_status(settings, runner=fake)["plugin"]["state"], "running")
+        self.assertEqual(
+            runtime_status(settings, runner=fake, reader=fake.reader)["plugin"]["state"], "running"
+        )
 
     def test_a_pass_interrupted_at_any_call_converges_on_the_next(self) -> None:
         target = {
@@ -392,6 +434,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 done = provision_runtime(
                     runtime_settings(root, **before),
                     runner=fake,
+                    reader=fake.reader,
                     plugin_source=write_plugin(root, "one"),
                     probe=free,
                 )
@@ -407,7 +450,7 @@ class PaseoRuntimeTests(unittest.TestCase):
             fake, source = world(f"reference {label}", before)
             first = len(fake.calls)
             reference = provision_runtime(
-                fake.settings, runner=fake, plugin_source=source, probe=free
+                fake.settings, runner=fake, reader=fake.reader, plugin_source=source, probe=free
             )
             self.assertTrue(reference["ok"], reference)
             expected = converged(fake)
@@ -440,41 +483,68 @@ class PaseoRuntimeTests(unittest.TestCase):
                     fake.interrupt_at = cut
                     with self.assertRaises(Interrupted):
                         provision_runtime(
-                            fake.settings, runner=fake, plugin_source=source, probe=free
+                            fake.settings,
+                            runner=fake,
+                            reader=fake.reader,
+                            plugin_source=source,
+                            probe=free,
                         )
                     fake.interrupt_at = None
 
                     resumed = provision_runtime(
-                        fake.settings, runner=fake, plugin_source=source, probe=free
+                        fake.settings,
+                        runner=fake,
+                        reader=fake.reader,
+                        plugin_source=source,
+                        probe=free,
                     )
 
                     self.assertTrue(resumed["ok"], resumed)
                     self.assertEqual(converged(fake), expected)
                     self.assertFalse(fake.speech_downloaded)
                     again = provision_runtime(
-                        fake.settings, runner=fake, plugin_source=source, probe=free
+                        fake.settings,
+                        runner=fake,
+                        reader=fake.reader,
+                        plugin_source=source,
+                        probe=free,
                     )
                     self.assertEqual((again["ok"], again["changed"]), (True, False))
 
-    def test_provider_values_stay_in_the_daemon_file_and_a_refused_file_is_put_back(self) -> None:
+    REFUSED_ENTRIES: ClassVar[dict[str, Any]] = {
+        "bad": {"extends": "nope", "env": {"KEY": OTHER_SECRET}}
+    }
+
+    def provisioned_with_foreign_keys(self) -> FakePaseo:
+        """A running runtime whose daemon file also holds keys only Paseo owns."""
         fake = FakePaseo(runtime_settings(self.root))
         self.assertTrue(self.provision(fake)["ok"])
-        refused_entries = {"bad": {"extends": "nope", "env": {"KEY": OTHER_SECRET}}}
+        fake.write("daemon.hostnames", ["fox.example.ts.net", "b\u00fccher.example"])
+        fake.write("agents.other", {"keep": True})
+        return fake
+
+    def kept_state(self, fake: FakePaseo) -> list[str]:
+        ar_home = fake.settings.home / "agents-remember"
+        return sorted(path.name for path in ar_home.glob("config-*"))
+
+    def test_provider_values_stay_in_the_daemon_file_and_a_refused_file_is_put_back(self) -> None:
+        fake = self.provisioned_with_foreign_keys()
+        refused = runtime_settings(self.root, providers=self.REFUSED_ENTRIES)
+        foreign = (fake.configured("daemon.hostnames"), fake.configured("agents.other"))
 
         for daemon_runs in (True, False):
             with self.subTest(daemon_runs=daemon_runs):
                 if not daemon_runs:
-                    fake.daemon = None
+                    fake.kill_daemon()
                 accepted = fake.config_file.read_bytes()
                 before = len(fake.calls)
 
-                report = self.provision(
-                    fake, settings=runtime_settings(self.root, providers=refused_entries)
-                )
+                report = self.provision(fake, settings=refused)
 
                 self.assertFalse(report["ok"])
                 self.assertEqual(report["error"]["code"], "provider_entries_refused")
                 self.assertEqual(report["error"]["step"], "config")
+                self.assertIn("the previous file was put back", report["error"]["message"])
                 self.assertIn("agents.providers.bad.extends", report["error"]["detail"])
                 self.assertNotIn(OTHER_SECRET, json.dumps(report))
                 self.assertEqual(report["changes"], [])
@@ -482,7 +552,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 validated = ("daemon", "reload") if daemon_runs else ("config", "get")
                 self.assertEqual(fake.kinds(before)[-1], validated)
                 self.assertEqual(fake.config_file.read_bytes(), accepted)
-                self.assertFalse(previous_config_path(fake.settings.home).exists())
+                self.assertEqual(self.kept_state(fake), [])
                 self.assertEqual(stat.S_IMODE(fake.config_file.stat().st_mode), 0o600)
                 self.assertNotIn(("daemon", "start"), fake.kinds(before))
                 if daemon_runs:
@@ -490,33 +560,227 @@ class PaseoRuntimeTests(unittest.TestCase):
                         fake.running()["live"]["agents.providers"], provider_entries(SECRET)
                     )
 
-        # A pass that died after replacing the file and before Paseo accepted it: the next pass
-        # puts the kept file back before any Paseo call reads the refused one.
-        write_provider_entries(fake.settings.home, refused_entries)
-        self.assertIsNotNone(fake.invalid_config())
-        report = self.provision(fake)
-        self.assertTrue(report["ok"], report)
-        self.assertEqual(
-            report["changes"][0],
-            {"step": "config", "action": "restored", "path": "agents.providers"},
-        )
-        self.assertEqual(fake.running()["live"]["agents.providers"], provider_entries(SECRET))
-        self.assertFalse(previous_config_path(fake.settings.home).exists())
+        with self.subTest("an accepted write leaves every other key, and its text, as it was"):
+            self.assertTrue(self.provision(fake)["ok"])
+            _report, mutations = self.rerun(fake, providers=provider_entries(OTHER_SECRET))
+            self.assertEqual(mutations, [("daemon", "reload")])
+            self.assertEqual(
+                (fake.configured("daemon.hostnames"), fake.configured("agents.other")), foreign
+            )
+            self.assertIn("b\u00fccher.example".encode(), fake.config_file.read_bytes())
+            self.assertEqual(self.kept_state(fake), [])
+
+        with self.subTest("a call that fails for another reason is not reported as a refusal"):
+            accepted = fake.config_file.read_bytes()
+            fake.answers = {("daemon", "reload"): CommandResult(124, "", "timed out after 60 s")}
+            report = self.provision(fake, settings=runtime_settings(self.root))
+            fake.answers = {}
+            self.assertEqual(report["error"]["code"], "paseo_command_failed")
+            self.assertEqual(report["error"]["detail"], "timed out after 60 s")
+            self.assertEqual((fake.config_file.read_bytes(), self.kept_state(fake)), (accepted, []))
 
         # A daemon file that is not a configuration object is never replaced.
         fake.config_file.write_text("[]", encoding="utf-8")
         with self.assertRaises(PaseoRuntimeFailure) as unreadable:
-            write_provider_entries(fake.settings.home, refused_entries)
+            write_provider_entries(fake.settings.home, self.REFUSED_ENTRIES)
         self.assertEqual(unreadable.exception.code, "daemon_config_unreadable")
         self.assertEqual(fake.config_file.read_text(encoding="utf-8"), "[]")
-        self.assertFalse(previous_config_path(fake.settings.home).exists())
+        self.assertEqual(self.kept_state(fake), [])
+
+    def test_a_rollback_undoes_only_what_the_pass_changed(self) -> None:
+        fake = self.provisioned_with_foreign_keys()
+        home = fake.settings.home
+        restored = {"step": "config", "action": "restored", "path": "agents.providers"}
+        reloaded = {"step": "config", "action": "reloaded", "path": "agents.providers"}
+
+        with self.subTest("the whole file while it is still the file the dead pass wrote"):
+            accepted = fake.config_file.read_bytes()
+            write_provider_entries(home, self.REFUSED_ENTRIES)
+            self.assertIsNotNone(fake.invalid_config())
+            self.assertEqual(
+                self.kept_state(fake), ["config-previous.json", "config-written.sha256"]
+            )
+            # Temporary files of a killed write hold provider values; the next pass removes them.
+            stale = [
+                home / ".config.json.1.a.tmp",
+                previous_config_path(home).with_name(".config-previous.json.1.a.tmp"),
+            ]
+            for path in stale:
+                path.write_text(OTHER_SECRET, encoding="utf-8")
+
+            report = self.provision(fake)
+
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(
+                report["changes"],
+                [
+                    {"step": "config", "action": "removed-leftover", "path": stale[0].as_posix()},
+                    {"step": "config", "action": "removed-leftover", "path": stale[1].as_posix()},
+                    {**restored, "restored": "file"},
+                    reloaded,
+                ],
+            )
+            self.assertEqual(fake.config_file.read_bytes(), accepted)
+            self.assertEqual([path.exists() for path in stale], [False, False])
+            self.assertEqual(self.kept_state(fake), [])
+
+        with self.subTest(
+            "only the provider entries when Paseo wrote the file after the dead pass"
+        ):
+            # The dead pass wrote entries Paseo accepts; a hand setting through Paseo then made
+            # the running daemon load them along with the new key.
+            write_provider_entries(home, provider_entries(OTHER_SECRET))
+            paseo = (fake.settings.install_prefix / "node_modules/.bin/paseo").as_posix()
+            hand_set = ["daemon", "config", "set", "daemon.hostnames", '["newer.example.ts.net"]']
+            self.assertEqual(fake([paseo, *hand_set, "--home", home.as_posix()], 1.0).returncode, 0)
+            self.assertEqual(
+                fake.running()["live"]["agents.providers"], provider_entries(OTHER_SECRET)
+            )
+            before = len(fake.calls)
+
+            report = self.provision(fake)
+
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["changes"], [{**restored, "restored": "providers"}, reloaded])
+            self.assertEqual(fake.mutations(before), [("daemon", "reload")])
+            self.assertEqual(report["daemon"]["action"], "reloaded")
+            self.assertEqual(fake.configured("daemon.hostnames"), ["newer.example.ts.net"])
+            self.assertEqual(fake.configured("agents.other"), {"keep": True})
+            self.assertEqual(fake.configured("agents.providers"), provider_entries(SECRET))
+            # The running daemon holds the configured entries again, not the undone ones.
+            self.assertEqual(fake.running()["live"]["agents.providers"], provider_entries(SECRET))
+            self.assertEqual(self.kept_state(fake), [])
+
+        with self.subTest("only the provider entries when Paseo wrote the file during a refusal"):
+            fake.during = {("daemon", "reload"): lambda: fake.write("daemon.hostnames", ["x.net"])}
+
+            report = self.provision(
+                fake, settings=runtime_settings(self.root, providers=self.REFUSED_ENTRIES)
+            )
+
+            self.assertEqual(report["error"]["code"], "provider_entries_refused")
+            self.assertIn("only the previous provider entries", report["error"]["message"])
+            self.assertEqual(fake.configured("daemon.hostnames"), ["x.net"])
+            self.assertEqual(fake.configured("agents.other"), {"keep": True})
+            self.assertEqual(fake.configured("agents.providers"), provider_entries(SECRET))
+            self.assertEqual((self.kept_state(fake), fake.invalid_config()), ([], None))
+            self.assertEqual(fake.running()["live"]["agents.providers"], provider_entries(SECRET))
+
+    def test_a_process_record_is_acted_on_only_when_it_names_this_homes_supervisor(self) -> None:
+        foreign = 999
+        stale_records: dict[str, tuple[tuple[ProcessFacts | None, ...], str]] = {
+            "a dead process": ((), "the recorded process no longer exists"),
+            "a live process that is not a supervisor": (
+                (ProcessFacts("sleep 600", None),),
+                "the recorded process is not a Paseo supervisor",
+            ),
+            "the supervisor of another home": (
+                (ProcessFacts("Paseo Supervisor", "/another/paseo/home"),),
+                "the recorded process is the supervisor of another home",
+            ),
+        }
+        for index, (label, (alive_as, reason)) in enumerate(stale_records.items()):
+            with self.subTest(record_names=label):
+                # The daemon crashed; its record now names something else.
+                fake = FakePaseo(runtime_settings(self.root / str(index)))
+                home = fake.settings.home
+                self.assertTrue(self.provision(fake)["ok"])
+                fake.kill_daemon()
+                fake.record(foreign, *alive_as)
+                stale = {"pid": foreign, "reason": reason}
+                before = len(fake.calls)
+
+                status = runtime_status(fake.settings, runner=fake, reader=fake.reader)
+
+                self.assertEqual((status["running"], status["staleRecord"]), (False, stale))
+                self.assertEqual((len(fake.calls), fake.record_file.is_file()), (before, True))
+
+                # Provision with a reason to restart: nothing is stopped, the daemon is started.
+                moved = runtime_settings(self.root / str(index), listen="127.0.0.1:6832")
+                report = self.provision(fake, settings=moved)
+
+                self.assertTrue(report["ok"], report)
+                self.assertEqual(
+                    report["changes"][0],
+                    {"step": "daemon", "action": "removed-stale-record", **stale},
+                )
+                self.assertEqual(report["daemon"], {"action": "started", "reasons": []})
+                self.assertNotIn(("daemon", "stop"), fake.kinds(before))
+                self.assertEqual((fake.signalled, fake.recorded_pid()), ([], SUPERVISOR_PID))
+                self.assertEqual(foreign in fake.processes, bool(alive_as))
+
+                fake.kill_daemon()
+                fake.record(foreign, *alive_as)
+                before = len(fake.calls)
+
+                stopped = stop_runtime(fake.settings, runner=fake, reader=fake.reader)
+
+                self.assertEqual(
+                    stopped,
+                    {
+                        "ok": True,
+                        "home": home.as_posix(),
+                        "action": "not running",
+                        "pid": None,
+                        "staleRecord": stale,
+                    },
+                )
+                self.assertEqual((fake.signalled, len(fake.calls)), ([], before))
+                self.assertFalse(fake.record_file.exists())
+                self.assertEqual(foreign in fake.processes, bool(alive_as))
+
+    def test_a_recorded_process_is_read_from_proc_and_one_that_cannot_be_read_is_never_signalled(
+        self,
+    ) -> None:
+        fake = FakePaseo(runtime_settings(self.root))
+        home = fake.settings.home
+        self.assertTrue(self.provision(fake)["ok"])
+        fake.kill_daemon()
+        foreign = 999
+
+        with self.subTest("the real reader tells a live process, its home and a dead one apart"):
+            if not Path("/proc/self").exists():
+                self.skipTest("no /proc on this system")
+            sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+            child = subprocess.Popen(sleeper, env={"PASEO_HOME": home.as_posix()})
+            try:
+                facts = read_process(child.pid)
+                assert facts is not None
+                self.assertEqual(facts.paseo_home, home.as_posix())
+                self.assertTrue(facts.command_line.startswith(sys.executable))
+                fake.record(child.pid)
+                state = inspect_record(home, "stop")
+                self.assertEqual((state.kind, state.pid), ("stale", child.pid))
+                self.assertEqual(state.reason, "the recorded process is not a Paseo supervisor")
+            finally:
+                child.kill()
+                child.wait()
+            self.assertIsNone(read_process(child.pid))
+            self.assertEqual(
+                inspect_record(home, "stop").reason, "the recorded process no longer exists"
+            )
+            fake.record_file.unlink()
+            self.assertEqual(inspect_record(home, "stop").kind, "absent")
+
+        with self.subTest(record_names="a live process this user cannot inspect"):
+            fake.record(foreign, None)
+            before = len(fake.calls)
+            for operation in (runtime_status, stop_runtime, self.provision_report):
+                try:
+                    report = operation(fake.settings, runner=fake, reader=fake.reader)
+                except PaseoRuntimeFailure as failure:
+                    report = {"error": failure.as_payload()}
+                self.assertEqual(report["error"]["code"], "process_record_unverifiable")
+                self.assertIn("999", report["error"]["message"])
+            self.assertEqual((fake.signalled, len(fake.calls)), ([], before))
+            self.assertTrue(fake.record_file.is_file())
 
     def test_status_and_stop_address_only_the_configured_home(self) -> None:
         settings = runtime_settings(self.root)
         fake = FakePaseo(settings)
 
         # Nothing installed and no process record: not running, and nothing else is invoked.
-        absent = runtime_status(settings, runner=fake)
+        absent = runtime_status(settings, runner=fake, reader=fake.reader)
         self.assertEqual(
             absent,
             {
@@ -529,13 +793,23 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "plugin": None,
                 "embed": None,
                 "providers": None,
+                "staleRecord": None,
             },
         )
-        self.assertEqual(stop_runtime(settings, runner=fake)["action"], "not running")
+        self.assertEqual(
+            stop_runtime(settings, runner=fake, reader=fake.reader),
+            {
+                "ok": True,
+                "home": settings.home.as_posix(),
+                "action": "not running",
+                "pid": None,
+                "staleRecord": None,
+            },
+        )
         self.assertEqual(len(fake.calls), 2)
 
         self.assertTrue(self.provision(fake)["ok"])
-        status = runtime_status(settings, runner=fake)
+        status = runtime_status(settings, runner=fake, reader=fake.reader)
         self.assertEqual(
             {key: status[key] for key in ("running", "version", "serverId", "listen")},
             {"running": True, "version": PINNED, "serverId": "srv_fake", "listen": settings.listen},
@@ -553,39 +827,45 @@ class PaseoRuntimeTests(unittest.TestCase):
         # A daemon that does not answer the plugin query is still reported as running.
         fake.plugins_unreachable = True
         self.assertEqual(
-            runtime_status(settings, runner=fake)["plugin"],
+            runtime_status(settings, runner=fake, reader=fake.reader)["plugin"],
             {"id": PLUGIN_ID, "state": "unknown", "error": "Daemon is not running"},
         )
         fake.plugins_unreachable = False
 
-        # An answer that is JSON but not the expected shape is a named failure, not a crash.
+        # An answer that is JSON but not the expected shape is a named failure, not a crash, and
+        # nothing of the answer is echoed: a configuration read can carry provider values.
         for kind, operation in (
             (("daemon", "status"), runtime_status),
             (("daemon", "stop"), stop_runtime),
             (("daemon", "status"), self.provision_report),
+            (("daemon", "config"), self.provision_report),
         ):
             with self.subTest(kind=kind, operation=operation.__name__):
-                fake.answers = {kind: ok([1])}
+                fake.answers = {kind: ok([{"env": {"KEY": OTHER_SECRET}}])}
                 try:
-                    report = operation(settings, runner=fake)
+                    report = operation(settings, runner=fake, reader=fake.reader)
                 except PaseoRuntimeFailure as failure:
                     report = {"error": failure.as_payload()}
                 self.assertEqual(report["error"]["code"], "paseo_invalid_response")
+                self.assertIsNone(report["error"]["detail"])
+                self.assertNotIn(OTHER_SECRET, json.dumps(report))
         fake.answers = {("plugin", "ls"): ok({"id": PLUGIN_ID})}
-        self.assertEqual(runtime_status(settings, runner=fake)["plugin"]["state"], "unknown")
+        self.assertEqual(
+            runtime_status(settings, runner=fake, reader=fake.reader)["plugin"]["state"], "unknown"
+        )
         fake.answers = {}
         self.assertIsNotNone(fake.daemon)
 
         before = len(fake.calls)
-        stopped = stop_runtime(settings, runner=fake)
-        again = stop_runtime(settings, runner=fake)
+        stopped = stop_runtime(settings, runner=fake, reader=fake.reader)
+        again = stop_runtime(settings, runner=fake, reader=fake.reader)
 
         self.assertEqual((stopped["action"], stopped["pid"]), ("stopped", 4242))
         self.assertEqual((again["action"], again["pid"]), ("not running", None))
         # The fake refuses any call that does not name the configured home or that names a host,
         # so a stop can only ever have reached this home's own process record.
         self.assertEqual(fake.kinds(before), [("daemon", "stop"), ("daemon", "stop")])
-        self.assertFalse(runtime_status(settings, runner=fake)["running"])
+        self.assertFalse(runtime_status(settings, runner=fake, reader=fake.reader)["running"])
 
     def test_commands_refuse_without_a_runtime_block_and_drop_paseo_environment(self) -> None:
         settings_path = self.root / "mcp-settings.json"
@@ -608,6 +888,11 @@ class PaseoRuntimeTests(unittest.TestCase):
             settings_path.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
             code, document = command("provision")
             self.assertEqual((code, document["error"]["code"]), (2, "settings_invalid"))
+            # A file that is not UTF-8 text is refused the same way, by all three commands.
+            settings_path.write_bytes(b"\xff\xfe")
+            for name in ("provision", "status", "stop"):
+                code, document = command(name)
+                self.assertEqual((code, document["error"]["code"]), (2, "settings_invalid"))
             run.assert_not_called()
 
         # Through the real command boundary: a prefix that holds nothing is "not running".

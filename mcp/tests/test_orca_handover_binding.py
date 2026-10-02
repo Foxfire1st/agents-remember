@@ -5,6 +5,7 @@ import unittest
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from unittest.mock import patch
 
 from agents_remember.application.orca_task_context import OrcaRoleContext, resolve_orca_role_context
@@ -17,7 +18,13 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_task
 from agents_remember.application.worktree_services import build_default_worktree_services
-from agents_remember.cli import orca_task_preparation
+from agents_remember.cli import (
+    orca_task_preparation,
+    orca_task_receipts,
+    orca_task_routes,
+    paseo_catalog,
+    paseo_launch,
+)
 from agents_remember.cli.orca_runtime import digest
 from agents_remember.cli.orca_task_preparation import (
     ROLE_START_OPERATIONS,
@@ -31,10 +38,12 @@ from agents_remember.cli.orca_task_preparation import (
     role_start_operation,
 )
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.orca_launcher import OrcaSelection
+from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
@@ -526,6 +535,159 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         )
         self.assertTrue(prepared["taskReportPath"].endswith(f"/{request_id}.md"))
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
+
+
+def _bridge_whose_first_creation_gets_no_answer(agents: dict[str, dict[str, Any]]) -> Any:
+    """A stand-in for ``bridge_call``: a catalog, a workspace, and creations after one timeout."""
+
+    answers = [PaseoBridgeFailure("paseo_bridge_timeout", "no answer in time")]
+
+    def bridge(_config: McpRuntimeConfig, command: str, payload: dict[str, Any]) -> Any:
+        if command == "catalog":
+            return {"providers": [{"id": "codex", "label": "Codex", "models": []}]}
+        if command == "workspace-open":
+            return {"serverId": "srv", "workspace": {"id": "wks", "directory": payload["cwd"]}}
+        if answers:
+            raise answers.pop()
+        agents[payload["agentId"]] = payload
+        agent = {"id": payload["agentId"], "provider": "codex", "workspaceId": "wks"}
+        return {"serverId": "srv", "existing": False, "agent": agent}
+
+    return bridge
+
+
+class RepeatAfterDocumentEditTests(unittest.TestCase):
+    """The dispatch route with the real handover compilation and a stand-in for the bridge."""
+
+    def test_a_repeat_runs_the_stored_call_after_the_leaf_document_was_edited(self) -> None:
+        agents: dict[str, dict[str, Any]] = {}
+        bridge = _bridge_whose_first_creation_gets_no_answer(agents)
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict(checkout_coordination._declared, {"mode": "test"}):
+                contract = open_external_contract_fixture(root)
+            repo_id = contract.repo_name
+            leaf_slug = contract.leaf_id.lower().replace("_", "-")
+            documents: dict[Path, dict[str, Any]] = {
+                contract.coordination_root / "tasks" / repo_id / "sprint": {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Repeat sprint",
+                    "kind": "master",
+                    "orchestrates": [contract.task_root.name],
+                },
+                contract.task_root: {
+                    "id": contract.task_id,
+                    "slug": "task",
+                    "title": contract.task_name,
+                    "kind": "master",
+                    "subTasks": [
+                        {
+                            "number": contract.leaf_id,
+                            "name": "Repeat after an edit",
+                            "file": f"{leaf_slug}.md",
+                            "status": "inProgress",
+                        }
+                    ],
+                },
+            }
+            leaf: dict[str, Any] = {
+                "id": contract.leaf_id,
+                "slug": leaf_slug,
+                "title": "Repeat after an edit",
+                "kind": "subTask",
+                "status": "inProgress",
+                "master": "task.md",
+                "enclosures": [
+                    {"leafId": contract.leaf_id, "enclosurePath": contract.contract_path.as_posix()}
+                ],
+            }
+            shared = {"repo": repo_id, "createdAt": "2026-10-02T05:00:00+00:00"}
+            for folder, document in documents.items():
+                write_task_doc(folder, TaskDocument.model_validate({**document, **shared}))
+            write_task_doc(contract.task_root, TaskDocument.model_validate({**leaf, **shared}))
+            settings_path = root / "settings" / "ar.json"
+            settings_path.parent.mkdir(parents=True)
+            settings = {
+                "coordinationRoot": contract.coordination_root.as_posix(),
+                "workspaceRoot": root.as_posix(),
+                "repositories": {repo_id: {}},
+                "paseoRuntime": {
+                    "installPrefix": (root / "paseo" / "prefix").as_posix(),
+                    "home": (root / "paseo" / "home").as_posix(),
+                    "listen": "127.0.0.1:6835",
+                    "version": "0.11.0-beta.2",
+                    "providers": {},
+                    "embed": [],
+                },
+            }
+            settings_path.write_text(json.dumps(settings), encoding="utf-8")
+            request = OrcaDispatchRequest.model_validate(
+                {
+                    "role": "worker",
+                    "requestId": uuid.uuid4(),
+                    "sprintDocumentRef": {"repository": repo_id, "path": "sprint/task.json"},
+                    "masterDocumentRef": {
+                        "repository": repo_id,
+                        "path": f"{contract.task_root.name}/task.json",
+                    },
+                    "taskDocumentRef": {
+                        "repository": repo_id,
+                        "path": f"{contract.task_root.name}/{leaf_slug}.json",
+                    },
+                    "agentOverride": {"agentId": "codex"},
+                }
+            )
+
+            def dispatch() -> tuple[int, dict[str, Any]]:
+                response = orca_task_routes._orca_dispatch_endpoint(config, request)
+                return response.status_code, json.loads(bytes(response.body))
+
+            forget_launcher_catalogs()
+            bind_worktree_services(build_default_worktree_services())
+            try:
+                with (
+                    patch.dict(checkout_coordination._declared, {"mode": "test"}),
+                    patch.object(paseo_catalog, "bridge_call", bridge),
+                    patch.object(paseo_launch, "bridge_call", bridge),
+                ):
+                    config = load_config(settings_path)
+                    first_status, first = dispatch()
+                    receipt_path = orca_task_receipts._receipt_path(config, request)
+                    saved = json.loads(receipt_path.read_text(encoding="utf-8"))
+                    # One ordinary edit of the leaf's task document, as an agent or a person makes.
+                    edited = {**leaf, "title": "Repeat after an edit, with a decision added"}
+                    write_task_doc(
+                        contract.task_root, TaskDocument.model_validate({**edited, **shared})
+                    )
+                    recompiled = prepare_orca_role_handover(
+                        config,
+                        resolve_orca_role_context(config, request),
+                        agent_override=request.agent_override,
+                        request_id=request.request_id,
+                    ).handover
+                    second_status, second = dispatch()
+                    third_status, third = dispatch()
+            finally:
+                reset_worktree_services()
+                forget_launcher_catalogs()
+
+        self.assertEqual((first_status, first["status"], first["canRetry"]), (202, "unknown", True))
+        # The edit changes what a compilation of this request yields ...
+        self.assertNotEqual(recompiled["taskDocumentDigest"], saved["taskDocumentDigest"])
+        self.assertNotEqual(
+            recompiled["messageBindingProjection"]["sha256"],
+            saved["messageBindingProjection"]["sha256"],
+        )
+        # ... and the repeat does not compile: it runs the saved call under the minted agent id.
+        self.assertEqual((second_status, second["status"]), (200, "running"))
+        self.assertEqual(second["execution"]["agentId"], saved["agentId"])
+        self.assertEqual(list(agents), [saved["agentId"]])
+        self.assertEqual(
+            agents[saved["agentId"]]["prompt"], saved["replayRequest"]["agent"]["prompt"]
+        )
+        self.assertEqual((third_status, third), (200, second))
 
 
 class LeafEnclosureSprintBindingTests(unittest.TestCase):

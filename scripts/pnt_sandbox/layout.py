@@ -33,6 +33,9 @@ PROJECT_HARNESS_MARKERS = (
     "AGENTS.md",
     "CLAUDE.md",
 )
+# A harness's own configuration directory. A sandbox inside one would put the sandbox's files
+# into the developer's harness configuration, wherever that directory lies.
+HARNESS_HOME_NAMES = (".claude", ".codex", ".pi", ".hermes", ".dsh")
 
 
 class SandboxRefusal(Exception):
@@ -109,6 +112,16 @@ class SandboxLayout:
         return self.root / "eve" / "eve-acp-launcher.mjs"
 
     @property
+    def dagger_authority(self) -> Path:
+        """The registry the build's quality tools would otherwise keep in the user's home."""
+        return self.root / "dagger-authority"
+
+    @property
+    def lock_file(self) -> Path:
+        """Beside the sandbox directory, so it also guards a build and a reset of it."""
+        return self.root.parent / f"{self.root.name}.lock"
+
+    @property
     def run_dir(self) -> Path:
         return self.root / "run"
 
@@ -149,6 +162,12 @@ def location_refusal(root: Path, home: Path | None = None) -> str | None:
     user_home = (home or Path.home()).resolve(strict=False)
     if resolved in (user_home, Path(resolved.anchor)) or resolved in user_home.parents:
         return f"the sandbox directory must be a directory of its own, not {resolved}"
+    inside = sorted(set(resolved.parts).intersection(HARNESS_HOME_NAMES))
+    if inside:
+        return (
+            f"the sandbox directory {resolved} lies inside a harness configuration directory "
+            f"({', '.join(inside)})"
+        )
     for folder in resolved.parents:
         if folder == user_home:
             continue
@@ -199,6 +218,17 @@ def provider_entries(layout: SandboxLayout, eve_env_file: Path | None) -> dict[s
     return providers
 
 
+def embed_entries(layout: SandboxLayout) -> list[dict[str, str]]:
+    """Both dashboard origins, each framing the sandbox's own Paseo runtime."""
+    return [
+        {
+            "dashboardOrigin": f"http://{host}:{layout.dashboard_port}",
+            "frameBaseUrl": layout.paseo_url,
+        }
+        for host in (LOOPBACK, "localhost")
+    ]
+
+
 def settings_document(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
     """The settings of the sandbox's dashboard, tool server and Paseo runtime."""
     return {
@@ -219,12 +249,6 @@ def settings_document(layout: SandboxLayout, eve_env_file: Path | None) -> dict[
             "listen": layout.paseo_listen,
             "version": PASEO_VERSION,
             "providers": provider_entries(layout, eve_env_file),
-            "embed": [
-                {
-                    "dashboardOrigin": f"http://{host}:{layout.dashboard_port}",
-                    "frameBaseUrl": layout.paseo_url,
-                }
-                for host in (LOOPBACK, "localhost")
-            ],
+            "embed": embed_entries(layout),
         },
     }

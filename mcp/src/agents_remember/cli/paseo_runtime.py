@@ -67,6 +67,10 @@ def run(args: argparse.Namespace) -> int:
         return _refuse("settings_invalid", str(error))
     except OSError as error:
         return _refuse("settings_unreadable", f"cannot read {args.config}: {error}")
+    except (ValueError, RecursionError) as error:
+        # Not UTF-8, or nested beyond what the JSON reader takes: the file is not usable settings.
+        problem = f"{type(error).__name__}: {error}"
+        return _refuse("settings_invalid", f"cannot parse {args.config}: {problem}")
     _help_text, operation = _COMMANDS[args.paseo_command]
     try:
         report = operation(settings)

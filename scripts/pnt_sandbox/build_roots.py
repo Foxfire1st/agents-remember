@@ -1,27 +1,63 @@
 #!/usr/bin/env python3
 """Resolve every root a PNT build would use for one settings file, with the build's own code.
 
-Run with the build's own interpreter (``<checkout>/mcp/.venv/bin/python``). The settings file is
-loaded through the build's configuration loader after declaring the process the way the
-dashboard and the tool server declare themselves, and derived roots come from the build's own
-functions, so a root the build fills in by default is reported exactly as the build would use it.
+Run with the build's own interpreter (``<checkout>/mcp/.venv/bin/python``) and the environment
+the sandbox gives its processes. The settings file is loaded through the build's configuration
+loader after declaring the process the way the dashboard and the tool server declare themselves.
+Every path the loaded configuration holds is reported, whatever key it sits under, and derived
+roots come from the build's own functions, so a root the build fills in by default is reported
+exactly as the build would use it.
 
-Prints one JSON document: ``{"packageRoot", "roots": {key: path or null}, "values": {...},
-"errors": {key: message}}``. A root that could not be resolved is ``null`` and carries its error;
-the caller treats that as a failure (fail closed).
+Prints one JSON document: ``{"packageRoot", "roots": {key: path or null}, "expected": [key],
+"values": {...}, "errors": {key: message}}``. ``expected`` names every root this script must
+have reported for the configuration it loaded. A root that could not be resolved is ``null`` and
+carries its error; the caller treats that, and a missing expected key, as a failure (fail closed).
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 MODES = ("dashboard", "mcp")
+# Fields of the loaded configuration that must hold a path.
+CONFIGURATION_ROOTS = (
+    "configPath",
+    "coordinationRoot",
+    "workspaceRoot",
+    "transcriptRoot",
+    "harnessSkillRoot",
+    "paseoRuntime.home",
+    "paseoRuntime.installPrefix",
+)
+# Roots the build derives; each has one resolver below.
+DERIVED_ROOTS = (
+    "agenticSettings",
+    "observerRoot",
+    "dashboardDaemonDir",
+    "receipts.taskless",
+    "receipts.messageBindings",
+    "reports.taskless",
+    "daggerAuthorityRoot",
+)
+REPOSITORY_ROOTS = (
+    "path",
+    "memoryRoot",
+    "taskRoot (receipts and reports of task-bound roles)",
+    "leafEnclosures",
+    "resolver.code_repository_root",
+    "resolver.memory_root",
+    "resolver.onboarding_root",
+    "resolver.task_root",
+    "resolver.temp_root",
+)
+PROVIDER_ROOTS = ("runtimeRoot", "logRoot")
 
 
 class _Roots:
@@ -34,15 +70,49 @@ class _Roots:
     def add(self, key: str, resolve: Callable[[], Path | None]) -> None:
         try:
             path = resolve()
+            if path is None:
+                raise LookupError("the build resolves no path for this root")
         except Exception as error:  # every failure is one unresolved root, by name
             self.roots[key] = None
             self.errors[key] = f"{type(error).__name__}: {error}"
             return
-        if path is None:
-            self.roots[key] = None
-            self.errors[key] = "the build resolves no path for this root"
-            return
         self.roots[key] = Path(path).resolve(strict=False).as_posix()
+
+
+def _settings_name(field: str) -> str:
+    """A configuration field under the spelling of its settings key."""
+    head, *rest = field.split("_")
+    return head + "".join(part.capitalize() for part in rest)
+
+
+def _configuration_paths(value: Any, key: str) -> Iterator[tuple[str, Path]]:
+    """Every absolute path the loaded configuration holds, with the key it sits under.
+
+    A path that is relative names a file inside a repository, not a root.
+    """
+    if isinstance(value, Path):
+        if value.is_absolute():
+            yield key, value
+    elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for field in dataclasses.fields(value):
+            name = _settings_name(field.name)
+            yield from _configuration_paths(getattr(value, field.name), f"{key}.{name}".strip("."))
+    elif isinstance(value, Mapping):
+        for name, item in value.items():
+            yield from _configuration_paths(item, f"{key}.{name}".strip("."))
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for index, item in enumerate(value):
+            yield from _configuration_paths(item, f"{key}[{index}]")
+
+
+def expected_roots(repositories: list[str], providers: list[str]) -> list[str]:
+    """The keys a complete resolution reports for this configuration."""
+    keys = [*CONFIGURATION_ROOTS, *DERIVED_ROOTS]
+    for repo_id in repositories:
+        keys.extend(f"repositories.{repo_id}.{name}" for name in REPOSITORY_ROOTS)
+    for provider_id in providers:
+        keys.extend(f"providers.{provider_id}.{name}" for name in PROVIDER_ROOTS)
+    return keys
 
 
 def resolve_roots(config_path: str) -> dict[str, Any]:
@@ -58,49 +128,66 @@ def resolve_roots(config_path: str) -> dict[str, Any]:
     report: dict[str, Any] = {
         "packageRoot": Path(agents_remember.__file__).resolve().parent.as_posix(),
         "roots": found.roots,
+        "expected": list(CONFIGURATION_ROOTS),
         "values": {},
         "errors": found.errors,
     }
     try:
         config = load_config(config_path)
     except Exception as error:
-        found.roots["settings"] = None
-        found.errors["settings"] = f"{type(error).__name__}: {error}"
+        found.roots["configPath"] = None
+        found.errors["configPath"] = f"{type(error).__name__}: {error}"
         return report
 
-    found.add("settings", lambda: config.config_path)
-    found.add("coordinationRoot", lambda: config.coordination_root)
-    found.add("workspaceRoot (Projects folder)", lambda: config.workspace_root)
-    found.add("transcriptRoot", lambda: config.transcript_root)
-    found.add("harnessSkillRoot", lambda: config.harness_skill_root)
+    for key, path in _configuration_paths(config, ""):
+        found.add(key, lambda path=path: path)
     _coordination_roots(found, config)
     _launch_roots(found, config)
-    for repo_id, repository in sorted(config.repositories.items()):
-        _repository_roots(found, config, repo_id, repository)
-    for provider_id, provider in sorted(config.providers.items()):
-        found.add(f"providers.{provider_id}.runtimeRoot", lambda p=provider: p.runtime_root)
-        found.add(f"providers.{provider_id}.logRoot", lambda p=provider: p.log_root)
+    for repo_id in sorted(config.repositories):
+        _repository_roots(found, config, repo_id)
     paseo = config.paseo_runtime
-    found.add("paseoRuntime.home", lambda: paseo.home if paseo else None)
-    found.add("paseoRuntime.installPrefix", lambda: paseo.install_prefix if paseo else None)
+    report["expected"] = expected_roots(sorted(config.repositories), sorted(config.providers))
     report["values"] = {
         "dashboard.port": config.dashboard.port,
         "dashboard.autoStart": config.dashboard.auto_start,
         "paseoRuntime.listen": paseo.listen if paseo else None,
         "paseoRuntime.version": paseo.version if paseo else None,
+        "paseoRuntime.embed": paseo.embed_payload() if paseo else None,
         "repositories": sorted(config.repositories),
     }
     return report
 
 
 def _coordination_roots(found: _Roots, config: Any) -> None:
-    from agents_remember.kernel.agentic_settings import agentic_settings_path  # noqa: PLC0415
-    from agents_remember.observer import observer_root  # noqa: PLC0415
-    from agents_remember.serving.daemon import daemon_dir  # noqa: PLC0415
+    def dagger_authority() -> Path:
+        from agents_remember.worktrees.modules.quality.dagger_authority import (  # noqa: PLC0415
+            default_registry_root,
+        )
 
-    found.add("agenticSettings", lambda: agentic_settings_path(config.coordination_root))
-    found.add("observerRoot", lambda: observer_root(config))
-    found.add("dashboardDaemonDir", lambda: daemon_dir(config))
+        # Read from this process's environment, which is the one the sandbox's processes get.
+        return default_registry_root()
+
+    def agentic_settings() -> Path:
+        from agents_remember.kernel.agentic_settings import (  # noqa: PLC0415
+            agentic_settings_path,
+        )
+
+        return agentic_settings_path(config.coordination_root)
+
+    def observer() -> Path:
+        from agents_remember.observer import observer_root  # noqa: PLC0415
+
+        return observer_root(config)
+
+    def dashboard_daemon() -> Path:
+        from agents_remember.serving.daemon import daemon_dir  # noqa: PLC0415
+
+        return daemon_dir(config)
+
+    found.add("agenticSettings", agentic_settings)
+    found.add("observerRoot", observer)
+    found.add("dashboardDaemonDir", dashboard_daemon)
+    found.add("daggerAuthorityRoot", dagger_authority)
 
 
 def _launch_roots(found: _Roots, config: Any) -> None:
@@ -127,15 +214,14 @@ def _launch_roots(found: _Roots, config: Any) -> None:
     found.add("reports.taskless", lambda: config.workspace_root / ".agents-remember" / "reports")
 
 
-def _repository_roots(found: _Roots, config: Any, repo_id: str, repository: Any) -> None:
-    """One repository's code, memory, task and enclosure roots.
+def _repository_roots(found: _Roots, config: Any, repo_id: str) -> None:
+    """One repository's task and enclosure roots and what the build's resolver answers for it.
 
-    Receipts and reports of task-bound roles are written below the selected task document's own
-    folder (``notes/reports``), so the task root covers them.
+    Its code and memory roots are fields of the configuration and are reported with it. Receipts
+    and reports of task-bound roles are written below the selected task document's own folder
+    (``notes/reports``), so the task root covers them.
     """
     prefix = f"repositories.{repo_id}"
-    found.add(f"{prefix}.path", lambda: repository.path)
-    found.add(f"{prefix}.memoryRoot", lambda: repository.memory_root)
 
     def task_root() -> Path:
         from agents_remember.worktrees.task_resolver import task_root_for  # noqa: PLC0415

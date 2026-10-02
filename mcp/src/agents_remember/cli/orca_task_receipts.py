@@ -591,5 +591,35 @@ def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
     path.replace(history)
 
 
+def _archived_receipt_agent_id(path: Path, selection: OrcaSelection) -> str | None:
+    """The agent to archive when a task-bound selection has no receipt but an archived one.
+
+    The newest receipt in the history that belongs to this selection names it, as
+    :func:`_replaced_agent_id` reads it. Archiving an agent a second time is harmless. Taskless
+    roles keep one receipt per request and archive none.
+    """
+
+    if selection.role in TASKLESS_ROLES:
+        return None
+    expected = selection_binding(selection)
+    archived: list[dict[str, Any]] = []
+    for candidate in (path.parent / "history").glob("*.json"):
+        try:
+            receipt = _read_receipt(candidate)
+        except HTTPException:
+            continue  # an unreadable archived receipt names no agent and blocks no launch
+        if receipt and receipt.get("selection") == expected:
+            archived.append(receipt)
+    if not archived:
+        return None
+    return _replaced_agent_id(max(archived, key=lambda row: str(row.get("createdAt", ""))))
+
+
+def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uuid.UUID) -> None:
+    """Remove the binding file of a request that was refused after the file was written."""
+
+    _message_binding_projection_path(config, request_id).unlink(missing_ok=True)
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
