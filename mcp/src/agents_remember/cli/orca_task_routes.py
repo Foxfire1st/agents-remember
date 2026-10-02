@@ -51,7 +51,9 @@ from agents_remember.cli.orca_task_preparation import (
     prepare_orca_role_handover,
 )
 from agents_remember.cli.orca_task_receipts import (
+    _archived_receipt_agent_id,
     _create_receipt,
+    _discard_message_binding_projection,
     _execute_prepared_launch,
     _migrate_taskless_legacy_receipt,
     _now_iso,
@@ -286,16 +288,24 @@ def _reserve_message_binding_projection(
     binding, reference = _prepared_message_binding_projection(prepared, request.request_id)
     current = _read_receipt(path)
     _verify_prior_message_binding_projection(config, current, request, binding, reference)
-    replaces_agent_id = (
-        _replaced_agent_id(current)
-        if current and current.get("requestId") != str(request.request_id)
-        else None
-    )
+    if current is None:
+        # A closed receipt may already be in the history (a launch that ended, or lost, between
+        # archiving it and creating its own); its agent is archived by this launch.
+        replaces_agent_id = _archived_receipt_agent_id(path, request)
+    elif current.get("requestId") != str(request.request_id):
+        replaces_agent_id = _replaced_agent_id(current)
+    else:
+        replaces_agent_id = None
     prior = _reconcile_prior_execution(config, path, request, request_digest)
     if prior is not None:
         return reference, None, prior
     _write_message_binding_projection(config, request.request_id, binding, reference)
     return reference, replaces_agent_id, None
+
+
+def _receipt_carries_request(path: Path, request: OrcaDispatchRequest) -> bool:
+    current = _read_receipt(path)
+    return current is not None and current.get("requestId") == str(request.request_id)
 
 
 def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
@@ -307,7 +317,10 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     path = _receipt_path(
         config, request, request.request_id if request.role in TASKLESS_ROLES else None
     )
-    if request.role in TASKLESS_ROLES:
+    # A request that already has its receipt is answered from that receipt: the stored call or
+    # the saved execution. It is not compiled again, so a task document or capsule that changed
+    # since the launch cannot turn its repeat into a conflict.
+    if _receipt_carries_request(path, request):
         prior = _reconcile_prior_execution(config, path, request, request_digest)
         if prior is not None:
             return prior
@@ -432,11 +445,17 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     }
     if not _create_receipt(start.receipt_path, receipt):
         # Another process created a receipt at this address since it was last read here.
-        prior = _reconcile_prior_execution(
-            start.config, start.receipt_path, request, start.request_digest
-        )
+        try:
+            prior = _reconcile_prior_execution(
+                start.config, start.receipt_path, request, start.request_digest
+            )
+        except HTTPException:
+            _discard_message_binding_projection(start.config, request.request_id)
+            raise
         if prior is not None:
             return prior
+        # No execution carries this request id, so its message-binding file goes with it.
+        _discard_message_binding_projection(start.config, request.request_id)
         raise HTTPException(
             status_code=409,
             detail="Another launch of this AR role selection started at the same moment; refresh and start again.",

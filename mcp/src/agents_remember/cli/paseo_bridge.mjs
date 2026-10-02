@@ -353,7 +353,18 @@ async function archiveAgent({ api, daemon }, input) {
   if (nonEmpty(agent.archivedAt)) {
     return { ...archived, alreadyArchived: true, archivedAt: agent.archivedAt }
   }
-  const result = await api.agents.ref(agentId).archive()
+  let result
+  try {
+    result = await api.agents.ref(agentId).archive()
+  } catch (error) {
+    // Another caller may have archived or removed the agent between the lookup and this call.
+    // What the runtime holds now decides: archived or gone is not an error; anything else is.
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    const after = await findAgent(api, daemon, agentId)
+    if (!after) return { serverId, agentId, found: false, archived: false }
+    if (!nonEmpty(after.archivedAt)) throw error
+    return { ...archived, alreadyArchived: true, archivedAt: after.archivedAt }
+  }
   return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }
 }
 

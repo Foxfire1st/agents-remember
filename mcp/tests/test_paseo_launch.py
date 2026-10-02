@@ -31,7 +31,7 @@ from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import agent_title
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
@@ -219,6 +219,11 @@ def runtime_config(root: Path, *, configured: bool = True) -> McpRuntimeConfig:
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
         paseo_runtime=settings if configured else None,
+        repositories={
+            REPO: RepositoryScope(
+                repo_id=REPO, path=root / "projects" / REPO, memory_root=root / "memory" / REPO
+            )
+        },
     )
 
 
@@ -609,17 +614,16 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
 
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
-        def run(argv: list[str], **kwargs: Any) -> Any:
-            calls.append((argv, kwargs))
+        def run(argv: list[str], request: dict[str, Any]) -> Any:
+            calls.append((argv, request))
             if isinstance(outcome, BaseException):
                 raise outcome
             if outcome is not None:
                 return outcome
             self.enclosures.start(None, "started by the child process")
-            return SimpleNamespace(returncode=0, stdout='{"ok": true}\n')
+            return SimpleNamespace(returncode=0, stdout=b'{"ok": true}\n', stderr=b"")
 
-        fake = SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired)
-        self.replace(leaf_enclosure_start, "subprocess", fake)
+        self.replace(leaf_enclosure_start, "_run_child", run)
         return calls
 
     def test_only_the_dashboard_process_starts_the_enclosure_in_a_child_process(self) -> None:
@@ -633,7 +637,7 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
             status, public = self.dispatch(request)
 
             self.assertEqual((status, public["status"]), (200, "running"))
-            ((argv, options),) = calls
+            ((argv, sent),) = calls
             self.assertEqual(
                 argv,
                 [
@@ -648,20 +652,20 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
             worktree_name = (
                 f"{slugify('01_leaf')}-{hashlib.sha256(LEAF_REF.key.encode()).hexdigest()[:10]}"
             )
+            # The identity of the start, and the roots this backend holds for the child to check.
             self.assertEqual(
-                json.loads(options["input"]),
+                sent,
                 {
                     "repoId": REPO,
                     "taskName": "master",
                     "worktreeName": worktree_name,
                     "leafId": "01_LEAF",
                     "parentTask": "sprint",
+                    "coordinationRoot": self.config.coordination_root.as_posix(),
+                    "codeRoot": (self.root / "projects" / REPO).as_posix(),
+                    "memoryRoot": (self.root / "memory" / REPO).as_posix(),
                 },
             )
-            self.assertEqual(options["timeout"], 120)
-            # The child gets the backend's own environment and no roots: only the settings file.
-            self.assertNotIn("env", options)
-            self.assertNotIn("cwd", options)
             # The worktree owner was not called in this process.
             self.assertEqual(self.enclosures.start_calls, ["started by the child process"])
             self.assertEqual(
@@ -698,22 +702,35 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
                     "message": "Atomic-series admission refused: the base branch is missing.",
                 },
             }
-        )
+        ).encode()
+
+        def ended(status: int, output: bytes, errors: bytes = b"") -> SimpleNamespace:
+            return SimpleNamespace(returncode=status, stdout=output, stderr=errors)
+
         outcomes: dict[str, tuple[Any, tuple[str, ...]]] = {
             "the child refuses": (
-                SimpleNamespace(returncode=1, stdout=refusal),
+                ended(1, refusal),
                 ("atomic-series-admission-failed", "the base branch is missing."),
             ),
-            "the child does not end in time": (
-                subprocess.TimeoutExpired("python", 120),
-                ("leaf_enclosure_start_timeout", "did not end within 120 seconds"),
+            "the child is cut off at the limit": (
+                subprocess.TimeoutExpired("python", 120, stderr=b"git fetch: still receiving"),
+                (
+                    "leaf_enclosure_start_timeout",
+                    "was cut off after 120 seconds",
+                    "may have left partial state, which a later Start completes",
+                    "The child process said: git fetch: still receiving",
+                ),
             ),
-            "the child ends without a reply": (
-                SimpleNamespace(returncode=1, stdout="Traceback (most recent call last):"),
-                ("leaf_enclosure_start_unreadable", "status 1"),
+            "the child ends without a reply, and its last error output is kept": (
+                ended(1, b"", b"Traceback (most recent call last):\nMemoryError"),
+                ("leaf_enclosure_start_unreadable", "status 1", "said: Traceback", "MemoryError"),
+            ),
+            "the child's output is not UTF-8": (
+                ended(1, b"\xff\xfe{", b"caf\xe9"),
+                ("leaf_enclosure_start_unreadable", "status 1", "The child process said: caf"),
             ),
             "the child says ok but failed": (
-                SimpleNamespace(returncode=3, stdout='{"ok": true}'),
+                ended(3, b'{"ok": true}'),
                 ("leaf_enclosure_start_unreadable", "status 3"),
             ),
             "the child cannot be started": (
@@ -728,6 +745,7 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
                 self.assertEqual(error.status_code, 409)
                 for reason in reasons:
                     self.assertIn(reason, str(error.detail))
+                self.assertLessEqual(len(str(error.detail)), 800)
                 self.assertEqual(len(calls), 1)
         self.assertEqual(self.enclosures.start_calls, [])
         self.assertEqual(self.runtime.launch_calls(), [])
