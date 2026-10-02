@@ -120,7 +120,8 @@
 //            -> {serverId, wait: {state: 'running', turnId: string | null}
 //                              | {state: 'permission', permission: string}
 //                              | {state: 'ended', outcome: 'finished' | 'failed' | 'cancelled',
-//                                 text: string | null, textTruncated: boolean, error?: string}
+//                                 text: string | null, textTruncated: boolean, error?: string,
+//                                 laterTurn?: boolean}
 //                              | {state: 'undecided', reason: string}
 //                              | {state: 'unavailable', reason: 'not-found' | 'archived' | 'closed'}}
 //            Waits, for at most `waitMs` and never past this call's own deadline, until the turn
@@ -143,7 +144,9 @@
 //            the runtime's own event of that turn's end when this call saw it; otherwise
 //            `failed` when the agent is in an error state, `finished` when the turn closed with
 //            text of the agent, and `cancelled` when it did not. `text` is that turn's text
-//            behind its last message or tool call (at most 20,000 characters).
+//            behind its last message or tool call (at most 20,000 characters). For a `steered`
+//            message `laterTurn` says which turn that is: true for a turn that began after the
+//            one that was running, false for the running turn itself.
 //            `undecided` means that the message is not among the timeline entries read, so no
 //            text can be said to answer it. Nothing is sent, resumed or un-archived.
 //
@@ -707,7 +710,7 @@ function consumedBy(seen, steered, followed) {
   if (!steered) return { turn: own ?? latest, read: true }
   const after = latest !== null && latest !== own ? latest : followed
   const later = own !== null && after !== null && after !== own
-  return { turn: later ? after : latest, read: later || seen.stepBehind }
+  return { turn: later ? after : latest, later, read: later || seen.stepBehind }
 }
 
 // The answer of a wait once the turn that consumed the message is over: the text that turn left
@@ -719,8 +722,9 @@ function waitEnded(seen, ends, agent, steered, followed) {
       reason: `the message is not among the last ${REPLY_TAIL} timeline entries of the agent`
     }
   }
-  const { turn } = consumedBy(seen, steered, followed)
-  const reply = seen.closing(turn)
+  const { turn, later } = consumedBy(seen, steered, followed)
+  // For a message handed to a running turn the answer says which turn it is about.
+  const reply = { ...seen.closing(turn), ...(steered ? { laterTurn: later === true } : {}) }
   const event = turn === null ? ends.last : ends.byTurn.get(turn)
   if (event) return { state: 'ended', ...event, ...reply }
   // The agent's state now is that of its last turn; it says nothing of an earlier one.

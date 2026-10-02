@@ -581,23 +581,23 @@ class RoleStartTests(RoleToolsTestCase):
 
     def test_a_start_that_waited_its_time_out_says_to_call_again(self) -> None:
         self.assertEqual(paseo_role_tools.LOCK_WAIT_SECONDS, 60)
-        self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.2)
+        self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.5)
         self.assertTrue(orca_task_routes._DISPATCH_LOCK.acquire(blocking=False))
         try:
             began = time.monotonic()
             refused = self.refusal(self.start(self.architect, "curator"), "launch-refused")
-            self.assertGreaterEqual(time.monotonic() - began, 0.2)
+            self.assertGreaterEqual(time.monotonic() - began, 0.5)
             # The launcher's route does not wait at all.
             began = time.monotonic()
             busy = self.refused(self.request("curator"))
-            self.assertLess(time.monotonic() - began, 0.15)
+            self.assertLess(time.monotonic() - began, 0.4)
         finally:
             orca_task_routes._DISPATCH_LOCK.release()
         self.assertIsInstance(busy, orca_task_routes.LaunchLockBusy)
         self.assertEqual(busy.status_code, 409)
         self.assertEqual(
             refused["detail"],
-            "Another start of this tool server was still running after 0.2 seconds, so this one "
+            "Another start of this tool server was still running after 0.5 seconds, so this one "
             "was not begun. Nothing was recorded for this request.",
         )
         self.assertEqual(

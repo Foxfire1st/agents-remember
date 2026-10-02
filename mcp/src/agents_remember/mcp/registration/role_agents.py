@@ -109,7 +109,8 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         recipient waits for a permission decision; or timeout after timeout_seconds (default
         300, at most 1800), with the message still delivered and the reply to be read later.
         When the host cannot say which turn consumed the message, the call returns accepted
-        without a text and detail says that the reply must be read later.
+        without a text and detail says that the reply must be read later. A reply to a message
+        delivered during a turn can be the running turn's text; detail says so then.
         Refusals: recipient-busy, recipient-not-found, recipient-archived, recipient-ambiguous,
         recipient-cannot-be-resumed, scope-check-failed, caller-has-no-binding,
         no-paseo-runtime-configured, host-unreachable. A finished turn is a fact about the

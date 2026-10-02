@@ -504,8 +504,11 @@ class RoleMessageTests(RoleToolsTestCase):
         self.assertIn(
             "Bash", self.message_with([outcomes["permission-pending"][0]], worker)["detail"]
         )
-        self.assertIn(
-            "not AR acceptance", self.message_with([outcomes["turn-finished"][0]], worker)["detail"]
+        # The message began the recipient's turn: the text is that turn's, with no reservation.
+        self.assertEqual(
+            self.message_with([outcomes["turn-finished"][0]], worker)["detail"],
+            "The recipient's turn finished; text is its final text. A finished turn is not AR "
+            "acceptance of any requirement.",
         )
         with self.subTest("the recipient became unavailable during the wait"):
             result = self.message_with([{"state": "unavailable", "reason": "archived"}], worker)
@@ -514,7 +517,13 @@ class RoleMessageTests(RoleToolsTestCase):
 
     def test_a_wait_follows_the_message_into_the_turn_that_consumes_it(self) -> None:
         _request, worker = self.started(status="running")
-        done = {"state": "ended", "outcome": "finished", "text": "DONE-C", "textTruncated": False}
+        done = {
+            "state": "ended",
+            "outcome": "finished",
+            "text": "DONE-C",
+            "textTruncated": False,
+            "laterTurn": True,
+        }
         # The turn that was running ends and the recipient runs the message in the next one; an
         # answer that names no turn keeps the one named before.
         self.waits = [
@@ -535,6 +544,31 @@ class RoleMessageTests(RoleToolsTestCase):
             [(wait["turnId"], wait["steered"], wait["messageId"]) for wait in self.waited()],
             [(turn, True, message_id) for turn in (TURN, TURN, "turn-8", "turn-8")],
         )
+        # The wait followed a later turn: the text is that turn's, with no reservation.
+        self.assertEqual(
+            result["detail"],
+            "The recipient's turn finished; text is its final text. A finished turn is not AR "
+            "acceptance of any requirement.",
+        )
+        with self.subTest("the text is the running turn's: the result says what it rests on"):
+            running = {**done, "text": "The plan.", "laterTurn": False}
+            result = self.message_with([running], worker, status="running")
+            self.assertEqual(
+                (result["ok"], result["status"], result["taken"], result["text"]),
+                (True, "turn-finished", "steered", "The plan."),
+            )
+            self.assertEqual(
+                result["detail"],
+                "The recipient's turn finished; text is its final text. The recipient was "
+                "mid-turn when the message arrived, and this is the text of that turn: if it does "
+                "not answer the message, the reply comes in the recipient's next turn and must be "
+                "read later. A finished turn is not AR acceptance of any requirement.",
+            )
+            # A turn that failed or was cancelled returned no text to qualify.
+            failed = {**running, "outcome": "failed", "text": None, "error": "usage limit"}
+            result = self.message_with([failed], worker, status="running")
+            self.assertEqual(result["status"], "turn-failed")
+            self.assertNotIn("mid-turn", result["detail"])
         with self.subTest("the turn that consumed the message cannot be told: no text"):
             undecided = {"state": "undecided", "reason": "no turn followed"}
             for waits in ([undecided], [{"state": "running", "turnId": "turn-8"}, undecided]):

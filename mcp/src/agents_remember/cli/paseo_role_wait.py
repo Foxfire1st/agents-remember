@@ -42,6 +42,14 @@ READ_LATER = (
 )
 
 
+# What a text rests on when it is the text of the turn that was running as the message arrived.
+RUNNING_TURN_NOTE = (
+    "The recipient was mid-turn when the message arrived, and this is the text of that turn: if "
+    "it does not answer the message, the reply comes in the recipient's next turn and must be "
+    "read later. "
+)
+
+
 def wait_for_turn(
     config: McpRuntimeConfig, sent: SentMessage, timeout_seconds: int
 ) -> dict[str, Any]:
@@ -101,11 +109,15 @@ def wait_for_turn(
             }
         if not isinstance(answer, dict) or state not in {"permission", "ended", "unavailable"}:
             return later("The wait ended early because the host's answer could not be read.")
-        return {**_turn_result(answer), "waitedSeconds": waited()}
+        return {**_turn_result(answer, sent.steered), "waitedSeconds": waited()}
 
 
-def _turn_result(answer: dict[str, Any]) -> dict[str, Any]:
-    """The result of a wait that ended: the turn's outcome, or the pending permission."""
+def _turn_result(answer: dict[str, Any], steered: bool) -> dict[str, Any]:
+    """The result of a wait that ended: the turn's outcome, or the pending permission.
+
+    A finished turn that was already running when the message arrived (``steered``, and no later
+    turn was followed) may not have read the message: the detail says what the text rests on.
+    """
 
     state = answer["state"]
     if state == "permission":
@@ -129,10 +141,12 @@ def _turn_result(answer: dict[str, Any]) -> dict[str, Any]:
     }
     outcome = answer.get("outcome")
     if outcome == "finished":
+        running_turn = steered and answer.get("laterTurn") is not True
         return {
             "status": "turn-finished",
-            "detail": "The recipient's turn finished; text is its final text. A finished turn "
-            "is not AR acceptance of any requirement.",
+            "detail": "The recipient's turn finished; text is its final text. "
+            f"{RUNNING_TURN_NOTE if running_turn else ''}"
+            "A finished turn is not AR acceptance of any requirement.",
             **reply,
         }
     if outcome == "failed":

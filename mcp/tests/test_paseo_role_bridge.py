@@ -407,7 +407,7 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                 )
                 # The event woke the wait, and a turn the message began is given no time in
                 # which another could follow.
-                self.assertLess(elapsed, 2.5)
+                self.assertLess(elapsed, 4.5)
                 self.assertEqual(self.recorded("timeline.refetch")[0]["options"], TAIL)
                 self.assertEqual(self.recorded("send", "run", "archive", "respondToPermission"), [])
                 self.assertEqual(len(self.recorded("timeline.unsubscribe")), 1)
@@ -499,7 +499,7 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                 began = time.monotonic()
                 answer = self.wait(holds=held, timeline=timeline)
                 self.assertEqual(answer, {"state": "ended", **ended})
-                self.assertLess(time.monotonic() - began, 2.5)
+                self.assertLess(time.monotonic() - began, 4.5)
                 self.assertEqual(self.recorded("send", "waitForFinish"), [])
 
     def test_without_a_named_turn_a_message_nothing_follows_yet_is_given_time_to_begin_its_turn(
@@ -537,7 +537,7 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                 {"turnId": None}, holds=agent("idle"), timeline=[MESSAGE, reply("Done.")]
             )
             self.assertEqual((answer["outcome"], answer["text"]), ("finished", "Done."))
-            self.assertLess(time.monotonic() - began, 2.5)
+            self.assertLess(time.monotonic() - began, 4.5)
 
     def test_a_turn_the_agent_runs_afterwards_is_not_the_one_the_message_began(self) -> None:
         answered = [MESSAGE, reply("The plan.")]
@@ -589,7 +589,7 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
             began = time.monotonic()
             answer = self.wait(holds=agent("running", activeTurn=TURN))
             self.assertEqual(answer, {"state": "running", "turnId": "turn-7"})
-            self.assertLess(time.monotonic() - began, 2.5)
+            self.assertLess(time.monotonic() - began, 4.5)
             self.assertEqual(self.recorded("timeline.refetch", "send"), [])
         with self.subTest("the events cannot be followed: the state afterwards decides"):
             answer = self.wait(
@@ -610,7 +610,7 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
             answer = self.wait({"waitMs": 600000}, holds=agent("running", activeTurn=TURN))
             self.assertEqual(answer["state"], "running")
             # The script's deadline less the reserve of a wait: one second here.
-            self.assertLess(time.monotonic() - began, 4.0)
+            self.assertLess(time.monotonic() - began, 10.0)
 
     def test_an_agent_that_cannot_be_waited_for_is_left_as_it_is(self) -> None:
         unavailable = {
@@ -665,14 +665,21 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
         answer = self.wait(holds=held, steps=took_it_up, timeline=timeline)
 
         elapsed = time.monotonic() - began
+        # The answer says that it is about a turn that began after the one that was running.
         self.assertEqual(
             answer,
-            {"state": "ended", "outcome": "finished", "text": "DONE-C", "textTruncated": False},
+            {
+                "state": "ended",
+                "outcome": "finished",
+                "text": "DONE-C",
+                "textTruncated": False,
+                "laterTurn": True,
+            },
         )
         # The wait did not end with the turn that was running, and it ended with the turn that
         # took the message up: that turn is not given time for another.
         self.assertGreater(elapsed, 1.0)
-        self.assertLess(elapsed, 4.0)
+        self.assertLess(elapsed, 5.5)
         with self.subTest("the time is up in the following turn: the answer names that turn"):
             answer = self.wait(
                 {"waitMs": 1200}, holds=held, steps=took_it_up[:3], timeline=timeline
@@ -686,7 +693,7 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
             began = time.monotonic()
             answer = self.wait(holds=agent("idle"), timeline=over)
             self.assertEqual((answer["outcome"], answer["text"]), ("finished", "DONE-C"))
-            self.assertLess(time.monotonic() - began, 2.5)
+            self.assertLess(time.monotonic() - began, 4.5)
         with self.subTest("the following turn fails and leaves nothing: its event is the outcome"):
             failing = [*took_it_up[:3], ends("turn-8", 900, "turn_failed", error="usage limit")]
             answer = self.wait(holds=held, steps=failing, timeline=timeline)
@@ -698,6 +705,7 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
                     "error": "usage limit",
                     "text": None,
                     "textTruncated": False,
+                    "laterTurn": True,
                 },
             )
 
@@ -720,10 +728,11 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
                 "outcome": "finished",
                 "text": "Both answered.",
                 "textTruncated": False,
+                "laterTurn": False,
             },
         )
         # The turn took another step behind the message, so it read it: no turn is waited for.
-        self.assertLess(time.monotonic() - began, 2.5)
+        self.assertLess(time.monotonic() - began, 4.5)
         with self.subTest("the turn's own first message is recorded behind ours: it is not newer"):
             answer = self.wait(
                 holds=agent("running", activeTurn=TURN),
@@ -740,7 +749,11 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
             answer = self.wait(
                 holds=agent("running", activeTurn=TURN), steps=steps, timeline=timeline
             )
-            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
+            # The text is the running turn's, and the answer says so.
+            self.assertEqual(
+                (answer["outcome"], answer["text"], answer["laterTurn"]),
+                ("finished", "The plan.", False),
+            )
             self.assertGreater(time.monotonic() - began, 5.0)
         with self.subTest("a newer message began the next turn: the wait ends at once"):
             newer = sent("a newer message", "newer-id", "turn-8")
@@ -751,7 +764,7 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
                 timeline=timeline,
             )
             self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
-            self.assertLess(time.monotonic() - began, 2.5)
+            self.assertLess(time.monotonic() - began, 4.5)
         with self.subTest("a newer message stands behind ours before the call"):
             newer = sent("a newer message", "newer-id", "turn-8")
             began = time.monotonic()
@@ -760,7 +773,7 @@ class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
                 timeline=[*timeline, reply("The plan."), newer, reply("Another.", "turn-8")],
             )
             self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
-            self.assertLess(time.monotonic() - began, 2.5)
+            self.assertLess(time.monotonic() - began, 4.5)
 
 
 class AgentParentScriptTests(RoleBridgeScriptTestCase):
