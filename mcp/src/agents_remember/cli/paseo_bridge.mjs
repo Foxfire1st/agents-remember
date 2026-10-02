@@ -36,7 +36,7 @@
 //            passes a resolved path.
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
-//                  title, labels, prompt?, systemPrompt?,
+//                  title, labels, prompt?, systemPrompt?, parentAgentId?,
 //                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
 //            -> {serverId, existing: boolean, agent: AGENT, creationError?}
 //            One agent under the caller's agent id (a UUID) in that workspace's directory, with
@@ -51,7 +51,10 @@
 //            with the agent and applied again whenever it resumes the agent's session: the text
 //            is added to the provider's system-level instructions where the provider has such,
 //            and each tool server is started for the agent with exactly the given command and
-//            environment.
+//            environment. `parentAgentId` names the agent that starts this one: the runtime
+//            records it as the new agent's parent (the label `paseo.parent-agent-id`, which
+//            AGENT's `labels` shows) and refuses the creation when it has no such agent loaded.
+//            The agent still runs in `workspaceId`, not in the parent's workspace.
 //
 //   agent-get  {agentId: string}
 //            -> {serverId, agent: AGENT | null}
@@ -66,6 +69,95 @@
 //   AGENT is {id, provider, model, thinkingOptionId, title, labels, workspaceId, cwd, status,
 //   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
 //   effective one.
+//
+//   agent-state  {agentId: string}
+//            -> {serverId, agent: STATE | null}
+//            What the runtime reports about the agent with exactly that id, archived or not; null
+//            when it has none. A read with no effect on the agent: nothing is sent, resumed or
+//            un-archived. The runtime keeps no outcome of the last turn, so that is taken from the
+//            end of the agent's timeline, and the timeline is read only while the agent is idle
+//            with an open session: reading the timeline of a closed session makes the runtime
+//            resume it.
+//
+//   agent-resume  {agentId: string}
+//            -> {serverId, agent: STATE | null, resume: {attempted: boolean, resumed: boolean,
+//                error?: string}}
+//            Opens the closed session of a live agent as the same agent, without a message. The
+//            runtime loads an agent when its timeline is read; that read is the resume. An agent
+//            that is missing, archived or already open is left alone (`attempted: false`), and
+//            nothing is ever created or un-archived. A resume the runtime refuses is
+//            `resumed: false` with the runtime's text in `error`. `agent` is the state afterwards.
+//
+//   STATE is {id, status, archivedAt, turnActive, pendingPermissions: [{name, kind}], lastError,
+//   attentionReason, lastTurn}. `status` is the runtime's own word (initializing, idle, running,
+//   error, closed). `attentionReason` is the runtime's own mark on the agent (finished, error,
+//   permission, or null); it is the one trace of a failed turn that outlives a closed session.
+//   `lastTurn` is null unless the agent is idle with an open session; then it is
+//   {state: 'none'} when the agent has not run a turn, {state: 'replied', text} when the timeline
+//   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
+//   the last turn ended without one, which is what a cancelled turn leaves behind.
+//
+//   agent-send  {agentId: string, text: string, messageId: string}
+//            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
+//                                     turnId: string | null}
+//                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
+//                           detail: string, permissionPending?: true, permission?: string}}
+//            One message to the agent with exactly that id, for a live agent with an open
+//            session only: a missing, archived or closed agent is refused and left as it is,
+//            because the runtime would un-archive or resume it to deliver. An idle agent starts a
+//            turn with the message (`started`). An agent that is mid-turn is sent the message
+//            with the runtime's steer behaviour, which hands it to the running turn (`steered`).
+//            The runtime has no "steer or refuse": for a provider without steering it cancels
+//            the running turn and starts another, and it reports which providers those are only
+//            through their entry in its configuration (they extend its ACP driver). Such a
+//            recipient, and one that is still initializing, is refused as `busy`. So is an
+//            agent that waits for a permission decision (`permissionPending`, with the name of
+//            the permission when the runtime gives one): the runtime answers every pending
+//            permission of the recipient with a denial when it delivers a message. A permission
+//            the agent asks for between this look and the send is still denied. `taken` says
+//            what the runtime did, read from the turn the agent runs before and after the send;
+//            `replaced` means the runtime cancelled the running turn all the same. `turnId` is
+//            the turn that took the message, when it is still running. `messageId` is the
+//            caller's id of the message; the runtime records it with the message in the timeline.
+//            A connection lost while the message is being sent fails with
+//            `paseo_send_outcome_unknown`: the runtime may have accepted it. Once the runtime
+//            has accepted the message the command answers `delivered: true`, also when the
+//            lookup afterwards fails (`turnId` is then null).
+//
+//   agent-wait  {agentId: string, messageId?: string, turnId?: string, steered?: boolean,
+//                waitMs?: number}
+//            -> {serverId, wait: {state: 'running', turnId: string | null}
+//                              | {state: 'permission', permission: string}
+//                              | {state: 'ended', outcome: 'finished' | 'failed' | 'cancelled',
+//                                 text: string | null, textTruncated: boolean, error?: string,
+//                                 laterTurn?: boolean}
+//                              | {state: 'undecided', reason: string}
+//                              | {state: 'unavailable', reason: 'not-found' | 'archived' | 'closed'}}
+//            Waits, for at most `waitMs` and never past this call's own deadline, until the turn
+//            that consumed the message `messageId` has ended, or the agent asks for a permission.
+//            `turnId` is the turn the caller knows to hold the message (as `agent-send` or an
+//            earlier `running` answer returned it). `running` means the time was up first; the
+//            caller repeats the call with the `turnId` of the answer.
+//            A message that began its turn was consumed by that turn: the wait ends when that
+//            turn has ended, and a turn the agent runs afterwards is not followed. When the
+//            caller names no turn and nothing stands behind the message yet, the turn may not
+//            have begun: it is given five seconds to begin.
+//            A message handed to a running turn (`steered`) is consumed by that turn or by the
+//            next one: a harness can leave such a message unread until its turn has ended and
+//            then run it as a turn of its own, which the runtime begins without recording a
+//            message for it. A turn that went on to another step (a tool call) behind the
+//            message has read it. A turn that ended without one is given five seconds in which
+//            another can begin, and a turn the agent runs after it is followed, unless a newer
+//            message of another turn stands behind ours in the timeline.
+//            `ended` carries the outcome and the text of the turn that consumed the message:
+//            the runtime's own event of that turn's end when this call saw it; otherwise
+//            `failed` when the agent is in an error state, `finished` when the turn closed with
+//            text of the agent, and `cancelled` when it did not. `text` is that turn's text
+//            behind its last message or tool call (at most 20,000 characters). For a `steered`
+//            message `laterTurn` says which turn that is: true for a turn that began after the
+//            one that was running, false for the running turn itself.
+//            `undecided` means that the message is not among the timeline entries read, so no
+//            text can be said to answer it. Nothing is sent, resumed or un-archived.
 //
 // The runtime is addressed by the environment paseo_bridge.py derives from `paseoRuntime`:
 //   AR_PASEO_INSTALL_PREFIX  install prefix; the client package is loaded from its node_modules
@@ -94,7 +186,11 @@ const COMMANDS = {
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'agent-get': getAgent,
-  'agent-archive': archiveAgent
+  'agent-archive': archiveAgent,
+  'agent-state': readAgentState,
+  'agent-resume': resumeAgent,
+  'agent-send': sendToAgent,
+  'agent-wait': waitForAgent
 }
 
 const DEFAULT_DEADLINE_MS = 55000
@@ -106,6 +202,28 @@ const CLOSE_TIMEOUT_MS = 1000
 const LISTING_RESERVE_MS = 10000
 const REPLY_RESERVE_MS = 2000
 const MESSAGE_LIMIT = 800
+// agent-state and agent-resume: the runtime's word for an agent without a running harness
+// process, the timeline entries that mark the end of a turn, how many entries are read from the
+// end, and the length of the reply text that is returned.
+const CLOSED_SESSION = 'closed'
+const TURN_ITEMS = new Set(['user_message', 'assistant_message', 'tool_call'])
+const TIMELINE_TAIL = 20
+const FINAL_TEXT_LIMIT = 3000
+// agent-send and agent-wait: the provider entries of the runtime's configuration that cannot
+// take a message into a running turn, the default and the reserve of one wait, the timeline
+// entries read for the reply, the length of the reply that is returned, and the runtime's
+// events that end a turn.
+const DRIVER_WITHOUT_STEERING = 'acp'
+const WAIT_DEFAULT_MS = 30000
+const WAIT_RESERVE_MS = 6000
+// How often a wait looks at the agent while a turn runs, how long a turn that has ended is given
+// for a following turn to begin, and how often the agent is looked at in that time.
+const WAIT_POLL_MS = 1000
+const TURN_GAP_MS = 5000
+const TURN_GAP_POLL_MS = 250
+const REPLY_TAIL = 200
+const REPLY_TEXT_LIMIT = 20000
+const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canceled: 'cancelled' }
 // Standard output carries the reply and nothing else: the client's log lines, and anything a
 // command or a package prints through the console, go to standard error.
 const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
@@ -297,6 +415,7 @@ function agentCreation(input, agentId) {
     labels: requiredLabels(input)
   }
   const title = requiredText(input, 'title')
+  const parentAgentId = optionalText(input, 'parentAgentId')
   const systemPrompt = optionalText(input, 'systemPrompt')
   const mcpServers = input.mcpServers ?? null
   const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -333,6 +452,7 @@ function agentCreation(input, agentId) {
           ...shared,
           config: { provider: `${provider}/${model}`, ...kept },
           title,
+          ...(parentAgentId ? { parent: parentAgentId } : {}),
           ...(prompt ? { prompt } : {})
         })
         return handle.current()
@@ -343,6 +463,7 @@ function agentCreation(input, agentId) {
         ...shared,
         config: { provider, cwd, title, ...kept },
         workspaceId,
+        ...(parentAgentId ? { callerAgentId: parentAgentId } : {}),
         ...(prompt ? { initialPrompt: prompt } : {})
       })
     }
@@ -376,6 +497,363 @@ async function archiveAgent({ api, daemon }, input) {
     return { ...archived, alreadyArchived: true, archivedAt: after.archivedAt }
   }
   return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }
+}
+
+async function readAgentState({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const agent = await findAgent(api, daemon, agentId)
+  return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
+}
+
+async function resumeAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  const untouched = { attempted: false, resumed: false }
+  if (!agent) return { serverId, agent: null, resume: untouched }
+  if (nonEmpty(agent.archivedAt) || agent.status !== CLOSED_SESSION) {
+    // Reading the timeline of an archived agent would load it, and an open session needs nothing.
+    return { serverId, agent: await agentState(api, agent), resume: untouched }
+  }
+  let refusal = null
+  try {
+    await api.agents.ref(agentId).timeline.refetch({ direction: 'tail', limit: 1 })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    refusal = text(error?.message ?? error) || 'The Paseo runtime did not resume the agent.'
+  }
+  const after = await findAgent(api, daemon, agentId)
+  return {
+    serverId,
+    agent: after ? await agentState(api, after) : null,
+    resume: {
+      attempted: true,
+      resumed: Boolean(after) && after.status !== CLOSED_SESSION,
+      ...(refusal ? { error: refusal } : {})
+    }
+  }
+}
+
+// What the runtime says about one agent, plus how its last turn ended when that can be read
+// without loading the agent: only an idle agent has an open session and no turn in progress.
+async function agentState(api, agent) {
+  const permissions = Array.isArray(agent.pendingPermissions) ? agent.pendingPermissions : []
+  const readable = agent.status === 'idle' && !nonEmpty(agent.archivedAt)
+  return {
+    id: agent.id,
+    status: agent.status ?? null,
+    archivedAt: agent.archivedAt ?? null,
+    turnActive: Boolean(agent.activeTurn),
+    pendingPermissions: permissions.map((request) => ({
+      name: nonEmpty(request?.name) ?? nonEmpty(request?.title) ?? 'a tool',
+      kind: request?.kind ?? null
+    })),
+    lastError: nonEmpty(agent.lastError) ? text(agent.lastError) : null,
+    attentionReason: nonEmpty(agent.attentionReason),
+    lastTurn: readable ? await lastTurn(api, agent) : null
+  }
+}
+
+// How the last turn ended, from the end of the timeline. A turn that finished ends with the
+// agent's reply. The runtime records no cancellation; a cancelled turn leaves a user message or a
+// tool call as the last entry instead. Entries of other kinds (reasoning, to-do lists, compaction)
+// say nothing about the end of a turn and are skipped.
+async function lastTurn(api, agent) {
+  const page = await api.agents
+    .ref(agent.id)
+    .timeline.refetch({ direction: 'tail', limit: TIMELINE_TAIL, projection: 'projected' })
+  const kinds = (Array.isArray(page?.entries) ? page.entries : [])
+    .map((entry) => entry?.item)
+    .filter((item) => TURN_ITEMS.has(item?.type))
+  if (kinds.length === 0) {
+    const ran = nonEmpty(agent.lastUserMessageAt) || page?.hasOlder === true
+    return { state: ran ? 'unreplied' : 'none' }
+  }
+  let first = kinds.length
+  while (first > 0 && kinds[first - 1].type === 'assistant_message') first -= 1
+  const reply = kinds
+    .slice(first)
+    .map((item) => (typeof item.text === 'string' ? item.text : ''))
+    .join('')
+  if (!reply.trim()) return { state: 'unreplied' }
+  // Cut by code points: twice the limit in UTF-16 units always holds the first 3,000 of them.
+  const head = Array.from(reply.slice(0, 2 * FINAL_TEXT_LIMIT)).slice(0, FINAL_TEXT_LIMIT)
+  return { state: 'replied', text: head.join('') }
+}
+
+async function sendToAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const message = requiredText(input, 'text')
+  const messageId = requiredText(input, 'messageId')
+  const serverId = serverIdOf(daemon)
+  const refused = (reason, detail) => ({ serverId, delivery: { delivered: false, refused: reason, detail } })
+  const before = await findAgent(api, daemon, agentId)
+  if (!before) return refused('not-found', 'the host has no such agent')
+  if (nonEmpty(before.archivedAt)) return refused('archived', 'the agent is archived')
+  if (before.status === CLOSED_SESSION) return refused('closed', 'the session of the agent is closed')
+  if (before.status === 'initializing') return refused('busy', 'the agent is still starting')
+  if (pendingPermission(before) !== null) {
+    const refusal = refused(
+      'busy',
+      'the agent waits for a permission decision, which a message would answer with a denial'
+    )
+    const permission = pendingPermissionName(before)
+    Object.assign(refusal.delivery, { permissionPending: true, ...(permission ? { permission } : {}) })
+    return refusal
+  }
+  const running = turnOf(before)
+  if (running.active && !(await providerSteers(api, before.provider))) {
+    return refused(
+      'busy',
+      'the agent is mid-turn and the host cannot hand a message to a running turn of this provider'
+    )
+  }
+  // Always with the steer behaviour: should a turn begin between the lookup and the send, the
+  // runtime's default would cancel it.
+  try {
+    await api.agents.ref(agentId).send(message, { messageId, activeTurnBehavior: 'steer' })
+  } catch (error) {
+    if (daemon.getConnectionState().status === 'connected') throw error
+    throw failure(
+      'paseo_send_outcome_unknown',
+      'The connection to the Paseo daemon was lost while the message was being sent; it is not ' +
+        'known whether the message was delivered.'
+    )
+  }
+  // The runtime accepted the message. What the agent runs now is looked up for the answer only.
+  const after = turnOf((await findAgent(api, daemon, agentId).catch(() => null)) ?? {})
+  const replaced = running.active && after.id !== null && running.id !== null && after.id !== running.id
+  return {
+    serverId,
+    delivery: {
+      delivered: true,
+      taken: !running.active ? 'started' : replaced ? 'replaced' : 'steered',
+      turnId: after.id
+    }
+  }
+}
+
+async function waitForAgent({ api, daemon, deadline }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const messageId = optionalText(input, 'messageId')
+  const steered = input.steered === true
+  let followed = optionalText(input, 'turnId')
+  const serverId = serverIdOf(daemon)
+  const answer = (wait) => ({ serverId, wait })
+  const stop =
+    Date.now() +
+    Math.min(positiveInteger(input.waitMs, WAIT_DEFAULT_MS), Math.max(0, deadline - Date.now() - WAIT_RESERVE_MS))
+  let agent = await findAgent(api, daemon, agentId)
+  const unavailable = waitUnavailable(agent)
+  if (unavailable) return answer(unavailable)
+  // The runtime's turn events are live only, so they are followed for as long as this call
+  // waits: the end of each turn is kept for the outcome, and every start or end of a turn wakes
+  // the wait, which otherwise looks at the agent at intervals.
+  const ends = { byTurn: new Map(), last: null }
+  let wake = () => {}
+  let following = true
+  const unsubscribe = api.agents.ref(agentId).timeline.subscribe((update) => {
+    const event = update?.event
+    if (!following || !event) return
+    const outcome = TURN_ENDS[event.type]
+    if (outcome) {
+      ends.last = { outcome, ...(nonEmpty(event.error) ? { error: text(event.error) } : {}) }
+      if (nonEmpty(event.turnId)) ends.byTurn.set(event.turnId, ends.last)
+    }
+    if (outcome || event.type === 'turn_started') wake()
+  })
+  const pause = (ms) =>
+    new Promise((resolve) => {
+      wake = resolve
+      setTimeout(resolve, Math.max(0, ms))
+    })
+  const view = () => messageView(api, agentId, messageId)
+  let quietSince = null
+  let settled = null
+  try {
+    // Without the events the outcome is taken from the agent's state afterwards.
+    await unsubscribe.ready.catch(() => {})
+    for (;;) {
+      agent = await findAgent(api, daemon, agentId)
+      const gone = waitUnavailable(agent)
+      if (gone) return answer(gone)
+      const permission = pendingPermission(agent)
+      if (permission !== null) return answer({ state: 'permission', permission })
+      const running = turnOf(agent)
+      if (running.active) {
+        quietSince = null
+        if (messageId && running.id !== null && running.id !== followed) {
+          // Another turn than the one known to hold the message. A newer message began it, or
+          // the message began a turn that is over: then the turn that consumed ours has ended.
+          const seen = await view()
+          if (!seen.found || seen.newer || (followed !== null && !steered)) {
+            return answer(waitEnded(seen, ends, agent, steered, followed))
+          }
+          followed = running.id
+        }
+        if (Date.now() >= stop) return answer({ state: 'running', turnId: followed })
+        await pause(Math.min(WAIT_POLL_MS, stop - Date.now()))
+        continue
+      }
+      // No turn runs. What the timeline holds says whether one can still begin for the message.
+      if (quietSince === null) {
+        const seen = await view()
+        if (!seen.found || seen.newer || !turnMayBegin(seen, steered, followed)) {
+          settled = seen
+          break
+        }
+        quietSince = Date.now()
+      }
+      if (Date.now() - quietSince >= TURN_GAP_MS) break
+      if (Date.now() >= stop) return answer({ state: 'running', turnId: followed })
+      await pause(TURN_GAP_POLL_MS)
+    }
+  } finally {
+    following = false
+    unsubscribe()
+  }
+  return answer(waitEnded(settled ?? (await view()), ends, agent, steered, followed))
+}
+
+// Whether, with no turn running, a turn can still begin that takes the message up. A message
+// handed to a running turn: when that turn may not have read it. A message for which no turn is
+// known: while nothing stands behind it, because the turn it began may not have started yet.
+function turnMayBegin(seen, steered, followed) {
+  if (steered) return !consumedBy(seen, steered, followed).read
+  return followed === null && seen.nothingBehind
+}
+
+// The turn that consumed the message, and whether it is known to have read it. A message that
+// began its turn: that turn. A message handed to a running turn: the last turn that ran behind
+// it, by the timeline or, for a turn that left nothing there, by what this call followed
+// (`followed`). Such a message was read when a later turn than its own ran, or when its own turn
+// went on to another step behind it; otherwise a turn that takes it up may still begin.
+function consumedBy(seen, steered, followed) {
+  const { own, latest } = seen
+  if (!steered) return { turn: own ?? latest, read: true }
+  const after = latest !== null && latest !== own ? latest : followed
+  const later = own !== null && after !== null && after !== own
+  return { turn: later ? after : latest, later, read: later || seen.stepBehind }
+}
+
+// The answer of a wait once the turn that consumed the message is over: the text that turn left
+// in the timeline, with the runtime's own event of its end when this call saw it.
+function waitEnded(seen, ends, agent, steered, followed) {
+  if (!seen.found) {
+    return {
+      state: 'undecided',
+      reason: `the message is not among the last ${REPLY_TAIL} timeline entries of the agent`
+    }
+  }
+  const { turn, later } = consumedBy(seen, steered, followed)
+  // For a message handed to a running turn the answer says which turn it is about.
+  const reply = { ...seen.closing(turn), ...(steered ? { laterTurn: later === true } : {}) }
+  const event = turn === null ? ends.last : ends.byTurn.get(turn)
+  if (event) return { state: 'ended', ...event, ...reply }
+  // The agent's state now is that of its last turn; it says nothing of an earlier one.
+  const failed = nonEmpty(agent.lastError) ? text(agent.lastError) : null
+  const last = !seen.newer && (seen.latest === null || turn === null || turn === seen.latest)
+  if (last && (agent.status === 'error' || failed)) {
+    return { state: 'ended', outcome: 'failed', error: failed ?? 'the agent is in an error state', ...reply }
+  }
+  return { state: 'ended', outcome: reply.text === null ? 'cancelled' : 'finished', ...reply }
+}
+
+// What the agent's timeline holds behind one message. `found`: the message is among the entries
+// read. `newer`: a newer message of another turn stands behind it; what is said below is about
+// the entries between the two (all of the rest, when there is no newer one). `own`: the turn the
+// message was recorded in. `latest`: the turn of the last entry. `nothingBehind`: there is no
+// entry at all. `stepBehind`: a tool call lies behind the message, so the turn went on to
+// another step after it. `closing(turn)`: the agent's text that closes that turn's entries. A
+// message of the same turn as ours is not a newer one: the prompt that began a turn can be
+// recorded after a message that was handed to it. Without a message id the whole tail is looked
+// at; without turn ids, everything is one turn.
+async function messageView(api, agentId, messageId) {
+  const page = await api.agents
+    .ref(agentId)
+    .timeline.refetch({ direction: 'tail', limit: REPLY_TAIL, projection: 'projected' })
+  const entries = (Array.isArray(page?.entries) ? page.entries : []).filter((entry) =>
+    TURN_ITEMS.has(entry?.item?.type)
+  )
+  const mine = messageId
+    ? entries.findLastIndex(
+        (entry) =>
+          entry.item.type === 'user_message' &&
+          [entry.item.messageId, entry.item.clientMessageId].includes(messageId)
+      )
+    : -1
+  if (messageId && mine < 0) return { found: false }
+  const own = mine < 0 ? null : nonEmpty(entries[mine].turnId)
+  const behind = entries.slice(mine + 1)
+  const next = messageId
+    ? behind.findIndex(
+        (entry) => entry.item.type === 'user_message' && (own === null || nonEmpty(entry.turnId) !== own)
+      )
+    : -1
+  const between = next < 0 ? behind : behind.slice(0, next)
+  return {
+    found: true,
+    newer: next >= 0,
+    own,
+    latest: nonEmpty(between.at(-1)?.turnId),
+    nothingBehind: between.length === 0,
+    stepBehind: between.some((entry) => entry.item.type === 'tool_call'),
+    closing: (turn) =>
+      closingText(
+        between.filter((entry) => turn === null || nonEmpty(entry.turnId) === turn).map((entry) => entry.item)
+      )
+  }
+}
+
+// The agent's text behind the last message or tool call of these items, at most REPLY_TEXT_LIMIT
+// characters of it.
+function closingText(items) {
+  let first = items.length
+  while (first > 0 && items[first - 1].type === 'assistant_message') first -= 1
+  const reply = items
+    .slice(first)
+    .map((item) => (typeof item.text === 'string' ? item.text : ''))
+    .join('')
+    .trim()
+  if (!reply) return { text: null, textTruncated: false }
+  const points = Array.from(reply.slice(0, 2 * REPLY_TEXT_LIMIT))
+  return {
+    text: points.slice(0, REPLY_TEXT_LIMIT).join(''),
+    textTruncated: points.length > REPLY_TEXT_LIMIT || reply.length > 2 * REPLY_TEXT_LIMIT
+  }
+}
+
+// The turn an agent runs, as the runtime reports it.
+function turnOf(agent) {
+  const id = nonEmpty(agent?.activeTurn?.turnId)
+  return { active: Boolean(agent?.activeTurn) || agent?.status === 'running', id }
+}
+
+function waitUnavailable(agent) {
+  if (!agent) return { state: 'unavailable', reason: 'not-found' }
+  if (nonEmpty(agent.archivedAt)) return { state: 'unavailable', reason: 'archived' }
+  if (agent.status === CLOSED_SESSION) return { state: 'unavailable', reason: 'closed' }
+  return null
+}
+
+function pendingPermission(agent) {
+  const pending = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions : []
+  if (pending.length === 0) return null
+  return pendingPermissionName(agent) ?? 'a tool'
+}
+
+// The name the runtime gives the first pending permission of an agent, or null.
+function pendingPermissionName(agent) {
+  const first = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions[0] : null
+  return nonEmpty(first?.name) ?? nonEmpty(first?.title) ?? null
+}
+
+// Whether the runtime hands a message to a running turn of this provider. It says so nowhere
+// directly; a provider it drives through its ACP driver has no steering, and such a provider is
+// an entry of the runtime's configuration that extends that driver.
+async function providerSteers(api, provider) {
+  const entries = (await api.config?.get())?.config?.providers ?? {}
+  return entries[provider]?.extends !== DRIVER_WITHOUT_STEERING
 }
 
 // The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an

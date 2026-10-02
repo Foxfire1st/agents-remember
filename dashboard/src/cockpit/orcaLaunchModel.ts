@@ -71,6 +71,13 @@ export interface OrcaScopedExecution {
   canStart: boolean;
   canRevive: boolean;
   canRetry?: boolean;
+  /** The final text of the agent's last finished turn. */
+  result?: { summary?: string };
+  /** Where the agent was told to write its report, and whether that file exists yet. */
+  report?: { path?: string; canonicalPath?: string; available?: boolean };
+  /** True on an answer the host could not confirm: the other fields are the last known ones. */
+  hostUnreachable?: boolean;
+  hostUnreachableReason?: string;
 }
 
 export interface OrcaLaunchSelection {

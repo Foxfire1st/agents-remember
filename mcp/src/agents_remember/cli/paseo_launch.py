@@ -11,6 +11,9 @@ definition, the tool server of this build under a fixed name with the agent's bi
 environment, and a short recovery note for the agent's system-level instructions. Both are the
 same for every provider; the definition is left out only for a provider the runtime reports as
 not accepting tool servers.
+
+A role that another role agent starts carries that agent as its parent: the call names it to the
+runtime, and the receipt records it.
 """
 
 from __future__ import annotations
@@ -82,6 +85,18 @@ class LaunchOutcome:
     predecessor_settled: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class StartingAgent:
+    """The role agent that starts another one: its agent id, its role, and the work it serves.
+
+    ``subject`` is the id of the most specific task document of its binding, or ``Projects``.
+    """
+
+    agent_id: str
+    role: str
+    subject: str
+
+
 def mint_agent_id() -> str:
     """The id of the agent a launch creates; the runtime accepts a caller-chosen UUID."""
 
@@ -133,6 +148,8 @@ class RoleLaunch:
     accepts_tool_servers: bool = True
     # The agent of the closed execution this launch replaces on its selection.
     replaces_agent_id: str | None = None
+    # The agent that started this role, which the runtime records as the new agent's parent.
+    parent_agent_id: str | None = None
 
 
 def agent_binding(launch: RoleLaunch) -> AgentBinding:
@@ -346,6 +363,8 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
         }
+    if launch.parent_agent_id:
+        agent["parentAgentId"] = launch.parent_agent_id
     if launch.session_options.get("model"):
         agent["model"] = launch.session_options["model"]
     if launch.session_options.get("effort"):

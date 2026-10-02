@@ -4,4 +4,4 @@ The Manager or Orchestrator may coordinate an existing AR paired closeout with s
 
 Before calling the existing AR closeout owner, read its current preview and authority contract. Bind the exact code and memory worktrees, canonical task/contract, candidate tips, changed paths, check results, and review/curation reports. Keep failures or missing evidence visible. The owner validates and applies the paired transaction; do not reproduce its logic with raw Git commands.
 
-A native Run/Task/Dispatch completion is not closeout. No role may claim commit, integration, push, or acceptance until the owning tool's result is read back and the exact code/memory outcome is verified. Human-pinned approvals remain with their named authority.
+A finished turn of a role agent is not closeout. No role may claim commit, integration, push, or acceptance until the owning tool's result is read back and the exact code/memory outcome is verified. Human-pinned approvals remain with their named authority.

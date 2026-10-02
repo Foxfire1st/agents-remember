@@ -86,9 +86,11 @@ PUBLIC_TOOLS = (
     "message_child",
     # The capsule operation and the skill discovery/read surface.
     "role_capsule_compile",
-    "orca_role_prepare",
     "skill_catalog_list",
     "skill_catalog_read",
+    # Role start and role messaging by role agents.
+    "role_start",
+    "role_message",
     # The knowledge operation family: read, change, diff, integrity and projection.
     "knowledge_read",
     "knowledge_change",

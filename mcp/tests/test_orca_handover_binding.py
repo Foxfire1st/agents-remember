@@ -24,6 +24,7 @@ from agents_remember.cli import (
     orca_task_routes,
     paseo_catalog,
     paseo_launch,
+    paseo_status,
 )
 from agents_remember.cli.orca_runtime import digest
 from agents_remember.cli.orca_task_preparation import (
@@ -50,6 +51,7 @@ from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
+from test_role_instruction_wording import forbidden_in, without_retained_paths
 from test_worktree_support import open_external_contract_fixture
 
 
@@ -214,11 +216,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     self.assertEqual(handover["requestId"], str(request_id))
                     self.assertEqual(handover["taskDocumentDigest"], prepared["taskDocumentDigest"])
                     self.assertEqual(handover["taskDocumentDigest"], digest(documents))
-                    message_binding = handover["nativeOrca"]["messageBinding"]
-                    self.assertEqual(
-                        message_binding["payloadType"],
-                        "The compact AR binding is a canonical JSON object; each native verb uses its own documented string field.",
-                    )
+                    message_binding = handover["host"]["messageBinding"]
                     self.assertEqual(
                         message_binding["arBinding"],
                         {
@@ -244,31 +242,20 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                             **projection_reference,
                         },
                     )
-                    for native_id in ("runId", "taskId", "dispatchId"):
-                        self.assertNotIn(native_id, message_binding["arBinding"])
-                    self.assertIn("only when", message_binding["nativeIdsRule"])
-                    message_semantics = handover["nativeOrca"]["messageSemantics"]
-                    self.assertIn("queued, not read", message_semantics)
-                    self.assertIn("--retry-request <original-request-uuid>", message_semantics)
-                    self.assertIn("messageBinding.projection.path", message_semantics)
-                    self.assertIn("JSON text for `--payload`", message_semantics)
-                    self.assertIn("neither ask nor reply", message_semantics)
-                    self.assertIn("only inside an active supervised Dispatch", message_semantics)
-                    self.assertIn("manual session without a Dispatch", message_semantics)
-                    self.assertIn("`--type question`", message_semantics)
+                    for host_id in ("runId", "taskId", "dispatchId"):
+                        self.assertNotIn(host_id, message_binding["arBinding"])
                     self.assertIn(
-                        "explicit `run:<id>` or `dispatch:<id>` recipient", message_semantics
+                        "you do not attach this record to a message", message_binding["use"]
                     )
-                    self.assertIn("Do not invent a Dispatch or sender identity", message_semantics)
-                    self.assertIn("mutually exclusive", message_semantics)
-                    self.assertIn("Save native `--json` stdout byte-for-byte", message_semantics)
-                    self.assertIn("structurally compare it", message_semantics)
-                    self.assertIn("that sender's expected binding", message_semantics)
-                    self.assertIn("mark it unverified", message_semantics)
-                    self.assertIn("string spec passed to Orca `task-create`", message_semantics)
-                    self.assertIn("run:<id>", message_semantics)
-                    self.assertIn("recipient workspace", message_semantics)
-                    self.assertIn("workspace/project listing", message_semantics)
+                    # The compiled first message of a real leaf role: capsule and handover.
+                    self.assertEqual(forbidden_in(without_retained_paths(prepared["prompt"])), [])
+                    role_tools = handover["host"]["roleTools"]
+                    self.assertEqual(
+                        (role_tools["toolServer"], role_tools["start"], role_tools["message"]),
+                        ("agents-remember-task", "role_start", "role_message"),
+                    )
+                    self.assertIn("It never interrupts a running turn.", role_tools["usage"])
+                    self.assertIn("role_message", prepared["prompt"].split("\n\nAR owner")[0])
                     self.assertEqual(binding["repositoryId"], repo_id)
                     self.assertEqual(
                         canonical_report.name,
@@ -335,12 +322,14 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                             "requiredCapability": "ar-task-scoped-readers/v1",
                         },
                     )
-                    self.assertIn("task_context", handover["nativeOrca"]["arMcpUsage"])
+                    self.assertIn("task_context", handover["host"]["arMcpUsage"])
                     # The handover names the one server to use for AR tools, and no other.
-                    self.assertEqual(handover["nativeOrca"]["arToolServer"], "agents-remember-task")
+                    self.assertEqual(handover["host"]["arToolServer"], "agents-remember-task")
                     for sentence in (
-                        "Use the tool server named agents-remember-task for every Agents "
-                        "Remember tool",
+                        "Call every Agents Remember tool on the tool server named "
+                        "agents-remember-task",
+                        "A tool server named agents-remember, if this session has one, belongs "
+                        "to another installation and must not be used for this assignment.",
                         "An AR tool server under any other name belongs to another AR "
                         "installation; do not use it for this assignment.",
                         "After a start or a resume a tool server can take some seconds to "
@@ -348,17 +337,13 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         "call once more before reporting the server missing, and report that "
                         "instead of substituting another.",
                     ):
-                        self.assertIn(sentence, handover["nativeOrca"]["arMcpUsage"])
+                        self.assertIn(sentence, handover["host"]["arMcpUsage"])
                     self.assertNotIn("existing shared", prepared["prompt"])
                     self.assertNotIn("nativeMcpScope", handover)
-                    self.assertEqual(
-                        handover["nativeOrca"]["guidesOnDemand"],
-                        ["orca skills get orca-cli", "orca skills get orchestration"],
-                    )
-                    self.assertIn("ORCA_TERMINAL_HANDLE", handover["nativeOrca"]["identitySource"])
-                    self.assertIn(
-                        "Only an active Dispatch worker", handover["nativeOrca"]["messageSemantics"]
-                    )
+                    self.assertEqual(handover["host"]["name"], "Paseo")
+                    self.assertIsNone(handover["host"]["parent"])
+                    self.assertIn("needs none", handover["host"]["ownerRelation"])
+                    self.assertIn("in your own chat", handover["host"]["developerQuestions"])
                     self.assertTrue(canonical_report.is_relative_to(task_reports.resolve()))
                     self.assertEqual(len(documents), 3)
                     documents_by_ref = {
@@ -482,7 +467,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(handover["taskDocumentDigest"], prepared["taskDocumentDigest"])
         self.assertEqual(handover["taskDocumentDigest"], digest([]))
         self.assertEqual(
-            handover["nativeOrca"]["messageBinding"]["arBinding"],
+            handover["host"]["messageBinding"]["arBinding"],
             {
                 "requestId": str(request_id),
                 "role": "architect",
@@ -494,19 +479,17 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             },
         )
         projection_reference = _message_binding_projection_reference(
-            config, request_id, handover["nativeOrca"]["messageBinding"]["arBinding"]
+            config, request_id, handover["host"]["messageBinding"]["arBinding"]
         )
-        self.assertEqual(
-            handover["nativeOrca"]["messageBinding"]["projection"], projection_reference
-        )
+        self.assertEqual(handover["host"]["messageBinding"]["projection"], projection_reference)
         self.assertTrue(
-            Path(handover["nativeOrca"]["messageBinding"]["projection"]["path"]).is_absolute()
+            Path(handover["host"]["messageBinding"]["projection"]["path"]).is_absolute()
         )
         self.assertEqual(
             prepared["messageBindingProjection"],
             {
                 "requestId": str(request_id),
-                "binding": handover["nativeOrca"]["messageBinding"]["arBinding"],
+                "binding": handover["host"]["messageBinding"]["arBinding"],
                 **projection_reference,
             },
         )
@@ -521,15 +504,18 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         )
         self.assertEqual(handover["capsule"]["binding"]["role"], "architect")
         self.assertEqual(handover["capsule"]["binding"]["operation"], "planning")
-        self.assertTrue(prepared["prompt"].startswith("EXPERIMENTAL MANUAL AR ROLE BRIEF:"))
-        source = handover["nativeOrca"]["instructionSource"]
+        self.assertTrue(
+            prepared["prompt"].startswith("AR ROLE BRIEF: the dashboard launcher started this role")
+        )
+        self.assertEqual(forbidden_in(without_retained_paths(prepared["prompt"])), [])
+        source = handover["host"]["instructionSource"]
         self.assertEqual(source["kind"], "compiled-role-operation-capsule")
         self.assertEqual(source["role"], "architect")
         self.assertEqual(source["operation"], "planning")
         self.assertEqual(source["semanticDigest"], prepared["capsuleDigest"])
         self.assertFalse(source["ambientRoleFilesSelected"])
         self.assertIn("do not load them as a second role", handover["ownerHandover"])
-        self.assertIn("Preserve native system/developer instructions", prepared["prompt"])
+        self.assertIn("Preserve system/developer instructions", prepared["prompt"])
         self.assertEqual(
             {
                 key: handover["arMcpContext"][key]
@@ -551,8 +537,13 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
 
 
-def _bridge_whose_first_creation_gets_no_answer(agents: dict[str, dict[str, Any]]) -> Any:
-    """A stand-in for ``bridge_call``: a catalog, a workspace, and creations after one timeout."""
+def _bridge_whose_first_creation_gets_no_answer(
+    agents: dict[str, dict[str, Any]], reads: list[str]
+) -> Any:
+    """A stand-in for ``bridge_call``: a catalog, a workspace, and creations after one timeout.
+
+    A created agent is reported as running its first turn when its state is read.
+    """
 
     answers = [PaseoBridgeFailure("paseo_bridge_timeout", "no answer in time")]
 
@@ -561,6 +552,10 @@ def _bridge_whose_first_creation_gets_no_answer(agents: dict[str, dict[str, Any]
             return {"providers": [{"id": "codex", "label": "Codex", "models": []}]}
         if command == "workspace-open":
             return {"serverId": "srv", "workspace": {"id": "wks", "directory": payload["cwd"]}}
+        if command == "agent-state":
+            reads.append(payload["agentId"])
+            state = {"id": payload["agentId"], "status": "running", "turnActive": True}
+            return {"serverId": "srv", "agent": state if payload["agentId"] in agents else None}
         if answers:
             raise answers.pop()
         agents[payload["agentId"]] = payload
@@ -575,7 +570,8 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
 
     def test_a_repeat_runs_the_stored_call_after_the_leaf_document_was_edited(self) -> None:
         agents: dict[str, dict[str, Any]] = {}
-        bridge = _bridge_whose_first_creation_gets_no_answer(agents)
+        reads: list[str] = []
+        bridge = _bridge_whose_first_creation_gets_no_answer(agents, reads)
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -665,6 +661,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                     patch.dict(checkout_coordination._declared, {"mode": "test"}),
                     patch.object(paseo_catalog, "bridge_call", bridge),
                     patch.object(paseo_launch, "bridge_call", bridge),
+                    patch.object(paseo_status, "bridge_call", bridge),
                 ):
                     config = load_config(settings_path)
                     first_status, first = dispatch()
@@ -701,7 +698,16 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
         self.assertEqual(
             agents[saved["agentId"]]["prompt"], saved["replayRequest"]["agent"]["prompt"]
         )
-        self.assertEqual((third_status, third), (200, second))
+        # A further repeat finds the launch resolved: it starts nothing and reads the agent once.
+        # Its answer is the second one; only what the read wrote differs.
+        self.assertEqual((third_status, third["status"]), (200, "running"))
+        written_by_the_read = {"detail", "updatedAt"}
+        self.assertEqual(
+            {key: value for key, value in third.items() if key not in written_by_the_read},
+            {key: value for key, value in second.items() if key not in written_by_the_read},
+        )
+        self.assertEqual(reads, [saved["agentId"]])
+        self.assertEqual(list(agents), [saved["agentId"]])
 
 
 class LeafEnclosureSprintBindingTests(unittest.TestCase):

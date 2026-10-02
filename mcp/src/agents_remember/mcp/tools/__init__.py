@@ -63,7 +63,6 @@ from .operator_inbox import (
     operator_inbox_post_payload,
     operator_inbox_supersede_payload,
 )
-from .orca_handover import orca_role_prepare_payload
 from .orchestration import orchestration_nudge_manager_payload
 from .providers import (
     cgc_callees_payload,
@@ -79,6 +78,7 @@ from .providers import (
     provider_watchers_payload,
 )
 from .read_files import read_ar_files_payload
+from .role_agents import role_message_payload, role_start_payload
 from .structural_agent import (
     dispatch_agent_payload,
     message_child_payload,
@@ -165,7 +165,6 @@ __all__ = [
     "operator_inbox_poll_payload",
     "operator_inbox_post_payload",
     "operator_inbox_supersede_payload",
-    "orca_role_prepare_payload",
     "orchestration_nudge_manager_payload",
     "ping_payload",
     "provider_diagnostics_payload",
@@ -176,6 +175,8 @@ __all__ = [
     "rename_self_payload",
     "resolve_context_payload",
     "retire_child_payload",
+    "role_message_payload",
+    "role_start_payload",
     "route_index_refresh_payload",
     "runtime_install_payload",
     "server_info_payload",
