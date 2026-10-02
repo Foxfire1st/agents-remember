@@ -5,15 +5,24 @@ execution receipt. Running the stored call again converges on the same agent: th
 the agent that already carries the id. The call is three bridge commands in a fixed order: archive
 the agent of the execution this launch replaces (when there is one), obtain the workspace of the
 role's folder, and create the agent in it.
+
+The call also carries what the agent is given beside its first message: one tool-server
+definition, the tool server of this build under a fixed name with the agent's binding in its
+environment, and a short recovery note for the agent's system-level instructions. Both are the
+same for every provider; the definition is left out only for a provider the runtime reports as
+not accepting tool servers.
 """
 
 from __future__ import annotations
 
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import agents_remember
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
 from agents_remember.application.orca_task_context import OrcaRoleContext
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_INVALID_REPLY,
@@ -33,6 +42,13 @@ TASK_LABEL = "ar.task-ref"
 # Paseo's limit for a title the caller sets.
 _TITLE_LIMIT = 200
 _TEXT_LIMIT = 800
+# The module that starts this build's tool server.
+_TOOL_SERVER_MODULE = "agents_remember.mcp"
+RECOVERY_NOTE_LIMIT = 600
+# Below this length a shortened task reference no longer identifies its document.
+_SHORTEST_REFERENCE = 16
+TOOL_SERVER_APPLIED = "tool server applied"
+TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +109,112 @@ class RoleLaunch:
     folder: str
     provider: str
     session_options: dict[str, str]
+    # The first message exactly as the agent receives it: the artifact line, then the content.
     prompt: str
+    # The file the agent is told to write its report to.
+    report_path: str
+    # The reference of the handover artifact that holds the compiled first message.
+    handover_artifact: dict[str, Any]
+    # The settings file this build was started with; its tool server is started with the same.
+    settings_file: Path
+    # What the runtime reports about the provider.
+    accepts_tool_servers: bool = True
     # The agent of the closed execution this launch replaces on its selection.
     replaces_agent_id: str | None = None
+
+
+def agent_binding(launch: RoleLaunch) -> AgentBinding:
+    """The agent id, role, task references, request id and report path of one launch."""
+
+    context = launch.context
+    return AgentBinding(
+        agent_id=launch.agent_id,
+        role=context.role,
+        request_id=str(launch.request_id),
+        report_path=launch.report_path,
+        sprint_ref=context.sprint.ref if context.sprint else None,
+        master_ref=context.master.ref if context.master else None,
+        task_ref=context.task.ref if context.task else None,
+    )
+
+
+def tool_server_definition(settings_file: Path, binding: AgentBinding) -> dict[str, Any]:
+    """The tool server of this build, started with this build's source and settings.
+
+    It is the interpreter that runs this process, the tool server's module, and the settings file
+    this process was started with. When this build's package is a source tree outside the
+    interpreter's own installation, the definition names that tree, so that the server loads the
+    same source as the process that launched the agent.
+    """
+
+    interpreter = sys.executable
+    if not interpreter:
+        raise ValueError("This process cannot name its Python interpreter for the tool server.")
+    package = launching_source_root()
+    source: dict[str, str] = {}
+    if not package.is_relative_to(Path(sys.prefix).resolve()):
+        source["PYTHONPATH"] = package.parent.as_posix()
+    return {
+        "type": "stdio",
+        "command": interpreter,
+        "args": ["-m", _TOOL_SERVER_MODULE, "--config", settings_file.as_posix()],
+        "env": {**source, **binding.environment()},
+    }
+
+
+def launching_source_root() -> Path:
+    """The package directory of this build, as its ``server_info`` reports it."""
+
+    return Path(agents_remember.__file__).resolve().parent
+
+
+def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
+    """Role, task references, and where the complete first message is stored; no task content.
+
+    The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The artifact's path and SHA-256
+    are always complete; task references that would not fit are shortened in the middle.
+    """
+
+    references = [
+        (label, document.ref.key)
+        for label, document in (
+            ("Sprint", context.sprint),
+            ("Master", context.master),
+            ("Task", context.task),
+        )
+        if document is not None
+    ]
+
+    def note(keys: list[str]) -> str:
+        named = [f"{label} {key}." for (label, _key), key in zip(references, keys, strict=True)]
+        return " ".join(
+            [
+                f"AR role agent: {context.role}.",
+                *(named or ["No task reference."]),
+                f"Assignment file: {artifact['path']} (SHA-256 {artifact['sha256']}).",
+                "Reload that file whenever your assignment is not in your context.",
+            ]
+        )
+
+    keys = [key for _label, key in references]
+    text = note(keys)
+    if len(text) > RECOVERY_NOTE_LIMIT and keys:
+        room = (RECOVERY_NOTE_LIMIT - len(note(["" for _key in keys]))) // len(keys)
+        if room >= _SHORTEST_REFERENCE:
+            text = note([_shortened(key, room) for key in keys])
+    if len(text) > RECOVERY_NOTE_LIMIT:
+        raise ValueError(
+            f"The recovery note of this launch cannot name its handover artifact within "
+            f"{RECOVERY_NOTE_LIMIT} characters; the artifact path is too long."
+        )
+    return text
+
+
+def _shortened(reference: str, room: int) -> str:
+    if len(reference) <= room:
+        return reference
+    head = (room - 1) // 3
+    return f"{reference[:head]}…{reference[len(reference) - (room - 1 - head) :]}"
 
 
 def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
@@ -103,7 +222,8 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
 
     Model and effort go to the runtime as its model and thinking option; no permission mode is
     named, so the provider's default applies. A launch without a model leaves the choice to the
-    provider. The first message is plain data in the call.
+    provider. The first message, the recovery note and the tool-server definition are plain data
+    in the call, so a repeat sends exactly what the first run sent.
     """
 
     agent: dict[str, Any] = {
@@ -113,7 +233,12 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         "labels": agent_labels(launch.context, launch.request_id),
         "provider": launch.provider,
         "prompt": launch.prompt,
+        "systemPrompt": recovery_note(launch.context, launch.handover_artifact),
     }
+    if launch.accepts_tool_servers:
+        agent["mcpServers"] = {
+            TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
+        }
     if launch.session_options.get("model"):
         agent["model"] = launch.session_options["model"]
     if launch.session_options.get("effort"):
@@ -123,6 +248,29 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         "workspace": {"cwd": launch.folder},
         "agent": agent,
     }
+
+
+def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
+    """What a launch call gives the agent beside its first message, as the receipt records it."""
+
+    agent = call["agent"]
+    definition = (agent.get("mcpServers") or {}).get(TOOL_SERVER_NAME)
+    if definition is None:
+        tool_server = {
+            "name": TOOL_SERVER_NAME,
+            "applied": False,
+            "detail": TOOL_SERVER_NOT_SUPPORTED,
+        }
+    else:
+        tool_server = {
+            "name": TOOL_SERVER_NAME,
+            "applied": True,
+            "detail": TOOL_SERVER_APPLIED,
+            "command": [definition["command"], *definition["args"]],
+            "environment": dict(definition["env"]),
+            "sourceRoot": launching_source_root().as_posix(),
+        }
+    return {"toolServer": tool_server, "recoveryNote": agent["systemPrompt"]}
 
 
 def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOutcome:

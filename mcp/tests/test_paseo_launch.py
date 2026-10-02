@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import os
+import sys
 import tempfile
 import unittest
 import uuid
@@ -66,9 +69,17 @@ CATALOG: dict[str, Any] = {
                 }
             ],
         },
-        # A provider that reports no models is launched without one.
-        {"id": "eve", "label": "Eve", "models": []},
+        # A provider that reports no models is launched without one. The runtime reports this one
+        # as taking no tool servers from its host.
+        {"id": "eve", "label": "Eve", "models": [], "acceptsToolServers": False},
     ],
+}
+# Label of a task reference -> the variable its tool server receives it in, and its name in the
+# recovery note.
+REFERENCES: dict[str, tuple[str, str, TaskDocumentRef]] = {
+    "ar.sprint-ref": ("AR_SPRINT_REF", "Sprint", SPRINT_REF),
+    "ar.master-ref": ("AR_MASTER_REF", "Master", MASTER_REF),
+    "ar.task-ref": ("AR_TASK_REF", "Task", LEAF_REF),
 }
 LAUNCH_COMMANDS = {"agent-archive", "workspace-open", "agent-create"}
 NO_ANSWER_CODES = (
@@ -254,6 +265,14 @@ class PaseoLaunchTestCase(unittest.TestCase):
         self.replace(orca_task_preparation, "_compile_handover", self.compile_handover)
         self.replace(orca_task_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"})
         self.replace(orca_task_preparation, "_role_defaults", return_value=ROLE_DEFAULTS)
+        # The source tree of the launching build, as a checkout outside the interpreter has it.
+        self.source = self.root / "build" / "src" / "agents_remember"
+        self.replace(paseo_launch, "launching_source_root", return_value=self.source)
+        # A launch writes no harness configuration; the user's home is watched for one as well.
+        (self.root / "home").mkdir()
+        home = patch.dict(os.environ, {"HOME": (self.root / "home").as_posix()})
+        home.start()
+        self.addCleanup(home.stop)
 
     def replace(self, target: Any, name: str, *replacement: Any, **mock: Any) -> Any:
         patcher = patch.object(target, name, *replacement, **mock)
@@ -324,6 +343,107 @@ class PaseoLaunchTestCase(unittest.TestCase):
         orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
         return receipt
 
+    def artifact(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+        """The reference of the handover artifact a launch of ``request`` writes."""
+
+        path = (self.root / "reports" / f"{request.request_id}.handover.txt").as_posix()
+        body = self.prompt.encode("utf-8")
+        return {
+            "path": path,
+            "canonicalPath": path,
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "bytes": len(body),
+        }
+
+    def first_message(self, request: OrcaDispatchRequest) -> str:
+        """What the agent of ``request`` receives: one line naming the artifact, then its content."""
+
+        artifact = self.artifact(request)
+        return (
+            f"AR handover artifact: {artifact['path']} (SHA-256 {artifact['sha256']}). It holds "
+            "everything below this line; read that file again whenever your assignment is no "
+            f"longer in your context.\n{self.prompt}"
+        )
+
+    def watch_launch(self, path: Path, observed: list[tuple[str, Any, Any, bool]]) -> None:
+        """At every runtime call of a launch, record the receipt on disk and whether its artifact is."""
+
+        def watch(command: str, payload: dict[str, Any]) -> None:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            stored = Path(saved["handoverArtifact"]["canonicalPath"]).is_file()
+            observed.append((command, saved, payload, stored))
+
+        self.runtime.observer = watch
+
+    def given_to_agent(
+        self, request: OrcaDispatchRequest, agent_id: str, task_labels: dict[str, str]
+    ) -> tuple[dict[str, Any], str]:
+        """The tool-server definition and the recovery note a launch passes to the runtime."""
+
+        return (
+            self.tool_server(request, agent_id, task_labels),
+            self.recovery_note(request, task_labels),
+        )
+
+    def tool_server(
+        self, request: OrcaDispatchRequest, agent_id: str, task_labels: dict[str, str]
+    ) -> dict[str, Any]:
+        """The one tool server a launch defines: the launching build's, with the agent's binding."""
+
+        references = {
+            REFERENCES[label][0]: json.dumps(
+                {"repository": REPO, "path": REFERENCES[label][2].path}, separators=(",", ":")
+            )
+            for label in task_labels
+        }
+        return {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "agents_remember.mcp", "--config", self.config.config_path.as_posix()],
+            "env": {
+                "PYTHONPATH": self.source.parent.as_posix(),
+                "AR_PASEO_AGENT_ID": agent_id,
+                "AR_ROLE": request.role,
+                "AR_REQUEST_ID": str(request.request_id),
+                "AR_REPORT_PATH": (self.root / "reports" / f"{request.request_id}.md").as_posix(),
+                **references,
+            },
+        }
+
+    def recovery_note(self, request: OrcaDispatchRequest, task_labels: dict[str, str]) -> str:
+        artifact = self.artifact(request)
+        named = [f"{REFERENCES[label][1]} {key}." for label, key in task_labels.items()]
+        return " ".join(
+            [
+                f"AR role agent: {request.role}.",
+                *(named or ["No task reference."]),
+                f"Assignment file: {artifact['path']} (SHA-256 {artifact['sha256']}).",
+                "Reload that file whenever your assignment is not in your context.",
+            ]
+        )
+
+    def assert_applied_is_recorded(
+        self, request: OrcaDispatchRequest, definition: dict[str, Any], note: str
+    ) -> None:
+        """The receipt says what the agent was given: tool server, recovery note, artifact."""
+
+        receipt = self.receipt(request)
+        artifact = self.artifact(request)
+        self.assertEqual(
+            receipt["toolServer"],
+            {
+                "name": "agents-remember-task",
+                "applied": True,
+                "detail": "tool server applied",
+                "command": [definition["command"], *definition["args"]],
+                "environment": definition["env"],
+                "sourceRoot": self.source.as_posix(),
+            },
+        )
+        self.assertEqual(receipt["recoveryNote"], note)
+        self.assertEqual(receipt["handoverArtifact"], artifact)
+        self.assertEqual(Path(artifact["path"]).read_text(encoding="utf-8"), self.prompt)
+
     def receipt_files(self) -> list[str]:
         return sorted(
             path.relative_to(self.root).as_posix()
@@ -366,7 +486,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 f"coordination/tasks/{REPO}/master/notes/reports/paseo-native-executions/",
             ),
         }
-        observed: list[tuple[str, Any, Any]] = []
+        observed: list[tuple[str, Any, Any, bool]] = []
         for role, (folder, title, task_labels, receipt_directory) in expected.items():
             with self.subTest(role):
                 request = self.request(role)
@@ -379,9 +499,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 self.assertEqual(self.enclosures.start_calls, [])
                 self.runtime.calls.clear()
                 path = self.receipt_path(request)
-                self.runtime.observer = lambda command, payload, path=path: observed.append(
-                    (command, json.loads(path.read_text(encoding="utf-8")), payload)
-                )
+                self.watch_launch(path, observed)
 
                 status, public = self.dispatch(request)
 
@@ -389,6 +507,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 opened, created = self.runtime.launch_calls()
                 self.assertEqual(opened, ("workspace-open", {"cwd": folder}))
                 agent_id = created[1]["agentId"]
+                definition, note = self.given_to_agent(request, agent_id, task_labels)
                 self.assertEqual(
                     created,
                     (
@@ -406,7 +525,9 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                                 "ar.request-id": str(request.request_id),
                                 **task_labels,
                             },
-                            "prompt": self.prompt,
+                            "prompt": self.first_message(request),
+                            "systemPrompt": note,
+                            "mcpServers": {"agents-remember-task": definition},
                         },
                     ),
                 )
@@ -428,16 +549,29 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 )
                 self.assertEqual(receipt["workspace"]["path"], folder)
                 self.assertNotIn("replayRequest", receipt)
+                self.assert_applied_is_recorded(request, definition, note)
                 self.assertTrue(
                     path.relative_to(self.root).as_posix().startswith(receipt_directory)
                 )
                 self.runtime.agents.clear()
-        # The receipt was on disk, with the agent id, before each call to the runtime.
+        # The receipt and the artifact were on disk, with the agent id, before each call to the
+        # runtime.
         self.assertEqual(len(observed), 8)
-        for _command, saved, payload in observed:
+        for _command, saved, payload, stored in observed:
             self.assertEqual(saved["status"], "starting")
             self.assertEqual(saved["replayRequest"]["agent"]["agentId"], saved["agentId"])
             self.assertEqual(payload.get("agentId", saved["agentId"]), saved["agentId"])
+            self.assertTrue(stored)
+        # Beside receipts and message bindings a launch writes its artifact and nothing else: no
+        # harness configuration file, in the folders it uses or in the user's home.
+        self.assertEqual(
+            sorted(
+                path.relative_to(self.root).as_posix()
+                for path in self.root.rglob("*")
+                if path.is_file() and "-native-executions" not in path.as_posix()
+            ),
+            sorted({f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}),
+        )
         # One workspace per folder, asked for by directory; AR created the leaf's enclosure.
         self.assertEqual(
             self.runtime.workspaces, {projects: "wks_1", self.enclosures.group.as_posix(): "wks_2"}
@@ -539,6 +673,19 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
             self.assertNotIn("model", created)
             self.assertNotIn("thinkingOptionId", created)
             self.assertEqual(self.receipt(request)["agent"], {"id": "eve", "model": "eve-default"})
+            # The runtime reports that this provider takes no tool servers: the definition is
+            # left out, the receipt says so, and note and artifact line are sent all the same.
+            self.assertNotIn("mcpServers", created)
+            self.assertEqual(
+                self.receipt(request)["toolServer"],
+                {
+                    "name": "agents-remember-task",
+                    "applied": False,
+                    "detail": "tool server not applied: not supported by provider",
+                },
+            )
+            self.assertEqual(created["systemPrompt"], self.receipt(request)["recoveryNote"])
+            self.assertEqual(created["prompt"], self.first_message(request))
             self.assertEqual(
                 (public["canStart"], public["canRetry"], public["canRevive"]), (True, False, False)
             )
@@ -591,7 +738,9 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
                 self.assertEqual((status, public["status"]), (202, "unknown"))
                 self.assertIn(code, public["detail"])
                 self.assertEqual(receipt["replayRequest"]["agent"]["agentId"], receipt["agentId"])
-                self.assertEqual(receipt["replayRequest"]["agent"]["prompt"], self.prompt)
+                self.assertEqual(
+                    receipt["replayRequest"]["agent"]["prompt"], self.first_message(request)
+                )
                 self.assertNotIn("hostAgentExists", receipt)
                 self.assertEqual((public["canStart"], public["canRetry"]), (False, True))
                 self.assertEqual(
@@ -611,12 +760,17 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
         self.runtime.fail("agent-create", "paseo_bridge_timeout")
 
         self.assertEqual(self.dispatch(request)[0], 202)
-        self.assertEqual(self.receipt(request)["replayRequest"]["agent"]["prompt"], self.prompt)
+        receipt = self.receipt(request)
+        self.assertEqual(receipt["replayRequest"]["agent"]["prompt"], self.first_message(request))
+        self.assertEqual(receipt["handoverArtifact"]["bytes"], 300_000)
+        self.assertEqual(
+            Path(receipt["handoverArtifact"]["path"]).read_bytes(), self.prompt.encode("utf-8")
+        )
         status, public = self.dispatch(request)
 
         self.assertEqual((status, public["status"]), (200, "running"))
         first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
-        self.assertEqual(first["prompt"], self.prompt)
+        self.assertEqual(first["prompt"], self.first_message(request))
         self.assertEqual(second, first)
 
 
@@ -774,6 +928,64 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual(
                 [call[0] for call in self.runtime.calls], ["workspace-open", "agent-create"]
             )
+
+    def test_the_handover_artifact_is_written_once_and_a_repeat_reuses_or_refuses_it(self) -> None:
+        with self.subTest("a retry sends the saved message and finds its artifact unchanged"):
+            request = self.request("worker")
+            self.runtime.fail("agent-create", "paseo_bridge_timeout")
+            self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+            artifact = Path(self.artifact(request)["path"])
+            written = artifact.stat()
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
+            self.assertEqual(second, first)
+            self.assertEqual(
+                (artifact.stat().st_ino, artifact.stat().st_mtime_ns),
+                (written.st_ino, written.st_mtime_ns),
+            )
+        with self.subTest("a retry writes a lost artifact again from the saved message"):
+            request = self.request("manager")
+            self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+            self.dispatch(request)
+            artifact = Path(self.artifact(request)["path"])
+            artifact.unlink()
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
+        with self.subTest("a retry refuses an artifact whose content was changed"):
+            request = self.request("orchestrator")
+            self.runtime.fail("agent-create", "paseo_daemon_unreachable")
+            self.dispatch(request)
+            artifact = Path(self.artifact(request)["path"])
+            artifact.write_text("another assignment", encoding="utf-8")
+            saved = self.receipt_path(request).read_bytes()
+            calls = len(self.runtime.calls)
+            error = self.refused(request)
+            self.assertEqual(error.status_code, 409)
+            self.assertIn("different handover content", str(error.detail))
+            self.assertEqual(len(self.runtime.calls), calls)
+            self.assertEqual(self.receipt_path(request).read_bytes(), saved)
+            self.assertEqual(artifact.read_text(encoding="utf-8"), "another assignment")
+        for label, content, launches in (
+            ("the same content is reused", self.prompt, True),
+            ("different content is refused before a receipt", "an earlier compilation", False),
+        ):
+            with self.subTest("an artifact the request already has", case=label):
+                # The process ended after the artifact was written and before the receipt was.
+                request = self.request("architect")
+                artifact = Path(self.artifact(request)["path"])
+                artifact.write_text(content, encoding="utf-8")
+                written = artifact.stat()
+                self.runtime.calls.clear()
+                if launches:
+                    self.assertEqual(self.dispatch(request)[1]["status"], "running")
+                else:
+                    error = self.refused(request)
+                    self.assertEqual(error.status_code, 409)
+                    self.assertIn("different handover content", str(error.detail))
+                    self.assertEqual(self.runtime.launch_calls(), [])
+                    self.assertFalse(self.receipt_path(request).exists())
+                self.assertEqual(artifact.read_text(encoding="utf-8"), content)
+                self.assertEqual(artifact.stat().st_ino, written.st_ino)
 
     def test_a_task_bound_receipt_is_created_exclusively(self) -> None:
         with self.subTest("of many simultaneous creations exactly one succeeds"):

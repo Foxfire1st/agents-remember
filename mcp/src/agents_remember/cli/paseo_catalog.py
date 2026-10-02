@@ -33,6 +33,8 @@ class LauncherCatalog:
 
     origin: str
     agents: tuple[dict[str, Any], ...]
+    # The providers the runtime reports as not accepting tool servers from their host.
+    without_tool_servers: frozenset[str] = frozenset()
 
     def agent(self, agent_id: str) -> dict[str, Any] | None:
         return next((agent for agent in self.agents if agent["id"] == agent_id), None)
@@ -60,7 +62,9 @@ def launcher_catalog(config: McpRuntimeConfig, *, refresh: bool = False) -> Laun
             return cached
         reply = bridge_call(config, "catalog", {"refresh": True} if refresh else {})
         catalog = LauncherCatalog(
-            origin=f"paseo:{uuid.uuid4().hex}", agents=_agents_from_reply(reply)
+            origin=f"paseo:{uuid.uuid4().hex}",
+            agents=_agents_from_reply(reply),
+            without_tool_servers=_providers_without_tool_servers(reply),
         )
         _CATALOGS[scope] = catalog
         return catalog
@@ -140,6 +144,16 @@ def resolve_agent_selection(
     return agent_id, options
 
 
+def provider_accepts_tool_servers(config: McpRuntimeConfig, agent_id: str) -> bool:
+    """Whether the runtime reports that this provider takes tool servers from its host.
+
+    The answer is the cached catalog's, the one the launch was validated against. Only an
+    explicit report of the runtime withholds the tool server from a provider.
+    """
+
+    return agent_id not in launcher_catalog(config).without_tool_servers
+
+
 def _default_agent(
     configured: str | None, harness_order: tuple[str, ...], catalog: LauncherCatalog
 ) -> str | None:
@@ -196,6 +210,16 @@ def _agents_from_reply(reply: dict[str, Any]) -> tuple[dict[str, Any], ...]:
     if not isinstance(providers, list):
         raise _unreadable_catalog()
     return tuple(_agent_row(provider) for provider in providers)
+
+
+def _providers_without_tool_servers(reply: dict[str, Any]) -> frozenset[str]:
+    return frozenset(
+        provider["id"]
+        for provider in reply.get("providers") or []
+        if isinstance(provider, dict)
+        and _is_text(provider.get("id"))
+        and provider.get("acceptsToolServers") is False
+    )
 
 
 def _agent_row(provider: Any) -> dict[str, Any]:

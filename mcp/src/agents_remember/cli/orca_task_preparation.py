@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.orca_task_context import (
     LEAF_ROLES,
@@ -498,8 +499,13 @@ def _compile_handover(
                 "orca skills get orca-cli",
                 "orca skills get orchestration",
             ],
+            "arToolServer": TOOL_SERVER_NAME,
             "arMcpUsage": (
-                "Use the existing shared Agents Remember MCP connection. For a leaf, pass the "
+                f"Use the tool server named {TOOL_SERVER_NAME} for every Agents Remember tool: "
+                "the AR build that launched this session started it for this agent. An AR tool "
+                "server under any other name belongs to another AR installation; do not use it "
+                f"for this assignment. If this session has no tool server named {TOOL_SERVER_NAME}, "
+                "report that instead of substituting another. For a leaf, pass the "
                 "exact arMcpContext.readerArguments; add the requested files list to "
                 "read_ar_files. If either "
                 "installed tool schema lacks the declared task_context fields, stop and report the "

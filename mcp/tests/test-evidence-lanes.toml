@@ -136,6 +136,7 @@ unit-regression = [
   "mcp/tests/test_orca_role_prepare.py",
   "mcp/tests/test_orca_task_routes.py",
   "mcp/tests/test_parked_external_await_separation.py",
+  "mcp/tests/test_paseo_agent_tools.py",
   "mcp/tests/test_paseo_bridge.py",
   "mcp/tests/test_paseo_bridge_agents.py",
   "mcp/tests/test_paseo_catalog.py",
@@ -216,6 +217,7 @@ public-contract = [
 ]
 integration = [
   "mcp/tests/test_orca_handover_binding.py",
+  "mcp/tests/test_paseo_tool_server_start.py",
   "mcp/tests/test_knowledge_citation_boundaries.py",
   "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",

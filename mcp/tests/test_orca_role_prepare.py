@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
-import tempfile
 import threading
 import unittest
 import uuid
@@ -11,11 +9,6 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from agents_remember.cli.orca_handover_artifacts import (
-    MAX_HANDOVER_ARTIFACT_BYTES,
-    read_role_handover_artifact,
-    write_role_handover_artifact,
-)
 from agents_remember.cli.orca_runtime import OrcaRuntimeFailure
 from agents_remember.cli.orca_task_routes import NativeRoleSessionPreparation
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, OrcaRuntimeSettings
@@ -160,39 +153,6 @@ class OrcaRolePrepareTest(unittest.TestCase):
         start.assert_not_called()
         self.assertIn("orcaRuntime.runtimeRoot and orcaRuntime.userDataPath", str(raised.exception))
         self.assertIn("Data-only MCP tools remain available", str(raised.exception))
-
-    def test_task_handover_artifact_is_bounded_immutable_and_report_confined(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            report_path = str(Path(temporary) / "notes" / "reports" / "worker.md")
-            small = {
-                "schema": "ar-orca-prepared-role-handover/v1",
-                "prompt": "x" * 128,
-            }
-            ref = write_role_handover_artifact(report_path, small)
-            self.assertEqual(Path(ref["path"]), Path(report_path).with_suffix(".handover.json"))
-            self.assertEqual(read_role_handover_artifact(report_path, ref), small)
-            self.assertEqual(write_role_handover_artifact(report_path, small), ref)
-            with self.assertRaisesRegex(ValueError, "different handover content"):
-                write_role_handover_artifact(report_path, {"prompt": "different"})
-
-            larger_path = str(Path(temporary) / "notes" / "reports" / "reviewer.md")
-            larger = {
-                "schema": "ar-orca-prepared-role-handover/v1",
-                "prompt": "y" * 64_000,
-            }
-            larger_ref = write_role_handover_artifact(larger_path, larger)
-            self.assertEqual(read_role_handover_artifact(larger_path, larger_ref), larger)
-            oversized = {
-                "schema": "ar-orca-prepared-role-handover/v1",
-                "prompt": "z" * MAX_HANDOVER_ARTIFACT_BYTES,
-            }
-            with self.assertRaisesRegex(ValueError, "size limit"):
-                write_role_handover_artifact(
-                    str(Path(temporary) / "notes" / "reports" / "curator.md"), oversized
-                )
-            self.assertEqual(
-                hashlib.sha256(Path(ref["path"]).read_bytes()).hexdigest(), ref["sha256"]
-            )
 
     def test_registered_tool_offloads_native_preparation_from_mcp_event_loop(self) -> None:
         preparation_threads: list[int] = []

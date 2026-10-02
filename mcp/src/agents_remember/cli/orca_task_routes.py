@@ -23,6 +23,7 @@ from agents_remember.application.orca_task_context import (
     resolve_orca_role_context,
     selection_binding,
 )
+from agents_remember.cli.orca_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.cli.orca_runtime import (
     HOST_CALL_NOT_AVAILABLE,
     OrcaRuntimeFailure,
@@ -71,7 +72,13 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     require_bridge_runtime,
 )
-from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call, mint_agent_id
+from agents_remember.cli.paseo_catalog import provider_accepts_tool_servers
+from agents_remember.cli.paseo_launch import (
+    RoleLaunch,
+    applied_to_agent,
+    build_launch_call,
+    mint_agent_id,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaDispatchRequest,
@@ -356,6 +363,24 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     prepared = role_handover.handover
     # The agent id is chosen here: before the receipt is written and before the runtime is called.
     agent_id = mint_agent_id()
+    # The compiled first message is stored once; what the agent receives names that file first.
+    artifact = write_handover_artifact(prepared["taskReportPath"], prompt)
+    launch_call = build_launch_call(
+        RoleLaunch(
+            agent_id=agent_id,
+            request_id=request.request_id,
+            context=start.context,
+            folder=workspace["path"],
+            provider=provider,
+            session_options=session_options,
+            prompt=first_message(artifact, prompt),
+            report_path=prepared["taskReportPath"],
+            handover_artifact=artifact,
+            settings_file=start.config.config_path,
+            accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
+            replaces_agent_id=start.replaces_agent_id,
+        )
+    )
     receipt: dict[str, Any] = {
         "schema": "ar-orca-native-execution/v1",
         "requestId": str(request.request_id),
@@ -399,18 +424,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             else None
         ),
         "execution": {},
-        "replayRequest": build_launch_call(
-            RoleLaunch(
-                agent_id=agent_id,
-                request_id=request.request_id,
-                context=start.context,
-                folder=workspace["path"],
-                provider=provider,
-                session_options=session_options,
-                prompt=prompt,
-                replaces_agent_id=start.replaces_agent_id,
-            )
-        ),
+        "handoverArtifact": artifact,
+        # What the launch call gives the agent: its tool server, or why none, and the note.
+        **applied_to_agent(launch_call),
+        "replayRequest": launch_call,
         "detail": "The Paseo runtime is creating the AR role agent.",
     }
     if not _create_receipt(start.receipt_path, receipt):

@@ -1,4 +1,7 @@
-"""The bridge's workspace and agent commands: the real script against a fake client package."""
+"""The bridge's workspace and agent commands: the real script against a fake client package.
+
+Also the catalog's report on tool servers, which a launch reads before it creates an agent.
+"""
 
 from __future__ import annotations
 
@@ -82,6 +85,16 @@ import { agents, create, record, scenario } from './daemon-client.js'
 export function createPaseoApi(daemon) {
   return {
     dispose: async () => {},
+    providers: {
+      waitForReady: async () => ({ entries: scenario.entries ?? [] }),
+      listModels: async () => ({ models: [] })
+    },
+    config: {
+      get: async () => {
+        if (scenario.configError) throw new Error(scenario.configError)
+        return { requestId: 'r', config: { providers: scenario.providerEntries ?? {} } }
+      }
+    },
     workspaces: {
       open: async (cwd) => {
         record({ via: 'workspaces.open', cwd })
@@ -228,6 +241,18 @@ class AgentCommandScriptTests(unittest.TestCase):
         self,
     ) -> None:
         labels = {"ar.role": "worker", "ar.request-id": "request-1"}
+        # What the runtime keeps with the agent: the recovery note and the one tool server.
+        kept = {
+            "systemPrompt": "AR role agent: worker.",
+            "mcpServers": {
+                "agents-remember-task": {
+                    "type": "stdio",
+                    "command": "/build/.venv/bin/python",
+                    "args": ["-m", "agents_remember.mcp", "--config", "/settings/ar.json"],
+                    "env": {"AR_PASEO_AGENT_ID": AGENT_ID, "AR_ROLE": "worker"},
+                }
+            },
+        }
         payload: dict[str, Any] = {
             "agentId": AGENT_ID,
             "idempotencyKey": "ar-role-launch:request-1",
@@ -238,6 +263,7 @@ class AgentCommandScriptTests(unittest.TestCase):
             "title": "Worker · 01_LEAF",
             "labels": labels,
             "prompt": "first message",
+            **kept,
         }
         agent = {
             "id": AGENT_ID,
@@ -262,7 +288,7 @@ class AgentCommandScriptTests(unittest.TestCase):
                 {
                     **identity,
                     "labels": labels,
-                    "config": {"provider": "codex/gpt-a", "thinkingOptionId": "low"},
+                    "config": {"provider": "codex/gpt-a", "thinkingOptionId": "low", **kept},
                     "title": "Worker · 01_LEAF",
                 },
             )
@@ -286,6 +312,7 @@ class AgentCommandScriptTests(unittest.TestCase):
                         "provider": "eve",
                         "cwd": "/work/folder",
                         "title": "Worker · 01_LEAF",
+                        **kept,
                     },
                     "workspaceId": "wks_fake",
                 },
@@ -337,6 +364,24 @@ class AgentCommandScriptTests(unittest.TestCase):
             "labels that are not text": (
                 "invalid_bridge_payload",
                 {**payload, "labels": {"ar.role": 7}},
+                {},
+            ),
+            "a system prompt that is not text": (
+                "invalid_bridge_payload",
+                {**payload, "systemPrompt": ["AR role agent"]},
+                {},
+            ),
+            "tool servers that are not definitions by name": (
+                "invalid_bridge_payload",
+                {**payload, "mcpServers": [kept["mcpServers"]["agents-remember-task"]]},
+                {},
+            ),
+            "a tool server without its environment": (
+                "invalid_bridge_payload",
+                {
+                    **payload,
+                    "mcpServers": {"agents-remember-task": {"type": "stdio", "command": "python"}},
+                },
                 {},
             ),
         }
@@ -409,6 +454,46 @@ class AgentCommandScriptTests(unittest.TestCase):
             creation["prompt"],
             {"bytes": 300_000, "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest()},
         )
+        # A payload without a note and tool servers gives the runtime neither.
+        self.assertEqual(creation["options"]["config"], {"provider": "codex/gpt-a"})
+
+    def test_catalog_marks_the_providers_the_runtime_reports_as_taking_no_tool_servers(
+        self,
+    ) -> None:
+        ready = {"status": "ready", "enabled": True}
+        entries = [
+            {"provider": "codex", "label": "Codex", **ready},
+            {"provider": "hermes", "label": "Hermes", **ready},
+            {"provider": "eve", "label": "Eve", **ready},
+        ]
+        # The provider entries of the runtime's configuration, as its configuration call returns
+        # them. Only an entry that declares the option to be false withholds tool servers.
+        declared = {
+            "hermes": {"extends": "acp", "command": ["hermes", "acp"]},
+            "eve": {
+                "extends": "acp",
+                "command": ["eve-launcher"],
+                "env": {"MODEL_KEY": "not passed on"},
+                "options": {"supportsMcpServers": False},
+            },
+        }
+
+        reply = self.call("catalog", {}, entries=entries, providerEntries=declared)
+
+        self.assertEqual(
+            reply["providers"],
+            [
+                {"id": "codex", "label": "Codex", "models": []},
+                {"id": "hermes", "label": "Hermes", "models": []},
+                {"id": "eve", "label": "Eve", "models": [], "acceptsToolServers": False},
+            ],
+        )
+        self.assertNotIn("not passed on", json.dumps(reply))
+        accepted = {"options": {"supportsMcpServers": True}}
+        reply = self.call("catalog", {}, entries=entries, providerEntries={"eve": accepted})
+        self.assertTrue(all("acceptsToolServers" not in row for row in reply["providers"]))
+        refused = self.failure("catalog", {}, entries=entries, configError="config unavailable")
+        self.assertEqual((refused.code, str(refused)), ("paseo_call_failed", "config unavailable"))
 
 
 if __name__ == "__main__":

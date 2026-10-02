@@ -1,57 +1,86 @@
-"""Immutable task-local projections of compiled native Orca role handovers."""
+"""The handover artifact of one launch: the first message as compiled, written once.
+
+Every launch stores the compiled capsule and handover in one file beside the report the agent is
+told to write. The file is never changed: the same request reuses it, and different content for
+the same request is refused. The message an agent actually receives is that content preceded by
+one line that names the file and its SHA-256, so an agent that no longer has its assignment in
+context can read it again.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import shlex
 import stat
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from agents_remember.cli.orca_task_preparation import PreparedOrcaRoleHandover
+# A first message of 300,000 bytes has to launch; this bound only keeps a runaway compilation
+# from being written to a task's report folder.
+MAX_HANDOVER_ARTIFACT_BYTES = 1_048_576
+_ARTIFACT_SUFFIX = ".handover.txt"
 
-MAX_HANDOVER_ARTIFACT_BYTES = 262_144
 
+def write_handover_artifact(report_path: str, content: str) -> dict[str, Any]:
+    """Write or reuse the immutable artifact beside ``report_path`` and return its reference.
 
-def build_role_handover_artifact(
-    role_handover: PreparedOrcaRoleHandover,
-) -> dict[str, Any]:
-    """Combine canonical task handover data with exact Orca terminal inputs."""
+    ``path`` is the artifact as the agent reaches it, next to the report path it was given;
+    ``canonicalPath`` is the same file with every link resolved.
+    """
 
-    prepared = role_handover.handover
-    workspace = role_handover.workspace
-    agent_id = role_handover.agent_id
-    agent_arg_tokens = role_handover.agent_arg_tokens
+    body = content.encode("utf-8")
+    if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
+        raise ValueError("The compiled role handover exceeds the task artifact size limit.")
+    path = Path(report_path).with_suffix(_ARTIFACT_SUFFIX)
+    canonical = path.resolve(strict=False)
+    _write_once(canonical, body)
     return {
-        "schema": "ar-orca-prepared-role-handover/v1",
-        "requestId": str(role_handover.request_id),
-        "prompt": prepared["prompt"],
-        "handover": prepared["handover"],
-        "nativeLaunch": {
-            "agent": agent_id,
-            "target": {"kind": "existing", "worktree": workspace["selector"]},
-            "workspaceSelector": workspace["selector"],
-            "workspacePath": workspace["path"],
-            "sessionOptions": role_handover.session_options,
-            "agentArgs": shlex.join(agent_arg_tokens) if agent_arg_tokens else None,
-        },
+        "path": path.as_posix(),
+        "canonicalPath": canonical.as_posix(),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "bytes": len(body),
     }
 
 
-def write_role_handover_artifact(report_path: str, artifact: dict[str, Any]) -> dict[str, str]:
-    """Write or reuse one bounded, immutable handover beside its canonical task report."""
+def artifact_line(reference: dict[str, Any]) -> str:
+    """The one line that precedes the compiled content in the message an agent receives."""
 
-    path = Path(report_path).with_suffix(".handover.json").resolve(strict=False)
-    body = (
-        json.dumps(artifact, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
-    if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
-        raise ValueError("The compiled role handover exceeds the task artifact size limit.")
+    return (
+        f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It holds "
+        "everything below this line; read that file again whenever your assignment is no longer "
+        "in your context."
+    )
+
+
+def first_message(reference: dict[str, Any], content: str) -> str:
+    """The message sent to the agent: the artifact line, then the content exactly as stored."""
+
+    return f"{artifact_line(reference)}\n{content}"
+
+
+def restore_handover_artifact(reference: dict[str, Any], message: str) -> None:
+    """Before a saved first message is sent again, make sure its artifact still holds it.
+
+    A missing artifact is written again from the saved message; one whose content differs is
+    refused, as on the first write.
+    """
+
+    line, separator, content = message.partition("\n")
+    body = content.encode("utf-8")
+    if (
+        not separator
+        or line != artifact_line(reference)
+        or hashlib.sha256(body).hexdigest() != reference["sha256"]
+    ):
+        raise ValueError("The saved first message does not match its handover artifact reference.")
+    _write_once(Path(reference["canonicalPath"]), body)
+
+
+def _write_once(path: Path, body: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    reference = {"path": path.as_posix(), "sha256": hashlib.sha256(body).hexdigest()}
+    if _matches(path, body):
+        return
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -61,40 +90,10 @@ def write_role_handover_artifact(report_path: str, artifact: dict[str, Any]) -> 
         try:
             os.link(temporary, path, follow_symlinks=False)
         except FileExistsError:
-            if not _matches(path, body):
-                raise ValueError(
-                    "This role request already has different handover content."
-                ) from None
+            # Another launch of the same request wrote it in the meantime.
+            _matches(path, body)
     finally:
         Path(temporary).unlink(missing_ok=True)
-    return reference
-
-
-def read_role_handover_artifact(report_path: str, reference: dict[str, str]) -> dict[str, Any]:
-    """Read one task-local handover only after checking its path and raw-byte digest."""
-
-    expected = Path(report_path).with_suffix(".handover.json").resolve(strict=False)
-    path = Path(reference["path"]).resolve(strict=False)
-    if path != expected:
-        raise ValueError("The saved handover projection does not match its canonical task report.")
-    try:
-        mode = path.lstat().st_mode
-    except OSError as error:
-        raise ValueError("The saved native handover artifact is unavailable.") from error
-    if not stat.S_ISREG(mode):
-        raise ValueError("The saved native handover artifact is not a regular file.")
-    body = path.read_bytes()
-    if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
-        raise ValueError("The saved native handover artifact exceeds the size limit.")
-    if hashlib.sha256(body).hexdigest() != reference["sha256"]:
-        raise ValueError("The saved native handover artifact failed its SHA-256 check.")
-    artifact = json.loads(body)
-    if (
-        not isinstance(artifact, dict)
-        or artifact.get("schema") != "ar-orca-prepared-role-handover/v1"
-    ):
-        raise ValueError("The saved native handover artifact has an unsupported schema.")
-    return artifact
 
 
 def _matches(path: Path, expected: bytes) -> bool:
@@ -104,4 +103,6 @@ def _matches(path: Path, expected: bytes) -> bool:
         return False
     if not stat.S_ISREG(mode):
         raise ValueError("The task handover artifact path is not a regular file.")
-    return path.read_bytes() == expected
+    if path.read_bytes() != expected:
+        raise ValueError("This role request already has different handover content.")
+    return True
