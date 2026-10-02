@@ -16,7 +16,8 @@
 //            The providers the runtime reports as ready and enabled, each with the models and
 //            thinking options the runtime lists for it. `refresh` asks the runtime to rediscover
 //            its providers first. A provider whose model listing fails keeps its row, with no
-//            models and the runtime's error text.
+//            models and the runtime's error text; so does a provider the runtime is still
+//            discovering when the discovery time is up, provided another provider is ready.
 //
 //   runtime-info  {}
 //            -> {serverId}
@@ -95,6 +96,11 @@ const CLOSE_TIMEOUT_MS = 1000
 const LISTING_RESERVE_MS = 10000
 const REPLY_RESERVE_MS = 2000
 const MESSAGE_LIMIT = 800
+// Standard output carries the reply and nothing else: the client's log lines, and anything a
+// command or a package prints through the console, go to standard error.
+const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
+const STILL_LOADING = Symbol('providers still loading')
+console.log = console.info = console.debug = console.error
 
 await main()
 
@@ -109,9 +115,9 @@ async function main() {
         `The Paseo bridge has no ${JSON.stringify(command ?? '')} command.`
       )
     }
-    const payload = await readPayload()
     const result = await within(
       (async () => {
+        const payload = await readPayload()
         connection.current = await connect(deadline)
         return await COMMANDS[command]({ ...connection.current, deadline }, payload)
       })(),
@@ -132,19 +138,31 @@ async function readCatalog({ api, daemon, deadline }, input) {
   const remaining = deadline - Date.now()
   const discoveryDeadline = deadline - Math.min(LISTING_RESERVE_MS, remaining / 5)
   const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
-  const snapshot = await within(
-    (async () => {
-      if (input.refresh === true) await api.providers.refresh()
-      return await api.providers.waitForReady({ timeoutMs: Math.max(1, deadline - Date.now()) })
-    })(),
+  const discoveryTimeout = () =>
+    failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
+  if (input.refresh === true) await within(api.providers.refresh(), discoveryDeadline, discoveryTimeout)
+  // waitForReady answers once no provider is loading. When the discovery time is up first, the
+  // providers that are ready are still returned, as long as there is one.
+  const settled = await within(
+    api.providers.waitForReady({ timeoutMs: Math.max(1, deadline - Date.now()) }),
     discoveryDeadline,
-    () => failure('paseo_bridge_timeout', 'The Paseo runtime did not finish provider discovery in time.')
+    () => STILL_LOADING
+  ).catch((error) => {
+    if (error !== STILL_LOADING) throw error
+    return null
+  })
+  const snapshot = settled ?? (await api.providers.snapshot())
+  const enabled = (Array.isArray(snapshot?.entries) ? snapshot.entries : []).filter(
+    (entry) => typeof entry?.provider === 'string' && entry.enabled === true
   )
-  const offered = (Array.isArray(snapshot?.entries) ? snapshot.entries : []).filter(
-    (entry) => typeof entry?.provider === 'string' && entry.status === 'ready' && entry.enabled === true
-  )
+  const ready = enabled.some((entry) => entry.status === 'ready')
+  if (!ready && enabled.some((entry) => entry.status === 'loading')) throw discoveryTimeout()
   const providers = await Promise.all(
-    offered.map((entry) => listProvider(api, entry, listingDeadline))
+    enabled
+      .filter((entry) => entry.status === 'ready' || entry.status === 'loading')
+      .map((entry) =>
+        entry.status === 'ready' ? listProvider(api, entry, listingDeadline) : stillLoading(entry)
+      )
   )
   if (daemon.getConnectionState().status !== 'connected') {
     throw failure('paseo_daemon_unreachable', 'The connection to the Paseo daemon was lost while reading the catalog.')
@@ -153,6 +171,15 @@ async function readCatalog({ api, daemon, deadline }, input) {
   return {
     runtime: { serverId: info.serverId, version: typeof info.version === 'string' ? info.version : null },
     providers
+  }
+}
+
+function stillLoading(entry) {
+  return {
+    id: entry.provider,
+    label: nonEmpty(entry.label) ?? entry.provider,
+    models: [],
+    listingError: 'the runtime was still listing the models of this provider when the call ended'
   }
 }
 
@@ -384,6 +411,7 @@ async function connect(deadline) {
     clientType: 'cli',
     ...(nonEmpty(process.env.AR_PASEO_VERSION) ? { appVersion: process.env.AR_PASEO_VERSION } : {}),
     reconnect: { enabled: false },
+    logger: STDERR_LOGGER,
     connectTimeoutMs: Math.max(1, Math.min(CONNECT_TIMEOUT_MS, deadline - Date.now()))
   })
   try {
@@ -450,6 +478,10 @@ async function finish(exitCode, reply, connection) {
   }
   // Exit from the write callback: an abandoned call may still hold the socket open.
   process.stdout.write(JSON.stringify(reply), () => process.exit(exitCode))
+}
+
+function logToStderr(fields, message) {
+  console.error(message ?? '', fields ?? '')
 }
 
 function failure(code, message) {
