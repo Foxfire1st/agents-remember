@@ -30,59 +30,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_SCRIPT = REPO_ROOT / "mcp/src/agents_remember/cli/paseo_bridge.mjs"
 SERVER_ID = "srv_configured"
 
-# The only files that may start a Paseo program or import a Paseo package (PNT-R02 item 1).
-BRIDGE_FILES = {
-    "mcp/src/agents_remember/cli/paseo_bridge.py",
-    "mcp/src/agents_remember/cli/paseo_bridge.mjs",
-}
-RUNTIME_COMMAND_FILES = {
-    "mcp/src/agents_remember/cli/paseo_command.py",
-    "mcp/src/agents_remember/cli/paseo_daemon.py",
-    "mcp/src/agents_remember/cli/paseo_plugin_files.py",
-    "mcp/src/agents_remember/cli/paseo_provision.py",
-    "mcp/src/agents_remember/cli/paseo_runtime.py",
-}
-PLUGIN_DIRECTORY = "mcp/src/agents_remember/package_data/paseo_plugin/"
-CODE_SUFFIXES = {".py", ".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".sh"}
-MANIFEST_NAMES = {"package.json", "pyproject.toml", "requirements.txt"}
-TEST_PATHS = re.compile(r"(^|/)(tests|e2e|__tests__)/|\.test\.[cm]?[jt]sx?$|(^|/)test_[^/]+\.py$")
-
-PASEO_PACKAGE = re.compile(r"@getpaseo/")
-PASEO_PROGRAM = re.compile(
-    r"\.bin[/\\\"', ]+paseo\b"
-    r"|which\(\s*[\"']paseo[\"']"
-    r"|\[\s*f?[\"']paseo[\"']\s*,"
-    r"|\b(?:run|Popen|call|check_call|check_output|system|popen)\(\s*f?[\"']paseo\b"
-    r"|\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(\s*[\"'`]paseo\b"
-    r"|\b(?:npx|bunx|npm exec|pnpm dlx)\s+(?:-\S+\s+)*(?:@getpaseo/\S+|paseo)\b"
-)
-BRIDGE_SCRIPT_NAME = re.compile(r"paseo_bridge\.mjs")
-COMMAND_LINE_IMPORT = re.compile(
-    r"from\s+agents_remember\.cli\.paseo_command\s+import\s+(\([^)]*\)|[^\n]+)"
-    r"|(import\s+agents_remember\.cli\.paseo_command\b)"
-    r"|(from\s+agents_remember\.cli\s+import\s+[^\n]*\bpaseo_command\b)"
-)
-COMMAND_LINE_STARTERS = {"PaseoCli", "run_command"}
-
-
-def second_paths_to_paseo(path: str, text: str) -> list[str]:
-    """Why a source file outside the bridge and the runtime commands reaches Paseo itself."""
-
-    found = []
-    if PASEO_PACKAGE.search(text):
-        found.append("names a Paseo package")
-    if Path(path).name in MANIFEST_NAMES:
-        return found
-    if PASEO_PROGRAM.search(text):
-        found.append("starts the Paseo command line")
-    if BRIDGE_SCRIPT_NAME.search(text):
-        found.append("names the bridge script")
-    for match in COMMAND_LINE_IMPORT.finditer(text):
-        names = set(re.findall(r"\w+", match.group(1) or ""))
-        if match.group(2) or match.group(3) or names & COMMAND_LINE_STARTERS:
-            found.append("imports the Paseo command-line runner")
-    return found
-
 
 def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
     block: dict[str, Any] = {
@@ -180,8 +127,8 @@ class BridgeProcessTests(unittest.TestCase):
         )
 
     def test_every_failure_of_a_call_is_named(self) -> None:
-        def reply(returncode: int, stdout: str) -> SimpleNamespace:
-            return SimpleNamespace(returncode=returncode, stdout=stdout)
+        def reply(returncode: int, stdout: str, stderr: str = "") -> SimpleNamespace:
+            return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
         refused = {"ok": False, "error": {"code": "paseo_daemon_unreachable", "message": "down"}}
         outcomes: dict[str, tuple[Any, str]] = {
@@ -213,6 +160,18 @@ class BridgeProcessTests(unittest.TestCase):
                 bridge_call(config, "catalog", {})
             self.assertEqual(raised.exception.code, "paseo_bridge_unavailable")
             run.assert_not_called()
+
+            crashed = reply(1, "", stderr="at frame\n" * 400 + "TypeError: boom\n")
+            with (
+                self.subTest("a crash keeps the end of its standard error"),
+                patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                patch.object(paseo_bridge.subprocess, "run", return_value=crashed),
+                self.assertRaises(PaseoBridgeFailure) as raised,
+            ):
+                bridge_call(config, "catalog", {})
+            self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
+            self.assertTrue(str(raised.exception).endswith("TypeError: boom"))
+            self.assertLessEqual(len(str(raised.exception)), 300)
 
     def test_a_call_that_does_not_end_is_stopped_and_reported_as_a_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -249,6 +208,12 @@ export const scenario = JSON.parse(readFileSync(process.env.FAKE_PASEO_SCENARIO,
 export class DaemonClient {
   constructor(config) { this.config = config; this.state = { status: 'idle' } }
   async connect() {
+    // Like the real client: log lines go to the given logger and, without one, to standard output.
+    const logger = this.config.logger ?? { info: (_fields, line) => process.stdout.write(line + '\\n') }
+    logger.info({ url: this.config.url }, 'connecting')
+    console.log('a line a package prints through the console')
+    if (scenario.connect === 'hang') await new Promise(() => {})
+    if (this.config.reconnect?.enabled !== false) throw new Error('the bridge must not reconnect')
     if (scenario.connectError) throw new Error(scenario.connectError)
     if (this.config.url !== scenario.url) throw new Error('unexpected url ' + this.config.url)
     this.state = { status: 'connected' }
@@ -267,9 +232,12 @@ export function createPaseoApi(daemon) {
     dispose: async () => {},
     providers: {
       refresh: async () => { refreshed = true; return { acknowledged: true } },
+      snapshot: async () => ({ entries: refreshed ? scenario.refreshedEntries : scenario.entries }),
+      // Like the real client: no answer while a provider is still loading.
       waitForReady: async () => {
-        if (scenario.discovery === 'hang') await never()
-        return { entries: refreshed ? scenario.refreshedEntries : scenario.entries }
+        const entries = refreshed ? scenario.refreshedEntries : scenario.entries
+        if (entries.some((entry) => entry.status === 'loading')) await never()
+        return { entries }
       },
       listModels: async (provider) => {
         const listing = scenario.models[provider]
@@ -339,6 +307,7 @@ class BridgeScriptTests(unittest.TestCase):
                         "metadata": {"internal": 1},
                     },
                     {"id": "gpt-b"},
+                    {"id": "gpt-c", "thinkingOptions": [{"id": "low"}, {"id": "high"}]},
                 ]
             },
             "eve": {"models": []},
@@ -364,7 +333,18 @@ class BridgeScriptTests(unittest.TestCase):
 
         self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": "0.11.0-beta.2"})
         providers = {row["id"]: row for row in reply["providers"]}
-        self.assertEqual(list(providers), ["codex", "eve", "pi", "hermes", "claude"])
+        self.assertEqual(list(providers), ["codex", "eve", "pi", "hermes", "claude", "slow"])
+        self.assertEqual(
+            providers["slow"],
+            {
+                "id": "slow",
+                "label": "Slow",
+                "models": [],
+                "listingError": (
+                    "the runtime was still listing the models of this provider when the call ended"
+                ),
+            },
+        )
         self.assertEqual(
             providers["codex"],
             {
@@ -380,6 +360,11 @@ class BridgeScriptTests(unittest.TestCase):
                         "defaultEffort": "high",
                     },
                     {"id": "gpt-b", "label": "gpt-b", "efforts": []},
+                    {
+                        "id": "gpt-c",
+                        "label": "gpt-c",
+                        "efforts": [{"id": "low", "label": "low"}, {"id": "high", "label": "high"}],
+                    },
                 ],
             },
         )
@@ -405,107 +390,81 @@ class BridgeScriptTests(unittest.TestCase):
 
     def test_script_failures_are_named_and_another_daemon_is_refused(self) -> None:
         healthy: dict[str, Any] = {"entries": [entry("codex")], "models": {"codex": {"models": []}}}
-        cases: dict[str, tuple[str, dict[str, Any]]] = {
-            "paseo_runtime_mismatch": ("catalog", {**healthy, "serverId": "srv_other_home"}),
-            "paseo_daemon_unreachable": ("catalog", {**healthy, "connectError": "ECONNREFUSED"}),
-            "paseo_bridge_timeout": ("catalog", {**healthy, "discovery": "hang"}),
-            "unsupported_bridge_command": ("workspaces", healthy),
+        nothing_ready = [entry("codex", "loading"), entry("omp", "ready", enabled=False)]
+        cases: dict[str, tuple[str, str, dict[str, Any]]] = {
+            "another home's daemon": (
+                "paseo_runtime_mismatch",
+                "catalog",
+                {**healthy, "serverId": "srv_other_home"},
+            ),
+            "a daemon without a server id": (
+                "paseo_runtime_mismatch",
+                "catalog",
+                {**healthy, "serverId": None},
+            ),
+            "connection refused": (
+                "paseo_daemon_unreachable",
+                "catalog",
+                {**healthy, "connectError": "ECONNREFUSED"},
+            ),
+            "connecting never answers": (
+                "paseo_bridge_timeout",
+                "catalog",
+                {**healthy, "connect": "hang"},
+            ),
+            "no provider ready when the discovery time is up": (
+                "paseo_bridge_timeout",
+                "catalog",
+                {**healthy, "entries": nothing_ready},
+            ),
+            "unknown command": ("unsupported_bridge_command", "workspaces", healthy),
         }
-        for code, (command, scenario) in cases.items():
-            with self.subTest(code):
+        for label, (code, command, scenario) in cases.items():
+            with self.subTest(label):
+                started = time.monotonic()
                 self.assertEqual(self.refusal(command, **scenario), code)
+                # The script's own budget (1.5 s here) ends the call, not the 60-second stop.
+                self.assertLess(time.monotonic() - started, 5)
+        with self.subTest("a payload that never arrives is inside the deadline"):
+            settings = self.config.paseo_runtime
+            assert settings is not None
+            environment = {
+                **paseo_bridge._bridge_environment(settings),
+                "AR_PASEO_DEADLINE_MS": "300",
+            }
+            with subprocess.Popen(
+                ["node", BRIDGE_SCRIPT.as_posix(), "catalog"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                env=environment,
+            ) as script:
+                try:
+                    status = script.wait(5)
+                except subprocess.TimeoutExpired:
+                    script.kill()
+                    self.fail("the script waited for its payload past its deadline")
+                assert script.stdout is not None
+                reply = json.loads(script.stdout.read())
+            self.assertEqual((status, reply["error"]["code"]), (1, "paseo_bridge_timeout"))
         with self.subTest("connection lost while listing"):
             self.assertEqual(
                 self.refusal(**healthy, connectionLost=True), "paseo_daemon_unreachable"
             )
+        with self.subTest("client package resolved outside the install prefix"):
+            modules = self.root / "prefix" / "node_modules"
+            modules.rename(self.root / "another-install")
+            modules.symlink_to(self.root / "another-install", target_is_directory=True)
+            self.assertEqual(self.refusal(**healthy), "paseo_client_unavailable")
+            modules.unlink()
+            (self.root / "another-install").rename(modules)
+            self.assertEqual(self.call("catalog", {}, **healthy)["providers"][0]["id"], "codex")
         with self.subTest("client package missing from the prefix"):
             shutil.rmtree(self.root / "prefix" / "node_modules")
             self.assertEqual(self.refusal(**healthy), "paseo_client_unavailable")
 
 
-class SinglePathTests(unittest.TestCase):
-    def test_only_the_bridge_and_the_runtime_commands_reach_paseo(self) -> None:
-        listed = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.split("\0")
-        allowed = BRIDGE_FILES | RUNTIME_COMMAND_FILES
-        sources = [
-            path
-            for path in listed
-            if path
-            and (Path(path).suffix in CODE_SUFFIXES or Path(path).name in MANIFEST_NAMES)
-            and not TEST_PATHS.search(path)
-            and path not in allowed
-            and not path.startswith(PLUGIN_DIRECTORY)
-            and (REPO_ROOT / path).is_file()
-        ]
-        self.assertGreater(
-            len(sources), 500, "the source scan found too few files to mean anything"
-        )
-        self.assertTrue(allowed <= set(listed), "an allowed Paseo boundary file no longer exists")
-        offenders = {
-            path: reasons
-            for path in sources
-            if (
-                reasons := second_paths_to_paseo(
-                    path, (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace")
-                )
-            )
-        }
-        self.assertEqual(offenders, {})
-
-    def test_the_scan_catches_each_kind_of_second_path(self) -> None:
-        second_paths = {
-            'import { createPaseoClient } from "@getpaseo/client"': "names a Paseo package",
-            'await import(prefix + "/node_modules/@getpaseo/client/dist/index.js")': (
-                "names a Paseo package"
-            ),
-            'subprocess.run([prefix / "node_modules/.bin/paseo", "provider", "models"])': (
-                "starts the Paseo command line"
-            ),
-            'executable = prefix / "node_modules" / ".bin" / "paseo"': (
-                "starts the Paseo command line"
-            ),
-            'subprocess.run(["paseo", "provider", "ls", "--json"])': (
-                "starts the Paseo command line"
-            ),
-            'cli = shutil.which("paseo")': "starts the Paseo command line",
-            'os.system("paseo daemon status")': "starts the Paseo command line",
-            'spawn("paseo", ["run", prompt])': "starts the Paseo command line",
-            "npx @getpaseo/cli provider ls": "names a Paseo package",
-            'script = Path(__file__).with_name("paseo_bridge.mjs")': "names the bridge script",
-            "from agents_remember.cli.paseo_command import PaseoCli": (
-                "imports the Paseo command-line runner"
-            ),
-            "from agents_remember.cli.paseo_command import (\n    PaseoRuntimeFailure,\n"
-            "    run_command,\n)": "imports the Paseo command-line runner",
-            "from agents_remember.cli import paseo_command": (
-                "imports the Paseo command-line runner"
-            ),
-        }
-        for text, reason in second_paths.items():
-            with self.subTest(text):
-                self.assertIn(reason, second_paths_to_paseo("mcp/src/agents_remember/x.py", text))
-        self.assertEqual(
-            second_paths_to_paseo("dashboard/package.json", '"@getpaseo/client": "0.11.0-beta.2"'),
-            ["names a Paseo package"],
-        )
-        allowed_uses = (
-            "from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call",
-            "from agents_remember.cli.paseo_command import PaseoRuntimeFailure",
-            "from agents_remember.cli.paseo_provision import provision_runtime",
-            'paseo = sub.add_parser(\n    "paseo",\n    help="Paseo runtime")',
-            'argv = [sys.executable, "-m", "agents_remember.cli", "paseo", "provision"]',
-            'receipt["execution"] = {"kind": "paseo-agent", "agentId": agent_id}',
-            'reply = bridge_call(config, "catalog", {})',
-        )
-        for text in allowed_uses:
-            with self.subTest(text):
-                self.assertEqual(second_paths_to_paseo("mcp/src/agents_remember/x.py", text), [])
+class BridgeScriptHeaderTests(unittest.TestCase):
+    """The header of the script is its contract; the single-path scan is test_paseo_single_path.py."""
 
     def test_the_script_lists_every_command_and_non_public_entry_point_it_uses(self) -> None:
         script = BRIDGE_SCRIPT.read_text(encoding="utf-8")
