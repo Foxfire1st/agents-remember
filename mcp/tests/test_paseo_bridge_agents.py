@@ -125,6 +125,15 @@ export function createPaseoApi(daemon) {
         },
         archive: async () => {
           record({ via: 'archive', id })
+          if (scenario.archiveError) {
+            // Another caller got there first: by the time this call fails, the agent is
+            // archived, or gone, or (for any other error) still live.
+            if (scenario.afterArchiveError === 'archived') {
+              agents.get(id).archivedAt = '2026-10-02T00:59:00.000Z'
+            }
+            if (scenario.afterArchiveError === 'gone') agents.delete(id)
+            throw new Error(scenario.archiveError)
+          }
           agents.get(id).archivedAt = '2026-10-02T01:00:00.000Z'
           return { archivedAt: agents.get(id).archivedAt }
         }
@@ -384,6 +393,44 @@ class AgentCommandScriptTests(unittest.TestCase):
             reply = self.call("agent-archive", {"agentId": MISSING_AGENT_ID}, agents=agents)
             self.assertEqual((reply["found"], reply["archived"]), (False, False))
             self.assertEqual(self.recorded(), [])
+        racing = "Request failed: Unknown agent requestType=archive_agent_request"
+        with self.subTest("another caller archives the agent at the same moment"):
+            reply = self.call(
+                "agent-archive",
+                {"agentId": AGENT_ID},
+                agents=agents,
+                archiveError=racing,
+                afterArchiveError="archived",
+            )
+            self.assertEqual(
+                reply,
+                {
+                    "serverId": SERVER_ID,
+                    "agentId": AGENT_ID,
+                    "found": True,
+                    "archived": True,
+                    "alreadyArchived": True,
+                    "archivedAt": "2026-10-02T00:59:00.000Z",
+                },
+            )
+            self.assertEqual(self.recorded(), [{"via": "archive", "id": AGENT_ID}])
+        with self.subTest("the agent is gone when the archive fails"):
+            reply = self.call(
+                "agent-archive",
+                {"agentId": AGENT_ID},
+                agents=agents,
+                archiveError=racing,
+                afterArchiveError="gone",
+            )
+            self.assertEqual(
+                reply,
+                {"serverId": SERVER_ID, "agentId": AGENT_ID, "found": False, "archived": False},
+            )
+        with self.subTest("the archive fails and the agent is still live"):
+            failure = self.failure(
+                "agent-archive", {"agentId": AGENT_ID}, agents=agents, archiveError="disk is full"
+            )
+            self.assertEqual((failure.code, str(failure)), ("paseo_call_failed", "disk is full"))
 
     def test_a_300_000_byte_first_message_reaches_the_client_as_data(self) -> None:
         # More than twice what one command-line argument can carry (131,072 bytes on Linux).
