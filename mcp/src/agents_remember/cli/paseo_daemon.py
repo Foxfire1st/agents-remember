@@ -31,8 +31,7 @@ def is_running(status: dict[str, Any]) -> bool:
 
 def plugin_entry(cli: PaseoCli, step: str) -> dict[str, Any] | None:
     """Paseo's record of the AR plugin on the running daemon; ``None`` when not installed."""
-    entries = cli.json(step, "plugin", "ls", "--json")
-    for entry in entries if isinstance(entries, list) else []:
+    for entry in cli.json(step, "plugin", "ls", "--json", expect=list):
         if isinstance(entry, dict) and entry.get("id") == PLUGIN_ID:
             return entry
     return None
@@ -68,6 +67,7 @@ def runtime_status(
         "providers": [
             {key: provider.get(key) for key in ("provider", "available", "error")}
             for provider in status.get("providers") or []
+            if isinstance(provider, dict)
         ],
     }
 
@@ -117,5 +117,4 @@ def _home_record(cli: PaseoCli, step: str, args: Sequence[str]) -> dict[str, Any
         return None
     if result.returncode != 0:
         raise command_failure(step, args, result)
-    record = parse_json_output(step, args, result)
-    return record if isinstance(record, dict) else {}
+    return parse_json_output(step, args, result)
