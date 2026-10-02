@@ -697,8 +697,13 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
             agents[saved["agentId"]]["prompt"], saved["replayRequest"]["agent"]["prompt"]
         )
         # A further repeat finds the launch resolved: it starts nothing and reads the agent once.
+        # Its answer is the second one; only what the read wrote differs.
         self.assertEqual((third_status, third["status"]), (200, "running"))
-        self.assertEqual(third["execution"], second["execution"])
+        written_by_the_read = {"detail", "updatedAt"}
+        self.assertEqual(
+            {key: value for key, value in third.items() if key not in written_by_the_read},
+            {key: value for key, value in second.items() if key not in written_by_the_read},
+        )
         self.assertEqual(reads, [saved["agentId"]])
         self.assertEqual(list(agents), [saved["agentId"]])
 

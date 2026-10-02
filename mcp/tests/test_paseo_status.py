@@ -623,6 +623,27 @@ class RefreshTests(StatusTestCase):
         self.assertFalse((self.receipt_path(previous).parent / "history").exists())
         self.assertEqual(sorted((bindings / "message-bindings").glob("*.json")), binding_files)
         self.assertEqual(len(self.runtime.agents), 1)
+        with self.subTest("a repeat of the saved request still converges on its execution"):
+            # The refusal is for a new request id only: the saved one is answered as last known.
+            self.runtime.calls.clear()
+            self.runtime.fail(
+                "agent-state", "paseo_bridge_timeout", "The bridge call ran out of time."
+            )
+
+            status, repeated = self.dispatch(previous)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(
+                repeated,
+                {
+                    **orca_task_receipts._public_execution(self.receipt(previous)),
+                    "hostUnreachable": True,
+                    "hostUnreachableReason": "paseo_bridge_timeout: The bridge call ran out of time.",
+                },
+            )
+            self.assertEqual(repeated["status"], "completed")
+            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertEqual(self.saved(previous), saved)
         with self.subTest("once the host answers, the rule is applied to what the agent is doing"):
             error = self.refused(self.request("worker"))
             self.assertIn("status running", str(error.detail))
