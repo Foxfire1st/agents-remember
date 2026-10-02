@@ -123,6 +123,23 @@ class McpConfigTests(unittest.TestCase):
             self.assertEqual(configured.embed_payload(), block["embed"])
             self.assertEqual(require_paseo_runtime(configured, source=path), configured)
 
+            # The spellings a browser itself reports are kept as written.
+            canonical = [
+                {"dashboardOrigin": origin, "frameBaseUrl": "http://127.0.0.1:6820"}
+                for origin in (
+                    "http://127.0.0.1:9797",
+                    "http://localhost:9797",
+                    "http://[::1]:9797",
+                    "http://[::ffff:7f00:1]:9797",
+                    "http://[2001:db8::1:0:0:1]",
+                    "https://xn--bcher-kva.example",
+                )
+            ]
+            payload["paseoRuntime"] = {**block, "embed": canonical}
+            write_json(path, payload)
+            kept = require_paseo_runtime(load_config(path).paseo_runtime, source=path)
+            self.assertEqual(kept.embed_payload(), canonical)
+
             payload["paseoRuntime"] = {**block, "providers": {}, "embed": []}
             write_json(path, payload)
             self.assertEqual(load_paseo_runtime_settings(path), load_config(path).paseo_runtime)
@@ -188,6 +205,17 @@ class McpConfigTests(unittest.TestCase):
                     "http://localhost:80",
                     "https://fox.example.ts.net:443",
                     "http://b\u00fccher.example",
+                    "http://[0:0:0:0:0:0:0:1]:9797",
+                    "http://[::ffff:127.0.0.1]:9797",
+                    "http://[::A]:9797",
+                    "http://[fe80::1%25eth0]:9797",
+                    "http://127.1:9797",
+                    "http://0x7f.0.0.1:9797",
+                    "http://2130706433:9797",
+                    "http://127.0.0.01:9797",
+                    "http://a%41:9797",
+                    "http://a b:9797",
+                    "http://ex_ample:9797",
                 )
             ]
             for candidate, message in invalid:
