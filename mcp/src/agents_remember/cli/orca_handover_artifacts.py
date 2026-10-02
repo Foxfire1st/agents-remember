@@ -1,10 +1,10 @@
 """The handover artifact of one launch: the first message as compiled, written once.
 
 Every launch stores the compiled capsule and handover in one file beside the report the agent is
-told to write. The file is never changed: the same request reuses it, and different content for
-the same request is refused. The message an agent actually receives is that content preceded by
-one line that names the file and its SHA-256, so an agent that no longer has its assignment in
-context can read it again.
+told to write. The file is never changed: it is created read-only, the same request reuses it, and
+different content for the same request is refused. The message an agent actually receives is that
+content preceded by one line that names the file and its SHA-256, so an agent that no longer has
+its assignment in context can read it again.
 """
 
 from __future__ import annotations
@@ -20,20 +20,22 @@ from typing import Any
 # from being written to a task's report folder.
 MAX_HANDOVER_ARTIFACT_BYTES = 1_048_576
 _ARTIFACT_SUFFIX = ".handover.txt"
+# Nobody writes the file after it was created, the agent it is for included.
+_ARTIFACT_MODE = 0o444
 
 
 def write_handover_artifact(report_path: str, content: str) -> dict[str, Any]:
     """Write or reuse the immutable artifact beside ``report_path`` and return its reference.
 
     ``path`` is the artifact as the agent reaches it, next to the report path it was given;
-    ``canonicalPath`` is the same file with every link resolved.
+    ``canonicalPath`` is the same file with every link of its folder resolved.
     """
 
     body = content.encode("utf-8")
     if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
         raise ValueError("The compiled role handover exceeds the task artifact size limit.")
     path = Path(report_path).with_suffix(_ARTIFACT_SUFFIX)
-    canonical = path.resolve(strict=False)
+    canonical = _canonical(path)
     _write_once(canonical, body)
     return {
         "path": path.as_posix(),
@@ -63,18 +65,27 @@ def restore_handover_artifact(reference: dict[str, Any], message: str) -> None:
     """Before a saved first message is sent again, make sure its artifact still holds it.
 
     A missing artifact is written again from the saved message; one whose content differs is
-    refused, as on the first write.
+    refused, as on the first write. The file is the one the reference's own ``path`` leads to,
+    and no other.
     """
 
     line, separator, content = message.partition("\n")
     body = content.encode("utf-8")
+    canonical = _canonical(Path(reference["path"]))
     if (
         not separator
         or line != artifact_line(reference)
         or hashlib.sha256(body).hexdigest() != reference["sha256"]
+        or canonical.as_posix() != reference["canonicalPath"]
     ):
         raise ValueError("The saved first message does not match its handover artifact reference.")
-    _write_once(Path(reference["canonicalPath"]), body)
+    _write_once(canonical, body)
+
+
+def _canonical(path: Path) -> Path:
+    """The artifact's own name in its resolved folder; a link at that name is never followed."""
+
+    return path.parent.resolve(strict=False) / path.name
 
 
 def _write_once(path: Path, body: bytes) -> None:
@@ -86,6 +97,7 @@ def _write_once(path: Path, body: bytes) -> None:
         with os.fdopen(fd, "wb") as stream:
             stream.write(body)
             stream.flush()
+            os.fchmod(stream.fileno(), _ARTIFACT_MODE)
             os.fsync(stream.fileno())
         try:
             os.link(temporary, path, follow_symlinks=False)
@@ -104,5 +116,8 @@ def _matches(path: Path, expected: bytes) -> bool:
     if not stat.S_ISREG(mode):
         raise ValueError("The task handover artifact path is not a regular file.")
     if path.read_bytes() != expected:
-        raise ValueError("This role request already has different handover content.")
+        raise ValueError(
+            f"This role request already has different handover content in {path}. That file is "
+            "never changed; start the role again under a new request id."
+        )
     return True

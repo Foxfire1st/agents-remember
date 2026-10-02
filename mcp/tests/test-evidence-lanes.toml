@@ -141,6 +141,7 @@ unit-regression = [
   "mcp/tests/test_paseo_bridge_agents.py",
   "mcp/tests/test_paseo_catalog.py",
   "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_tools.py",
   "mcp/tests/test_paseo_runtime.py",

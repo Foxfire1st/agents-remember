@@ -7,11 +7,14 @@ therefore runs AR's existing worktree start in a child process, which ends when 
 
     <this interpreter> -m agents_remember.cli start-leaf-enclosure --config <settings file>
 
-The settings file is the one the backend itself was started with (``config.config_path``); the
-child resolves every root from it and is given none. The request is one JSON object on standard
-input (``repoId``, ``taskName``, ``worktreeName``, ``leafId``, ``parentTask``) and the reply one
-JSON object on standard output: ``{"ok": true}`` or ``{"ok": false, "error": {"code", "message"}}``.
-The exit status is 0 only for ``ok``. The command is internal: it is not listed in the help.
+The settings file is the one the backend itself was started with (``config.config_path``). The
+request is one JSON object on standard input: the identity of the start (``repoId``, ``taskName``,
+``worktreeName``, ``leafId``, ``parentTask``) and the roots the backend holds
+(``coordinationRoot``, ``codeRoot``, ``memoryRoot``). The child resolves its roots from the
+settings file and starts nothing when they are not the backend's. The reply is one JSON object on
+standard output: ``{"ok": true}`` or ``{"ok": false, "error": {"code", "message"}}``; the exit
+status is 0 only for ``ok``. The command is internal: it is no sub-command of the public command
+line and appears in no help.
 """
 
 from __future__ import annotations
@@ -19,8 +22,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
+import signal
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from agents_remember.application.worktree_services import build_default_worktree_services
@@ -31,16 +37,14 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.worktrees.services import bind_worktree_services
 
 COMMAND = "start-leaf-enclosure"
-# A start that takes longer is stopped and counts as refused.
+# A start that takes longer is cut off, with everything it started, and counts as refused.
 START_TIMEOUT_SECONDS = 120
+ROOTS_DIFFER = "leaf_enclosure_roots_differ"
+# How long the ended process group is waited for before its output is given up.
+_REAP_SECONDS = 5
 _TEXT_LIMIT = 800
-_IDENTITY_FIELDS = {
-    "repoId": "repo_id",
-    "taskName": "task_name",
-    "worktreeName": "worktree_name",
-    "leafId": "leaf_id",
-    "parentTask": "parent_task",
-}
+_ERROR_OUTPUT_TAIL = 300
+_IDENTITY_FIELDS = ("repoId", "taskName", "worktreeName", "leafId", "parentTask")
 
 
 def start_leaf_enclosure_in_child(
@@ -49,31 +53,39 @@ def start_leaf_enclosure_in_child(
     """Run the worktree start in a child process and return its outcome as the start tool does.
 
     ``{"ok": True}`` when the child created the enclosure; otherwise ``ok`` is false and
-    ``summary`` names the reason: the child's own error code and message, or that it did not end
-    in time or answered unreadably.
+    ``summary`` names the reason: the child's own error code and message, or that it was cut off
+    at the limit or answered unreadably.
     """
 
-    request = {key: getattr(identity, field) for key, field in _IDENTITY_FIELDS.items()}
+    roots = _held_roots(config, identity.repo_id)
+    if roots is None:
+        return _refused(
+            "leaf_enclosure_repository_unknown",
+            f"the settings of this backend name no repository {identity.repo_id!r}.",
+        )
+    request = {
+        "repoId": identity.repo_id,
+        "taskName": identity.task_name,
+        "worktreeName": identity.worktree_name,
+        "leafId": identity.leaf_id,
+        "parentTask": identity.parent_task,
+        **roots,
+    }
     argv = [sys.executable, "-m", "agents_remember.cli", COMMAND]
     try:
-        completed = subprocess.run(
-            [*argv, "--config", config.config_path.as_posix()],
-            input=json.dumps(request),
-            encoding="utf-8",
-            capture_output=True,
-            check=False,
-            timeout=START_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
+        completed = _run_child([*argv, "--config", config.config_path.as_posix()], request)
+    except subprocess.TimeoutExpired as expired:
         return _refused(
             "leaf_enclosure_start_timeout",
-            f"the worktree start did not end within {START_TIMEOUT_SECONDS} seconds and was "
-            "stopped.",
+            f"the worktree start was cut off after {START_TIMEOUT_SECONDS} seconds, together "
+            "with every process it had started. It may have left partial state, which a later "
+            "Start completes.",
+            expired.stderr,
         )
     except OSError as error:
         return _refused("leaf_enclosure_start_unavailable", str(error))
     try:
-        reply = json.loads(completed.stdout)
+        reply = json.loads(completed.stdout.decode("utf-8", errors="replace"))
     except json.JSONDecodeError:
         reply = None
     if isinstance(reply, dict) and reply.get("ok") is True and completed.returncode == 0:
@@ -83,27 +95,75 @@ def start_leaf_enclosure_in_child(
         return _refused(
             str(error.get("code") or "leaf_enclosure_start_refused"),
             str(error.get("message") or "AR refused to create the leaf enclosure."),
+            completed.stderr,
         )
     return _refused(
         "leaf_enclosure_start_unreadable",
         f"the worktree start ended with status {completed.returncode} and no readable reply.",
+        completed.stderr,
     )
 
 
-def _refused(code: str, message: str) -> dict[str, Any]:
+def _run_child(argv: list[str], request: dict[str, Any]) -> subprocess.CompletedProcess[bytes]:
+    """Run the child in a session of its own and end its whole process group at the limit.
+
+    The child inherits this process's environment and working directory. A start that is cut off
+    leaves no process behind that could go on changing a repository after the launch was refused.
+    """
+
+    child = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        output, errors = child.communicate(
+            json.dumps(request).encode("utf-8"), timeout=START_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired as expired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(child.pid, signal.SIGKILL)
+        try:
+            _output, errors = child.communicate(timeout=_REAP_SECONDS)
+        except subprocess.TimeoutExpired:
+            errors = b""  # something outside the group still holds the child's pipes
+        raise subprocess.TimeoutExpired(argv, START_TIMEOUT_SECONDS, stderr=errors) from expired
+    return subprocess.CompletedProcess(argv, child.returncode, output, errors)
+
+
+def _held_roots(config: McpRuntimeConfig, repo_id: str) -> dict[str, str | None] | None:
+    """The roots a configuration resolves for one repository, as the request carries them."""
+
+    repository = config.repositories.get(repo_id)
+    if repository is None:
+        return None
+    memory_root = repository.memory_root
     return {
-        "ok": False,
-        "state": code,
-        "summary": f"AR could not create the leaf enclosure ({code}): {message}"[:_TEXT_LIMIT],
+        "coordinationRoot": config.coordination_root.resolve().as_posix(),
+        "codeRoot": repository.path.resolve().as_posix(),
+        "memoryRoot": memory_root.resolve().as_posix() if memory_root else None,
     }
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
+def _refused(code: str, message: str, error_output: bytes | None = None) -> dict[str, Any]:
+    """A refusal in the start tool's shape; the tail of the child's error output is kept."""
+
+    tail = (error_output or b"").decode("utf-8", errors="replace").strip()[-_ERROR_OUTPUT_TAIL:]
+    said = f" The child process said: {tail}" if tail else ""
+    summary = f"AR could not create the leaf enclosure ({code}): {message}"
+    return {"ok": False, "state": code, "summary": summary[: _TEXT_LIMIT - len(said)] + said}
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog=f"agents-remember {COMMAND}")
     parser.add_argument(
         "--config",
         required=True,
         help="Absolute path of the settings file the launching backend was started with.",
     )
+    return run(parser.parse_args(argv))
 
 
 def run(args: argparse.Namespace) -> int:
@@ -114,8 +174,16 @@ def run(args: argparse.Namespace) -> int:
     declare_process_role("mcp")
     bind_worktree_services(build_default_worktree_services())
     try:
-        identity = _identity(json.load(sys.stdin))
+        request = json.load(sys.stdin)
+        identity = _identity(request)
         config = load_config(args.config)
+        differing = _differing_roots(request, _held_roots(config, identity.repo_id))
+        if differing:
+            return _reply(
+                ROOTS_DIFFER,
+                f"{args.config} now names other roots than the backend that asked for this "
+                f"start holds ({differing}); nothing was started.",
+            )
         # Nothing the start prints may reach standard output: it carries the one reply.
         with contextlib.redirect_stdout(sys.stderr):
             created = worktree_start_tool(
@@ -133,11 +201,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _identity(request: Any) -> TaskIdentity:
-    values = (
-        [request.get(key) for key in ("repoId", "taskName", "worktreeName", "leafId", "parentTask")]
-        if isinstance(request, dict)
-        else []
-    )
+    values = [request.get(key) for key in _IDENTITY_FIELDS] if isinstance(request, dict) else []
     texts = [value for value in values if isinstance(value, str) and value]
     if len(texts) != len(_IDENTITY_FIELDS):
         raise ValueError(
@@ -151,6 +215,24 @@ def _identity(request: Any) -> TaskIdentity:
         leaf_id=leaf_id,
         parent_task=parent_task,
     )
+
+
+def _differing_roots(request: dict[str, Any], loaded: dict[str, str | None] | None) -> str:
+    """Which roots of the request are not the ones this process loaded; empty when all agree."""
+
+    if loaded is None:
+        return f"no repository {request.get('repoId')!r}"
+    differing = []
+    for name, here in loaded.items():
+        asked = request.get(name)
+        same = (
+            asked is None and here is None
+            if asked is None or here is None
+            else isinstance(asked, str) and Path(asked).resolve() == Path(here).resolve()
+        )
+        if not same:
+            differing.append(f"{name}: {here} instead of {asked}")
+    return "; ".join(differing)
 
 
 def _reply(code: str, message: str) -> int:

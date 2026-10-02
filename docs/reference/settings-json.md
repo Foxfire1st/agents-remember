@@ -173,7 +173,7 @@ the block is present every key is required and an unknown key fails at start-up.
 | `listen` | The daemon's listen address as `host:port`. Provision binds exactly this address and never chooses another port. |
 | `version` | One exact Paseo version (`MAJOR.MINOR.PATCH` with an optional prerelease). A range, a tag such as `beta`, or a partial version is refused. A prefix that holds any other version is replaced. |
 | `providers` | Provider entries for harnesses Paseo drives through ACP, keyed by provider id. The object is written unchanged to the daemon's `agents.providers`; Paseo validates it. May be `{}`. |
-| `embed` | The embed list: pairs of `dashboardOrigin` and `frameBaseUrl`. `dashboardOrigin` is the origin a browser opens the dashboard on, written exactly as a browser reports it: lower-case ASCII scheme and host, an optional port, no default port (`:80` for http, `:443` for https), no path. Any other spelling is refused, because the value is compared with a browser's origin as text. `frameBaseUrl` is the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment. Each origin appears once. May be `[]`. |
+| `embed` | The embed list: pairs of `dashboardOrigin` and `frameBaseUrl`. `dashboardOrigin` is the origin a browser opens the dashboard on, written exactly as a browser reports it: lower-case scheme; a host of `a-z`, `0-9`, dot and hyphen only (an international name in its `xn--` form); an IPv4 address as four decimal numbers; an IPv6 address in brackets, in hexadecimal groups with the longest run of zero groups collapsed (`[::1]`, not `[0:0:0:0:0:0:0:1]` and not `[::ffff:127.0.0.1]`); an optional port, no default port (`:80` for http, `:443` for https); no path. Any other spelling is refused, because the value is compared with a browser's origin as text. `frameBaseUrl` is the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment. Each origin appears once. May be `[]`. |
 
 A provider entry may carry values that should stay private, for example an `env`
 map with a key for the harness. Provision never puts a provider entry on a
@@ -181,10 +181,16 @@ command line and never prints one: it writes `agents.providers` into the
 daemon's own `config.json` (readable by the daemon's user only), has Paseo
 reload that file when the daemon runs or read it back when it is stopped, and
 names only the provider ids (`providerIds`) in its report. If Paseo refuses the
-entries, the previous file is put back and the report says
-`provider_entries_refused` with Paseo's text. The settings file itself is the
-place that holds such a value, so protect it accordingly. The other five facts
-carry no secret.
+entries, what provision wrote is undone and the report says
+`provider_entries_refused` with Paseo's text; if that call fails for another
+reason, for example a timeout, the write is undone as well and the report says
+`paseo_command_failed`. Paseo's refusal text is carried as Paseo wrote it. It
+names the offending path and may quote a provider id and the value of an
+`extends` field, so neither is a place for a secret; values of `env` and
+`command` were not seen quoted by Paseo 0.11.0-beta.2. A Paseo answer of an
+unexpected shape is never echoed into a report. The settings file itself is the
+place that holds a private value, so protect it accordingly. The other five
+facts carry no secret.
 
 The daemon inherits the environment of the process that runs `provision`. Agents
 Remember writes no harness configuration and handles no harness credential.
@@ -203,10 +209,11 @@ agents-remember paseo stop      --config <MCP settings file>
 `--config` is required and only the `paseoRuntime` block of that file is read.
 Exit status is `0` on success, `1` when a step failed (`error.step` names it and
 `error.detail` carries Paseo's text) and `2` when the command refused before
-doing anything (unusable settings, or `paseo_runtime_not_configured`). Every
-failure ends in that JSON document with an `error` object of `code`, `step`,
-`message` and `detail` (a refusal has `code` and `message`), never in a
-traceback.
+doing anything (unusable settings, or `paseo_runtime_not_configured`). A
+settings file that cannot be read as UTF-8 JSON is refused with
+`settings_invalid`. Every failure ends in that JSON document with an `error`
+object of `code`, `step`, `message` and `detail` (a refusal has `code` and
+`message`), never in a traceback.
 
 `provision` brings the runtime to the configured state and lists every change it
 made in `changes`; a command that failed is reported in `error`, not as a
@@ -230,18 +237,31 @@ not running), `restarted` (it ran another version, or a setting applied only at
 start changed; `daemon.reasons` says which), `reloaded` (only live settings, the
 embed list or the plugin changed) or `untouched`. A restart closes the sessions
 of running agents; they stay resumable. A change of only the host part of
-`listen` is such a restart: the home's own daemon holds the port and is
-restarted onto the new address.
+`listen` is such a restart when the home's own daemon is what holds the new
+address (the same port, and a wildcard host or two host names for one address):
+the daemon is restarted onto it. Any other new address is probed first, and if
+another process holds it provision refuses without touching the running daemon.
 
 Agents Remember keeps three things under `<home>/agents-remember/`: `plugin/`,
 the installed copy of the AR plugin (id `ar-plugin`) that ships inside the
 package; `embed.json`, the embed list the plugin reads; and
 `plugin-loaded.json`, a stamp of what the running plugin last loaded. A change
 to the plugin's content or to the embed list replaces the files and reloads the
-plugin. While provider entries are being replaced, a fourth file,
-`config-previous.json`, holds the daemon configuration they replace; it is
-removed once Paseo has accepted the new file, and a run that finds it puts it
-back first. A frame base URL whose host is not `localhost` or an IP literal also
+plugin. While provider entries are being replaced, two more files exist there:
+`config-previous.json`, the daemon configuration they replace, and
+`config-written.sha256`, the digest of the file provision wrote. Both are
+removed once Paseo has accepted the new file. A provision run that finds them
+undoes that unfinished write before it does anything else, and undoes only what
+the earlier run changed: while `config.json` is still the file that run wrote,
+the kept file goes back whole (`"restored": "file"` in the change record); if
+Paseo has written the file since, only `agents.providers` is put back and every
+other key stays as it is (`"restored": "providers"`). A daemon that keeps
+running is then told to reload the file, because it may have loaded the file
+that was undone. The same rule applies when Paseo refuses the entries. Only a provision run repairs: `status` and
+`stop` never change the file, and while a file Paseo refuses is in place
+`status` fails with Paseo's "Invalid config" text. A provision run also deletes
+temporary files a killed write left beside those two. A frame base URL whose
+host is not `localhost` or an IP literal also
 needs that host in Paseo's `daemon.hostnames`; provision does not write that
 key.
 
@@ -251,6 +271,22 @@ each provider with its availability; when the daemon is not running the other
 fields are `null`. `stop` stops the daemon recorded in the configured home's own
 process record and reports `"action": "stopped"` or `"not running"`; it never
 looks a process up by port.
+
+The home's process record (`<home>/paseo.pid`) holds a process id, and Paseo's
+own `daemon stop` signals whatever live process that id names. After a crash the
+operating system can give the id to another process. Before any Paseo command
+that would act on the record, all three commands therefore require that the
+recorded process is alive, that its command line is a Paseo supervisor's, and
+that its own environment names this home (`PASEO_HOME`, read from
+`/proc/<pid>/environ`). A record that fails this is stale and nothing is
+signalled: `stop` reports `"not running"`, names the record in `staleRecord`
+(`pid` and `reason`) and deletes the record file; `provision` deletes it,
+reports `{"step": "daemon", "action": "removed-stale-record"}` and continues as
+for a daemon that is not running; `status` reports not running, names it in
+`staleRecord` and leaves the file. `staleRecord` is `null` otherwise. If the
+recorded process is alive but cannot be inspected (it belongs to another user,
+or the system has no `/proc`), the command refuses with
+`process_record_unverifiable` and signals nothing.
 
 ## Memory Fields
 
