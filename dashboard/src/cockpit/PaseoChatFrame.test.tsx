@@ -515,6 +515,44 @@ describe("Chats pane wiring", () => {
     expect(frameElement(container)).toBe(frame);
     expect(frame.getAttribute("src")).toBe(PROJECTS_URL);
   });
+
+  it("follows the receipt when it names another agent than the options answer still held", async () => {
+    // The options answer of the selection names one agent. The result read afterwards says the
+    // execution is now another agent (it was revived elsewhere): the receipt is the newer word.
+    const revived = { agentId: "agent-revived", workspaceId: "wks_leaf" };
+    stubBackend([AVAILABLE], {
+      "/api/orca/launcher/options": (request) =>
+        request.role === "orchestrator" ? { ...catalog, execution: sprintExecution } : { ...catalog, executions: [] },
+      "/api/orca/result": { ...sprintExecution, execution: { kind: "paseo-agent", serverId: "srv_test", ...revived } },
+    });
+    const { container, getByLabelText, getByRole } = render(
+      <ChatsModePanels
+        active
+        selectedLifecycleId={undefined}
+        selectedLeafKey={undefined}
+        taskDocuments={[sprint]}
+        series={[]}
+        contextMaster={undefined}
+      />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    fireEvent.change(getByLabelText("Role"), { target: { value: "orchestrator" } });
+    await settle();
+    fireEvent.change(getByLabelText("AR sprint"), { target: { value: "0" } });
+    await settle();
+    expect(posts).toHaveBeenCalledTimes(1);
+    expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: WORKER.agentId }, FRAME_ORIGIN);
+    deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
+
+    fireEvent.click(getByRole("button", { name: "Refresh Orca result" }));
+    await settle();
+    expect(posts).toHaveBeenCalledTimes(2);
+    expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: revived.agentId }, FRAME_ORIGIN);
+    expect(frameElement(container)).toBe(frame);
+  });
 });
 
 describe("paseoFrameModel", () => {

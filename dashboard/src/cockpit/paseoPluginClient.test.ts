@@ -1,7 +1,7 @@
 // The client part of the AR plugin for the Paseo runtime (PNT-R05). Its source lives with the
 // plugin, under mcp/src/agents_remember/package_data/paseo_plugin/client/, and imports nothing
-// from Paseo: the browser objects and the plugin's client context are passed in. This file is
-// where the repository's gates run and type-check it.
+// from Paseo: the browser objects and the plugin's client context are passed in. This file and
+// paseoPluginLook.test.ts are where the repository's gates run and type-check it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,6 +18,7 @@ import {
   reloadOnce,
   requestedUrl,
   takeOwnLookBack,
+  watchAppWrites,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/load";
 import {
   APP_SETTINGS_KEY,
@@ -27,123 +28,25 @@ import {
   applyEmbedLook,
   restoreStandaloneLook,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/look";
-import type { PluginPage, StorageLike } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
-
-const DASHBOARD = "http://127.0.0.1:9797";
-const DAEMON = "http://127.0.0.1:6820";
-const WORKSPACE_URL = DAEMON + "/h/srv_test/workspace/wks_projects";
-const EMBED = [{ dashboardOrigin: DASHBOARD, frameBaseUrl: DAEMON }];
-// What a browser profile holds before the dashboard was ever used, and two looks a user may set.
-const DEFAULT_LOOK = { theme: "auto", pluginThemeId: null, uiFontFamily: "", monoFontFamily: "" };
-const OWN_LOOK = { theme: "dark", pluginThemeId: null, uiFontFamily: "Georgia, serif", monoFontFamily: "" };
-
-class MemoryStorage implements StorageLike {
-  readonly items = new Map<string, string>();
-  getItem(key: string): string | null {
-    return this.items.get(key) ?? null;
-  }
-  setItem(key: string, value: string): void {
-    this.items.set(key, value);
-  }
-  removeItem(key: string): void {
-    this.items.delete(key);
-  }
-  json(key: string): unknown {
-    const raw = this.getItem(key);
-    return raw === null ? null : JSON.parse(raw);
-  }
-  put(key: string, value: unknown): void {
-    this.setItem(key, JSON.stringify(value));
-  }
-}
-
-interface Posted {
-  data: Record<string, unknown>;
-  targetOrigin: string;
-}
-
-interface Tab {
-  local: MemoryStorage;
-  session: MemoryStorage;
-}
-
-/** One page load: a fresh page global, the tab's storages, and what the browser tells the page. */
-function pageLoad(
-  tab: Tab,
-  options: {
-    framedBy?: string | null;
-    ancestorOrigins?: boolean;
-    referrer?: string;
-    href?: string;
-    requested?: string;
-  } = {},
-) {
-  const framedBy = options.framedBy === undefined ? DASHBOARD : options.framedBy;
-  const href = options.href ?? WORKSPACE_URL;
-  const posted: Posted[] = [];
-  const listeners = new Set<(event: { origin: string; source: unknown; data: unknown }) => void>();
-  const parent = {
-    postMessage: (data: Record<string, unknown>, targetOrigin: string) => posted.push({ data, targetOrigin }),
-  };
-  const pageWindow: Record<string, unknown> = {
-    addEventListener: (_type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => listeners.add(listener),
-    removeEventListener: (_type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => listeners.delete(listener),
-    setInterval: (handler: () => void, ms: number) => window.setInterval(handler, ms),
-    clearInterval: (timer: number) => window.clearInterval(timer),
-  };
-  pageWindow.parent = framedBy === null ? pageWindow : parent;
-  const replace = vi.fn();
-  const url = new URL(href);
-  const page: PluginPage = {
-    window: pageWindow,
-    document: {
-      referrer: options.referrer ?? "",
-      head: document.head,
-      getElementById: (id: string) => document.getElementById(id),
-      createElement: (tag: string) => document.createElement(tag),
-      querySelector: (selector: string) => document.querySelector(selector),
-    },
-    location: {
-      href,
-      origin: url.origin,
-      pathname: url.pathname,
-      replace,
-      ...(framedBy !== null && options.ancestorOrigins !== false ? { ancestorOrigins: [framedBy] } : {}),
-    },
-    performance: { getEntriesByType: () => [{ name: options.requested ?? href }] },
-    localStorage: tab.local,
-    sessionStorage: tab.session,
-    state: {},
-  };
-  return {
-    page,
-    replace,
-    posted,
-    parent,
-    /** Deliver a message event to the page, by default from the parent window and origin. */
-    receive(data: unknown, from: { origin?: string; source?: unknown } = {}) {
-      for (const listener of listeners) {
-        listener({ origin: from.origin ?? DASHBOARD, source: "source" in from ? from.source : parent, data });
-      }
-    },
-    listening: () => listeners.size,
-  };
-}
-
-function newTab(look: Record<string, unknown> | null = DEFAULT_LOOK, sidebarOpen = true): Tab {
-  const local = new MemoryStorage();
-  if (look) local.put(APP_SETTINGS_KEY, { ...look, language: "system" });
-  local.put(PANEL_STATE_KEY, { state: { desktop: { agentListOpen: sidebarOpen, focusModeEnabled: false } }, version: 16 });
-  return { local, session: new MemoryStorage() };
-}
-
-const settingsOf = (tab: Tab) => tab.local.json(APP_SETTINGS_KEY) as Record<string, unknown>;
-const memoryOf = (tab: Tab) =>
-  tab.local.json(STANDALONE_LOOK_KEY) as { appSettings: Record<string, unknown>; agentListOpen: boolean | null; stored: string } | null;
-const sidebarOf = (tab: Tab) =>
-  (tab.local.json(PANEL_STATE_KEY) as { state: { desktop: { agentListOpen: boolean } } }).state.desktop.agentListOpen;
-/** What Paseo does on any settings change: it writes all of the page's in-memory settings. */
-const paseoWrites = (tab: Tab, look: Record<string, unknown>) => tab.local.put(APP_SETTINGS_KEY, { ...look, language: "system" });
+import { currentPage } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
+import { startClientPart } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/start";
+import {
+  CYCLED_IN_FRAME,
+  DAEMON,
+  DASHBOARD,
+  DEFAULT_LOOK,
+  EMBED,
+  MemoryStorage,
+  OWN_LOOK,
+  WORKSPACE_URL,
+  memoryOf,
+  newTab,
+  pageLoad,
+  panelState,
+  settingsOf,
+  type Posted,
+  type Tab,
+} from "../test/paseoPluginPage";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -153,126 +56,7 @@ afterEach(() => {
   vi.useRealTimers();
   document.head.innerHTML = "";
   document.body.innerHTML = "";
-});
-
-describe("the look stored for the frame and the look remembered for a standalone tab", () => {
-  it("remembers the user's look before it stores the AR look, and stores it once", () => {
-    const tab = newTab(OWN_LOOK);
-
-    expect(applyEmbedLook(tab.local)).toEqual(["theme", "pluginThemeId", "uiFontFamily", "monoFontFamily"]);
-    expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
-    expect(sidebarOf(tab)).toBe(false);
-    expect(memoryOf(tab)).toEqual({ appSettings: OWN_LOOK, agentListOpen: true, stored: "frame" });
-
-    // The next frame load finds the AR look: nothing to change, nothing to remember.
-    expect(applyEmbedLook(tab.local)).toEqual([]);
-    expect(memoryOf(tab)).toEqual({ appSettings: OWN_LOOK, agentListOpen: true, stored: "frame" });
-  });
-
-  it("gives a standalone tab the user's look back, keys the user never had included", () => {
-    const tab = newTab({ theme: "dark" });
-    applyEmbedLook(tab.local);
-
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ theme: "dark", language: "system" });
-    expect(sidebarOf(tab)).toBe(true);
-    expect(memoryOf(tab)?.stored).toBe("user");
-    // Nothing left to put back.
-    expect(restoreStandaloneLook(tab.local)).toBe(false);
-    // A tab that never shared storage with a frame has nothing remembered and is left alone.
-    const untouched = newTab(OWN_LOOK);
-    expect(restoreStandaloneLook(untouched.local)).toBe(false);
-    expect(memoryOf(untouched)).toBeNull();
-    expect(settingsOf(untouched)).toEqual({ ...OWN_LOOK, language: "system" });
-  });
-
-  it("puts the default sidebar back when the app had stored none before the frame closed it", () => {
-    // A first visit: the frame's look is stored before the app has written any sidebar state.
-    const tab = newTab(DEFAULT_LOOK);
-    tab.local.removeItem(PANEL_STATE_KEY);
-    applyEmbedLook(tab.local);
-    expect(memoryOf(tab)?.agentListOpen).toBeNull();
-    // The frame then closes the sidebar through the app's toggle, and the app stores that.
-    tab.local.put(PANEL_STATE_KEY, { state: { desktop: { agentListOpen: false } }, version: 16 });
-
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(sidebarOf(tab)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ ...DEFAULT_LOOK, language: "system" });
-  });
-
-  it("does not take a font changed inside the frame for the user's standalone look", () => {
-    const tab = newTab(OWN_LOOK);
-    applyEmbedLook(tab.local);
-    // Inside the frame the page runs the AR look, so its write keeps the other three AR values.
-    paseoWrites(tab, { ...EMBED_LOOK, uiFontFamily: '"Courier New", monospace' });
-
-    // The next frame load puts the AR font back and keeps the remembered standalone look.
-    expect(applyEmbedLook(tab.local)).toEqual(["uiFontFamily"]);
-    expect(memoryOf(tab)).toEqual({ appSettings: OWN_LOOK, agentListOpen: true, stored: "frame" });
-
-    // A standalone tab that loads in that state gets the user's look, not the frame's font.
-    paseoWrites(tab, { ...EMBED_LOOK, uiFontFamily: '"Courier New", monospace' });
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
-  });
-
-  it("keeps a look the user set in a standalone tab while the frame's mark was on the storage", () => {
-    const tab = newTab(DEFAULT_LOOK);
-    applyEmbedLook(tab.local);
-    expect(memoryOf(tab)?.stored).toBe("frame");
-    // A standalone tab loaded before the frame runs the user's look; the user types a font and
-    // Paseo writes that page's whole look over the storage. The mark still says "frame".
-    const usersNewLook = { ...DEFAULT_LOOK, uiFontFamily: "Verdana" };
-    paseoWrites(tab, usersNewLook);
-
-    // The standalone tab's next load adopts it: the settings are not touched. Only the sidebar,
-    // which the frame closed when it stored its look, is put back (that is the one change).
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ ...usersNewLook, language: "system" });
-    expect(sidebarOf(tab)).toBe(true);
-    expect(memoryOf(tab)).toEqual({ appSettings: usersNewLook, agentListOpen: true, stored: "user" });
-    // With the sidebar as the user had it, the adoption changes nothing at all.
-    const closed = newTab(DEFAULT_LOOK, false);
-    applyEmbedLook(closed.local);
-    paseoWrites(closed, usersNewLook);
-    expect(restoreStandaloneLook(closed.local)).toBe(false);
-    expect(settingsOf(closed)).toEqual({ ...usersNewLook, language: "system" });
-    expect(memoryOf(closed)).toEqual({ appSettings: usersNewLook, agentListOpen: false, stored: "user" });
-    // Adopted once: a further load of the tab finds nothing to do.
-    expect(restoreStandaloneLook(tab.local)).toBe(false);
-
-    // The frame's next load stores the AR look again and still remembers the user's new look.
-    expect(applyEmbedLook(tab.local)).toHaveLength(4);
-    expect(memoryOf(tab)).toEqual({ appSettings: usersNewLook, agentListOpen: true, stored: "frame" });
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ ...usersNewLook, language: "system" });
-  });
-
-  it("remembers a look set in a standalone tab when the frame loads before that tab does", () => {
-    const tab = newTab(DEFAULT_LOOK);
-    applyEmbedLook(tab.local);
-    const usersNewLook = { ...DEFAULT_LOOK, theme: "light", uiFontFamily: "Verdana" };
-    paseoWrites(tab, usersNewLook);
-
-    // The other order: the frame loads first. It must not treat the mark as proof either.
-    expect(applyEmbedLook(tab.local)).toHaveLength(4);
-    expect(memoryOf(tab)).toEqual({ appSettings: usersNewLook, agentListOpen: true, stored: "frame" });
-    expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
-  });
-
-  it("restores again when a frame that stayed open stored the AR look after the tab took its own back", () => {
-    const tab = newTab(OWN_LOOK);
-    applyEmbedLook(tab.local);
-    restoreStandaloneLook(tab.local);
-    paseoWrites(tab, EMBED_LOOK);
-
-    expect(restoreStandaloneLook(tab.local)).toBe(true);
-    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
-    // And the frame's next load knows the storage is its own again without forgetting the user's look.
-    paseoWrites(tab, EMBED_LOOK);
-    expect(applyEmbedLook(tab.local)).toEqual([]);
-    expect(memoryOf(tab)).toEqual({ appSettings: OWN_LOOK, agentListOpen: true, stored: "frame" });
-  });
+  localStorage.clear();
 });
 
 describe("one reload per page load", () => {
@@ -293,6 +77,18 @@ describe("one reload per page load", () => {
     expect(tab.session.getItem(RELOAD_FLAG)).toBeNull();
     expect(reloadOnce(reloaded.page, WORKSPACE_URL, DASHBOARD)).toBe(false);
     expect(reloaded.replace).not.toHaveBeenCalled();
+  });
+
+  it("takes any flag for the reload, also one it cannot read", () => {
+    for (const flag of ["{not json", "null", "[]", JSON.stringify({ parent: 42 })]) {
+      const tab = newTab();
+      tab.session.setItem(RELOAD_FLAG, flag);
+      const load = pageLoad(tab);
+      expect(loadState(load.page)).toMatchObject({ reloaded: true, carriedParent: null });
+      expect(tab.session.getItem(RELOAD_FLAG)).toBeNull();
+      expect(reloadOnce(load.page, WORKSPACE_URL, DASHBOARD)).toBe(false);
+      expect(load.replace).not.toHaveBeenCalled();
+    }
   });
 
   it("never refuses a later, separate load its own reload, however soon it comes", () => {
@@ -343,6 +139,8 @@ describe("one reload per page load", () => {
     expect(requestedUrl(bounced.page)).toBe(deepLink);
     expect(bootstrapEmbed(bounced.page, DASHBOARD)).toBe(true);
     expect(bounced.replace).toHaveBeenCalledExactlyOnceWith(deepLink);
+    // A page that is leaving does not start waiting for the app's sidebar toggle.
+    expect(vi.getTimerCount()).toBe(0);
 
     // The look is stored already but the link bounced: still one reload to the link.
     const warmTab = newTab(DEFAULT_LOOK);
@@ -350,6 +148,18 @@ describe("one reload per page load", () => {
     const welcome = pageLoad(warmTab, { href: DAEMON + "/welcome", requested: deepLink });
     expect(bootstrapEmbed(welcome.page, DASHBOARD)).toBe(true);
     expect(welcome.replace).toHaveBeenCalledExactlyOnceWith(deepLink);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // The app is somewhere else than the link for another reason (not one of the two bounce
+    // paths): that is not a first visit, and the page is left where it is.
+    for (const elsewhere of ["/settings/appearance", "/h/srv_test/workspace/wks_other", "/"]) {
+      const movedTab = newTab(DEFAULT_LOOK);
+      applyEmbedLook(movedTab.local);
+      const moved = pageLoad(movedTab, { href: DAEMON + elsewhere, requested: deepLink });
+      expect(bootstrapEmbed(moved.page, DASHBOARD)).toBe(false);
+      expect(moved.replace).not.toHaveBeenCalled();
+    }
+    vi.advanceTimersByTime(10_000); // (their wait for the app's sidebar toggle ends)
 
     // Nothing to store and nothing to repair: no reload; an open sidebar is closed by the app's toggle.
     const toggled = vi.fn();
@@ -406,6 +216,14 @@ describe("who frames the page", () => {
     // It is a candidate, checked against the embed list like any other.
     expect(isListedParent(EMBED, DASHBOARD, DAEMON)).toBe(true);
     expect(isListedParent([], DASHBOARD, DAEMON)).toBe(false);
+
+    // What the browser says now always goes before what was carried: a carried origin is never
+    // used under another parent.
+    const other = "http://other.test";
+    expect(framingOrigin(pageLoad(tab, { framedBy: other }).page, DASHBOARD)).toBe(other);
+    expect(framingOrigin(pageLoad(tab, { ancestorOrigins: false, referrer: other + "/page" }).page, DASHBOARD)).toBe(other);
+    // ancestorOrigins goes before the referrer, which a page can be sent with any value of.
+    expect(framingOrigin(pageLoad(tab, { framedBy: other, referrer: DASHBOARD + "/" }).page, null)).toBe(other);
 
     // The carried value lasts for that one page load: a later load without it knows no parent.
     const later = pageLoad(tab, { ancestorOrigins: false, referrer: WORKSPACE_URL });
@@ -554,5 +372,328 @@ describe("the control channel inside the frame", () => {
       ["error", "workspace-not-found", "wks_doesnotexist0000", "the runtime has no such workspace"],
       ["error", "workspace-not-found", "wks_broken", "socket closed"],
     ]);
+  });
+});
+
+describe("which look a page runs, and recording the app's writes in it", () => {
+  const FRAME_FONT = { ...EMBED_LOOK, uiFontFamily: '"Courier New", monospace' };
+
+  it("records a write inside a listed frame as the frame's", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    restoreStandaloneLook(tab.local);
+    const frame = pageLoad(tab);
+    const stop = watchAppWrites(frame.page);
+    // Until the page is known to be a listed frame, nothing is recorded for it.
+    frame.appWrites(APP_SETTINGS_KEY, FRAME_FONT);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "user", seen: OWN_LOOK });
+
+    bootstrapEmbed(frame.page, DASHBOARD);
+    expect(loadState(frame.page).usersLook).toBe(false);
+    frame.appWrites(APP_SETTINGS_KEY, FRAME_FONT);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame", seen: FRAME_FONT });
+    frame.appWrites(PANEL_STATE_KEY, panelState(true));
+    expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "frame", seen: true } });
+
+    stop();
+    expect(frame.watched()).toBe(false);
+  });
+
+  it("records a write in a standalone page that started with the user's look as the user's", () => {
+    const tab = newTab(OWN_LOOK);
+    // The tab loads before any frame: nothing is remembered yet, the look is the user's.
+    const solo = pageLoad(tab, { framedBy: null });
+    watchAppWrites(solo.page);
+    takeOwnLookBack(solo.page);
+    expect(loadState(solo.page).usersLook).toBe(true);
+    expect(solo.replace).not.toHaveBeenCalled();
+    // A frame stores the AR look in the shared storage; then the user changes the theme in the tab.
+    applyEmbedLook(tab.local);
+    const chosen = { ...OWN_LOOK, theme: "light" };
+    solo.appWrites(APP_SETTINGS_KEY, chosen);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: chosen, stored: "user" });
+    solo.appWrites(PANEL_STATE_KEY, panelState(false));
+    expect(memoryOf(tab)).toMatchObject({ agentListOpen: false, sidebar: { stored: "user", seen: false } });
+
+    // The plugin evaluated again in the same page (the storage is the frame's once more): the
+    // look is put back, and the page still counts as running the user's look.
+    applyEmbedLook(tab.local);
+    takeOwnLookBack(solo.page);
+    expect(solo.replace).toHaveBeenCalledTimes(1);
+    expect(loadState(solo.page).usersLook).toBe(true);
+  });
+
+  it("does not take a standalone page that is left in the AR look for the user's", () => {
+    const tab = newTab(OWN_LOOK);
+    applyEmbedLook(tab.local);
+    // The page started with the AR look and is not allowed its reload (it is one already).
+    tab.session.setItem(RELOAD_FLAG, JSON.stringify({ parent: null }));
+    const solo = pageLoad(tab, { framedBy: null });
+    watchAppWrites(solo.page);
+    takeOwnLookBack(solo.page);
+    expect(solo.replace).not.toHaveBeenCalled();
+    expect(loadState(solo.page).usersLook).toBe(false);
+    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    // What the app writes from that page is the AR look with one change: never the user's.
+    solo.appWrites(APP_SETTINGS_KEY, CYCLED_IN_FRAME);
+    expect(memoryOf(tab)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
+    // A frame page that later falls back to "take the look back" stays a page of the AR look too.
+    const frame = pageLoad(newTab(OWN_LOOK));
+    bootstrapEmbed(frame.page, DASHBOARD);
+    takeOwnLookBack(frame.page);
+    expect(loadState(frame.page).usersLook).toBe(false);
+  });
+
+  it("works without watching where the write cannot be wrapped", () => {
+    const load = pageLoad(newTab());
+    load.page.watchWrites = () => {
+      throw new Error("setItem is not writable");
+    };
+    expect(() => watchAppWrites(load.page)()).not.toThrow();
+  });
+});
+
+describe("seeing the app's own storage writes (the real page)", () => {
+  const original = Storage.prototype.setItem;
+
+  afterEach(() => {
+    Storage.prototype.setItem = original;
+    delete (globalThis as Record<string, unknown>).__arPluginWrites;
+    sessionStorage.clear();
+  });
+
+  it("tells the listener what the app stored, after it is stored, and nothing else", () => {
+    const page = currentPage();
+    if (!page) throw new Error("the test environment has no page");
+    const seen: Array<[string, string, string | null]> = [];
+    const stop = page.watchWrites((key, value) => seen.push([key, value, localStorage.getItem(key)]));
+
+    localStorage.setItem(APP_SETTINGS_KEY, '{"theme":"light"}');
+    expect(seen).toEqual([[APP_SETTINGS_KEY, '{"theme":"light"}', '{"theme":"light"}']]);
+    // Not the session's writes, and not what the plugin itself writes through its page object.
+    sessionStorage.setItem(RELOAD_FLAG, "{}");
+    page.localStorage.setItem(STANDALONE_LOOK_KEY, "{}");
+    expect(localStorage.getItem(STANDALONE_LOOK_KEY)).toBe("{}");
+    expect(seen).toHaveLength(1);
+
+    stop();
+    localStorage.setItem(APP_SETTINGS_KEY, '{"theme":"dark"}');
+    expect(seen).toHaveLength(1);
+    expect(Storage.prototype.setItem).toBe(original);
+    // Without a listener the plugin's own writes still work.
+    page.localStorage.setItem(STANDALONE_LOOK_KEY, "[]");
+    expect(localStorage.getItem(STANDALONE_LOOK_KEY)).toBe("[]");
+  });
+
+  it("never lets a failing listener break the app's write, and wraps the function once", () => {
+    const page = currentPage();
+    if (!page) throw new Error("the test environment has no page");
+    const stopFirst = page.watchWrites(() => {
+      throw new Error("listener failed");
+    });
+    const wrapped = Storage.prototype.setItem;
+    expect(wrapped).not.toBe(original);
+    expect(() => localStorage.setItem(PANEL_STATE_KEY, "{}")).not.toThrow();
+    expect(localStorage.getItem(PANEL_STATE_KEY)).toBe("{}");
+
+    // A later evaluation of the plugin in the same page replaces the listener, not the wrapper.
+    const seen: string[] = [];
+    const stopSecond = currentPage()?.watchWrites((key) => seen.push(key)) ?? (() => {});
+    expect(Storage.prototype.setItem).toBe(wrapped);
+    // The earlier evaluation stopping afterwards does not take the newer listener away.
+    stopFirst();
+    localStorage.setItem(PANEL_STATE_KEY, "{}");
+    expect(seen).toEqual([PANEL_STATE_KEY]);
+    stopSecond();
+    expect(Storage.prototype.setItem).toBe(original);
+  });
+
+  it("leaves the function alone on stopping when something else has wrapped it since", () => {
+    const page = currentPage();
+    if (!page) throw new Error("the test environment has no page");
+    const seen: string[] = [];
+    const stop = page.watchWrites((key) => seen.push(key));
+    const ours = Storage.prototype.setItem;
+    const outer = function (this: Storage, key: string, value: string) {
+      ours.call(this, key, value);
+    };
+    Storage.prototype.setItem = outer;
+    stop();
+    expect(Storage.prototype.setItem).toBe(outer);
+    localStorage.setItem(PANEL_STATE_KEY, "{}");
+    expect(localStorage.getItem(PANEL_STATE_KEY)).toBe("{}");
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("starting the client part: which parent is trusted and what follows", () => {
+  const client: BridgeClient = {
+    openScreen: () => {},
+    paseo: {
+      agents: { ref: () => ({ archivedAt: null, workspaceId: null, refresh: async () => ({}) }) },
+      workspaces: { ref: () => ({ refresh: async () => ({}) }) },
+    },
+  };
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  const listed = () => vi.fn(async () => EMBED);
+  /** A tab whose storage holds the AR look already: a frame load there needs no reload. */
+  function framedTab(look: Record<string, unknown> = OWN_LOOK): Tab {
+    const tab = newTab(look);
+    applyEmbedLook(tab.local);
+    return tab;
+  }
+  const ready = [{ data: { source: "ar-plugin", type: "ready" }, targetOrigin: DASHBOARD }];
+
+  it("standalone tab: takes the user's look back and never reads the list", async () => {
+    const tab = framedTab();
+    const solo = pageLoad(tab, { framedBy: null });
+    const readList = listed();
+    startClientPart(solo.page, client, readList);
+    await flush();
+
+    expect(readList).not.toHaveBeenCalled();
+    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    expect(solo.replace).toHaveBeenCalledExactlyOnceWith(WORKSPACE_URL);
+    expect(solo.posted).toEqual([]);
+    expect(solo.listening()).toBe(0);
+    expect(solo.watched()).toBe(true);
+  });
+
+  it("listed frame: the AR look and the channel, once the list has confirmed the parent", async () => {
+    // A first load: the look is stored and the page replaced; no channel in a page that is leaving.
+    const fresh = newTab(OWN_LOOK);
+    const first = pageLoad(fresh);
+    startClientPart(first.page, client, listed());
+    expect(settingsOf(fresh)).toEqual({ ...OWN_LOOK, language: "system" });
+    await flush();
+    expect(settingsOf(fresh)).toEqual({ ...EMBED_LOOK, language: "system" });
+    expect(first.replace).toHaveBeenCalledExactlyOnceWith(WORKSPACE_URL);
+    expect(first.posted).toEqual([]);
+
+    // The load that follows: nothing before the list answers, then ready to that parent.
+    const frame = pageLoad(fresh);
+    const stop = startClientPart(frame.page, client, listed());
+    expect(frame.posted).toEqual([]);
+    expect(frame.listening()).toBe(0);
+    await flush();
+    expect(frame.posted).toEqual(ready);
+    expect(frame.listening()).toBe(1);
+    expect(loadState(frame.page).trustedParent).toBe(DASHBOARD);
+    // What the app writes in that page is recorded as the frame's.
+    frame.appWrites(APP_SETTINGS_KEY, CYCLED_IN_FRAME);
+    expect(memoryOf(fresh)).toMatchObject({ appSettings: OWN_LOOK, stored: "frame" });
+
+    stop();
+    expect(frame.listening()).toBe(0);
+    expect(frame.watched()).toBe(false);
+    expect(document.getElementById("ar-plugin-embed-style")).toBeNull();
+  });
+
+  it("frame under a parent the list does not pair with this page: no channel, the user's look", async () => {
+    const lists = [
+      [],
+      [{ dashboardOrigin: "http://other.test", frameBaseUrl: DAEMON }],
+      // The parent is listed, but for another daemon address than the one this page is served from.
+      [{ dashboardOrigin: DASHBOARD, frameBaseUrl: "http://localhost:6820" }],
+    ];
+    for (const list of lists) {
+      const tab = framedTab();
+      const frame = pageLoad(tab);
+      startClientPart(frame.page, client, async () => list);
+      await flush();
+      expect(frame.posted).toEqual([]);
+      expect(frame.listening()).toBe(0);
+      expect(document.getElementById("ar-plugin-embed-style")).toBeNull();
+      expect(loadState(frame.page).trustedParent).toBeNull();
+      expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+      expect(frame.replace).toHaveBeenCalledTimes(1);
+    }
+    // The same for a listed dashboard origin that frames the page from an unlisted look-alike.
+    const tab = framedTab();
+    const frame = pageLoad(tab, { framedBy: DASHBOARD + ".evil.test" });
+    startClientPart(frame.page, client, listed());
+    await flush();
+    expect(frame.posted).toEqual([]);
+    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+  });
+
+  it("a list that cannot be read: no parent is trusted and nothing changes", async () => {
+    const failures = [
+      () => Promise.reject(new Error("rpc failed")),
+      () => {
+        throw new Error("rpc unavailable");
+      },
+      async () => null as unknown as typeof EMBED,
+    ];
+    for (const readList of failures) {
+      const tab = newTab(OWN_LOOK);
+      const frame = pageLoad(tab);
+      startClientPart(frame.page, client, readList);
+      await flush();
+      expect(frame.posted).toEqual([]);
+      expect(frame.listening()).toBe(0);
+      expect(frame.replace).not.toHaveBeenCalled();
+      expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+      expect(memoryOf(tab)).toBeNull();
+      expect(loadState(frame.page).usersLook).toBeNull();
+    }
+  });
+
+  it("a frame whose parent nothing names: nothing at all, and the list is not read", async () => {
+    const tab = framedTab();
+    const frame = pageLoad(tab, { ancestorOrigins: false });
+    const readList = listed();
+    startClientPart(frame.page, client, readList);
+    await flush();
+    expect(readList).not.toHaveBeenCalled();
+    expect(frame.posted).toEqual([]);
+    expect(frame.replace).not.toHaveBeenCalled();
+    expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
+  });
+
+  it("evaluated again in the same page: no gap in the channel, and the list has the last word", async () => {
+    const tab = framedTab();
+    const frame = pageLoad(tab);
+    const stopFirst = startClientPart(frame.page, client, listed());
+    await flush();
+    stopFirst();
+    frame.posted.length = 0;
+
+    // The second evaluation answers at once, on the first one's verified parent ...
+    let answer: (list: typeof EMBED) => void = () => {};
+    startClientPart(frame.page, client, () => new Promise((resolve) => (answer = resolve)));
+    expect(frame.posted).toEqual(ready);
+    expect(frame.listening()).toBe(1);
+    // ... and the list, which no longer has the parent, takes the channel and the look away.
+    await flush();
+    answer([]);
+    await flush();
+    expect(frame.listening()).toBe(0);
+    expect(loadState(frame.page).trustedParent).toBeNull();
+    expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    expect(frame.posted).toEqual(ready);
+  });
+
+  it("evaluated again under a parent the page did not verify: waits for the list", async () => {
+    const frame = pageLoad(framedTab());
+    loadState(frame.page).trustedParent = "http://other.test";
+    startClientPart(frame.page, client, () => new Promise(() => {}));
+    await flush();
+    expect(frame.posted).toEqual([]);
+    expect(frame.listening()).toBe(0);
+  });
+
+  it("stopped before the list answers: the late answer does nothing", async () => {
+    const tab = framedTab();
+    const frame = pageLoad(tab);
+    let answer: (list: typeof EMBED) => void = () => {};
+    const stop = startClientPart(frame.page, client, () => new Promise((resolve) => (answer = resolve)));
+    await flush();
+    stop();
+    answer(EMBED);
+    await flush();
+    expect(frame.posted).toEqual([]);
+    expect(frame.listening()).toBe(0);
+    expect(loadState(frame.page).trustedParent).toBeNull();
   });
 });
