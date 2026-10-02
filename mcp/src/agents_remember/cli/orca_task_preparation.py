@@ -214,7 +214,7 @@ def _ar_mcp_context(
     context: OrcaRoleContext,
     workspace: dict[str, str],
 ) -> dict[str, Any]:
-    """Declare the exact arguments role agents pass to the existing shared AR MCP tools."""
+    """Declare the exact arguments role agents pass to the readers of their AR tool server."""
 
     if context.role in LEAF_ROLES:
         if context.task is None:
@@ -247,10 +247,10 @@ def _ar_mcp_context(
             "readArFilesNote": "Add the requested files list to readerArguments.read_ar_files.",
             "requiredCapability": "ar-task-scoped-readers/v1",
             "missingCapabilityAction": (
-                "If either installed AR MCP tool schema lacks task_context with both "
-                "task_document_ref and contract_path, stop and report the missing "
-                "ar-task-scoped-readers/v1 capability. Do not call a task reader without "
-                "task_context or substitute caller-selected roots."
+                f"If the context_packet or the read_ar_files schema of {TOOL_SERVER_NAME} lacks "
+                "task_context with both task_document_ref and contract_path, stop and report "
+                "the missing ar-task-scoped-readers/v1 capability. Do not call a task reader "
+                "without task_context or substitute caller-selected roots."
             ),
         }
 
@@ -277,8 +277,9 @@ def _ar_mcp_context(
             else "Choose repo_id from availableRepositoryIds for each reader call."
         ),
         "missingCapabilityAction": (
-            "If a registered AR MCP reader schema is unavailable, report that installation issue; "
-            "do not invent a repository id or pass caller-selected roots."
+            f"If the context_packet or the read_ar_files schema of {TOOL_SERVER_NAME} is "
+            "unavailable, report that; do not invent a repository id or pass caller-selected "
+            "roots."
         ),
     }
 
@@ -581,7 +582,9 @@ def _compile_handover(
                 f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: "
                 "the AR build that launched this agent started it for this agent. A tool server "
                 f"named {OTHER_INSTALLATION_TOOL_SERVER}, if this session has one, belongs to "
-                "another installation and must not be used for this assignment. After a start or "
+                "another installation and must not be used for this assignment. An AR tool "
+                "server under any other name belongs to another AR installation; do not use it "
+                "for this assignment. After a start or "
                 "a resume a tool server can take some seconds to appear: if a call to "
                 f"{TOOL_SERVER_NAME} is not available, make the call once more before reporting "
                 "the server missing, and report that instead of substituting another. For a "

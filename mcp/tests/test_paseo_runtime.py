@@ -87,6 +87,7 @@ class PaseoRuntimeTests(unittest.TestCase):
             {
                 "daemon.listen": ("127.0.0.1:6831", "start"),
                 "daemon.relay.enabled": (False, "live"),
+                "daemon.mcp.injectIntoAgents": (False, "live"),
                 "features.webUi.enabled": (True, "start"),
                 "features.dictation.enabled": (False, "start"),
                 "features.voiceMode.enabled": (False, "start"),
@@ -131,7 +132,7 @@ class PaseoRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [(change["step"], change["action"]) for change in report["changes"]],
             [("install", "installed")]
-            + [("config", "set")] * 7
+            + [("config", "set")] * 8
             + [("embed", "written"), ("plugin", "copied"), ("daemon", "started")]
             + [("plugin", "installed")],
         )
@@ -239,6 +240,51 @@ class PaseoRuntimeTests(unittest.TestCase):
             self.assertEqual(report["daemon"], {"action": "reloaded", "reasons": []})
             self.assertEqual(mutations, [("config", "set")])
             self.assertTrue(fake.running()["live"]["pluginsEnabled"])
+
+        with self.subTest("Paseo's own agent tools are switched off again without a restart"):
+            for other in (True, None):
+                fake.write("daemon.mcp.injectIntoAgents", other)
+                fake.running()["live"]["daemon.mcp.injectIntoAgents"] = other
+                status = runtime_status(fake.settings, runner=fake, reader=fake.reader)
+                self.assertEqual(
+                    status["agentTools"],
+                    {
+                        "path": "daemon.mcp.injectIntoAgents",
+                        "expected": False,
+                        "configured": other,
+                        "differs": True,
+                    },
+                )
+                report, mutations = self.rerun(fake)
+                self.assertEqual(report["daemon"], {"action": "reloaded", "reasons": []})
+                self.assertEqual(mutations, [("config", "set")])
+                self.assertEqual(
+                    report["changes"],
+                    [
+                        {
+                            "step": "config",
+                            "action": "set",
+                            "path": "daemon.mcp.injectIntoAgents",
+                            "value": False,
+                            "applies": "live",
+                        }
+                    ],
+                )
+                self.assertIs(fake.running()["live"]["daemon.mcp.injectIntoAgents"], False)
+                status = runtime_status(fake.settings, runner=fake, reader=fake.reader)
+                self.assertEqual(
+                    (status["agentTools"]["configured"], status["agentTools"]["differs"]),
+                    (False, False),
+                )
+            # A key Paseo's file never held is another state than the value AR writes.
+            config = fake.config
+            del config["daemon"]["mcp"]
+            fake.save(config)
+            status = runtime_status(fake.settings, runner=fake, reader=fake.reader)
+            self.assertEqual(
+                (status["agentTools"]["configured"], status["agentTools"]["differs"]), (None, True)
+            )
+            self.assertEqual(self.rerun(fake)[1], [("config", "set")])
 
         with self.subTest("the embed list reloads the plugin"):
             embed = [{"dashboardOrigin": "http://localhost:9797", "frameBaseUrl": "http://h:1"}]
@@ -466,6 +512,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                     },
                     "live": {
                         "daemon.relay.enabled": False,
+                        "daemon.mcp.injectIntoAgents": False,
                         "pluginsEnabled": True,
                         "agents.providers": target["providers"],
                     },
@@ -792,6 +839,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "listen": None,
                 "plugin": None,
                 "embed": None,
+                "agentTools": None,
                 "providers": None,
                 "staleRecord": None,
             },
@@ -816,6 +864,17 @@ class PaseoRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(status["plugin"], {"id": PLUGIN_ID, "state": "running", "error": None})
         self.assertEqual(status["embed"], settings.embed_payload())
+        # Paseo's own agent tools are off because provision wrote that, not by Paseo's default.
+        self.assertEqual(
+            status["agentTools"],
+            {
+                "path": "daemon.mcp.injectIntoAgents",
+                "expected": False,
+                "configured": False,
+                "differs": False,
+            },
+        )
+        self.assertIs(fake.configured("daemon.mcp.injectIntoAgents"), False)
         self.assertEqual(
             status["providers"],
             [

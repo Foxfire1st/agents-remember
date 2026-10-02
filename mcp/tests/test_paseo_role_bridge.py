@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from agents_remember.cli import paseo_bridge
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -50,56 +51,71 @@ export class DaemonClient {
   }
 }
 """
-# A send does what the scenario says the runtime does with it (`afterSend`). A timeline
-# subscription delivers the scenario's turn events once it is established. The runtime's own wait
-# answers after `waitTakes` milliseconds and leaves the agent as `afterWait` says. Anything that
-# would resume, archive or answer for an agent fails.
+# A send does what the scenario says the runtime does with it (`afterSend`), or loses the
+# connection (`sendDisconnects`). From the first look at the agent on, the scenario's `steps` run:
+# each, `after` its milliseconds, changes the agent (`set`), adds timeline entries (`timeline`)
+# and delivers a turn event to the subscribers (`event`). Anything that would resume, archive or
+# answer for an agent fails.
 FAKE_CLIENT_ROOT = """
 import { agents, record, scenario } from './daemon-client.js'
+const timeline = [...(scenario.timeline ?? [])]
+const handlers = new Set()
+let began = false
+let sends = 0
+function begin(id) {
+  if (began) return
+  began = true
+  for (const step of scenario.steps ?? []) {
+    setTimeout(() => {
+      Object.assign(agents.get(id), step.set ?? {})
+      timeline.push(...(step.timeline ?? []))
+      if (step.event) for (const handler of handlers) handler({ agentId: id, event: step.event })
+    }, step.after)
+  }
+}
 function forbidden(via, id) {
   return async () => {
     record({ via, id })
     throw new Error(via + ' is not allowed here')
   }
 }
-function handle(id) {
+function handle(id, daemon) {
   return {
     refresh: async () => {
       record({ via: 'refresh', id })
+      begin(id)
+      if (sends > 0 && scenario.lookupFailsAfterSend) throw new Error('lookup failed')
       const agent = agents.get(id)
       if (!agent) throw new Error(`Agent not found: ${id}`)
       return { agent, project: null }
     },
     send: async (text, options) => {
       record({ via: 'send', id, text, options })
+      sends += 1
+      if (scenario.sendDisconnects) {
+        daemon.state = { status: 'disconnected' }
+        throw new Error('socket closed')
+      }
       if (scenario.sendError) throw new Error(scenario.sendError)
       Object.assign(agents.get(id), scenario.afterSend ?? {})
     },
-    waitForFinish: async (timeoutMs) => {
-      record({ via: 'waitForFinish', id, timeoutMs })
-      await new Promise((resolve) => setTimeout(resolve, scenario.waitTakes ?? 0))
-      Object.assign(agents.get(id), scenario.afterWait ?? {})
-      return { status: scenario.waitStatus ?? 'idle', final: null, error: null, lastMessage: null }
-    },
+    waitForFinish: forbidden('waitForFinish', id),
     timeline: {
       subscribe: (handler) => {
         record({ via: 'timeline.subscribe', id })
-        const unsubscribe = () => record({ via: 'timeline.unsubscribe', id })
+        const unsubscribe = () => {
+          handlers.delete(handler)
+          record({ via: 'timeline.unsubscribe', id })
+        }
         unsubscribe.ready = (async () => {
           if (scenario.subscribeError) throw new Error(scenario.subscribeError)
-          for (const event of scenario.events ?? []) {
-            setTimeout(() => {
-              Object.assign(agents.get(id), scenario.afterEvent ?? {})
-              handler({ agentId: id, event })
-            }, scenario.eventAfter ?? 20)
-          }
+          handlers.add(handler)
         })()
         return unsubscribe
       },
       refetch: async (options) => {
         record({ via: 'timeline.refetch', id, options })
-        const items = scenario.timeline ?? []
-        return { agent: agents.get(id), entries: items.slice(-options.limit).map((item) => ({ item })), hasOlder: false }
+        return { agent: agents.get(id), entries: timeline.slice(-options.limit), hasOlder: false }
       },
       append: forbidden('timeline.append', id)
     },
@@ -112,7 +128,7 @@ export function createPaseoApi(daemon) {
   return {
     dispose: async () => {},
     config: { get: async () => ({ config: { providers: scenario.providers ?? {} } }) },
-    agents: { ref: handle },
+    agents: { ref: (id) => handle(id, daemon) },
     workspaces: {
       ref: (workspaceId) => ({
         refresh: async () => ({ workspaceDirectory: '/work/' + workspaceId }),
@@ -146,12 +162,39 @@ def agent(status: str, **fields: Any) -> dict[str, Any]:
     }
 
 
-def sent(text: str, message_id: str = MESSAGE_ID) -> dict[str, str]:
-    return {"type": "user_message", "text": text, "messageId": message_id}
+def sent(text: str, message_id: str = MESSAGE_ID, turn: str | None = "turn-7") -> dict[str, Any]:
+    """A timeline entry: a message, recorded with its id in the turn that was running."""
+
+    return {"turnId": turn, "item": {"type": "user_message", "text": text, "messageId": message_id}}
 
 
-def reply(text: str) -> dict[str, str]:
-    return {"type": "assistant_message", "text": text}
+def reply(text: str, turn: str | None = "turn-7") -> dict[str, Any]:
+    return {"turnId": turn, "item": {"type": "assistant_message", "text": text}}
+
+
+def tool(turn: str | None = "turn-7") -> dict[str, Any]:
+    return {"turnId": turn, "item": {"type": "tool_call", "name": "shell"}}
+
+
+def ends(turn: str, after: int, kind: str = "turn_completed", **event: Any) -> dict[str, Any]:
+    """A step: the turn ends, the agent is idle, and the runtime says so with its event."""
+
+    return {
+        "after": after,
+        "set": {"status": "idle", "activeTurn": None},
+        "event": {"type": kind, "turnId": turn, **event},
+    }
+
+
+def begins(turn: str, after: int, *entries: dict[str, Any]) -> dict[str, Any]:
+    """A step: the agent begins a turn, with the entries the runtime records at its start."""
+
+    return {
+        "after": after,
+        "set": {"status": "running", "activeTurn": {"turnId": turn}},
+        "event": {"type": "turn_started", "turnId": turn},
+        "timeline": list(entries),
+    }
 
 
 @unittest.skipUnless(shutil.which("node"), "the bridge script needs Node.js")
@@ -304,31 +347,51 @@ class AgentSendScriptTests(RoleBridgeScriptTestCase):
                 self.send(holds=agent("idle"), sendError="Active turn changed before steering")
             self.assertEqual(raised.exception.code, "paseo_call_failed")
 
+    def test_a_failure_around_the_send_says_what_is_known_of_the_delivery(self) -> None:
+        with self.subTest("the connection is lost while the message is being sent"):
+            with self.assertRaises(PaseoBridgeFailure) as raised:
+                self.send(holds=agent("idle"), sendDisconnects=True)
+            self.assertEqual(raised.exception.code, "paseo_send_outcome_unknown")
+            self.assertIn("not known whether the message was delivered", str(raised.exception))
+        with self.subTest("the runtime accepted the message and the lookup afterwards fails"):
+            cases = {"started": agent("idle"), "steered": agent("running", activeTurn=TURN)}
+            for taken, held in cases.items():
+                delivery = self.send(holds=held, lookupFailsAfterSend=True)
+                self.assertEqual(delivery, {"delivered": True, "taken": taken, "turnId": None})
+                self.assertEqual(len(self.recorded("send")), 1)
+
+
+MESSAGE = sent("From architect\nreport your plan")
+FIRST_PROMPT = sent("The first message of the launch.", "the-launch")
+ASKED = "What outcome do you want to achieve?"
+
 
 class AgentWaitScriptTests(RoleBridgeScriptTestCase):
+    """The wait for a message that began its turn: that turn consumed it."""
+
     def wait(self, payload: dict[str, Any] | None = None, **scenario: Any) -> dict[str, Any]:
-        request = {"agentId": AGENT_ID, "turnId": "turn-7", "waitMs": 400}
+        request = {
+            "agentId": AGENT_ID,
+            "messageId": MESSAGE_ID,
+            "turnId": "turn-7",
+            "waitMs": 400,
+        }
         return self.call("agent-wait", {**request, **(payload or {})}, **scenario)["wait"]
 
     def test_a_turn_that_ends_during_the_call_is_reported_by_the_runtimes_own_event(self) -> None:
-        timeline = [
-            sent("From architect\nreport your plan"),
-            reply("The plan: "),
-            reply("read, change, test.\n"),
-        ]
-        events = {
-            "finished": {"type": "turn_completed", "turnId": "turn-7"},
-            "failed": {"type": "turn_failed", "turnId": "turn-7", "error": "usage limit reached"},
-            "cancelled": {"type": "turn_canceled", "turnId": "turn-7"},
+        timeline = [MESSAGE, reply("The plan: "), reply("read, change, test.\n")]
+        events: dict[str, tuple[str, dict[str, Any]]] = {
+            "finished": ("turn_completed", {}),
+            "failed": ("turn_failed", {"error": "usage limit reached"}),
+            "cancelled": ("turn_canceled", {}),
         }
-        for outcome, event in events.items():
+        for outcome, (kind, fields) in events.items():
             with self.subTest(outcome):
                 began = time.monotonic()
                 answer = self.wait(
+                    {"waitMs": 30000},
                     holds=agent("running", activeTurn=TURN),
-                    events=[{"type": "turn_started", "turnId": "turn-7"}, event],
-                    afterEvent={"status": "idle", "activeTurn": None},
-                    waitTakes=8000,
+                    steps=[ends("turn-7", 150, kind, **fields)],
                     timeline=timeline,
                 )
                 elapsed = time.monotonic() - began
@@ -337,68 +400,78 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                     {
                         "state": "ended",
                         "outcome": outcome,
-                        **({"error": "usage limit reached"} if outcome == "failed" else {}),
+                        **fields,
                         "text": "The plan: read, change, test.",
                         "textTruncated": False,
                     },
                 )
-                # The wait ended with the event, not with the runtime's own wait eight seconds on.
-                self.assertLess(elapsed, 6.0)
+                # The event woke the wait, and a turn the message began is given no time in
+                # which another could follow.
+                self.assertLess(elapsed, 2.5)
                 self.assertEqual(self.recorded("timeline.refetch")[0]["options"], TAIL)
                 self.assertEqual(self.recorded("send", "run", "archive", "respondToPermission"), [])
-        with self.subTest("an event of another turn does not end the wait"):
-            # The event arrives while the runtime's own wait is still running.
+                self.assertEqual(len(self.recorded("timeline.unsubscribe")), 1)
+        with self.subTest("the end of another turn is not the outcome of this one"):
             answer = self.wait(
                 holds=agent("running", activeTurn=TURN),
-                events=[{"type": "turn_completed", "turnId": "turn-6"}],
-                waitTakes=300,
-                waitStatus="timeout",
+                steps=[
+                    {
+                        "after": 50,
+                        "event": {"type": "turn_failed", "turnId": "turn-6", "error": "x"},
+                    }
+                ],
             )
-            self.assertEqual(answer, {"state": "running"})
-        with self.subTest("without a named turn, the end of the running turn ends the wait"):
+            self.assertEqual(answer, {"state": "running", "turnId": "turn-7"})
+        with self.subTest("the end of another turn, seen before, is not this turn's outcome"):
+            # This turn's own event does not arrive; what it left in the timeline decides.
             answer = self.wait(
-                {"turnId": None},
+                {"waitMs": 30000},
                 holds=agent("running", activeTurn=TURN),
-                events=[{"type": "turn_canceled", "turnId": "turn-6"}],
-                afterEvent={"status": "idle", "activeTurn": None},
-                waitTakes=8000,
-                timeline=[sent("From architect\nreport your plan")],
+                steps=[
+                    {
+                        "after": 50,
+                        "event": {"type": "turn_failed", "turnId": "turn-6", "error": "x"},
+                    },
+                    {"after": 200, "set": {"status": "idle", "activeTurn": None}},
+                ],
+                timeline=timeline,
             )
-            self.assertEqual((answer["state"], answer["outcome"]), ("ended", "cancelled"))
+            self.assertEqual(
+                (answer["outcome"], answer.get("error"), answer["text"]),
+                ("finished", None, "The plan: read, change, test."),
+            )
+        with self.subTest("without a named turn the running turn is followed and named"):
+            answer = self.wait(
+                {"turnId": None}, holds=agent("running", activeTurn=TURN), timeline=[MESSAGE]
+            )
+            self.assertEqual(answer, {"state": "running", "turnId": "turn-7"})
 
     def test_a_turn_that_ended_before_the_call_is_read_from_the_agents_state(self) -> None:
-        message = sent("From architect\nreport your plan")
-        earlier = [sent("an earlier message", "another-id"), reply("An earlier reply.")]
+        earlier = [sent("an earlier message", "another-id", "turn-6"), reply("Earlier.", "turn-6")]
         cases: dict[str, tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]] = {
             "a reply after the message": (
                 agent("idle"),
-                [*earlier, message, {"type": "tool_call", "name": "shell"}, reply("  Done.  ")],
+                [*earlier, MESSAGE, tool(), reply("  Done.  ")],
                 {"outcome": "finished", "text": "Done.", "textTruncated": False},
             ),
             "a reply in several parts, behind text that preceded a tool call": (
                 agent("idle"),
-                [
-                    message,
-                    reply("Looking."),
-                    {"type": "tool_call", "name": "shell"},
-                    reply("Do"),
-                    reply("ne."),
-                ],
+                [MESSAGE, reply("Looking."), tool(), reply("Do"), reply("ne.")],
                 {"outcome": "finished", "text": "Done.", "textTruncated": False},
             ),
             "no reply after the message": (
                 agent("idle"),
-                [*earlier, message, {"type": "tool_call", "name": "shell"}],
+                [*earlier, MESSAGE, tool()],
                 {"outcome": "cancelled", "text": None, "textTruncated": False},
             ),
             "the message itself closes the timeline": (
                 agent("idle"),
-                [*earlier, message],
+                [*earlier, MESSAGE],
                 {"outcome": "cancelled", "text": None, "textTruncated": False},
             ),
             "the agent is in an error state": (
                 agent("error", lastError="The model refused the turn."),
-                [*earlier, message],
+                [*earlier, MESSAGE],
                 {
                     "outcome": "failed",
                     "error": "The model refused the turn.",
@@ -408,51 +481,136 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
             ),
             "a reply longer than the limit": (
                 agent("idle"),
-                [message, reply("é" * 20001)],
+                [MESSAGE, reply("é" * 20001)],
                 {"outcome": "finished", "text": "é" * 20000, "textTruncated": True},
+            ),
+            "a timeline without turn ids": (
+                agent("idle"),
+                [
+                    sent("an earlier message", "another-id", None),
+                    MESSAGE | {"turnId": None},
+                    reply("Done.", None),
+                ],
+                {"outcome": "finished", "text": "Done.", "textTruncated": False},
             ),
         }
         for label, (held, timeline, ended) in cases.items():
             with self.subTest(label):
+                began = time.monotonic()
                 answer = self.wait(holds=held, timeline=timeline)
                 self.assertEqual(answer, {"state": "ended", **ended})
-                # Nothing is waited for or subscribed to once the turn is over.
-                self.assertEqual(self.recorded("waitForFinish", "timeline.subscribe", "send"), [])
+                self.assertLess(time.monotonic() - began, 2.5)
+                self.assertEqual(self.recorded("send", "waitForFinish"), [])
+
+    def test_without_a_named_turn_a_message_nothing_follows_yet_is_given_time_to_begin_its_turn(
+        self,
+    ) -> None:
+        # The send could not name the turn, and the agent is idle: the turn may not have begun.
+        steps = [
+            begins("turn-7", 400),
+            {"after": 600, "timeline": [reply("Done.")]},
+            ends("turn-7", 700),
+        ]
+        answer = self.wait(
+            {"turnId": None, "waitMs": 30000},
+            holds=agent("idle"),
+            steps=steps,
+            timeline=[MESSAGE],
+        )
+        self.assertEqual(
+            answer,
+            {"state": "ended", "outcome": "finished", "text": "Done.", "textTruncated": False},
+        )
+        with self.subTest("no turn begins: the message was not answered"):
+            began = time.monotonic()
+            answer = self.wait(
+                {"turnId": None, "waitMs": 30000}, holds=agent("idle"), timeline=[MESSAGE]
+            )
+            self.assertEqual((answer["state"], answer["outcome"]), ("ended", "cancelled"))
+            self.assertGreater(time.monotonic() - began, 5.0)
+        with self.subTest("the time is up first"):
+            answer = self.wait({"turnId": None}, holds=agent("idle"), timeline=[MESSAGE])
+            self.assertEqual(answer, {"state": "running", "turnId": None})
+        with self.subTest("a reply stands behind the message: its turn is over"):
+            began = time.monotonic()
+            answer = self.wait(
+                {"turnId": None}, holds=agent("idle"), timeline=[MESSAGE, reply("Done.")]
+            )
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "Done."))
+            self.assertLess(time.monotonic() - began, 2.5)
+
+    def test_a_turn_the_agent_runs_afterwards_is_not_the_one_the_message_began(self) -> None:
+        answered = [MESSAGE, reply("The plan.")]
+        with self.subTest("a turn without a message of its own"):
+            # The agent's state now is that of the later turn: it is not this turn's outcome.
+            answer = self.wait(
+                holds=agent("running", activeTurn={"turnId": "turn-8"}, lastError="later failure"),
+                timeline=[*answered, tool("turn-8"), reply("Something else.", "turn-8")],
+            )
+            self.assertEqual(
+                answer,
+                {
+                    "state": "ended",
+                    "outcome": "finished",
+                    "text": "The plan.",
+                    "textTruncated": False,
+                },
+            )
+        with self.subTest("a turn a newer message began"):
+            newer = sent("a newer message", "newer-id", "turn-8")
+            answer = self.wait(
+                holds=agent("running", activeTurn={"turnId": "turn-8"}),
+                timeline=[*answered, newer, reply("An answer to the newer one.", "turn-8")],
+            )
+            self.assertEqual((answer["state"], answer["text"]), ("ended", "The plan."))
+        with self.subTest("the message is not among the entries read: nothing is said to answer"):
+            for held in (agent("idle"), agent("running", activeTurn={"turnId": "turn-8"})):
+                answer = self.wait(
+                    holds=held, timeline=[sent("another", "another-id"), reply("Another reply.")]
+                )
+                self.assertEqual(answer["state"], "undecided")
+                self.assertIn("not among the last 200 timeline entries", answer["reason"])
+                self.assertNotIn("text", answer)
 
     def test_a_pending_permission_and_a_turn_that_still_runs_are_reported_as_such(self) -> None:
         pending = [{"id": "perm-1", "provider": "steering", "name": "Bash", "kind": "tool"}]
         with self.subTest("a permission is pending when the call begins"):
             answer = self.wait(holds=agent("running", activeTurn=TURN, pendingPermissions=pending))
             self.assertEqual(answer, {"state": "permission", "permission": "Bash"})
-            self.assertEqual(self.recorded(), [READ])
+            self.assertEqual(self.recorded("timeline.refetch", "send"), [])
         with self.subTest("the agent asks for a permission during the wait"):
             answer = self.wait(
+                {"waitMs": 30000},
                 holds=agent("running", activeTurn=TURN),
-                waitStatus="permission",
-                afterWait={"pendingPermissions": pending},
+                steps=[{"after": 100, "set": {"pendingPermissions": pending}}],
             )
             self.assertEqual(answer, {"state": "permission", "permission": "Bash"})
         with self.subTest("the time is up and the turn still runs"):
-            answer = self.wait(holds=agent("running", activeTurn=TURN), waitStatus="timeout")
-            self.assertEqual(answer, {"state": "running"})
-            self.assertEqual(
-                self.recorded("waitForFinish"),
-                [{"via": "waitForFinish", "id": AGENT_ID, "timeoutMs": 400}],
-            )
+            began = time.monotonic()
+            answer = self.wait(holds=agent("running", activeTurn=TURN))
+            self.assertEqual(answer, {"state": "running", "turnId": "turn-7"})
+            self.assertLess(time.monotonic() - began, 2.5)
             self.assertEqual(self.recorded("timeline.refetch", "send"), [])
         with self.subTest("the events cannot be followed: the state afterwards decides"):
             answer = self.wait(
+                {"waitMs": 30000},
                 holds=agent("running", activeTurn=TURN),
                 subscribeError="subscription refused",
-                afterWait={"status": "idle", "activeTurn": None},
-                timeline=[sent("From architect\nreport your plan"), reply("Done.")],
+                steps=[
+                    {"after": 100, "set": {"status": "idle", "activeTurn": None}},
+                ],
+                timeline=[MESSAGE, reply("Done.")],
             )
-            self.assertEqual(answer["outcome"], "finished")
-        with self.subTest("one wait never outlasts the limit of a bridge call"):
-            self.wait(
-                {"waitMs": 600000}, holds=agent("running", activeTurn=TURN), waitStatus="timeout"
-            )
-            self.assertLessEqual(self.recorded("waitForFinish")[0]["timeoutMs"], 55000 - 6000)
+            self.assertEqual((answer["state"], answer["outcome"]), ("ended", "finished"))
+        with (
+            self.subTest("one wait never outlasts the limit of a bridge call"),
+            patch.object(paseo_bridge, "_SCRIPT_DEADLINE_MS", 7000),
+        ):
+            began = time.monotonic()
+            answer = self.wait({"waitMs": 600000}, holds=agent("running", activeTurn=TURN))
+            self.assertEqual(answer["state"], "running")
+            # The script's deadline less the reserve of a wait: one second here.
+            self.assertLess(time.monotonic() - began, 4.0)
 
     def test_an_agent_that_cannot_be_waited_for_is_left_as_it_is(self) -> None:
         unavailable = {
@@ -465,6 +623,144 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                 self.assertEqual(self.wait(holds=held), {"state": "unavailable", "reason": reason})
                 # A timeline read would load the agent; none is made.
                 self.assertEqual(self.recorded(), [READ])
+        with self.subTest("the agent is archived during the wait"):
+            answer = self.wait(
+                {"waitMs": 30000},
+                holds=agent("running", activeTurn=TURN),
+                steps=[{"after": 100, "set": {"status": "closed", "archivedAt": ARCHIVED_AT}}],
+            )
+            self.assertEqual(answer, {"state": "unavailable", "reason": "archived"})
+
+
+class SteeredWaitScriptTests(RoleBridgeScriptTestCase):
+    """The wait for a message handed to a running turn: that turn or the next consumed it.
+
+    The turn that was running is ``turn-7``; it began with the launch's first message, and the
+    runtime recorded ours in it when it was sent.
+    """
+
+    def wait(self, payload: dict[str, Any] | None = None, **scenario: Any) -> dict[str, Any]:
+        request = {
+            "agentId": AGENT_ID,
+            "messageId": MESSAGE_ID,
+            "turnId": "turn-7",
+            "steered": True,
+            "waitMs": 30000,
+        }
+        return self.call("agent-wait", {**request, **(payload or {})}, **scenario)["wait"]
+
+    def test_the_awaited_turn_ends_and_the_following_turn_consumes_the_message(self) -> None:
+        held = agent("running", activeTurn=TURN)
+        timeline = [FIRST_PROMPT, MESSAGE]
+        took_it_up = [
+            {"after": 100, "timeline": [reply(ASKED)]},
+            ends("turn-7", 150),
+            # No message is recorded for this turn: the harness runs the one it had kept.
+            begins("turn-8", 700),
+            {"after": 900, "timeline": [tool("turn-8"), reply("DONE-C", "turn-8")]},
+            ends("turn-8", 1000),
+        ]
+        began = time.monotonic()
+
+        answer = self.wait(holds=held, steps=took_it_up, timeline=timeline)
+
+        elapsed = time.monotonic() - began
+        self.assertEqual(
+            answer,
+            {"state": "ended", "outcome": "finished", "text": "DONE-C", "textTruncated": False},
+        )
+        # The wait did not end with the turn that was running, and it ended with the turn that
+        # took the message up: that turn is not given time for another.
+        self.assertGreater(elapsed, 1.0)
+        self.assertLess(elapsed, 4.0)
+        with self.subTest("the time is up in the following turn: the answer names that turn"):
+            answer = self.wait(
+                {"waitMs": 1200}, holds=held, steps=took_it_up[:3], timeline=timeline
+            )
+            self.assertEqual(answer, {"state": "running", "turnId": "turn-8"})
+        with self.subTest("the time is up between the two turns: nothing has ended yet"):
+            answer = self.wait({"waitMs": 500}, holds=held, steps=took_it_up[:2], timeline=timeline)
+            self.assertEqual(answer, {"state": "running", "turnId": "turn-7"})
+        with self.subTest("both turns were over before the call"):
+            over = [*timeline, reply(ASKED), tool("turn-8"), reply("DONE-C", "turn-8")]
+            began = time.monotonic()
+            answer = self.wait(holds=agent("idle"), timeline=over)
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "DONE-C"))
+            self.assertLess(time.monotonic() - began, 2.5)
+        with self.subTest("the following turn fails and leaves nothing: its event is the outcome"):
+            failing = [*took_it_up[:3], ends("turn-8", 900, "turn_failed", error="usage limit")]
+            answer = self.wait(holds=held, steps=failing, timeline=timeline)
+            self.assertEqual(
+                answer,
+                {
+                    "state": "ended",
+                    "outcome": "failed",
+                    "error": "usage limit",
+                    "text": None,
+                    "textTruncated": False,
+                },
+            )
+
+    def test_a_turn_that_went_on_behind_the_message_is_the_one_that_consumed_it(self) -> None:
+        timeline = [FIRST_PROMPT, MESSAGE]
+        read_it = [
+            {"after": 100, "timeline": [tool(), reply("Both answered.")]},
+            ends("turn-7", 150),
+        ]
+        began = time.monotonic()
+
+        answer = self.wait(
+            holds=agent("running", activeTurn=TURN), steps=read_it, timeline=timeline
+        )
+
+        self.assertEqual(
+            answer,
+            {
+                "state": "ended",
+                "outcome": "finished",
+                "text": "Both answered.",
+                "textTruncated": False,
+            },
+        )
+        # The turn took another step behind the message, so it read it: no turn is waited for.
+        self.assertLess(time.monotonic() - began, 2.5)
+        with self.subTest("the turn's own first message is recorded behind ours: it is not newer"):
+            answer = self.wait(
+                holds=agent("running", activeTurn=TURN),
+                steps=[
+                    {"after": 100, "timeline": [FIRST_PROMPT, tool(), reply("Both answered.")]},
+                    ends("turn-7", 150),
+                ],
+                timeline=[MESSAGE],
+            )
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "Both answered."))
+        with self.subTest("a turn that ended without a step is given the time for another"):
+            steps = [{"after": 100, "timeline": [reply("The plan.")]}, ends("turn-7", 150)]
+            began = time.monotonic()
+            answer = self.wait(
+                holds=agent("running", activeTurn=TURN), steps=steps, timeline=timeline
+            )
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
+            self.assertGreater(time.monotonic() - began, 5.0)
+        with self.subTest("a newer message began the next turn: the wait ends at once"):
+            newer = sent("a newer message", "newer-id", "turn-8")
+            began = time.monotonic()
+            answer = self.wait(
+                holds=agent("running", activeTurn=TURN),
+                steps=[*steps, begins("turn-8", 400, newer)],
+                timeline=timeline,
+            )
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
+            self.assertLess(time.monotonic() - began, 2.5)
+        with self.subTest("a newer message stands behind ours before the call"):
+            newer = sent("a newer message", "newer-id", "turn-8")
+            began = time.monotonic()
+            answer = self.wait(
+                holds=agent("idle"),
+                timeline=[*timeline, reply("The plan."), newer, reply("Another.", "turn-8")],
+            )
+            self.assertEqual((answer["outcome"], answer["text"]), ("finished", "The plan."))
+            self.assertLess(time.monotonic() - began, 2.5)
 
 
 class AgentParentScriptTests(RoleBridgeScriptTestCase):

@@ -1,15 +1,18 @@
-"""PNT-R06: role start and role messaging by role agents, against a fake bridge."""
+"""PNT-R06: role start by role agents, against a fake bridge; the fixture of both role tools.
+
+The cases of role messaging are in ``test_paseo_role_messages.py``.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import threading
+import time
 import unittest
 import uuid
-from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, cast
+from unittest.mock import patch
 
 from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
@@ -18,34 +21,38 @@ from agents_remember.application.agent_binding import (
     TOOL_SERVER_NAME,
     AgentBinding,
 )
+from agents_remember.application.orca_task_context import selection_binding
 from agents_remember.cli import (
     orca_task_receipts,
     orca_task_routes,
     paseo_catalog,
     paseo_role_tools,
+    paseo_role_wait,
 )
+from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
+from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import (
     MAY_START,
     send_role_message,
-    sender_line,
     start_role,
     start_rule_violation,
-    starting_agent,
 )
+from agents_remember.cli.paseo_status import AgentReading
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
 from agents_remember.models.role_agents import (
     RoleMessageCall,
-    RoleMessageRefusal,
-    RoleMessageStatus,
     RoleStartCall,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentRefError
+from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from test_paseo_launch import (
+    CLOSING_STATES,
     LEAF_REF,
     MASTER_REF,
     ROLE_REFS,
@@ -53,7 +60,7 @@ from test_paseo_launch import (
     SPRINT_REF,
     runtime_config,
 )
-from test_paseo_status import NO_ROLLOUT, StatusTestCase
+from test_paseo_status import StatusTestCase
 
 ROLES = (
     "architect",
@@ -66,6 +73,8 @@ ROLES = (
 )
 OTHER_SPRINT = TaskDocumentRef(repository="agents-remember", path="other-sprint/task.json")
 OTHER_MASTER = TaskDocumentRef(repository="agents-remember", path="other-master/task.json")
+OTHER_LEAF = TaskDocumentRef(repository="agents-remember", path="master/02_leaf.json")
+ARCHIVED_AT = "2026-10-02T02:00:00.000Z"
 REFS = {
     "sprintDocumentRef": "sprint_ref",
     "masterDocumentRef": "master_ref",
@@ -104,6 +113,7 @@ class RoleToolsTestCase(StatusTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.replace(paseo_role_tools, "bridge_call", self.runtime)
+        self.replace(paseo_role_wait, "bridge_call", self.runtime)
         self.replace(paseo_role_tools, "resolve_orca_role_context", side_effect=self.context)
         self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
         self.runtime._agent_send = self.agent_send
@@ -111,7 +121,7 @@ class RoleToolsTestCase(StatusTestCase):
         # What each wait call answers, in order; the clock moves by `waitMs` with every call.
         self.waits: list[dict[str, Any]] = []
         self.clock = 0.0
-        self.replace(paseo_role_tools, "_monotonic", lambda: self.clock)
+        self.replace(paseo_role_wait, "_monotonic", lambda: self.clock)
         self.architect = binding("architect")
 
     def topology(self, _root: Any) -> Any:
@@ -156,8 +166,15 @@ class RoleToolsTestCase(StatusTestCase):
 
     def agent_wait(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.clock += payload["waitMs"] / 1000
-        answer = self.waits.pop(0) if self.waits else {"state": "running"}
-        return {"serverId": SERVER_ID, "wait": answer}
+        # Without a queued answer the time is up and the turn the caller named still runs.
+        still = {"state": "running", "turnId": payload.get("turnId")}
+        return {"serverId": SERVER_ID, "wait": self.waits.pop(0) if self.waits else still}
+
+    def waited(self) -> list[dict[str, Any]]:
+        return [payload for command, payload in self.runtime.calls if command == "agent-wait"]
+
+    def message_ids(self, agent_id: str) -> list[str]:
+        return [message_id for message_id, _text in self.runtime.agents[agent_id]["received"]]
 
     def start(self, caller: AgentBinding | None, role: str, **fields: Any) -> dict[str, Any]:
         call = RoleStartCall(
@@ -386,6 +403,12 @@ class RoleStartTests(RoleToolsTestCase):
             result = self.refusal(self.start(self.architect, "worker"), "host-unreachable")
             self.assertIn("paseo_daemon_unreachable", result["detail"])
             self.assertEqual((self.receipt_files(), self.runtime.agents), ([], {}))
+        with self.subTest("the host refuses a call before anything is recorded"):
+            # The host answered, so it is not unreachable; what it refused is in the detail.
+            self.runtime.fail("catalog", "paseo_call_failed", "the catalog is not served")
+            result = self.refusal(self.start(self.architect, "worker"), "launch-refused")
+            self.assertIn("the catalog is not served", result["detail"])
+            self.assertEqual((self.receipt_files(), self.runtime.agents), ([], {}))
         with self.subTest("a second start on an open task-bound execution"):
             first = self.start(self.architect, "worker")
             # While the host cannot say what the open execution's agent is doing, nothing starts.
@@ -430,12 +453,217 @@ class RoleStartTests(RoleToolsTestCase):
             other = self.start(self.architect, "system-specialist")
             self.assertEqual(repeat["agentId"], first["agentId"])
             self.assertNotEqual(other["agentId"], first["agentId"])
-        with self.subTest("the same request id from another caller is another request"):
+        with self.subTest("a receipt that is still starting is not answered as running"):
+            # Another process of this request wrote the receipt and has not launched yet.
+            request = self.request("manager")
+            crash = RuntimeError("the process ended here")
+            with (
+                patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+                self.assertRaises(RuntimeError),
+            ):
+                orca_task_routes._orca_dispatch_endpoint(
+                    self.config,
+                    request,
+                    started_by=StartingAgent(self.architect.agent_id, "architect", "Projects"),
+                )
+            self.assertEqual(self.receipt(request)["status"], "starting")
+            self.replace(paseo_role_tools, "_orca_dispatch_endpoint", return_value=JSONResponse({}))
+            starting = self.start(self.architect, "manager", request_id=request.request_id)
+            self.assertEqual(
+                (starting["ok"], starting["status"], starting["executionStatus"]),
+                (False, "unknown", "starting"),
+            )
+            self.assertIn("same request id", starting["nextAction"])
+
+    def test_a_request_id_is_repeated_by_its_starter_and_the_launcher_and_no_other_agent(
+        self,
+    ) -> None:
+        request_id = uuid.uuid4()
+        self.runtime.fail("agent-create", "paseo_bridge_timeout")
+        unknown = self.start(self.architect, "worker", request_id=request_id)
+        self.assertEqual((unknown["status"], self.runtime.agents), ("unknown", {}))
+        request = self.request("worker", request_id)
+        stored = self.receipt(request)["replayRequest"]["agent"]
+        self.assertEqual(stored["parentAgentId"], self.architect.agent_id)
+        with self.subTest("another agent is refused and nothing is created"):
+            other = binding("architect")
+            self.runtime.calls.clear()
             refused = self.refusal(
-                self.start(binding("architect"), "system-specialist", request_id=request_id),
+                self.start(other, "worker", request_id=request_id), "launch-refused"
+            )
+            self.assertEqual(
+                refused["detail"],
+                f"This request id belongs to an execution that agent {self.architect.agent_id} "
+                f"started; agent {other.agent_id} did not start it and cannot repeat it.",
+            )
+            self.assertEqual((self.runtime.calls, self.runtime.agents), ([], {}))
+            self.assertEqual(self.receipt(request)["status"], "unknown")
+        with self.subTest("the launcher's Retry replays the stored call with the stored parent"):
+            self.runtime.calls.clear()
+            status, public = self.dispatch(request)
+            self.assertEqual((status, public["status"]), (200, "running"))
+            created = [
+                payload for command, payload in self.runtime.calls if command == "agent-create"
+            ]
+            self.assertEqual([{key: call[key] for key in stored} for call in created], [stored])
+            self.assertEqual(self.receipt(request)["parentAgentId"], self.architect.agent_id)
+            self.assertEqual(list(self.runtime.agents), [unknown["agentId"]])
+            # The launcher's bar offers this Retry: the result route says so with the same payload.
+            self.assertEqual(self.dispatch(request)[1]["execution"]["agentId"], unknown["agentId"])
+        with self.subTest("the starter's own repeat reconciles the same agent"):
+            again = self.start(self.architect, "worker", request_id=request_id)
+            self.assertEqual(
+                (again["status"], again["agentId"], again["parentAgentId"]),
+                ("running", unknown["agentId"], self.architect.agent_id),
+            )
+        with self.subTest("an execution the launcher started is not an agent's to repeat"):
+            dashboard = self.request("manager")
+            self.dispatch(dashboard)
+            agents = list(self.runtime.agents)
+            self.runtime.calls.clear()
+            refused = self.refusal(
+                self.start(self.architect, "manager", request_id=dashboard.request_id),
                 "launch-refused",
             )
-            self.assertIn("already bound to different", refused["detail"])
+            self.assertEqual(
+                refused["detail"],
+                "This request id belongs to an execution that the launcher started; agent "
+                f"{self.architect.agent_id} did not start it and cannot repeat it.",
+            )
+            self.assertEqual((self.runtime.calls, list(self.runtime.agents)), ([], agents))
+            self.assertNotIn("parentAgentId", self.receipt(dashboard))
+            self.assertEqual(self.dispatch(dashboard)[1]["status"], "running")
+        with self.subTest("a taskless execution of another agent"):
+            taskless = uuid.uuid4()
+            self.start(self.architect, "system-specialist", request_id=taskless)
+            refused = self.refusal(
+                self.start(binding("architect"), "system-specialist", request_id=taskless),
+                "launch-refused",
+            )
+            self.assertIn("did not start it and cannot repeat it", refused["detail"])
+
+    def test_starts_run_one_at_a_time_and_a_start_waits_for_the_one_before_it(self) -> None:
+        inside, proceed = threading.Event(), threading.Event()
+        order: list[str] = []
+        results: dict[str, dict[str, Any]] = {}
+
+        def observed(_command: str, _payload: dict[str, Any]) -> None:
+            name = threading.current_thread().name
+            order.append(name)
+            if name == "first" and not inside.is_set():
+                inside.set()
+                self.assertTrue(proceed.wait(10))
+
+        def run(role: str) -> None:
+            results[threading.current_thread().name] = self.start(self.architect, role)
+
+        self.runtime.observer = observed
+        first = threading.Thread(target=run, args=("worker",), name="first")
+        second = threading.Thread(target=run, args=("manager",), name="second")
+        first.start()
+        self.assertTrue(inside.wait(10))
+        second.start()
+        second.join(0.3)
+        # The second start is neither refused nor begun: it waits for the first to end.
+        self.assertTrue(second.is_alive())
+        self.assertEqual((results, set(order)), ({}, {"first"}))
+        proceed.set()
+        first.join(10)
+        second.join(10)
+        self.runtime.observer = None
+        self.assertEqual(
+            {name: result["status"] for name, result in results.items()},
+            {"first": "running", "second": "running"},
+        )
+        self.assertEqual(order, sorted(order), "the two launches did not interleave")
+        self.assertEqual(len(self.runtime.agents), 2)
+        self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+
+    def test_a_start_that_waited_its_time_out_says_to_call_again(self) -> None:
+        self.assertEqual(paseo_role_tools.LOCK_WAIT_SECONDS, 60)
+        self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.2)
+        self.assertTrue(orca_task_routes._DISPATCH_LOCK.acquire(blocking=False))
+        try:
+            began = time.monotonic()
+            refused = self.refusal(self.start(self.architect, "curator"), "launch-refused")
+            self.assertGreaterEqual(time.monotonic() - began, 0.2)
+            # The launcher's route does not wait at all.
+            began = time.monotonic()
+            busy = self.refused(self.request("curator"))
+            self.assertLess(time.monotonic() - began, 0.15)
+        finally:
+            orca_task_routes._DISPATCH_LOCK.release()
+        self.assertIsInstance(busy, orca_task_routes.LaunchLockBusy)
+        self.assertEqual(busy.status_code, 409)
+        self.assertEqual(
+            refused["detail"],
+            "Another start of this tool server was still running after 0.2 seconds, so this one "
+            "was not begun. Nothing was recorded for this request.",
+        )
+        self.assertEqual(
+            refused["nextAction"],
+            "Call role_start again with the same arguments; starts run one at a time.",
+        )
+        self.assertEqual((self.runtime.calls, self.receipt_files()), ([], []))
+        self.assertEqual(self.start(self.architect, "curator")["status"], "running")
+        with self.subTest("the tool's description says so"):
+            described = asyncio.run(self.tool_descriptions())["role_start"]
+            self.assertIn("Starts run one at a time.", described)
+            self.assertIn("waits up to 60 seconds", described)
+            self.assertIn("nextAction says to call again with the same arguments", described)
+
+    async def tool_descriptions(self) -> dict[str, str]:
+        server = FastMCP("role-tools-descriptions")
+        register_role_agent_tools(server, self.config)
+        return {
+            tool.name: " ".join(line.strip() for line in (tool.description or "").split("\n"))
+            for tool in await server.list_tools()
+        }
+
+    def test_a_repeat_whose_agent_is_archived_or_gone_is_refused_with_what_to_do(self) -> None:
+        gone: dict[str, Any] = {
+            "is archived": lambda agent_id: self.runtime.agents[agent_id].update(
+                status="closed", archivedAt=ARCHIVED_AT
+            ),
+            "is unknown to the host": self.runtime.agents.pop,
+        }
+        for state, leave in gone.items():
+            with self.subTest(state):
+                request_id = uuid.uuid4()
+                first = self.start(self.architect, "system-specialist", request_id=request_id)
+                leave(first["agentId"])
+                self.runtime.calls.clear()
+
+                result = self.refusal(
+                    self.start(self.architect, "system-specialist", request_id=request_id),
+                    "launch-refused",
+                )
+
+                self.assertEqual(
+                    (result["agentId"], result["executionStatus"], result["nextAction"]),
+                    (first["agentId"], "stopped", "Start again with a new request id."),
+                )
+                self.assertIn(f"Agent {first['agentId']} of this request {state}", result["detail"])
+                # Nothing but reads: the repeat neither creates, resumes nor un-archives.
+                self.assertEqual({command for command, _p in self.runtime.calls}, {"agent-state"})
+        with self.subTest("a live agent whose last turn was cancelled is answered as before"):
+            request_id = uuid.uuid4()
+            first = self.start(self.architect, "system-specialist", request_id=request_id)
+            self.runtime.agents[first["agentId"]].update(CLOSING_STATES["stopped"])
+            repeat = self.start(self.architect, "system-specialist", request_id=request_id)
+            self.assertEqual(
+                (repeat["ok"], repeat["status"], repeat["executionStatus"], repeat["agentId"]),
+                (True, "running", "stopped", first["agentId"]),
+            )
+            with self.subTest("the host cannot say whether the agent is still there"):
+                unread = AgentReading(reachable=False, unreachable_reason="connection refused")
+                self.replace(paseo_role_tools, "read_agent", return_value=unread)
+                result = self.refusal(
+                    self.start(self.architect, "system-specialist", request_id=request_id),
+                    "host-unreachable",
+                )
+                self.assertIn("connection refused", result["detail"])
+                self.assertIn(first["agentId"], result["detail"])
 
     @staticmethod
     def changed(document: ResolvedTaskDocument) -> ResolvedTaskDocument:
@@ -465,425 +693,72 @@ class RoleStartTests(RoleToolsTestCase):
         self.assertEqual(len(self.enclosures.start_calls), 1)
 
 
-class RoleMessageTests(RoleToolsTestCase):
-    def test_the_delivered_text_opens_with_the_line_that_names_the_sender(self) -> None:
-        _request, worker = self.started(status="idle")
-        before = sorted(path.as_posix() for path in self.root.rglob("*") if path.is_file())
-        saved = {path: Path(path).read_bytes() for path in before}
-        senders = {
-            "architect": (self.architect, "Projects"),
-            "orchestrator": (binding("orchestrator"), "SPRINT"),
-            "manager": (binding("manager"), "MASTER"),
-            "reviewer": (binding("reviewer"), "01_LEAF"),
+class ReusedRequestIdTests(RoleToolsTestCase):
+    """A start whose request id belongs to another selection: refused before anything is prepared."""
+
+    def setUp(self) -> None:
+        self.compiled = 0
+        super().setUp()
+
+    def compile_handover(self, request: OrcaHandoverRequest) -> dict[str, Any]:
+        """The compiled handover with the binding the build writes: it names the selection."""
+
+        assert request.request_id is not None
+        self.compiled += 1
+        prepared = super().compile_handover(request)
+        bound = {
+            **prepared["messageBindingProjection"]["binding"],
+            "selection": selection_binding(request.context),
         }
-        for role, (caller, subject) in senders.items():
-            with self.subTest(sender=role):
-                self.runtime.agents[worker].update(status="idle", received=[])
-                self.runtime.calls.clear()
-                line = f"From {role} · {subject} · agent {caller.agent_id}"
+        prepared["messageBindingProjection"] = {
+            "requestId": str(request.request_id),
+            "binding": bound,
+            **_message_binding_projection_reference(self.config, request.request_id, bound),
+        }
+        return prepared
 
-                result = self.message(caller, "report your plan", agent_id=worker)
+    def state(self) -> dict[str, bytes]:
+        return {
+            path.relative_to(self.root).as_posix(): path.read_bytes()
+            for path in sorted(self.root.rglob("*"))
+            if path.is_file()
+        }
 
-                self.assertEqual(self.received(worker), [f"{line}\nreport your plan"])
-                self.assertEqual(
-                    result,
-                    {
-                        "ok": True,
-                        "status": "accepted",
-                        "detail": "The recipient started a turn with the message.",
-                        "recipientAgentId": worker,
-                        "senderLine": line,
-                        "taken": "started",
-                    },
-                )
-                self.assertEqual(sender_line(starting_agent(self.config, caller)), line)
-                # Accepted means the host took the message; nothing waits for the turn.
-                self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"])
-        with self.subTest("nothing is stored by AR and no receipt changes"):
-            after = sorted(path.as_posix() for path in self.root.rglob("*") if path.is_file())
-            self.assertEqual(after, before)
-            self.assertEqual({path: Path(path).read_bytes() for path in after}, saved)
-        with self.subTest("a task document that is gone still names the work by its reference"):
-            caller = binding("orchestrator", sprint_ref=OTHER_SPRINT)
-            self.assertEqual(
-                sender_line(starting_agent(self.config, caller)),
-                f"From orchestrator · {OTHER_SPRINT.key} · agent {caller.agent_id}",
-            )
+    def test_the_request_id_of_one_leaf_reused_on_another_prepares_nothing(self) -> None:
+        request_id = uuid.uuid4()
+        first = self.start(self.architect, "worker", request_id=request_id)
+        self.assertEqual((first["status"], self.compiled), ("running", 1))
+        # The second leaf has no enclosure yet: preparing a start for it would create one.
+        self.enclosures.started = False
+        before = self.state()
+        self.runtime.calls.clear()
 
-    def test_a_role_resolves_through_the_receipts_to_its_live_agent(self) -> None:
-        to_worker = {"role": "worker", **selection_of("worker")}
-        first, old_agent = self.started(status="idle")
-        with self.subTest("the open execution"):
-            self.runtime.calls.clear()
-            result = self.message(self.architect, **to_worker)
-            self.assertEqual(
-                (result["status"], result["recipientAgentId"]), ("accepted", old_agent)
-            )
-            self.assertEqual(
-                [command for command, _p in self.runtime.calls], ["agent-state", "agent-send"]
-            )
-            self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
-        with self.subTest("failing that, the most recent execution whose agent is live"):
-            self.close_execution(first, "completed")
-            # The next start is refused by the host before it archived the closed execution's agent.
-            self.runtime.fail("agent-archive", "paseo_call_failed", "archive refused")
-            second = self.request("worker")
-            self.assertEqual(self.dispatch(second)[1]["status"], "rejected")
-            self.assertNotEqual(self.receipt(second)["agentId"], old_agent)
-            self.runtime.agents[old_agent].update(status="idle", received=[])
-            result = self.message(self.architect, **to_worker)
-            self.assertEqual(
-                (result["status"], result["recipientAgentId"]), ("accepted", old_agent)
-            )
-        with self.subTest("an archived agent is refused and stays archived"):
-            self.runtime.agents[old_agent].update(
-                status="closed", archivedAt="2026-10-02T02:00:00.000Z", received=[]
-            )
-            self.runtime.calls.clear()
-            for address in (to_worker, {"agent_id": old_agent}):
-                result = self.refusal(self.message(self.architect, **address), "recipient-archived")
-                self.assertEqual(result["recipientAgentId"], old_agent)
-            self.assertNotIn("agent-resume", [command for command, _p in self.runtime.calls])
-            self.assertEqual(
-                self.runtime.agents[old_agent]["archivedAt"], "2026-10-02T02:00:00.000Z"
-            )
-            self.assertEqual(self.received(old_agent), [])
-        with self.subTest("a selection without an execution"):
-            curator = {"role": "curator", **selection_of("curator")}
-            result = self.refusal(self.message(self.architect, **curator), "recipient-not-found")
-            self.assertIn("No live curator agent", result["detail"])
-        with self.subTest("a selection that cannot be resolved"):
-            self.replace(
-                paseo_role_tools,
-                "resolve_orca_role_context",
-                side_effect=ValueError("worker requires a canonical task selection."),
-            )
+        result = self.refusal(
+            self.start(
+                self.architect, "worker", request_id=request_id, task_document_ref=OTHER_LEAF
+            ),
+            "launch-refused",
+        )
+
+        self.assertIn(
+            f"Request id {request_id} is already bound to another AR role selection (worker); "
+            "nothing was prepared for this request.",
+            result["detail"],
+        )
+        self.assertEqual((self.compiled, len(self.enclosures.start_calls)), (1, 1))
+        self.assertFalse(self.enclosures.started)
+        self.assertEqual(self.state(), before)
+        self.assertEqual(self.runtime.launch_calls(), [])
+        self.assertEqual(list(self.runtime.agents), [first["agentId"]])
+        with self.subTest("the id of a taskless execution reused on a leaf"):
+            taskless = uuid.uuid4()
+            self.start(self.architect, "system-specialist", request_id=taskless)
+            before = self.state()
             result = self.refusal(
-                self.message(self.architect, role="worker"), "recipient-not-found"
+                self.start(self.architect, "reviewer", request_id=taskless), "launch-refused"
             )
-            self.assertIn("worker requires a canonical task selection.", result["detail"])
-
-    def test_several_live_agents_of_a_role_are_refused_with_their_ids_never_chosen_among(
-        self,
-    ) -> None:
-        _first, one = self.started("architect", status="idle")
-        _second, two = self.started("architect", status="idle")
-        _third, gone = self.started(
-            "architect", status="closed", archivedAt="2026-10-02T02:00:00.000Z"
-        )
-        worker = binding("worker")
-
-        result = self.refusal(self.message(worker, role="architect"), "recipient-ambiguous")
-
-        self.assertEqual(sorted(result["candidateAgentIds"]), sorted([one, two]))
-        self.assertIn(one, result["detail"])
-        self.assertIn(two, result["detail"])
-        self.assertNotIn(gone, result["detail"])
-        self.assertEqual([self.received(agent) for agent in (one, two, gone)], [[], [], []])
-        with self.subTest("addressed by agent id it is delivered"):
-            result = self.message(worker, agent_id=two)
-            self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", two))
-            self.assertEqual(self.received(one), [])
-        with self.subTest("one live agent of the role is the recipient"):
-            self.runtime.agents[one].update(status="closed", archivedAt="2026-10-02T03:00:00.000Z")
-            result = self.message(worker, role="architect")
-            self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", two))
-        with self.subTest("the host cannot be asked which agents are live"):
-            self.runtime.fail("agent-state", "paseo_daemon_unreachable", "connection refused")
-            self.refusal(self.message(worker, role="architect"), "host-unreachable")
-
-    def test_only_an_agent_id_of_this_lines_receipts_is_a_recipient(self) -> None:
-        _request, worker = self.started(status="idle")
-        caller_request, caller_agent = self.started("architect", status="running")
-        caller = binding("architect", caller_agent)
-        self.runtime.calls.clear()
-        not_ids = (
-            "architect",
-            "Worker · 01_LEAF",
-            worker[:8],
-            worker.upper(),
-            f"{{{worker}}}",
-            "",
-        )
-        for value in not_ids:
-            with self.subTest(not_an_id=value):
-                result = self.refusal(self.message(caller, agent_id=value), "recipient-not-found")
-                self.assertIn("AR agent ids are UUIDs", result["detail"])
-        cases = {
-            "an id no receipt records": (
-                {"agent_id": str(uuid.uuid4())},
-                "No role execution of this AR line",
-            ),
-            "an id and a role together": (
-                {"agent_id": worker, "role": "worker"},
-                "not both and not neither",
-            ),
-            "neither an id nor a role": ({}, "not both and not neither"),
-            "the caller itself": ({"agent_id": caller_agent}, "is the calling agent itself"),
-        }
-        for label, (address, said) in cases.items():
-            with self.subTest(label):
-                result = self.refusal(self.message(caller, **address), "recipient-not-found")
-                self.assertIn(said, result["detail"])
-        # None of these reached the host: the runtime resolves prefixes and titles.
-        self.assertEqual(self.runtime.calls, [])
-        self.assertEqual(self.received(worker), [])
-        with self.subTest("an agent the host no longer has"):
-            del self.runtime.agents[worker]
-            self.refusal(self.message(caller, agent_id=worker), "recipient-not-found")
-        del caller_request
-
-    def test_a_running_turn_is_never_cancelled(self) -> None:
-        _request, worker = self.started(status="running")
-        with self.subTest("the running turn takes the message up"):
-            result = self.message(self.architect, agent_id=worker)
-            self.assertEqual((result["status"], result["taken"]), ("accepted", "steered"))
-            self.assertEqual(
-                result["detail"],
-                "The recipient's running turn took the message up; nothing was cancelled.",
-            )
-            self.assertNotIn("warning", result)
-            self.assertEqual(len(self.received(worker)), 1)
-        with self.subTest("the host cannot hand a message to this recipient's running turn"):
-            self.runtime.agents[worker].update(steers=False, received=[])
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
-            self.assertIn("the message was not delivered", result["detail"])
-            self.assertEqual(
-                (self.received(worker), self.runtime.agents[worker]["status"]), ([], "running")
-            )
-        with self.subTest("the host cancelled the turn all the same: the result says so"):
-            self.runtime.agents[worker].update(steers=True, taken="replaced")
-            result = self.message(self.architect, agent_id=worker)
-            self.assertEqual(result["status"], "accepted")
-            self.assertIn("cancelled the recipient's running turn", result["warning"])
-        with self.subTest("the host does not accept the message"):
-            self.runtime.calls.clear()
-            for _attempt in range(2):
-                self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
-            self.assertIn("Active turn changed", result["detail"])
-            self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"] * 2)
-        with self.subTest("a turn that changed under the send is tried once more"):
-            self.runtime.agents[worker].update(taken=None, received=[])
-            self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
-            self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
-            self.assertEqual(len(self.received(worker)), 1)
-
-    def test_a_closed_session_is_resumed_first_under_the_scope_check_of_revive(self) -> None:
-        request, worker = self.started(status="closed")
-        self.runtime.calls.clear()
-        agents = list(self.runtime.agents)
-
-        result = self.message(self.architect, agent_id=worker)
-
-        self.assertEqual(
-            (result["status"], result["resumed"], result["taken"]), ("accepted", True, "started")
-        )
-        self.assertEqual(
-            [command for command, _p in self.runtime.calls],
-            ["agent-send", "agent-resume", "agent-send"],
-        )
-        self.assertEqual(len(self.received(worker)), 1)
-        self.assertEqual((list(self.runtime.agents), len(self.enclosures.start_calls)), (agents, 1))
-        with self.subTest("a changed task scope refuses with both values and resumes nothing"):
-            self.runtime.agents[worker].update(status="closed", received=[])
-            receipt = self.receipt(request)
-            current = copy.deepcopy(receipt["arMcpContext"]["taskContext"])
-            receipt["arMcpContext"]["taskContext"]["contract_path"] = (
-                "/enclosures/moved/contract.json"
-            )
-            orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
-            self.runtime.calls.clear()
-            result = self.refusal(
-                self.message(self.architect, agent_id=worker), "scope-check-failed"
-            )
-            self.assertIn("/enclosures/moved/contract.json", result["detail"])
-            self.assertIn(current["contract_path"], result["detail"])
-            self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"])
-            self.assertEqual(
-                (self.runtime.agents[worker]["status"], self.received(worker)), ("closed", [])
-            )
-            receipt["arMcpContext"]["taskContext"] = current
-            orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
-        with self.subTest("an agent the host cannot resume: its reason, and nothing is relaunched"):
-            self.runtime.agents[worker]["resumeRefusal"] = NO_ROLLOUT
-            self.runtime.calls.clear()
-            result = self.refusal(
-                self.message(self.architect, agent_id=worker), "recipient-cannot-be-resumed"
-            )
-            self.assertEqual(result["detail"], NO_ROLLOUT)
-            self.assertEqual(
-                [command for command, _p in self.runtime.calls], ["agent-send", "agent-resume"]
-            )
-            self.assertEqual((list(self.runtime.agents), self.received(worker)), (agents, []))
-        with self.subTest("the host cannot be reached for the resume"):
-            self.runtime.fail("agent-resume", "paseo_daemon_unreachable", "connection refused")
-            self.refusal(self.message(self.architect, agent_id=worker), "host-unreachable")
-        with self.subTest("a taskless recipient has no task scope to check"):
-            _architect, other = self.started("architect", status="closed")
-            result = self.message(binding("worker"), agent_id=other)
-            self.assertEqual((result["status"], result["resumed"]), ("accepted", True))
-
-    def test_a_caller_without_a_binding_or_a_runtime_and_an_unreachable_host_are_refused(
-        self,
-    ) -> None:
-        _request, worker = self.started(status="idle")
-        self.runtime.calls.clear()
-        self.refusal(self.message(None, agent_id=worker), "caller-has-no-binding")
-        unconfigured = send_role_message(
-            runtime_config(self.root, configured=False),
-            RoleMessageCall(text="report your plan", agent_id=worker),
-            environment=self.architect.environment(),
-        )
-        self.assertIn(
-            "no Paseo runtime configured",
-            self.refusal(unconfigured, "no-paseo-runtime-configured")["detail"],
-        )
-        self.assertEqual(self.runtime.calls, [])
-        failures = {
-            "paseo_daemon_unreachable": "cannot be reached",
-            "paseo_bridge_timeout": "It is not known whether the message was delivered.",
-            "paseo_bridge_invalid_reply": "paseo_bridge_invalid_reply",
-        }
-        for code, said in failures.items():
-            with self.subTest(code):
-                self.runtime.fail("agent-send", code)
-                result = self.refusal(
-                    self.message(self.architect, agent_id=worker), "host-unreachable"
-                )
-                self.assertIn(said, result["detail"])
-        self.assertEqual(self.received(worker), [])
-
-    def test_a_wait_returns_the_outcome_of_the_turn_that_consumed_the_message(self) -> None:
-        _request, worker = self.started(status="idle")
-        ended = {"state": "ended", "text": "The plan: read, change, test.", "textTruncated": False}
-        outcomes: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
-            "turn-finished": (
-                {**ended, "outcome": "finished"},
-                {"text": "The plan: read, change, test.", "textTruncated": False},
-            ),
-            "turn-failed": (
-                {
-                    "state": "ended",
-                    "outcome": "failed",
-                    "text": None,
-                    "textTruncated": False,
-                    "error": "usage limit",
-                },
-                {"text": None, "textTruncated": False},
-            ),
-            "turn-cancelled": (
-                {"state": "ended", "outcome": "cancelled", "text": None, "textTruncated": False},
-                {"text": None, "textTruncated": False},
-            ),
-            "permission-pending": (
-                {"state": "permission", "permission": "Bash"},
-                {"permission": "Bash"},
-            ),
-        }
-        for status, (answer, fields) in outcomes.items():
-            with self.subTest(status):
-                self.runtime.agents[worker].update(status="idle", received=[])
-                self.runtime.calls.clear()
-                self.waits = [{"state": "running"}, {"state": "running"}, answer]
-                self.clock = 0.0
-
-                result = self.message(self.architect, agent_id=worker, wait=True)
-
-                self.assertEqual((result["ok"], result["status"]), (True, status))
-                self.assertEqual({key: result.get(key) for key in fields}, fields)
-                self.assertEqual(result["waitedSeconds"], 120)
-                waits = [
-                    payload for command, payload in self.runtime.calls if command == "agent-wait"
-                ]
-                # Each wait names the turn that took the message, as the send returned it.
-                self.assertEqual(waits, [{"agentId": worker, "turnId": TURN, "waitMs": 40000}] * 3)
-        self.assertIn(
-            "usage limit", self.message_with([outcomes["turn-failed"][0]], worker)["detail"]
-        )
-        self.assertIn(
-            "Bash", self.message_with([outcomes["permission-pending"][0]], worker)["detail"]
-        )
-        self.assertIn(
-            "not AR acceptance", self.message_with([outcomes["turn-finished"][0]], worker)["detail"]
-        )
-        with self.subTest("the recipient became unavailable during the wait"):
-            result = self.message_with([{"state": "unavailable", "reason": "archived"}], worker)
-            self.assertEqual(result["status"], "turn-cancelled")
-            self.assertIn("archived", result["detail"])
-
-    def message_with(self, waits: list[dict[str, Any]], worker: str, **call: Any) -> dict[str, Any]:
-        self.runtime.agents[worker].update(status="idle", received=[])
-        self.runtime.calls.clear()
-        self.waits = list(waits)
-        self.clock = 0.0
-        return self.message(self.architect, agent_id=worker, wait=True, **call)
-
-    def test_a_wait_that_times_out_leaves_the_message_delivered(self) -> None:
-        _request, worker = self.started(status="idle")
-        cases = {
-            "the default": ({}, 300),
-            "the caller's": ({"timeout_seconds": 50}, 50),
-            "the maximum": ({"timeout_seconds": 5000}, 1800),
-        }
-        for label, (call, seconds) in cases.items():
-            with self.subTest(label):
-                result = self.message_with([], worker, **call)
-
-                self.assertEqual((result["ok"], result["status"]), (True, "timeout"))
-                self.assertEqual(result["waitedSeconds"], seconds)
-                self.assertIn(f"did not end within {seconds} seconds", result["detail"])
-                self.assertIn(
-                    "The message stays delivered; the reply must be read later", result["detail"]
-                )
-                self.assertEqual(len(self.received(worker)), 1)
-                slices = [
-                    payload["waitMs"]
-                    for command, payload in self.runtime.calls
-                    if command == "agent-wait"
-                ]
-                # A sequence of bridge calls, each well inside the limit of one bridge call.
-                self.assertTrue(all(0 < value <= 40000 for value in slices), slices)
-                self.assertEqual(sum(slices), seconds * 1000)
-        with self.subTest("the host gives no answer during the wait"):
-            self.runtime.fail("agent-wait", "paseo_daemon_unreachable", "connection refused")
-            result = self.message_with([], worker)
-            self.assertEqual(result["status"], "timeout")
-            self.assertIn("the host gave no answer (paseo_daemon_unreachable)", result["detail"])
-            self.assertEqual(len(self.received(worker)), 1)
-        with self.subTest("without wait nothing waits"):
-            self.runtime.agents[worker].update(status="idle", received=[])
-            self.runtime.calls.clear()
-            self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
-            self.assertNotIn("agent-wait", [command for command, _p in self.runtime.calls])
-
-    def test_the_results_and_refusals_are_exactly_the_named_ones(self) -> None:
-        self.assertEqual(
-            set(get_args(RoleMessageStatus)),
-            {
-                "accepted",
-                "turn-finished",
-                "turn-failed",
-                "turn-cancelled",
-                "permission-pending",
-                "timeout",
-                "refused",
-            },
-        )
-        self.assertEqual(
-            set(get_args(RoleMessageRefusal)),
-            {
-                "recipient-busy",
-                "recipient-not-found",
-                "recipient-archived",
-                "recipient-ambiguous",
-                "recipient-cannot-be-resumed",
-                "scope-check-failed",
-                "caller-has-no-binding",
-                "no-paseo-runtime-configured",
-                "host-unreachable",
-            },
-        )
+            self.assertIn("another AR role selection (system-specialist)", result["detail"])
+            self.assertEqual((self.compiled, self.state()), (2, before))
 
 
 class RegisteredRoleToolTests(RoleToolsTestCase):

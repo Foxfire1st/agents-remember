@@ -4,8 +4,8 @@ The surfaces are the ones a launched role agent reads: the router, the role file
 seven launcher roles, every operation file that applies to one of them, the routing manifest, the
 handover text built in code, and the descriptions of the two role tools. None of them may name
 the previous host or its transport, every passage that tells an agent to call an AR tool names
-the tool server ``agents-remember-task``, and the handover says in one sentence that a server
-named ``agents-remember`` belongs to another installation.
+the tool server ``agents-remember-task``, and the handover says that a server named
+``agents-remember``, and an AR tool server under any other name, belongs to another installation.
 """
 
 from __future__ import annotations
@@ -23,9 +23,13 @@ from unittest.mock import patch
 
 from agents_remember.application.orca_task_context import OrcaRoleContext
 from agents_remember.cli import orca_task_preparation
-from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest, _compile_handover
+from agents_remember.cli.orca_task_preparation import (
+    OrcaHandoverRequest,
+    _ar_mcp_context,
+    _compile_handover,
+)
 from agents_remember.cli.paseo_launch import StartingAgent
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.models.orca_launcher import OrcaRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -193,6 +197,16 @@ class InstructionFileWordingTests(unittest.TestCase):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, coordination)
 
+    def test_the_workers_report_names_its_agent_id(self) -> None:
+        # Where the report of the previous host named the execution, it names the agent.
+        implementation = " ".join(read(LIFECYCLE / "operations" / "implementation.md").split())
+        self.assertIn(
+            "exact checks and results, your agent ID as the `senderLine` of `role_message` on "
+            '`agents-remember-task` names it (write "agent ID not known" when you sent no '
+            "message), and open limitations.",
+            implementation,
+        )
+
     def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(self) -> None:
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
         for role in LAUNCHER_ROLES:
@@ -203,8 +217,28 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertEqual(set(tools) - set(PUBLIC_TOOLS), set())
 
 
+def task_document(ref: TaskDocumentRef, document_id: str, root: Path) -> ResolvedTaskDocument:
+    leaf = document_id == "01_LEAF"
+    document = TaskDocument.model_validate(
+        {
+            "id": document_id,
+            "slug": Path(ref.path).stem,
+            "title": document_id,
+            "kind": "subTask" if leaf else "master",
+            "repo": "repo",
+            "createdAt": "2026-10-02T00:00:00+00:00",
+            **({"status": "inProgress", "master": "task.json"} if leaf else {}),
+        }
+    )
+    return ResolvedTaskDocument(ref=ref, path=root / "tasks" / "repo" / ref.path, document=document)
+
+
 class HandoverTextWordingTests(unittest.TestCase):
-    """The handover text as the launch code builds it; the capsule and the reads are stubbed."""
+    """The handover text as the launch code builds it, with the reader context of the launch.
+
+    The capsule and the reads of task documents and context packet are stubbed; the block that
+    tells the agent how to call the readers is the one the launch compiles.
+    """
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -215,6 +249,11 @@ class HandoverTextWordingTests(unittest.TestCase):
             coordination_root=root / "coordination",
             workspace_root=root / "projects",
             transcript_root=root / "coordination" / "logs" / "mcp",
+            repositories={
+                "repo": RepositoryScope(
+                    repo_id="repo", path=root / "projects" / "repo", memory_root=root / "memory"
+                )
+            },
         )
         delivery = SimpleNamespace(
             semantic_digest="capsule-digest",
@@ -228,34 +267,48 @@ class HandoverTextWordingTests(unittest.TestCase):
             ("compile_launch_capsule", lambda *_args, **_kwargs: capsule),
             ("build_context_packet", lambda *_args, **_kwargs: {"repo": {"id": "repo"}}),
             ("_read_task_doc", lambda _config, resolved: {"canonicalTaskPath": resolved.ref.key}),
+            # A leaf's readers are confined to its enclosure, which this test does not create.
+            ("task_scoped_mcp_config_for_reader", lambda config, **_scope: config),
         ):
             patcher = patch.object(orca_task_preparation, name, stub)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
-        sprint = None
+    def launch_of(self, role: str) -> tuple[OrcaRoleContext, dict[str, str]]:
+        """The documents and the folder of one launch: taskless, sprint-bound or leaf-bound."""
+
+        root = self.config.coordination_root
+        workspace = {"path": self.config.workspace_root.as_posix()}
+        if role in {"architect", "system-specialist"}:
+            return OrcaRoleContext(role, None, None, None, None), workspace  # type: ignore[arg-type]
+        sprint = task_document(
+            TaskDocumentRef(repository="repo", path="sprint/task.json"), "SPRINT", root
+        )
         if role == "orchestrator":
-            ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
-            document = TaskDocument.model_validate(
-                {
-                    "id": "SPRINT",
-                    "slug": "task",
-                    "title": "Sprint",
-                    "kind": "master",
-                    "repo": "repo",
-                    "createdAt": "2026-10-02T00:00:00+00:00",
-                }
-            )
-            path = self.config.coordination_root / "tasks" / "repo" / ref.path
-            sprint = ResolvedTaskDocument(ref=ref, path=path, document=document)
+            return OrcaRoleContext(role, sprint, None, None, sprint), workspace  # type: ignore[arg-type]
+        master = task_document(
+            TaskDocumentRef(repository="repo", path="master/task.json"), "MASTER", root
+        )
+        leaf = task_document(
+            TaskDocumentRef(repository="repo", path="master/01_leaf.json"), "01_LEAF", root
+        )
+        enclosure = self.config.workspace_root / "enclosure"
+        workspace = {
+            "path": (enclosure / "code").as_posix(),
+            "contractPath": (enclosure / "contract.json").as_posix(),
+            "taskReportAccessRoot": (leaf.path.parent / "notes" / "reports").as_posix(),
+        }
+        return OrcaRoleContext(role, sprint, master, leaf, leaf), workspace  # type: ignore[arg-type]
+
+    def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
+        context, workspace = self.launch_of(role)
         prepared = _compile_handover(
             OrcaHandoverRequest(
                 config=self.config,
-                context=OrcaRoleContext(role, sprint, None, None, sprint),  # type: ignore[arg-type]
-                workspace={"path": self.config.workspace_root.as_posix()},
+                context=context,
+                workspace=workspace,
                 agent_id="some-provider",
-                ar_mcp_context={"scopeKind": "configured-projects"},
+                ar_mcp_context=_ar_mcp_context(self.config, context, workspace),
                 request_id=uuid.uuid4(),
                 started_by=started_by,
             )
@@ -265,8 +318,9 @@ class HandoverTextWordingTests(unittest.TestCase):
     def test_the_first_message_names_no_forbidden_host_string(self) -> None:
         parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
         for label, role, started_by in (
-            ("started from the dashboard", "architect", None),
-            ("started by an agent", "orchestrator", parent),
+            ("a taskless role started from the dashboard", "architect", None),
+            ("a sprint-bound role started by an agent", "orchestrator", parent),
+            ("a leaf role started by an agent", "worker", parent),
         ):
             with self.subTest(label):
                 prompt, handover = self.compiled(role, started_by)
@@ -276,6 +330,33 @@ class HandoverTextWordingTests(unittest.TestCase):
                     forbidden_in(without_retained_paths(json.dumps(handover, ensure_ascii=False))),
                     [],
                 )
+                # The first message carries the reader context the launch compiled.
+                self.assertIn(handover["arMcpContext"]["missingCapabilityAction"], prompt)
+
+    def test_the_reader_context_names_the_readers_of_the_task_tool_server(self) -> None:
+        _prompt, leaf = self.compiled("worker", None)
+        _prompt, taskless = self.compiled("architect", None)
+        self.assertEqual(
+            (leaf["arMcpContext"]["scopeKind"], taskless["arMcpContext"]["scopeKind"]),
+            ("canonical-leaf", "configured-projects"),
+        )
+        self.assertEqual(
+            leaf["arMcpContext"]["missingCapabilityAction"],
+            f"If the context_packet or the read_ar_files schema of {TOOL_SERVER} lacks "
+            "task_context with both task_document_ref and contract_path, stop and report the "
+            "missing ar-task-scoped-readers/v1 capability. Do not call a task reader without "
+            "task_context or substitute caller-selected roots.",
+        )
+        self.assertEqual(
+            taskless["arMcpContext"]["missingCapabilityAction"],
+            f"If the context_packet or the read_ar_files schema of {TOOL_SERVER} is unavailable, "
+            "report that; do not invent a repository id or pass caller-selected roots.",
+        )
+        # "The installed AR" is the developer's other installation: no reader text points there.
+        for handover in (leaf, taskless):
+            told = json.dumps([handover["arMcpContext"], handover["host"]], ensure_ascii=False)
+            self.assertNotIn("installed", told)
+            self.assertNotIn("AR MCP tool", told)
 
     def test_the_handover_names_the_tool_server_the_two_tools_and_the_host(self) -> None:
         prompt, handover = self.compiled("architect", None)
@@ -285,10 +366,13 @@ class HandoverTextWordingTests(unittest.TestCase):
             f"Call every Agents Remember tool on the tool server named {TOOL_SERVER}",
             host["arMcpUsage"],
         )
-        # The one sentence about the developer's own installation, which every harness carries.
+        # The developer's own installation, which every harness carries, by its name; and any
+        # other AR tool server, whatever its name.
         self.assertIn(
             f"A tool server named {OTHER_INSTALLATION}, if this session has one, belongs to "
-            "another installation and must not be used for this assignment.",
+            "another installation and must not be used for this assignment. An AR tool server "
+            "under any other name belongs to another AR installation; do not use it for this "
+            "assignment.",
             host["arMcpUsage"],
         )
         self.assertIn(

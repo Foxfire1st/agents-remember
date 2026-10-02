@@ -194,15 +194,18 @@ def _orca_dispatch_endpoint(
     request: OrcaDispatchRequest,
     *,
     started_by: StartingAgent | None = None,
+    lock_wait_seconds: float = 0.0,
 ) -> JSONResponse:
     """Start or revive one role execution; the launcher's route and the role-start tool end here.
 
     ``started_by`` is the role agent on whose behalf the start runs. The preparation, the launch,
     the receipt, the reconciliation of a repeated request and the lock are the same either way.
+    The launcher's route never waits for the lock; the role-start tool waits ``lock_wait_seconds``
+    for it, because one agent issues its starts side by side.
     """
 
     _require_paseo_runtime(config)
-    _acquire_dispatch_lock()
+    _acquire_dispatch_lock(lock_wait_seconds)
     try:
         if request.action == "revive":
             return _revive_execution(config, request)
@@ -350,6 +353,35 @@ def _receipt_carries_request(path: Path, request: OrcaDispatchRequest) -> bool:
     return current is not None and current.get("requestId") == str(request.request_id)
 
 
+def _refuse_another_starter(
+    path: Path, request: OrcaDispatchRequest, started_by: StartingAgent | None
+) -> None:
+    """Refuse the repeat of a request id by a role agent that did not start its execution.
+
+    The receipt records the agent that started the execution (``parentAgentId``); a start from
+    the launcher records none. The launcher repeats and retries every execution: its retry of an
+    agent-started one replays the stored call, which names the stored parent. A role agent
+    repeats only what it started itself.
+    """
+
+    if started_by is None:
+        return
+    current = _read_receipt(path)
+    if current is None or current.get("requestId") != str(request.request_id):
+        return
+    recorded = current.get("parentAgentId")
+    if recorded == started_by.agent_id:
+        return
+    owner = f"agent {recorded}" if isinstance(recorded, str) and recorded else "the launcher"
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"This request id belongs to an execution that {owner} started; agent "
+            f"{started_by.agent_id} did not start it and cannot repeat it."
+        ),
+    )
+
+
 def _start_execution(
     config: McpRuntimeConfig,
     request: OrcaDispatchRequest,
@@ -357,7 +389,7 @@ def _start_execution(
 ) -> JSONResponse:
     context = resolve_orca_role_context(config, request)
     binding = selection_binding(request)
-    request_digest = _request_digest(context, request, started_by.agent_id if started_by else None)
+    request_digest = _request_digest(context, request)
     if request.role in TASKLESS_ROLES:
         _migrate_taskless_legacy_receipt(config, request)
     path = _receipt_path(
@@ -367,6 +399,7 @@ def _start_execution(
     # the saved execution. It is not compiled again, so a task document or capsule that changed
     # since the launch cannot turn its repeat into a conflict.
     if _receipt_carries_request(path, request):
+        _refuse_another_starter(path, request, started_by)
         prior = _reconcile_prior_execution(config, path, request, request_digest)
         if prior is not None:
             return prior
@@ -382,6 +415,8 @@ def _start_execution(
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
+    # The receipt of this request id may have appeared while the handover was compiled.
+    _refuse_another_starter(path, request, started_by)
     projection_reference, replaces_agent_id, created_binding, prior = (
         _reserve_message_binding_projection(config, path, request, request_digest, prepared)
     )
@@ -485,6 +520,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     if not _create_receipt(start.receipt_path, receipt):
         # Another process created a receipt at this address since it was last read here.
         try:
+            _refuse_another_starter(start.receipt_path, request, start.started_by)
             prior = _reconcile_prior_execution(
                 start.config, start.receipt_path, request, start.request_digest
             )
@@ -540,8 +576,22 @@ def _bridge_http_error(error: PaseoBridgeFailure) -> HTTPException:
     return HTTPException(status_code=_BRIDGE_FAILURE_STATUS.get(error.code, 502), detail=str(error))
 
 
-def _acquire_dispatch_lock() -> None:
-    if not _DISPATCH_LOCK.acquire(blocking=False):
-        raise HTTPException(
+class LaunchLockBusy(HTTPException):
+    """Another launch or result check of this backend process holds the launch lock."""
+
+    def __init__(self) -> None:
+        super().__init__(
             status_code=409, detail="An AR-to-Orca launch or result check is already in progress."
         )
+
+
+def _acquire_dispatch_lock(wait_seconds: float = 0.0) -> None:
+    """Take the launch lock of this process, waiting at most ``wait_seconds`` for it."""
+
+    acquired = (
+        _DISPATCH_LOCK.acquire(timeout=wait_seconds)
+        if wait_seconds > 0
+        else _DISPATCH_LOCK.acquire(blocking=False)
+    )
+    if not acquired:
+        raise LaunchLockBusy

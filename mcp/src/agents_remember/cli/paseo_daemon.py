@@ -21,6 +21,7 @@ from agents_remember.cli.paseo_command import (
     parse_json_output,
     run_command,
 )
+from agents_remember.cli.paseo_daemon_config import agent_tools_setting
 from agents_remember.cli.paseo_plugin_files import PLUGIN_ID, read_embed
 from agents_remember.cli.paseo_process_record import (
     PROCESS_RECORD,
@@ -51,7 +52,11 @@ def runtime_status(
     runner: CommandRunner = run_command,
     reader: ProcessReader = read_process,
 ) -> dict[str, Any]:
-    """Whether the configured home's daemon runs and, when it does, what it runs with."""
+    """Whether the configured home's daemon runs and, when it does, what it runs with.
+
+    ``agentTools`` is the setting for Paseo's own agent tools as the home's configuration file
+    holds it; ``differs`` is true when that is not the value provision writes.
+    """
     cli = PaseoCli(settings, runner)
     record = inspect_record(settings.home, "status", reader)
     status = None
@@ -68,6 +73,7 @@ def runtime_status(
         "listen": status.get("listen"),
         "plugin": _plugin_state(cli),
         "embed": read_embed(settings.home) or [],
+        "agentTools": agent_tools_setting(settings.home),
         "providers": [
             {key: provider.get(key) for key in ("provider", "available", "error")}
             for provider in status.get("providers") or []
@@ -88,6 +94,7 @@ def _not_running(settings: PaseoRuntimeSettings, record: RecordState) -> dict[st
         "listen": None,
         "plugin": None,
         "embed": None,
+        "agentTools": None,
         "providers": None,
         "staleRecord": record.as_payload(),
     }

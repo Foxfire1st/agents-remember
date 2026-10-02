@@ -57,6 +57,12 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         handoverArtifactPath and status: running (the agent exists), rejected (the host refused;
         no agent exists) or unknown (no usable answer; repeat the same request_id). A call that
         is not carried out answers status refused with the reason in refusal and detail.
+
+        Starts run one at a time. A call waits up to 60 seconds for another start of this tool
+        server to end; after that it is refused as launch-refused and nextAction says to call
+        again with the same arguments. Only the agent that started an execution repeats its
+        request_id. A repeat whose agent is archived or gone is refused as launch-refused with
+        the agentId: start again with a new request_id.
         """
         call = RoleStartCall(
             role=role,
@@ -91,16 +97,19 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
 
         The recipient reads the text behind one line that names the sender:
         "From <role> · <task id or Projects> · agent <sender agent id>". A recipient that is
-        mid-turn takes the message up in its running turn; that turn is never cancelled, and
+        mid-turn is handed the message in its running turn; that turn is never cancelled, and
         when the host cannot hand a message to a running turn the call is refused as
-        recipient-busy. A recipient whose session is closed is resumed first; an archived or
-        missing recipient is refused and stays as it is.
+        recipient-busy. Depending on its harness the recipient takes such a message up in the
+        running turn or in a turn of its own right after it. A recipient whose session is closed
+        is resumed first; an archived or missing recipient is refused and stays as it is.
 
         Without wait the call returns status accepted once the host accepted the message. With
         wait it returns when the turn that consumed the message ends: turn-finished with its
         final text in text, turn-failed or turn-cancelled; or permission-pending when the
         recipient waits for a permission decision; or timeout after timeout_seconds (default
         300, at most 1800), with the message still delivered and the reply to be read later.
+        When the host cannot say which turn consumed the message, the call returns accepted
+        without a text and detail says that the reply must be read later.
         Refusals: recipient-busy, recipient-not-found, recipient-archived, recipient-ambiguous,
         recipient-cannot-be-resumed, scope-check-failed, caller-has-no-binding,
         no-paseo-runtime-configured, host-unreachable. A finished turn is a fact about the
