@@ -49,6 +49,7 @@ try:
         SandboxRefusal,
         embed_entries,
         location_refusal,
+        pi_provider_entry,
         settings_document,
     )
     from pnt_sandbox.lock import (
@@ -108,6 +109,7 @@ __all__ = [
     "launcher_scrub",
     "location_refusal",
     "lock",
+    "pi_provider_entry",
     "port_holders",
     "port_state",
     "procfs",
@@ -354,6 +356,7 @@ class SandboxCase(unittest.TestCase):
                 "paseoRuntime.listen": layout.paseo_listen,
                 "paseoRuntime.version": "0.11.0-beta.2",
                 "paseoRuntime.embed": embed_entries(layout),
+                "paseoRuntime.providers.pi": pi_provider_entry(),
                 "repositories": [REPOSITORY_ID],
             },
             "errors": {},

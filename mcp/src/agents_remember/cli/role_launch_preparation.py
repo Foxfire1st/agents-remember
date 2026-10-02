@@ -79,6 +79,38 @@ OTHER_INSTALLATION_TOOL_SERVER = "agents-remember"
 # The folder a role's report and handover artifact are written in: under a task's notes/reports,
 # or under the Projects folder's own report folder for a taskless role.
 REPORTS_DIRECTORY = "role-launch"
+# The launch's tool server as a harness that prefixes tool names spells it, and one of its tools.
+_UNDERSCORED_TOOL_SERVER = TOOL_SERVER_NAME.replace("-", "_")
+_PREFIXED_TOOL_SERVER = f"mcp__{_UNDERSCORED_TOOL_SERVER}"
+_PREFIXED_TOOL_EXAMPLE = f"{_PREFIXED_TOOL_SERVER}__server_info"
+# Where a launched agent finds its AR tools. The first message says it twice: in plain text
+# before the capsule, and as host.arMcpUsage of the handover. It names no harness and no
+# harness's tool: every harness shows a tool server's tools in its own way.
+_AR_TOOL_SERVER_USAGE = (
+    f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: the AR build "
+    "that launched this agent started it for this agent, and its tools are in this session. A "
+    "harness shows them in its own way, so find them by the server's name in either spelling, "
+    f"{TOOL_SERVER_NAME} or {_UNDERSCORED_TOOL_SERVER}. Either a tool is declared to you under a "
+    "name that contains that spelling and ends in the tool's own name, for example "
+    f"{_PREFIXED_TOOL_EXAMPLE}: call it. Or your harness's own instructions to you list a server "
+    f"or namespace in that spelling, for example {_PREFIXED_TOOL_SERVER}, and say how its tools "
+    "are reached, for example through the harness's tool search or its script tool: reach them "
+    "that way, and learn a tool's arguments there too. A tool that lists, describes, connects "
+    "or proxies tool servers holds only the servers it was configured with. When it does not "
+    f"list {TOOL_SERVER_NAME} itself, do not use it for AR tools at all, not even to search for "
+    "or describe a tool by its name: what it answers then comes from another installation, and "
+    'its answer "server not found" speaks only for that tool. Do not '
+    "connect to, list, describe or call a tool server named "
+    f"{OTHER_INSTALLATION_TOOL_SERVER} or any of its tools, nor an AR tool server under any "
+    "other name: it belongs to another installation, its tools carry the same tool names, and "
+    "nothing found there serves this assignment. After a start or a resume a tool server can "
+    f"take some seconds to appear: look once more before reporting {TOOL_SERVER_NAME} missing, "
+    "and report that instead of substituting another. For a leaf, pass the exact "
+    "arMcpContext.readerArguments; add the requested files to read_ar_files as a list of "
+    'objects such as {"path": "<path in the repository>", "source": "full"}. If either tool '
+    "schema lacks the declared task_context fields, stop and report the missing AR reader "
+    "capability; do not drop task_context or substitute another root."
+)
 
 
 def role_start_operation(role: LauncherRole) -> CapsuleOperation:
@@ -550,23 +582,7 @@ def _compile_handover(
                 "dashboard and answers in it. Never send a developer question to another agent."
             ),
             "arToolServer": TOOL_SERVER_NAME,
-            "arMcpUsage": (
-                f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: "
-                "the AR build that launched this agent started it for this agent. A tool server "
-                f"named {OTHER_INSTALLATION_TOOL_SERVER}, if this session has one, belongs to "
-                "another installation and must not be used for this assignment. An AR tool "
-                "server under any other name belongs to another AR installation; do not use it "
-                "for this assignment. After a start or "
-                "a resume a tool server can take some seconds to appear: if a call to "
-                f"{TOOL_SERVER_NAME} is not available, make the call once more before reporting "
-                "the server missing, and report that instead of substituting another. A harness "
-                "may list the tools of this server under a prefixed name in which the hyphens of "
-                "the server's name are underscores, so look a tool up by the tool's own name. "
-                "For a leaf, pass the exact arMcpContext.readerArguments; "
-                "add the requested files list to read_ar_files. If either tool schema lacks the "
-                "declared task_context fields, stop and report the missing AR reader "
-                "capability; do not drop task_context or substitute another root."
-            ),
+            "arMcpUsage": _AR_TOOL_SERVER_USAGE,
             "roleTools": {
                 "toolServer": TOOL_SERVER_NAME,
                 "start": ROLE_START_TOOL,
@@ -592,8 +608,11 @@ def _compile_handover(
                     "message, and the text of a message delivered during a turn can be the "
                     "running turn's own; detail says which. Do not wait on an agent that may be "
                     "waiting on you: two agents that wait on each other both stand still until "
-                    "one wait runs out. The recipient can answer you with "
-                    f"{ROLE_MESSAGE_TOOL} addressed to your agent id. A refusal names its "
+                    "one wait runs out. A message another agent sent you begins with a line "
+                    '"From <role> · <task> · agent <agent id>": your reply in that turn, in '
+                    "your own chat, is what the sender receives, so answer the message there; "
+                    f"send {ROLE_MESSAGE_TOOL} to that agent id only for a message of your own. "
+                    "A refusal names its "
                     "reason: act on that reason, never guess a recipient, and never start a "
                     "second agent for an uncertain result. Do not create or message role agents "
                     "with any other tool: an agent created another way has no capsule and no "
@@ -637,6 +656,8 @@ def _compile_handover(
         "lifecycle, or coordination-level role-routing text to infer a different assignment. "
         "Preserve system/developer instructions, approvals, sandbox policy, and "
         "repository-specific coding/tool rules.\n\n"
+        # Before the capsule, which names AR tools: where this session holds them.
+        f"AR tools, before your first tool call: {_AR_TOOL_SERVER_USAGE}\n\n"
         + capsule.codex_delivery.trusted_instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))

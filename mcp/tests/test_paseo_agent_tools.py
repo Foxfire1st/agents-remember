@@ -41,6 +41,7 @@ from agents_remember.cli.role_handover_artifacts import (
 )
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.server import LAUNCHED_SERVER_INSTRUCTIONS, launched_server_instructions
 from agents_remember.mcp.tools.core import server_info_payload
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -294,9 +295,14 @@ class ToolServerDefinitionTests(unittest.TestCase):
         build = ServingBuildPayload(version="0", bootedAt="2026-10-02T00:00:00Z")
         bound = binding("worker", SPRINT, MASTER, LEAF)
         with patch.dict("os.environ", bound.environment()):
-            reported = server_info_payload(config, build)["agentBinding"]
+            answer = server_info_payload(config, build)
+        # The launched server names itself as its agent was told to call it, in a field of its
+        # own; ``server`` stays the package's name, which the handover gives to another server.
         self.assertEqual(
-            reported,
+            (answer["server"], answer["toolServer"]), ("agents-remember", "agents-remember-task")
+        )
+        self.assertEqual(
+            answer["agentBinding"],
             {
                 "agentId": bound.agent_id,
                 "role": "worker",
@@ -309,7 +315,31 @@ class ToolServerDefinitionTests(unittest.TestCase):
         )
         with patch.dict("os.environ", clear=False) as environment:
             environment.pop("AR_PASEO_AGENT_ID", None)
-            self.assertNotIn("agentBinding", server_info_payload(config, build))
+            unbound = server_info_payload(config, build)
+        self.assertNotIn("agentBinding", unbound)
+        self.assertNotIn("toolServer", unbound)
+        self.assertEqual(unbound["server"], "agents-remember")
+
+    def test_a_launched_server_states_one_line_of_instructions_and_no_other_server_does(
+        self,
+    ) -> None:
+        # The line a harness may show beside the server's name: which server this is, in the
+        # spelling of the agent's assignment, and that it is the one to use. It names no harness.
+        self.assertEqual(
+            LAUNCHED_SERVER_INSTRUCTIONS,
+            "This server is agents-remember-task: the Agents Remember tool server of the AR "
+            "build that launched this agent, and the one to use for this assignment.",
+        )
+        self.assertNotIn("\n", LAUNCHED_SERVER_INSTRUCTIONS)
+        bound = binding("worker", SPRINT, MASTER, LEAF)
+        with patch.dict("os.environ", bound.environment()):
+            self.assertEqual(launched_server_instructions(), LAUNCHED_SERVER_INSTRUCTIONS)
+            # A binding that cannot be read: no instructions, and the server still starts.
+            with patch.dict("os.environ", {"AR_ROLE": "no-role"}):
+                self.assertIsNone(launched_server_instructions())
+        with patch.dict("os.environ", clear=False) as environment:
+            environment.pop("AR_PASEO_AGENT_ID", None)
+            self.assertIsNone(launched_server_instructions())
 
 
 def artifact_with_path_of(length: int) -> dict[str, str]:

@@ -30,8 +30,9 @@ from .lock import sandbox_lock
 from .operations import HELPERS, Operations, StepFailed
 
 # Raised when a rebuild has something to add to sandboxes built earlier: 2 added the Dagger
-# authority directory and the Eve launcher's list of variables an env file may not set.
-LAYOUT_VERSION = 2
+# authority directory and the Eve launcher's list of variables an env file may not set; 3 added
+# the Pi provider entry to the settings file, which a rebuild writes anew.
+LAYOUT_VERSION = 3
 EVE_LAUNCHER_SOURCE = HELPERS / "eve-acp-launcher.mjs"
 EVE_SCRUB_NAME = "removed-variables.json"
 # The marker's state while a reset deletes the directory: neither built nor to be built on.

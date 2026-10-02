@@ -62,7 +62,8 @@ settings file anew, copies the four Eve application files again from the develop
 are lost.
 
 A sandbox built by an earlier version of this tooling is rebuilt once by the next `start`: the
-build adds what is new (`dagger-authority/`, `eve/removed-variables.json`).
+build adds what is new (`dagger-authority/`, `eve/removed-variables.json`, the Pi provider entry
+of the settings file).
 
 `reset` deletes the sandbox's marker last. If something cannot be deleted, it says so and names
 what is left by its full path. What is left is still marked as this tool's and as being reset:
@@ -105,9 +106,11 @@ root the dashboard and the tool server would use for the sandbox settings:
 
 The check passes only when each of them resolves inside the sandbox directory, every root the
 resolver is expected to report is there, the dashboard port is 9797 and not auto-started, the
-Paseo listen address is `127.0.0.1:6820`, the Paseo version is the pinned one and both embed
-entries frame `http://127.0.0.1:6820`. A root that is outside or cannot be resolved fails the
-check and is named. A later change that moves one of the build's functions used by
+Paseo listen address is `127.0.0.1:6820`, the Paseo version is the pinned one, both embed
+entries frame `http://127.0.0.1:6820` and the settings file's provider entry for Pi is exactly
+the one this tool writes (see Pi below): a settings file from which that entry was dropped or
+changed fails `check` and `start` under the key `paseoRuntime.providers.pi`. A root that is
+outside or cannot be resolved fails the check and is named. A later change that moves one of the build's functions used by
 `build_roots.py` makes that root unresolved until the script is updated.
 
 ## Processes
@@ -153,6 +156,24 @@ PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all four
 `GIT_OPTIONAL_LOCKS`, `PYTHONPYCACHEPREFIX`, `TMUX_TMPDIR` and `AR_DAGGER_AUTHORITY_ROOT` into the
 definition whenever the launching process has them.
 
+## Pi
+
+The settings file gives the sandbox's Paseo runtime a provider entry for Pi that replaces Pi's
+command: `pi --no-extensions -e builtin:mcp -e builtin:codemode -e builtin:tool-search`. Pi then
+starts without any of the developer's Pi extensions and with its own MCP, script and tool-search
+parts, which hold only the tool server a launch gives the agent (`agents-remember-task`).
+
+The reason is one kind of extension: a gateway to the tool servers of the developer's own Pi
+configuration. Through it a sandbox agent can search, list, connect to and call the installed AR
+tool server on the live roots, and an agent that did not find `agents-remember-task` at once did
+connect to it. Instructions forbid that; the entry makes it impossible.
+
+The cost: a Pi agent of the sandbox runs without every extension and package of the developer's
+Pi, not only the gateway. Nothing under `~/.pi` is read differently or written: the developer's
+Pi configuration, logins and models stay as they are, and a Pi started outside the sandbox loads
+its extensions as before. Outside the sandbox the entry is the developer's choice
+(`paseoRuntime.providers` of the settings file); without it only the instructions apply.
+
 ## Eve
 
 The Eve provider entry starts `eve-acp-launcher.mjs`, which runs `eve acp` inside
@@ -176,11 +197,12 @@ The live roots are not among them. These are writes of other programs, in their 
 - **Harness programs started by Paseo.** Agents use the developer's harness logins, so every
   agent writes its sessions into its harness's home, and Paseo's provider checks start the
   harness programs as well.
-- **The installed AR tool server inside every agent.** Codex, Claude Code, Pi and Hermes each
+- **The installed AR tool server inside an agent.** Codex, Claude Code, Pi and Hermes each
   carry the developer's installed AR tool server (named `agents-remember`, on the live roots) in
-  their user-level configuration. Every role agent in the sandbox therefore sees it next to the
-  sandbox's own `agents-remember-task`, and the harness starts it with every session. It is the
-  installed runtime, not the build under test; the sandbox cannot remove it.
+  their user-level configuration. A Codex, Claude Code or Hermes agent in the sandbox therefore
+  sees it next to the sandbox's own `agents-remember-task`, and the harness starts it with every
+  session. It is the installed runtime, not the build under test; the sandbox cannot remove it
+  there. A Pi agent of the sandbox does not have it (see Pi above).
 - **Package-manager caches.** Installing Paseo writes npm's cache and logs (`~/.npm/_cacache`,
   `~/.npm/_logs`); creating the checkout's Python environment writes uv's cache.
 - **The Eve project.** `eve/app/node_modules` is a link into the developer's Eve project;

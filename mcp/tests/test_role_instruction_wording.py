@@ -149,9 +149,26 @@ class InstructionFileWordingTests(unittest.TestCase):
         for sentence in (
             "Paseo is the host",
             "Call every AR tool on the tool server named `agents-remember-task`",
-            "A tool server named `agents-remember`, if your session has one, belongs to another "
-            "installation and must not be used for this assignment.",
-            "wait a few seconds and call once more before you report it missing",
+            # Where the tools are: found by the server's name in either spelling, not by a
+            # tool's own name, which another installation's server carries too.
+            "its tools are in your session",
+            "find them by the server's name in either spelling, `agents-remember-task` or "
+            "`agents_remember_task`: as tools declared under a prefixed name (for example "
+            "`mcp__agents_remember_task__server_info`), or, when your harness's own "
+            "instructions list a server in that spelling behind its tool search or script "
+            "tool, the way those instructions say.",
+            "A tool that lists or proxies tool servers holds only the servers it was configured "
+            "with: unless it lists `agents-remember-task` itself, do not use it for AR tools at "
+            "all, not even to search for or describe a tool by its name, and take its answer "
+            '"server not found" as speaking only for that tool.',
+            "Do not connect to, list, describe or call a tool server named `agents-remember` or "
+            "any of its tools: it belongs to another installation, and its tools carry the same "
+            "tool names.",
+            "wait a few seconds and look once more before you report it missing",
+            # What a recipient does with another agent's message.
+            "A message another agent sent you begins with a line `From <role> · <task> · agent "
+            "<agent ID>`: your reply in that turn, in your own chat, is what the sender "
+            "receives, so answer the message there.",
             "Put every question for the developer in your own chat",
             "A role started from the dashboard has no parent agent and needs none.",
             "an agent created outside `role_start` on `agents-remember-task` has no capsule and no binding",
@@ -161,6 +178,25 @@ class InstructionFileWordingTests(unittest.TestCase):
         for tool in ("role_start", "role_message"):
             self.assertIn(tool, PUBLIC_TOOLS)
             self.assertIn(tool, router)
+
+    def test_the_orientation_says_where_the_tools_are_and_what_a_reply_is(self) -> None:
+        orientation = " ".join(read(LIFECYCLE / "operations" / "orientation.md").split())
+        for sentence in (
+            "Call AR tools only on the tool server named `agents-remember-task`.",
+            "Find its tools by the server's name, spelled `agents-remember-task` or "
+            "`agents_remember_task`: declared under a prefixed name, or listed in your harness's "
+            "own instructions behind its tool search or script tool.",
+            "A tool that lists or proxies tool servers is not the way to AR tools unless it "
+            "lists `agents-remember-task` itself: do not search or describe AR tools through "
+            'it, and take its "server not found" as that tool\'s answer only.',
+            "Do not connect to, list, describe or call a server named `agents-remember` or any "
+            "of its tools: it belongs to another installation.",
+            "wait a few seconds and look once more before you report it missing",
+            "A message another agent sent you begins with a `From` line: your reply in that "
+            "turn is what the sender receives, so answer it there.",
+        ):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, orientation)
 
     def test_each_role_is_told_how_to_reach_agents_and_the_developer(self) -> None:
         for role in LAUNCHER_ROLES:
@@ -400,24 +436,47 @@ class HandoverTextWordingTests(unittest.TestCase):
             f"Call every Agents Remember tool on the tool server named {TOOL_SERVER}",
             host["arMcpUsage"],
         )
-        # The developer's own installation, which every harness carries, by its name; and any
-        # other AR tool server, whatever its name.
-        self.assertIn(
-            f"A tool server named {OTHER_INSTALLATION}, if this session has one, belongs to "
-            "another installation and must not be used for this assignment. An AR tool server "
-            "under any other name belongs to another AR installation; do not use it for this "
-            "assignment.",
-            host["arMcpUsage"],
-        )
-        self.assertIn(
-            "make the call once more before reporting the server missing", host["arMcpUsage"]
-        )
-        # A lookup by the server's name as it is spelled here can find nothing in a tool list.
-        self.assertIn(
-            "A harness may list the tools of this server under a prefixed name in which the "
-            "hyphens of the server's name are underscores, so look a tool up by the tool's own "
-            "name.",
-            host["arMcpUsage"],
+        for said in (
+            "and its tools are in this session.",
+            # A lookup by the server's name as it is spelled here can find nothing, and one by a
+            # tool's own name finds another installation's tool: the server's name, in either
+            # spelling, is what to look for.
+            "A harness shows them in its own way, so find them by the server's name in either "
+            f"spelling, {TOOL_SERVER} or agents_remember_task.",
+            "Either a tool is declared to you under a name that contains that spelling and ends "
+            "in the tool's own name, for example mcp__agents_remember_task__server_info: call "
+            "it.",
+            "Or your harness's own instructions to you list a server or namespace in that "
+            "spelling, for example mcp__agents_remember_task, and say how its tools are "
+            "reached, for example through the harness's tool search or its script tool: reach "
+            "them that way, and learn a tool's arguments there too.",
+            # A tool that proxies other servers answers for those servers only.
+            "A tool that lists, describes, connects or proxies tool servers holds only the "
+            f"servers it was configured with. When it does not list {TOOL_SERVER} itself, do "
+            "not use it for AR tools at all, not even to search for or describe a tool by its "
+            "name: what it answers then comes from another installation, and its answer "
+            '"server not found" speaks only for that tool.',
+            # The developer's own installation, which every harness carries, by its name; and
+            # any other AR tool server, whatever its name: not connected to, listed or called.
+            f"Do not connect to, list, describe or call a tool server named {OTHER_INSTALLATION} "
+            "or any of its tools, nor an AR tool server under any other name: it belongs to "
+            "another installation, its tools carry the same tool names, and nothing found there "
+            "serves this assignment.",
+            f"look once more before reporting {TOOL_SERVER} missing, and report that instead of "
+            "substituting another.",
+            "add the requested files to read_ar_files as a list of objects such as "
+            '{"path": "<path in the repository>", "source": "full"}.',
+        ):
+            with self.subTest(said=said):
+                self.assertIn(said, host["arMcpUsage"])
+        # The paragraph tells an agent where to look and names no harness and no harness's tool.
+        self.assertNotRegex(host["arMcpUsage"], r"(?i)codemode|tool_search|\bmcp\(")
+        # The first message says it in plain text before the capsule, which names AR tools, and
+        # again as a field of the handover.
+        self.assertEqual(prompt.count(host["arMcpUsage"]), 1)
+        self.assertLess(
+            prompt.index(f"AR tools, before your first tool call: {host['arMcpUsage']}"),
+            prompt.index("AR owner assignment and canonical task handover:"),
         )
         self.assertEqual(
             {key: host["roleTools"][key] for key in ("toolServer", "start", "message")},
@@ -441,6 +500,11 @@ class HandoverTextWordingTests(unittest.TestCase):
             "turn's own; detail says which.",
             "Do not wait on an agent that may be waiting on you: two agents that wait on each "
             "other both stand still until one wait runs out.",
+            # What a recipient does with a message: its chat reply is the answer.
+            'A message another agent sent you begins with a line "From <role> · <task> · agent '
+            '<agent id>": your reply in that turn, in your own chat, is what the sender '
+            "receives, so answer the message there; send role_message to that agent id only "
+            "for a message of your own.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, usage)
