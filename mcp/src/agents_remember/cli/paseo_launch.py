@@ -246,17 +246,33 @@ def _fitted(references: list[str], room: int) -> list[str]:
 
     The others are shortened before the most specific reference, the last one: it stays whole
     while the others can still be named in their shortest form, and is cut only by what is then
-    still missing. Room that a short reference does not need goes to the others.
+    still missing. A less specific reference may end at its task folder, whose document it
+    names: its document name is given up before any folder's slug is cut, and comes back only
+    when every folder is whole and the name fits whole.
     """
 
     lengths = [len(reference) for reference in references]
     if not references or sum(lengths) <= room:
         return references
-    floors = [len(_shortened(reference, 0)) for reference in references]
-    specific = min(lengths[-1], max(room - sum(floors[:-1]), floors[-1]))
-    widths = [*_shares(room - specific, floors[:-1], lengths[:-1]), specific]
+    others, last = references[:-1], references[-1]
+    floors = [len(_shortened(reference, 0, ends_at_folder=True)) for reference in others]
+    folders = [
+        len(_shortened(reference, len(reference) - 1, ends_at_folder=True)) for reference in others
+    ]
+    shortest = len(_shortened(last, 0, ends_at_folder=False))
+    specific = min(len(last), max(room - sum(floors), shortest))
+    widths = _shares(room - specific, floors, folders)
+    spare = room - specific - sum(widths)
+    for index in reversed(range(len(others))):
+        missing = lengths[index] - widths[index]
+        if widths[index] == folders[index] and 0 < missing <= spare:
+            widths[index], spare = lengths[index], spare - missing
     return [
-        _shortened(reference, width) for reference, width in zip(references, widths, strict=True)
+        *(
+            _shortened(reference, width, ends_at_folder=True)
+            for reference, width in zip(others, widths, strict=True)
+        ),
+        _shortened(last, specific, ends_at_folder=False),
     ]
 
 
@@ -279,28 +295,43 @@ def _shares(room: int, floors: list[int], caps: list[int]) -> list[int]:
     return widths
 
 
-def _shortened(reference: str, width: int) -> str:
+def _shortened(reference: str, width: int, *, ends_at_folder: bool) -> str:
     """``reference`` in at most ``width`` characters, or in its shortest form if that is longer.
 
-    The repository name stays whole. Each part after it, the task folder and the document, keeps
-    at least its leading id and ends in an ellipsis where it was cut.
+    The repository name stays whole. A part with a slug, a task folder or a numbered document,
+    keeps at least its leading id and ends in an ellipsis where its slug was cut; the slugs get
+    the room first. A part without a slug is never cut inside: it is whole, or at its shortest,
+    or, as the document of a reference that may end at its folder, left out.
     """
 
     if len(reference) <= width:
         return reference
     repository, *parts = reference.split("/")
-    lengths = [len(part) for part in parts]
-    floors = [min(len(part), len(_leading_id(part)) + 1) for part in parts]
-    widths = _shares(width - len(repository) - len(parts), floors, lengths)
-    return "/".join(
-        [
-            repository,
-            *(
-                part if size >= len(part) else f"{part[: size - 1]}…"
-                for part, size in zip(parts, widths, strict=True)
-            ),
-        ]
+    shortest = [
+        ""
+        if ends_at_folder and index == len(parts) - 1 and index > 0 and "_" not in part
+        else part
+        if len(_leading_id(part)) + 1 >= len(part)
+        else f"{_leading_id(part)}…"
+        for index, part in enumerate(parts)
+    ]
+    slugs = [index for index, part in enumerate(parts) if "_" in part]
+    plain = sum(len(shortest[index]) + 1 for index in range(len(parts)) if shortest[index])
+    slug_floor = sum(len(shortest[index]) for index in slugs)
+    granted = _shares(
+        width - len(repository) - plain + slug_floor,
+        [len(shortest[index]) for index in slugs],
+        [len(parts[index]) for index in slugs],
     )
+    texts = list(shortest)
+    for index, size in zip(slugs, granted, strict=True):
+        texts[index] = parts[index] if size >= len(parts[index]) else f"{parts[index][: size - 1]}…"
+    spare = width - len(repository) - sum(len(text) + 1 for text in texts if text)
+    for index, part in enumerate(parts):
+        missing = len(part) - len(texts[index]) + (0 if texts[index] else 1)
+        if index not in slugs and 0 < missing <= spare:
+            texts[index], spare = part, spare - missing
+    return "/".join([repository, *(text for text in texts if text)])
 
 
 def _leading_id(part: str) -> str:
