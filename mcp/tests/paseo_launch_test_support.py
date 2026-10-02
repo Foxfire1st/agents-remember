@@ -104,7 +104,8 @@ class GivenToAgentExpectations(unittest.TestCase):
             ],
             "env": {
                 "PYTHONPATH": self.source.parent.as_posix(),
-                # What the launching process has of these, the fixture sets both.
+                # Carried from the launching process, which in the fixture has these two of the
+                # four variables that say where a process of this build may write.
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
                 # No seat identity reaches the tool server from the harness that starts it.

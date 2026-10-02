@@ -148,16 +148,22 @@ class ToolServerDefinitionTests(unittest.TestCase):
             # that no inherited value names another source tree.
             "a package inside the interpreter": (package.parent, ""),
         }
-        # The two variables that keep a process from writing into the checkout it runs from
-        # travel with the definition when the launching process has them.
+        # The four variables that say where a process of this build may write travel with the
+        # definition when the launching process has them; none is given a value of its own.
         surroundings: dict[str, dict[str, str]] = {
             "the launching process has them": {
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONPYCACHEPREFIX": "/cache/pycache",
+                "TMUX_TMPDIR": "/run/tmux",
+                "AR_DAGGER_AUTHORITY_ROOT": "/state/dagger-authority",
                 "PATH": "/usr/bin",
             },
-            "it has one of them": {"GIT_OPTIONAL_LOCKS": "0", "PYTHONPYCACHEPREFIX": ""},
-            "it has neither": {},
+            "it has some of them": {
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONPYCACHEPREFIX": "",
+                "AR_DAGGER_AUTHORITY_ROOT": "/state/dagger-authority",
+            },
+            "it has none": {},
         }
         for label, (prefix, source) in placements.items():
             for surrounding, process in surroundings.items():
@@ -672,7 +678,11 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 else:
                     error = self.refused(request)
                     self.assertEqual(error.status_code, 409)
-                    self.assertIn("different handover content", str(error.detail))
+                    self.assertEqual(
+                        str(error.detail),
+                        f"This role request already has different handover content in {artifact}. "
+                        "That file is never changed; start the role again under a new request id.",
+                    )
                     self.assertEqual(self.runtime.launch_calls(), [])
                     self.assertFalse(self.receipt_path(request).exists())
                 self.assertEqual(artifact.read_text(encoding="utf-8"), content)

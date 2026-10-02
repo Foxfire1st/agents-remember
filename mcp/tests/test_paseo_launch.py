@@ -292,6 +292,8 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         )
         home.start()
         self.addCleanup(home.stop)
+        for absent in ("TMUX_TMPDIR", "AR_DAGGER_AUTHORITY_ROOT"):
+            os.environ.pop(absent, None)
 
     def replace(self, target: Any, name: str, *replacement: Any, **mock: Any) -> Any:
         patcher = patch.object(target, name, *replacement, **mock)

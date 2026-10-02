@@ -32,6 +32,7 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.worktrees.modules.quality.dagger_authority import HOST_REGISTRY_ROOT_ENV
 
 PASEO_AGENT_KIND = "paseo-agent"
 # The labels every role agent carries; a task reference is `<repository>/<document path>`.
@@ -48,9 +49,16 @@ _TOOL_SERVER_MODULE = "agents_remember.mcp"
 RECOVERY_NOTE_LIMIT = 600
 # A shortened part of a task reference keeps its leading id, at most this many characters of it.
 _LONGEST_LEADING_ID = 12
-# Variables that keep a process from writing into the checkout it runs from. A harness need not
-# pass them on, so the definition carries them when the launching process has them.
-_WRITE_AVOIDING_VARIABLES = ("GIT_OPTIONAL_LOCKS", "PYTHONPYCACHEPREFIX")
+# Variables that say where a process of this build may write: no index lock and no bytecode in
+# the checkout it runs from, its own terminal multiplexer, its own registry of quality tools. A
+# harness need not pass its environment on, so the definition carries each of them when the
+# launching process has it, and never a value of its own.
+_CARRIED_VARIABLES = (
+    "GIT_OPTIONAL_LOCKS",
+    "PYTHONPYCACHEPREFIX",
+    "TMUX_TMPDIR",
+    HOST_REGISTRY_ROOT_ENV,
+)
 TOOL_SERVER_APPLIED = "tool server applied"
 TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
 
@@ -159,7 +167,7 @@ def tool_server_definition(settings_file: Path, binding: AgentBinding) -> dict[s
         raise ValueError("This process cannot name its Python interpreter for the tool server.")
     package = launching_source_root()
     installed = package.is_relative_to(Path(sys.prefix).resolve())
-    kept = {name: os.environ[name] for name in _WRITE_AVOIDING_VARIABLES if os.environ.get(name)}
+    kept = {name: os.environ[name] for name in _CARRIED_VARIABLES if os.environ.get(name)}
     return {
         "type": "stdio",
         "command": interpreter,

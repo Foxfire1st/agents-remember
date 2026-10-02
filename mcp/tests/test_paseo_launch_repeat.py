@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -70,7 +71,11 @@ class RepeatAfterChangeTests(RepeatTestCase):
         for role, state in cases:
             with self.subTest(role=role, state=state):
                 request = self.request(role)
-                first_message = self.prompt
+                # What the launch stores and sends: the compiled message behind the line that
+                # names its artifact. The artifact holds the compiled message alone.
+                compiled_at_launch = self.prompt
+                first_message = self.first_message(request)
+                artifact = Path(self.artifact(request)["path"])
                 if state == "unknown":
                     self.runtime.fail("agent-create", "paseo_bridge_timeout", after_effect=True)
                     self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
@@ -85,6 +90,7 @@ class RepeatAfterChangeTests(RepeatTestCase):
                     self.assertEqual(self.dispatch(request)[1]["status"], "running")
                 saved = self.receipt(request)
                 self.assertEqual(saved["status"], state)
+                written = artifact.stat()
                 compiled = self.compilations
                 self.runtime.calls.clear()
 
@@ -98,11 +104,26 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 if state == "running":
                     self.assertEqual(self.runtime.calls, [])
                 else:
-                    # The stored call runs again: the same agent id and the first message as saved.
+                    # The stored call runs again unchanged: the same agent id, the first message
+                    # as saved with its artifact line, the saved recovery note and tool server.
                     self.assertEqual(
                         [(call["agentId"], call["prompt"]) for call in created],
                         [(saved["agentId"], first_message)],
                     )
+                    stored = saved["replayRequest"]["agent"]
+                    self.assertEqual(
+                        [{key: call[key] for key in stored} for call in created], [stored]
+                    )
+                    self.assertIn("agents-remember-task", stored["mcpServers"])
+                    self.assertIn(artifact.as_posix(), stored["systemPrompt"])
+                # The artifact holds what was compiled at the launch. The repeat neither wrote it
+                # again nor compared it with what a compilation would give now.
+                self.assertEqual(artifact.read_text(encoding="utf-8"), compiled_at_launch)
+                self.assertNotEqual(self.prompt, compiled_at_launch)
+                self.assertEqual(
+                    (artifact.stat().st_ino, artifact.stat().st_mtime_ns),
+                    (written.st_ino, written.st_mtime_ns),
+                )
                 agents = [
                     agent
                     for agent in self.runtime.agents.values()
@@ -209,6 +230,11 @@ class ReplacedExecutionTests(RepeatTestCase):
                 with lose_against(competitor(uuid.uuid4(), status), mine):
                     self.assertEqual(self.refused(mine).status_code, 409)
                 self.assertNotIn(str(mine.request_id), self.binding_files())
+                # The artifact the loser wrote is its own, at the path of its own request id; it
+                # is left in place (no execution names it, and no other request can reach it).
+                own = Path(self.artifact(mine)["path"])
+                self.assertIn(str(mine.request_id), own.name)
+                self.assertEqual(own.read_text(encoding="utf-8"), self.prompt)
                 self.receipt_path(mine).unlink(missing_ok=True)
         with self.subTest("the same request wins in another process: its file stays"):
             mine = self.request("manager")
@@ -220,12 +246,22 @@ class ReplacedExecutionTests(RepeatTestCase):
             ):
                 self.dispatch(theirs)
             winner = self.receipt(theirs)
+            shared = Path(winner["handoverArtifact"]["canonicalPath"])
+            written = shared.stat()
             self.receipt_path(theirs).unlink()
             with lose_against(winner, mine):
                 status, public = self.dispatch(mine)
             self.assertEqual((status, public["status"]), (200, "running"))
             self.assertEqual(public["execution"]["agentId"], winner["agentId"])
             self.assertIn(str(mine.request_id), self.binding_files())
+            # Both processes compiled the same request, so the loser found the winner's artifact
+            # and reused it: the file the winner's receipt names is the one written first.
+            self.assertEqual(self.receipt(mine)["handoverArtifact"], winner["handoverArtifact"])
+            self.assertEqual(shared.read_text(encoding="utf-8"), self.prompt)
+            self.assertEqual(
+                (shared.stat().st_ino, shared.stat().st_mtime_ns),
+                (written.st_ino, written.st_mtime_ns),
+            )
 
 
 class RuntimeReplyTests(RepeatTestCase):
