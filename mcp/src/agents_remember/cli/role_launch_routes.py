@@ -16,32 +16,44 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from agents_remember.application.orca_task_context import (
+from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
-    OrcaRoleContext,
-    resolve_orca_role_context,
+    RoleLaunchContext,
+    resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.cli.orca_handover_artifacts import first_message, write_handover_artifact
-from agents_remember.cli.orca_runtime import OrcaRuntimeFailure
-from agents_remember.cli.orca_runtime import (
-    digest as _digest,
+from agents_remember.cli.paseo_bridge import (
+    BRIDGE_TIMEOUT,
+    RUNTIME_NOT_CONFIGURED,
+    PaseoBridgeFailure,
+    require_bridge_runtime,
 )
-from agents_remember.cli.orca_task_liveness import (
+from agents_remember.cli.paseo_catalog import provider_accepts_tool_servers
+from agents_remember.cli.paseo_frame import frame_answer
+from agents_remember.cli.paseo_launch import (
+    RoleLaunch,
+    StartingAgent,
+    applied_to_agent,
+    build_launch_call,
+    mint_agent_id,
+)
+from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
+from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
     _reconcile_prior_execution,
     _recorded_agent_id,
     _refresh_execution,
     _revive_agent,
 )
-from agents_remember.cli.orca_task_preparation import (
-    PreparedOrcaRoleHandover,
+from agents_remember.cli.role_launch_preparation import (
+    PreparedRoleHandover,
     _launcher_catalog,
     _verify_leaf_revival_scope,
-    prepare_orca_role_handover,
+    prepare_role_handover,
 )
-from agents_remember.cli.orca_task_receipts import (
+from agents_remember.cli.role_launch_receipts import (
+    RECEIPT_SCHEMA,
     _archived_receipt_agent_id,
     _create_receipt,
     _discard_message_binding_projection,
@@ -59,26 +71,14 @@ from agents_remember.cli.orca_task_receipts import (
     _taskless_execution_receipts,
     _verify_message_binding_projection,
 )
-from agents_remember.cli.paseo_bridge import (
-    BRIDGE_TIMEOUT,
-    RUNTIME_NOT_CONFIGURED,
-    PaseoBridgeFailure,
-    require_bridge_runtime,
-)
-from agents_remember.cli.paseo_catalog import provider_accepts_tool_servers
-from agents_remember.cli.paseo_frame import frame_answer
-from agents_remember.cli.paseo_launch import (
-    RoleLaunch,
-    StartingAgent,
-    applied_to_agent,
-    build_launch_call,
-    mint_agent_id,
+from agents_remember.cli.role_launch_receipts import (
+    digest as _digest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import (
-    OrcaDispatchRequest,
-    OrcaLauncherOptionsRequest,
-    OrcaResultRequest,
+from agents_remember.models.role_launcher import (
+    RoleDispatchRequest,
+    RoleLauncherOptionsRequest,
+    RoleResultRequest,
 )
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
@@ -90,12 +90,12 @@ _BRIDGE_FAILURE_STATUS = {RUNTIME_NOT_CONFIGURED: 503, BRIDGE_TIMEOUT: 504}
 @dataclass(frozen=True, slots=True)
 class _PreparedRoleStart:
     config: McpRuntimeConfig
-    request: OrcaDispatchRequest
-    context: OrcaRoleContext
+    request: RoleDispatchRequest
+    context: RoleLaunchContext
     binding: dict[str, Any]
     request_digest: str
     receipt_path: Path
-    role_handover: PreparedOrcaRoleHandover
+    role_handover: PreparedRoleHandover
     message_binding_projection: dict[str, str]
     # The agent of the closed execution this start replaces on a task-bound selection.
     replaces_agent_id: str | None = None
@@ -105,55 +105,57 @@ class _PreparedRoleStart:
     created_message_binding: bool = False
 
 
-def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
-    app.add_api_route("/api/orca/frame", _bind_frame_endpoint(config), methods=["GET"])
+def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
+    app.add_api_route("/api/role-launch/frame", _bind_frame_endpoint(config), methods=["GET"])
     app.add_api_route(
-        "/api/orca/launcher/options",
+        "/api/role-launch/options",
         _bind_options_endpoint(config),
         methods=["POST"],
     )
-    app.add_api_route("/api/orca/dispatch", _bind_dispatch_endpoint(config), methods=["POST"])
-    app.add_api_route("/api/orca/result", _bind_result_endpoint(config), methods=["POST"])
+    app.add_api_route(
+        "/api/role-launch/dispatch", _bind_dispatch_endpoint(config), methods=["POST"]
+    )
+    app.add_api_route("/api/role-launch/result", _bind_result_endpoint(config), methods=["POST"])
 
 
-def orca_frame(config: McpRuntimeConfig, request: Request) -> JSONResponse:
+def role_launch_frame(config: McpRuntimeConfig, request: Request) -> JSONResponse:
     """Where this dashboard origin frames the Paseo web UI, or why it cannot (always HTTP 200)."""
     return JSONResponse(frame_answer(config, request))
 
 
 def _bind_frame_endpoint(config: McpRuntimeConfig):
     def endpoint(request: Request) -> JSONResponse:
-        return orca_frame(config, request)
+        return role_launch_frame(config, request)
 
     return endpoint
 
 
 def _bind_options_endpoint(config: McpRuntimeConfig):
-    def endpoint(request: OrcaLauncherOptionsRequest) -> JSONResponse:
-        return _orca_options_endpoint(config, request)
+    def endpoint(request: RoleLauncherOptionsRequest) -> JSONResponse:
+        return _role_launch_options_endpoint(config, request)
 
     return endpoint
 
 
 def _bind_dispatch_endpoint(config: McpRuntimeConfig):
-    def endpoint(request: OrcaDispatchRequest) -> JSONResponse:
-        return _orca_dispatch_endpoint(config, request)
+    def endpoint(request: RoleDispatchRequest) -> JSONResponse:
+        return _role_launch_dispatch_endpoint(config, request)
 
     return endpoint
 
 
 def _bind_result_endpoint(config: McpRuntimeConfig):
-    def endpoint(request: OrcaResultRequest) -> JSONResponse:
-        return _orca_result_endpoint(config, request)
+    def endpoint(request: RoleResultRequest) -> JSONResponse:
+        return _role_launch_result_endpoint(config, request)
 
     return endpoint
 
 
-def _orca_options_endpoint(
-    config: McpRuntimeConfig, request: OrcaLauncherOptionsRequest
+def _role_launch_options_endpoint(
+    config: McpRuntimeConfig, request: RoleLauncherOptionsRequest
 ) -> JSONResponse:
     try:
-        context = resolve_orca_role_context(config, request)
+        context = resolve_role_launch_context(config, request)
         # The catalog is loaded, or taken from its cache, before the launch lock is taken: the
         # lock is held for the receipts and the one bridge call of the refresh, nothing longer.
         response = _launcher_catalog(config, context, request)
@@ -178,13 +180,13 @@ def _orca_options_endpoint(
         return busy.read_answer()
     except PaseoBridgeFailure as error:
         raise _bridge_http_error(error) from error
-    except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
+    except (OSError, ValueError, TaskDocumentRefError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-def _orca_dispatch_endpoint(
+def _role_launch_dispatch_endpoint(
     config: McpRuntimeConfig,
-    request: OrcaDispatchRequest,
+    request: RoleDispatchRequest,
     *,
     started_by: StartingAgent | None = None,
     lock_wait_seconds: float = 0.0,
@@ -205,13 +207,7 @@ def _orca_dispatch_endpoint(
         return _start_execution(config, request, started_by)
     except HostUnreachableRefusal as refusal:
         return JSONResponse({"detail": refusal.detail, "hostUnreachable": True}, status_code=409)
-    except (
-        OSError,
-        ValueError,
-        TaskDocumentRefError,
-        OrcaRuntimeFailure,
-        PaseoBridgeFailure,
-    ) as error:
+    except (OSError, ValueError, TaskDocumentRefError, PaseoBridgeFailure) as error:
         # A refusal: this call recorded nothing, and a request that has its receipt keeps it
         # unchanged. The launcher shows the reason of a 409; a bridge failure reaches this point
         # only while the selection is validated, before a receipt.
@@ -220,7 +216,9 @@ def _orca_dispatch_endpoint(
         _DISPATCH_LOCK.release()
 
 
-def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) -> JSONResponse:
+def _role_launch_result_endpoint(
+    config: McpRuntimeConfig, request: RoleResultRequest
+) -> JSONResponse:
     try:
         require_bridge_runtime(config)
     except PaseoBridgeFailure as error:
@@ -235,7 +233,7 @@ def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) 
             if request.request_id is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="Taskless Orca results require the exact saved requestId.",
+                    detail="Taskless role results require the exact saved requestId.",
                 )
             _migrate_taskless_legacy_receipt(config, request)
             path = _receipt_path(config, request, request.request_id)
@@ -244,15 +242,15 @@ def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) 
         receipt = _read_receipt(path)
         if receipt is None:
             raise HTTPException(
-                status_code=404, detail="No Orca execution is recorded for this AR selection."
+                status_code=404, detail="No role execution is recorded for this AR selection."
             )
         if not _receipt_address_matches(receipt, request):
             raise HTTPException(
                 status_code=409,
-                detail="The recorded Orca execution belongs to another AR selection.",
+                detail="The recorded role execution belongs to another AR selection.",
             )
         return JSONResponse(_refresh_execution(config, path, receipt))
-    except (OSError, ValueError, OrcaRuntimeFailure) as error:
+    except (OSError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
         _DISPATCH_LOCK.release()
@@ -281,7 +279,7 @@ def _prepared_message_binding_projection(
 def _verify_prior_message_binding_projection(
     config: McpRuntimeConfig,
     receipt: dict[str, Any] | None,
-    request: OrcaDispatchRequest,
+    request: RoleDispatchRequest,
     binding: dict[str, Any],
     reference: dict[str, str],
 ) -> None:
@@ -298,7 +296,7 @@ def _verify_prior_message_binding_projection(
 def _reserve_message_binding_projection(
     config: McpRuntimeConfig,
     path: Path,
-    request: OrcaDispatchRequest,
+    request: RoleDispatchRequest,
     request_digest: str,
     prepared: dict[str, Any],
 ) -> tuple[dict[str, str], str | None, bool, JSONResponse | None]:
@@ -345,13 +343,13 @@ def _take_back_message_binding(start: _PreparedRoleStart) -> None:
     _discard_message_binding_projection(start.config, start.request.request_id)
 
 
-def _receipt_carries_request(path: Path, request: OrcaDispatchRequest) -> bool:
+def _receipt_carries_request(path: Path, request: RoleDispatchRequest) -> bool:
     current = _read_receipt(path)
     return current is not None and current.get("requestId") == str(request.request_id)
 
 
 def _refuse_another_starter(
-    path: Path, request: OrcaDispatchRequest, started_by: StartingAgent | None
+    path: Path, request: RoleDispatchRequest, started_by: StartingAgent | None
 ) -> None:
     """Refuse the repeat of a request id by a role agent that did not start its execution.
 
@@ -381,10 +379,10 @@ def _refuse_another_starter(
 
 def _start_execution(
     config: McpRuntimeConfig,
-    request: OrcaDispatchRequest,
+    request: RoleDispatchRequest,
     started_by: StartingAgent | None = None,
 ) -> JSONResponse:
-    context = resolve_orca_role_context(config, request)
+    context = resolve_role_launch_context(config, request)
     binding = selection_binding(request)
     request_digest = _request_digest(context, request)
     if request.role in TASKLESS_ROLES:
@@ -403,7 +401,7 @@ def _start_execution(
     # A request id that belongs to an archived execution, or to another selection, is refused
     # here: before an enclosure is created or anything else is prepared for it.
     _refuse_reused_request_id(config, path, request)
-    role_handover = prepare_orca_role_handover(
+    role_handover = prepare_role_handover(
         config,
         context,
         agent_override=request.agent_override,
@@ -464,7 +462,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         )
     )
     receipt: dict[str, Any] = {
-        "schema": "ar-orca-native-execution/v1",
+        "schema": RECEIPT_SCHEMA,
         "requestId": str(request.request_id),
         "role": request.role,
         "selection": start.binding,
@@ -534,7 +532,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     return _execute_prepared_launch(start.config, start.receipt_path, receipt)
 
 
-def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
+def _revive_execution(config: McpRuntimeConfig, request: RoleDispatchRequest) -> JSONResponse:
     """Resume the recorded agent's closed session without a message; never create an agent."""
 
     if request.role in TASKLESS_ROLES:
@@ -554,7 +552,7 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
             detail="This execution has no agent in the Paseo runtime, so there is nothing to revive.",
         )
     if request.role in LEAF_ROLES:
-        _verify_leaf_revival_scope(resolve_orca_role_context(config, request), receipt)
+        _verify_leaf_revival_scope(resolve_role_launch_context(config, request), receipt)
     return _revive_agent(config, path, receipt, agent_id)
 
 
@@ -578,7 +576,7 @@ class LaunchLockBusy(HTTPException):
 
     def __init__(self) -> None:
         super().__init__(
-            status_code=409, detail="An AR-to-Orca launch or result check is already in progress."
+            status_code=409, detail="A role launch or result check is already in progress."
         )
 
     def read_answer(self) -> JSONResponse:

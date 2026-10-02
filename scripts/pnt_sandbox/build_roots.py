@@ -194,14 +194,14 @@ def _launch_roots(found: _Roots, config: Any) -> None:
     """Where launch receipts and the reports of taskless roles are written."""
 
     def taskless_receipts() -> Path:
-        from agents_remember.cli.orca_task_receipts import (  # noqa: PLC0415
+        from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
             _taskless_session_directory,
         )
 
         return _taskless_session_directory(config, "architect")
 
     def message_bindings() -> Path:
-        from agents_remember.cli.orca_task_receipts import (  # noqa: PLC0415
+        from agents_remember.cli.role_launch_receipts import (  # noqa: PLC0415
             _message_binding_projection_path,
         )
 

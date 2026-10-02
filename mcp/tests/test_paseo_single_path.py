@@ -4,11 +4,12 @@ A text scan of every source file in the checkout. It fails when a file outside t
 names a Paseo package, starts Paseo's command line, names the command-line runner or the bridge
 script, or reads the runtime's address or install prefix, which is what a second path into the
 daemon needs first. A legitimate use of one of those names outside the boundary gets one entry in
-``ALLOWED``, for one rule and one file, with its reason.
+``ALLOWED``, for one rule and one file, with the number of its uses and its reason.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -19,17 +20,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI = "mcp/src/agents_remember/cli/"
 SANDBOX = "scripts/pnt_sandbox/"  # PNT-R11's tooling, merged from another leaf
 
-# The boundary itself: no rule applies inside these files. An entry for a file that a checkout
-# does not have is not an error, so leaves that are merged later can be listed here.
+# The boundary itself: no rule applies inside these files. They are the two paths: the bridge
+# with its script, and the runner of Paseo's own command line. The other files of the PNT-R01
+# runtime commands are ordinary files with entries in ``ALLOWED`` for the rules they trip.
 BOUNDARY_FILES: dict[str, str] = {
     CLI + "paseo_bridge.py": "the bridge: the one caller of the bridge script",
     CLI + "paseo_bridge.mjs": "the bridge script: the one importer of Paseo's client package",
     CLI + "paseo_command.py": "PNT-R01: the one runner of Paseo's own command line",
-    CLI + "paseo_daemon.py": "PNT-R01: status and stop through that runner",
-    CLI + "paseo_daemon_config.py": "PNT-R01: the daemon settings provision writes",
-    CLI + "paseo_plugin_files.py": "PNT-R01: the files AR owns under the daemon home",
-    CLI + "paseo_provision.py": "PNT-R01: provision through that runner",
-    CLI + "paseo_runtime.py": "PNT-R01: the provision, status and stop commands",
 }
 BOUNDARY_DIRECTORIES: dict[str, str] = {
     "mcp/src/agents_remember/package_data/paseo_plugin/": "the AR plugin: Paseo's plugin interface",
@@ -47,16 +44,20 @@ MANIFEST = "names paseo in a manifest"
 
 RULES: dict[str, re.Pattern[str]] = {
     PACKAGE: re.compile(r"getpaseo"),
-    # The program by a path that ends in it, by a look-up, or through a package runner.
+    # The program by a path that ends in it, by a look-up, or through a package runner. After an
+    # interpolated directory only the program itself counts, not a longer name that begins with
+    # the word (a receipt folder, a route, the daemon's record file).
     PROGRAM: re.compile(
         r"\.bin[/\\\"', ]+paseo\b"
         r"|which\(\s*[\"']paseo\b"
+        r"|\b(?:command\s+-v|which|type\s+-P|hash)\s+paseo\b"
         r"|\b(?:npx|bunx|npm exec|pnpm dlx)\s+(?:-\S+\s+)*paseo\b"
-        r"|\bbin[/\\]paseo\b|\}[/\\]paseo\b|[\"'`][/\\]paseo[\"'`]"
+        r"|\bbin[/\\]paseo\b|\}[/\\]paseo(?:\.(?:cmd|exe))?(?![\w./\\-])|[/\\]paseo[\"'`]"
         r"|[\"'`]paseo\.(?:cmd|exe)[\"'`]"
     ),
     LITERAL: re.compile(r"""["'`]paseo["'`]"""),
-    COMMAND_LINE: re.compile(r"""["'`]paseo\s"""),
+    # A string that begins with the command, or that reaches it after a shell prefix.
+    COMMAND_LINE: re.compile(r"""["'`]paseo\s|["'`][^"'`\n]*(?:&&|\|\||;|=\S*)\s+paseo\s"""),
     RUNNER: re.compile(r"\bpaseo_command\b|\bPaseoCli\b"),
     SCRIPT: re.compile(r"paseo_bridge\.mjs|paseo_bridge\.__file__"),
     # AR_PASEO_AGENT_ID is the agent binding of design contract C5, not an address of the runtime.
@@ -65,47 +66,104 @@ RULES: dict[str, re.Pattern[str]] = {
         r"|\.listen(?:_host|_port)?\b(?!\()"
     ),
     # A command word that is paseo or ends in /paseo, at the start of a command or after leading
-    # NAME=value words; or a variable that is given the program.
+    # NAME=value words; a variable that is given the program; the word on its own anywhere in a
+    # line (after a wrapper, in a case branch), AR's own sub-command excepted; or the program as
+    # a parameter's default.
     SHELL: re.compile(
         r"(?m)(?:^|[;|&(`{!]|\$\("
         r"|\b(?:if|elif|while|until|then|do|else|exec|env|nohup|sudo|time|command|xargs)\s"
         r"|\btimeout\s+\S+\s)"
         r"\s*(?:[A-Za-z_]\w*=\S*\s+)*[\"']?(?:[^\s\"';|&]*/)?paseo[\"']?(?:\s|$)"
         r"|\b[A-Za-z_]\w*=[\"']?(?:[^\s\"';|&]*/)?paseo[\"']?(?:\s|$)"
+        r"|(?<![\w./$-])(?<!agents-remember )(?<!agents_remember\.cli )paseo(?![\w./-])"
+        r"|:[-=]paseo\}"
     ),
     # In a manifest: the word paseo on its own, as in a script entry or a dependency name.
     MANIFEST: re.compile(r"(?<![\w@/-])paseo(?![\w-])"),
 }
 
-# Per rule and per file: a use of one of these names that is AR's own. An entry for a file that a
-# checkout does not have is not an error.
-ALLOWED: dict[str, dict[str, str]] = {
+# Per rule and per file: the uses of one of these names that are AR's own, as their number and
+# their reason. A file may trip a rule exactly as often as its entry says: one use more is a
+# second path until it is counted here, and an entry whose file is gone, or trips the rule less
+# often, is stale. Both fail the scan of the checkout.
+RUNTIME_COMMANDS = "PNT-R01: "
+ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     LITERAL: {
-        CLI + "__main__.py": "the `paseo` sub-command of AR's own command line (PNT-R01)",
+        CLI + "__main__.py": (1, "the `paseo` sub-command of AR's own command line (PNT-R01)"),
         SANDBOX + "operations.py": (
-            "starts AR's own `agents_remember.cli paseo <command>`; `paseo` key of its own record"
+            1,
+            "starts AR's own `agents_remember.cli paseo <command>`; `paseo` key of its own record",
         ),
-        SANDBOX + "commands.py": "the `paseo` key of the sandbox's own process record",
-        SANDBOX + "layout.py": "the sandbox directory named `paseo` that holds the home and prefix",
+        SANDBOX + "commands.py": (3, "the `paseo` key of the sandbox's own process record"),
+        SANDBOX + "layout.py": (
+            2,
+            "the sandbox directory named `paseo` that holds the home and prefix",
+        ),
     },
     COMMAND_LINE: {
-        SANDBOX + "commands.py": "step names and output lines about AR's own `paseo` sub-commands",
-        SANDBOX + "operations.py": "the step name of AR's own `paseo <command>` sub-command",
+        CLI + "paseo_daemon.py": (
+            2,
+            RUNTIME_COMMANDS + "its docstring quotes the command line the runner builds, and "
+            "one failure text of stop begins with the command's name",
+        ),
+        CLI + "paseo_daemon_config.py": (
+            1,
+            RUNTIME_COMMANDS + "its docstring quotes the command it does not use for a provider "
+            "entry",
+        ),
+        CLI + "paseo_provision.py": (
+            1,
+            RUNTIME_COMMANDS + "one failure text of provision begins with the command's name",
+        ),
+        SANDBOX + "commands.py": (
+            12,
+            "step names and output lines about AR's own `paseo` sub-commands",
+        ),
+        SANDBOX + "operations.py": (2, "the step name of AR's own `paseo <command>` sub-command"),
     },
     RUNNER: {
+        CLI + "paseo_daemon.py": (
+            7,
+            RUNTIME_COMMANDS + "status and stop build the runner and pass it to their helpers",
+        ),
+        CLI + "paseo_daemon_config.py": (
+            1,
+            RUNTIME_COMMANDS + "imports the failure class from the runner's module",
+        ),
+        CLI + "paseo_provision.py": (
+            7,
+            RUNTIME_COMMANDS + "provision builds the runner and passes it to its steps",
+        ),
+        CLI + "paseo_runtime.py": (
+            5,
+            RUNTIME_COMMANDS + "imports the failure class from the runner's module; "
+            "`paseo_command` is also the name under which it parses its own sub-command",
+        ),
         CLI + "paseo_process_record.py": (
-            "PNT-R01: imports the failure class from the runner's module; it starts nothing"
+            1,
+            RUNTIME_COMMANDS + "imports the failure class from the runner's module; it starts "
+            "nothing",
         ),
     },
     ADDRESS: {
-        CLI + "paseo_catalog.py": "the catalog cache is keyed by the runtime it was read from",
-        "mcp/src/agents_remember/kernel/primitives/paseo_runtime_settings.py": (
-            "the settings model that defines these fields"
+        CLI + "paseo_provision.py": (
+            16,
+            RUNTIME_COMMANDS + "provision installs into the prefix and binds the listen address",
         ),
-        SANDBOX + "layout.py": "writes the `paseoRuntime` settings block of the sandbox",
-        SANDBOX
-        + "build_roots.py": "reports the configured values so the sandbox check can compare",
-        SANDBOX + "safety.py": "names the settings keys whose values must lie inside the sandbox",
+        CLI + "paseo_catalog.py": (2, "the catalog cache is keyed by the runtime it was read from"),
+        "mcp/src/agents_remember/kernel/primitives/paseo_runtime_settings.py": (
+            6,
+            "the settings model that defines these fields",
+        ),
+        SANDBOX + "layout.py": (1, "writes the `paseoRuntime` settings block of the sandbox"),
+        SANDBOX + "build_roots.py": (
+            3,
+            "reports the configured values so the sandbox check can compare",
+        ),
+        SANDBOX + "safety.py": (
+            2,
+            "names the settings keys whose values must lie inside the sandbox",
+        ),
     },
 }
 
@@ -136,11 +194,11 @@ def is_scanned(path: str, text: str) -> bool:
     return may_be_scanned(path) and (Path(path).suffix != "" or text.startswith("#!"))
 
 
-def second_paths_to_paseo(path: str, text: str) -> list[str]:
-    """The rules a scanned file trips and is not allowed to trip."""
+def rule_hits(path: str, text: str) -> dict[str, int]:
+    """How often a file trips each rule that applies to its kind; rules it does not trip are left out."""
 
     if Path(path).name in MANIFEST_NAMES:
-        names = [PACKAGE, MANIFEST]
+        names = [PACKAGE, PROGRAM, MANIFEST]
     else:
         names = [name for name in RULES if name not in (SHELL, MANIFEST)]
         if Path(path).suffix in SHELL_SUFFIXES or SHELL_INTERPRETER.search(text):
@@ -148,21 +206,42 @@ def second_paths_to_paseo(path: str, text: str) -> list[str]:
             text = "\n".join(
                 line for line in text.splitlines() if not line.lstrip().startswith("#")
             )
-    return [
-        name for name in names if RULES[name].search(text) and path not in ALLOWED.get(name, {})
-    ]
+    counted = {name: sum(1 for _ in RULES[name].finditer(text)) for name in names}
+    return {name: hits for name, hits in counted.items() if hits}
+
+
+def allowed_hits(rule: str, path: str) -> int:
+    return ALLOWED.get(rule, {}).get(path, (0, ""))[0]
+
+
+def second_paths_to_paseo(path: str, text: str) -> list[str]:
+    """The rules a scanned file trips more often than it is allowed to."""
+
+    return [name for name, hits in rule_hits(path, text).items() if hits > allowed_hits(name, path)]
+
+
+def git(root: Path, *arguments: str) -> str:
+    """Run Git on the repository at ``root`` and on no other, whatever the caller's environment.
+
+    A caller that exports a repository (as Git does for a hook) would otherwise have the scan
+    list, and its self-test stage, the files of that repository.
+    """
+
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("GIT_") or name == "GIT_EXEC_PATH"
+    }
+    environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    return subprocess.run(
+        ["git", *arguments], cwd=root, env=environment, capture_output=True, text=True, check=True
+    ).stdout
 
 
 def scan_tree(root: Path) -> tuple[int, dict[str, list[str]]]:
     """Scan every tracked or untracked, not ignored file of a checkout."""
 
-    listed = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\0")
+    listed = git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")
     scanned = 0
     offenders: dict[str, list[str]] = {}
     for path in listed:
@@ -450,6 +529,80 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
         'paseo = sub.add_parser("paseo")\nprefix = settings.install_prefix',
         (ADDRESS,),
     ),
+    "a file allowed for a rule uses it once more than its entry counts": (
+        CLI + "__main__.py",
+        'paseo = sub.add_parser("paseo")\nsubprocess.run(["paseo", "daemon", "status"])',
+        (LITERAL,),
+    ),
+    "a file allowed for the runner's failure class names the program": (
+        CLI + "paseo_process_record.py",
+        'from agents_remember.cli.paseo_command import PaseoRuntimeFailure\nPROGRAM = "paseo"',
+        (LITERAL,),
+    ),
+    "a boundary file's name in another directory": (
+        "scripts/paseo_command.py",
+        'subprocess.run(["paseo", "provider", "ls", "--json"])',
+        (LITERAL,),
+    ),
+    "a .sh script without an interpreter line": (
+        "scripts/zz-paseo.sh",
+        "paseo provider ls --json\n",
+        (SHELL,),
+    ),
+    # Review R3, plants T02 to T04 and T06 to T10 and its further probes.
+    "T02 a command line after an environment assignment": (
+        PY,
+        'subprocess.run(f"PASEO_HOME={home} paseo provider ls --json", shell=True)',
+        (COMMAND_LINE,),
+    ),
+    "T03 a command line after a change of directory": (
+        MJS,
+        "export const run = (dir) => execSync(`cd ${dir} && paseo provider ls --json`);",
+        (COMMAND_LINE,),
+    ),
+    "T04 a percent-formatted path to the program": (
+        PY,
+        'subprocess.run(["%s/paseo" % bin_dir, "provider", "ls", "--json"])',
+        (PROGRAM,),
+    ),
+    "T06 a path to the program without a bin directory": (
+        PY,
+        'PROGRAM = "/opt/paseo/paseo"',
+        (PROGRAM,),
+    ),
+    "T07 shell: the program looked up": (
+        "scripts/zz-paseo.sh",
+        '#!/bin/sh\nPASEO_BIN=$(command -v paseo)\n"$PASEO_BIN" provider ls --json\n',
+        (PROGRAM, SHELL),
+    ),
+    "T08 shell: the program as a parameter's default": (
+        "scripts/zz-paseo.sh",
+        '#!/bin/sh\n"${PASEO_BIN:-paseo}" provider ls --json\n',
+        (SHELL,),
+    ),
+    "T09 shell: a one-line case branch": (
+        "scripts/zz-paseo.sh",
+        '#!/bin/sh\ncase "$1" in\n  status) paseo daemon status --json ;;\nesac\n',
+        (SHELL,),
+    ),
+    "T10 a manifest script that uses the .bin path": (
+        "dashboard/zz/package.json",
+        '{"scripts": {"providers": "./node_modules/.bin/paseo provider ls --json"}}',
+        (PROGRAM,),
+    ),
+    **{
+        f"shell: {line}": ("scripts/zz-paseo.sh", f"#!/bin/sh\n{line}\n", (SHELL,))
+        for line in (
+            "nice -n 10 paseo provider ls --json",
+            "sudo -u ar paseo provider ls --json",
+            'env -i PATH="$PATH" paseo provider ls --json',
+        )
+    },
+    "a program name with another suffix in an argument list": (
+        PY,
+        'subprocess.run(["paseo.bat", "provider", "ls", "--json"])',
+        (),
+    ),
 }
 
 # Uses of the same names that are AR's own and must not trip the scan.
@@ -483,6 +636,10 @@ OWN_USES: dict[str, tuple[str, str]] = {
         "scripts/zz-tool",
         "#!/usr/bin/env python3\npaseo = load()\n",
     ),
+    # Longer names that begin with the word, after an interpolated directory.
+    "a receipt path": (PY, 'path = f"{root}/paseo-native-executions/{task_id}.json"'),
+    "a URL built from a base": (TS, "const response = await fetch(`${base}/paseo/frame`);"),
+    "the daemon's record file": (PY, 'record = f"{settings.home}/paseo.pid"'),
 }
 
 
@@ -491,9 +648,25 @@ class SinglePathTests(unittest.TestCase):
         scanned, offenders = scan_tree(REPO_ROOT)
 
         self.assertGreater(scanned, 500, "the scan found too few source files to mean anything")
-        self.assertTrue((REPO_ROOT / CLI / "paseo_bridge.py").is_file())
-        self.assertTrue((REPO_ROOT / CLI / "paseo_bridge.mjs").is_file())
         self.assertEqual(offenders, {})
+        # Every boundary entry names something the checkout has, and every boundary file is one
+        # the scan would otherwise report: an entry that excepts nothing has to go.
+        for path in BOUNDARY_FILES:
+            with self.subTest(boundary=path):
+                self.assertTrue((REPO_ROOT / path).is_file(), "a boundary file that is gone")
+                text = (REPO_ROOT / path).read_text(encoding="utf-8")
+                self.assertNotEqual(rule_hits(path, text), {})
+        for path in BOUNDARY_DIRECTORIES:
+            with self.subTest(boundary=path):
+                self.assertTrue((REPO_ROOT / path).is_dir(), "a boundary directory that is gone")
+        # Every allowed use is still there, exactly as often as its entry says.
+        for rule, files in ALLOWED.items():
+            for path, (expected, _reason) in files.items():
+                with self.subTest(rule=rule, allowed=path):
+                    self.assertTrue((REPO_ROOT / path).is_file(), "an allowed file that is gone")
+                    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+                    self.assertTrue(is_scanned(path, text), "the scan does not read this file")
+                    self.assertEqual(rule_hits(path, text).get(rule, 0), expected)
 
     def test_the_scan_catches_each_kind_of_second_path(self) -> None:
         """Each planted second path trips the rules named for it, and AR's own uses trip none.
@@ -506,9 +679,16 @@ class SinglePathTests(unittest.TestCase):
 
         Also open: file kinds the scan does not read (data files such as other `.json` and
         `.toml` files, a `Makefile` or `justfile`, `.ps1` scripts, workflow files, `.html`
-        pages); a file that is allowed for a rule using that rule again for a second path; and
-        an address read from the raw settings mapping, or held under one of AR's own names (the
-        frame URL of the embed list, the sandbox layout's listen address).
+        pages); a file that is allowed for a rule replacing one of its counted uses by a second
+        path (one use more is caught); a program name with a suffix other than `.cmd` or `.exe`
+        as an element of an argument list; and an address read from the raw settings mapping, or
+        held under one of AR's own names (the frame URL of the embed list, the sandbox layout's
+        listen address).
+
+        What the scan reports although it is no second path, so that such a line is worded
+        otherwise or gets an entry: the lower-case word at the start of a string, the word on
+        its own in a line of a shell script (an `echo` about the runtime), a look-up phrase
+        such as "which paseo" in a comment, and the project's repository address.
         """
 
         for label, (path, text, rules) in PLANTS.items():
@@ -525,8 +705,9 @@ class SinglePathTests(unittest.TestCase):
                 self.assertFalse(is_scanned(path, ""))
         for rule, files in ALLOWED.items():
             self.assertIn(rule, RULES)
-            for path, reason in files.items():
+            for path, (expected, reason) in files.items():
                 self.assertNotIn(path, BOUNDARY_FILES)
+                self.assertGreater(expected, 0, f"{path} is allowed for no use")
                 self.assertGreater(len(reason), 20, f"{path} is allowed without a reason")
 
     def test_the_tree_scan_reports_exactly_the_planted_files(self) -> None:
@@ -578,13 +759,13 @@ class SinglePathTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", root.as_posix()], check=True)
+            git(root, "init", "-q")
             files = {**{path: text for path, (text, _rules) in planted.items()}, **clean, **unread}
             for path, text in files.items():
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
                 (root / path).write_text(text, encoding="utf-8")
             tracked = sorted(set(files) - untracked - {"node_modules/@getpaseo/client/index.js"})
-            subprocess.run(["git", "-C", root.as_posix(), "add", "--", *tracked], check=True)
+            git(root, "add", "--", *tracked)
 
             scanned, offenders = scan_tree(root)
 

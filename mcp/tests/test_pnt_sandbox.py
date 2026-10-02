@@ -70,13 +70,13 @@ KEPT = (
     "PATH", "HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
     "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
 )
-# The roots the build's own code answers for a settings file with one repository, one provider
-# and an Orca block: spelled out, so a root the resolver stops reporting is noticed.
+# The roots the build's own code answers for a settings file with one repository and one
+# provider: spelled out, so a root the resolver stops reporting is noticed.
 RESOLVED_ROOTS = (
     "configPath", "coordinationRoot", "workspaceRoot", "transcriptRoot", "harnessSkillRoot",
     "agenticSettings", "observerRoot", "dashboardDaemonDir", "daggerAuthorityRoot",
     "receipts.taskless", "receipts.messageBindings", "reports.taskless",
-    "orcaRuntime.runtimeRoot", "orcaRuntime.userDataPath", "paseoRuntime.home",
+    "paseoRuntime.home",
     "paseoRuntime.installPrefix", "providers.grepai-memory.runtimeRoot",
     "providers.grepai-memory.logRoot",
     TASK_ROOT,
@@ -127,8 +127,8 @@ class SafetyCheckTests(SandboxCase):
         # A path the configuration holds under a key the check has no name for is judged too.
         linked.unlink()
         unnamed = self.good_roots()
-        unnamed["roots"]["orcaRuntime.userDataPath"] = "/home/dev/.config/orca-dev"
-        self.assertEqual(self.found(unnamed), ["orcaRuntime.userDataPath"])
+        unnamed["roots"]["laterBlock.dataPath"] = "/home/dev/.config/later-block"
+        self.assertEqual(self.found(unnamed), ["laterBlock.dataPath"])
 
     def test_a_root_that_cannot_be_resolved_fails_closed_and_is_named(self) -> None:
         unresolved = self.good_roots()
@@ -219,11 +219,9 @@ class SafetyCheckTests(SandboxCase):
         document["providers"] = {"grepai-memory": {}}
         # A path relative to the repository names a file in it, not a root.
         document["repositories"][REPOSITORY_ID] = {"certificationProfile": "mcp/profile.json"}
-        orca = self.root / "orca"
-        document["orcaRuntime"] = {
-            "runtimeRoot": (orca / "source").as_posix(),
-            "userDataPath": (orca / "profile").as_posix(),
-        }
+        # A block the build does not know holds paths outside the sandbox: the loader skips an
+        # unknown top-level key, so the build uses none of them and the resolver reports none.
+        document["laterBlock"] = {"dataPath": (self.root / "later-block").as_posix()}
         memory = f"{REPOSITORY}.memoryRoot"
         authority = {"AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix()}
 
@@ -238,14 +236,9 @@ class SafetyCheckTests(SandboxCase):
         # The exact set of roots the build's own code answers for this configuration: a root the
         # resolver stops reporting, or a path-bearing key it does not know by name, shows here.
         self.assertEqual(sorted(resolved["roots"]), sorted(RESOLVED_ROOTS))
-        self.assertEqual(
-            sorted(set(resolved["roots"]) - set(resolved["expected"])),
-            ["orcaRuntime.runtimeRoot", "orcaRuntime.userDataPath"],
-        )
+        self.assertEqual(sorted(set(resolved["roots"]) - set(resolved["expected"])), [])
         for key in (memory, "transcriptRoot", "daggerAuthorityRoot", "observerRoot"):
             self.assertNotIn(key, inside)
-        for key in ("orcaRuntime.runtimeRoot", "orcaRuntime.userDataPath"):
-            self.assertIn("outside the sandbox directory", inside[key])
         # Nothing was created for the repository, so the build's resolver cannot answer for it.
         self.assertIn("cannot be resolved", inside[f"{REPOSITORY}.resolver.memory_root"])
 

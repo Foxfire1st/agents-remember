@@ -82,7 +82,7 @@ test("empty state renders without items", async ({ page }) => {
 
 const scenarioUrl = (name: string) => `/dev/bench?scenario=${name}&effects=off`;
 
-test('Orca chats receives clipboard Permissions Policy in its cross-origin frame', async ({
+test('Role chats receives clipboard Permissions Policy in its cross-origin frame', async ({
   page,
 }) => {
   const frameServer = createServer((_request, response) => {
@@ -111,7 +111,7 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
   const frameUrl = `${frameOrigin}/`;
 
   try {
-    await page.route('**/api/orca/frame', (route) =>
+    await page.route('**/api/role-launch/frame', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -124,7 +124,7 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
         }),
       }),
     );
-    await page.route('**/api/orca/launcher/options', (route) =>
+    await page.route('**/api/role-launch/options', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -142,16 +142,16 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
     // from its in-page authority, so the two routes mocked above would never be asked there.
     await page.goto('/?effects=off');
     await page.getByRole('radio', { name: 'Chats' }).click();
-    const orca = page.frameLocator('iframe[title="Native Orca chats"]');
-    await expect(orca.locator('html')).toHaveAttribute('data-policy-api', 'true');
-    await expect(orca.locator('html')).toHaveAttribute('data-clipboard-read', 'true');
-    await expect(orca.locator('html')).toHaveAttribute('data-clipboard-write', 'true');
+    const frame = page.frameLocator('iframe[title="Role chats"]');
+    await expect(frame.locator('html')).toHaveAttribute('data-policy-api', 'true');
+    await expect(frame.locator('html')).toHaveAttribute('data-clipboard-read', 'true');
+    await expect(frame.locator('html')).toHaveAttribute('data-clipboard-write', 'true');
     const embeddedOriginOnly = JSON.stringify([frameOrigin]);
-    await expect(orca.locator('html')).toHaveAttribute(
+    await expect(frame.locator('html')).toHaveAttribute(
       'data-clipboard-read-allowlist',
       embeddedOriginOnly,
     );
-    await expect(orca.locator('html')).toHaveAttribute(
+    await expect(frame.locator('html')).toHaveAttribute(
       'data-clipboard-write-allowlist',
       embeddedOriginOnly,
     );

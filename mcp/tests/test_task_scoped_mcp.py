@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,16 +13,11 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     ConfiguredContractAccepted,
 )
 from agents_remember.application.task_scoped_mcp import (
-    PROJECTS_MCP_PROFILE_SCHEMA,
-    TASK_SCOPED_MCP_PROFILE_SCHEMA,
-    TaskScopedMcpBinding,
-    mcp_config_from_scope_profile,
-    projects_mcp_config,
-    task_scoped_mcp_config,
     task_scoped_mcp_config_for_reader,
     task_scoped_mcp_config_for_task,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.mcp import server as mcp_server
 from agents_remember.models.task_document_ref import TaskDocumentRef, TaskScopedReaderContext
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
@@ -91,55 +88,32 @@ class TaskScopedMcpConfigTests(unittest.TestCase):
                 "agents_remember.application.task_scoped_mcp.admit_configured_contract",
                 return_value=admission,
             ):
-                scoped = task_scoped_mcp_config(
-                    base,
-                    TaskScopedMcpBinding(
-                        task_document_ref=ref,
-                        contract_path=contract_path,
-                        workspace_root=workspace,
-                        code_root=code,
-                        memory_root=memory,
-                    ),
-                )
-                self.assertEqual(scoped.config_path, config_path)
-                self.assertEqual(scoped.coordination_root, coordinator)
-                self.assertEqual(scoped.workspace_root, workspace)
-                self.assertEqual(scoped.repositories["repo"].path, code)
-                self.assertEqual(scoped.repositories["repo"].memory_root, memory)
-                self.assertEqual(scoped.repositories["repo"].contract_path, contract_path)
                 derived = task_scoped_mcp_config_for_task(base, ref, contract_path)
                 self.assertIsNot(derived, base)
+                self.assertEqual(derived.config_path, config_path)
+                self.assertEqual(derived.coordination_root, coordinator)
                 self.assertEqual(derived.workspace_root, workspace)
+                self.assertEqual(set(derived.repositories), {"repo"})
                 self.assertEqual(derived.repositories["repo"].path, code)
                 self.assertEqual(derived.repositories["repo"].memory_root, memory)
                 self.assertEqual(derived.repositories["repo"].contract_path, contract_path)
-                with self.assertRaisesRegex(ValueError, "do not match"):
-                    task_scoped_mcp_config(
-                        base,
-                        TaskScopedMcpBinding(
-                            task_document_ref=ref,
-                            contract_path=contract_path,
-                            workspace_root=workspace,
-                            code_root=code,
-                            memory_root=root / "wrong-memory",
-                        ),
-                    )
-
-                profile = {
-                    "schema": TASK_SCOPED_MCP_PROFILE_SCHEMA,
-                    "baseConfigPath": config_path.as_posix(),
-                    "taskDocumentRef": ref.model_dump(mode="json"),
-                    "contractPath": contract_path.as_posix(),
-                    "workspaceRoot": workspace.as_posix(),
-                    "codeRoot": code.as_posix(),
-                    "memoryRoot": memory.as_posix(),
-                }
-                loaded = mcp_config_from_scope_profile(base, profile)
-                self.assertEqual(loaded.repositories["repo"].path, code)
-                self.assertEqual(loaded.repositories["repo"].memory_root, memory)
                 reader_scope = TaskScopedReaderContext(
                     task_document_ref=ref,
                     contract_path=contract_path.as_posix(),
+                )
+                # A reader call with the leaf's context gets that same derived config; one
+                # without a context is answered from the configured Projects roots, unchanged.
+                self.assertEqual(
+                    task_scoped_mcp_config_for_reader(
+                        base, repository_id="repo", task_context=reader_scope
+                    ),
+                    derived,
+                )
+                self.assertIs(
+                    task_scoped_mcp_config_for_reader(
+                        base, repository_id="repo", task_context=None
+                    ),
+                    base,
                 )
                 with self.assertRaisesRegex(ValueError, "repo_id must match"):
                     task_scoped_mcp_config_for_reader(
@@ -150,53 +124,21 @@ class TaskScopedMcpConfigTests(unittest.TestCase):
                 self.assertEqual(base.workspace_root, root)
                 self.assertEqual(base.repositories["repo"].path, root / "repo")
 
-    def test_projects_scope_clears_only_contract_pins_and_keeps_configured_pairs(self) -> None:
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            config_path = root / "settings" / "mcp.json"
-            base = McpRuntimeConfig(
-                config_path=config_path,
-                coordination_root=root / "coordination",
-                workspace_root=root / "projects",
-                transcript_root=root / "coordination" / "logs" / "mcp",
-                repositories={
-                    "repo-one": RepositoryScope(
-                        "repo-one",
-                        root / "code-one",
-                        memory_root=root / "memory-one",
-                        contract_path=root / "task-one" / "series-contract.md",
-                    ),
-                    "repo-two": RepositoryScope(
-                        "repo-two",
-                        root / "code-two",
-                        memory_root=root / "memory-two",
-                        contract_path=root / "task-two" / "series-contract.md",
-                    ),
-                },
-            )
+    def test_the_tool_server_has_no_scope_profile_start_option(self) -> None:
+        """Nothing on this line produces a scope profile, so the server takes none (PNT-R08 4)."""
 
-            taskless = projects_mcp_config(base, None)
-            bound = projects_mcp_config(base, "repo-two")
-            profile = {
-                "schema": PROJECTS_MCP_PROFILE_SCHEMA,
-                "baseConfigPath": config_path.as_posix(),
-                "workspaceRoot": base.workspace_root.as_posix(),
-                "repositoryId": "repo-two",
-            }
-            loaded = mcp_config_from_scope_profile(base, profile)
-
-            self.assertEqual(taskless.allowed_repo_ids, ("repo-one", "repo-two"))
-            self.assertTrue(
-                all(repo.contract_path is None for repo in taskless.repositories.values())
-            )
-            self.assertEqual(set(bound.repositories), {"repo-two"})
-            self.assertEqual(bound.repositories["repo-two"].path, root / "code-two")
-            self.assertEqual(bound.repositories["repo-two"].memory_root, root / "memory-two")
-            self.assertIsNone(bound.repositories["repo-two"].contract_path)
-            self.assertEqual(loaded.repositories, bound.repositories)
-            self.assertEqual(loaded.config_path, base.config_path)
-            self.assertEqual(loaded.coordination_root, base.coordination_root)
-            self.assertEqual(loaded.workspace_root, base.workspace_root)
+        refused = io.StringIO()
+        with (
+            contextlib.redirect_stderr(refused),
+            patch.object(mcp_server, "load_config") as load_config,
+            patch.object(mcp_server, "run_server") as run_server,
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            mcp_server.main(["--config", "/settings/mcp.json", "--scope-profile", "/tmp/p.json"])
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertIn("unrecognized arguments: --scope-profile", refused.getvalue())
+        load_config.assert_not_called()
+        run_server.assert_not_called()
 
 
 if __name__ == "__main__":

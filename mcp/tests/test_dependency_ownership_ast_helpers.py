@@ -43,8 +43,17 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 19
 LIFECYCLE_ARTIFACT_COUNT = 69
-LIFECYCLE_CATALOG_SHA256 = "09cb0ac89fb4d3699c20a84227dc6ddcd3c1c84149b119a50311afe71ea39d66"
+LIFECYCLE_CATALOG_SHA256 = "3d57d3a6c653205d268c75aa75dd7f5bf943ff8e55a6aeb1faee41bf1cfb21ff"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+The ``261001-PNT`` rename leaf (L9, PNT-R08) changed consumer lines only. Two test modules were
+renamed with the seam they test (``test_role_handover_binding.py``, ``test_role_launch_routes.py``)
+and stand under their new names in the two rows that listed them. The leaf's new module
+``test_previous_host_removed.py`` reaches the dispatch route through the launch cases it reuses, so
+it is a consumer of the node lockfile and of ``paseo_launch_test_support.py``; and
+``test_task_scoped_mcp.py`` now imports the tool server's entry point for the removed start option,
+which makes it a consumer of the node lockfile. No artifact and no contract was added or removed:
+the counts stay 19 and 69; the digest this value replaces was ``09cb0ac8…``.
 
 The ``261001-PNT`` master pass's fix round then completed three consumer lists so that both
 integration cases below pass on the merged tree: the two rows this line had inherited incomplete

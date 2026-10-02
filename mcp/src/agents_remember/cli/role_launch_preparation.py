@@ -16,15 +16,15 @@ from typing import Any
 
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
-from agents_remember.application.orca_task_context import (
+from agents_remember.application.role_capsules.launch import compile_launch_capsule
+from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     ROLE_LEVELS,
     TASKLESS_ROLES,
-    OrcaRoleContext,
-    resolve_orca_role_context,
+    RoleLaunchContext,
+    resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
@@ -36,31 +36,31 @@ from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_f
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.application.worktree_tools import worktree_start_tool, worktree_status_tool
 from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
-from agents_remember.cli.orca_runtime import (
-    digest as _digest,
-)
-from agents_remember.cli.orca_task_receipts import (
+from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
+from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_launch_receipts import (
     _bind_task_report_access,
     _message_binding_projection_reference,
 )
-from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
-from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_launch_receipts import (
+    digest as _digest,
+)
 from agents_remember.controlplane.durable_store import declared_process_role
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import (
-    OrcaAgentOverride,
-    OrcaLauncherOptionsRequest,
-    OrcaRole,
-    OrcaSelection,
-)
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
+from agents_remember.models.role_launcher import (
+    LauncherRole,
+    RoleAgentOverride,
+    RoleLauncherOptionsRequest,
+    RoleSelection,
+)
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 
-ROLE_START_OPERATIONS: dict[OrcaRole, CapsuleOperation] = {
+ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
     "system-specialist": "orientation",
     "orchestrator": "coordination",
@@ -76,18 +76,21 @@ ROLE_START_TOOL = "role_start"
 ROLE_MESSAGE_TOOL = "role_message"
 # The name under which a harness may carry the AR tool server of another installation.
 OTHER_INSTALLATION_TOOL_SERVER = "agents-remember"
+# The folder a role's report and handover artifact are written in: under a task's notes/reports,
+# or under the Projects folder's own report folder for a taskless role.
+REPORTS_DIRECTORY = "role-launch"
 
 
-def role_start_operation(role: OrcaRole) -> CapsuleOperation:
+def role_start_operation(role: LauncherRole) -> CapsuleOperation:
     """Select the one existing operation appropriate to a manually selected role."""
 
     return ROLE_START_OPERATIONS[role]
 
 
 @dataclass(frozen=True, slots=True)
-class OrcaHandoverRequest:
+class RoleHandoverRequest:
     config: McpRuntimeConfig
-    context: OrcaRoleContext
+    context: RoleLaunchContext
     workspace: dict[str, str]
     agent_id: str
     ar_mcp_context: dict[str, Any]
@@ -97,32 +100,31 @@ class OrcaHandoverRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedOrcaRoleHandover:
+class PreparedRoleHandover:
     """The validated inputs of one role launch, from the launcher or from a role agent."""
 
-    context: OrcaRoleContext
+    context: RoleLaunchContext
     workspace: dict[str, str]
     agent_id: str
     session_options: dict[str, str]
-    agent_arg_tokens: tuple[str, ...]
     ar_mcp_context: dict[str, Any]
     handover: dict[str, Any]
     request_id: uuid.UUID
 
 
-def prepare_orca_role_handover(
+def prepare_role_handover(
     config: McpRuntimeConfig,
-    context: OrcaRoleContext,
+    context: RoleLaunchContext,
     *,
-    agent_override: OrcaAgentOverride | None,
+    agent_override: RoleAgentOverride | None,
     request_id: uuid.UUID,
     started_by: StartingAgent | None = None,
-) -> PreparedOrcaRoleHandover:
+) -> PreparedRoleHandover:
     """Prepare the canonical role handover and the exact launch inputs of one role."""
 
     # The selection is validated against the cached catalog before anything is created for it.
     defaults, harness_order = _role_defaults(config, context)
-    agent_id, session_options, agent_arg_tokens = _resolve_agent_selection(
+    agent_id, session_options = resolve_agent_selection(
         config, defaults, harness_order, agent_override
     )
     workspace = _resolve_workspace(config, context)
@@ -132,7 +134,7 @@ def prepare_orca_role_handover(
         context = _current_role_context(config, context)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
-        OrcaHandoverRequest(
+        RoleHandoverRequest(
             config=config,
             context=context,
             workspace=workspace,
@@ -142,24 +144,25 @@ def prepare_orca_role_handover(
             started_by=started_by,
         )
     )
-    return PreparedOrcaRoleHandover(
+    return PreparedRoleHandover(
         context=context,
         workspace=workspace,
         agent_id=agent_id,
         session_options=session_options,
-        agent_arg_tokens=agent_arg_tokens,
         ar_mcp_context=ar_mcp_context,
         handover=handover,
         request_id=request_id,
     )
 
 
-def _current_role_context(config: McpRuntimeConfig, context: OrcaRoleContext) -> OrcaRoleContext:
+def _current_role_context(
+    config: McpRuntimeConfig, context: RoleLaunchContext
+) -> RoleLaunchContext:
     """Resolve the selection's task documents again, as they are on disk at this moment."""
 
-    return resolve_orca_role_context(
+    return resolve_role_launch_context(
         config,
-        OrcaSelection(
+        RoleSelection(
             role=context.role,
             sprintDocumentRef=context.sprint.ref if context.sprint else None,
             masterDocumentRef=context.master.ref if context.master else None,
@@ -170,8 +173,8 @@ def _current_role_context(config: McpRuntimeConfig, context: OrcaRoleContext) ->
 
 def _launcher_catalog(
     config: McpRuntimeConfig,
-    context: OrcaRoleContext,
-    request: OrcaLauncherOptionsRequest,
+    context: RoleLaunchContext,
+    request: RoleLauncherOptionsRequest,
 ) -> dict[str, Any]:
     """Role defaults plus the Paseo runtime's cached catalog; only an explicit refresh rediscovers."""
 
@@ -180,7 +183,7 @@ def _launcher_catalog(
 
 
 def _role_defaults(
-    config: McpRuntimeConfig, context: OrcaRoleContext
+    config: McpRuntimeConfig, context: RoleLaunchContext
 ) -> tuple[dict[str, str | None], tuple[str, ...]]:
     repository = context.effective_task.ref.repository if context.effective_task else None
     repo_scope = config.repositories.get(repository) if repository else None
@@ -196,25 +199,9 @@ def _role_defaults(
     )
 
 
-def _resolve_agent_selection(
-    config: McpRuntimeConfig,
-    defaults: dict[str, str | None],
-    harness_order: tuple[str, ...],
-    override: OrcaAgentOverride | None,
-) -> tuple[str, dict[str, str], tuple[str, ...]]:
-    """Validate the requested agent, model and effort against the Paseo runtime's catalog.
-
-    Paseo takes the model and effort as data when the agent is created, so no harness argument
-    tokens are derived any more; the empty tuple keeps the prepared-handover shape.
-    """
-
-    agent_id, options = resolve_agent_selection(config, defaults, harness_order, override)
-    return agent_id, options, ()
-
-
 def _ar_mcp_context(
     config: McpRuntimeConfig,
-    context: OrcaRoleContext,
+    context: RoleLaunchContext,
     workspace: dict[str, str],
 ) -> dict[str, Any]:
     """Declare the exact arguments role agents pass to the readers of their AR tool server."""
@@ -287,7 +274,7 @@ def _ar_mcp_context(
     }
 
 
-def _verify_leaf_revival_scope(context: OrcaRoleContext, receipt: dict[str, Any]) -> None:
+def _verify_leaf_revival_scope(context: RoleLaunchContext, receipt: dict[str, Any]) -> None:
     """Refuse the revive of a leaf-bound agent whose task scope changed since its launch.
 
     The scope is the task reference and the contract path. The one computed now comes from the
@@ -338,7 +325,7 @@ def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
     return contract_path
 
 
-def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
+def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> dict[str, str]:
     """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
 
     Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
@@ -346,7 +333,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     """
 
     if context.role not in LEAF_ROLES:
-        return _workspace_folder(config.workspace_root)
+        return workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
     contract_path, status = _ensure_leaf_enclosure(
         config,
@@ -356,7 +343,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
-    workspace = _workspace_folder(group)
+    workspace = workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = _bind_task_report_access(group, task_reports)
@@ -429,7 +416,7 @@ def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> d
     return worktree_start_tool(config, identity, execution=StartExecution(skip_provider_setup=True))
 
 
-def _workspace_folder(path: Path) -> dict[str, str]:
+def workspace_folder(path: Path) -> dict[str, str]:
     # The runtime keys a workspace by the path text, so the folder is always its resolved path.
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -437,7 +424,7 @@ def _workspace_folder(path: Path) -> dict[str, str]:
 
 
 def _compile_handover(
-    request: OrcaHandoverRequest,
+    request: RoleHandoverRequest,
 ) -> dict[str, Any]:
     config = request.config
     context = request.context
@@ -735,7 +722,7 @@ def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> 
     }
 
 
-def _role_assignment(context: OrcaRoleContext, report_path: str) -> str:
+def _role_assignment(context: RoleLaunchContext, report_path: str) -> str:
     selected = context.effective_task
     if context.role == "architect":
         return (
@@ -758,7 +745,7 @@ def _role_assignment(context: OrcaRoleContext, report_path: str) -> str:
 
 
 def _role_report_path(
-    context: OrcaRoleContext,
+    context: RoleLaunchContext,
     workspace: dict[str, str],
     *,
     request_id: uuid.UUID | None = None,
@@ -767,7 +754,11 @@ def _role_report_path(
         if request_id is None:
             raise ValueError("A taskless role report requires its durable requestId.")
         report_root = (
-            Path(workspace["path"]) / ".agents-remember" / "reports" / "orca-native" / context.role
+            Path(workspace["path"])
+            / ".agents-remember"
+            / "reports"
+            / REPORTS_DIRECTORY
+            / context.role
         )
         report_name = f"{request_id}.md"
     else:
@@ -793,7 +784,7 @@ def _role_report_path(
                 raise ValueError(
                     "The leaf task-report access path does not resolve to its canonical reports."
                 )
-        report_root = report_root / "orca-native"
+        report_root = report_root / REPORTS_DIRECTORY
         report_name = f"{selected.document.id}-{context.role}-{request_id}.md"
     report = report_root / report_name
     report.parent.mkdir(parents=True, exist_ok=True)

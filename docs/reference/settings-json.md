@@ -4,7 +4,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 
 | Family | Home | Read cadence |
 | --- | --- | --- |
-| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard, Orca RuntimeClient, Paseo runtime) | MCP authority settings file (outside the coordinator root) | boot |
+| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard, Paseo runtime) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
@@ -107,31 +107,6 @@ watch settings internally.
 }
 ```
 
-`orcaRuntime` is an optional shared Agents Remember connection setting for the
-native Orca role launcher. Configure both paths in the same MCP authority file
-when that launcher is used:
-
-```json
-{
-  "orcaRuntime": {
-    "runtimeRoot": "/absolute/path/to/pinned/orca/source",
-    "userDataPath": "/absolute/path/to/selected/orca/profile"
-  }
-}
-```
-
-`runtimeRoot` selects the pinned Orca source tree and `userDataPath` selects
-the Orca user profile whose local runtime metadata and pairing configuration the
-public RuntimeClient reads. These paths carry no credentials. The AR runtime
-boundary does not search `PATH` for an Orca command or fall back to the default
-production profile. Existing `ORCA_PAIRING_CODE` / `ORCA_REMOTE_PAIRING` and
-`ORCA_ENVIRONMENT` settings retain Orca's normal precedence; the configured
-`userDataPath` selects the profile in which that environment is resolved.
-
-No MCP tool depends on `orcaRuntime`: role agents are started and messaged with
-`role_start` and `role_message`, which use the `paseoRuntime` block. Changes to this
-boot-time block take effect after the shared AR MCP process restarts.
-
 `benchmarksEnabled` (optional, default `false`) gates the `codex_benchmark_prepare`
 and `codex_benchmark_run` tools. They are refused unless this is `true`, because a
 real run clones third-party repositories and executes the Codex CLI against them.
@@ -145,6 +120,8 @@ runtime Agents Remember provisions: a pinned Paseo install, one daemon home and
 one listen address. When the block is absent the settings are in the named state
 "no Paseo runtime configured" and each consumer refuses in its own words. When
 the block is present every key is required and an unknown key fails at start-up.
+The dashboard's role launcher and the tools `role_start` and `role_message` use
+this block and no other to reach the host.
 
 ```json
 {

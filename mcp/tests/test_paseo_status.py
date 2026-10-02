@@ -9,19 +9,19 @@ from typing import Any
 from unittest.mock import patch
 
 from agents_remember.cli import (
-    orca_task_liveness,
-    orca_task_preparation,
-    orca_task_receipts,
-    orca_task_routes,
     paseo_catalog,
     paseo_status,
+    role_launch_liveness,
+    role_launch_preparation,
+    role_launch_receipts,
+    role_launch_routes,
 )
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_status import SUMMARY_LIMIT, AgentReading, status_row
-from agents_remember.models.orca_launcher import (
-    OrcaDispatchRequest,
-    OrcaLauncherOptionsRequest,
-    OrcaResultRequest,
+from agents_remember.models.role_launcher import (
+    RoleDispatchRequest,
+    RoleLauncherOptionsRequest,
+    RoleResultRequest,
 )
 from fastapi import HTTPException
 from test_paseo_launch import LEAF_REF, ROLE_REFS, PaseoLaunchTestCase, runtime_config
@@ -37,7 +37,7 @@ class StatusTestCase(PaseoLaunchTestCase):
     def setUp(self) -> None:
         super().setUp()
         # The launch records the leaf's task scope for the agent's readers, as the build does.
-        self.replace(orca_task_preparation, "_ar_mcp_context", self.reader_context)
+        self.replace(role_launch_preparation, "_ar_mcp_context", self.reader_context)
 
     @staticmethod
     def reader_context(_config: Any, context: Any, workspace: dict[str, str]) -> dict[str, Any]:
@@ -49,7 +49,7 @@ class StatusTestCase(PaseoLaunchTestCase):
         }
         return {"scopeKind": "canonical-leaf", "taskContext": scope}
 
-    def launched(self, role: str = "worker", **state: Any) -> OrcaDispatchRequest:
+    def launched(self, role: str = "worker", **state: Any) -> RoleDispatchRequest:
         """Start a role agent and put its agent in the given state."""
 
         request = self.request(role)
@@ -58,7 +58,7 @@ class StatusTestCase(PaseoLaunchTestCase):
         self.runtime.calls.clear()
         return request
 
-    def saved(self, request: OrcaDispatchRequest) -> tuple[bytes, int, int]:
+    def saved(self, request: RoleDispatchRequest) -> tuple[bytes, int, int]:
         """The receipt file as it is: its bytes, and the inode and time any rewrite would change."""
 
         path = self.receipt_path(request)
@@ -66,11 +66,11 @@ class StatusTestCase(PaseoLaunchTestCase):
         return path.read_bytes(), stat.st_ino, stat.st_mtime_ns
 
     @staticmethod
-    def revival(request: OrcaDispatchRequest) -> OrcaDispatchRequest:
+    def revival(request: RoleDispatchRequest) -> RoleDispatchRequest:
         payload = request.model_dump(mode="json", by_alias=True, exclude_none=True)
-        return OrcaDispatchRequest.model_validate({**payload, "action": "revive"})
+        return RoleDispatchRequest.model_validate({**payload, "action": "revive"})
 
-    def revive(self, request: OrcaDispatchRequest) -> tuple[int, dict[str, Any]]:
+    def revive(self, request: RoleDispatchRequest) -> tuple[int, dict[str, Any]]:
         """Press Revive: the dispatch route with the revive action."""
 
         return self.dispatch(self.revival(request))
@@ -81,7 +81,7 @@ class StatusTestCase(PaseoLaunchTestCase):
     def assert_row(
         self,
         public: dict[str, Any],
-        request: OrcaDispatchRequest,
+        request: RoleDispatchRequest,
         *,
         status: str,
         detail: str,
@@ -424,7 +424,7 @@ class RefreshTests(StatusTestCase):
             "a running agent": {"status": "running"},
             "an agent waiting for a permission": {"pendingPermissions": [{"name": "Bash"}]},
         }
-        options = OrcaLauncherOptionsRequest.model_validate(
+        options = RoleLauncherOptionsRequest.model_validate(
             {"role": "worker", **ROLE_REFS["worker"]}
         )
         for label, state in states.items():
@@ -434,7 +434,7 @@ class RefreshTests(StatusTestCase):
 
                 # Result, the options load, and a repeat of the resolved request all refresh.
                 self.refresh(request)
-                orca_task_routes._orca_options_endpoint(self.config, options)
+                role_launch_routes._role_launch_options_endpoint(self.config, options)
                 written = self.saved(request)
                 self.dispatch(request)
 
@@ -479,21 +479,21 @@ class RefreshTests(StatusTestCase):
     def test_a_refresh_holds_the_launch_lock_for_one_bridge_call_only(self) -> None:
         request = self.launched(status="idle", lastTurn=REPLIED)
         held: list[bool] = []
-        read_agent = orca_task_liveness.read_agent
+        read_agent = role_launch_liveness.read_agent
 
         def reading(*args: Any) -> AgentReading:
-            held.append(orca_task_routes._DISPATCH_LOCK.locked())
+            held.append(role_launch_routes._DISPATCH_LOCK.locked())
             return read_agent(*args)
 
-        with patch.object(orca_task_liveness, "read_agent", side_effect=reading):
+        with patch.object(role_launch_liveness, "read_agent", side_effect=reading):
             self.refresh(request)
-            options = OrcaLauncherOptionsRequest.model_validate(
+            options = RoleLauncherOptionsRequest.model_validate(
                 {"role": "worker", **ROLE_REFS["worker"]}
             )
-            orca_task_routes._orca_options_endpoint(self.config, options)
+            role_launch_routes._role_launch_options_endpoint(self.config, options)
         self.assertEqual(held, [True, True])
         self.assertEqual(self.commands().count("agent-state"), 2)
-        self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+        self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
         with self.subTest("the options route loads the catalog before it takes the lock"):
             forget_launcher_catalogs()
             self.runtime.calls.clear()
@@ -501,49 +501,51 @@ class RefreshTests(StatusTestCase):
             bridge = self.runtime.__call__
 
             def watched(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-                during.append((command, orca_task_routes._DISPATCH_LOCK.locked()))
+                during.append((command, role_launch_routes._DISPATCH_LOCK.locked()))
                 return bridge(config, command, payload)
 
             self.replace(paseo_catalog, "bridge_call", watched)
             self.replace(paseo_status, "bridge_call", watched)
-            orca_task_routes._orca_options_endpoint(self.config, options)
+            role_launch_routes._role_launch_options_endpoint(self.config, options)
             self.assertEqual(during, [("catalog", False), ("agent-state", True)])
-            self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+            self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
             # A failed catalog load leaves the lock free as well.
             forget_launcher_catalogs()
             self.runtime.fail("catalog", "paseo_daemon_unreachable")
             with self.assertRaises(HTTPException):
-                orca_task_routes._orca_options_endpoint(self.config, options)
-            self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+                role_launch_routes._role_launch_options_endpoint(self.config, options)
+            self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
         # While another launch or check holds the lock, a refresh and the options route refuse
         # and call nothing. Both mark the refusal as a launch in progress, which the launcher
         # shows as such and not as an error; a Start is refused as before.
         forget_launcher_catalogs()
         self.runtime.calls.clear()
-        result = OrcaResultRequest.model_validate(
+        result = RoleResultRequest.model_validate(
             {"role": "worker", "requestId": request.request_id, **ROLE_REFS["worker"]}
         )
-        with orca_task_routes._DISPATCH_LOCK:
+        with role_launch_routes._DISPATCH_LOCK:
             answers = [
-                orca_task_routes._orca_result_endpoint(self.config, result),
-                orca_task_routes._orca_options_endpoint(self.config, options),
+                role_launch_routes._role_launch_result_endpoint(self.config, result),
+                role_launch_routes._role_launch_options_endpoint(self.config, options),
             ]
-            with self.assertRaises(orca_task_routes.LaunchLockBusy):
-                orca_task_routes._orca_dispatch_endpoint(self.config, self.request("worker"))
-            self.assertTrue(orca_task_routes._DISPATCH_LOCK.locked())
+            with self.assertRaises(role_launch_routes.LaunchLockBusy):
+                role_launch_routes._role_launch_dispatch_endpoint(
+                    self.config, self.request("worker")
+                )
+            self.assertTrue(role_launch_routes._DISPATCH_LOCK.locked())
         for answer in answers:
             self.assertEqual(
                 (answer.status_code, json.loads(bytes(answer.body))),
                 (
                     409,
                     {
-                        "detail": "An AR-to-Orca launch or result check is already in progress.",
+                        "detail": "A role launch or result check is already in progress.",
                         "launchInProgress": True,
                     },
                 ),
             )
         self.assertEqual(self.commands(), ["catalog"])
-        self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+        self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
 
     def test_a_launch_that_is_unresolved_or_rejected_has_no_agent_to_read(self) -> None:
         with self.subTest("an unresolved launch stays retryable"):
@@ -569,11 +571,11 @@ class RefreshTests(StatusTestCase):
 
     def test_the_options_route_marks_an_unreachable_host_and_keeps_the_receipt(self) -> None:
         request = self.launched(status="idle", lastTurn=REPLIED)
-        options = OrcaLauncherOptionsRequest.model_validate(
+        options = RoleLauncherOptionsRequest.model_validate(
             {"role": "worker", **ROLE_REFS["worker"]}
         )
         first = json.loads(
-            bytes(orca_task_routes._orca_options_endpoint(self.config, options).body)
+            bytes(role_launch_routes._role_launch_options_endpoint(self.config, options).body)
         )
         self.assertEqual(first["execution"]["status"], "completed")
         saved = self.saved(request)
@@ -582,7 +584,7 @@ class RefreshTests(StatusTestCase):
         self.runtime.fail("catalog", "paseo_daemon_unreachable")
         self.runtime.fail("agent-state", "paseo_daemon_unreachable", "The daemon is down.")
 
-        response = orca_task_routes._orca_options_endpoint(self.config, options)
+        response = role_launch_routes._role_launch_options_endpoint(self.config, options)
 
         answered = json.loads(bytes(response.body))
         self.assertEqual(self.commands(), ["agent-state"])
@@ -663,7 +665,7 @@ class RefreshTests(StatusTestCase):
             self.assertEqual(
                 repeated,
                 {
-                    **orca_task_receipts._public_execution(self.receipt(previous)),
+                    **role_launch_receipts._public_execution(self.receipt(previous)),
                     "hostUnreachable": True,
                     "hostUnreachableReason": "paseo_bridge_timeout: The bridge call ran out of time.",
                 },
@@ -743,7 +745,7 @@ class ReviveTests(StatusTestCase):
         status, again = self.revive(request)
 
         self.assertEqual(
-            (status, again), (200, orca_task_receipts._public_execution(self.receipt(request)))
+            (status, again), (200, role_launch_receipts._public_execution(self.receipt(request)))
         )
         self.assertEqual(self.commands(), ["agent-state"])
         self.assertEqual((self.saved(request), self.runtime.agents), (saved, agents))
@@ -776,7 +778,7 @@ class ReviveTests(StatusTestCase):
         for label, (reader_context, recorded) in changed.items():
             with self.subTest(label):
                 receipt["arMcpContext"] = reader_context
-                orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
+                role_launch_receipts._write_receipt(self.receipt_path(request), receipt)
                 saved = self.saved(request)
 
                 error = self.refused(self.revival(request))

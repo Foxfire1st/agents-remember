@@ -1,4 +1,4 @@
-"""Task-hierarchy context and stable selection binding for Orca role launches."""
+"""Task-hierarchy context and stable selection binding for role launches."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaRole, OrcaSelection
+from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentTopology,
@@ -26,17 +26,17 @@ LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 
 
 @dataclass(frozen=True)
-class OrcaRoleContext:
-    role: OrcaRole
+class RoleLaunchContext:
+    role: LauncherRole
     sprint: ResolvedTaskDocument | None
     master: ResolvedTaskDocument | None
     task: ResolvedTaskDocument | None
     effective_task: ResolvedTaskDocument | None
 
 
-def resolve_orca_role_context(
-    config: McpRuntimeConfig, selection: OrcaSelection
-) -> OrcaRoleContext:
+def resolve_role_launch_context(
+    config: McpRuntimeConfig, selection: RoleSelection
+) -> RoleLaunchContext:
     """Resolve the selected sprint/master/leaf chain from canonical task documents."""
 
     needs_sprint = selection.role not in TASKLESS_ROLES
@@ -73,13 +73,13 @@ def resolve_orca_role_context(
         task.document.kind != "subTask" or master is None or topology.parent(task.ref) != master.ref
     ):
         raise ValueError("The selected leaf is not a child of the selected master.")
-    return OrcaRoleContext(selection.role, sprint, master, task, task or master or sprint)
+    return RoleLaunchContext(selection.role, sprint, master, task, task or master or sprint)
 
 
-def selection_binding(selection: OrcaSelection | OrcaRoleContext) -> dict[str, Any]:
+def selection_binding(selection: RoleSelection | RoleLaunchContext) -> dict[str, Any]:
     """Serialize the exact canonical task references selected for one role."""
 
-    if isinstance(selection, OrcaRoleContext):
+    if isinstance(selection, RoleLaunchContext):
         refs = {
             "sprintDocumentRef": selection.sprint.ref if selection.sprint else None,
             "masterDocumentRef": selection.master.ref if selection.master else None,

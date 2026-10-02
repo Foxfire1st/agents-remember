@@ -11,13 +11,13 @@ from pydantic import Field
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.role_agents import role_message_payload, role_start_payload
-from agents_remember.models.orca_launcher import OrcaRole
 from agents_remember.models.role_agents import (
     DEFAULT_WAIT_SECONDS,
     MAX_WAIT_SECONDS,
     RoleMessageCall,
     RoleStartCall,
 )
+from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
@@ -26,7 +26,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
 
     @server.tool()
     async def role_start(
-        role: OrcaRole,
+        role: LauncherRole,
         request_id: uuid.UUID,
         sprint_document_ref: TaskDocumentRef | None = None,
         master_document_ref: TaskDocumentRef | None = None,
@@ -81,7 +81,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
     async def role_message(
         text: Annotated[str, Field(min_length=1)],
         agent_id: str | None = None,
-        role: OrcaRole | None = None,
+        role: LauncherRole | None = None,
         *,
         sprint_document_ref: TaskDocumentRef | None = None,
         master_document_ref: TaskDocumentRef | None = None,

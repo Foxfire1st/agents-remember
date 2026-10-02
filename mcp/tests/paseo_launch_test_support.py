@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaDispatchRequest
+from agents_remember.models.role_launcher import RoleDispatchRequest
 
 # Label of a task reference -> the variable its tool server receives it in, and its name in the
 # recovery note. The label's value is the reference as `<repository>/<document path>`.
@@ -34,10 +34,10 @@ class GivenToAgentExpectations(unittest.TestCase):
     source: Path
     runtime: Any
 
-    def receipt(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+    def receipt(self, request: RoleDispatchRequest) -> dict[str, Any]:
         raise NotImplementedError
 
-    def artifact(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+    def artifact(self, request: RoleDispatchRequest) -> dict[str, Any]:
         """The reference of the handover artifact a launch of ``request`` writes."""
 
         path = (self.root / "reports" / f"{request.request_id}.handover.txt").as_posix()
@@ -49,7 +49,7 @@ class GivenToAgentExpectations(unittest.TestCase):
             "bytes": len(body),
         }
 
-    def first_message(self, request: OrcaDispatchRequest) -> str:
+    def first_message(self, request: RoleDispatchRequest) -> str:
         """What the agent of ``request`` receives: one line naming the artifact, then its content."""
 
         artifact = self.artifact(request)
@@ -70,7 +70,7 @@ class GivenToAgentExpectations(unittest.TestCase):
         self.runtime.observer = watch
 
     def given_to_agent(
-        self, request: OrcaDispatchRequest, agent_id: str, task_labels: dict[str, str]
+        self, request: RoleDispatchRequest, agent_id: str, task_labels: dict[str, str]
     ) -> tuple[dict[str, Any], str]:
         """The tool-server definition and the recovery note a launch passes to the runtime."""
 
@@ -80,7 +80,7 @@ class GivenToAgentExpectations(unittest.TestCase):
         )
 
     def tool_server(
-        self, request: OrcaDispatchRequest, agent_id: str, task_labels: dict[str, str]
+        self, request: RoleDispatchRequest, agent_id: str, task_labels: dict[str, str]
     ) -> dict[str, Any]:
         """The one tool server a launch defines: the launching build's, with the agent's binding."""
 
@@ -119,7 +119,7 @@ class GivenToAgentExpectations(unittest.TestCase):
             },
         }
 
-    def recovery_note(self, request: OrcaDispatchRequest, task_labels: dict[str, str]) -> str:
+    def recovery_note(self, request: RoleDispatchRequest, task_labels: dict[str, str]) -> str:
         artifact = self.artifact(request)
         named = [f"{REFERENCES[label][1]} {key}." for label, key in task_labels.items()]
         return " ".join(
@@ -132,7 +132,7 @@ class GivenToAgentExpectations(unittest.TestCase):
         )
 
     def assert_applied_is_recorded(
-        self, request: OrcaDispatchRequest, definition: dict[str, Any], note: str
+        self, request: RoleDispatchRequest, definition: dict[str, Any], note: str
     ) -> None:
         """The receipt says what the agent was given: tool server, recovery note, artifact."""
 

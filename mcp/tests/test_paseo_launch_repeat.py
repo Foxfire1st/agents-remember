@@ -10,15 +10,15 @@ from typing import Any
 from unittest.mock import patch
 
 import test_paseo_launch as launch
-from agents_remember.application.orca_task_context import selection_binding
-from agents_remember.cli import orca_task_receipts, orca_task_routes
-from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.application.role_launch_context import selection_binding
+from agents_remember.cli import role_launch_receipts, role_launch_routes
 from agents_remember.cli.paseo_launch import agent_title
+from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
+from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from fastapi import HTTPException
 
-SCHEMA = "ar-orca-native-execution/v1"
+SCHEMA = "ar-role-execution/v1"
 
 
 class RepeatTestCase(launch.PaseoLaunchTestCase):
@@ -29,7 +29,7 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
         self.compilations = 0
         super().setUp()
 
-    def compile_handover(self, request: OrcaHandoverRequest) -> dict[str, Any]:
+    def compile_handover(self, request: RoleHandoverRequest) -> dict[str, Any]:
         assert request.request_id is not None
         self.compilations += 1
         prepared = super().compile_handover(request)
@@ -77,7 +77,7 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
 
         crash = RuntimeError("the process ended here")
         with (
-            patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+            patch.object(role_launch_receipts, "run_launch_call", side_effect=crash),
             self.assertRaises(RuntimeError),
         ):
             self.dispatch(request)
@@ -105,7 +105,7 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 elif state == "starting":
                     crash = RuntimeError("the backend process ended here")
                     with (
-                        patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+                        patch.object(role_launch_receipts, "run_launch_call", side_effect=crash),
                         self.assertRaises(RuntimeError),
                     ):
                         self.dispatch(request)
@@ -180,7 +180,7 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.assertEqual(self.receipt(first)["requestId"], str(first.request_id))
             self.assertFalse((path.parent / "history").exists())
         with self.subTest("a launch ended between archiving the old receipt and creating its own"):
-            orca_task_receipts._archive_receipt(path, closed)
+            role_launch_receipts._archive_receipt(path, closed)
             self.runtime.calls.clear()
             second = self.request("worker")
             self.assertEqual(self.dispatch(second)[1]["status"], "running")
@@ -188,7 +188,7 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
         with self.subTest("the newest archived receipt of this selection, and no other, is read"):
             newest = self.close_execution(second, "stopped")
-            orca_task_receipts._archive_receipt(path, newest)
+            role_launch_receipts._archive_receipt(path, newest)
             other_selection = {
                 "schema": SCHEMA,
                 "requestId": str(uuid.uuid4()),
@@ -198,7 +198,7 @@ class ReplacedExecutionTests(RepeatTestCase):
                 "execution": {"kind": "paseo-agent", "agentId": "a-reviewer-agent"},
             }
             history = path.parent / "history"
-            orca_task_receipts._write_receipt(
+            role_launch_receipts._write_receipt(
                 history / f"{other_selection['requestId']}.json", other_selection
             )
             (history / "unreadable.json").write_text("{", encoding="utf-8")
@@ -213,8 +213,8 @@ class ReplacedExecutionTests(RepeatTestCase):
             # A launch that lost against this closed receipt moved it; it never ran a call itself.
             rejected = self.receipt(third)
             rejected.update(status="rejected", execution={}, pendingArchiveAgentId=old_agent)
-            orca_task_receipts._write_receipt(path, rejected)
-            orca_task_receipts._archive_receipt(path, rejected)
+            role_launch_receipts._write_receipt(path, rejected)
+            role_launch_receipts._archive_receipt(path, rejected)
             self.runtime.agents[old_agent]["archivedAt"] = None
             self.runtime.calls.clear()
             self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
@@ -267,6 +267,28 @@ class ReplacedExecutionTests(RepeatTestCase):
             self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": lost}))
             self.assertIsNotNone(self.runtime.agents[lost]["archivedAt"])
             self.assertNotEqual(self.receipt(again)["agentId"], lost)
+        with self.subTest("a taskless role is told to archive the agent by hand"):
+            # A later start of a taskless role archives nothing, so the detail does not say it.
+            taskless = self.request("architect")
+            self.runtime.fail("agent-create", "paseo_daemon_unreachable", after_effect=True)
+            self.assertEqual(self.dispatch(taskless)[1]["status"], "unknown")
+            stranded = self.receipt(taskless)["agentId"]
+            self.runtime.fail("agent-create", "paseo_agent_without_message_lost", said)
+            status, public = self.dispatch(taskless)
+            self.assertEqual(
+                (status, public["status"], public["canStart"]), (502, "rejected", True)
+            )
+            self.assertEqual(
+                public["detail"],
+                "The agent of this launch never got its first message and the Paseo runtime "
+                "cannot open its session again, so this launch is closed. Start the role "
+                "again; a start of this role archives no agent, so archive agent "
+                f"{stranded} in Paseo by hand. {said}",
+            )
+            self.runtime.calls.clear()
+            self.assertEqual(self.dispatch(self.request("architect"))[1]["status"], "running")
+            self.assertNotIn("agent-archive", [call[0] for call in self.runtime.calls])
+            self.assertIsNone(self.runtime.agents[stranded]["archivedAt"])
         with self.subTest("a first message the runtime did not take stays retryable"):
             other = self.request("orchestrator")
             self.runtime.fail("agent-create", "paseo_first_message_undelivered")
@@ -282,19 +304,19 @@ class ReplacedExecutionTests(RepeatTestCase):
         With ``binding_first`` this launch has written the file before the other receipt appears.
         """
 
-        place = orca_task_routes._place_message_binding_projection
+        place = role_launch_routes._place_message_binding_projection
         path = self.receipt_path(mine)
 
         def another_process_starts_first(*args: Any) -> bool:
             if binding_first:
                 created = place(*args)
-                self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
+                self.assertTrue(role_launch_receipts._create_receipt(path, competitor))
                 return created
-            self.assertTrue(orca_task_receipts._create_receipt(path, competitor))
+            self.assertTrue(role_launch_receipts._create_receipt(path, competitor))
             return place(*args)
 
         return patch.object(
-            orca_task_routes,
+            role_launch_routes,
             "_place_message_binding_projection",
             side_effect=another_process_starts_first,
         )
@@ -325,7 +347,7 @@ class ReplacedExecutionTests(RepeatTestCase):
         with self.subTest("what stands at the address cannot be read: the file stays"):
             # Nothing proves that no receipt names the file, so the loser does not remove it.
             mine = self.request("manager")
-            place = orca_task_routes._place_message_binding_projection
+            place = role_launch_routes._place_message_binding_projection
 
             def something_unreadable_appears(*args: Any) -> bool:
                 created = place(*args)
@@ -333,7 +355,7 @@ class ReplacedExecutionTests(RepeatTestCase):
                 return created
 
             with patch.object(
-                orca_task_routes,
+                role_launch_routes,
                 "_place_message_binding_projection",
                 side_effect=something_unreadable_appears,
             ):
@@ -348,7 +370,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             with (
                 self.lose_against(self.competitor(uuid.uuid4(), "starting"), mine),
                 patch.object(
-                    orca_task_routes, "_reconcile_prior_execution", side_effect=[None, unreachable]
+                    role_launch_routes,
+                    "_reconcile_prior_execution",
+                    side_effect=[None, unreachable],
                 ),
             ):
                 self.assertEqual(self.refused(mine).status_code, 503)
@@ -404,7 +428,9 @@ class ReplacedExecutionTests(RepeatTestCase):
             with (
                 self.lose_against(self.competitor(mine.request_id, "starting"), again),
                 patch.object(
-                    orca_task_routes, "_reconcile_prior_execution", side_effect=[None, unreachable]
+                    role_launch_routes,
+                    "_reconcile_prior_execution",
+                    side_effect=[None, unreachable],
                 ),
             ):
                 self.assertEqual(self.refused(again).status_code, 503)
@@ -415,7 +441,7 @@ class ReplacedExecutionTests(RepeatTestCase):
             mine = self.request("manager")
             ended = RuntimeError("the process ended before its receipt was created")
             with (
-                patch.object(orca_task_routes, "_create_receipt", side_effect=ended),
+                patch.object(role_launch_routes, "_create_receipt", side_effect=ended),
                 self.assertRaises(RuntimeError),
             ):
                 self.dispatch(mine)
@@ -427,27 +453,22 @@ class ReplacedExecutionTests(RepeatTestCase):
             request_id = uuid.uuid4()
             binding = {"requestId": str(request_id), "role": "manager"}
             reference = _message_binding_projection_reference(self.config, request_id, binding)
-            place = orca_task_receipts._place_message_binding_projection
+            place = role_launch_receipts._place_message_binding_projection
             self.assertIs(place(self.config, request_id, binding, reference), True)
             self.assertIs(place(self.config, request_id, binding, reference), False)
             # Another process writes the same file between this call's look and its own write.
             raced = uuid.uuid4()
             binding = {"requestId": str(raced), "role": "manager"}
             reference = _message_binding_projection_reference(self.config, raced, binding)
-            real_link = orca_task_receipts.os.link
+            real_link = role_launch_receipts.os.link
 
             def the_other_process_is_first(source: Any, target: Any, **options: Any) -> None:
                 real_link(source, target, **options)
                 raise FileExistsError(target)
 
-            with patch.object(orca_task_receipts.os, "link", the_other_process_is_first):
+            with patch.object(role_launch_receipts.os, "link", the_other_process_is_first):
                 self.assertIs(place(self.config, raced, binding, reference), False)
-            self.assertEqual(
-                orca_task_receipts._write_message_binding_projection(
-                    self.config, raced, binding, reference
-                ),
-                reference,
-            )
+            self.assertIs(place(self.config, raced, binding, reference), False)
 
 
 class ReusedRequestIdTests(RepeatTestCase):
@@ -472,7 +493,7 @@ class ReusedRequestIdTests(RepeatTestCase):
             self.assertEqual(self.state(), before)
         with self.subTest("no receipt is at the address"):
             newer = self.receipt_path(first)
-            orca_task_receipts._archive_receipt(
+            role_launch_receipts._archive_receipt(
                 newer, {**json.loads(newer.read_text("utf-8")), "status": "completed"}
             )
             before = self.state()
@@ -555,7 +576,7 @@ class ReusedRequestIdTests(RepeatTestCase):
             request = self.request("worker")
             ended = RuntimeError("the process ended before its receipt was created")
             with (
-                patch.object(orca_task_routes, "_create_receipt", side_effect=ended),
+                patch.object(role_launch_routes, "_create_receipt", side_effect=ended),
                 self.assertRaises(RuntimeError),
             ):
                 self.dispatch(request)
@@ -626,7 +647,7 @@ class RuntimeReplyTests(RepeatTestCase):
 
     def test_can_start_follows_whether_the_task_bound_execution_is_open(self) -> None:
         flags = {
-            status: orca_task_receipts._public_execution({"role": "worker", "status": status})[
+            status: role_launch_receipts._public_execution({"role": "worker", "status": status})[
                 "canStart"
             ]
             for status in (

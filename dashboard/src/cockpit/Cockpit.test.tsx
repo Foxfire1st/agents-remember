@@ -766,7 +766,7 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
 });
 
 describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
-  it("defaults to Orca in Chats, switches to AR Sessions, and keeps one Chats cockpit mounted", () => {
+  it("defaults to Role chats in Chats, switches to AR Sessions, and keeps one Chats cockpit mounted", () => {
     seed("engine-fleet");
     const { container, getByRole, queryByRole } = render(<CockpitShell />);
 
@@ -788,9 +788,9 @@ describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
     expect((container.querySelector(".rail--left") as HTMLElement).style.display).toBe("none");
     expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
 
-    const orcaTab = getByRole("tab", { name: "Orca" });
+    const roleTab = getByRole("tab", { name: "Role chats" });
     const arSessionsTab = getByRole("tab", { name: "AR Sessions" });
-    expect(orcaTab.getAttribute("aria-selected")).toBe("true");
+    expect(roleTab.getAttribute("aria-selected")).toBe("true");
     expect(arSessionsTab.getAttribute("aria-selected")).toBe("false");
     expect(chatsLayer.style.display).toBe("flex");
     expect(chatsLayer.getAttribute("aria-hidden")).toBe("false");
@@ -798,7 +798,7 @@ describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
     expect(arPanel.getAttribute("aria-hidden")).toBe("true");
 
     fireEvent.click(arSessionsTab);
-    expect(orcaTab.getAttribute("aria-selected")).toBe("false");
+    expect(roleTab.getAttribute("aria-selected")).toBe("false");
     expect(arSessionsTab.getAttribute("aria-selected")).toBe("true");
     expect(arPanel.style.display).toBe("flex");
     expect(arPanel.getAttribute("aria-hidden")).toBe("false");

@@ -21,7 +21,7 @@ from agents_remember.cli.paseo_bridge import (
     require_bridge_runtime,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaAgentOverride
+from agents_remember.models.role_launcher import RoleAgentOverride
 
 _CATALOGS: dict[tuple[str, str, str, str], LauncherCatalog] = {}
 _CATALOG_LOCK = threading.Lock()
@@ -117,7 +117,7 @@ def resolve_agent_selection(
     config: McpRuntimeConfig,
     defaults: dict[str, str | None],
     harness_order: tuple[str, ...],
-    override: OrcaAgentOverride | None,
+    override: RoleAgentOverride | None,
 ) -> tuple[str, dict[str, str]]:
     """Validate a launch's agent, model and effort against the cached catalog.
 

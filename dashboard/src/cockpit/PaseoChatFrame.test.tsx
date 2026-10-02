@@ -2,10 +2,10 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { taskDoc } from "../test/fixtures/wire";
-import { ChatsModePanels } from "./OrcaChats";
+import { ChatsModePanels } from "./RoleChats";
 import { PaseoChatFrame } from "./PaseoChatFrame";
 import { PASEO_CONTROL_TIMEOUT_MS } from "./paseoFrameControl";
-import { tasklessRequestStorageKey } from "./orcaLaunchModel";
+import { tasklessRequestStorageKey } from "./roleLaunchModel";
 import { paseoAgentTarget, parseFrameDescriptor, parsePluginMessage, paseoFrameUrl } from "./paseoFrameModel";
 
 vi.mock("../panels/session-cockpit/sessions-view/SessionsView", () => ({
@@ -33,7 +33,7 @@ function stubBackend(frameAnswers: Answer[], other: Record<string, Route> = {}) 
   const queue = [...frameAnswers];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const route = url === "/api/orca/frame" ? (queue.length > 1 ? queue.shift() : queue[0]) : other[url];
+    const route = url === "/api/role-launch/frame" ? (queue.length > 1 ? queue.shift() : queue[0]) : other[url];
     if (!route) throw new Error("unexpected request " + url);
     const body = typeof route === "function" ? route(JSON.parse(String(init?.body ?? "{}")) as Answer) : route;
     const status = typeof body.httpStatus === "number" ? body.httpStatus : 200;
@@ -459,12 +459,12 @@ describe("Chats pane wiring", () => {
   it("steers the mounted frame to the launcher's execution and keeps it across mode switches", async () => {
     sessionStorage.setItem(tasklessRequestStorageKey("architect"), JSON.stringify({ requestId: execution.requestId }));
     stubBackend([AVAILABLE], {
-      "/api/orca/launcher/options": (request) =>
+      "/api/role-launch/options": (request) =>
         request.role === "orchestrator"
           ? { ...catalog, execution: sprintExecution }
           : { ...catalog, executions: request.role === "architect" ? [execution] : [] },
       // No result is served: the taskless execution is known from the options answer alone.
-      "/api/orca/result": { httpStatus: 404, detail: "no result" },
+      "/api/role-launch/result": { httpStatus: 404, detail: "no result" },
     });
     const { container, getByLabelText, getByRole } = render(
       <ChatsModePanels
@@ -488,7 +488,7 @@ describe("Chats pane wiring", () => {
 
     // Both chat modes stay mounted: the frame is the same element after a round trip.
     fireEvent.click(getByRole("tab", { name: "AR Sessions" }));
-    fireEvent.click(getByRole("tab", { name: "Orca" }));
+    fireEvent.click(getByRole("tab", { name: "Role chats" }));
     await settle();
     expect(frameElement(container)).toBe(frame);
     expect(posts).toHaveBeenCalledTimes(1);
@@ -521,9 +521,9 @@ describe("Chats pane wiring", () => {
     // execution is now another agent (it was revived elsewhere): the receipt is the newer word.
     const revived = { agentId: "agent-revived", workspaceId: "wks_leaf" };
     stubBackend([AVAILABLE], {
-      "/api/orca/launcher/options": (request) =>
+      "/api/role-launch/options": (request) =>
         request.role === "orchestrator" ? { ...catalog, execution: sprintExecution } : { ...catalog, executions: [] },
-      "/api/orca/result": { ...sprintExecution, execution: { kind: "paseo-agent", serverId: "srv_test", ...revived } },
+      "/api/role-launch/result": { ...sprintExecution, execution: { kind: "paseo-agent", serverId: "srv_test", ...revived } },
     });
     const { container, getByLabelText, getByRole } = render(
       <ChatsModePanels
@@ -547,7 +547,7 @@ describe("Chats pane wiring", () => {
     expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: WORKER.agentId }, FRAME_ORIGIN);
     deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
 
-    fireEvent.click(getByRole("button", { name: "Refresh Orca result" }));
+    fireEvent.click(getByRole("button", { name: "Refresh role result" }));
     await settle();
     expect(posts).toHaveBeenCalledTimes(2);
     expect(posts).toHaveBeenLastCalledWith({ type: "ar.open", agentId: revived.agentId }, FRAME_ORIGIN);

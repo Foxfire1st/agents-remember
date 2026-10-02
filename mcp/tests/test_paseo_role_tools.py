@@ -21,17 +21,15 @@ from agents_remember.application.agent_binding import (
     TOOL_SERVER_NAME,
     AgentBinding,
 )
-from agents_remember.application.orca_task_context import selection_binding
+from agents_remember.application.role_launch_context import selection_binding
 from agents_remember.cli import (
-    orca_task_preparation,
-    orca_task_receipts,
-    orca_task_routes,
     paseo_catalog,
     paseo_role_tools,
     paseo_role_wait,
+    role_launch_preparation,
+    role_launch_receipts,
+    role_launch_routes,
 )
-from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import (
     MAY_START,
@@ -40,13 +38,15 @@ from agents_remember.cli.paseo_role_tools import (
     start_rule_violation,
 )
 from agents_remember.cli.paseo_status import AgentReading
+from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
+from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
 from agents_remember.models.role_agents import (
     RoleMessageCall,
     RoleStartCall,
 )
+from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentRefError
 from fastapi.responses import JSONResponse
@@ -115,7 +115,7 @@ class RoleToolsTestCase(StatusTestCase):
         super().setUp()
         self.replace(paseo_role_tools, "bridge_call", self.runtime)
         self.replace(paseo_role_wait, "bridge_call", self.runtime)
-        self.replace(paseo_role_tools, "resolve_orca_role_context", side_effect=self.context)
+        self.replace(paseo_role_tools, "resolve_role_launch_context", side_effect=self.context)
         self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
         self.runtime._agent_send = self.agent_send
         self.runtime._agent_wait = self.agent_wait
@@ -203,7 +203,7 @@ class RoleToolsTestCase(StatusTestCase):
             self.config, RoleMessageCall(text=text, **to), environment=environment
         )
 
-    def started(self, role: str = "worker", **state: Any) -> tuple[OrcaDispatchRequest, str]:
+    def started(self, role: str = "worker", **state: Any) -> tuple[RoleDispatchRequest, str]:
         """A role agent the dashboard started, in the given state; its request and agent id."""
 
         request = self.launched(role, **state)
@@ -231,7 +231,7 @@ class MayStartRuleTests(unittest.TestCase):
         for caller in ROLES:
             for role in ROLES:
                 with self.subTest(caller=caller, starts=role):
-                    selection = OrcaSelection.model_validate({"role": role, **ROLE_REFS[role]})
+                    selection = RoleSelection.model_validate({"role": role, **ROLE_REFS[role]})
                     violated = start_rule_violation(binding(caller), selection)
                     if role in allowed.get(caller, set()):
                         self.assertIsNone(violated)
@@ -265,13 +265,13 @@ class MayStartRuleTests(unittest.TestCase):
         for label, (caller, rule) in cases.items():
             with self.subTest(label):
                 self.assertEqual(
-                    start_rule_violation(caller, OrcaSelection.model_validate(worker)),
+                    start_rule_violation(caller, RoleSelection.model_validate(worker)),
                     ("selection-outside-callers-scope", rule),
                 )
         for caller in ("orchestrator", "manager"):
             with self.subTest(f"a {caller} under its own scope"):
                 self.assertIsNone(
-                    start_rule_violation(binding(caller), OrcaSelection.model_validate(worker))
+                    start_rule_violation(binding(caller), RoleSelection.model_validate(worker))
                 )
 
 
@@ -281,7 +281,7 @@ class RoleStartTests(RoleToolsTestCase):
         locked: list[bool] = []
         # The tool takes the backend's launch lock around preparation and launch, as the route does.
         self.runtime.observer = lambda _command, _payload: locked.append(
-            orca_task_routes._DISPATCH_LOCK.locked()
+            role_launch_routes._DISPATCH_LOCK.locked()
         )
 
         result = self.start(
@@ -326,7 +326,7 @@ class RoleStartTests(RoleToolsTestCase):
         )
         with self.subTest("the process keeps no catalog between calls and frees the launch lock"):
             self.assertEqual(paseo_catalog._CATALOGS, {})
-            self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+            self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
             self.runtime.calls.clear()
             self.assertEqual(
                 self.start(self.architect, "architect")["refusal"], "role-may-not-start-role"
@@ -468,16 +468,18 @@ class RoleStartTests(RoleToolsTestCase):
             request = self.request("manager")
             crash = RuntimeError("the process ended here")
             with (
-                patch.object(orca_task_receipts, "run_launch_call", side_effect=crash),
+                patch.object(role_launch_receipts, "run_launch_call", side_effect=crash),
                 self.assertRaises(RuntimeError),
             ):
-                orca_task_routes._orca_dispatch_endpoint(
+                role_launch_routes._role_launch_dispatch_endpoint(
                     self.config,
                     request,
                     started_by=StartingAgent(self.architect.agent_id, "architect", "Projects"),
                 )
             self.assertEqual(self.receipt(request)["status"], "starting")
-            self.replace(paseo_role_tools, "_orca_dispatch_endpoint", return_value=JSONResponse({}))
+            self.replace(
+                paseo_role_tools, "_role_launch_dispatch_endpoint", return_value=JSONResponse({})
+            )
             starting = self.start(self.architect, "manager", request_id=request.request_id)
             self.assertEqual(
                 (starting["ok"], starting["status"], starting["executionStatus"]),
@@ -587,12 +589,12 @@ class RoleStartTests(RoleToolsTestCase):
         )
         self.assertEqual(order, sorted(order), "the two launches did not interleave")
         self.assertEqual(len(self.runtime.agents), 2)
-        self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+        self.assertFalse(role_launch_routes._DISPATCH_LOCK.locked())
 
     def test_a_start_that_waited_its_time_out_says_to_call_again(self) -> None:
         self.assertEqual(paseo_role_tools.LOCK_WAIT_SECONDS, 60)
         self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.5)
-        self.assertTrue(orca_task_routes._DISPATCH_LOCK.acquire(blocking=False))
+        self.assertTrue(role_launch_routes._DISPATCH_LOCK.acquire(blocking=False))
         try:
             began = time.monotonic()
             refused = self.refusal(self.start(self.architect, "curator"), "launch-refused")
@@ -602,8 +604,8 @@ class RoleStartTests(RoleToolsTestCase):
             busy = self.refused(self.request("curator"))
             self.assertLess(time.monotonic() - began, 0.4)
         finally:
-            orca_task_routes._DISPATCH_LOCK.release()
-        self.assertIsInstance(busy, orca_task_routes.LaunchLockBusy)
+            role_launch_routes._DISPATCH_LOCK.release()
+        self.assertIsInstance(busy, role_launch_routes.LaunchLockBusy)
         self.assertEqual(busy.status_code, 409)
         self.assertEqual(
             refused["detail"],
@@ -740,7 +742,7 @@ class OtherStarterTests(RoleToolsTestCase):
             """The receipt another process wrote for the same request id on behalf of ``other``."""
 
             return {
-                "schema": "ar-orca-native-execution/v1",
+                "schema": "ar-role-execution/v1",
                 "requestId": str(request_id),
                 "role": "manager",
                 "status": "starting",
@@ -767,23 +769,23 @@ class OtherStarterTests(RoleToolsTestCase):
             path = self.receipt_path(self.request("manager", request_id))
             compile_handover = self.compile_handover
 
-            def appears_first(request: OrcaHandoverRequest) -> dict[str, Any]:
-                self.assertTrue(orca_task_receipts._create_receipt(path, competitor(request_id)))
+            def appears_first(request: RoleHandoverRequest) -> dict[str, Any]:
+                self.assertTrue(role_launch_receipts._create_receipt(path, competitor(request_id)))
                 return compile_handover(request)
 
-            with patch.object(orca_task_preparation, "_compile_handover", appears_first):
+            with patch.object(role_launch_preparation, "_compile_handover", appears_first):
                 refused_start(request_id)
         with self.subTest("when the creation of the receipt is lost to it"):
             request_id = uuid.uuid4()
             path = self.receipt_path(self.request("manager", request_id))
-            place = orca_task_routes._place_message_binding_projection
+            place = role_launch_routes._place_message_binding_projection
 
             def created_first(*args: Any) -> bool:
-                self.assertTrue(orca_task_receipts._create_receipt(path, competitor(request_id)))
+                self.assertTrue(role_launch_receipts._create_receipt(path, competitor(request_id)))
                 return place(*args)
 
             with patch.object(
-                orca_task_routes, "_place_message_binding_projection", side_effect=created_first
+                role_launch_routes, "_place_message_binding_projection", side_effect=created_first
             ):
                 refused_start(request_id)
 
@@ -795,7 +797,7 @@ class ReusedRequestIdTests(RoleToolsTestCase):
         self.compiled = 0
         super().setUp()
 
-    def compile_handover(self, request: OrcaHandoverRequest) -> dict[str, Any]:
+    def compile_handover(self, request: RoleHandoverRequest) -> dict[str, Any]:
         """The compiled handover with the binding the build writes: it names the selection."""
 
         assert request.request_id is not None

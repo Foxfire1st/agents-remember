@@ -246,7 +246,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // collection has its own memo gate, so these controller renders do not rebuild it while hidden.
     expect(counts.attentionQueue).toBe(5);
     expect(counts.lifecycleList).toBe(5);
-    // AR Sessions stays mounted but dormant while Orca is the selected chat mode.
+    // AR Sessions stays mounted but dormant while Role chats is the selected chat mode.
     expect(counts.sessionsView).toBe(1);
   });
 
@@ -260,7 +260,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     const chats = container.querySelector('[data-testid="sessions-view"]') as HTMLElement;
     const arPanel = chats.parentElement as HTMLElement;
     const chatsLayerEl = arPanel.parentElement as HTMLElement;
-    const orcaPanel = container.querySelector("#chats-panel-orca") as HTMLElement;
+    const rolePanel = container.querySelector("#chats-panel-role") as HTMLElement;
 
     // Railed Operations: rails shown, keep-alive layers hidden via display + aria-hidden.
     expect(railLeft.style.display).toBe("flex");
@@ -268,7 +268,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(roomLayer.getAttribute("aria-hidden")).toBe("true");
     expect(chatsLayerEl.style.display).toBe("none");
     expect(arPanel.style.display).toBe("none");
-    expect(orcaPanel.style.display).toBe("flex");
+    expect(rolePanel.style.display).toBe("flex");
 
     fireEvent.click(getByRole("radio", { name: "Engine Room" }));
     expect(railLeft.style.display).toBe("none");
@@ -280,13 +280,13 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     fireEvent.click(getByRole("radio", { name: "Chats" }));
     expect(chatsLayerEl.style.display).toBe("flex");
     expect(chatsLayerEl.getAttribute("aria-hidden")).toBe("false");
-    expect(orcaPanel.style.display).toBe("flex");
+    expect(rolePanel.style.display).toBe("flex");
     expect(arPanel.style.display).toBe("none");
     expect(roomLayer.style.display).toBe("none");
 
     fireEvent.click(getByRole("tab", { name: "AR Sessions" }));
     expect(arPanel.style.display).toBe("flex");
-    expect(orcaPanel.style.display).toBe("none");
+    expect(rolePanel.style.display).toBe("none");
     expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
 
     fireEvent.click(getByRole("radio", { name: "Operations" }));

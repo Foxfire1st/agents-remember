@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import tempfile
 import unittest
 import uuid
@@ -11,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from agents_remember.cli import orca_task_preparation, orca_task_routes, paseo_catalog
+from agents_remember.cli import paseo_catalog, role_launch_preparation, role_launch_routes
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     LaunchSelectionRefused,
@@ -21,7 +20,7 @@ from agents_remember.cli.paseo_catalog import (
 )
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaAgentOverride, OrcaLauncherOptionsRequest
+from agents_remember.models.role_launcher import RoleAgentOverride, RoleLauncherOptionsRequest
 from fastapi import HTTPException
 
 HARNESS_ORDER = ("claude", "codex", "pi", "eve")
@@ -128,26 +127,25 @@ class PaseoCatalogTestCase(unittest.TestCase):
 
         request.setdefault("role", "architect")
         with (
-            patch.dict(os.environ, {"ORCA_PAIRING_CODE": "", "ORCA_REMOTE_PAIRING": ""}),
-            patch.object(orca_task_routes, "resolve_orca_role_context", return_value=object()),
+            patch.object(role_launch_routes, "resolve_role_launch_context", return_value=object()),
             patch.object(
-                orca_task_preparation,
+                role_launch_preparation,
                 "_role_defaults",
                 return_value=(dict(role_defaults), HARNESS_ORDER),
             ),
             patch.object(
-                orca_task_routes, "_receipt_path", return_value=self.root / "receipt.json"
+                role_launch_routes, "_receipt_path", return_value=self.root / "receipt.json"
             ),
-            patch.object(orca_task_routes, "_read_receipt", return_value=None),
+            patch.object(role_launch_routes, "_read_receipt", return_value=None),
         ):
-            response = orca_task_routes._orca_options_endpoint(
-                config or self.config, OrcaLauncherOptionsRequest(**request)
+            response = role_launch_routes._role_launch_options_endpoint(
+                config or self.config, RoleLauncherOptionsRequest(**request)
             )
         return json.loads(bytes(response.body))
 
 
 class LauncherOptionsTests(PaseoCatalogTestCase):
-    def test_options_come_from_the_runtime_catalog_without_an_orca_pairing(self) -> None:
+    def test_options_come_from_the_runtime_catalog(self) -> None:
         bridge = self.bridge()
         taskless = self.options(defaults("codex", "gpt-a", "high"))
         bound = self.options(defaults("codex", "gpt-a", "high"), role="manager")
@@ -330,22 +328,22 @@ class LaunchValidationTests(PaseoCatalogTestCase):
     def test_a_launch_is_validated_against_the_catalog_before_anything_is_created(self) -> None:
         self.bridge()
         role = defaults("codex", "gpt-a", "high")
-        accepted: dict[str, tuple[OrcaAgentOverride | None, tuple[str, dict[str, str]]]] = {
+        accepted: dict[str, tuple[RoleAgentOverride | None, tuple[str, dict[str, str]]]] = {
             "role defaults": (None, ("codex", {"model": "gpt-a", "effort": "high"})),
             "model override drops the role effort": (
-                OrcaAgentOverride(agentId="codex", modelId="gpt-b"),
+                RoleAgentOverride(agentId="codex", modelId="gpt-b"),
                 ("codex", {"model": "gpt-b"}),
             ),
             "effort override on the role model": (
-                OrcaAgentOverride(agentId="codex", effortId="low"),
+                RoleAgentOverride(agentId="codex", effortId="low"),
                 ("codex", {"model": "gpt-a", "effort": "low"}),
             ),
             "another agent drops the role model and effort": (
-                OrcaAgentOverride(agentId="eve"),
+                RoleAgentOverride(agentId="eve"),
                 ("eve", {}),
             ),
             "provider whose listing failed stays selectable": (
-                OrcaAgentOverride(agentId="pi"),
+                RoleAgentOverride(agentId="pi"),
                 ("pi", {}),
             ),
         }
@@ -355,15 +353,15 @@ class LaunchValidationTests(PaseoCatalogTestCase):
                     resolve_agent_selection(self.config, role, HARNESS_ORDER, override), expected
                 )
 
-        refused: dict[str, tuple[dict[str, str | None], OrcaAgentOverride | None]] = {
+        refused: dict[str, tuple[dict[str, str | None], RoleAgentOverride | None]] = {
             "agent_not_selected": (defaults(None), None),
-            "agent_not_offered": (role, OrcaAgentOverride(agentId="claude")),
-            "model_not_offered": (role, OrcaAgentOverride(agentId="codex", modelId="gpt-z")),
+            "agent_not_offered": (role, RoleAgentOverride(agentId="claude")),
+            "model_not_offered": (role, RoleAgentOverride(agentId="codex", modelId="gpt-z")),
             "effort_not_offered": (
                 role,
-                OrcaAgentOverride(agentId="codex", modelId="gpt-a", effortId="max"),
+                RoleAgentOverride(agentId="codex", modelId="gpt-a", effortId="max"),
             ),
-            "effort_requires_model": (role, OrcaAgentOverride(agentId="eve", effortId="low")),
+            "effort_requires_model": (role, RoleAgentOverride(agentId="eve", effortId="low")),
         }
         for code, (role_defaults, override) in refused.items():
             with self.subTest(code), self.assertRaises(LaunchSelectionRefused) as raised:
@@ -386,21 +384,21 @@ class LaunchValidationTests(PaseoCatalogTestCase):
         with self.subTest("model on a model-less provider"):
             with self.assertRaises(LaunchSelectionRefused) as raised:
                 resolve_agent_selection(
-                    self.config, role, HARNESS_ORDER, OrcaAgentOverride(agentId="pi", modelId="x")
+                    self.config, role, HARNESS_ORDER, RoleAgentOverride(agentId="pi", modelId="x")
                 )
             self.assertEqual(raised.exception.code, "model_not_offered")
 
         with (
             patch.object(
-                orca_task_preparation, "_role_defaults", return_value=(role, HARNESS_ORDER)
+                role_launch_preparation, "_role_defaults", return_value=(role, HARNESS_ORDER)
             ),
-            patch.object(orca_task_preparation, "_resolve_workspace") as resolve_workspace,
+            patch.object(role_launch_preparation, "_resolve_workspace") as resolve_workspace,
             self.assertRaises(LaunchSelectionRefused),
         ):
-            orca_task_preparation.prepare_orca_role_handover(
+            role_launch_preparation.prepare_role_handover(
                 self.config,
                 SimpleNamespace(role="architect"),  # type: ignore[arg-type]
-                agent_override=OrcaAgentOverride(agentId="codex", modelId="gpt-z"),
+                agent_override=RoleAgentOverride(agentId="codex", modelId="gpt-z"),
                 request_id=uuid.uuid4(),
             )
         resolve_workspace.assert_not_called()
