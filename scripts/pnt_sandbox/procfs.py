@@ -11,7 +11,7 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,9 @@ from typing import Any
 PROC = Path("/proc")
 _LISTEN = "0A"
 _POLL_SECONDS = 0.1
+# How long, and how often, a child just started is read until its command line is in place.
+_STARTED_SECONDS = 5.0
+_STARTED_POLL_SECONDS = 0.005
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,24 @@ def read_identity(pid: int) -> ProcessIdentity | None:
         return None
     argv = tuple(part.decode("utf-8", "replace") for part in raw.rstrip(b"\0").split(b"\0"))
     return ProcessIdentity(pid, stat.start_ticks, argv)
+
+
+def started_identity(
+    pid: int, argv: Sequence[str], seconds: float = _STARTED_SECONDS
+) -> ProcessIdentity | None:
+    """The identity of a child that was just started with ``argv``; ``None`` when it is gone.
+
+    A start returns before the new program's arguments are in place, and until they are
+    ``/proc`` shows an empty command line. An identity read in that moment never matches the
+    process again, so it is read until it shows the command line the child was given.
+    """
+    wanted = tuple(argv)
+    deadline = time.monotonic() + seconds
+    identity = read_identity(pid)
+    while identity is not None and identity.argv != wanted and time.monotonic() < deadline:
+        time.sleep(_STARTED_POLL_SECONDS)
+        identity = read_identity(pid)
+    return identity
 
 
 def environment(pid: int) -> dict[str, str] | None:

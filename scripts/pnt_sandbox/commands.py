@@ -23,6 +23,7 @@ from .operations import TOOLING_CHECKOUT, Operations, StepFailed, require_checko
 from .procfs import ProcessIdentity, is_running, session_members, terminate, wait_until
 from .record import (
     PASEO_PROCESS_RECORD,
+    PaseoRecord,
     PortState,
     clear_stale_paseo_record,
     is_sandbox_dashboard,
@@ -30,6 +31,7 @@ from .record import (
     read_record,
     recorded_dashboard,
     unrecorded_dashboards,
+    unrecorded_supervisors,
     write_record,
 )
 
@@ -80,27 +82,37 @@ def observe(layout: SandboxLayout, ops: Operations) -> Observed:
     )
 
 
-def _refuse_foreign_ports(layout: SandboxLayout, observed: Observed) -> None:
+def _refuse_unrecorded_processes(layout: SandboxLayout, observed: Observed) -> None:
+    """Refuse while a dashboard or supervisor of this sandbox runs that no record names.
+
+    A start that was killed between starting a process and recording it leaves one. Starting a
+    second beside it would be wrong and signalling it on a guess is not this tool's to do.
+    """
+    dashboards = unrecorded_dashboards(layout, observed.dashboard)
+    supervisors = unrecorded_supervisors(layout.paseo_home, observed.paseo)
+    if dashboards:
+        raise SandboxRefusal(
+            f"process {dashboards[0]} runs this sandbox's dashboard, but the process record does "
+            f"not name it; end it yourself (kill {dashboards[0]}). Nothing was started"
+        )
+    if supervisors:
+        raise SandboxRefusal(
+            f"process {supervisors[0]} is a Paseo supervisor of this sandbox's home, but the "
+            f"home's process record does not name it; end it yourself (kill {supervisors[0]}). "
+            "Nothing was started"
+        )
+
+
+def _refuse_foreign_ports(observed: Observed) -> None:
     for state in (observed.paseo_port, observed.dashboard_port):
         if state.foreign:
             holders = ", ".join(
                 "unknown (not this user's process)" if pid is None else str(pid)
                 for pid in state.foreign
             )
-            unrecorded = [
-                pid
-                for pid in state.foreign
-                if pid is not None and is_sandbox_dashboard(pid, layout)
-            ]
-            hint = (
-                f" (process {unrecorded[0]} runs this sandbox's dashboard, but the process record "
-                "does not name it: end it yourself)"
-                if unrecorded
-                else ""
-            )
             raise SandboxRefusal(
                 f"port {state.port} is held by process {holders}, which this sandbox did not "
-                f"start{hint}; nothing was started and no other port is used"
+                "start; nothing was started and no other port is used"
             )
 
 
@@ -149,15 +161,20 @@ def start(
 ) -> int:
     checkout = require_checkout(checkout_path)
     builder.require_sandbox_directory(layout)
-    with sandbox_lock(layout, "start"):
-        return _start(layout, checkout, ops, out, eve_project)
+    with sandbox_lock(layout, "start") as held:
+        ops.held_lock = held
+        try:
+            return _start(layout, checkout, ops, out, eve_project)
+        finally:
+            ops.held_lock = None
 
 
 def _start(
     layout: SandboxLayout, checkout: Path, ops: Operations, out: Out, eve_project: Path
 ) -> int:
     observed = observe(layout, ops)
-    _refuse_foreign_ports(layout, observed)
+    _refuse_unrecorded_processes(layout, observed)
+    _refuse_foreign_ports(observed)
     _refuse_foreign_environment(layout, ops, observed.paseo)
     if observed.running:
         out(f"already running: {layout.dashboard_url}")
@@ -171,31 +188,46 @@ def _start(
     if not check(layout, checkout, ops, out):
         raise SandboxRefusal("the safety check failed; nothing was started")
     observed = observe(layout, ops)
-    _refuse_foreign_ports(layout, observed)
+    _refuse_foreign_ports(observed)
     return _bring_up(layout, checkout, ops, out, observed)
+
+
+def _clear_paseo_record(layout: SandboxLayout, out: Out, deleted: str) -> PaseoRecord:
+    """Delete a Paseo record that names nothing of this home, and say so in ``deleted`` words."""
+    record = clear_stale_paseo_record(layout.paseo_home)
+    path = layout.paseo_home / PASEO_PROCESS_RECORD
+    if record.kind == "stale":
+        out(
+            f"{deleted} {path}: it named process {record.pid}, which is not this home's Paseo "
+            "supervisor; that process was not signalled"
+        )
+    elif record.kind == "unusable":
+        out(f"{deleted} {path}: it named no process")
+    return record
 
 
 def _provision(
     layout: SandboxLayout, checkout: Path, ops: Operations, out: Out, started: _Started
 ) -> ProcessIdentity:
     """Bring the Paseo runtime up through PNT-R01; the proven supervisor of the sandbox home."""
-    if ops.paseo_supervisor() is not None:
-        # It ran before this start and has been checked; provision may reload it, and when it
-        # restarts it, the report says so.
-        stale = None
-    else:
-        stale = clear_stale_paseo_record(layout.paseo_home)
-    if stale is not None:
-        out(
-            f"deleted the stale Paseo process record {layout.paseo_home / PASEO_PROCESS_RECORD}: "
-            f"it named process {stale}, which is not this home's Paseo supervisor; that process "
-            "was not signalled"
-        )
+    before = ops.paseo_supervisor()
+    if before is None:
+        # A supervisor that ran before this start has been checked already. Without one, the
+        # record is read once more: no runtime command may meet a record that names anything else.
+        record = _clear_paseo_record(layout, out, "deleted the stale Paseo process record")
+        if record.kind == "unreadable":
+            raise SandboxRefusal(
+                f"{layout.paseo_home / PASEO_PROCESS_RECORD} names process {record.pid}, a Paseo "
+                "supervisor whose environment cannot be read, so it cannot be told whether it is "
+                "this home's; nothing was signalled, deleted or started"
+            )
     try:
         provision = ops.paseo(checkout, "provision")
     except StepFailed:
-        # No report: the command did not say what it did, so what is there now decides.
-        started.paseo = ops.paseo_supervisor() is not None
+        # No report: the command did not say what it did. It counts as started by this run only
+        # when a supervisor is there now that was not there before.
+        after = ops.paseo_supervisor()
+        started.paseo = after is not None and after != before
         raise
     daemon = provision.get("daemon")
     action = daemon.get("action") if isinstance(daemon, dict) else None
@@ -350,15 +382,15 @@ def _stop_paseo(layout: SandboxLayout, ops: Operations, out: Out) -> bool:
     """
     supervisor = ops.paseo_supervisor()
     if supervisor is None:
-        stale = clear_stale_paseo_record(layout.paseo_home)
-        if stale is None:
-            out("paseo runtime: not running")
-        else:
+        record = _clear_paseo_record(layout, out, "paseo runtime: deleted the stale record")
+        if record.kind == "unreadable":
             out(
-                "paseo runtime: not running (deleted the stale record "
-                f"{layout.paseo_home / PASEO_PROCESS_RECORD}: it named process {stale}, which is "
-                "not this home's Paseo supervisor; nothing was signalled)"
+                f"paseo runtime: NOT STOPPED: {layout.paseo_home / PASEO_PROCESS_RECORD} names "
+                f"process {record.pid}, a Paseo supervisor whose environment cannot be read, so "
+                "it cannot be told whether it is this home's; nothing was signalled or deleted"
             )
+            return True
+        out("paseo runtime: not running")
         return False
     try:
         stopped = ops.paseo(_stop_checkout(layout, ops), "stop", 120)
@@ -369,6 +401,29 @@ def _stop_paseo(layout: SandboxLayout, ops: Operations, out: Out) -> bool:
     else:
         out(f"paseo runtime: STILL RUNNING (pid {supervisor.pid}): {_error_text(stopped)}")
     return ops.paseo_supervisor() is not None
+
+
+def _report_unrecorded(layout: SandboxLayout, ops: Operations, out: Out) -> bool:
+    """Name every process of this sandbox that is still running and that no record names.
+
+    Looked for over all processes, by what they are: a dashboard by its command line and working
+    directory, a supervisor by the home its environment names. A start that was killed between
+    starting and recording leaves such a process; it is reported, not guessed at.
+    """
+    dashboards = unrecorded_dashboards(layout, recorded_dashboard(layout))
+    supervisors = unrecorded_supervisors(layout.paseo_home, ops.paseo_supervisor())
+    for pid in dashboards:
+        out(
+            f"dashboard: NOT STOPPED: process {pid} runs this sandbox's dashboard, but the "
+            f"process record does not name it; it was not signalled. End it yourself (kill {pid})"
+        )
+    for pid in supervisors:
+        out(
+            f"paseo runtime: NOT STOPPED: process {pid} is a Paseo supervisor of this sandbox's "
+            "home, but the home's process record does not name it; it was not signalled. End it "
+            f"yourself (kill {pid})"
+        )
+    return bool(dashboards or supervisors)
 
 
 def stop(layout: SandboxLayout, ops: Operations, out: Out) -> int:
@@ -386,19 +441,46 @@ def _stop(layout: SandboxLayout, ops: Operations, out: Out) -> int:
     tmux = ops.stop_tmux_server()
     if tmux is not None:
         out(f"terminal multiplexer server of the sandbox: {tmux}")
-    # The record is the only thing start leaves behind; a dashboard it does not name (a start
-    # that was killed between starting and recording it) is reported, not guessed at.
-    unrecorded = unrecorded_dashboards(layout, None)
-    for pid in unrecorded:
-        out(
-            f"dashboard: NOT STOPPED: process {pid} runs this sandbox's dashboard and holds a "
-            "reserved port, but the process record does not name it; it was not signalled. End "
-            f"it yourself (kill {pid})"
-        )
+    unrecorded = _report_unrecorded(layout, ops, out)
     if dashboard_remains or paseo_remains or unrecorded:
         return 1
     layout.process_record.unlink(missing_ok=True)
     return 0
+
+
+def _left(layout: SandboxLayout) -> list[Path]:
+    return sorted(entry for entry in layout.root.iterdir() if entry != layout.marker)
+
+
+def _delete(layout: SandboxLayout) -> tuple[list[Path], str]:
+    """Delete the sandbox directory, its marker last; what is left of it, and why.
+
+    Every entry is tried. While anything is left, the directory is still marked as this tool's
+    and as being reset, so a deletion that failed half-way can be repeated and nothing is built
+    or started in what remains.
+    """
+    builder.mark(layout, builder.RESETTING)
+    reason = "something was written there during the deletion"
+    for entry in _left(layout):
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError as error:
+            reason = error.strerror or str(error)
+    left = _left(layout)
+    if left:
+        return left, reason
+    marker = layout.marker.read_bytes()
+    layout.marker.unlink()
+    try:
+        layout.root.rmdir()
+    except OSError as error:
+        # Not empty after all, or not this user's to remove: what is there stays marked.
+        layout.marker.write_bytes(marker)
+        return _left(layout) or [layout.root], error.strerror or str(error)
+    return [], ""
 
 
 def reset(layout: SandboxLayout, ops: Operations, out: Out) -> int:
@@ -415,11 +497,15 @@ def reset(layout: SandboxLayout, ops: Operations, out: Out) -> int:
             out(f"a sandbox process is still running; {layout.root} was not deleted")
             return 1
         try:
-            shutil.rmtree(layout.root)
+            left, reason = _delete(layout)
         except OSError as error:
+            left, reason = [layout.root], error.strerror or str(error)
+        if left:
             out(
-                f"{layout.root} could not be deleted completely: {error}; what remains is at "
-                f"{error.filename or layout.root}"
+                f"{layout.root} could not be deleted completely ({reason}); left there: "
+                f"{', '.join(entry.as_posix() for entry in left)}. It is still marked as this "
+                "tool's sandbox: remove what blocks the deletion (a file or directory that cannot "
+                "be written, or a program still writing there), then run 'reset' again"
             )
             return 1
     out(f"deleted {layout.root}")

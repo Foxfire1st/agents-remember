@@ -19,7 +19,11 @@ the system Python (3.10 or newer) or with a checkout's `mcp/.venv`.
 Rules for using it:
 
 - One command at a time. `build`, `start`, `stop` and `reset` hold a lock (`<sandbox>.lock`,
-  beside the directory) for the whole command; a second one refuses and names the holder.
+  beside the directory) for the whole command; a second one refuses and names the holder. The
+  provision run of a start shares the lock: if the start is killed, the sandbox stays locked
+  until that run has ended, and the refusal names it.
+- One directory is one sandbox however `--sandbox` spells it: the path is resolved once, so a link
+  to the directory and a path with `..` in it name the same lock, settings file and process record.
 - Start and stop the Paseo runtime through `start` and `stop` only. Do not run
   `agents-remember paseo provision` directly on the sandbox settings: a daemon started that way
   carries the caller's environment, the calling harness session's variables among them, and
@@ -43,25 +47,37 @@ Rules for using it:
 
 The coordination root, the memory repository and the task documents are created by the tool
 server of the build under test (`runtime_install`, `memory_init`, `memory_baseline_adopt`,
-`task_doc`), so they are documents that build can read. A rebuild leaves existing ones alone.
+`task_doc`), so they are documents that build can read. A rebuild leaves the repository, the task
+documents, the packets, the memory repository and the Paseo install and home alone. It writes the
+settings file, the Eve application files (`eve/app`, among them `agent/instructions.md`) and the
+Eve launcher anew from the tool, so hand edits to those are lost.
+
+A sandbox built by an earlier version of this tooling is rebuilt once by the next `start`: the
+build adds what is new (`dagger-authority/`, `eve/removed-variables.json`).
+
+`reset` deletes the sandbox's marker last. If something cannot be deleted, it says so and names
+what is left by its full path. What is left is still marked as this tool's and as being reset:
+nothing is built or started there, and `reset` can be run again once the obstacle is gone.
 
 ## What start does, in order
 
-1. Refuses a checkout that is not a PNT build, a sandbox directory in a refused place, and a
-   second command on the same sandbox.
-2. Refuses a reserved port held by a process the sandbox did not start. It names the port and
+1. Refuses a checkout that is not a PNT build, a sandbox directory in a refused place, a
+   sandbox whose reset did not finish, and a second command on the same sandbox.
+2. Refuses while a dashboard or a Paseo supervisor of this sandbox runs that no record names.
+   Refuses a reserved port held by a process the sandbox did not start: it names the port and
    the process id and never uses another port. Refuses a running Paseo runtime of the sandbox
    that does not carry the sandbox's environment, naming the variables.
 3. Reports `already running` with the URL when both of its processes run and hold their ports.
-4. Builds the sandbox when it is missing. The build creates the checkout's `mcp/.venv` when that
-   is missing.
+4. Builds the sandbox when it is missing or was built by an earlier version of this tooling. The
+   build creates the checkout's `mcp/.venv` when that is missing.
 5. Builds the checkout's dashboard bundle when it is missing or stale. Environment and bundle
    are ignored build products; nothing else in the checkout is written.
 6. Runs the safety check and refuses when it fails, then looks at the two ports again.
 7. Deletes a stale Paseo process record (see Processes), provisions the Paseo runtime through
    `agents-remember paseo provision` and starts the dashboard from the checkout's source. When
    the dashboard does not answer in time, what this start itself started is stopped and the
-   failing step and its log file are named.
+   failing step and its log file are named. A Paseo runtime that ran before this start is left
+   running.
 
 ## The safety check
 
@@ -90,17 +106,23 @@ start time, command line, boot id).
 
 - The dashboard is trusted or signalled only while `/proc` shows that exact process, running the
   build's dashboard on this sandbox's settings file with the sandbox as its working directory. A
-  dashboard of this sandbox that the record does not name (a start killed between starting and
-  recording it) is reported by `stop` and `start` and never signalled; `reset` then refuses to
-  delete the directory. End it yourself with `kill <pid>`.
+  record written by the earlier tooling (without a boot id) is read the same way.
 - The Paseo runtime is the daemon of the sandbox's own home, named by the home's process record
   `paseo/home/paseo.pid`, as for the stop command of PNT-R01. It is trusted only when the named
   process is a Paseo supervisor that names this home in its own environment. A record that names
-  anything else is stale: `start` and `stop` delete it, say so, and do not signal the process it
-  named. No runtime command is run while such a record exists.
+  anything else, or no process at all, is stale: `start` and `stop` delete it, say so, and do not
+  signal the process it named. No runtime command is run while such a record exists. When the
+  named process is a supervisor whose environment cannot be read, nothing is deleted, signalled
+  or started, and the command says so.
+- What the records do not name is looked for among all running processes, whether or not it
+  holds a port: a dashboard by its command line and working directory, a supervisor by the home
+  its environment names. Such a process (left by a start that was killed between starting and
+  recording it) is reported by `stop` and refused by `start`, and never signalled; `reset` then
+  keeps the directory. End it yourself with `kill <pid>`.
 
-`stop` signals nothing else: the dashboard directly, the Paseo runtime through
-`agents-remember paseo stop`.
+`stop` ends the recorded dashboard and every process left in that dashboard's own session, the
+Paseo runtime through `agents-remember paseo stop`, and the sandbox's own tmux server when one
+runs. It signals nothing else.
 
 ## Environment
 
@@ -113,6 +135,10 @@ child's `PWD` is the directory it is started in. Four variables are set: `TMUX_T
 sandbox's own tmux server), `PYTHONPYCACHEPREFIX` and `GIT_OPTIONAL_LOCKS=0` (nothing is written
 into the checkout) and `AR_DAGGER_AUTHORITY_ROOT` (the registry of the quality tools lies in the
 sandbox).
+
+A tool server that an agent's harness starts gets these variables only if the harness forwards
+its environment or the launch puts them into the tool server's definition; the launch does that
+for the write-avoiding variables and the Dagger root.
 
 ## Eve
 

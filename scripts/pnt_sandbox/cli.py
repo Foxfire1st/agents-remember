@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace) -> int:
-    layout = SandboxLayout(args.sandbox.expanduser().absolute())
+    layout = SandboxLayout(args.sandbox)
     ops = Operations(layout)
     if args.command == "build":
         builder.build(layout, require_checkout(args.checkout), ops, print, args.eve_project)
