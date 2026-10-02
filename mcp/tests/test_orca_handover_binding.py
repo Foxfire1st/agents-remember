@@ -456,9 +456,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
             (context, workspace, "codex", session_options, agent_arg_tokens),
         )
         resolve_workspace.assert_called_once_with(config, context)
-        resolve_agent.assert_called_once_with(
-            config, workspace["selector"], defaults, ("codex",), None
-        )
+        resolve_agent.assert_called_once_with(config, defaults, ("codex",), None)
 
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")
