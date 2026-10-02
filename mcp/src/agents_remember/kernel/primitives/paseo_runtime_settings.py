@@ -27,7 +27,7 @@ NO_PASEO_RUNTIME_CONFIGURED = "no Paseo runtime configured"
 # "latest"), a partial version or build metadata is not a pin and is refused.
 _EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
 _LISTEN_ADDRESS = re.compile(r"(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<port>\d{1,5})")
-_WEB_SCHEMES = frozenset({"http", "https"})
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 class PaseoRuntimeSettingsError(AgentsRememberError):
@@ -179,6 +179,13 @@ def _embed_entry(value: object, index: int) -> PaseoEmbedEntry:
             f"{label}.dashboardOrigin must be an http(s) origin: scheme, host and optional "
             "port, without a path, query or credentials"
         )
+    canonical = _canonical_origin(origin)
+    if origin != canonical or not origin.isascii():
+        hint = f"; write {canonical}" if canonical.isascii() else ""
+        raise PaseoRuntimeSettingsError(
+            f"{label}.dashboardOrigin must be the origin exactly as a browser reports it: "
+            f"lower-case ASCII scheme and host, no default port{hint}"
+        )
     frame_base_url = value["frameBaseUrl"]
     if not _is_web_url(frame_base_url, origin_only=False):
         raise PaseoRuntimeSettingsError(
@@ -195,8 +202,18 @@ def _is_web_url(value: object, *, origin_only: bool) -> bool:
         port_is_valid = parts.port is None or 0 < parts.port < 65536
     except ValueError:
         return False
-    if parts.scheme not in _WEB_SCHEMES or not parts.hostname or not port_is_valid:
+    if parts.scheme not in _DEFAULT_PORTS or not parts.hostname or not port_is_valid:
         return False
     if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
         return False
     return not (origin_only and parts.path)
+
+
+def _canonical_origin(origin: str) -> str:
+    """A validated origin as a browser serialises it, which is what later code compares with."""
+    parts = urlsplit(origin)
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    port = "" if parts.port in (None, _DEFAULT_PORTS[parts.scheme]) else f":{parts.port}"
+    return f"{parts.scheme}://{host}{port}"

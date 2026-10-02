@@ -173,11 +173,24 @@ the block is present every key is required and an unknown key fails at start-up.
 | `listen` | The daemon's listen address as `host:port`. Provision binds exactly this address and never chooses another port. |
 | `version` | One exact Paseo version (`MAJOR.MINOR.PATCH` with an optional prerelease). A range, a tag such as `beta`, or a partial version is refused. A prefix that holds any other version is replaced. |
 | `providers` | Provider entries for harnesses Paseo drives through ACP, keyed by provider id. The object is written unchanged to the daemon's `agents.providers`; Paseo validates it. May be `{}`. |
-| `embed` | The embed list: pairs of `dashboardOrigin` (the origin a browser opens the dashboard on: scheme, host and optional port) and `frameBaseUrl` (the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment). Each origin appears once. May be `[]`. |
+| `embed` | The embed list: pairs of `dashboardOrigin` and `frameBaseUrl`. `dashboardOrigin` is the origin a browser opens the dashboard on, written exactly as a browser reports it: lower-case ASCII scheme and host, an optional port, no default port (`:80` for http, `:443` for https), no path. Any other spelling is refused, because the value is compared with a browser's origin as text. `frameBaseUrl` is the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment. Each origin appears once. May be `[]`. |
 
-The block carries no secret. The daemon inherits the environment of the process
-that runs `provision`; Agents Remember writes no harness configuration and
-handles no harness credential.
+A provider entry may carry values that should stay private, for example an `env`
+map with a key for the harness. Provision never puts a provider entry on a
+command line and never prints one: it writes `agents.providers` into the
+daemon's own `config.json` (readable by the daemon's user only), has Paseo
+reload that file when the daemon runs or read it back when it is stopped, and
+names only the provider ids (`providerIds`) in its report. If Paseo refuses the
+entries, the previous file is put back and the report says
+`provider_entries_refused` with Paseo's text. The settings file itself is the
+place that holds such a value, so protect it accordingly. The other five facts
+carry no secret.
+
+The daemon inherits the environment of the process that runs `provision`. Agents
+Remember writes no harness configuration and handles no harness credential.
+Installing uses `npm` as the user has configured it, including the user's npm
+cache and logs under `~/.npm`; that cache is what makes a repeated install fast.
+Everything else provision writes lies under `installPrefix` and `home`.
 
 Three commands act on the block and print one JSON document each:
 
@@ -190,12 +203,16 @@ agents-remember paseo stop      --config <MCP settings file>
 `--config` is required and only the `paseoRuntime` block of that file is read.
 Exit status is `0` on success, `1` when a step failed (`error.step` names it and
 `error.detail` carries Paseo's text) and `2` when the command refused before
-doing anything (unusable settings, or `paseo_runtime_not_configured`).
+doing anything (unusable settings, or `paseo_runtime_not_configured`). Every
+failure ends in that JSON document with an `error` object of `code`, `step`,
+`message` and `detail` (a refusal has `code` and `message`), never in a
+traceback.
 
-`provision` brings the runtime to the configured state and lists every change in
-`changes`; a run with nothing to change reports `"changed": false` and makes
-only read-only calls. It writes exactly these daemon settings and leaves every
-other key of the daemon's `config.json` alone:
+`provision` brings the runtime to the configured state and lists every change it
+made in `changes`; a command that failed is reported in `error`, not as a
+change. A run with nothing to change reports `"changed": false`, makes only
+read-only calls and writes no file. It writes exactly these daemon settings and
+leaves every other key of the daemon's `config.json` alone:
 
 | Daemon setting | Value | Applied |
 | --- | --- | --- |
@@ -205,21 +222,26 @@ other key of the daemon's `config.json` alone:
 | `features.dictation.enabled` | `false` | at start |
 | `features.voiceMode.enabled` | `false` | at start |
 | `pluginsEnabled` | `true` | live |
-| `agents.providers` | `providers` | live |
+| `agents.providers` | `providers` | live (written into the file, then reloaded) |
 
 Dictation and voice mode are switched off before the first start, so no speech
 model is downloaded. `daemon.action` in the report is `started` (the daemon was
 not running), `restarted` (it ran another version, or a setting applied only at
 start changed; `daemon.reasons` says which), `reloaded` (only live settings, the
 embed list or the plugin changed) or `untouched`. A restart closes the sessions
-of running agents; they stay resumable.
+of running agents; they stay resumable. A change of only the host part of
+`listen` is such a restart: the home's own daemon holds the port and is
+restarted onto the new address.
 
 Agents Remember keeps three things under `<home>/agents-remember/`: `plugin/`,
 the installed copy of the AR plugin (id `ar-plugin`) that ships inside the
 package; `embed.json`, the embed list the plugin reads; and
 `plugin-loaded.json`, a stamp of what the running plugin last loaded. A change
 to the plugin's content or to the embed list replaces the files and reloads the
-plugin. A frame base URL whose host is not `localhost` or an IP literal also
+plugin. While provider entries are being replaced, a fourth file,
+`config-previous.json`, holds the daemon configuration they replace; it is
+removed once Paseo has accepted the new file, and a run that finds it puts it
+back first. A frame base URL whose host is not `localhost` or an IP literal also
 needs that host in Paseo's `daemon.hostnames`; provision does not write that
 key.
 

@@ -98,24 +98,43 @@ class PaseoCli:
         argv = [self.executable.as_posix(), *args, "--home", self.settings.home.as_posix()]
         return self.runner(argv, timeout)
 
-    def json(self, step: str, *args: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Any:
-        """Run a command that prints JSON on success; a failure carries Paseo's error text."""
+    def json(
+        self,
+        step: str,
+        *args: str,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        expect: type = dict,
+    ) -> Any:
+        """Run a command that prints one JSON object (or ``expect``) on success.
+
+        A failed command carries Paseo's error text; an answer of another shape is a failure too.
+        """
         result = self.call(*args, timeout=timeout)
         if result.returncode != 0:
             raise command_failure(step, args, result)
-        return parse_json_output(step, args, result)
+        return parse_json_output(step, args, result, expect)
 
 
-def parse_json_output(step: str, args: Sequence[str], result: CommandResult) -> Any:
+def parse_json_output(
+    step: str, args: Sequence[str], result: CommandResult, expect: type = dict
+) -> Any:
+    """The command's JSON answer, refused unless it has the expected shape.
+
+    The answer itself is never echoed into the failure: a configuration read can carry provider
+    values that must not reach a report.
+    """
     try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as error:
+        answer = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        answer = None
+    if not isinstance(answer, expect):
+        wanted = "a JSON array" if expect is list else "a JSON object"
         raise PaseoRuntimeFailure(
             "paseo_invalid_response",
             step,
-            f"paseo {' '.join(args[:3])} returned output that is not JSON",
-            result.stdout[:_ERROR_TEXT_LIMIT],
-        ) from error
+            f"paseo {' '.join(args[:3])} did not return {wanted}",
+        )
+    return answer
 
 
 def command_failure(step: str, args: Sequence[str], result: CommandResult) -> PaseoRuntimeFailure:
