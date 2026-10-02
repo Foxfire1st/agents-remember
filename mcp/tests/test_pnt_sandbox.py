@@ -424,8 +424,26 @@ class BuildInputTests(SandboxCase):
         )
         self.assertEqual(runtime["providers"]["hermes"]["command"], ["hermes", "acp"])
         self.assertEqual(runtime["providers"]["eve"]["options"], {"supportsMcpServers": False})
+        # Pi starts without the developer's extensions, one of which reaches the installed AR
+        # server on the live roots, and with its own MCP, script and tool-search parts. The
+        # entry replaces the command and nothing else of the provider Paseo knows by itself.
         self.assertEqual(
-            list(settings_document(layout, None)["paseoRuntime"]["providers"]), ["hermes"]
+            runtime["providers"]["pi"],
+            {
+                "command": [
+                    "pi",
+                    "--no-extensions",
+                    "-e",
+                    "builtin:mcp",
+                    "-e",
+                    "builtin:codemode",
+                    "-e",
+                    "builtin:tool-search",
+                ]
+            },
+        )
+        self.assertEqual(
+            list(settings_document(layout, None)["paseoRuntime"]["providers"]), ["hermes", "pi"]
         )
         paths = [
             settings[key]

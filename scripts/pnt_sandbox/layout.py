@@ -196,16 +196,37 @@ def read_marker(layout: SandboxLayout) -> dict[str, Any] | None:
     return marker
 
 
-def provider_entries(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
-    """The provider entries Paseo needs: Hermes and Eve are driven through ACP.
+# How the sandbox's runtime starts Pi: none of the developer's Pi extensions, and Pi's own MCP,
+# script and tool-search parts loaded by name. One of the developer's extensions is a gateway to
+# the tool servers of the developer's own configuration, the installed AR server on the live
+# roots among them; a sandbox agent could connect to it. Pi's own MCP part holds only the tool
+# server a launch gives the agent.
+PI_COMMAND = (
+    "pi",
+    "--no-extensions",
+    "-e",
+    "builtin:mcp",
+    "-e",
+    "builtin:codemode",
+    "-e",
+    "builtin:tool-search",
+)
 
-    Eve cannot start a session when a client hands it tool servers, so its entry tells Paseo not
-    to. Its launcher and application directory are the sandbox's own; ``eve_env_file`` is the one
-    path outside the sandbox, read at launch for the developer's model keys and never copied.
-    ``None`` means the developer has no Eve project and the entry is left out.
+
+def provider_entries(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
+    """The provider entries of the sandbox's Paseo runtime.
+
+    Hermes and Eve are driven through ACP. Eve cannot start a session when a client hands it
+    tool servers, so its entry tells Paseo not to. Its launcher and application directory are
+    the sandbox's own; ``eve_env_file`` is the one path outside the sandbox, read at launch for
+    the developer's model keys and never copied. ``None`` means the developer has no Eve project
+    and the entry is left out.
+
+    Pi is a provider Paseo knows by itself; its entry only replaces the command (``PI_COMMAND``).
     """
     providers: dict[str, Any] = {
-        "hermes": {"extends": "acp", "label": "Hermes", "command": ["hermes", "acp"]}
+        "hermes": {"extends": "acp", "label": "Hermes", "command": ["hermes", "acp"]},
+        "pi": {"command": list(PI_COMMAND)},
     }
     if eve_env_file is not None:
         providers["eve"] = {

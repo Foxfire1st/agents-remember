@@ -40,7 +40,9 @@ DECOYS = {
 }
 
 
-async def _server_info(definition: dict[str, Any], cwd: Path) -> dict[str, Any]:
+async def _server_info(definition: dict[str, Any], cwd: Path) -> tuple[dict[str, Any], str | None]:
+    """The server's ``server_info`` answer and the instructions it stated when it was opened."""
+
     # A harness adds the definition's environment to its own and starts the command in the
     # agent's working directory.
     server = StdioServerParameters(
@@ -50,11 +52,11 @@ async def _server_info(definition: dict[str, Any], cwd: Path) -> dict[str, Any]:
         cwd=cwd,
     )
     async with stdio_client(server) as (reader, writer), ClientSession(reader, writer) as session:
-        await session.initialize()
+        opened = await session.initialize()
         result = await session.call_tool("server_info", {})
     (content,) = result.content
     assert isinstance(content, TextContent)
-    return json.loads(content.text)
+    return json.loads(content.text), opened.instructions
 
 
 class ToolServerStartTests(unittest.TestCase):
@@ -92,7 +94,7 @@ class ToolServerStartTests(unittest.TestCase):
             )
             definition = tool_server_definition(settings, binding)
 
-            info = asyncio.run(
+            info, instructions = asyncio.run(
                 asyncio.wait_for(
                     _server_info(definition, root / "projects"), timeout=START_TIMEOUT_SECONDS
                 )
@@ -105,6 +107,12 @@ class ToolServerStartTests(unittest.TestCase):
         self.assertEqual(info["servingBuild"]["packageRoot"], launching_source_root().as_posix())
         self.assertEqual(info["configPath"], settings.as_posix())
         self.assertEqual(info["coordinationRoot"], (root / "coordination").as_posix())
+        # It states who it is when a harness opens it, in the spelling of the agent's assignment.
+        self.assertEqual(
+            instructions,
+            "This server is agents-remember-task: the Agents Remember tool server of the AR "
+            "build that launched this agent, and the one to use for this assignment.",
+        )
         # It says under which name its agent was given it; ``server`` is the package's name.
         self.assertEqual(
             (info["server"], info["toolServer"]), ("agents-remember", "agents-remember-task")
