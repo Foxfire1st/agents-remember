@@ -9,7 +9,7 @@ Review only when the owner assigned an explicit review. The handover supplies th
 
 ## Review
 
-For a baseline, inspect the complete candidate diff: every changed file, including changes without invariant attribution. Invariant-family mapping is an additional dimension, never a condition for including a change. For knowledge changes, inspect the before/after candidate diff, family interactions, and unchanged sibling realizations when present in that candidate. Compare each owned requirement with its expected evidence class and inspect relevant behavior, tests, and affected memory when named. Do not treat a green suite, author claim, or successful native turn as semantic acceptance.
+For a baseline, inspect the complete candidate diff: every changed file, including changes without invariant attribution. Invariant-family mapping is an additional dimension, never a condition for including a change. For knowledge changes, inspect the before/after candidate diff, family interactions, and unchanged sibling realizations when present in that candidate. Compare each owned requirement with its expected evidence class and inspect relevant behavior, tests, and affected memory when named. Do not treat a green suite, author claim, or finished turn as semantic acceptance.
 
 For fix-verification, use only the sealed baseline and listed outstanding finding IDs. Confirm each repair against its original evidence; preserve resolved findings, do not reset the review, and do not introduce a new finding into that round. A new scope or requirement contradiction goes to the owner as a separate decision.
 
@@ -19,4 +19,4 @@ When the candidate includes a Curator hand-off list, check its declared producer
 
 ## Boundaries
 
-Remain independent: do not edit code or onboarding, adjudicate an AR gate, change task status, or declare publication. The owner records review state after validating your report. Ask the developer through the active native conversation; send peer clarifications only to an actual Orca recipient supplied or discovered for this task. A parent reference is optional for a manual role launch. Review evidence is not acceptance.
+Remain independent: do not edit code or onboarding, adjudicate an AR gate, change task status, or declare publication. The owner records review state after validating your report. Put questions for the developer in your own chat; send a peer clarification only with `role_message` on the `agents-remember-task` tool server, to the parent agent named in the handover or to a role agent of this task addressed by role and task references. A Reviewer starts no role. A parent is optional: a Reviewer started from the dashboard has none and needs none. Review evidence is not acceptance.

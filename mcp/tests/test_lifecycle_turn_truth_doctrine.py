@@ -98,8 +98,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCTRINE_TREE = "skills/l-01-agent-lifecycles"
 TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
-# Every retained legacy AR surface that still composes completion-truth wording. Compact native
-# Orca capsules no longer carry those role/operation relay instructions, so they are not kept on this
+# Every retained legacy AR surface that still composes completion-truth wording. Compact role
+# capsules no longer carry those role/operation relay instructions, so they are not kept on this
 # roster merely to preserve stale wording. The roster equals the actual remaining speakers.
 COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/core/acceptance.md",
@@ -113,11 +113,9 @@ COMPLETION_TRUTH_ROSTER = (
 # same act as composing completion, and three criteria/history files name it for other reasons.
 COMPLETION_TRUTH_VOCABULARY = re.compile(r"terminal/finalizer|terminal truth", re.IGNORECASE)
 
-# Retained legacy template that states an AR relay's mechanical side. Native capsule roles no longer
-# describe that relay; active Orca Dispatch completion is checked separately below.
-RELAY_MECHANICS_SURFACES = (
-    "skills/l-01-agent-lifecycles/templates/turn-report.md",
-)
+# Retained legacy template that states an AR relay's mechanical side. Capsule roles no longer
+# describe that relay; what a Worker tells the agent that started it is checked separately below.
+RELAY_MECHANICS_SURFACES = ("skills/l-01-agent-lifecycles/templates/turn-report.md",)
 
 # The one reading every completion-truth surface must carry: the terminal outcome ends a turn and
 # nothing more. Written as one alternation so a legitimate rephrasing inside the pattern passes.
@@ -673,18 +671,23 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
             with self.subTest(surface=relative):
                 self._assert_owed(relative)
 
-    def test_native_worker_completion_is_dispatch_scoped_and_exactly_once(self) -> None:
+    def test_a_worker_tells_only_a_parent_agent_and_only_once_that_its_report_is_written(
+        self,
+    ) -> None:
         worker = normalize(read_surface("skills/l-01-agent-lifecycles/roles/worker.md"))
         self.assertRegex(
             worker,
-            r"if this is an active orca dispatch worker.{0,120}worker_done exactly once",
-            "only an active Dispatch worker emits native completion, and it emits it once",
+            r"when a parent agent started you, tell it once that the report is written"
+            r".{0,40}one role_message on agents-remember-task to its agent id",
+            "only a Worker with a parent agent sends the completion message, and it sends one",
         )
-        self.assertIn("a manual role session is not a dispatch worker", worker)
-        self.assertIn("does not emit that completion message", worker)
-        self.assertIn("native completion is not ar acceptance", worker)
+        self.assertIn("a worker started from the dashboard has no parent", worker)
+        self.assertIn("sends no such message", worker)
+        self.assertIn("a finished turn is not ar acceptance", worker)
 
-    def test_delivered_coordinator_capsules_check_candidate_evidence_before_acceptance(self) -> None:
+    def test_delivered_coordinator_capsules_check_candidate_evidence_before_acceptance(
+        self,
+    ) -> None:
         manifest = json.loads((TREE_LITERAL / "composition-manifest.json").read_text())
         cases = (
             (
@@ -702,7 +705,7 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 (
                     "inspect each deliverable",
                     "required evidence",
-                    "never substitute shell commits or a native run's completion for ar acceptance",
+                    "never substitute shell commits or a finished turn for ar acceptance",
                 ),
             ),
             (
@@ -711,7 +714,7 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 (
                     "inspect the worker's actual diff",
                     "targeted check results",
-                    "do not claim acceptance or landing from an orca status",
+                    "do not claim acceptance or landing from the status of an agent in paseo",
                 ),
             ),
         )
@@ -743,7 +746,11 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                     weakened_delivery = normalize(weakened + "\n" + operation_text)
                     self.assertIn(
                         "inspect each deliverable",
-                        [marker for marker in markers if normalize(marker) not in weakened_delivery],
+                        [
+                            marker
+                            for marker in markers
+                            if normalize(marker) not in weakened_delivery
+                        ],
                         "removing candidate inspection must make the guard fail",
                     )
 

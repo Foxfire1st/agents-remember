@@ -700,6 +700,20 @@ class EntryPointWorld:
             },
             "skill_catalog_list": {},
             "skill_catalog_read": {"uri": "__FROM_LIST__"},
+            # Role start and role messaging serve only a role agent AR launched. This server was
+            # not started by a launch, so both refuse in the envelope before anything is read,
+            # started or sent: the caller has no binding.
+            "role_start": {
+                "role": "worker",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "sprint_document_ref": self.task_ref,
+                "master_document_ref": self.task_ref,
+                "task_document_ref": self.leaf_ref,
+            },
+            "role_message": {
+                "text": "entry-point sweep",
+                "agent_id": "00000000-0000-4000-8000-000000000002",
+            },
             "curator_coherence": {"request": {"action": "status", "contract_path": contract}},
             "closeout_queue": {
                 "request": {

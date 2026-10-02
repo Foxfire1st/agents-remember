@@ -1,4 +1,9 @@
-"""Resolve Orca launch defaults, workspaces, and canonical AR handovers."""
+"""Resolve role launch defaults, role folders, and canonical AR handovers.
+
+The handover is the assignment data of one launch. Its host-specific part names Paseo as the
+host, the tool server a role agent calls AR tools on, and the two AR tools through which role
+agents start and message each other.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
@@ -36,6 +41,7 @@ from agents_remember.cli.orca_runtime import (
 )
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
+from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.controlplane.durable_store import declared_process_role
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -62,6 +68,13 @@ ROLE_START_OPERATIONS: dict[OrcaRole, CapsuleOperation] = {
 }
 
 
+# The two AR tools a role agent's instructions name for starting and messaging role agents.
+ROLE_START_TOOL = "role_start"
+ROLE_MESSAGE_TOOL = "role_message"
+# The name under which a harness may carry the AR tool server of another installation.
+OTHER_INSTALLATION_TOOL_SERVER = "agents-remember"
+
+
 def role_start_operation(role: OrcaRole) -> CapsuleOperation:
     """Select the one existing operation appropriate to a manually selected role."""
 
@@ -76,14 +89,13 @@ class OrcaHandoverRequest:
     agent_id: str
     ar_mcp_context: dict[str, Any]
     request_id: uuid.UUID | None = None
-    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"] = (
-        "manual-dashboard-role-start"
-    )
+    # The role agent that starts this role; none when the launcher starts it.
+    started_by: StartingAgent | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedOrcaRoleHandover:
-    """The validated inputs shared by the dashboard launcher and native role preparation."""
+    """The validated inputs of one role launch, from the launcher or from a role agent."""
 
     context: OrcaRoleContext
     workspace: dict[str, str]
@@ -101,11 +113,9 @@ def prepare_orca_role_handover(
     *,
     agent_override: OrcaAgentOverride | None,
     request_id: uuid.UUID,
-    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"] = (
-        "manual-dashboard-role-start"
-    ),
+    started_by: StartingAgent | None = None,
 ) -> PreparedOrcaRoleHandover:
-    """Prepare the existing canonical role handover and exact native launch inputs."""
+    """Prepare the canonical role handover and the exact launch inputs of one role."""
 
     # The selection is validated against the cached catalog before anything is created for it.
     defaults, harness_order = _role_defaults(config, context)
@@ -126,7 +136,7 @@ def prepare_orca_role_handover(
             agent_id=agent_id,
             ar_mcp_context=ar_mcp_context,
             request_id=request_id,
-            entry_mode=entry_mode,
+            started_by=started_by,
         )
     )
     return PreparedOrcaRoleHandover(
@@ -204,7 +214,7 @@ def _ar_mcp_context(
     context: OrcaRoleContext,
     workspace: dict[str, str],
 ) -> dict[str, Any]:
-    """Declare the exact arguments native roles pass to the existing shared AR MCP tools."""
+    """Declare the exact arguments role agents pass to the existing shared AR MCP tools."""
 
     if context.role in LEAF_ROLES:
         if context.task is None:
@@ -273,18 +283,55 @@ def _ar_mcp_context(
     }
 
 
-def _verify_leaf_revival_scope(
-    config: McpRuntimeConfig,
-    context: OrcaRoleContext,
-    receipt: dict[str, Any],
-) -> None:
-    workspace = _resolve_workspace(config, context)
-    expected = _ar_mcp_context(config, context, workspace)
-    if receipt.get("arMcpContext") != expected:
+def _verify_leaf_revival_scope(context: OrcaRoleContext, receipt: dict[str, Any]) -> None:
+    """Refuse the revive of a leaf-bound agent whose task scope changed since its launch.
+
+    The scope is the task reference and the contract path. The one computed now comes from the
+    leaf document alone, so the comparison creates and starts nothing.
+    """
+
+    if context.task is None:
+        raise ValueError("A leaf role requires its canonical task document for a revive.")
+    current = TaskScopedReaderContext(
+        task_document_ref=context.task.ref,
+        contract_path=_leaf_contract_path(context.task).as_posix(),
+    ).model_dump(mode="json")
+    recorded = _recorded_leaf_scope(receipt)
+    if recorded != current:
         raise ValueError(
-            "The saved leaf execution does not carry the current canonical AR MCP task reader "
-            "context; prepare a new native handover before revive."
+            "The task scope recorded at launch differs from the scope computed now, so the "
+            "agent was not revived. Recorded at launch: "
+            f"{json.dumps(recorded, sort_keys=True)}. Computed now: "
+            f"{json.dumps(current, sort_keys=True)}. Start a new execution for the current scope."
         )
+
+
+def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
+    """The task reference and contract path the launch wrote into the receipt, if it did."""
+
+    reader_context = receipt.get("arMcpContext")
+    scope = reader_context.get("taskContext") if isinstance(reader_context, dict) else None
+    return scope if isinstance(scope, dict) else None
+
+
+def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
+    """The contract path of a leaf's enclosure, derived from the leaf document alone.
+
+    Nothing is created here: a launch goes on to open the enclosure, a revive only compares.
+    """
+
+    if leaf.document.kind != "subTask":
+        raise ValueError("Only a canonical leaf can open a leaf enclosure.")
+    expected = leaf_enclosure_path(leaf.path.parent, leaf.document.id).resolve()
+    if not leaf.document.enclosures:
+        return expected
+    enclosure = leaf.document.enclosures[0]
+    if len(leaf.document.enclosures) != 1 or enclosure.leafId != leaf.document.id:
+        raise ValueError("The selected leaf has conflicting enclosure bindings.")
+    contract_path = Path(enclosure.enclosurePath).resolve()
+    if contract_path != expected:
+        raise ValueError("The selected leaf enclosure does not match its canonical task binding.")
+    return contract_path
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
@@ -320,7 +367,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
 
 
 def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
-    """Expose only this task's canonical reports from inside its Orca workspace."""
+    """Expose only this task's canonical reports from inside its enclosure group folder."""
     link = workspace / "task-reports"
     target = task_reports.resolve()
     if link.is_symlink():
@@ -343,21 +390,8 @@ def _ensure_leaf_enclosure(
     *,
     parent_task: str,
 ) -> tuple[Path, dict[str, Any]]:
-    if leaf.document.kind != "subTask":
-        raise ValueError("Only a canonical leaf can open a leaf enclosure.")
+    contract_path = _leaf_contract_path(leaf)
     task_root = leaf.path.parent
-    expected = leaf_enclosure_path(task_root, leaf.document.id).resolve()
-    if leaf.document.enclosures:
-        enclosure = leaf.document.enclosures[0]
-        if len(leaf.document.enclosures) != 1 or enclosure.leafId != leaf.document.id:
-            raise ValueError("The selected leaf has conflicting enclosure bindings.")
-        contract_path = Path(enclosure.enclosurePath).resolve()
-        if contract_path != expected:
-            raise ValueError(
-                "The selected leaf enclosure does not match its canonical task binding."
-            )
-    else:
-        contract_path = expected
 
     status = worktree_status_tool(
         config,
@@ -452,7 +486,7 @@ def _compile_handover(
     if capsule.is_refusal:
         raise ValueError(capsule.explain())
     if capsule.codex_delivery is None:
-        raise ValueError("The selected Orca agent has no supported AR instruction carrier.")
+        raise ValueError("The selected agent has no supported AR instruction carrier.")
     documents = [doc for doc in (context.sprint, context.master, context.task) if doc]
     task_reads = [_read_task_doc(config, document) for document in documents]
     primary = context.effective_task
@@ -480,7 +514,7 @@ def _compile_handover(
         }
     report_path = _role_report_path(context, workspace, request_id=request_id)
     if request_id is None:
-        raise ValueError("An Orca message binding requires its durable requestId.")
+        raise ValueError("A message binding requires its durable requestId.")
     task_document_digest = _digest(task_reads)
     ar_binding = {
         "requestId": str(request_id),
@@ -494,13 +528,14 @@ def _compile_handover(
     message_binding_projection = _message_binding_projection_reference(
         config, request_id, ar_binding
     )
+    started_by = request.started_by
     handover = {
-        "schema": "ar-orca-role-handover/v1",
+        "schema": "ar-role-handover/v1",
         "requestId": str(request_id),
         "role": context.role,
         "operation": operation,
         "assignment": _role_assignment(context, report_path),
-        "orcaAgent": agent_id,
+        "agent": agent_id,
         "selection": selection_binding(context),
         "documents": task_reads,
         "taskDocumentDigest": task_document_digest,
@@ -516,8 +551,9 @@ def _compile_handover(
             "semanticDigest": capsule.codex_delivery.semantic_digest,
             "binding": capsule.codex_delivery.binding.as_report(),
         },
-        "nativeOrca": {
-            "entryMode": request.entry_mode,
+        "host": {
+            "name": "Paseo",
+            "entryMode": "agent-role-start" if started_by else "dashboard-role-start",
             "instructionSource": {
                 "kind": "compiled-role-operation-capsule",
                 "role": capsule.codex_delivery.binding.role,
@@ -525,100 +561,95 @@ def _compile_handover(
                 "semanticDigest": capsule.codex_delivery.semantic_digest,
                 "ambientRoleFilesSelected": False,
             },
-            "ownerRelation": _native_owner_relation(request.entry_mode),
-            "identitySource": (
-                "Orca supplies sender identity in ORCA_TERMINAL_HANDLE and ORCA_PANE_KEY; never infer an AR session identity."
+            "parent": (
+                {
+                    "agentId": started_by.agent_id,
+                    "role": started_by.role,
+                    "task": started_by.subject,
+                }
+                if started_by
+                else None
             ),
-            "guidesOnDemand": [
-                "orca skills get orca-cli",
-                "orca skills get orchestration",
-            ],
+            "ownerRelation": _owner_relation(started_by),
+            "developerQuestions": (
+                "Put every question for the developer in your own chat: write it as your reply "
+                "in this session and end your turn. The developer reads this chat in the "
+                "dashboard and answers in it. Never send a developer question to another agent."
+            ),
             "arToolServer": TOOL_SERVER_NAME,
             "arMcpUsage": (
-                f"Use the tool server named {TOOL_SERVER_NAME} for every Agents Remember tool: "
-                "the AR build that launched this session started it for this agent. An AR tool "
-                "server under any other name belongs to another AR installation; do not use it "
-                "for this assignment. After a start or a resume a tool server can take some "
-                f"seconds to appear: if a call to {TOOL_SERVER_NAME} is not available, make the "
-                "call once more before reporting the server missing, and report that instead of "
-                "substituting another. For a leaf, pass the "
-                "exact arMcpContext.readerArguments; add the requested files list to "
-                "read_ar_files. If either "
-                "installed tool schema lacks the declared task_context fields, stop and report the "
-                "missing AR reader capability; do not drop task_context or substitute another root."
+                f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: "
+                "the AR build that launched this agent started it for this agent. A tool server "
+                f"named {OTHER_INSTALLATION_TOOL_SERVER}, if this session has one, belongs to "
+                "another installation and must not be used for this assignment. After a start or "
+                "a resume a tool server can take some seconds to appear: if a call to "
+                f"{TOOL_SERVER_NAME} is not available, make the call once more before reporting "
+                "the server missing, and report that instead of substituting another. For a "
+                "leaf, pass the exact arMcpContext.readerArguments; "
+                "add the requested files list to read_ar_files. If either tool schema lacks the "
+                "declared task_context fields, stop and report the missing AR reader "
+                "capability; do not drop task_context or substitute another root."
             ),
-            "messageSemantics": (
-                "For a cross-workspace message, address the exact native recipient supplied by the active Orca preamble. "
-                "If absent, use the assignment's explicitly named recipient workspace; resolve its exact native workspace selector "
-                "through Orca's native workspace/project listing, then use `orca terminal list --worktree <exact-selector>` and "
-                "`orca orchestration run-list`/`run-show` there. Never infer a parent from directory ancestry or choose a "
-                "first/latest/ancestral session. If no recipient workspace is named, ask the active native user. "
-                "Prefer `run:<id>` or `dispatch:<id>`; a bare terminal handle is non-durable and may carry a native warning. "
-                "If discovery is ambiguous, ask the active native user before sending. Load the immutable JSON at "
-                "messageBinding.projection.path, verify its raw-byte SHA-256 against messageBinding.projection.sha256, "
-                "parse it, and structurally compare it to this handover's messageBinding.arBinding. For an incoming peer binding, "
-                "compare it structurally only to that sender's expected binding in the active native Task/Dispatch spec or an "
-                "explicitly selected peer record; never compare it to this session's own binding. If no peer binding is established, "
-                "mark it unverified and keep communication usable without claiming equality. Do not compare by visual inspection or "
-                "retype opaque values. For ordinary "
-                "`send`, serialize it as JSON text for `--payload`; this flag is mutually exclusive with "
-                "typed lifecycle payload flags. Use native `ask` for coordinator questions only inside an active supervised "
-                "Dispatch; ask has only a question string, so include the serialized binding in `--question` and resume the same "
-                "question by its message ID after timeout. In a manual session without a Dispatch, use ordinary native `send` "
-                "with `--type question`, an explicit `run:<id>` or `dispatch:<id>` recipient, the question in its string body, "
-                "and the serialized binding in `--payload`; then use native check to read the reply and reply to that exact message. "
-                "Do not invent a Dispatch or sender identity. `reply` has only a body string, so include the serialized binding "
-                "in `--body` when needed; neither ask nor reply accepts a custom payload flag. In a supervised native Run, put "
-                "the explicit assignment and projection path/digest "
-                "in the string spec passed to Orca `task-create`; then follow the injected Task/Dispatch preamble and typed flags "
-                "for heartbeat/worker_done, never attach "
-                "a raw `--payload` to those structured lifecycle sends. Include native Run/Task/Dispatch IDs only when Orca "
-                "supplied or confirmed them, omitting absent IDs. A send receipt/message ID means queued, not read: use native "
-                "check, reply to the exact message/thread, and acknowledge only after processing. On uncertain send outcome, retry "
-                "the same native request with identical arguments and payload using Orca's `--retry-request <original-request-uuid>`; "
-                "do not create a fresh request or claim delivery/read until native evidence confirms it. Surface stale, ambiguous, "
-                "or unavailable recipients as such. Save native `--json` stdout byte-for-byte from the command directly to the "
-                "supplied evidence path; a model-authored summary is a report, never a native receipt. Only an active Dispatch "
-                "worker may emit worker_done; a plain manual session does not."
-            ),
+            "roleTools": {
+                "toolServer": TOOL_SERVER_NAME,
+                "start": ROLE_START_TOOL,
+                "message": ROLE_MESSAGE_TOOL,
+                "usage": (
+                    f"{ROLE_START_TOOL} on {TOOL_SERVER_NAME} starts one role agent for one "
+                    "canonical selection, when this role may start that role. Choose the "
+                    "request id yourself (a UUID) and repeat the same id to reconcile an "
+                    "uncertain start; a new id is a new agent. It returns the new agent's id, "
+                    "report path, handover artifact path and launch status. "
+                    f"{ROLE_MESSAGE_TOOL} on {TOOL_SERVER_NAME} sends one message to one role "
+                    "agent, addressed by its agent id or by its role plus task references. The "
+                    "recipient reads your role, task and agent id in the first line. It never "
+                    "interrupts a running turn. With wait it returns the recipient's reply, or "
+                    "says that a permission is pending or that the time was up; the message "
+                    "stays delivered then, and the recipient can answer you with "
+                    f"{ROLE_MESSAGE_TOOL} addressed to your agent id. A refusal names its "
+                    "reason: act on that reason, never guess a recipient, and never start a "
+                    "second agent for an uncertain result. Do not create or message role agents "
+                    "with any other tool: an agent created another way has no capsule and no "
+                    "binding."
+                ),
+            },
             "messageBinding": {
-                "payloadType": "The compact AR binding is a canonical JSON object; each native verb uses its own documented string field.",
                 "arBinding": ar_binding,
                 "projection": message_binding_projection,
-                "nativeIdsRule": "Add native Run/Task/Dispatch IDs only when the active Orca preamble or an exact native read supplies their values; omit absent IDs.",
+                "use": (
+                    "The immutable file at projection.path records which task, role and capsule "
+                    f"this launch was bound to. {ROLE_MESSAGE_TOOL} names you from the binding "
+                    "of your own tool server; you do not attach this record to a message."
+                ),
             },
         },
         "ownerHandover": (
-            _native_owner_handover(request.entry_mode)
-            + " Older ambient AR lifecycle/router/role files and coordination-level "
-            "role-routing prose were not selected by this launcher; do not load them as a second role, "
-            "operation, hierarchy, parent, or transport. "
-            "Keep higher-priority native instructions and applicable repository coding, tool, and safety "
-            "rules. AR owns task requirements, review and curation decisions, task lifecycle, and paired "
-            "Git acceptance. This native Orca session performs only the assignment above. For leaf "
-            "context_packet/read_ar_files calls, use the exact arMcpContext.readerArguments; task scope "
-            "is per call and includes no caller-selected roots. If the existing AR MCP schema does not "
-            "expose task_context with both required fields, stop and report that capability mismatch. "
-            "Resolve each task document by calling task_doc "
+            "This exact compiled role and operation plus this handover are the role brief for "
+            "this request. Older ambient AR lifecycle/router/role files and coordination-level "
+            "role-routing prose were not selected by this launch; do not load them as a second "
+            "role, operation, hierarchy, parent, or transport. "
+            "Keep higher-priority system and developer instructions and applicable repository "
+            "coding, tool, and safety rules. AR owns task requirements, review and curation "
+            "decisions, task lifecycle, and paired Git acceptance. This agent performs only the "
+            "assignment above. For leaf context_packet/read_ar_files calls, use the exact "
+            "arMcpContext.readerArguments; task scope is per call and includes no "
+            f"caller-selected roots. If the {TOOL_SERVER_NAME} tool schema does not expose "
+            "task_context with both required fields, stop and report that capability mismatch. "
+            f"Resolve each task document by calling task_doc on {TOOL_SERVER_NAME} "
             "with the row's taskDocReadArgs exactly, then read its canonical JSON at the returned "
             "docPath before acting. Do not add .json to the slug. Each contentDigest records the "
-            "document snapshot used for this launch. Never claim AR review, curation, lifecycle, or "
-            "Git acceptance from native session completion."
+            "document snapshot used for this launch. Never claim AR review, curation, lifecycle, "
+            "or Git acceptance from a finished turn."
         ),
     }
-    brief_header = (
-        "PREPARED NATIVE AR ROLE BRIEF: this native session starts idle. After Orca injects its exact "
-        "Task and Dispatch preamble, load and verify the prepared handover artifact named by the native "
-        "Task spec and follow its compiled role/operation prompt. "
-        if request.entry_mode == "native-orca-task"
-        else "EXPERIMENTAL MANUAL AR ROLE BRIEF: the launcher explicitly selected the role and operation "
-        "identified below. "
-    )
     prompt = (
-        brief_header + "The following compiled capsule and canonical handover are the complete AR "
-        "role/operation instructions and assignment for this session. Do not reopen ambient AR role, "
-        "lifecycle, or coordination-level role-routing text to infer a different assignment. Preserve native system/developer instructions, "
-        "approvals, sandbox policy, and repository-specific coding/tool rules.\n\n"
+        f"AR ROLE BRIEF: {_started_from(started_by)} started this role with the role and "
+        "operation identified below. "
+        "The following compiled capsule and canonical handover are the complete AR "
+        "role/operation instructions and assignment for this agent. Do not reopen ambient AR role, "
+        "lifecycle, or coordination-level role-routing text to infer a different assignment. "
+        "Preserve system/developer instructions, approvals, sandbox policy, and "
+        "repository-specific coding/tool rules.\n\n"
         + capsule.codex_delivery.trusted_instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))
@@ -640,32 +671,29 @@ def _compile_handover(
     }
 
 
-def _native_owner_relation(
-    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"],
-) -> str:
-    if entry_mode == "native-orca-task":
+def _started_from(started_by: StartingAgent | None) -> str:
+    """Who started the role, as the first sentence of its brief says it."""
+
+    if started_by is None:
+        return "the dashboard launcher"
+    return f"agent {started_by.agent_id} ({started_by.role} · {started_by.subject})"
+
+
+def _owner_relation(started_by: StartingAgent | None) -> str:
+    """Whom this role answers to: the agent that started it, or nobody but the developer."""
+
+    if started_by is None:
         return (
-            "The active Orca Task and Dispatch own this execution. The selected AR sprint/master/leaf "
-            "remains semantic work scope, not a native Run/Task identity. Use only exact native identity "
-            "injected or returned by Orca."
+            "This role was started from the dashboard launcher. It has no parent agent and needs "
+            "none: the developer who reads this chat owns its decisions. The selected AR "
+            "sprint/master/leaf is work scope, not a parent."
         )
     return (
-        "The active native user conversation owns decisions for this manual launch. The selected AR "
-        "sprint/master/leaf is work scope, not a native Orca parent or Run identity. If the live Orca "
-        "preamble supplies an active Run or Dispatch, follow those exact native references."
+        f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
+        "role and is its parent in Paseo. Send that agent your questions about the assignment "
+        f"and your result with {ROLE_MESSAGE_TOOL}, addressed to its agent id. The selected AR "
+        "sprint/master/leaf is work scope; the parent is the agent named here and no other."
     )
-
-
-def _native_owner_handover(
-    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"],
-) -> str:
-    if entry_mode == "native-orca-task":
-        return (
-            "This exact compiled role and operation plus this handover are the native role instructions "
-            "for the assignment. This terminal starts idle; do not begin until Orca injects its native "
-            "Task and Dispatch."
-        )
-    return "This exact compiled role and operation plus this handover are the manual native role brief for this request."
 
 
 def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> dict[str, Any]:
@@ -737,7 +765,7 @@ def _role_report_path(
 ) -> str:
     if context.role in TASKLESS_ROLES:
         if request_id is None:
-            raise ValueError("A taskless Orca report requires its durable requestId.")
+            raise ValueError("A taskless role report requires its durable requestId.")
         report_root = (
             Path(workspace["path"]) / ".agents-remember" / "reports" / "orca-native" / context.role
         )
@@ -745,14 +773,14 @@ def _role_report_path(
     else:
         selected = context.effective_task
         if selected is None:
-            raise ValueError("A task-bound Orca report requires its canonical task document.")
+            raise ValueError("A task-bound role report requires its canonical task document.")
         if request_id is None:
-            raise ValueError("A task-bound Orca report requires its durable requestId.")
+            raise ValueError("A task-bound role report requires its durable requestId.")
 
         report_root = (selected.path.parent / "notes" / "reports").resolve(strict=False)
         if context.role in LEAF_ROLES:
             if context.task is None:
-                raise ValueError("A leaf Orca report requires its canonical task document.")
+                raise ValueError("A leaf role report requires its canonical task document.")
             access_path = workspace.get("taskReportAccessRoot")
             if not isinstance(access_path, str) or not access_path:
                 raise ValueError(

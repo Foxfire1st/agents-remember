@@ -128,8 +128,8 @@ production profile. Existing `ORCA_PAIRING_CODE` / `ORCA_REMOTE_PAIRING` and
 `ORCA_ENVIRONMENT` settings retain Orca's normal precedence; the configured
 `userDataPath` selects the profile in which that environment is resolved.
 
-Without `orcaRuntime`, data-only MCP tools remain available and `orca_role_prepare`
-returns a clear `native_runtime_configuration_missing` refusal. Changes to this
+No MCP tool depends on `orcaRuntime`: role agents are started and messaged with
+`role_start` and `role_message`, which use the `paseoRuntime` block. Changes to this
 boot-time block take effect after the shared AR MCP process restarts.
 
 `benchmarksEnabled` (optional, default `false`) gates the `codex_benchmark_prepare`

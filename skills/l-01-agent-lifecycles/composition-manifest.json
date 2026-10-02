@@ -1,6 +1,6 @@
 {
   "schema": "ar-role-capsule-composition/v1",
-  "authority": "skills/l-01-agent-lifecycles/SKILL.md (thin native Orca router) · this file is routing metadata only",
+  "authority": "skills/l-01-agent-lifecycles/SKILL.md (thin role-capsule router) · this file is routing metadata only",
   "entry_router": "skills/l-01-agent-lifecycles/SKILL.md",
   "authoritative_tree": "skills/",
   "role_order": [
@@ -18,10 +18,10 @@
   "routing_conditions": [
     {
       "id": "supplied-native-role-binding",
-      "condition": "The native Orca launcher supplies one supported role and one applicable operation.",
+      "condition": "The AR role launcher or the role_start tool supplies one supported role and one applicable operation.",
       "selects": "role-and-operation",
-      "role_from": "the explicit native handover role id",
-      "operation_from": "the explicit native handover operation id",
+      "role_from": "the explicit handover role id",
+      "operation_from": "the explicit handover operation id",
       "task_from": "only canonical task references supplied in the handover",
       "never_selects": "an inferred role, task, repository, parent, or default operation",
       "fail_closed_when": "role or operation is missing, unsupported, or inapplicable, or supplied bindings conflict"
@@ -30,7 +30,7 @@
       "id": "manual-taskless-projects-role",
       "condition": "Architect or System Specialist is explicitly selected for a manual Projects launch with no task binding.",
       "selects": "the supplied role and one applicable operation",
-      "role_from": "the explicit native launcher selection",
+      "role_from": "the explicit launcher selection",
       "task_from": "none; no synthetic task reference is created",
       "requires": "ask only for a missing outcome/repository or system concern/report scope"
     }
@@ -89,7 +89,7 @@
     },
     "coordination": {
       "source": "operations/coordination.md",
-      "purpose": "Coordinate native Orca execution against exact canonical AR task references.",
+      "purpose": "Start and message role agents on the Paseo host against exact canonical AR task references.",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -107,7 +107,7 @@
     },
     "recovery": {
       "source": "operations/recovery.md",
-      "purpose": "Resume the same task and native execution; reconcile uncertainty before retrying.",
+      "purpose": "Resume the same task and the same role agents; reconcile uncertainty before retrying.",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -163,8 +163,9 @@
         "gate_list",
         "knowledge_diff",
         "knowledge_read",
-        "orca_role_prepare",
         "read_ar_files",
+        "role_message",
+        "role_start",
         "task_doc",
         "worktree_closeout_apply",
         "worktree_closeout_preview",
@@ -207,6 +208,8 @@
         "context_packet",
         "knowledge_read",
         "read_ar_files",
+        "role_message",
+        "role_start",
         "task_doc",
         "worktree_attach",
         "worktree_closeout_apply",
@@ -220,7 +223,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Optional sprint portfolio coordinator using native Orca execution.",
+      "seat": "Optional sprint portfolio coordinator of role agents.",
       "core": [
         "authority",
         "invariants",
@@ -312,6 +315,8 @@
         "context_packet",
         "knowledge_read",
         "read_ar_files",
+        "role_message",
+        "role_start",
         "task_doc",
         "worktree_attach",
         "worktree_closeout_apply",
@@ -368,6 +373,7 @@
         "grepai_search",
         "knowledge_read",
         "read_ar_files",
+        "role_message",
         "task_doc",
         "worktree_status"
       ],
@@ -408,6 +414,7 @@
         "knowledge_read",
         "memory_quality_check",
         "read_ar_files",
+        "role_message",
         "route_index_refresh",
         "task_doc"
       ],
@@ -446,6 +453,7 @@
         "knowledge_diff",
         "knowledge_read",
         "read_ar_files",
+        "role_message",
         "task_doc",
         "worktree_status"
       ],
@@ -485,7 +493,8 @@
         "context_packet",
         "provider_diagnostics",
         "provider_status",
-        "read_ar_files"
+        "read_ar_files",
+        "role_message"
       ],
       "skills": [
         "l-01-agent-lifecycles"
@@ -586,10 +595,10 @@
     "operation"
   ],
   "notes": [
-    "Routing metadata only: the native role route composes exactly one role source and one applicable operation source.",
-    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into native role capsules.",
+    "Routing metadata only: the role route composes exactly one role source and one applicable operation source.",
+    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into role capsules.",
     "Canonical task references and workspace bindings travel in the handover as data, separate from instruction blocks.",
-    "The compiler vocabulary retains ten role ids and nine operation ids; the native launcher exposes only the seven current UI roles.",
-    "Native Orca CLI guidance is fetched from the active runtime on demand and is not an AR MCP tool entry."
+    "The compiler vocabulary retains ten role ids and nine operation ids; the role launcher exposes only the seven current UI roles.",
+    "Paseo is the host. Role agents start and message each other with the AR tools role_start and role_message on the agents-remember-task tool server."
   ]
 }

@@ -58,7 +58,6 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxPostResponse,
     OperatorInboxSupersedeResponse,
 )
-from agents_remember.models.orca_launcher import OrcaRolePrepareResponse
 from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.providers import (
     CGCCalleesResponse,
@@ -75,6 +74,7 @@ from agents_remember.models.providers import (
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
+from agents_remember.models.role_agents import RoleMessageResponse, RoleStartResponse
 from agents_remember.models.role_capsule_resources import (
     RoleCapsuleResponse,
     SkillCatalogListResponse,
@@ -244,9 +244,10 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "message_parent": MessageParentResponse,
     "message_child": MessageChildResponse,
     "role_capsule_compile": RoleCapsuleResponse,
-    "orca_role_prepare": OrcaRolePrepareResponse,
     "skill_catalog_list": SkillCatalogListResponse,
     "skill_catalog_read": SkillCatalogReadResponse,
+    "role_start": RoleStartResponse,
+    "role_message": RoleMessageResponse,
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_change": KnowledgeChangeResponse,
     "knowledge_diff": KnowledgeDiffResponse,

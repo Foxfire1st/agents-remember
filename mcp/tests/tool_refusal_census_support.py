@@ -227,6 +227,21 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "skill_catalog_list": {},
         "skill_catalog_read": {"uri": "skill://no-such-skill/SKILL.md"},
+        # -- role agents ---------------------------------------------------------------
+        # Both tools serve only a role agent AR launched. The census server was started by no
+        # launch, so each call meets the first refusal the tools have: the caller has no binding
+        # (`status: "refused"`, `refusal: "caller-has-no-binding"`, a reason and a next action).
+        "role_start": {
+            "role": "worker",
+            "request_id": "00000000-0000-4000-8000-000000000001",
+            "sprint_document_ref": TASK_REF,
+            "master_document_ref": TASK_REF,
+            "task_document_ref": LEAF_REF,
+        },
+        "role_message": {
+            "text": "refusal census",
+            "agent_id": "00000000-0000-4000-8000-000000000002",
+        },
         # -- knowledge ----------------------------------------------------------------
         # The five `knowledge_*` families, added to the roster by the merged
         # `260915_knowledge-substrate` line and therefore to this table by `260918-TSIP-L10`
