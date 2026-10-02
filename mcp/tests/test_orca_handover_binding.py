@@ -330,6 +330,8 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         "agents-remember-task",
                         "A tool server named agents-remember, if this session has one, belongs "
                         "to another installation and must not be used for this assignment.",
+                        "An AR tool server under any other name belongs to another AR "
+                        "installation; do not use it for this assignment.",
                         "After a start or a resume a tool server can take some seconds to "
                         "appear: if a call to agents-remember-task is not available, make the "
                         "call once more before reporting the server missing, and report that "

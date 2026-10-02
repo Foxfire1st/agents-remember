@@ -19,7 +19,6 @@ carried out is a refusal that names its one reason.
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -48,7 +47,7 @@ from agents_remember.cli.orca_task_receipts import (
     _receipt_path,
     _taskless_execution_receipts,
 )
-from agents_remember.cli.orca_task_routes import _orca_dispatch_endpoint
+from agents_remember.cli.orca_task_routes import LaunchLockBusy, _orca_dispatch_endpoint
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     BRIDGE_TIMEOUT,
@@ -59,6 +58,7 @@ from agents_remember.cli.paseo_bridge import (
 )
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent, resume_agent
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaSelection
@@ -70,10 +70,16 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
-# One bridge call of a wait: well inside the limit every bridge call has to end within.
-WAIT_SLICE_SECONDS = 40
-# How many of a selection's most recent executions are asked about when a role is addressed.
-_CANDIDATE_LIMIT = 12
+# How long a start waits for another start of the same tool server to end: one agent issues
+# its starts side by side, and the launch path runs them one at a time.
+LOCK_WAIT_SECONDS = 60
+# The bridge's code for a connection lost while a message was being sent.
+SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
+# How many executions of a selection are asked about when a role is addressed. More than that
+# are never chosen among: the address is refused as ambiguous.
+_CANDIDATE_LIMIT = 24
+# Receipt statuses of an execution that has no live agent to ask about.
+_NO_AGENT_STATUSES = frozenset({"stopped", "rejected"})
 _PROJECTS = "Projects"
 
 # Who may start what (PNT-R06 item 4); a role that is not listed may start none.
@@ -82,8 +88,6 @@ MAY_START: dict[str, tuple[str, ...]] = {
     "orchestrator": ("manager", "worker", "reviewer", "curator"),
     "manager": ("worker", "reviewer", "curator"),
 }
-
-_monotonic = time.monotonic
 
 
 class _Refused(Exception):
@@ -258,8 +262,18 @@ def _start_role(
     forget_launcher_catalogs()
     try:
         response = _orca_dispatch_endpoint(
-            config, request, started_by=starting_agent(config, binding)
+            config,
+            request,
+            started_by=starting_agent(config, binding),
+            lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
+    except LaunchLockBusy as busy:
+        raise _Refused(
+            "launch-refused",
+            f"Another start of this tool server was still running after {LOCK_WAIT_SECONDS} "
+            "seconds, so this one was not begun. Nothing was recorded for this request.",
+            f"Call {ROLE_START_TOOL} again with the same arguments; starts run one at a time.",
+        ) from busy
     except HTTPException as error:
         raise _start_refusal(error) from error
     finally:
@@ -267,7 +281,7 @@ def _start_role(
     unread = _host_not_read(response)
     if unread is not None:
         raise _host_unreachable(f"{unread} Nothing was recorded for this request.")
-    return _started(config, request, binding)
+    return _started(config, request)
 
 
 def _host_not_read(response: JSONResponse) -> str | None:
@@ -343,9 +357,7 @@ def _host_unreachable(detail: str) -> _Refused:
     )
 
 
-def _started(
-    config: McpRuntimeConfig, request: OrcaDispatchRequest, binding: AgentBinding
-) -> dict[str, Any]:
+def _started(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> dict[str, Any]:
     """The tool's answer, read from the receipt the start path wrote for this request."""
 
     try:
@@ -359,6 +371,7 @@ def _started(
     if receipt is None or receipt.get("requestId") != str(request.request_id):
         raise _launch_refused("The start was answered but its receipt cannot be read back.")
     execution = str(receipt.get("status"))
+    agent_id = receipt.get("agentId")
     launch = (
         "rejected"
         if execution == "rejected"
@@ -366,6 +379,8 @@ def _started(
         if execution in {"starting", "unknown"}
         else "running"
     )
+    if execution == "stopped" and isinstance(agent_id, str):
+        _refuse_agent_that_is_gone(config, agent_id, execution)
     report = receipt.get("report")
     artifact = receipt.get("handoverArtifact")
     next_action = {
@@ -381,13 +396,39 @@ def _started(
         "detail": str(receipt.get("detail") or ""),
         "requestId": str(request.request_id),
         "role": request.role,
-        "agentId": receipt.get("agentId"),
-        "parentAgentId": receipt.get("parentAgentId") or binding.agent_id,
+        "agentId": agent_id,
+        "parentAgentId": receipt.get("parentAgentId"),
         "reportPath": report.get("path") if isinstance(report, dict) else None,
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,
         "executionStatus": execution,
         **({"nextAction": next_action} if next_action else {}),
     }
+
+
+def _refuse_agent_that_is_gone(config: McpRuntimeConfig, agent_id: str, execution: str) -> None:
+    """Refuse the repeat of a request whose agent is archived or unknown to the host.
+
+    A ``stopped`` execution can also be one whose last turn was cancelled; that agent is live and
+    the repeat answers ``running`` for it. Which of the two it is, the host says: one read.
+    """
+
+    reading = read_agent(config, agent_id)
+    if not reading.reachable:
+        raise _host_unreachable(
+            f"{reading.unreachable_reason} Whether agent {agent_id} of this request still "
+            "exists could not be read."
+        )
+    if reading.found and not reading.archived:
+        return
+    state = "is archived" if reading.found else "is unknown to the host"
+    raise _Refused(
+        "launch-refused",
+        f"Agent {agent_id} of this request {state}; a repeat of the request id does not bring "
+        "it back.",
+        "Start again with a new request id.",
+        agentId=agent_id,
+        executionStatus=execution,
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -418,8 +459,9 @@ def _resolve_recipient(
     by_selection = call.role is not None
     if (call.agent_id is not None) == by_selection:
         raise _not_found(
-            "Name the recipient either by agent_id, or by role plus the task references its "
-            "class requires; not both and not neither."
+            "Name the recipient either with agent_id, or with role plus the task references its "
+            "class requires (sprint_document_ref, master_document_ref, task_document_ref); not "
+            "both and not neither. No other argument names a recipient."
         )
     recipient = (
         _recipient_by_selection(config, call) if by_selection else _recipient_by_id(config, call)
@@ -509,7 +551,9 @@ def _recipient_by_selection(config: McpRuntimeConfig, call: RoleMessageCall) -> 
 
     A task-bound selection has one current execution; its agent is the recipient when it is live,
     and otherwise the most recent earlier execution whose agent is live. A taskless role can have
-    several live agents; then the recipient is ambiguous.
+    several live agents; then the recipient is ambiguous. Of a taskless role every execution that
+    is not already stopped or rejected is asked about; when there are more of those than are
+    asked about, the address is ambiguous as well.
     """
 
     try:
@@ -526,14 +570,25 @@ def _recipient_by_selection(config: McpRuntimeConfig, call: RoleMessageCall) -> 
     except (ValidationError, ValueError, TaskDocumentRefError, HTTPException) as error:
         detail = error.detail if isinstance(error, HTTPException) else error
         raise _not_found(f"The recipient selection cannot be resolved: {detail}") from error
-    live, archived = _live_agents(config, receipts, first_only=selection.role not in TASKLESS_ROLES)
-    if len(live) > 1:
+    taskless = selection.role in TASKLESS_ROLES
+    if taskless:
+        # An execution already stopped or rejected has no live agent to ask about.
+        receipts = [r for r in receipts if r.get("status") not in _NO_AGENT_STATUSES]
+    live, archived = _live_agents(config, receipts[:_CANDIDATE_LIMIT], first_only=not taskless)
+    cut = taskless and len(receipts) > _CANDIDATE_LIMIT
+    if len(live) > 1 or cut:
         ids = [recipient.agent_id for recipient in live]
+        listed = f"{len(ids)} live {selection.role} agents match: {', '.join(ids)}."
+        if cut:
+            listed = (
+                f"{len(receipts)} {selection.role} executions are not known to be stopped; only "
+                f"the {_CANDIDATE_LIMIT} most recent were asked about, so the list was cut. Of "
+                f"those, {len(ids)} are live{': ' + ', '.join(ids) if ids else ''}."
+            )
         raise _Refused(
             "recipient-ambiguous",
-            f"{len(ids)} live {selection.role} agents match: {', '.join(ids)}. The tool never "
-            "picks one.",
-            "Send the message again addressed to one of candidateAgentIds by agent_id.",
+            f"{listed} The tool never picks one.",
+            "Send the message again addressed to the recipient by agent_id.",
             candidateAgentIds=ids,
         )
     if live:
@@ -554,7 +609,7 @@ def _live_agents(
 
     live: list[_Recipient] = []
     archived: str | None = None
-    for receipt in receipts[:_CANDIDATE_LIMIT]:
+    for receipt in receipts:
         agent_id = receipt.get("agentId")
         if not isinstance(agent_id, str) or not agent_id:
             continue
@@ -594,10 +649,13 @@ def _deliver(
     recipient: _Recipient,
 ) -> dict[str, Any]:
     line = sender_line(sender)
+    message_id = str(uuid.uuid4())
+    # One id for the message whatever the number of attempts: the runtime records it with the
+    # message, and the wait finds the message by it.
     payload = {
         "agentId": recipient.agent_id,
         "text": f"{line}\n{call.text}",
-        "messageId": str(uuid.uuid4()),
+        "messageId": message_id,
     }
     delivery = _send(config, payload)
     resumed = False
@@ -634,10 +692,14 @@ def _deliver(
         return result
     return {
         **result,
-        **_wait(
+        **wait_for_turn(
             config,
-            recipient.agent_id,
-            turn_id if isinstance(turn_id, str) and turn_id else None,
+            SentMessage(
+                recipient.agent_id,
+                message_id,
+                turn_id if isinstance(turn_id, str) and turn_id else None,
+                steered=taken == "steered",
+            ),
             min(max(1, call.timeout_seconds), MAX_WAIT_SECONDS),
         ),
     }
@@ -654,9 +716,12 @@ def _send(config: McpRuntimeConfig, payload: dict[str, str]) -> dict[str, Any]:
                 if attempt == 1:
                     continue
                 return {"delivered": False, "refused": "busy", "detail": str(error)}
+            # A call that ran out of time, or lost its connection while the message was being
+            # sent, may have delivered it.
             uncertain = (
                 " It is not known whether the message was delivered."
-                if error.code == BRIDGE_TIMEOUT
+                if error.code in {BRIDGE_TIMEOUT, SEND_OUTCOME_UNKNOWN}
+                and "not known whether" not in str(error)
                 else ""
             )
             raise _host_unreachable(f"{error.code}: {error}{uncertain}") from error
@@ -706,6 +771,19 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
 def _undelivered(agent_id: str, delivery: dict[str, Any]) -> _Refused:
     reason = delivery.get("refused")
     detail = str(delivery.get("detail") or "")
+    if reason == "busy" and delivery.get("permissionPending") is True:
+        # The host answers a pending permission with a denial when it delivers a message.
+        name = delivery.get("permission")
+        named = f" ({name})" if isinstance(name, str) and name else ""
+        return _Refused(
+            "recipient-busy",
+            f"Agent {agent_id} waits for a permission decision{named}. A message would answer "
+            "it with a denial, so the message was not delivered.",
+            "The developer answers the permission in the recipient's chat; send the message "
+            "again afterwards.",
+            recipientAgentId=agent_id,
+            **({"permission": name} if named else {}),
+        )
     if reason == "busy":
         return _Refused(
             "recipient-busy",
@@ -723,101 +801,3 @@ def _undelivered(agent_id: str, delivery: dict[str, Any]) -> _Refused:
             recipientAgentId=agent_id,
         )
     return _not_found(f"The host has no agent {agent_id}.", recipientAgentId=agent_id)
-
-
-def _wait(
-    config: McpRuntimeConfig,
-    agent_id: str,
-    turn_id: str | None,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    """Wait for the turn that consumed the message, as a sequence of bounded bridge calls."""
-
-    started = _monotonic()
-    deadline = started + timeout_seconds
-
-    def waited() -> int:
-        return int(_monotonic() - started)
-
-    def later(reason: str) -> dict[str, Any]:
-        return {
-            "status": "timeout",
-            "detail": f"{reason} The message stays delivered; the reply must be read later: the "
-            f"recipient can answer with {ROLE_MESSAGE_TOOL}, or ask it again.",
-            "waitedSeconds": waited(),
-        }
-
-    while True:
-        remaining = deadline - _monotonic()
-        if remaining <= 0:
-            return later(f"The recipient's turn did not end within {timeout_seconds} seconds.")
-        try:
-            reply = bridge_call(
-                config,
-                "agent-wait",
-                {
-                    "agentId": agent_id,
-                    **({"turnId": turn_id} if turn_id else {}),
-                    "waitMs": max(1, int(min(remaining, WAIT_SLICE_SECONDS) * 1000)),
-                },
-            )
-        except PaseoBridgeFailure as error:
-            return later(f"The wait ended early because the host gave no answer ({error.code}).")
-        answer = reply.get("wait")
-        state = answer.get("state") if isinstance(answer, dict) else None
-        if state == "running":
-            continue
-        if not isinstance(answer, dict) or state not in {"permission", "ended", "unavailable"}:
-            return later("The wait ended early because the host's answer could not be read.")
-        return {**_turn_result(answer), "waitedSeconds": waited()}
-
-
-def _turn_result(answer: dict[str, Any]) -> dict[str, Any]:
-    """The result of a wait that ended: the turn's outcome, or the pending permission."""
-
-    state = answer["state"]
-    if state == "permission":
-        name = str(answer.get("permission") or "a tool")
-        return {
-            "status": "permission-pending",
-            "detail": f"The recipient waits for a permission decision: {name}. The developer "
-            "answers it in the recipient's chat.",
-            "permission": name,
-        }
-    if state == "unavailable":
-        return {
-            "status": "turn-cancelled",
-            "detail": "The recipient's turn did not finish: during the wait the agent became "
-            f"{_UNAVAILABLE.get(str(answer.get('reason')), 'unavailable')}.",
-        }
-    text = answer.get("text")
-    reply = {
-        "text": text if isinstance(text, str) else None,
-        "textTruncated": answer.get("textTruncated") is True,
-    }
-    outcome = answer.get("outcome")
-    if outcome == "finished":
-        return {
-            "status": "turn-finished",
-            "detail": "The recipient's turn finished; text is its final text. A finished turn "
-            "is not AR acceptance of any requirement.",
-            **reply,
-        }
-    if outcome == "failed":
-        return {
-            "status": "turn-failed",
-            "detail": f"The recipient's turn failed: {answer.get('error') or 'no reason given'}",
-            **reply,
-        }
-    return {
-        "status": "turn-cancelled",
-        "detail": "The recipient's turn was cancelled before it gave a final text.",
-        **reply,
-    }
-
-
-_UNAVAILABLE = {
-    "not-found": "unknown to the host",
-    "archived": "archived",
-    "closed": "a closed session",
-}

@@ -38,6 +38,8 @@ from agents_remember.cli.paseo_command import (
 )
 from agents_remember.cli.paseo_daemon import is_running, plugin_entry
 from agents_remember.cli.paseo_daemon_config import (
+    AGENT_TOOLS_SETTING,
+    AGENT_TOOLS_VALUE,
     PROVIDER_ENTRIES,
     accept_provider_entries,
     remove_stale_temporaries,
@@ -90,10 +92,13 @@ def daemon_settings(settings: PaseoRuntimeSettings) -> tuple[DaemonSetting, ...]
     configuration reload. The split follows Paseo's configuration reference and was confirmed by
     run on 0.11.0-beta.2 for every path except relay enablement, which is never switched on here.
     Dictation and voice mode are off before the first start, so no speech model is downloaded.
+    Paseo's own agent tools are written off, not left to Paseo's default (PNT-R06): Paseo lists
+    that path among the ones it applies on a reload.
     """
     return (
         DaemonSetting("daemon.listen", settings.listen, "start"),
         DaemonSetting("daemon.relay.enabled", False, "live"),
+        DaemonSetting(AGENT_TOOLS_SETTING, AGENT_TOOLS_VALUE, "live"),
         DaemonSetting("features.webUi.enabled", True, "start"),
         DaemonSetting("features.dictation.enabled", False, "start"),
         DaemonSetting("features.voiceMode.enabled", False, "start"),

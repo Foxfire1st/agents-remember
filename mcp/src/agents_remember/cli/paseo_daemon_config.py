@@ -11,6 +11,9 @@ wrote, until Paseo has accepted it. The file belongs to Paseo, which rewrites it
 settings, so a rollback undoes only what the pass changed: the kept file goes back whole only while
 ``config.json`` is still the file the pass wrote; otherwise only ``agents.providers`` is put back
 into the file as it is now.
+
+The module also names the one setting whose value in the file the runtime status reports
+(``AGENT_TOOLS_SETTING``) and reads it from the file; that read changes nothing.
 """
 
 from __future__ import annotations
@@ -27,6 +30,11 @@ from agents_remember.cli.paseo_plugin_files import AR_HOME_DIRECTORY
 
 CONFIG_FILE = "config.json"
 PROVIDER_ENTRIES = "agents.providers"
+# Paseo's own tools for creating and messaging agents, which Paseo can add to every agent it
+# runs. Role agents start and message each other through AR's role tools only, so provision
+# writes this setting off instead of leaving it to Paseo's default.
+AGENT_TOOLS_SETTING = "daemon.mcp.injectIntoAgents"
+AGENT_TOOLS_VALUE = False
 
 Restored = Literal["file", "providers"]
 
@@ -88,6 +96,25 @@ def restore_previous_config(home: Path) -> Restored | None:
         restored = "providers"
     digest.unlink(missing_ok=True)
     return restored
+
+
+def agent_tools_setting(home: Path) -> dict[str, Any]:
+    """What ``config.json`` holds for Paseo's own agent tools, and whether AR wrote that value.
+
+    ``configured`` is ``None`` when the file, or the key in it, is missing or unreadable. Any
+    value but the one provision writes ``differs``: with ``true`` every agent of this home gets
+    Paseo's tools to create and message agents beside AR's.
+    """
+    path = home / CONFIG_FILE
+    value: Any = _configuration(path.read_bytes()) if path.is_file() else None
+    for key in AGENT_TOOLS_SETTING.split("."):
+        value = value.get(key) if isinstance(value, dict) else None
+    return {
+        "path": AGENT_TOOLS_SETTING,
+        "expected": AGENT_TOOLS_VALUE,
+        "configured": value,
+        "differs": value is not AGENT_TOOLS_VALUE,
+    }
 
 
 def remove_stale_temporaries(home: Path) -> list[Path]:

@@ -36,7 +36,12 @@ SECRET = "pnt-provider-value-7f3a"
 OTHER_SECRET = "pnt-provider-value-91c2"
 SUPERVISOR_PID = 4242
 START_ONLY = ("daemon.listen", "features.webUi", "features.dictation", "features.voiceMode")
-LIVE = ("daemon.relay.enabled", "pluginsEnabled", "agents.providers")
+LIVE = (
+    "daemon.relay.enabled",
+    "daemon.mcp.injectIntoAgents",
+    "pluginsEnabled",
+    "agents.providers",
+)
 MUTATING = {
     ("npm", "install"),
     ("daemon", "start"),
