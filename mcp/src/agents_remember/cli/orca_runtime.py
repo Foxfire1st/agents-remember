@@ -1,9 +1,8 @@
 """What is left of the ONT host boundary until the Paseo leaves replace its callers.
 
-The Orca bridge script is gone: the launcher catalog, the agent, model and effort validation and
-the launch reach the host through ``paseo_bridge.py``, and a launch needs no pairing. The status
-and revive call sites that still import :func:`runtime_call` have no Paseo command yet; they are
-refused here with a named reason until PNT-R07 moves them onto the bridge.
+The Orca bridge script is gone: the launcher catalog, the agent, model and effort validation, the
+launch, the status refresh and the revive reach the host through ``paseo_bridge.py``, and a launch
+needs no pairing. :func:`runtime_call` has no caller left; it refuses an ONT host call by name.
 """
 
 from __future__ import annotations

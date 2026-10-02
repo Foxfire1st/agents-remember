@@ -37,12 +37,11 @@ from agents_remember.cli.orca_runtime import (
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
 from agents_remember.cli.orca_task_liveness import (
     _reconcile_prior_execution,
+    _recorded_agent_id,
     _refresh_execution,
+    _revive_agent,
 )
 from agents_remember.cli.orca_task_preparation import (
     PreparedOrcaRoleHandover,
@@ -64,7 +63,6 @@ from agents_remember.cli.orca_task_receipts import (
     _taskless_execution_receipts,
     _verify_message_binding_projection,
     _write_message_binding_projection,
-    _write_receipt,
 )
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_TIMEOUT,
@@ -204,6 +202,11 @@ def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchReque
 
 
 def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) -> JSONResponse:
+    try:
+        require_bridge_runtime(config)
+    except PaseoBridgeFailure as error:
+        raise _bridge_http_error(error) from error
+    # The lock is held for the receipt and the one bridge call of the refresh, nothing longer.
     _acquire_dispatch_lock()
     try:
         if request.role in TASKLESS_ROLES:
@@ -445,6 +448,8 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
 
 
 def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
+    """Resume the recorded agent's closed session without a message; never create an agent."""
+
     if request.role in TASKLESS_ROLES:
         _migrate_taskless_legacy_receipt(config, request)
     path = _receipt_path(
@@ -455,79 +460,15 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
         raise HTTPException(
             status_code=404, detail="No matching AR role execution is recorded to revive."
         )
-    reference = receipt.get("execution")
-    if not isinstance(reference, dict) or reference.get("kind") != "structured":
+    agent_id = _recorded_agent_id(receipt)
+    if agent_id is None:
         raise HTTPException(
             status_code=409,
-            detail="This Orca session has no native structured-session revive path.",
+            detail="This execution has no agent in the Paseo runtime, so there is nothing to revive.",
         )
     if request.role in LEAF_ROLES:
-        context = resolve_orca_role_context(config, request)
-        _verify_leaf_revival_scope(config, context, receipt)
-    status = _refresh_execution(config, path, receipt)
-    if status.get("canRevive") is not True:
-        raise HTTPException(
-            status_code=409,
-            detail="Orca has no validated interrupted-session offer for this exact AR workspace and agent.",
-        )
-    session_id = reference.get("sessionId")
-    if not isinstance(session_id, str):
-        raise HTTPException(
-            status_code=409, detail="The saved structured session identity is incomplete."
-        )
-    resumed = _runtime_call(config, "restart-continue", {"sessionId": session_id})
-    resumed_rows = resumed.get("resumed", [])
-    continued_rows = resumed.get("continued", [])
-    resumed_row = next(
-        (
-            row
-            for row in resumed_rows
-            if isinstance(row, dict) and row.get("sessionId") == session_id
-        ),
-        None,
-    )
-    continued_row = next(
-        (
-            row
-            for row in continued_rows
-            if isinstance(row, dict) and row.get("sessionId") == session_id
-        ),
-        None,
-    )
-    if resumed_row is None or resumed_row.get("outcome") != "resumed":
-        raise HTTPException(
-            status_code=409,
-            detail="Orca refused to resume this session; no new session was launched.",
-        )
-    if continued_row is None:
-        receipt.update(
-            status="unknown",
-            detail="Orca resumed the exact session but returned no continuation outcome; inspect native Chats before acting again.",
-            revivedAt=_now_iso(),
-            updatedAt=_now_iso(),
-        )
-    elif continued_row.get("outcome") == "refused":
-        receipt.update(
-            status="running",
-            detail="Orca resumed the exact session, but its continuation was refused; continue it in native Chats.",
-            revivedAt=_now_iso(),
-            updatedAt=_now_iso(),
-        )
-    else:
-        receipt.update(
-            status="running",
-            detail=f"Orca resumed the exact session; continuation state is {continued_row.get('outcome', 'unknown')}.",
-            revivedAt=_now_iso(),
-            updatedAt=_now_iso(),
-        )
-    continuation_reason = continued_row.get("reason") if isinstance(continued_row, dict) else None
-    receipt["resumeResult"] = {
-        "resumed": resumed_row.get("outcome"),
-        "continuation": continued_row.get("outcome") if continued_row else "unknown",
-        **({"reason": continuation_reason[:300]} if isinstance(continuation_reason, str) else {}),
-    }
-    _write_receipt(path, receipt)
-    return JSONResponse(_public_execution(receipt))
+        _verify_leaf_revival_scope(resolve_orca_role_context(config, request), receipt)
+    return _revive_agent(config, path, receipt, agent_id)
 
 
 def _require_paseo_runtime(config: McpRuntimeConfig) -> None:

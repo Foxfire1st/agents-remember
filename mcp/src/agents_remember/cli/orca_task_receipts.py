@@ -468,7 +468,6 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             "result",
             "capsuleOperation",
             "arMcpContext",
-            "resumeResult",
             "canRevive",
         )
         if key in receipt

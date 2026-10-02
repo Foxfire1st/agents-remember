@@ -273,18 +273,56 @@ def _ar_mcp_context(
     }
 
 
-def _verify_leaf_revival_scope(
-    config: McpRuntimeConfig,
-    context: OrcaRoleContext,
-    receipt: dict[str, Any],
-) -> None:
-    workspace = _resolve_workspace(config, context)
-    expected = _ar_mcp_context(config, context, workspace)
-    if receipt.get("arMcpContext") != expected:
+def _verify_leaf_revival_scope(context: OrcaRoleContext, receipt: dict[str, Any]) -> None:
+    """Refuse the revive of a leaf-bound agent whose task scope changed since its launch.
+
+    The scope is the task reference and the contract path. The one computed now comes from the
+    leaf document alone, so the comparison creates and starts nothing.
+    """
+
+    if context.task is None:
+        raise ValueError("A leaf role requires its canonical task document for a revive.")
+    current = TaskScopedReaderContext(
+        task_document_ref=context.task.ref,
+        contract_path=_leaf_contract_path(context.task).as_posix(),
+    ).model_dump(mode="json")
+    recorded = _recorded_leaf_scope(receipt)
+    if recorded != current:
         raise ValueError(
-            "The saved leaf execution does not carry the current canonical AR MCP task reader "
-            "context; prepare a new native handover before revive."
+            "The task scope recorded at launch differs from the scope computed now, so the "
+            "agent was not revived. Recorded at launch: "
+            f"{json.dumps(recorded, sort_keys=True)}. Computed now: "
+            f"{json.dumps(current, sort_keys=True)}. Start a new execution for the current scope."
         )
+
+
+def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
+    """The task reference and contract path the launch wrote into the receipt, if it did."""
+
+    reader_context = receipt.get("arMcpContext")
+    scope = reader_context.get("taskContext") if isinstance(reader_context, dict) else None
+    return scope if isinstance(scope, dict) else None
+
+
+def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
+    """The contract path of a leaf's enclosure, derived from the leaf document alone.
+
+    The same derivation opens `_ensure_leaf_enclosure`, which goes on to create the enclosure; a
+    revive must not, so it is repeated here without that step.
+    """
+
+    if leaf.document.kind != "subTask":
+        raise ValueError("Only a canonical leaf can open a leaf enclosure.")
+    expected = leaf_enclosure_path(leaf.path.parent, leaf.document.id).resolve()
+    if not leaf.document.enclosures:
+        return expected
+    enclosure = leaf.document.enclosures[0]
+    if len(leaf.document.enclosures) != 1 or enclosure.leafId != leaf.document.id:
+        raise ValueError("The selected leaf has conflicting enclosure bindings.")
+    contract_path = Path(enclosure.enclosurePath).resolve()
+    if contract_path != expected:
+        raise ValueError("The selected leaf enclosure does not match its canonical task binding.")
+    return contract_path
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:

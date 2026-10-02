@@ -23,6 +23,7 @@ from agents_remember.cli import (
     orca_task_routes,
     paseo_catalog,
     paseo_launch,
+    paseo_status,
 )
 from agents_remember.cli.orca_runtime import HOST_CALL_NOT_AVAILABLE, OrcaRuntimeFailure, digest
 from agents_remember.cli.orca_task_preparation import OrcaHandoverRequest
@@ -32,7 +33,11 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import agent_title
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
+from agents_remember.models.orca_launcher import (
+    OrcaDispatchRequest,
+    OrcaLauncherOptionsRequest,
+    OrcaResultRequest,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
 from agents_remember.tasks.document import TaskEnclosureRef
@@ -81,6 +86,12 @@ CATALOG: dict[str, Any] = {
     ],
 }
 LAUNCH_COMMANDS = {"agent-archive", "workspace-open", "agent-create"}
+# What an agent reports when a refresh closes its execution with the given status (PNT-R07).
+CLOSING_STATES: dict[str, dict[str, Any]] = {
+    "completed": {"status": "idle", "lastTurn": {"state": "replied", "text": "Done."}},
+    "failed": {"status": "error", "lastError": "The model refused the turn."},
+    "stopped": {"status": "idle", "lastTurn": {"state": "unreplied"}},
+}
 NO_ANSWER_CODES = (
     "paseo_bridge_timeout",
     "paseo_daemon_unreachable",
@@ -167,7 +178,46 @@ class FakeRuntime:
         if agent is None:
             return {"serverId": SERVER_ID, "agentId": payload["agentId"], "found": False}
         agent["archivedAt"] = agent["archivedAt"] or "2026-10-02T00:00:00.000Z"
+        agent["status"] = "closed"
         return {"serverId": SERVER_ID, "agentId": agent["id"], "found": True, "archived": True}
+
+    def _agent_state(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent = self.agents.get(payload["agentId"])
+        return {"serverId": SERVER_ID, "agent": self.state(agent) if agent else None}
+
+    def _agent_resume(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent = self.agents.get(payload["agentId"])
+        resume: dict[str, Any] = {"attempted": False, "resumed": False}
+        if agent and agent["status"] == "closed" and not agent["archivedAt"]:
+            refusal = agent.get("resumeRefusal")
+            if not refusal:
+                agent["status"] = "idle"
+            resume = {"attempted": True, "resumed": not refusal}
+            if refusal:
+                resume["error"] = refusal
+        return {
+            "serverId": SERVER_ID,
+            "agent": self.state(agent) if agent else None,
+            "resume": resume,
+        }
+
+    @staticmethod
+    def state(agent: dict[str, Any]) -> dict[str, Any]:
+        """The bridge's state of an agent; a test sets `status` and what goes with it."""
+
+        permissions = agent.get("pendingPermissions", [])
+        return {
+            "id": agent["id"],
+            "status": agent["status"],
+            "archivedAt": agent["archivedAt"],
+            "turnActive": agent["status"] == "running" and not permissions,
+            "pendingPermissions": permissions,
+            "lastError": agent.get("lastError"),
+            # The last turn is readable only while the agent is idle with an open session.
+            "lastTurn": agent.get("lastTurn", {"state": "none"})
+            if agent["status"] == "idle"
+            else None,
+        }
 
 
 class FakeEnclosures:
@@ -265,6 +315,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.replace(orca_task_preparation, "resolve_orca_role_context", side_effect=self.context)
         self.replace(paseo_catalog, "bridge_call", self.runtime)
         self.replace(paseo_launch, "bridge_call", self.runtime)
+        self.replace(paseo_status, "bridge_call", self.runtime)
         self.replace(orca_task_preparation, "worktree_status_tool", self.enclosures.status)
         self.replace(orca_task_preparation, "worktree_start_tool", self.enclosures.start)
         self.replace(orca_task_preparation, "_compile_handover", self.compile_handover)
@@ -365,13 +416,34 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
     def receipt(self, request: OrcaDispatchRequest) -> dict[str, Any]:
         return json.loads(self.receipt_path(request).read_text(encoding="utf-8"))
 
-    def close_execution(self, request: OrcaDispatchRequest, status: str) -> dict[str, Any]:
-        """Close a running execution the way PNT-R07's refresh will."""
+    def agent_of(self, request: OrcaDispatchRequest) -> dict[str, Any]:
+        """The fake runtime's record of the agent this execution launched."""
 
-        receipt = self.receipt(request)
-        receipt["status"] = status
-        orca_task_receipts._write_receipt(self.receipt_path(request), receipt)
-        return receipt
+        return self.runtime.agents[self.receipt(request)["execution"]["agentId"]]
+
+    def refresh(
+        self, request: OrcaDispatchRequest, config: McpRuntimeConfig | None = None
+    ) -> dict[str, Any]:
+        """Press Result: the result route for the execution of this request."""
+
+        response = orca_task_routes._orca_result_endpoint(
+            config or self.config,
+            OrcaResultRequest.model_validate(
+                {
+                    "role": request.role,
+                    "requestId": request.request_id,
+                    **ROLE_REFS[request.role],
+                }
+            ),
+        )
+        return json.loads(bytes(response.body))
+
+    def close_execution(self, request: OrcaDispatchRequest, status: str) -> dict[str, Any]:
+        """Let the agent end its turn so that a refresh closes the execution with this status."""
+
+        self.agent_of(request).update(CLOSING_STATES[status])
+        self.assertEqual(self.refresh(request)["status"], status)
+        return self.receipt(request)
 
     def receipt_files(self) -> list[str]:
         return sorted(
@@ -853,9 +925,13 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
             self.assertEqual(second, first)
             self.assertEqual(len(self.enclosures.start_calls), 1)
-            calls = len(self.runtime.calls)
-            self.assertEqual(self.dispatch(request), (200, public))
-            self.assertEqual(len(self.runtime.calls), calls)
+            # A resolved request is answered by a refresh of its execution: a read, no launch.
+            launches = len(self.runtime.launch_calls())
+            status, again = self.dispatch(request)
+            self.assertEqual((status, again["status"]), (200, "running"))
+            self.assertEqual(again["execution"], public["execution"])
+            self.assertEqual(self.runtime.calls[-1], ("agent-state", {"agentId": agent_id}))
+            self.assertEqual(len(self.runtime.launch_calls()), launches)
         with self.subTest("the process ended between the receipt and the call"):
             request = self.request("architect")
             crash = RuntimeError("the backend process ended here")
@@ -881,6 +957,8 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         self.dispatch(running)
         self.runtime.fail("agent-create", "paseo_daemon_unreachable")
         self.dispatch(unresolved)
+        # The receipt already says what the agent is doing, so a further refresh changes nothing.
+        self.assertEqual(self.refresh(running)["status"], "running")
         files = self.receipt_files()
         saved = {path: (self.root / path).read_bytes() for path in files}
         calls = len(self.runtime.calls)
@@ -909,7 +987,11 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 self.assertIn(reason, str(error.detail))
         self.assertEqual(self.receipt_files(), files)
         self.assertEqual({path: (self.root / path).read_bytes() for path in files}, saved)
-        self.assertEqual(len(self.runtime.calls), calls)
+        # The one call a refusal makes is the read of the open execution's agent.
+        self.assertEqual(
+            self.runtime.calls[calls:],
+            [("agent-state", {"agentId": self.receipt(running)["agentId"]})],
+        )
         self.assertEqual(len(self.runtime.agents), 1)
 
     def test_a_new_start_on_a_closed_execution_archives_the_old_receipt_and_agent(self) -> None:
@@ -935,11 +1017,13 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 status_code, public = self.dispatch(successor)
 
                 self.assertEqual((status_code, public["status"]), (200, "running"))
+                # The old execution is refreshed first; closed, its agent is archived.
                 self.assertEqual(
                     [call[0] for call in self.runtime.calls],
-                    ["agent-archive", "workspace-open", "agent-create"],
+                    ["agent-state", "agent-archive", "workspace-open", "agent-create"],
                 )
                 self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
+                self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
                 # The new receipt replaced the old one before the runtime was called at all.
                 self.assertEqual(
                     {(request_id, state) for _command, request_id, state in seen},
@@ -964,7 +1048,7 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual(self.dispatch(successor)[1]["status"], "running")
             self.assertEqual(
                 [call[0] for call in self.runtime.calls],
-                ["agent-archive", "agent-archive", "workspace-open", "agent-create"],
+                ["agent-state", "agent-archive", "agent-archive", "workspace-open", "agent-create"],
             )
             self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
             previous = successor

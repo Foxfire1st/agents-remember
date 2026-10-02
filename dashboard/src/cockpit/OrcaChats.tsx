@@ -3,6 +3,7 @@ import { css, cva } from "../../styled-system/css";
 import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import { sameTaskDocumentRef } from "../data/taskIdentity";
+import { OrcaExecutionStatus, OrcaReviveControl } from "./OrcaExecutionStatus";
 import {
   EMPTY_ORCA_EFFORTS,
   EMPTY_ORCA_MODELS,
@@ -317,8 +318,8 @@ function OrcaRoleLauncher({
   const canStart = !choiceProblem && (isTasklessOrcaRole(role)
     ? optionsReady && complete && !busy && !["starting", "unknown"].includes(status ?? "")
     : optionsReady && complete && !busy && !liveOccupant && !canRetry && currentScopedExecution?.canStart !== false);
-  const canRevive = optionsReady && complete && !busy && currentScopedExecution?.canRevive === true;
-  const canRefreshResult = complete && ["accepted", "running", "starting", "unknown"].includes(status ?? "");
+  // Every refresh re-reads the agent, so Result is offered for any execution, closed ones included.
+  const canRefreshResult = complete && Boolean(status);
 
   useEffect(() => {
     if (!optionsReady) return;
@@ -522,9 +523,7 @@ function OrcaRoleLauncher({
         {canRetry && canRetrySelection && retryRequestId ? (
           <button className={orcaLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry Orca" title="Retry the same saved Orca request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
         ) : null}
-        {currentScopedExecution?.canRevive ? (
-          <button className={orcaLauncherButton({ tone: "secondary" })} type="button" aria-label="Revive Orca" title="Revive Orca" disabled={!canRevive} onClick={() => void onRevive(launchSelection)}>Revive</button>
-        ) : null}
+        <OrcaReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={orcaLauncherButton({ tone: "secondary" })} onRevive={() => void onRevive(launchSelection)} />
         {canRefreshResult ? <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca result" title="Refresh Orca result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
         <button className={orcaLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh Orca agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
       </div>
@@ -544,12 +543,7 @@ function OrcaRoleLauncher({
           {[choiceProblem, selectedAgent?.listingError ? "Models of " + selectedAgent.label + " could not be listed: " + selectedAgent.listingError : null].filter(Boolean).join(" ")}
         </div>
       ) : null}
-      {currentScopedExecution ? (
-        <div className={orcaLauncherMeta} role="status" data-status={status}>
-          Current Orca execution: {currentScopedExecution.status}
-          {currentScopedExecution.detail ? " · " + currentScopedExecution.detail : ""}
-        </div>
-      ) : null}
+      {currentScopedExecution ? <OrcaExecutionStatus execution={currentScopedExecution} className={orcaLauncherMeta} /> : null}
       {optionsError ? (
         <div className={orcaLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>
           {optionsError} <button className={orcaLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button>
@@ -585,7 +579,7 @@ function OrcaChatsPane({
   const [optionsLoadingScope, setOptionsLoadingScope] = useState<OrcaOptionsScope | null>(null);
   const [optionsErrorState, setOptionsErrorState] = useState<{ scope: OrcaOptionsScope; message: string } | null>(null);
   const [executionState, setExecutionState] = useState<{ scope: OrcaDocumentScope; value: OrcaExecutionReceipt } | null>(null);
-  const [executionErrorState, setExecutionErrorState] = useState<{ scope: OrcaDocumentScope; message: string } | null>(null);
+  const [executionErrorState, setExecutionErrorState] = useState<{ scope: OrcaDocumentScope; message: string; sticky?: boolean } | null>(null);
   const [busyScope, setBusyScope] = useState<OrcaLaunchSelection | null>(null);
   const [tasklessActiveRequests, setTasklessActiveRequests] = useState(readTasklessActiveRequests);
   const sentCatalogRefresh = useRef(0);
@@ -680,15 +674,7 @@ function OrcaChatsPane({
         }
       : pendingTasklessExecution
     : !optionsLoading && executionReceipt
-    ? {
-        status: executionReceipt.status,
-        detail: executionReceipt.detail,
-        requestId: executionReceipt.requestId,
-        retryPayload: executionReceipt.retryPayload,
-        canStart: executionReceipt.canStart,
-        canRevive: executionReceipt.canRevive,
-        canRetry: executionReceipt.canRetry,
-      }
+    ? executionReceipt
     : !optionsLoading ? options?.execution ?? undefined : undefined;
   const retryRequestId = currentScopedExecution?.canRetry &&
     (!isTasklessOrcaRole(selection.role) || Boolean(currentScopedExecution.retryPayload))
@@ -876,7 +862,8 @@ function OrcaChatsPane({
             }
           : { requestId: receipt.requestId });
       }
-      setExecutionErrorState(null);
+      // A refused dispatch stays on screen next to the execution it was refused for.
+      setExecutionErrorState((current) => (current?.sticky ? current : null));
     } catch {
       if (isCurrentExecutionTarget(requestScope, requestId)) {
         setExecutionErrorState({
@@ -969,6 +956,7 @@ function OrcaChatsPane({
         setExecutionErrorState({
           scope: requestScope,
           message: "Orca could not accept this launch (HTTP 409): " + value.detail,
+          sticky: true,
         });
       } else if ("status" in value && typeof value.status === "string") {
         const receipt = value as OrcaExecutionReceipt;
