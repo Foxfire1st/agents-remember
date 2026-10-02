@@ -34,6 +34,8 @@ from .operations import HELPERS, Operations, StepFailed
 LAYOUT_VERSION = 2
 EVE_LAUNCHER_SOURCE = HELPERS / "eve-acp-launcher.mjs"
 EVE_SCRUB_NAME = "removed-variables.json"
+# The marker's state while a reset deletes the directory: neither built nor to be built on.
+RESETTING = "resetting"
 # What the sandbox's Eve application takes from the developer's Eve project. Its connections are
 # left out on purpose: they point the agent at the developer's installed AR tool server.
 EVE_APPLICATION_FILES = ("package.json", "tsconfig.json", "agent/agent.ts", "agent/channels/eve.ts")
@@ -52,11 +54,21 @@ def is_built(layout: SandboxLayout) -> bool:
     )
 
 
+def mark(layout: SandboxLayout, state: str) -> None:
+    """Change the state the sandbox's marker records, keeping everything else it says."""
+    marker = read_marker(layout) or {"schema": SANDBOX_SCHEMA}
+    layout.marker.write_text(json.dumps({**marker, "state": state}, indent=2) + "\n", "utf-8")
+
+
 def require_sandbox_directory(layout: SandboxLayout) -> None:
     """Refuse a directory that cannot or must not become a sandbox."""
     refusal = location_refusal(layout.root)
     if refusal is not None:
         raise SandboxRefusal(refusal)
+    if (read_marker(layout) or {}).get("state") == RESETTING:
+        raise SandboxRefusal(
+            f"a reset of {layout.root} did not finish; run 'reset' again before anything else"
+        )
     unmarked = layout.root.exists() and read_marker(layout) is None
     if unmarked and (not layout.root.is_dir() or any(layout.root.iterdir())):
         raise SandboxRefusal(

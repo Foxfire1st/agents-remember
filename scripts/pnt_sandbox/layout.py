@@ -58,6 +58,11 @@ class SandboxLayout:
     paseo_port: int = PASEO_PORT
     dashboard_port: int = DASHBOARD_PORT
 
+    def __post_init__(self) -> None:
+        # One directory has one layout, however it was spelled: through a link or with ``..`` in
+        # it, the lock file, the settings path and the process record must be the same.
+        object.__setattr__(self, "root", Path(self.root).expanduser().resolve())
+
     @property
     def marker(self) -> Path:
         return self.root / MARKER_NAME

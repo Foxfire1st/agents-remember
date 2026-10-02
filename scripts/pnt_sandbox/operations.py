@@ -19,7 +19,8 @@ from typing import Any
 
 from .environment import child_environment, removed_names, sandbox_environment
 from .layout import LOOPBACK, SandboxLayout, SandboxRefusal
-from .procfs import ProcessIdentity, environment, read_identity
+from .lock import HeldLock
+from .procfs import ProcessIdentity, environment, started_identity
 from .record import verified_supervisor
 
 HELPERS = Path(__file__).resolve().parent
@@ -77,6 +78,8 @@ class Operations:
         base = os.environ if environ is None else environ
         self.environment = sandbox_environment(base, layout)
         self.removed_variables = removed_names(base)
+        # Set by the command that holds the sandbox's lock, for the provision run to share.
+        self.held_lock: HeldLock | None = None
 
     def run(self, argv: Sequence[str], *, cwd: Path, timeout: float) -> Completed:
         try:
@@ -169,9 +172,8 @@ class Operations:
 
     # --- the Paseo runtime, through the commands of PNT-R01 ---------------------------------
 
-    def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
-        """``agents-remember paseo <command>`` of the checkout, on the sandbox settings."""
-        argv = [
+    def paseo_argv(self, checkout: Path, command: str) -> list[str]:
+        return [
             self.build_python(checkout).as_posix(),
             "-m",
             "agents_remember.cli",
@@ -180,7 +182,14 @@ class Operations:
             "--config",
             self.layout.settings_file.as_posix(),
         ]
-        done = self.run(argv, cwd=self.layout.root, timeout=timeout)
+
+    def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
+        """``agents-remember paseo <command>`` of the checkout, on the sandbox settings."""
+        argv = self.paseo_argv(checkout, command)
+        if command == "provision" and self.held_lock is not None:
+            done = self._run_sharing_lock(argv, self.held_lock, f"paseo {command}", timeout)
+        else:
+            done = self.run(argv, cwd=self.layout.root, timeout=timeout)
         try:
             report = json.loads(done.stdout)
         except ValueError:
@@ -188,6 +197,40 @@ class Operations:
         if not isinstance(report, dict):
             raise StepFailed(f"paseo {command}", f"no report from the command: {done.tail}")
         return report
+
+    def _run_sharing_lock(
+        self, argv: Sequence[str], held: HeldLock, name: str, timeout: float
+    ) -> Completed:
+        """Run a child that keeps the sandbox locked for as long as it runs.
+
+        Provision installs and starts things for minutes. Were the command that started it
+        killed, the lock would go with it and a second provision could run beside the first; the
+        child inherits the locked file instead, and the holder record names it.
+        """
+        cwd = self.layout.root
+        try:
+            process = subprocess.Popen(
+                list(argv),
+                cwd=cwd,
+                env=child_environment(self.environment, cwd),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                pass_fds=(held.fileno(),),
+            )
+        except OSError as error:
+            return Completed(127, "", str(error))
+        held.note_child(name, process.pid)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            return Completed(124, "", f"timed out after {timeout:g} s")
+        finally:
+            held.note_child(name, None)
+        return Completed(process.returncode, stdout, stderr)
 
     def paseo_supervisor(self) -> ProcessIdentity | None:
         """The running daemon of the sandbox's Paseo home, proven from its own process record."""
@@ -217,9 +260,10 @@ class Operations:
     def spawn_dashboard(self, checkout: Path) -> ProcessIdentity:
         """Start the dashboard detached, in a session of its own, logging to the sandbox."""
         self.layout.run_dir.mkdir(parents=True, exist_ok=True)
+        argv = self.dashboard_argv(checkout)
         with open(self.layout.dashboard_log, "ab") as log:
             process = subprocess.Popen(
-                self.dashboard_argv(checkout),
+                argv,
                 cwd=self.layout.root,
                 env=child_environment(self.environment, self.layout.root),
                 stdin=subprocess.DEVNULL,
@@ -227,7 +271,7 @@ class Operations:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        identity = read_identity(process.pid)
+        identity = started_identity(process.pid, argv)
         if identity is None:
             raise StepFailed("dashboard", "the dashboard exited at once", self.layout.dashboard_log)
         return identity
