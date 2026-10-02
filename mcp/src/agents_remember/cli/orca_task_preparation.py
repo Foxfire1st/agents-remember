@@ -306,8 +306,7 @@ def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
 def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
     """The contract path of a leaf's enclosure, derived from the leaf document alone.
 
-    The same derivation opens `_ensure_leaf_enclosure`, which goes on to create the enclosure; a
-    revive must not, so it is repeated here without that step.
+    Nothing is created here: a launch goes on to open the enclosure, a revive only compares.
     """
 
     if leaf.document.kind != "subTask":
@@ -380,21 +379,8 @@ def _ensure_leaf_enclosure(
     *,
     parent_task: str,
 ) -> tuple[Path, dict[str, Any]]:
-    if leaf.document.kind != "subTask":
-        raise ValueError("Only a canonical leaf can open a leaf enclosure.")
+    contract_path = _leaf_contract_path(leaf)
     task_root = leaf.path.parent
-    expected = leaf_enclosure_path(task_root, leaf.document.id).resolve()
-    if leaf.document.enclosures:
-        enclosure = leaf.document.enclosures[0]
-        if len(leaf.document.enclosures) != 1 or enclosure.leafId != leaf.document.id:
-            raise ValueError("The selected leaf has conflicting enclosure bindings.")
-        contract_path = Path(enclosure.enclosurePath).resolve()
-        if contract_path != expected:
-            raise ValueError(
-                "The selected leaf enclosure does not match its canonical task binding."
-            )
-    else:
-        contract_path = expected
 
     status = worktree_status_tool(
         config,

@@ -216,6 +216,8 @@ class AgentStateScriptTests(unittest.TestCase):
                 state("error", lastError="The model is not supported."),
             ),
             "a session that is starting": (agent("initializing"), state("initializing")),
+            # The runtime's word is passed through as it is, also one this build does not know.
+            "a state with an unknown word": (agent("hibernating"), state("hibernating")),
         }
         for label, (held, expected) in snapshots.items():
             with self.subTest(label):

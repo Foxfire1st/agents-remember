@@ -107,8 +107,7 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
         return {
             **_public_execution(receipt),
             "hostUnreachable": True,
-            "hostUnreachableReason": reading.unreachable_reason
-            or f"the host's answer matches no status row (agent status {reading.lifecycle!r})",
+            "hostUnreachableReason": reading.unreachable_reason,
         }
     before = {field: receipt.get(field) for field in _ROW_FIELDS}
     if row.status is not None:

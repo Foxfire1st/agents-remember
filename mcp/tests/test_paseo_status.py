@@ -13,7 +13,10 @@ from agents_remember.cli import (
     orca_task_preparation,
     orca_task_receipts,
     orca_task_routes,
+    paseo_catalog,
+    paseo_status,
 )
+from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_status import SUMMARY_LIMIT, AgentReading, status_row
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
 from fastapi import HTTPException
@@ -120,7 +123,6 @@ class StatusTableTests(StatusTestCase):
         unreadable: dict[str, dict[str, Any]] = {
             "an agent under another id": {"id": "another-agent"},
             "no status": {"status": None},
-            "a status the table does not name": {"status": "initializing"},
             "an idle agent whose last turn was not read": {"lastTurn": None},
         }
         for label, change in unreadable.items():
@@ -287,6 +289,53 @@ class StatusTableTests(StatusTestCase):
         )
         self.assertNotIn("result", public)
 
+    def test_row_12_an_agent_that_is_starting_keeps_the_status_and_says_so(self) -> None:
+        # Not a row of the packet's table: ruled for the runtime's `initializing`.
+        for previous, state in (
+            ("running", {}),
+            ("completed", {"status": "idle", "lastTurn": REPLIED}),
+        ):
+            with self.subTest(previous=previous):
+                request = self.launched(**state)
+                before = self.refresh(request)
+                self.assertEqual(before["status"], previous)
+                self.agent_of(request)["status"] = "initializing"
+
+                public = self.refresh(request)
+
+                self.assert_row(
+                    public,
+                    request,
+                    status=previous,
+                    detail="the agent is starting",
+                    can_revive=False,
+                )
+                self.assertEqual(public.get("result"), before.get("result"))
+                # Only the detail changed; a second refresh of the same state writes nothing.
+                saved = self.saved(request)
+                self.assertEqual(self.refresh(request), public)
+                self.assertEqual(self.saved(request), saved)
+                self.runtime.agents.clear()
+                self.receipt_path(request).unlink()
+
+    def test_row_13_an_unrecognised_agent_state_keeps_the_status_and_names_it(self) -> None:
+        # Not a row of the packet's table: ruled for a status word this build does not know.
+        request = self.launched(status="idle", lastTurn=REPLIED)
+        before = self.refresh(request)
+        self.agent_of(request)["status"] = "hibernating"
+
+        public = self.refresh(request)
+
+        self.assert_row(
+            public,
+            request,
+            status="completed",
+            detail="unrecognised agent state: hibernating",
+            can_revive=False,
+        )
+        self.assertEqual(public["result"], before["result"])
+        self.assertEqual(public["canStart"], before["canStart"])
+
     def test_the_first_matching_row_decides(self) -> None:
         with self.subTest("closed and archived together is row 3, not row 4"):
             archived = {"status": "closed", "archivedAt": "2026-10-02T01:00:00.000Z"}
@@ -309,6 +358,10 @@ class StatusTableTests(StatusTestCase):
             with self.subTest(row=number):
                 self.assertEqual(status_row(reading, "running").number, number)
         self.assertEqual(status_row(AgentReading(lifecycle="closed"), "completed").number, 5)
+        # The two ruled rows come last: a starting agent with a pending permission is row 6.
+        starting = AgentReading(lifecycle="initializing", pending_permission="Bash")
+        self.assertEqual(status_row(starting, "running").number, 6)
+        self.assertEqual(status_row(AgentReading(lifecycle="initializing"), "running").number, 12)
 
 
 class RefreshTests(StatusTestCase):
@@ -387,6 +440,27 @@ class RefreshTests(StatusTestCase):
         self.assertEqual(held, [True, True])
         self.assertEqual(self.commands().count("agent-state"), 2)
         self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+        with self.subTest("the options route loads the catalog before it takes the lock"):
+            forget_launcher_catalogs()
+            self.runtime.calls.clear()
+            during: list[tuple[str, bool]] = []
+            bridge = self.runtime.__call__
+
+            def watched(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+                during.append((command, orca_task_routes._DISPATCH_LOCK.locked()))
+                return bridge(config, command, payload)
+
+            self.replace(paseo_catalog, "bridge_call", watched)
+            self.replace(paseo_status, "bridge_call", watched)
+            orca_task_routes._orca_options_endpoint(self.config, options)
+            self.assertEqual(during, [("catalog", False), ("agent-state", True)])
+            self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
+            # A failed catalog load leaves the lock free as well.
+            forget_launcher_catalogs()
+            self.runtime.fail("catalog", "paseo_daemon_unreachable")
+            with self.assertRaises(HTTPException):
+                orca_task_routes._orca_options_endpoint(self.config, options)
+            self.assertFalse(orca_task_routes._DISPATCH_LOCK.locked())
         # While another launch or check holds the lock, a refresh refuses and calls nothing.
         self.runtime.calls.clear()
         with orca_task_routes._DISPATCH_LOCK, self.assertRaises(HTTPException) as busy:

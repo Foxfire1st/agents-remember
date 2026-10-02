@@ -1,7 +1,8 @@
 """What the Paseo runtime says about one role agent, and the execution status that follows.
 
 A refresh reads the agent once through the bridge (``agent-state``) and maps the answer through
-one ordered, first-match table (:data:`STATUS_TABLE`, PNT-R07 item 1). The read has no effect on
+one ordered, first-match table (:data:`STATUS_TABLE`: PNT-R07 item 1, followed by the two rows
+ruled for the states that table does not name). The read has no effect on
 the agent. Revive is the one call here that changes anything (``agent-resume``): it opens the
 closed session of the same agent and returns the same kind of answer.
 """
@@ -20,6 +21,8 @@ SUMMARY_LIMIT = 3000
 _TEXT_LIMIT = 800
 # The runtime's word for a live agent whose harness process is not running.
 _CLOSED = "closed"
+# How the last turn of an idle agent ended, in the bridge's words.
+_TURN_STATES = frozenset({"none", "replied", "unreplied"})
 # The receipt statuses of a launch whose turn was still open when the session closed.
 _TURN_OPEN_STATUSES = frozenset({"running", "starting"})
 
@@ -55,7 +58,8 @@ class StatusRow:
     """What one row of the table says about the execution.
 
     ``None`` keeps what the receipt holds: its status, its detail, its ``canRevive`` flag. Only
-    row 10 carries a result summary, and only row 1 marks the host unreachable.
+    row 10 carries a result summary, and only row 1 marks the host unreachable. Rows 12 and 13
+    are not in the packet's table: they keep the status and say what the runtime reports.
     """
 
     number: int
@@ -78,7 +82,8 @@ class _Known:
 _Matches = Callable[[AgentReading, _Known], bool]
 _Outcome = Callable[[AgentReading, _Known], StatusRow]
 
-# PNT-R07 item 1, in table order. The first row whose condition holds decides.
+# PNT-R07 item 1, in table order, then the two ruled rows. The first row whose condition holds
+# decides; the last row holds for every reading, so one always does.
 STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
     (
         lambda reading, _known: not reading.reachable,
@@ -143,23 +148,28 @@ STATUS_TABLE: tuple[tuple[_Matches, _Outcome], ...] = (
         lambda reading, _known: reading.lifecycle == "idle" and reading.last_turn == "none",
         lambda _reading, _known: StatusRow(11, "running", "started; no turn yet", False),
     ),
+    (
+        lambda reading, _known: reading.lifecycle == "initializing",
+        lambda _reading, _known: StatusRow(12, detail="the agent is starting"),
+    ),
+    (
+        lambda _reading, _known: True,
+        lambda reading, _known: StatusRow(
+            13, detail=f"unrecognised agent state: {reading.lifecycle}"
+        ),
+    ),
 )
 
 
 def status_row(
     reading: AgentReading, previous_status: str, resume_refusal: str | None = None
 ) -> StatusRow:
-    """The first row of the table that matches the reading.
-
-    A state the table does not name (the runtime's ``initializing``, or a word this build does not
-    know) is an answer that cannot be read; it is treated as row 1, like an unreachable host.
-    """
+    """The first row of the table that matches the reading."""
 
     known = _Known(previous_status, resume_refusal)
-    for matches, outcome in STATUS_TABLE:
-        if matches(reading, known):
-            return outcome(reading, known)
-    return StatusRow(1, host_unreachable=True)
+    return next(
+        outcome(reading, known) for matches, outcome in STATUS_TABLE if matches(reading, known)
+    )
 
 
 def read_agent(config: McpRuntimeConfig, agent_id: str) -> AgentReading:
@@ -236,6 +246,9 @@ def _reading(reply: dict[str, Any], agent_id: str) -> AgentReading:
     last_turn = agent.get("lastTurn")
     turn_state = last_turn.get("state") if isinstance(last_turn, dict) else None
     final_text = last_turn.get("text") if isinstance(last_turn, dict) else None
+    if turn_state not in _TURN_STATES and lifecycle == "idle" and not agent.get("archivedAt"):
+        # The bridge reads the last turn of every idle agent; without it the reply is incomplete.
+        return _no_answer("the bridge returned an idle agent without its last turn")
     error = agent.get("lastError")
     return AgentReading(
         archived=bool(agent.get("archivedAt")),
@@ -243,7 +256,7 @@ def _reading(reply: dict[str, Any], agent_id: str) -> AgentReading:
         pending_permission=_pending_permission(agent.get("pendingPermissions")),
         turn_active=agent.get("turnActive") is True,
         error=error[:_TEXT_LIMIT] if isinstance(error, str) and error else None,
-        last_turn=turn_state if turn_state in {"none", "replied", "unreplied"} else None,
+        last_turn=turn_state if turn_state in _TURN_STATES else None,
         final_text=final_text if isinstance(final_text, str) else None,
     )
 

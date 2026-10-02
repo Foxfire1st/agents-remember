@@ -148,29 +148,32 @@ def _bind_result_endpoint(config: McpRuntimeConfig):
 def _orca_options_endpoint(
     config: McpRuntimeConfig, request: OrcaLauncherOptionsRequest
 ) -> JSONResponse:
-    _acquire_dispatch_lock()
     try:
         context = resolve_orca_role_context(config, request)
+        # The catalog is loaded, or taken from its cache, before the launch lock is taken: the
+        # lock is held for the receipts and the one bridge call of the refresh, nothing longer.
         response = _launcher_catalog(config, context, request)
-        if request.role in TASKLESS_ROLES:
-            _migrate_taskless_legacy_receipt(config, request)
-            response["executions"] = [
-                _public_execution(receipt)
-                for _path, receipt in _taskless_execution_receipts(config, request)
-            ]
-        else:
-            receipt_path = _receipt_path(config, request)
-            receipt = _read_receipt(receipt_path)
-            response["execution"] = (
-                _refresh_execution(config, receipt_path, receipt) if receipt else None
-            )
+        _acquire_dispatch_lock()
+        try:
+            if request.role in TASKLESS_ROLES:
+                _migrate_taskless_legacy_receipt(config, request)
+                response["executions"] = [
+                    _public_execution(receipt)
+                    for _path, receipt in _taskless_execution_receipts(config, request)
+                ]
+            else:
+                receipt_path = _receipt_path(config, request)
+                receipt = _read_receipt(receipt_path)
+                response["execution"] = (
+                    _refresh_execution(config, receipt_path, receipt) if receipt else None
+                )
+        finally:
+            _DISPATCH_LOCK.release()
         return JSONResponse(response)
     except PaseoBridgeFailure as error:
         raise _bridge_http_error(error) from error
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    finally:
-        _DISPATCH_LOCK.release()
 
 
 def _orca_dispatch_endpoint(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
