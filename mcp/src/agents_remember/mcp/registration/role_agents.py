@@ -100,8 +100,11 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         mid-turn is handed the message in its running turn; that turn is never cancelled, and
         when the host cannot hand a message to a running turn the call is refused as
         recipient-busy. Depending on its harness the recipient takes such a message up in the
-        running turn or in a turn of its own right after it. A recipient whose session is closed
-        is resumed first; an archived or missing recipient is refused and stays as it is.
+        running turn or in a turn of its own right after it. A recipient that waits for a
+        permission decision is refused as recipient-busy, because a message would answer the
+        permission with a denial: the developer answers it in the recipient's chat, then send
+        again. A recipient whose session is closed is resumed first; an archived or missing
+        recipient is refused and stays as it is.
 
         Without wait the call returns status accepted once the host accepted the message. With
         wait it returns when the turn that consumed the message ends: turn-finished with its

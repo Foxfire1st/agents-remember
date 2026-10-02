@@ -96,7 +96,7 @@
 //            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
 //                                     turnId: string | null}
 //                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
-//                           detail: string}}
+//                           detail: string, permissionPending?: true, permission?: string}}
 //            One message to the agent with exactly that id, for a live agent with an open
 //            session only: a missing, archived or closed agent is refused and left as it is,
 //            because the runtime would un-archive or resume it to deliver. An idle agent starts a
@@ -105,7 +105,11 @@
 //            The runtime has no "steer or refuse": for a provider without steering it cancels
 //            the running turn and starts another, and it reports which providers those are only
 //            through their entry in its configuration (they extend its ACP driver). Such a
-//            recipient, and one that is still initializing, is refused as `busy`. `taken` says
+//            recipient, and one that is still initializing, is refused as `busy`. So is an
+//            agent that waits for a permission decision (`permissionPending`, with the name of
+//            the permission when the runtime gives one): the runtime answers every pending
+//            permission of the recipient with a denial when it delivers a message. A permission
+//            the agent asks for between this look and the send is still denied. `taken` says
 //            what the runtime did, read from the turn the agent runs before and after the send;
 //            `replaced` means the runtime cancelled the running turn all the same. `turnId` is
 //            the turn that took the message, when it is still running. `messageId` is the
@@ -578,6 +582,15 @@ async function sendToAgent({ api, daemon }, input) {
   if (nonEmpty(before.archivedAt)) return refused('archived', 'the agent is archived')
   if (before.status === CLOSED_SESSION) return refused('closed', 'the session of the agent is closed')
   if (before.status === 'initializing') return refused('busy', 'the agent is still starting')
+  if (pendingPermission(before) !== null) {
+    const refusal = refused(
+      'busy',
+      'the agent waits for a permission decision, which a message would answer with a denial'
+    )
+    const permission = pendingPermissionName(before)
+    Object.assign(refusal.delivery, { permissionPending: true, ...(permission ? { permission } : {}) })
+    return refusal
+  }
   const running = turnOf(before)
   if (running.active && !(await providerSteers(api, before.provider))) {
     return refused(
@@ -816,7 +829,13 @@ function waitUnavailable(agent) {
 function pendingPermission(agent) {
   const pending = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions : []
   if (pending.length === 0) return null
-  return nonEmpty(pending[0]?.name) ?? nonEmpty(pending[0]?.title) ?? 'a tool'
+  return pendingPermissionName(agent) ?? 'a tool'
+}
+
+// The name the runtime gives the first pending permission of an agent, or null.
+function pendingPermissionName(agent) {
+  const first = Array.isArray(agent?.pendingPermissions) ? agent.pendingPermissions[0] : null
+  return nonEmpty(first?.name) ?? nonEmpty(first?.title) ?? null
 }
 
 // Whether the runtime hands a message to a running turn of this provider. It says so nowhere

@@ -352,6 +352,61 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertNotEqual(first, second)
             self.assertEqual(str(uuid.UUID(second)), second)
 
+    def test_a_recipient_that_waits_for_a_permission_decision_is_not_sent_to(self) -> None:
+        _request, worker = self.started(status="running")
+        pending = [{"id": "perm-1", "name": "Bash", "kind": "tool"}]
+        self.runtime.agents[worker].update(pendingPermissions=pending)
+        self.runtime.calls.clear()
+
+        result = self.refusal(
+            self.message(self.architect, agent_id=worker, wait=True), "recipient-busy"
+        )
+
+        # A message would deny what the developer was asked: it is not sent, and not tried again.
+        self.assertEqual(
+            result["detail"],
+            f"Agent {worker} waits for a permission decision (Bash). A message would answer it "
+            "with a denial, so the message was not delivered.",
+        )
+        self.assertEqual(
+            result["nextAction"],
+            "The developer answers the permission in the recipient's chat; send the message "
+            "again afterwards.",
+        )
+        self.assertEqual((result["recipientAgentId"], result["permission"]), (worker, "Bash"))
+        self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"])
+        self.assertEqual(self.received(worker), [])
+        self.assertEqual(self.runtime.agents[worker]["pendingPermissions"], pending)
+        with self.subTest("the host names no permission"):
+            self.runtime.agents[worker].update(pendingPermissions=[{"id": "perm-2"}])
+            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
+            self.assertIn("waits for a permission decision. A message would", result["detail"])
+            self.assertNotIn("permission", result)
+        with self.subTest("once the permission is answered the message is delivered"):
+            self.runtime.agents[worker].update(pendingPermissions=[])
+            self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
+        with self.subTest("another busy recipient is told to send again later"):
+            self.runtime.agents[worker].update(steers=False, received=[])
+            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
+            self.assertIn("left running", result["nextAction"])
+            self.assertNotIn("permission", result["detail"])
+
+    def test_a_task_bound_execution_that_says_stopped_is_found_while_its_agent_is_live(
+        self,
+    ) -> None:
+        # The agent's last turn was cancelled: the execution is closed, the agent is not gone.
+        request, worker = self.started(status="idle")
+        self.assertEqual(self.close_execution(request, "stopped")["status"], "stopped")
+        self.runtime.calls.clear()
+
+        result = self.message(self.architect, role="worker", **selection_of("worker"))
+
+        self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", worker))
+        self.assertEqual(len(self.received(worker)), 1)
+        self.assertEqual(
+            [command for command, _p in self.runtime.calls], ["agent-state", "agent-send"]
+        )
+
     def test_a_closed_session_is_resumed_first_under_the_scope_check_of_revive(self) -> None:
         request, worker = self.started(status="closed")
         self.runtime.calls.clear()

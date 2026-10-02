@@ -286,6 +286,40 @@ class AgentSendScriptTests(RoleBridgeScriptTestCase):
                 # Nothing was sent: the runtime would un-archive or resume the agent to deliver.
                 self.assertEqual(self.recorded(), [READ])
 
+    def test_an_agent_that_waits_for_a_permission_decision_is_not_sent_to(self) -> None:
+        # The runtime answers every pending permission with a denial when it delivers a message.
+        named = {"id": "perm-1", "provider": "steering", "name": "Bash", "kind": "tool"}
+        cases = {
+            "the runtime names the permission": ([named], {"permission": "Bash"}),
+            "it gives a title only": (
+                [{"id": "perm-2", "title": "Edit file"}],
+                {"permission": "Edit file"},
+            ),
+            "it names nothing": ([{"id": "perm-3"}], {}),
+            "several are pending: the first is named": (
+                [named, {"id": "p", "name": "Edit"}],
+                {"permission": "Bash"},
+            ),
+        }
+        for label, (pending, name) in cases.items():
+            with self.subTest(label):
+                held = agent("running", activeTurn=TURN, pendingPermissions=pending)
+                self.assertEqual(
+                    self.send(holds=held),
+                    {
+                        "delivered": False,
+                        "refused": "busy",
+                        "detail": "the agent waits for a permission decision, which a message "
+                        "would answer with a denial",
+                        "permissionPending": True,
+                        **name,
+                    },
+                )
+                # Nothing was sent, so the permission is still the developer's to answer.
+                self.assertEqual(self.recorded(), [READ])
+        with self.subTest("a refusal for another reason says nothing of a permission"):
+            self.assertNotIn("permissionPending", self.send(holds=agent("initializing")))
+
     def test_an_idle_agent_starts_a_turn_and_a_running_turn_takes_the_message_up(self) -> None:
         options = {"messageId": MESSAGE_ID, "activeTurnBehavior": "steer"}
         other_turn = {"turnId": "turn-8", "startedAt": "2026-10-02T01:05:00.000Z"}

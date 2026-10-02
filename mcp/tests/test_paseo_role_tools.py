@@ -23,6 +23,7 @@ from agents_remember.application.agent_binding import (
 )
 from agents_remember.application.orca_task_context import selection_binding
 from agents_remember.cli import (
+    orca_task_preparation,
     orca_task_receipts,
     orca_task_routes,
     paseo_catalog,
@@ -147,12 +148,21 @@ class RoleToolsTestCase(StatusTestCase):
             if agent["archivedAt"]
             else ("closed", "the session of the agent is closed")
             if agent["status"] == "closed"
+            else ("busy", "the agent waits for a permission decision")
+            if agent.get("pendingPermissions")
             else ("busy", "the agent is mid-turn and cannot take a message up")
             if agent["status"] == "running" and agent.get("steers") is False
             else None
         )
         if refusal is not None:
-            delivery = {"delivered": False, "refused": refusal[0], "detail": refusal[1]}
+            delivery: dict[str, Any] = {
+                "delivered": False,
+                "refused": refusal[0],
+                "detail": refusal[1],
+            }
+            if refusal[1].endswith("permission decision"):
+                name = agent["pendingPermissions"][0].get("name") if agent else None
+                delivery.update(permissionPending=True, **({"permission": name} if name else {}))
             return {"serverId": SERVER_ID, "delivery": delivery}
         assert agent is not None
         running = agent["status"] == "running"
@@ -691,6 +701,91 @@ class RoleStartTests(RoleToolsTestCase):
         # agent is read once.
         self.assertEqual(self.runtime.calls, [("agent-state", {"agentId": first["agentId"]})])
         self.assertEqual(len(self.enclosures.start_calls), 1)
+
+
+class OtherStarterTests(RoleToolsTestCase):
+    """What another starter's execution means for a start: its request id is not taken over."""
+
+    def test_a_new_start_on_a_selection_whose_closed_execution_another_began_is_admitted(
+        self,
+    ) -> None:
+        self.runtime.fail("agent-create", "paseo_call_failed", "parent agent is not loaded")
+        rejected = self.start(self.architect, "worker")
+        self.assertEqual((rejected["status"], self.runtime.agents), ("rejected", {}))
+        other = binding("architect")
+
+        fresh = self.start(other, "worker")
+
+        self.assertEqual(
+            (fresh["ok"], fresh["status"], fresh["parentAgentId"]),
+            (True, "running", other.agent_id),
+        )
+        self.assertNotEqual(fresh["requestId"], rejected["requestId"])
+        self.assertEqual(list(self.runtime.agents), [fresh["agentId"]])
+        with self.subTest("a closed execution the launcher began"):
+            dashboard, old_agent = self.started("manager", status="idle")
+            self.close_execution(dashboard, "completed")
+            fresh = self.start(self.architect, "manager")
+            self.assertEqual(
+                (fresh["status"], fresh["parentAgentId"]), ("running", self.architect.agent_id)
+            )
+            self.assertNotEqual(fresh["agentId"], old_agent)
+
+    def test_a_receipt_of_another_starter_that_appears_during_a_start_is_not_taken_over(
+        self,
+    ) -> None:
+        other = binding("architect")
+
+        def competitor(request_id: uuid.UUID) -> dict[str, Any]:
+            """The receipt another process wrote for the same request id on behalf of ``other``."""
+
+            return {
+                "schema": "ar-orca-native-execution/v1",
+                "requestId": str(request_id),
+                "role": "manager",
+                "status": "starting",
+                "parentAgentId": other.agent_id,
+                "execution": {},
+            }
+
+        def refused_start(request_id: uuid.UUID) -> None:
+            refused = self.refusal(
+                self.start(self.architect, "manager", request_id=request_id), "launch-refused"
+            )
+            self.assertEqual(
+                refused["detail"],
+                f"This request id belongs to an execution that agent {other.agent_id} started; "
+                f"agent {self.architect.agent_id} did not start it and cannot repeat it.",
+            )
+            path = self.receipt_path(self.request("manager", request_id))
+            self.assertEqual(json.loads(path.read_text("utf-8")), competitor(request_id))
+            self.assertEqual((self.runtime.launch_calls(), self.runtime.agents), ([], {}))
+            path.unlink()
+
+        with self.subTest("while the handover is compiled"):
+            request_id = uuid.uuid4()
+            path = self.receipt_path(self.request("manager", request_id))
+            compile_handover = self.compile_handover
+
+            def appears_first(request: OrcaHandoverRequest) -> dict[str, Any]:
+                self.assertTrue(orca_task_receipts._create_receipt(path, competitor(request_id)))
+                return compile_handover(request)
+
+            with patch.object(orca_task_preparation, "_compile_handover", appears_first):
+                refused_start(request_id)
+        with self.subTest("when the creation of the receipt is lost to it"):
+            request_id = uuid.uuid4()
+            path = self.receipt_path(self.request("manager", request_id))
+            place = orca_task_routes._place_message_binding_projection
+
+            def created_first(*args: Any) -> bool:
+                self.assertTrue(orca_task_receipts._create_receipt(path, competitor(request_id)))
+                return place(*args)
+
+            with patch.object(
+                orca_task_routes, "_place_message_binding_projection", side_effect=created_first
+            ):
+                refused_start(request_id)
 
 
 class ReusedRequestIdTests(RoleToolsTestCase):

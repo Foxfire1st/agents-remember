@@ -771,6 +771,19 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
 def _undelivered(agent_id: str, delivery: dict[str, Any]) -> _Refused:
     reason = delivery.get("refused")
     detail = str(delivery.get("detail") or "")
+    if reason == "busy" and delivery.get("permissionPending") is True:
+        # The host answers a pending permission with a denial when it delivers a message.
+        name = delivery.get("permission")
+        named = f" ({name})" if isinstance(name, str) and name else ""
+        return _Refused(
+            "recipient-busy",
+            f"Agent {agent_id} waits for a permission decision{named}. A message would answer "
+            "it with a denial, so the message was not delivered.",
+            "The developer answers the permission in the recipient's chat; send the message "
+            "again afterwards.",
+            recipientAgentId=agent_id,
+            **({"permission": name} if named else {}),
+        )
     if reason == "busy":
         return _Refused(
             "recipient-busy",

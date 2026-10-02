@@ -442,6 +442,29 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
                 self.assertEqual(forbidden_in(text), [])
                 self.assertIn("Only a role agent that AR launched can call this", text)
         self.assertIn("in Paseo", described["role_start"])
+        told = {name: " ".join(text.split()) for name, text in described.items()}
+        for name, sentence in (
+            ("role_start", "Only the agent that started an execution repeats its request_id."),
+            ("role_start", "Starts run one at a time."),
+            (
+                "role_message",
+                "When the host cannot say which turn consumed the message, the call returns "
+                "accepted without a text and detail says that the reply must be read later.",
+            ),
+            (
+                "role_message",
+                "A reply to a message delivered during a turn can be the running turn's text; "
+                "detail says so then.",
+            ),
+            (
+                "role_message",
+                "A recipient that waits for a permission decision is refused as recipient-busy, "
+                "because a message would answer the permission with a denial: the developer "
+                "answers it in the recipient's chat, then send again.",
+            ),
+        ):
+            with self.subTest(tool=name, sentence=sentence[:40]):
+                self.assertIn(sentence, told[name])
         self.assertIn(
             '"From <role> · <task id or Projects> · agent <sender agent id>"',
             described["role_message"],
