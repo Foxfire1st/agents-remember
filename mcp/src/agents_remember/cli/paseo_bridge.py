@@ -34,6 +34,7 @@ _SCRIPT_DEADLINE_MS = 55_000
 _SERVER_ID_FILE = "server-id"
 _CODE_LIMIT = 100
 _MESSAGE_LIMIT = 800
+_STDERR_TAIL = 200
 
 RUNTIME_NOT_CONFIGURED = PaseoRuntimeNotConfigured.code
 DAEMON_UNREACHABLE = "paseo_daemon_unreachable"
@@ -85,7 +86,7 @@ def bridge_call(
         raise PaseoBridgeFailure(
             BRIDGE_UNAVAILABLE, f"The Paseo bridge could not be started: {error}"
         ) from error
-    return _bridge_reply(command, completed.returncode, completed.stdout)
+    return _bridge_reply(command, completed)
 
 
 def require_bridge_runtime(config: McpRuntimeConfig) -> PaseoRuntimeSettings:
@@ -137,18 +138,14 @@ def _configured_server_id(settings: PaseoRuntimeSettings) -> str:
     return server_id
 
 
-def _bridge_reply(command: str, returncode: int, stdout: str) -> dict[str, Any]:
+def _bridge_reply(command: str, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     try:
-        reply = json.loads(stdout)
+        reply = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise PaseoBridgeFailure(
-            BRIDGE_INVALID_REPLY, f"The Paseo bridge call {command!r} returned an unreadable reply."
-        ) from error
+        raise _unreadable_reply(command, completed) from error
     if not isinstance(reply, dict):
-        raise PaseoBridgeFailure(
-            BRIDGE_INVALID_REPLY, f"The Paseo bridge call {command!r} returned an unreadable reply."
-        )
-    if returncode == 0 and reply.get("ok") is not False:
+        raise _unreadable_reply(command, completed)
+    if completed.returncode == 0 and reply.get("ok") is not False:
         return reply
     error = reply.get("error")
     if isinstance(error, dict):
@@ -157,3 +154,15 @@ def _bridge_reply(command: str, returncode: int, stdout: str) -> dict[str, Any]:
             str(error.get("message") or "The Paseo runtime refused the call.")[:_MESSAGE_LIMIT],
         )
     raise PaseoBridgeFailure(BRIDGE_REFUSED, "The Paseo runtime refused the call.")
+
+
+def _unreadable_reply(
+    command: str, completed: subprocess.CompletedProcess[str]
+) -> PaseoBridgeFailure:
+    """The script printed no JSON object; the end of its standard error says why it died."""
+
+    message = f"The Paseo bridge call {command!r} returned an unreadable reply."
+    tail = (completed.stderr or "").strip()[-_STDERR_TAIL:]
+    if tail:
+        message += f" Its standard error ended with: {tail}"
+    return PaseoBridgeFailure(BRIDGE_INVALID_REPLY, message[:_MESSAGE_LIMIT])
