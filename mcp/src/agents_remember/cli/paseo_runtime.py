@@ -10,7 +10,8 @@ so they never fall back to a discovered settings file.
 
 Exit status: 0 when the command did what it reports; 1 when a step failed (the document's
 ``error`` names the step and carries Paseo's text); 2 when the command refused before doing
-anything, because the settings are unusable or hold no ``paseoRuntime`` block.
+anything, because the settings are unusable or hold no ``paseoRuntime`` block. Every failure ends
+in that document and one of those codes, never in a traceback.
 """
 
 from __future__ import annotations
@@ -64,13 +65,24 @@ def run(args: argparse.Namespace) -> int:
         return _refuse(error.code, str(error))
     except ConfigError as error:
         return _refuse("settings_invalid", str(error))
+    except OSError as error:
+        return _refuse("settings_unreadable", f"cannot read {args.config}: {error}")
     _help_text, operation = _COMMANDS[args.paseo_command]
     try:
         report = operation(settings)
     except PaseoRuntimeFailure as failure:
         report = {"ok": False, "error": failure.as_payload()}
+    except OSError as error:
+        report = _failed("filesystem_error", args.paseo_command, str(error))
+    except Exception as error:
+        # The contract is one JSON document per run; an unforeseen failure still honours it.
+        report = _failed("unexpected_error", args.paseo_command, f"{type(error).__name__}: {error}")
     print(json.dumps(report, indent=2))
     return 0 if report["ok"] else 1
+
+
+def _failed(code: str, step: str, message: str) -> dict[str, Any]:
+    return {"ok": False, "error": PaseoRuntimeFailure(code, step, message).as_payload()}
 
 
 def _refuse(code: str, message: str) -> int:

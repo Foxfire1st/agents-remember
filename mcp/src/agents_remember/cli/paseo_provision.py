@@ -8,7 +8,9 @@ Order is what makes an interrupted pass converge on the next one. A new version 
 the old install and activated only after it reports the pinned version. A running daemon is
 stopped before a start-only setting is written and started after it, so a daemon is never left
 running on settings the file no longer holds. The plugin stamp is written after the plugin
-loaded, so a copy that was replaced but never loaded is loaded by the next pass.
+loaded, so a copy that was replaced but never loaded is loaded by the next pass. The provider
+entries are written into the daemon's configuration file, never onto a command line, and the
+file they replace is kept until Paseo has accepted the new one.
 """
 
 from __future__ import annotations
@@ -28,10 +30,17 @@ from agents_remember.cli.paseo_command import (
     CommandRunner,
     PaseoCli,
     PaseoRuntimeFailure,
+    parse_json_output,
     paseo_error_text,
     run_command,
 )
 from agents_remember.cli.paseo_daemon import is_running, plugin_entry
+from agents_remember.cli.paseo_daemon_config import (
+    PROVIDER_ENTRIES,
+    accept_provider_entries,
+    restore_previous_config,
+    write_provider_entries,
+)
 from agents_remember.cli.paseo_plugin_files import (
     PLUGIN_ID,
     installed_plugin_path,
@@ -77,7 +86,7 @@ def daemon_settings(settings: PaseoRuntimeSettings) -> tuple[DaemonSetting, ...]
         DaemonSetting("features.dictation.enabled", False, "start"),
         DaemonSetting("features.voiceMode.enabled", False, "start"),
         DaemonSetting("pluginsEnabled", True, "live"),
-        DaemonSetting("agents.providers", settings.providers, "live"),
+        DaemonSetting(PROVIDER_ENTRIES, settings.providers, "live"),
     )
 
 
@@ -122,6 +131,7 @@ def provision_runtime(
     run = _Run(settings, PaseoCli(settings, runner), plugin_source or plugin_source_root(), probe)
     failure: PaseoRuntimeFailure | None = None
     try:
+        _restore_unfinished_provider_write(run)
         _ensure_install(run)
         _converge_daemon(run)
     except PaseoRuntimeFailure as error:
@@ -141,6 +151,14 @@ def provision_runtime(
         "changes": run.changes,
         "error": None if failure is None else failure.as_payload(),
     }
+
+
+def _restore_unfinished_provider_write(run: _Run) -> None:
+    """Undo a provider write an earlier pass did not finish, before any Paseo call reads the file."""
+    run.step = "config"
+    if restore_previous_config(run.settings.home):
+        run.change("config", "restored", path=PROVIDER_ENTRIES)
+    run.step = "install"
 
 
 def _daemon_action(run: _Run) -> str:
@@ -265,7 +283,7 @@ def _converge_daemon(run: _Run) -> None:
 def _pending_settings(run: _Run) -> list[DaemonSetting]:
     run.step = "config"
     document = run.cli.json("config", "daemon", "config", "get", "--json")
-    current = document.get("value") if isinstance(document, dict) else None
+    current = document.get("value")
     return [
         setting
         for setting in daemon_settings(run.settings)
@@ -282,9 +300,14 @@ def _configured_value(current: object, setting: DaemonSetting) -> Any:
 
 
 def _require_listen_address(run: _Run, running: dict[str, Any] | None) -> None:
-    """Refuse before anything is started or stopped when another process holds the address."""
+    """Refuse before anything is started or stopped when another process holds the address.
+
+    A running daemon of this home that already listens on the configured port is the holder
+    itself: it keeps the port or is restarted onto it, so there is nothing to probe. If another
+    process takes the address between that stop and the start, Paseo's own refusal reports it.
+    """
     settings = run.settings
-    if running is not None and running.get("listen") == settings.listen:
+    if running is not None and _port_of(running.get("listen")) == settings.listen_port:
         return
     refused = run.probe(settings.listen_host, settings.listen_port)
     if refused is None:
@@ -297,6 +320,11 @@ def _require_listen_address(run: _Run, running: dict[str, Any] | None) -> None:
         f"the listen address {settings.listen} cannot be bound; nothing was started",
         str(refused),
     )
+
+
+def _port_of(listen: object) -> int | None:
+    port = listen.rsplit(":", 1)[-1] if isinstance(listen, str) else ""
+    return int(port) if port.isdecimal() else None
 
 
 def _port_in_use(settings: PaseoRuntimeSettings, detail: str) -> PaseoRuntimeFailure:
@@ -327,16 +355,53 @@ def _apply_settings(run: _Run, pending: list[DaemonSetting], running: bool) -> l
     late: list[str] = []
     for setting in pending:
         run.step = "config"
-        response = run.cli.json(
-            "config", "daemon", "config", "set", setting.path, json.dumps(setting.value)
-        )
-        run.change("config", "set", path=setting.path, value=setting.value, applies=setting.applies)
-        required = response.get("restartRequiredPaths") if isinstance(response, dict) else None
+        if setting.path == PROVIDER_ENTRIES:
+            response = _apply_provider_entries(run, setting, running)
+        else:
+            response = run.cli.json(
+                "config", "daemon", "config", "set", setting.path, json.dumps(setting.value)
+            )
+            run.change(
+                "config", "set", path=setting.path, value=setting.value, applies=setting.applies
+            )
+        required = response.get("restartRequiredPaths")
         if running and any(
-            path == setting.path or path.startswith(setting.path + ".") for path in required or []
+            path == setting.path or path.startswith(setting.path + ".")
+            for path in (required if isinstance(required, list) else [])
+            if isinstance(path, str)
         ):
             late.append(f"setting:{setting.path}")
     return late
+
+
+def _apply_provider_entries(run: _Run, setting: DaemonSetting, running: bool) -> dict[str, Any]:
+    """Write the provider entries into the daemon's file and have Paseo take them from there.
+
+    Their values never appear on a command line or in the report, which names the ids only. A
+    running daemon reloads the file; for a stopped one Paseo reads the file back, which validates
+    it. If Paseo refuses the file, the previous one is put back.
+    """
+    home = run.settings.home
+    write_provider_entries(home, setting.value)
+    args = ("daemon", "reload", "--json") if running else ("daemon", "config", "get", "--json")
+    result = run.cli.call(*args)
+    if result.returncode != 0:
+        restore_previous_config(home)
+        raise PaseoRuntimeFailure(
+            "provider_entries_refused",
+            "config",
+            "Paseo refused the provider entries; the daemon configuration is unchanged",
+            paseo_error_text(result),
+        )
+    accept_provider_entries(home)
+    run.change(
+        "config",
+        "set",
+        path=setting.path,
+        providerIds=sorted(setting.value),
+        applies=setting.applies,
+    )
+    return parse_json_output("config", args, result) if running else {}
 
 
 def _sync_home_files(run: _Run) -> None:
@@ -405,10 +470,15 @@ def _ensure_plugin(run: _Run, kept_running: bool) -> None:
 
 
 def _plugin_command(run: _Run, action: str, *args: str) -> str | None:
-    """Run one plugin lifecycle command; a load failure is judged from the plugin's state."""
+    """Run one plugin lifecycle command; a load failure is judged from the plugin's state.
+
+    The change is recorded only when the command succeeded; a failure returns Paseo's text.
+    """
     result = run.cli.call("plugin", *args, "--json")
+    if result.returncode != 0:
+        return paseo_error_text(result)
     run.change("plugin", action)
-    return None if result.returncode == 0 else paseo_error_text(result)
+    return None
 
 
 def _embed_digest(settings: PaseoRuntimeSettings) -> str:

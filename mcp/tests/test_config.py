@@ -162,7 +162,33 @@ class McpConfigTests(unittest.TestCase):
             ]
             invalid += [
                 ({**block, "version": version}, "one exact Paseo version")
-                for version in ("^0.11.0-beta.2", "~0.11.0", ">=0.11.0", "0.11", "0.11.x", "beta")
+                for version in (
+                    "^0.11.0-beta.2",
+                    "~0.11.0",
+                    ">=0.11.0",
+                    "0.11",
+                    "0.11.x",
+                    "beta",
+                    "0.11.0 || 0.12.0",
+                    "0.11.0 - 0.12.0",
+                    "0.11.0-beta.2+build",
+                    "v0.11.0-beta.2",
+                    " 0.11.0-beta.2 ",
+                )
+            ]
+            # A dashboard origin must be spelled the way a browser reports it.
+            invalid += [
+                (
+                    {**block, "embed": [{**block["embed"][0], "dashboardOrigin": spelling}]},
+                    "exactly as a browser reports it",
+                )
+                for spelling in (
+                    "HTTP://127.0.0.1:9797",
+                    "http://LocalHost:9797",
+                    "http://localhost:80",
+                    "https://fox.example.ts.net:443",
+                    "http://b\u00fccher.example",
+                )
             ]
             for candidate, message in invalid:
                 payload["paseoRuntime"] = candidate
