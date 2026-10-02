@@ -12,12 +12,17 @@
 //   catalog  {refresh?: boolean}
 //            -> {runtime: {serverId, version},
 //                providers: [{id, label, models: [{id, label, description?, isDefault?,
-//                             efforts: [{id, label}], defaultEffort?}], listingError?}]}
+//                             efforts: [{id, label}], defaultEffort?}], listingError?,
+//                             acceptsToolServers?: false}]}
 //            The providers the runtime reports as ready and enabled, each with the models and
 //            thinking options the runtime lists for it. `refresh` asks the runtime to rediscover
 //            its providers first. A provider whose model listing fails keeps its row, with no
 //            models and the runtime's error text; so does a provider the runtime is still
 //            discovering when the discovery time is up, provided another provider is ready.
+//            `acceptsToolServers: false` marks a provider whose entry in the runtime's
+//            configuration declares that it takes no tool servers from its host
+//            (`options.supportsMcpServers: false`); the runtime refuses to create an agent with
+//            tool servers for such a provider.
 //
 //   workspace-open  {cwd: string}
 //            -> {serverId, workspace: {id, directory, name, projectId, projectKind}}
@@ -26,7 +31,8 @@
 //            passes a resolved path.
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
-//                  title, labels, prompt?}
+//                  title, labels, prompt?, systemPrompt?,
+//                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
 //            -> {serverId, existing: boolean, agent: AGENT, creationError?}
 //            One agent under the caller's agent id (a UUID) in that workspace's directory, with
 //            the provider's default permission mode. An agent that already has the id is returned
@@ -36,7 +42,11 @@
 //            `paseo_call_failed`. Without `model` the creation goes through the daemon client
 //            (below), because the public client requires a provider/model pair; the provider
 //            then applies its own default model. `prompt` is the first message; without it the
-//            agent is created idle.
+//            agent is created idle. `systemPrompt` and `mcpServers` are stored by the runtime
+//            with the agent and applied again whenever it resumes the agent's session: the text
+//            is added to the provider's system-level instructions where the provider has such,
+//            and each tool server is started for the agent with exactly the given command and
+//            environment.
 //
 //   agent-get  {agentId: string}
 //            -> {serverId, agent: AGENT | null}
@@ -161,10 +171,15 @@ async function readCatalog({ api, daemon, deadline }, input) {
   if (daemon.getConnectionState().status !== 'connected') {
     throw failure('paseo_daemon_unreachable', 'The connection to the Paseo daemon was lost while reading the catalog.')
   }
+  // What the runtime reports about tool servers before an agent exists is the provider's entry
+  // in its configuration.
+  const entries = (await api.config?.get())?.config?.providers ?? {}
   const info = daemon.getLastServerInfoMessage()
   return {
     runtime: { serverId: info.serverId, version: typeof info.version === 'string' ? info.version : null },
-    providers
+    providers: providers.map((row) =>
+      entries[row.id]?.options?.supportsMcpServers === false ? { ...row, acceptsToolServers: false } : row
+    )
   }
 }
 
@@ -272,14 +287,41 @@ function agentCreation(input, agentId) {
     labels: requiredLabels(input)
   }
   const title = requiredText(input, 'title')
-  const thinking = thinkingOptionId ? { thinkingOptionId } : {}
+  const systemPrompt = optionalText(input, 'systemPrompt')
+  const mcpServers = input.mcpServers ?? null
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const wellFormed =
+    mcpServers === null ||
+    (isRecord(mcpServers) &&
+      Object.values(mcpServers).every(
+        (server) =>
+          isRecord(server) &&
+          server.type === 'stdio' &&
+          nonEmpty(server.command) &&
+          Array.isArray(server.args) &&
+          server.args.every((argument) => typeof argument === 'string') &&
+          isRecord(server.env) &&
+          Object.values(server.env).every((value) => typeof value === 'string')
+      ))
+  if (!wellFormed) {
+    throw failure(
+      'invalid_bridge_payload',
+      'The Paseo bridge payload needs mcpServers as stdio definitions with command, args and env.'
+    )
+  }
+  // What the runtime keeps with the agent and applies again on every resume of its session.
+  const kept = {
+    ...(thinkingOptionId ? { thinkingOptionId } : {}),
+    ...(systemPrompt ? { systemPrompt } : {}),
+    ...(mcpServers ? { mcpServers } : {})
+  }
   return {
     async create(api, daemon) {
       const workspace = api.workspaces.ref(workspaceId)
       if (model) {
         const handle = await workspace.agents.create({
           ...shared,
-          config: { provider: `${provider}/${model}`, ...thinking },
+          config: { provider: `${provider}/${model}`, ...kept },
           title,
           ...(prompt ? { prompt } : {})
         })
@@ -289,7 +331,7 @@ function agentCreation(input, agentId) {
       if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
       return await daemon.createAgent({
         ...shared,
-        config: { provider, cwd, title, ...thinking },
+        config: { provider, cwd, title, ...kept },
         workspaceId,
         ...(prompt ? { initialPrompt: prompt } : {})
       })

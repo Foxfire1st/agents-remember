@@ -5,15 +5,25 @@ execution receipt. Running the stored call again converges on the same agent: th
 the agent that already carries the id. The call is three bridge commands in a fixed order: archive
 the agent of the execution this launch replaces (when there is one), obtain the workspace of the
 role's folder, and create the agent in it.
+
+The call also carries what the agent is given beside its first message: one tool-server
+definition, the tool server of this build under a fixed name with the agent's binding in its
+environment, and a short recovery note for the agent's system-level instructions. Both are the
+same for every provider; the definition is left out only for a provider the runtime reports as
+not accepting tool servers.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import agents_remember
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
 from agents_remember.application.orca_task_context import OrcaRoleContext
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_INVALID_REPLY,
@@ -22,6 +32,7 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.worktrees.modules.quality.dagger_authority import HOST_REGISTRY_ROOT_ENV
 
 PASEO_AGENT_KIND = "paseo-agent"
 # The labels every role agent carries; a task reference is `<repository>/<document path>`.
@@ -33,6 +44,23 @@ TASK_LABEL = "ar.task-ref"
 # Paseo's limit for a title the caller sets.
 _TITLE_LIMIT = 200
 _TEXT_LIMIT = 800
+# The module that starts this build's tool server.
+_TOOL_SERVER_MODULE = "agents_remember.mcp"
+RECOVERY_NOTE_LIMIT = 600
+# A shortened part of a task reference keeps its leading id, at most this many characters of it.
+_LONGEST_LEADING_ID = 12
+# Variables that say where a process of this build may write: no index lock and no bytecode in
+# the checkout it runs from, its own terminal multiplexer, its own registry of quality tools. A
+# harness need not pass its environment on, so the definition carries each of them when the
+# launching process has it, and never a value of its own.
+_CARRIED_VARIABLES = (
+    "GIT_OPTIONAL_LOCKS",
+    "PYTHONPYCACHEPREFIX",
+    "TMUX_TMPDIR",
+    HOST_REGISTRY_ROOT_ENV,
+)
+TOOL_SERVER_APPLIED = "tool server applied"
+TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +121,207 @@ class RoleLaunch:
     folder: str
     provider: str
     session_options: dict[str, str]
+    # The first message exactly as the agent receives it: the artifact line, then the content.
     prompt: str
+    # The file the agent is told to write its report to.
+    report_path: str
+    # The reference of the handover artifact that holds the compiled first message.
+    handover_artifact: dict[str, Any]
+    # The settings file this build was started with; its tool server is started with the same.
+    settings_file: Path
+    # What the runtime reports about the provider.
+    accepts_tool_servers: bool = True
     # The agent of the closed execution this launch replaces on its selection.
     replaces_agent_id: str | None = None
+
+
+def agent_binding(launch: RoleLaunch) -> AgentBinding:
+    """The agent id, role, task references, request id and report path of one launch."""
+
+    context = launch.context
+    return AgentBinding(
+        agent_id=launch.agent_id,
+        role=context.role,
+        request_id=str(launch.request_id),
+        report_path=launch.report_path,
+        sprint_ref=context.sprint.ref if context.sprint else None,
+        master_ref=context.master.ref if context.master else None,
+        task_ref=context.task.ref if context.task else None,
+    )
+
+
+def tool_server_definition(settings_file: Path, binding: AgentBinding) -> dict[str, Any]:
+    """The tool server of this build, started with this build's source and settings.
+
+    It is the interpreter that runs this process, the tool server's module, and the settings file
+    this process was started with. The interpreter is told not to put the working directory on
+    its module search path: the server starts in the agent's folder, and nothing in that folder
+    may stand in for the build or for a module the build imports. The source path variable is
+    always set: to this build's source tree when the package is a checkout outside the
+    interpreter's own installation, and to nothing when the interpreter's own installation holds
+    it, so that no inherited value puts another source tree in front.
+    """
+
+    interpreter = sys.executable
+    if not interpreter:
+        raise ValueError("This process cannot name its Python interpreter for the tool server.")
+    package = launching_source_root()
+    installed = package.is_relative_to(Path(sys.prefix).resolve())
+    kept = {name: os.environ[name] for name in _CARRIED_VARIABLES if os.environ.get(name)}
+    return {
+        "type": "stdio",
+        "command": interpreter,
+        "args": ["-P", "-m", _TOOL_SERVER_MODULE, "--config", settings_file.as_posix()],
+        "env": {
+            "PYTHONPATH": "" if installed else package.parent.as_posix(),
+            **kept,
+            **binding.environment(),
+        },
+    }
+
+
+def launching_source_root() -> Path:
+    """The package directory of this build, as its ``server_info`` reports it."""
+
+    return Path(agents_remember.__file__).resolve().parent
+
+
+def recovery_note(context: OrcaRoleContext, artifact: dict[str, Any]) -> str:
+    """Role, task references, and where the complete first message is stored; no task content.
+
+    The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The artifact's path and SHA-256
+    are always complete; task references that would not fit are shortened (``_fitted``).
+    """
+
+    references = [
+        (label, document.ref.key)
+        for label, document in (
+            ("Sprint", context.sprint),
+            ("Master", context.master),
+            ("Task", context.task),
+        )
+        if document is not None
+    ]
+
+    def note(keys: list[str]) -> str:
+        named = [f"{label} {key}." for (label, _key), key in zip(references, keys, strict=True)]
+        return " ".join(
+            [
+                f"AR role agent: {context.role}.",
+                *(named or ["No task reference."]),
+                f"Assignment file: {artifact['path']} (SHA-256 {artifact['sha256']}).",
+                "Reload that file whenever your assignment is not in your context.",
+            ]
+        )
+
+    keys = [key for _label, key in references]
+    text = note(_fitted(keys, RECOVERY_NOTE_LIMIT - len(note(["" for _key in keys]))))
+    if len(text) > RECOVERY_NOTE_LIMIT:
+        raise ValueError(
+            f"The recovery note of this launch cannot name its handover artifact within "
+            f"{RECOVERY_NOTE_LIMIT} characters; the artifact path is too long."
+        )
+    return text
+
+
+def _fitted(references: list[str], room: int) -> list[str]:
+    """The references as the note names them in ``room`` characters: whole, or shortened.
+
+    The others are shortened before the most specific reference, the last one: it stays whole
+    while the others can still be named in their shortest form, and is cut only by what is then
+    still missing. A less specific reference may end at its task folder, whose document it
+    names: its document name is given up before any folder's slug is cut, and comes back only
+    when every folder is whole and the name fits whole.
+    """
+
+    lengths = [len(reference) for reference in references]
+    if not references or sum(lengths) <= room:
+        return references
+    others, last = references[:-1], references[-1]
+    floors = [len(_shortened(reference, 0, ends_at_folder=True)) for reference in others]
+    folders = [
+        len(_shortened(reference, len(reference) - 1, ends_at_folder=True)) for reference in others
+    ]
+    shortest = len(_shortened(last, 0, ends_at_folder=False))
+    specific = min(len(last), max(room - sum(floors), shortest))
+    widths = _shares(room - specific, floors, folders)
+    spare = room - specific - sum(widths)
+    for index in reversed(range(len(others))):
+        missing = lengths[index] - widths[index]
+        if widths[index] == folders[index] and 0 < missing <= spare:
+            widths[index], spare = lengths[index], spare - missing
+    return [
+        *(
+            _shortened(reference, width, ends_at_folder=True)
+            for reference, width in zip(others, widths, strict=True)
+        ),
+        _shortened(last, specific, ends_at_folder=False),
+    ]
+
+
+def _shares(room: int, floors: list[int], caps: list[int]) -> list[int]:
+    """Divide ``room`` among parts that each take at least their floor and at most their cap.
+
+    The parts that need least are served first, so what they leave over goes to the others.
+    """
+
+    widths = list(floors)
+    spare = room - sum(floors)
+    wanting = sorted(
+        (index for index in range(len(caps)) if caps[index] > floors[index]),
+        key=lambda index: caps[index] - floors[index],
+    )
+    for served, index in enumerate(wanting):
+        grant = min(caps[index] - floors[index], max(spare, 0) // (len(wanting) - served))
+        widths[index] += grant
+        spare -= grant
+    return widths
+
+
+def _shortened(reference: str, width: int, *, ends_at_folder: bool) -> str:
+    """``reference`` in at most ``width`` characters, or in its shortest form if that is longer.
+
+    The repository name stays whole. A part with a slug, a task folder or a numbered document,
+    keeps at least its leading id and ends in an ellipsis where its slug was cut; the slugs get
+    the room first. A part without a slug is never cut inside: it is whole, or at its shortest,
+    or, as the document of a reference that may end at its folder, left out.
+    """
+
+    if len(reference) <= width:
+        return reference
+    repository, *parts = reference.split("/")
+    shortest = [
+        ""
+        if ends_at_folder and index == len(parts) - 1 and index > 0 and "_" not in part
+        else part
+        if len(_leading_id(part)) + 1 >= len(part)
+        else f"{_leading_id(part)}…"
+        for index, part in enumerate(parts)
+    ]
+    slugs = [index for index, part in enumerate(parts) if "_" in part]
+    plain = sum(len(shortest[index]) + 1 for index in range(len(parts)) if shortest[index])
+    slug_floor = sum(len(shortest[index]) for index in slugs)
+    granted = _shares(
+        width - len(repository) - plain + slug_floor,
+        [len(shortest[index]) for index in slugs],
+        [len(parts[index]) for index in slugs],
+    )
+    texts = list(shortest)
+    for index, size in zip(slugs, granted, strict=True):
+        texts[index] = parts[index] if size >= len(parts[index]) else f"{parts[index][: size - 1]}…"
+    spare = width - len(repository) - sum(len(text) + 1 for text in texts if text)
+    for index, part in enumerate(parts):
+        missing = len(part) - len(texts[index]) + (0 if texts[index] else 1)
+        if index not in slugs and 0 < missing <= spare:
+            texts[index], spare = part, spare - missing
+    return "/".join([repository, *(text for text in texts if text)])
+
+
+def _leading_id(part: str) -> str:
+    """What identifies a folder or document among its siblings: the text before its slug."""
+
+    head = part.split("_", 1)[0] if "_" in part else part.split(".", 1)[0]
+    return head[:_LONGEST_LEADING_ID]
 
 
 def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
@@ -103,7 +329,8 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
 
     Model and effort go to the runtime as its model and thinking option; no permission mode is
     named, so the provider's default applies. A launch without a model leaves the choice to the
-    provider. The first message is plain data in the call.
+    provider. The first message, the recovery note and the tool-server definition are plain data
+    in the call, so a repeat sends exactly what the first run sent.
     """
 
     agent: dict[str, Any] = {
@@ -113,7 +340,12 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         "labels": agent_labels(launch.context, launch.request_id),
         "provider": launch.provider,
         "prompt": launch.prompt,
+        "systemPrompt": recovery_note(launch.context, launch.handover_artifact),
     }
+    if launch.accepts_tool_servers:
+        agent["mcpServers"] = {
+            TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
+        }
     if launch.session_options.get("model"):
         agent["model"] = launch.session_options["model"]
     if launch.session_options.get("effort"):
@@ -123,6 +355,29 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         "workspace": {"cwd": launch.folder},
         "agent": agent,
     }
+
+
+def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
+    """What a launch call gives the agent beside its first message, as the receipt records it."""
+
+    agent = call["agent"]
+    definition = (agent.get("mcpServers") or {}).get(TOOL_SERVER_NAME)
+    if definition is None:
+        tool_server = {
+            "name": TOOL_SERVER_NAME,
+            "applied": False,
+            "detail": TOOL_SERVER_NOT_SUPPORTED,
+        }
+    else:
+        tool_server = {
+            "name": TOOL_SERVER_NAME,
+            "applied": True,
+            "detail": TOOL_SERVER_APPLIED,
+            "command": [definition["command"], *definition["args"]],
+            "environment": dict(definition["env"]),
+            "sourceRoot": launching_source_root().as_posix(),
+        }
+    return {"toolServer": tool_server, "recoveryNote": agent["systemPrompt"]}
 
 
 def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOutcome:

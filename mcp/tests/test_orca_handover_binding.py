@@ -336,6 +336,20 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         },
                     )
                     self.assertIn("task_context", handover["nativeOrca"]["arMcpUsage"])
+                    # The handover names the one server to use for AR tools, and no other.
+                    self.assertEqual(handover["nativeOrca"]["arToolServer"], "agents-remember-task")
+                    for sentence in (
+                        "Use the tool server named agents-remember-task for every Agents "
+                        "Remember tool",
+                        "An AR tool server under any other name belongs to another AR "
+                        "installation; do not use it for this assignment.",
+                        "After a start or a resume a tool server can take some seconds to "
+                        "appear: if a call to agents-remember-task is not available, make the "
+                        "call once more before reporting the server missing, and report that "
+                        "instead of substituting another.",
+                    ):
+                        self.assertIn(sentence, handover["nativeOrca"]["arMcpUsage"])
+                    self.assertNotIn("existing shared", prepared["prompt"])
                     self.assertNotIn("nativeMcpScope", handover)
                     self.assertEqual(
                         handover["nativeOrca"]["guidesOnDemand"],

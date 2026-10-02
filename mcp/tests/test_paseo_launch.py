@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,7 @@ from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from fastapi import HTTPException
+from paseo_launch_test_support import GivenToAgentExpectations
 
 REPO = "agents-remember"
 SERVER_ID = "srv_configured"
@@ -73,8 +75,9 @@ CATALOG: dict[str, Any] = {
                 }
             ],
         },
-        # A provider that reports no models is launched without one.
-        {"id": "eve", "label": "Eve", "models": []},
+        # A provider that reports no models is launched without one. The runtime reports this one
+        # as taking no tool servers from its host.
+        {"id": "eve", "label": "Eve", "models": [], "acceptsToolServers": False},
     ],
 }
 LAUNCH_COMMANDS = {"agent-archive", "workspace-open", "agent-create"}
@@ -243,7 +246,7 @@ def resolved_document(
     return ResolvedTaskDocument(ref=ref, path=path, document=document)
 
 
-class PaseoLaunchTestCase(unittest.TestCase):
+class PaseoLaunchTestCase(GivenToAgentExpectations):
     """The dispatch route against a fake bridge; capsule compilation is stubbed, the rest is real."""
 
     def setUp(self) -> None:
@@ -272,6 +275,25 @@ class PaseoLaunchTestCase(unittest.TestCase):
         self.replace(orca_task_preparation, "_compile_handover", self.compile_handover)
         self.replace(orca_task_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"})
         self.replace(orca_task_preparation, "_role_defaults", return_value=ROLE_DEFAULTS)
+        # The source tree of the launching build, as a checkout outside the interpreter has it.
+        self.source = self.root / "build" / "src" / "agents_remember"
+        self.replace(paseo_launch, "launching_source_root", return_value=self.source)
+        # A launch writes no harness configuration; the user's home is watched for one as well.
+        # The launching process has both variables that keep a process from writing into the
+        # checkout it runs from.
+        (self.root / "home").mkdir()
+        home = patch.dict(
+            os.environ,
+            {
+                "HOME": (self.root / "home").as_posix(),
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
+            },
+        )
+        home.start()
+        self.addCleanup(home.stop)
+        for absent in ("TMUX_TMPDIR", "AR_DAGGER_AUTHORITY_ROOT"):
+            os.environ.pop(absent, None)
 
     def replace(self, target: Any, name: str, *replacement: Any, **mock: Any) -> Any:
         patcher = patch.object(target, name, *replacement, **mock)
@@ -409,7 +431,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 f"coordination/tasks/{REPO}/master/notes/reports/paseo-native-executions/",
             ),
         }
-        observed: list[tuple[str, Any, Any]] = []
+        observed: list[tuple[str, Any, Any, bool]] = []
         for role, (folder, title, task_labels, receipt_directory) in expected.items():
             with self.subTest(role):
                 request = self.request(role)
@@ -422,9 +444,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 self.assertEqual(self.enclosures.start_calls, [])
                 self.runtime.calls.clear()
                 path = self.receipt_path(request)
-                self.runtime.observer = lambda command, payload, path=path: observed.append(
-                    (command, json.loads(path.read_text(encoding="utf-8")), payload)
-                )
+                self.watch_launch(path, observed)
 
                 status, public = self.dispatch(request)
 
@@ -432,6 +452,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 opened, created = self.runtime.launch_calls()
                 self.assertEqual(opened, ("workspace-open", {"cwd": folder}))
                 agent_id = created[1]["agentId"]
+                definition, note = self.given_to_agent(request, agent_id, task_labels)
                 self.assertEqual(
                     created,
                     (
@@ -449,7 +470,9 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                                 "ar.request-id": str(request.request_id),
                                 **task_labels,
                             },
-                            "prompt": self.prompt,
+                            "prompt": self.first_message(request),
+                            "systemPrompt": note,
+                            "mcpServers": {"agents-remember-task": definition},
                         },
                     ),
                 )
@@ -471,16 +494,29 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 )
                 self.assertEqual(receipt["workspace"]["path"], folder)
                 self.assertNotIn("replayRequest", receipt)
+                self.assert_applied_is_recorded(request, definition, note)
                 self.assertTrue(
                     path.relative_to(self.root).as_posix().startswith(receipt_directory)
                 )
                 self.runtime.agents.clear()
-        # The receipt was on disk, with the agent id, before each call to the runtime.
+        # The receipt and the artifact were on disk, with the agent id, before each call to the
+        # runtime.
         self.assertEqual(len(observed), 8)
-        for _command, saved, payload in observed:
+        for _command, saved, payload, stored in observed:
             self.assertEqual(saved["status"], "starting")
             self.assertEqual(saved["replayRequest"]["agent"]["agentId"], saved["agentId"])
             self.assertEqual(payload.get("agentId", saved["agentId"]), saved["agentId"])
+            self.assertTrue(stored)
+        # Beside receipts and message bindings a launch writes its artifact and nothing else: no
+        # harness configuration file, in the folders it uses or in the user's home.
+        self.assertEqual(
+            sorted(
+                path.relative_to(self.root).as_posix()
+                for path in self.root.rglob("*")
+                if path.is_file() and "-native-executions" not in path.as_posix()
+            ),
+            sorted({f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}),
+        )
         # One workspace per folder, asked for by directory; AR created the leaf's enclosure.
         self.assertEqual(
             self.runtime.workspaces, {projects: "wks_1", self.enclosures.group.as_posix(): "wks_2"}
@@ -730,6 +766,19 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
             self.assertNotIn("model", created)
             self.assertNotIn("thinkingOptionId", created)
             self.assertEqual(self.receipt(request)["agent"], {"id": "eve", "model": "eve-default"})
+            # The runtime reports that this provider takes no tool servers: the definition is
+            # left out, the receipt says so, and note and artifact line are sent all the same.
+            self.assertNotIn("mcpServers", created)
+            self.assertEqual(
+                self.receipt(request)["toolServer"],
+                {
+                    "name": "agents-remember-task",
+                    "applied": False,
+                    "detail": "tool server not applied: not supported by provider",
+                },
+            )
+            self.assertEqual(created["systemPrompt"], self.receipt(request)["recoveryNote"])
+            self.assertEqual(created["prompt"], self.first_message(request))
             self.assertEqual(
                 (public["canStart"], public["canRetry"], public["canRevive"]), (True, False, False)
             )
@@ -782,7 +831,9 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
                 self.assertEqual((status, public["status"]), (202, "unknown"))
                 self.assertIn(code, public["detail"])
                 self.assertEqual(receipt["replayRequest"]["agent"]["agentId"], receipt["agentId"])
-                self.assertEqual(receipt["replayRequest"]["agent"]["prompt"], self.prompt)
+                self.assertEqual(
+                    receipt["replayRequest"]["agent"]["prompt"], self.first_message(request)
+                )
                 self.assertNotIn("hostAgentExists", receipt)
                 self.assertEqual((public["canStart"], public["canRetry"]), (False, True))
                 self.assertEqual(
@@ -802,12 +853,17 @@ class LaunchOutcomeTests(PaseoLaunchTestCase):
         self.runtime.fail("agent-create", "paseo_bridge_timeout")
 
         self.assertEqual(self.dispatch(request)[0], 202)
-        self.assertEqual(self.receipt(request)["replayRequest"]["agent"]["prompt"], self.prompt)
+        receipt = self.receipt(request)
+        self.assertEqual(receipt["replayRequest"]["agent"]["prompt"], self.first_message(request))
+        self.assertEqual(receipt["handoverArtifact"]["bytes"], 300_000)
+        self.assertEqual(
+            Path(receipt["handoverArtifact"]["path"]).read_bytes(), self.prompt.encode("utf-8")
+        )
         status, public = self.dispatch(request)
 
         self.assertEqual((status, public["status"]), (200, "running"))
         first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
-        self.assertEqual(first["prompt"], self.prompt)
+        self.assertEqual(first["prompt"], self.first_message(request))
         self.assertEqual(second, first)
 
 

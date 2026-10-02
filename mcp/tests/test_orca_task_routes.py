@@ -212,6 +212,9 @@ class MessageBindingProjectionTests(unittest.TestCase):
                         return_value=("codex", {"model": "gpt-5.6-luna"}, ()),
                     ),
                     patch.object(orca_task_preparation, "_compile_handover", return_value=prepared),
+                    patch.object(
+                        orca_task_routes, "provider_accepts_tool_servers", return_value=True
+                    ),
                     patch.object(orca_task_routes, "_receipt_path", return_value=receipt_path),
                     patch.object(orca_task_routes, "_execute_prepared_launch", side_effect=execute),
                 ):

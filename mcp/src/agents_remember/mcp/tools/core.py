@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.application.agent_binding import read_agent_binding
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
@@ -34,6 +35,8 @@ def ping_payload() -> dict[str, Any]:
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
+    # A server that a role launch started for one agent says which agent and which AR work.
+    binding = read_agent_binding()
     return _tool_payload(
         "server_info",
         {
@@ -53,6 +56,7 @@ def server_info_payload(
             "tools": list(PUBLIC_TOOLS),
             "reservedTools": list(RESERVED_TOOLS),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
+            **({"agentBinding": binding.as_report()} if binding is not None else {}),
         },
     )
 

@@ -26,6 +26,7 @@ from agents_remember.application.orca_task_context import (
     OrcaRoleContext,
     selection_binding,
 )
+from agents_remember.cli.orca_handover_artifacts import restore_handover_artifact
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
@@ -67,6 +68,11 @@ def _execute_prepared_launch(
             status_code=409,
             detail="The unresolved launch has no saved launch call; reconcile the Paseo runtime before retrying.",
         )
+    artifact = receipt.get("handoverArtifact")
+    if isinstance(artifact, dict):
+        # The first message names this file; it must hold that message whenever it is sent.
+        _rebind_report_access(receipt)
+        restore_handover_artifact(artifact, _saved_first_message(launch_call))
     outcome = run_launch_call(config, launch_call)
     if outcome.kind == "created":
         receipt["execution"] = outcome.execution
@@ -108,6 +114,35 @@ def _execute_prepared_launch(
     )
     _write_receipt(path, receipt)
     return JSONResponse(_public_execution(receipt), status_code=202)
+
+
+def _rebind_report_access(receipt: dict[str, Any]) -> None:
+    """Put a leaf's report-access link back when it is gone, as its first launch created it.
+
+    A leaf agent is given its report and its artifact through that link, and a retry does not
+    pass through the preparation that binds it. Only a missing link is created; whatever else
+    is at its name is left to the artifact check, which then refuses and says why.
+    """
+
+    workspace = receipt.get("workspace")
+    if not isinstance(workspace, dict):
+        return
+    access = workspace.get("taskReportAccessRoot")
+    reports = workspace.get("taskReportRoot")
+    if not isinstance(access, str) or not isinstance(reports, str):
+        return
+    link = Path(access)
+    if link.is_symlink() or link.exists() or not link.parent.is_dir() or not Path(reports).is_dir():
+        return
+    link.symlink_to(reports, target_is_directory=True)
+
+
+def _saved_first_message(launch_call: dict[str, Any]) -> str:
+    agent = launch_call.get("agent")
+    message = agent.get("prompt") if isinstance(agent, dict) else None
+    if not isinstance(message, str):
+        raise ValueError("The saved launch call has no first message for its handover artifact.")
+    return message
 
 
 def _replaced_agent_id(receipt: dict[str, Any]) -> str | None:
