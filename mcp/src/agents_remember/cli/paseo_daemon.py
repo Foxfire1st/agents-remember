@@ -3,7 +3,9 @@
 Both commands address the daemon only through ``paseo <command> --home <home>``, so Paseo
 identifies the process by that home's own process record (``paseo.pid``). Nothing here looks a
 process up by port or signals one itself: a daemon of another home is never touched, even when
-it listens on the configured address.
+it listens on the configured address. Because Paseo signals whatever live process the record
+names, the record is first proven to name this home's supervisor (``paseo_process_record``); a
+stale record is reported, and stop removes it, without anything being signalled.
 """
 
 from __future__ import annotations
@@ -20,9 +22,15 @@ from agents_remember.cli.paseo_command import (
     run_command,
 )
 from agents_remember.cli.paseo_plugin_files import PLUGIN_ID, read_embed
+from agents_remember.cli.paseo_process_record import (
+    PROCESS_RECORD,
+    ProcessReader,
+    RecordState,
+    inspect_record,
+    read_process,
+    remove_stale_record,
+)
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
-
-PROCESS_RECORD = "paseo.pid"
 
 
 def is_running(status: dict[str, Any]) -> bool:
@@ -38,23 +46,19 @@ def plugin_entry(cli: PaseoCli, step: str) -> dict[str, Any] | None:
 
 
 def runtime_status(
-    settings: PaseoRuntimeSettings, *, runner: CommandRunner = run_command
+    settings: PaseoRuntimeSettings,
+    *,
+    runner: CommandRunner = run_command,
+    reader: ProcessReader = read_process,
 ) -> dict[str, Any]:
     """Whether the configured home's daemon runs and, when it does, what it runs with."""
     cli = PaseoCli(settings, runner)
-    status = _home_record(cli, "status", ("daemon", "status", "--json"))
+    record = inspect_record(settings.home, "status", reader)
+    status = None
+    if record.kind != "stale":
+        status = _home_record(cli, "status", ("daemon", "status", "--json"))
     if status is None or not is_running(status):
-        return {
-            "ok": True,
-            "home": settings.home.as_posix(),
-            "running": False,
-            "version": None,
-            "serverId": None,
-            "listen": None,
-            "plugin": None,
-            "embed": None,
-            "providers": None,
-        }
+        return _not_running(settings, record)
     return {
         "ok": True,
         "home": settings.home.as_posix(),
@@ -69,6 +73,23 @@ def runtime_status(
             for provider in status.get("providers") or []
             if isinstance(provider, dict)
         ],
+        "staleRecord": None,
+    }
+
+
+def _not_running(settings: PaseoRuntimeSettings, record: RecordState) -> dict[str, Any]:
+    """The status of a home without a daemon; a stale process record is named, not removed."""
+    return {
+        "ok": True,
+        "home": settings.home.as_posix(),
+        "running": False,
+        "version": None,
+        "serverId": None,
+        "listen": None,
+        "plugin": None,
+        "embed": None,
+        "providers": None,
+        "staleRecord": record.as_payload(),
     }
 
 
@@ -84,11 +105,23 @@ def _plugin_state(cli: PaseoCli) -> dict[str, Any]:
 
 
 def stop_runtime(
-    settings: PaseoRuntimeSettings, *, runner: CommandRunner = run_command
+    settings: PaseoRuntimeSettings,
+    *,
+    runner: CommandRunner = run_command,
+    reader: ProcessReader = read_process,
 ) -> dict[str, Any]:
-    """Stop the daemon of the configured home; "not running" when it has none."""
+    """Stop the daemon of the configured home; "not running" when it has none.
+
+    A process record that does not name this home's supervisor is removed and nothing is
+    signalled: the process it names belongs to someone else.
+    """
     cli = PaseoCli(settings, runner)
-    record = _home_record(cli, "stop", ("daemon", "stop", "--json"))
+    stale = inspect_record(settings.home, "stop", reader)
+    record = None
+    if stale.kind == "stale":
+        remove_stale_record(settings.home)
+    else:
+        record = _home_record(cli, "stop", ("daemon", "stop", "--json"))
     action = "not_running" if record is None else record.get("action")
     if action not in {"stopped", "not_running"}:
         raise PaseoRuntimeFailure(
@@ -100,6 +133,7 @@ def stop_runtime(
         "home": settings.home.as_posix(),
         "action": "stopped" if stopped else "not running",
         "pid": record.get("pid") if record is not None and stopped else None,
+        "staleRecord": stale.as_payload(),
     }
 
 
