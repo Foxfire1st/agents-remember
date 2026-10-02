@@ -17,10 +17,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .environment import removed_names, sandbox_environment
+from .environment import child_environment, removed_names, sandbox_environment
 from .layout import LOOPBACK, SandboxLayout, SandboxRefusal
-from .procfs import ProcessIdentity, read_identity
-from .record import read_record, verified_supervisor
+from .procfs import ProcessIdentity, environment, read_identity
+from .record import verified_supervisor
 
 HELPERS = Path(__file__).resolve().parent
 TOOLING_CHECKOUT = HELPERS.parents[1]
@@ -83,7 +83,7 @@ class Operations:
             done = subprocess.run(
                 list(argv),
                 cwd=cwd,
-                env=self.environment,
+                env=child_environment(self.environment, cwd),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -191,8 +191,11 @@ class Operations:
 
     def paseo_supervisor(self) -> ProcessIdentity | None:
         """The running daemon of the sandbox's Paseo home, proven from its own process record."""
-        recorded = ProcessIdentity.from_record(read_record(self.layout).get("paseo"))
-        return verified_supervisor(self.layout.paseo_home, recorded)
+        return verified_supervisor(self.layout.paseo_home)
+
+    def process_environment(self, pid: int) -> dict[str, str] | None:
+        """The environment a running process was started with; ``None`` when not readable."""
+        return environment(pid)
 
     # --- the dashboard ----------------------------------------------------------------------
 
@@ -218,7 +221,7 @@ class Operations:
             process = subprocess.Popen(
                 self.dashboard_argv(checkout),
                 cwd=self.layout.root,
-                env=self.environment,
+                env=child_environment(self.environment, self.layout.root),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,

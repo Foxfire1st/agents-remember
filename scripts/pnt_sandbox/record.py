@@ -3,10 +3,11 @@
 Two records exist. The dashboard is recorded by ``start`` in the sandbox's own process record.
 The Paseo runtime is recorded by Paseo itself in its home (``paseo.pid``), which is how the stop
 command of PNT-R01 addresses it; the home lies inside the sandbox directory, so its daemon is the
-sandbox's own whichever provision run started it. Either record is trusted only after the
-recorded process id is shown, from ``/proc``, to belong to the same process: the dashboard by
-start time and command line, the supervisor by command line and by either its recorded start
-time or its own environment naming this home.
+sandbox's own whichever provision run started it. Neither record is trusted on its word. The
+recorded process id must be shown, from ``/proc``, to belong to the same process: the dashboard
+by start time, command line, working directory and boot; the supervisor by its command line and
+by its own environment naming this home. A Paseo record that fails this is stale and is deleted
+before any runtime command reads it.
 """
 
 from __future__ import annotations
@@ -19,25 +20,31 @@ from typing import Any
 from .layout import SandboxLayout
 from .procfs import (
     ProcessIdentity,
-    environment_value,
+    boot_id,
+    environment,
     is_running,
     lineage,
     port_holders,
     read_identity,
+    working_directory,
 )
 
 RECORD_SCHEMA = "pnt-sandbox-processes/v1"
 PASEO_PROCESS_RECORD = "paseo.pid"
 SUPERVISOR_COMMAND = "Paseo Supervisor"
 PASEO_HOME_VARIABLE = "PASEO_HOME"
+DASHBOARD_COMMAND = ("agents_remember.cli", "dashboard", "--config")
 
 
 def read_record(layout: SandboxLayout) -> dict[str, Any]:
+    """The process record of this boot; a record of an earlier boot names nothing."""
     try:
         record = json.loads(layout.process_record.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(record, dict) or record.get("schema") != RECORD_SCHEMA:
+        return {}
+    if record.get("bootId") != boot_id():
         return {}
     return record
 
@@ -45,16 +52,45 @@ def read_record(layout: SandboxLayout) -> dict[str, Any]:
 def write_record(layout: SandboxLayout, record: dict[str, Any]) -> None:
     layout.run_dir.mkdir(parents=True, exist_ok=True)
     staged = layout.process_record.with_suffix(".json.new")
-    staged.write_text(
-        json.dumps({"schema": RECORD_SCHEMA, **record}, indent=2) + "\n", encoding="utf-8"
-    )
+    document = {**record, "schema": RECORD_SCHEMA, "bootId": boot_id()}
+    staged.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     staged.replace(layout.process_record)
+
+
+def is_sandbox_dashboard(pid: int, layout: SandboxLayout) -> bool:
+    """Whether a running process is a dashboard of this sandbox, judged by what it is.
+
+    Its command line runs the build's dashboard on this sandbox's settings file and its working
+    directory is the sandbox directory.
+    """
+    identity = read_identity(pid)
+    if identity is None:
+        return False
+    wanted = (*DASHBOARD_COMMAND, layout.settings_file.as_posix())
+    argv = identity.argv
+    runs_dashboard = any(argv[index : index + len(wanted)] == wanted for index in range(len(argv)))
+    cwd = working_directory(pid)
+    return runs_dashboard and cwd is not None and cwd.resolve() == layout.root.resolve()
 
 
 def recorded_dashboard(layout: SandboxLayout) -> ProcessIdentity | None:
     """The dashboard ``start`` recorded, when that very process is still running."""
     identity = ProcessIdentity.from_record(read_record(layout).get("dashboard"))
-    return identity if is_running(identity) else None
+    if identity is None or not is_running(identity):
+        return None
+    return identity if is_sandbox_dashboard(identity.pid, layout) else None
+
+
+def unrecorded_dashboards(layout: SandboxLayout, known: ProcessIdentity | None) -> list[int]:
+    """Dashboards of this sandbox that hold a reserved port and that the record does not name."""
+    holders = {*port_holders(layout.dashboard_port), *port_holders(layout.paseo_port)}
+    return sorted(
+        pid
+        for pid in holders
+        if pid is not None
+        and (known is None or pid != known.pid)
+        and is_sandbox_dashboard(pid, layout)
+    )
 
 
 def paseo_record_pid(home: Path) -> int | None:
@@ -66,26 +102,36 @@ def paseo_record_pid(home: Path) -> int | None:
     return pid if isinstance(pid, int) else None
 
 
-def verified_supervisor(
-    home: Path, recorded: ProcessIdentity | None = None
-) -> ProcessIdentity | None:
+def verified_supervisor(home: Path) -> ProcessIdentity | None:
     """The supervisor of the daemon of ``home``, when Paseo's record still names that process.
 
-    The named process must carry the supervisor's command line, and one of two things must
-    prove it is this home's: it is exactly the process ``start`` recorded (same start time), or
-    its own environment names this home, which Paseo sets when it starts a supervisor. A process
-    that inherited the id proves neither and is left alone.
+    The named process must carry the supervisor's command line and name this home in its own
+    environment, which Paseo sets when it starts a supervisor. A process that inherited the id
+    shows neither.
     """
     pid = paseo_record_pid(home)
     identity = read_identity(pid) if pid is not None else None
     if identity is None or identity.argv[:1] != (SUPERVISOR_COMMAND,):
         return None
-    if identity == recorded:
-        return identity
-    named_home = environment_value(identity.pid, PASEO_HOME_VARIABLE)
-    if named_home is not None and Path(named_home).resolve() == home.resolve():
-        return identity
-    return None
+    named_home = (environment(identity.pid) or {}).get(PASEO_HOME_VARIABLE)
+    if named_home is None or Path(named_home).resolve() != home.resolve():
+        return None
+    return identity
+
+
+def clear_stale_paseo_record(home: Path) -> int | None:
+    """Delete Paseo's record when it names a process that is not this home's supervisor.
+
+    Returns the process id the stale record named. The PNT-R01 commands address whatever process
+    the record names, so they are never run while a record of this kind exists; the record lies
+    inside the sandbox and names nothing of the sandbox's, so deleting it loses nothing. The named
+    process is not signalled.
+    """
+    pid = paseo_record_pid(home)
+    if pid is None or verified_supervisor(home) is not None:
+        return None
+    (home / PASEO_PROCESS_RECORD).unlink(missing_ok=True)
+    return pid
 
 
 @dataclass(frozen=True)

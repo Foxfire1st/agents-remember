@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from . import fixture
+from .environment import launcher_scrub
 from .layout import (
     INTEGRATION_BRANCH,
     REPOSITORY_ID,
@@ -25,10 +26,14 @@ from .layout import (
     read_marker,
     settings_document,
 )
+from .lock import sandbox_lock
 from .operations import HELPERS, Operations, StepFailed
 
-LAYOUT_VERSION = 1
+# Raised when a rebuild has something to add to sandboxes built earlier: 2 added the Dagger
+# authority directory and the Eve launcher's list of variables an env file may not set.
+LAYOUT_VERSION = 2
 EVE_LAUNCHER_SOURCE = HELPERS / "eve-acp-launcher.mjs"
+EVE_SCRUB_NAME = "removed-variables.json"
 # What the sandbox's Eve application takes from the developer's Eve project. Its connections are
 # left out on purpose: they point the agent at the developer's installed AR tool server.
 EVE_APPLICATION_FILES = ("package.json", "tsconfig.json", "agent/agent.ts", "agent/channels/eve.ts")
@@ -143,6 +148,9 @@ def _seed_eve(layout: SandboxLayout, eve_project: Path) -> Path | None:
         link.symlink_to(dependencies, target_is_directory=True)
     _put(layout.eve_launcher, EVE_LAUNCHER_SOURCE.read_text(encoding="utf-8"))
     layout.eve_launcher.chmod(0o755)
+    # The launcher lays the env file over the sandbox environment; these names it may not set.
+    scrub = json.dumps(launcher_scrub(layout), indent=2) + "\n"
+    _put(layout.eve_launcher.with_name(EVE_SCRUB_NAME), scrub)
     return eve_project / ".env.local"
 
 
@@ -231,11 +239,26 @@ def build(
 ) -> None:
     """Bring the sandbox directory to its built state; every step is safe to repeat."""
     require_sandbox_directory(layout)
+    with sandbox_lock(layout, "build"):
+        build_unlocked(layout, checkout, ops, out, eve_project)
+
+
+def build_unlocked(
+    layout: SandboxLayout, checkout: Path, ops: Operations, out: Out, eve_project: Path
+) -> None:
+    """The build itself, for a caller that already holds the sandbox's lock."""
+    require_sandbox_directory(layout)
     layout.root.mkdir(parents=True, exist_ok=True)
     recorded_eve = eve_project if eve_project.is_dir() else None
     if not is_built(layout):
         _write_marker(layout, "building", recorded_eve)
-    for folder in (layout.projects, layout.harness_skills, layout.run_dir, layout.tmux_dir):
+    for folder in (
+        layout.projects,
+        layout.harness_skills,
+        layout.run_dir,
+        layout.tmux_dir,
+        layout.dagger_authority,
+    ):
         folder.mkdir(parents=True, exist_ok=True)
     layout.tmux_dir.chmod(0o700)
     out(f"repository {layout.repository}: {_seed_repository(layout, ops)}")
