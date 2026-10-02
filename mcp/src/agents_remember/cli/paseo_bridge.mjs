@@ -24,6 +24,11 @@
 //            (`options.supportsMcpServers: false`); the runtime refuses to create an agent with
 //            tool servers for such a provider.
 //
+//   runtime-info  {}
+//            -> {serverId}
+//            The server id of the configured daemon and nothing else. An answer means that the
+//            daemon is reachable and is the configured one; no runtime function is called.
+//
 //   workspace-open  {cwd: string}
 //            -> {serverId, workspace: {id, directory, name, projectId, projectKind}}
 //            The runtime's workspace for the directory: the existing one is reused, otherwise the
@@ -150,6 +155,7 @@ import { pathToFileURL } from 'node:url'
 
 const COMMANDS = {
   catalog: readCatalog,
+  'runtime-info': readRuntimeInfo,
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'agent-get': getAgent,
@@ -306,6 +312,10 @@ function projectModel(model) {
       .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id })),
     ...(nonEmpty(model.defaultThinkingOptionId) ? { defaultEffort: model.defaultThinkingOptionId } : {})
   }
+}
+
+async function readRuntimeInfo({ daemon }) {
+  return { serverId: serverIdOf(daemon) }
 }
 
 async function openWorkspace({ api, daemon }, input) {

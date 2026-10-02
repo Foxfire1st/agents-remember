@@ -90,9 +90,12 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
     response.end(`<!doctype html><html><head><script>
       const policy = document.permissionsPolicy ?? document.featurePolicy;
       const allows = (feature) => Boolean(policy?.allowsFeature?.(feature));
+      const allowlist = (feature) => JSON.stringify(policy?.getAllowlistForFeature?.(feature) ?? null);
       document.documentElement.dataset.policyApi = String(Boolean(policy?.allowsFeature));
       document.documentElement.dataset.clipboardRead = String(allows("clipboard-read"));
       document.documentElement.dataset.clipboardWrite = String(allows("clipboard-write"));
+      document.documentElement.dataset.clipboardReadAllowlist = allowlist("clipboard-read");
+      document.documentElement.dataset.clipboardWriteAllowlist = allowlist("clipboard-write");
     </script></head><body>clipboard policy probe</body></html>`);
   });
   await new Promise<void>((resolve, reject) => {
@@ -102,14 +105,23 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
   const address = frameServer.address();
   if (!address || typeof address === 'string')
     throw new Error('clipboard frame server did not bind TCP');
-  const frameUrl = `http://127.0.0.1:${address.port}/web-index.html`;
+  // The frame route names the base URL for this dashboard origin; the pane builds the frame URL
+  // from it and grants clipboard access to that origin only.
+  const frameOrigin = `http://127.0.0.1:${address.port}`;
+  const frameUrl = `${frameOrigin}/`;
 
   try {
     await page.route('**/api/orca/frame', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ available: true, frameUrl }),
+        body: JSON.stringify({
+          available: true,
+          frameBaseUrl: frameOrigin,
+          serverId: 'srv_clipboard_policy_e2e',
+          projectsWorkspaceId: null,
+          projectsWorkspaceDetail: null,
+        }),
       }),
     );
     await page.route('**/api/orca/launcher/options', (route) =>
@@ -126,11 +138,23 @@ test('Orca chats receives clipboard Permissions Policy in its cross-origin frame
       }),
     );
 
-    await page.goto(scenarioUrl('sessions-fleet-12'));
+    // The application's own page, not a bench scenario: a scenario answers every /api request
+    // from its in-page authority, so the two routes mocked above would never be asked there.
+    await page.goto('/?effects=off');
+    await page.getByRole('radio', { name: 'Chats' }).click();
     const orca = page.frameLocator('iframe[title="Native Orca chats"]');
     await expect(orca.locator('html')).toHaveAttribute('data-policy-api', 'true');
     await expect(orca.locator('html')).toHaveAttribute('data-clipboard-read', 'true');
     await expect(orca.locator('html')).toHaveAttribute('data-clipboard-write', 'true');
+    const embeddedOriginOnly = JSON.stringify([frameOrigin]);
+    await expect(orca.locator('html')).toHaveAttribute(
+      'data-clipboard-read-allowlist',
+      embeddedOriginOnly,
+    );
+    await expect(orca.locator('html')).toHaveAttribute(
+      'data-clipboard-write-allowlist',
+      embeddedOriginOnly,
+    );
 
     await page.evaluate((url) => {
       const control = document.createElement('iframe');
