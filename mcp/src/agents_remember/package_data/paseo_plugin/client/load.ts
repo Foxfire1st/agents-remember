@@ -14,7 +14,11 @@ import type { PluginPage } from "./page";
 //   - one page global shared by every evaluation of the entry in the same page (see page.ts);
 //   - the look a page runs being the one its storage held when the page started: a page inside
 //     a listed frame runs the AR look, a page whose settings did not have to be put back runs
-//     the user's (look.ts lists what the look itself relies on).
+//     the user's (look.ts lists what the look itself relies on);
+//   - `performance.now()` counting from the moment the page began to load, the wall clock
+//     (`Date.now()`) being one clock for every tab, and the app reading its stored settings no
+//     earlier than 50 ms after that moment: together they say whether the stored settings were
+//     written after this page began to load.
 
 // On the page global: one record per page load.
 const LOAD_STATE = "__arPluginLoad";
@@ -23,6 +27,9 @@ const LOAD_STATE = "__arPluginLoad";
 export const RELOAD_FLAG = "ar-plugin:reloading";
 // Where the app sends a deep link while it does not know the serving daemon yet.
 const BOUNCE_PATHS = ["/welcome", "/open-project"];
+// A write this soon after a page began to load came before the app of that page read the store
+// (the app reads it 140 ms and more after the navigation starts).
+const LOAD_BEGIN_MARGIN_MS = 50;
 
 export interface LoadState {
   /** This page is the plugin's own reload, or has already asked for one: no further reload. */
@@ -118,10 +125,32 @@ export function bootstrapEmbed(page: PluginPage, parentOrigin: string): boolean 
 /** At top level, or under a parent that is not listed: give the page the user's own look back. */
 export function takeOwnLookBack(page: PluginPage): void {
   const state = loadState(page);
+  const first = state.usersLook === null;
   const restored = restoreStandaloneLook(page.localStorage);
   // The first answer of a page load stands: what the page runs does not change while it lives.
-  if (state.usersLook === null) state.usersLook = restored.usersLook;
-  if (restored.changed) reloadOnce(page, page.location.href, null);
+  const stale = first && restored.usersLook && writtenSinceLoadBegan(page, restored.at);
+  if (first) state.usersLook = restored.usersLook && !stale;
+  // A stale page loads once more, like one whose look had to be put back. Where that is refused
+  // it stays what it is: a page that does not count as running the user's look.
+  if (restored.changed || stale) reloadOnce(page, page.location.href, null);
+}
+
+/**
+ * Whether the stored settings were written after this page began to load. The app reads them
+ * early in the load and the plugin runs later, so a store that holds the user's look now does
+ * not prove the page started with it: another tab may have put that look back in between (two
+ * standalone tabs opened at the same moment while the store held the AR look). A wrong "yes"
+ * costs one more load; it never makes a page count as running the user's look.
+ */
+function writtenSinceLoadBegan(page: PluginPage, at: number | null): boolean {
+  if (at === null) return false;
+  try {
+    // Both sides from the wall clock; a page's own time origin can lag behind it after a sleep.
+    const began = Date.now() - page.performance.now();
+    return at > began + LOAD_BEGIN_MARGIN_MS;
+  } catch {
+    return false;
+  }
 }
 
 /**

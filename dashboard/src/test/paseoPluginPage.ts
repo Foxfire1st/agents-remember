@@ -59,6 +59,8 @@ export function pageLoad(
     referrer?: string;
     href?: string;
     requested?: string;
+    /** When the page began to load (wall clock, ms); by default the moment the test makes it. */
+    beganAt?: number;
   } = {},
 ) {
   const framedBy = options.framedBy === undefined ? DASHBOARD : options.framedBy;
@@ -77,6 +79,7 @@ export function pageLoad(
   pageWindow.parent = framedBy === null ? pageWindow : parent;
   const replace = vi.fn();
   const url = new URL(href);
+  const beganAt = options.beganAt ?? Date.now();
   let watching: WriteListener | null = null;
   const page: PluginPage = {
     window: pageWindow,
@@ -94,7 +97,11 @@ export function pageLoad(
       replace,
       ...(framedBy !== null && options.ancestorOrigins !== false ? { ancestorOrigins: [framedBy] } : {}),
     },
-    performance: { getEntriesByType: () => [{ name: options.requested ?? href }] },
+    performance: {
+      getEntriesByType: () => [{ name: options.requested ?? href }],
+      // Milliseconds since this page began to load (the test's clock decides how long ago).
+      now: () => Date.now() - beganAt,
+    },
     localStorage: tab.local,
     sessionStorage: tab.session,
     state: {},
@@ -139,6 +146,7 @@ export interface Memory {
   agentListOpen: boolean | null;
   stored: string;
   seen?: Record<string, unknown>;
+  at?: number;
   sidebar?: { stored: string; seen: boolean | null };
 }
 export const memoryOf = (tab: Tab) => tab.local.json(STANDALONE_LOOK_KEY) as Memory | null;

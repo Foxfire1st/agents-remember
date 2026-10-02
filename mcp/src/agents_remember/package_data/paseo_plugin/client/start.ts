@@ -6,7 +6,9 @@ import type { PluginPage } from "./page";
 // it is trusted, and which of the two things follows. The entry file only hands over the page,
 // the plugin's client context and the call that reads the embed list.
 //
-// This file relies on nothing unsupported itself; the files it calls do, and say so.
+// Of the page this file reads one thing itself, `location.origin` (the origin the embed list is
+// checked against; page.ts lists the browser objects). Everything else unsupported is in the
+// files it calls, which say so.
 
 /**
  * Start the client part in `page`. Returns the function that stops it.
@@ -17,6 +19,9 @@ import type { PluginPage } from "./page";
  *   - A frame under any other parent: as a standalone tab, and no channel.
  *   - A frame whose parent is unknown, or a list that cannot be read: nothing at all. Without the
  *     list no parent is trusted.
+ *
+ * In the first three cases the app's writes of its stored settings are watched from then on (the
+ * record of who wrote them); in the last case nothing in the page is touched.
  */
 export function startClientPart(
   page: PluginPage,
@@ -25,20 +30,33 @@ export function startClientPart(
 ): () => void {
   let live = true;
   let removeBridge: (() => void) | null = null;
-  const stopWatching = watchAppWrites(page);
+  let stopWatching: (() => void) | null = null;
+  const load = loadState(page);
+  // The app's writes are watched from the moment the page is known to be a listed frame or not
+  // one; nothing is recorded before that, so nothing is wrapped before that either.
+  const watch = () => {
+    if (live && !stopWatching && load.usersLook !== null) stopWatching = watchAppWrites(page);
+  };
   const dropBridge = () => {
     removeBridge?.();
     removeBridge = null;
   };
+  const ownLook = () => {
+    takeOwnLookBack(page);
+    watch();
+  };
   const embed = (parentOrigin: string) => {
-    if (!live || removeBridge || bootstrapEmbed(page, parentOrigin)) return;
-    removeBridge = installBridge(client, page, parentOrigin);
+    if (!live || removeBridge) return;
+    const leaving = bootstrapEmbed(page, parentOrigin);
+    watch();
+    if (!leaving) removeBridge = installBridge(client, page, parentOrigin);
   };
 
-  const load = loadState(page);
+  // An earlier evaluation in this page settled what the page is: its writes are watched at once.
+  watch();
   const parentOrigin = framingOrigin(page, load.carriedParent);
   if (parentOrigin === null) {
-    takeOwnLookBack(page);
+    ownLook();
   } else if (parentOrigin !== undefined) {
     // A re-evaluation in the same page reuses the answer this page already verified, so the
     // channel has no gap; the list is then asked again.
@@ -53,7 +71,7 @@ export function startClientPart(
         } else {
           load.trustedParent = null;
           dropBridge();
-          takeOwnLookBack(page);
+          ownLook();
         }
       })
       .catch(() => {
@@ -64,6 +82,7 @@ export function startClientPart(
   return () => {
     live = false;
     dropBridge();
-    stopWatching();
+    stopWatching?.();
+    stopWatching = null;
   };
 }
