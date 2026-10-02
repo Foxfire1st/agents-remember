@@ -42,6 +42,8 @@ import {
   type OrcaScopedExecution,
   type OrcaTasklessActiveRequest,
 } from "./orcaLaunchModel";
+import { PaseoChatFrame } from "./PaseoChatFrame";
+import { paseoAgentTarget } from "./paseoFrameModel";
 
 const chatsModeTabs = css({
   display: "flex",
@@ -85,15 +87,6 @@ const orcaPane = css({
   overflow: "hidden",
   border: "1px solid var(--grid)",
   background: "var(--bg-panel)",
-});
-const orcaFrame = css({
-  display: "block",
-  flex: "1",
-  width: "100%",
-  minHeight: "0",
-  minWidth: "0",
-  border: "0",
-  background: "var(--bg)",
 });
 const orcaLauncherGrid = css({
   display: "flex",
@@ -568,9 +561,6 @@ function OrcaChatsPane({
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
 }) {
-  const [frameUrl, setFrameUrl] = useState<string | null>(null);
-  const [frameProblem, setFrameProblem] = useState("Orca's web client is not configured for this dashboard process.");
-  const [frameAttempted, setFrameAttempted] = useState(false);
   const [selection, setSelection] = useState<OrcaLaunchSelection>({ role: "architect" });
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
@@ -691,25 +681,12 @@ function OrcaChatsPane({
     : undefined;
   const selectionComplete = launchSelectionComplete(selection);
 
-  useEffect(() => {
-    if (!active || frameAttempted) return;
-    setFrameAttempted(true);
-    void fetch("/api/orca/frame")
-      .then(async (response) => {
-        if (!response.ok) {
-          setFrameProblem("The dashboard could not reach the Orca web client (HTTP " + response.status + "). Start its owned runtime, then reconnect.");
-          return;
-        }
-        const value = (await response.json()) as { available?: boolean; frameUrl?: unknown };
-        if (value.available && typeof value.frameUrl === "string" && value.frameUrl.trim()) {
-          setFrameUrl(value.frameUrl);
-          setFrameProblem("");
-        } else {
-          setFrameProblem("Start the owned Orca runtime with a local web-client pairing URL, then reconnect.");
-        }
-      })
-      .catch(() => setFrameProblem("The dashboard could not reach the configured Orca web client."));
-  }, [active, frameAttempted]);
+  // The frame follows the execution the launcher bar displays status for. Its host fields are
+  // read from the receipt itself, so the frame is not steered away while launch options reload.
+  const frameScope = useMemo(() => JSON.stringify(currentDocumentScope), [currentDocumentScope]);
+  const frameTarget = paseoAgentTarget(
+    isTasklessOrcaRole(selection.role) ? selectedTasklessExecution : executionReceipt ?? options?.execution,
+  );
 
   useEffect(() => {
     if (!active || !selectionComplete) return;
@@ -1087,21 +1064,7 @@ function OrcaChatsPane({
         onRefreshCatalog={refreshCatalog}
         onRefreshResult={refreshResult}
       />
-      {frameUrl ? (
-        <iframe
-          title="Native Orca chats"
-          src={frameUrl}
-          referrerPolicy="no-referrer"
-          allow="clipboard-read; clipboard-write"
-          allowFullScreen
-          className={orcaFrame}
-        />
-      ) : (
-        <div role="status" style={{ display: "grid", flex: "1", placeItems: "center", minHeight: 0, padding: "1rem", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: "0.78rem", textAlign: "center" }}>
-          Orca mode is selected, but its web client is unavailable. {frameProblem}
-          <button type="button" onClick={() => setFrameAttempted(false)}>Reconnect Orca</button>
-        </div>
-      )}
+      <PaseoChatFrame active={active} scope={frameScope} target={frameTarget} />
     </section>
   );
 }

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from agents_remember.application.orca_task_context import (
@@ -33,12 +33,6 @@ from agents_remember.cli.orca_handover_artifacts import (
 )
 from agents_remember.cli.orca_runtime import (
     OrcaRuntimeFailure,
-)
-from agents_remember.cli.orca_runtime import (
-    configured_frame_url as _configured_frame_url,
-)
-from agents_remember.cli.orca_runtime import (
-    configured_pairing_code as _configured_pairing_code,
 )
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
@@ -73,6 +67,7 @@ from agents_remember.cli.orca_task_receipts import (
     _write_message_binding_projection,
     _write_receipt,
 )
+from agents_remember.cli.paseo_frame import frame_descriptor, request_dashboard_origin
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaDispatchRequest,
@@ -112,7 +107,7 @@ def _json_response_payload(response: JSONResponse) -> Any:
 
 
 def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
-    app.add_api_route("/api/orca/frame", orca_frame, methods=["GET"])
+    app.add_api_route("/api/orca/frame", _bind_frame_endpoint(config), methods=["GET"])
     app.add_api_route(
         "/api/orca/launcher/options",
         _bind_options_endpoint(config),
@@ -122,12 +117,16 @@ def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     app.add_api_route("/api/orca/result", _bind_result_endpoint(config), methods=["POST"])
 
 
-def orca_frame() -> JSONResponse:
-    frame_url = _configured_frame_url() if _configured_pairing_code() else None
-    return JSONResponse(
-        {"available": frame_url is not None, "frameUrl": frame_url},
-        status_code=200 if frame_url else 503,
-    )
+def orca_frame(config: McpRuntimeConfig, request: Request) -> JSONResponse:
+    """Where this dashboard origin frames the Paseo web UI, or why it cannot (always HTTP 200)."""
+    return JSONResponse(frame_descriptor(config, request_dashboard_origin(request)))
+
+
+def _bind_frame_endpoint(config: McpRuntimeConfig):
+    def endpoint(request: Request) -> JSONResponse:
+        return orca_frame(config, request)
+
+    return endpoint
 
 
 def _bind_options_endpoint(config: McpRuntimeConfig):

@@ -137,6 +137,7 @@ unit-regression = [
   "mcp/tests/test_orca_runtime_settings.py",
   "mcp/tests/test_orca_task_routes.py",
   "mcp/tests/test_parked_external_await_separation.py",
+  "mcp/tests/test_paseo_frame.py",
   "mcp/tests/test_paseo_runtime.py",
   "mcp/tests/test_platform_subprocess.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
