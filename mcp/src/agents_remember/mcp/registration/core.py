@@ -44,8 +44,9 @@ def _register_identity_tools(
     def server_info() -> dict[str, Any]:
         """Report the resolved configuration: coordination/workspace/transcript roots, allowed
         repo ids, allowed provider ids, full tool list, and the boot-resolved package identity.
-        A server that a role launch started for one agent also reports agentBinding: that
-        agent's id, role, task references, request id and report path.
+        A server that a role launch started for one agent also reports toolServer, the name
+        under which that agent was given this server (server is the package's own name), and
+        agentBinding: that agent's id, role, task references, request id and report path.
         Read-only; reflects the settings and exact runtime loaded at startup (settings-file or
         package changes need a harness restart to take effect)."""
         return server_info_payload(config, serving_build)

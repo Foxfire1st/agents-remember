@@ -328,14 +328,13 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     for sentence in (
                         "Call every Agents Remember tool on the tool server named "
                         "agents-remember-task",
-                        "A tool server named agents-remember, if this session has one, belongs "
-                        "to another installation and must not be used for this assignment.",
-                        "An AR tool server under any other name belongs to another AR "
-                        "installation; do not use it for this assignment.",
+                        "Do not connect to, list, describe or call a tool server named "
+                        "agents-remember or any of its tools, nor an AR tool server under any "
+                        "other name: it belongs to another installation, its tools carry the "
+                        "same tool names, and nothing found there serves this assignment.",
                         "After a start or a resume a tool server can take some seconds to "
-                        "appear: if a call to agents-remember-task is not available, make the "
-                        "call once more before reporting the server missing, and report that "
-                        "instead of substituting another.",
+                        "appear: look once more before reporting agents-remember-task missing, "
+                        "and report that instead of substituting another.",
                     ):
                         self.assertIn(sentence, handover["host"]["arMcpUsage"])
                     self.assertNotIn("existing shared", prepared["prompt"])

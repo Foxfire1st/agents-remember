@@ -105,6 +105,10 @@ class ToolServerStartTests(unittest.TestCase):
         self.assertEqual(info["servingBuild"]["packageRoot"], launching_source_root().as_posix())
         self.assertEqual(info["configPath"], settings.as_posix())
         self.assertEqual(info["coordinationRoot"], (root / "coordination").as_posix())
+        # It says under which name its agent was given it; ``server`` is the package's name.
+        self.assertEqual(
+            (info["server"], info["toolServer"]), ("agents-remember", "agents-remember-task")
+        )
         self.assertEqual(
             info["agentBinding"],
             {

@@ -294,9 +294,14 @@ class ToolServerDefinitionTests(unittest.TestCase):
         build = ServingBuildPayload(version="0", bootedAt="2026-10-02T00:00:00Z")
         bound = binding("worker", SPRINT, MASTER, LEAF)
         with patch.dict("os.environ", bound.environment()):
-            reported = server_info_payload(config, build)["agentBinding"]
+            answer = server_info_payload(config, build)
+        # The launched server names itself as its agent was told to call it, in a field of its
+        # own; ``server`` stays the package's name, which the handover gives to another server.
         self.assertEqual(
-            reported,
+            (answer["server"], answer["toolServer"]), ("agents-remember", "agents-remember-task")
+        )
+        self.assertEqual(
+            answer["agentBinding"],
             {
                 "agentId": bound.agent_id,
                 "role": "worker",
@@ -309,7 +314,10 @@ class ToolServerDefinitionTests(unittest.TestCase):
         )
         with patch.dict("os.environ", clear=False) as environment:
             environment.pop("AR_PASEO_AGENT_ID", None)
-            self.assertNotIn("agentBinding", server_info_payload(config, build))
+            unbound = server_info_payload(config, build)
+        self.assertNotIn("agentBinding", unbound)
+        self.assertNotIn("toolServer", unbound)
+        self.assertEqual(unbound["server"], "agents-remember")
 
 
 def artifact_with_path_of(length: int) -> dict[str, str]:
