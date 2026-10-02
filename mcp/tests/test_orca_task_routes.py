@@ -192,7 +192,6 @@ class MessageBindingProjectionTests(unittest.TestCase):
                         orca_task_routes, "_request_digest", return_value="request-digest"
                     ),
                     patch.object(orca_task_routes, "_migrate_taskless_legacy_receipt"),
-                    patch.object(orca_task_routes, "_reconcile_prior_execution", return_value=None),
                     patch.object(
                         orca_task_preparation, "_resolve_workspace", return_value=workspace
                     ),
@@ -231,10 +230,16 @@ class MessageBindingProjectionTests(unittest.TestCase):
                 "binding": changed_binding,
                 **changed_reference,
             }
+            # The write-once rule is reached by a request that has its binding file but no
+            # receipt, as an attempt leaves it that ended before its receipt. A request with a
+            # receipt is answered from that receipt and is not compiled again.
+            receipt_path.unlink()
             with self.assertRaises(HTTPException) as raised:
                 dispatch()
             self.assertEqual(raised.exception.status_code, 409)
+            self.assertIn("different immutable message-binding", str(raised.exception.detail))
             self.assertEqual(Path(reference["path"]).read_bytes(), exact_bytes)
+            self.assertFalse(receipt_path.exists())
 
 
 class OrcaNativeResultTests(unittest.TestCase):

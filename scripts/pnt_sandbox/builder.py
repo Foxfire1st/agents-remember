@@ -55,20 +55,41 @@ def is_built(layout: SandboxLayout) -> bool:
 
 
 def mark(layout: SandboxLayout, state: str) -> None:
-    """Change the state the sandbox's marker records, keeping everything else it says."""
+    """Change the state the sandbox's marker records, keeping everything else it says.
+
+    The marker is replaced by a complete new file, so a command that is killed here leaves the
+    old marker or the new one, never half of one.
+    """
     marker = read_marker(layout) or {"schema": SANDBOX_SCHEMA}
-    layout.marker.write_text(json.dumps({**marker, "state": state}, indent=2) + "\n", "utf-8")
+    staged = layout.marker.with_name(f"{layout.marker.name}.new")
+    staged.write_text(json.dumps({**marker, "state": state}, indent=2) + "\n", "utf-8")
+    staged.replace(layout.marker)
 
 
-def require_sandbox_directory(layout: SandboxLayout) -> None:
-    """Refuse a directory that cannot or must not become a sandbox."""
+def _being_reset(layout: SandboxLayout) -> bool:
+    return (read_marker(layout) or {}).get("state") == RESETTING
+
+
+def require_sandbox_directory(layout: SandboxLayout, command: str | None = None) -> None:
+    """Refuse a directory that cannot or must not become a sandbox.
+
+    ``command`` is the command that asks before it has taken the sandbox's lock. A directory
+    marked as being reset is then looked at under the lock: a reset that is still running holds
+    it and is named as the holder, and only without a holder did a reset not finish.
+    """
     refusal = location_refusal(layout.root)
     if refusal is not None:
         raise SandboxRefusal(refusal)
-    if (read_marker(layout) or {}).get("state") == RESETTING:
-        raise SandboxRefusal(
-            f"a reset of {layout.root} did not finish; run 'reset' again before anything else"
-        )
+    if _being_reset(layout):
+        if command is not None:
+            with sandbox_lock(layout, command):
+                unfinished = _being_reset(layout)
+        else:
+            unfinished = True
+        if unfinished:
+            raise SandboxRefusal(
+                f"a reset of {layout.root} did not finish; run 'reset' again before anything else"
+            )
     unmarked = layout.root.exists() and read_marker(layout) is None
     if unmarked and (not layout.root.is_dir() or any(layout.root.iterdir())):
         raise SandboxRefusal(
@@ -250,7 +271,7 @@ def build(
     layout: SandboxLayout, checkout: Path, ops: Operations, out: Out, eve_project: Path
 ) -> None:
     """Bring the sandbox directory to its built state; every step is safe to repeat."""
-    require_sandbox_directory(layout)
+    require_sandbox_directory(layout, "build")
     with sandbox_lock(layout, "build"):
         build_unlocked(layout, checkout, ops, out, eve_project)
 

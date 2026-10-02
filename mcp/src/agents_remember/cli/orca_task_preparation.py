@@ -39,7 +39,10 @@ from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_chi
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
+from agents_remember.cli.orca_task_receipts import (
+    _bind_task_report_access,
+    _message_binding_projection_reference,
+)
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.controlplane.durable_store import declared_process_role
@@ -214,7 +217,7 @@ def _ar_mcp_context(
     context: OrcaRoleContext,
     workspace: dict[str, str],
 ) -> dict[str, Any]:
-    """Declare the exact arguments role agents pass to the existing shared AR MCP tools."""
+    """Declare the exact arguments role agents pass to the readers of their tool server."""
 
     if context.role in LEAF_ROLES:
         if context.task is None:
@@ -364,24 +367,6 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
         taskReportAccessRoot=report_access.as_posix(),
     )
     return workspace
-
-
-def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
-    """Expose only this task's canonical reports from inside its enclosure group folder."""
-    link = workspace / "task-reports"
-    target = task_reports.resolve()
-    if link.is_symlink():
-        if link.resolve() != target:
-            raise ValueError(
-                "The enclosure task-report link points outside the selected task's report folder."
-            )
-        return link
-    if link.exists():
-        raise ValueError(
-            "The enclosure task-report path is occupied by a non-link; refusing to replace it."
-        )
-    link.symlink_to(target, target_is_directory=True)
-    return link
 
 
 def _ensure_leaf_enclosure(

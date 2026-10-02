@@ -1,7 +1,8 @@
 """Command line of the PNT sandbox: build, start, stop, reset, check.
 
 Exit status: 0 when the command did what it reports; 1 when a step failed or the safety check
-did not pass; 2 when the command refused before changing anything.
+did not pass; 2 when the command refused. A start that refuses has started nothing, though it may
+have built the sandbox and prepared the checkout before it refused.
 """
 
 from __future__ import annotations

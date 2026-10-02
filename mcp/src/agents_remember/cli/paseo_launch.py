@@ -4,7 +4,9 @@ Agents Remember chooses the agent id before it calls the runtime and stores the 
 execution receipt. Running the stored call again converges on the same agent: the runtime returns
 the agent that already carries the id. The call is three bridge commands in a fixed order: archive
 the agent of the execution this launch replaces (when there is one), obtain the workspace of the
-role's folder, and create the agent in it.
+role's folder, and create the agent in it. The third command also sends the first message, once
+the agent exists and its tool servers have had time to start, and a repeat sends it to an agent
+that never received it; a first message the runtime did not take leaves the launch unresolved.
 
 The call also carries what the agent is given beside its first message: one tool-server
 definition, the tool server of this build under a fixed name with the agent's binding in its
@@ -301,7 +303,8 @@ def _shortened(reference: str, width: int, *, ends_at_folder: bool) -> str:
     The repository name stays whole. A part with a slug, a task folder or a numbered document,
     keeps at least its leading id and ends in an ellipsis where its slug was cut; the slugs get
     the room first. A part without a slug is never cut inside: it is whole, or at its shortest,
-    or, as the document of a reference that may end at its folder, left out.
+    or, as the document of a reference that may end at its folder, left out; that document is
+    named only when every other part is whole.
     """
 
     if len(reference) <= width:
@@ -327,9 +330,15 @@ def _shortened(reference: str, width: int, *, ends_at_folder: bool) -> str:
     for index, size in zip(slugs, granted, strict=True):
         texts[index] = parts[index] if size >= len(parts[index]) else f"{parts[index][: size - 1]}…"
     spare = width - len(repository) - sum(len(text) + 1 for text in texts if text)
-    for index, part in enumerate(parts):
+    # A part that was left out, the document of a reference that ends at its folder, comes back
+    # last, and only to a reference whose other parts are all whole.
+    for index in sorted(range(len(parts)), key=lambda index: not shortest[index]):
+        part = parts[index]
+        others_whole = all(
+            texts[other] == parts[other] for other in range(len(parts)) if other != index
+        )
         missing = len(part) - len(texts[index]) + (0 if texts[index] else 1)
-        if index not in slugs and 0 < missing <= spare:
+        if index not in slugs and 0 < missing <= spare and (shortest[index] or others_whole):
             texts[index], spare = part, spare - missing
     return "/".join([repository, *(text for text in texts if text)])
 

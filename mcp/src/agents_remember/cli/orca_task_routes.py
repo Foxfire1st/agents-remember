@@ -215,8 +215,9 @@ def _orca_dispatch_endpoint(
         OrcaRuntimeFailure,
         PaseoBridgeFailure,
     ) as error:
-        # Nothing was recorded for this request. The launcher shows the reason of a 409; a bridge
-        # failure reaches this point only while the selection is validated, before a receipt.
+        # A refusal: this call recorded nothing, and a request that has its receipt keeps it
+        # unchanged. The launcher shows the reason of a 409; a bridge failure reaches this point
+        # only while the selection is validated, before a receipt.
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
         _DISPATCH_LOCK.release()

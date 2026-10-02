@@ -41,10 +41,22 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 16
-LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "f0cb5fec700019923c5028d4e2547e70cecab97582870f128e70e4f8f960a1e4"
+LIFECYCLE_CONTRACT_COUNT = 19
+LIFECYCLE_ARTIFACT_COUNT = 69
+LIFECYCLE_CATALOG_SHA256 = "4c1b5f02fab374f307febc6ec859e12b1e9cc83a4ebd198310702d29acfe8908"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+The ``261001-PNT`` master pass registered the three support modules that line's leaves introduced
+without a row: ``mcp/tests/paseo_runtime_test_support.py`` (L1),
+``mcp/tests/pnt_sandbox_test_support.py`` (L2) and ``mcp/tests/paseo_launch_test_support.py`` (L5),
+each with a ``[[contract]]`` row and one ``[[artifact]]`` row of ``kind = "shared-support"`` in the
+sibling pattern. The consumer lists are ``RepositoryDependencyFacts.observed_test_consumers`` for
+each path; the launch module's includes the four modules that build on the launch fixture. Contract
+count **16 -> 19**, artifact count **66 -> 69**; the digest this value replaces was ``f0cb5fec…``.
+The same pass removed ``scripts/pnt_sandbox/__init__.py``: as a package it made ``scripts/`` an import
+root, under which the script-local imports of ``scripts/e2e_harness`` resolved to nothing and
+thirteen of that directory's rows failed their consumer proof. The two findings this line inherited
+(``curator_coherence_test_support.py`` and the node lockfile) are left as inherited.
 
 ``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
 ``mcp/tests/tool_refusal_census_support.py``, introduced by ``260918-TSIP-L6`` (the refusal-census leaf

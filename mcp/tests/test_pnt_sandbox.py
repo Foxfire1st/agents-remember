@@ -19,9 +19,11 @@ from unittest import mock
 
 from pnt_sandbox_test_support import (
     MARKER_NAME,
+    PASEO_PROCESS_RECORD,
     REPOSITORY,
     REPOSITORY_ID,
     REPOSITORY_ROOT,
+    SANDBOX_SCHEMA,
     SLEEPER,
     TASK_ROOT,
     FakeOperations,
@@ -43,6 +45,7 @@ from pnt_sandbox_test_support import (
     resolve_roots,
     safety,
     sandbox_environment,
+    sandbox_lock,
     settings_document,
 )
 
@@ -287,10 +290,51 @@ class BuildInputTests(SandboxCase):
             builder.build(self.layout, self.checkout, ops, self.lines.append, self.root / "no-eve")
         with self.assertRaisesRegex(SandboxRefusal, "refusing to delete"):
             commands.reset(self.layout, ops, self.lines.append)
+        # Nor is anything stopped there, although the directory holds what a stop acts on.
+        records = (self.layout.paseo_home / PASEO_PROCESS_RECORD, self.layout.process_record)
+        for record in records:
+            record.parent.mkdir(parents=True)
+            record.write_text('{"pid": 1}', encoding="utf-8")
+        with self.assertRaises(SandboxRefusal) as refused:
+            commands.stop(self.layout, ops, self.lines.append)
+        self.assertEqual(
+            str(refused.exception),
+            f"{self.layout.root} is not a sandbox this tool built; nothing was stopped",
+        )
+        self.assertEqual(
+            [record.read_text(encoding="utf-8") for record in records], ['{"pid": 1}'] * 2
+        )
+        self.assertFalse(self.layout.lock_file.exists())
 
         self.assertEqual(ops.calls, [])
-        self.assertEqual([path.name for path in self.layout.root.iterdir()], ["notes.txt"])
+        self.assertEqual(
+            sorted(path.name for path in self.layout.root.iterdir()), ["notes.txt", "paseo", "run"]
+        )
         self.assertFalse((self.layout.root / MARKER_NAME).exists())
+
+    def test_the_marker_is_replaced_whole_when_its_state_changes(self) -> None:
+        self.mark_built()
+        before = self.layout.marker.read_text(encoding="utf-8")
+        # The command is killed after the new marker was written and before it took the old
+        # one's place: the old marker is still there, complete.
+        with (
+            mock.patch.object(Path, "replace", side_effect=KeyboardInterrupt),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            builder.mark(self.layout, builder.RESETTING)
+        self.assertEqual(self.layout.marker.read_text(encoding="utf-8"), before)
+        self.assertTrue(builder.is_built(self.layout))
+
+        builder.mark(self.layout, builder.RESETTING)
+        marker = json.loads(self.layout.marker.read_text(encoding="utf-8"))
+        self.assertEqual(
+            marker,
+            {"schema": SANDBOX_SCHEMA, "layout": builder.LAYOUT_VERSION, "state": "resetting"},
+        )
+        # A reset deletes what an interrupted change left beside the marker.
+        ops = FakeOperations(self)
+        self.assertEqual(commands.reset(self.layout, ops, self.lines.append), 0)
+        self.assertFalse(self.layout.root.exists())
 
     def test_a_reset_that_cannot_delete_everything_can_be_repeated(self) -> None:
         self.mark_built()
@@ -320,6 +364,21 @@ class BuildInputTests(SandboxCase):
         for refused in (builder.build, commands.start):
             with self.assertRaisesRegex(SandboxRefusal, "did not finish; run 'reset' again"):
                 refused(self.layout, self.checkout, ops, self.lines.append, self.root / "no-eve")
+            self.assertFalse(self.layout.lock_file.exists())
+        self.assertEqual(ops.calls, [])
+        # While a reset is still at work it holds the lock, and the refusal names it instead.
+        with sandbox_lock(self.layout, "reset"):
+            for refused in (builder.build, commands.start):
+                with self.assertRaises(SandboxRefusal) as running:
+                    refused(
+                        self.layout, self.checkout, ops, self.lines.append, self.root / "no-eve"
+                    )
+                self.assertIn(
+                    f"another command is running on the sandbox {self.layout.root}: 'reset' "
+                    f"(pid {os.getpid()}, since ",
+                    str(running.exception),
+                )
+                self.assertNotIn("did not finish", str(running.exception))
         self.assertEqual(ops.calls, [])
 
         # The same when a program wrote into the directory while it was being deleted.

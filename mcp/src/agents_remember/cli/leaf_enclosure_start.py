@@ -38,7 +38,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.worktrees.services import bind_worktree_services
 
 COMMAND = "start-leaf-enclosure"
-# A start that takes longer is cut off, with everything it started, and counts as refused.
+# A start that takes longer is cut off, together with its process group, and counts as refused.
 START_TIMEOUT_SECONDS = 120
 ROOTS_DIFFER = "leaf_enclosure_roots_differ"
 _TEXT_LIMIT = 800
@@ -121,9 +121,12 @@ def _run_child(argv: list[str], request: dict[str, Any]) -> subprocess.Completed
             argv, stdin=subprocess.PIPE, stdout=output, stderr=errors, process_group=0
         )
         try:
+            # A child that ended without reading its request is answered from what it wrote. The
+            # pipe is closed either way, also when the write failed.
+            assert child.stdin is not None
             with contextlib.suppress(BrokenPipeError):
-                assert child.stdin is not None
                 child.stdin.write(json.dumps(request).encode("utf-8"))
+            with contextlib.suppress(BrokenPipeError):
                 child.stdin.close()
             child.wait(timeout=START_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as expired:
@@ -177,6 +180,11 @@ def main(argv: list[str]) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
+    # This process is a background process group of the backend's session. When that session has
+    # a terminal, a read of it by Git or ssh below this process (a credential prompt) would stop
+    # the reader until the limit. With the signal ignored, here and in whatever this process
+    # starts, such a read fails at once instead.
+    signal.signal(signal.SIGTTIN, signal.SIG_IGN)
     # The start is the tool server's operation, so this process takes the tool server's role for
     # the stores it writes. The role is declared before the settings are loaded: an undeclared
     # process that runs from a source checkout is given that checkout's development settings

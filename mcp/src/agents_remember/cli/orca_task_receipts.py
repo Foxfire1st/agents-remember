@@ -41,6 +41,8 @@ from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 # Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
 EXECUTIONS_DIRECTORY = "paseo-native-executions"
+# The link in a leaf's enclosure group folder through which its agents reach the task's reports.
+REPORT_ACCESS_LINK = "task-reports"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +74,7 @@ def _execute_prepared_launch(
     if isinstance(artifact, dict):
         # The first message names this file; it must hold that message whenever it is sent.
         _rebind_report_access(receipt)
-        restore_handover_artifact(artifact, _saved_first_message(launch_call))
+        restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
     outcome = run_launch_call(config, launch_call)
     if outcome.kind == "created":
         receipt["execution"] = outcome.execution
@@ -116,25 +118,66 @@ def _execute_prepared_launch(
     return JSONResponse(_public_execution(receipt), status_code=202)
 
 
+def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
+    """Expose only this task's canonical reports from inside its enclosure group folder.
+
+    The one place that creates the link, for a first launch and for a retry alike.
+    """
+
+    link = workspace / REPORT_ACCESS_LINK
+    target = task_reports.resolve()
+    if link.is_symlink():
+        if link.resolve() != target:
+            raise ValueError(
+                "The enclosure task-report link points outside the selected task's report folder."
+            )
+        return link
+    if link.exists():
+        raise ValueError(
+            "The enclosure task-report path is occupied by a non-link; refusing to replace it."
+        )
+    link.symlink_to(target, target_is_directory=True)
+    return link
+
+
 def _rebind_report_access(receipt: dict[str, Any]) -> None:
     """Put a leaf's report-access link back when it is gone, as its first launch created it.
 
     A leaf agent is given its report and its artifact through that link, and a retry does not
-    pass through the preparation that binds it. Only a missing link is created; whatever else
-    is at its name is left to the artifact check, which then refuses and says why.
+    pass through the preparation that binds it. Only a missing link is created, and only where
+    the receipt agrees with itself: the link has the name and the folder a first launch gives
+    it, the artifact's path runs through it, and the artifact's recorded place lies under the
+    folder the link is to lead to. Whatever else is at the link's name, and a receipt that does
+    not agree with itself, is left to the artifact check, which then refuses and says why.
     """
 
     workspace = receipt.get("workspace")
-    if not isinstance(workspace, dict):
+    artifact = receipt.get("handoverArtifact")
+    if not isinstance(workspace, dict) or not isinstance(artifact, dict):
         return
+    folder = workspace.get("path")
     access = workspace.get("taskReportAccessRoot")
     reports = workspace.get("taskReportRoot")
-    if not isinstance(access, str) or not isinstance(reports, str):
+    if not isinstance(folder, str) or not isinstance(access, str) or not isinstance(reports, str):
         return
     link = Path(access)
+    if (
+        link != Path(folder) / REPORT_ACCESS_LINK
+        or not _lies_under(artifact.get("path"), link)
+        or not _lies_under(artifact.get("canonicalPath"), Path(reports))
+    ):
+        return
     if link.is_symlink() or link.exists() or not link.parent.is_dir() or not Path(reports).is_dir():
         return
-    link.symlink_to(reports, target_is_directory=True)
+    _bind_task_report_access(link.parent, Path(reports))
+
+
+def _lies_under(path: Any, folder: Path) -> bool:
+    """Whether a recorded path names a place below ``folder``, read as it is written."""
+
+    if not isinstance(path, str) or ".." in Path(path).parts:
+        return False
+    return Path(path) != folder and Path(path).is_relative_to(folder)
 
 
 def _saved_first_message(launch_call: dict[str, Any]) -> str:
@@ -677,9 +720,12 @@ def _refuse_reused_request_id(
 ) -> None:
     """Refuse a request id that already belongs elsewhere, before anything is prepared for it.
 
-    Called for a request that has no receipt at its address. Its id may be the id of an archived
-    execution of the task folder, which can neither be launched again nor archived a second
-    time, or of a request on another selection, whose message-binding file is written once.
+    Called for a request whose id no receipt at its address carries. Its id may be the id of an
+    archived execution of the task folder, which can neither be launched again nor archived a
+    second time, or of a request on another selection, whose message-binding file is written
+    once. A message-binding file under the id that does not record this selection, whatever it
+    holds instead, refuses the request as well: the write-once rule would refuse it later, after
+    the enclosure and the handover were prepared.
     """
 
     archived = path.parent / "history" / f"{request.request_id}.json"
@@ -691,14 +737,17 @@ def _refuse_reused_request_id(
                 "AR role selection's task folder; start again under a new request id."
             ),
         )
-    try:
-        bound = json.loads(
-            _message_binding_projection_path(config, request.request_id).read_text("utf-8")
-        )
-    except (OSError, ValueError):
+    binding_file = _message_binding_projection_path(config, request.request_id)
+    if not binding_file.exists():
         return
+    try:
+        bound = json.loads(binding_file.read_text("utf-8"))
+    except (OSError, ValueError):
+        bound = None
     selection = bound.get("selection") if isinstance(bound, dict) else None
-    if isinstance(selection, dict) and selection != selection_binding(request):
+    if selection == selection_binding(request):
+        return
+    if isinstance(selection, dict):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -706,6 +755,14 @@ def _refuse_reused_request_id(
                 f"({selection.get('role')}); nothing was prepared for this request."
             ),
         )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Request id {request.request_id} already has a message-binding file that does not "
+            f"record this AR role selection ({binding_file}); nothing was prepared for this "
+            "request. Start again under a new request id."
+        ),
+    )
 
 
 def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uuid.UUID) -> None:

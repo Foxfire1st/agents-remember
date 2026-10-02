@@ -14,7 +14,14 @@ python3 scripts/pnt-sandbox.py reset                 # stop, then delete the san
 
 `<checkout>` is the PNT build to run, for example this checkout. Every command takes
 `--sandbox <directory>`; the default is `~/.local/state/ar-pnt/sandbox`. The commands run with
-the system Python (3.10 or newer) or with a checkout's `mcp/.venv`.
+the system Python (3.10 or newer) or with a checkout's `mcp/.venv`. Two modules are different:
+`build_roots.py` and `build_tool_calls.py` run inside the Python environment of the PNT build
+under test and import that build's own code.
+
+The directory has no `__init__.py`, on purpose. `scripts/pnt-sandbox.py` puts `scripts/` on the
+import path and imports `pnt_sandbox` as a namespace package. A package there would make
+`scripts/` an import root in the repository's dependency facts, under which the script-local
+imports of `scripts/e2e_harness` no longer resolve and the test-evidence catalog stops validating.
 
 Rules for using it:
 
@@ -49,8 +56,10 @@ The coordination root, the memory repository and the task documents are created 
 server of the build under test (`runtime_install`, `memory_init`, `memory_baseline_adopt`,
 `task_doc`), so they are documents that build can read. A rebuild leaves the repository, the task
 documents, the packets, the memory repository and the Paseo install and home alone. It writes the
-settings file, the Eve application files (`eve/app`, among them `agent/instructions.md`) and the
-Eve launcher anew from the tool, so hand edits to those are lost.
+settings file anew, copies the four Eve application files again from the developer's Eve project
+(`eve/app`: `package.json`, `tsconfig.json`, the agent definition and the channel), and writes
+`eve/app/agent/instructions.md` and the Eve launcher anew from the tool, so hand edits to those
+are lost.
 
 A sandbox built by an earlier version of this tooling is rebuilt once by the next `start`: the
 build adds what is new (`dagger-authority/`, `eve/removed-variables.json`).
@@ -68,6 +77,8 @@ nothing is built or started there, and `reset` can be run again once the obstacl
    the process id and never uses another port. Refuses a running Paseo runtime of the sandbox
    that does not carry the sandbox's environment, naming the variables.
 3. Reports `already running` with the URL when both of its processes run and hold their ports.
+   The safety check is not run again in that case: after editing the settings file by hand, run
+   `check`.
 4. Builds the sandbox when it is missing or was built by an earlier version of this tooling. The
    build creates the checkout's `mcp/.venv` when that is missing.
 5. Builds the checkout's dashboard bundle when it is missing or stale. Environment and bundle
@@ -137,8 +148,10 @@ into the checkout) and `AR_DAGGER_AUTHORITY_ROOT` (the registry of the quality t
 sandbox).
 
 A tool server that an agent's harness starts gets these variables only if the harness forwards
-its environment or the launch puts them into the tool server's definition; the launch does that
-for the write-avoiding variables and the Dagger root.
+its environment or the launch puts them into the tool server's definition. The launch code of the
+PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all four: it carries
+`GIT_OPTIONAL_LOCKS`, `PYTHONPYCACHEPREFIX`, `TMUX_TMPDIR` and `AR_DAGGER_AUTHORITY_ROOT` into the
+definition whenever the launching process has them.
 
 ## Eve
 

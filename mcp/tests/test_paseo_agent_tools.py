@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import os
 import re
@@ -22,7 +21,12 @@ from agents_remember.application.agent_binding import (
     read_agent_binding,
 )
 from agents_remember.application.orca_task_context import OrcaRoleContext
-from agents_remember.cli import orca_handover_artifacts, orca_task_preparation, paseo_launch
+from agents_remember.cli import (
+    orca_handover_artifacts,
+    orca_task_preparation,
+    orca_task_receipts,
+    paseo_launch,
+)
 from agents_remember.cli.orca_handover_artifacts import (
     MAX_HANDOVER_ARTIFACT_BYTES,
     artifact_line,
@@ -45,28 +49,6 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from test_paseo_launch import PaseoLaunchTestCase
 
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
-# The code a launch runs through: every module of the seam, found by name, every script beside
-# the bridge, and every module of the package that imports one of the seam's modules, so that new
-# code is scanned without anyone listing it. It serves every harness alike, so it names none.
-LAUNCH_CODE_PATTERNS = (
-    "cli/paseo_*.py",
-    "cli/orca_*.py",
-    "cli/leaf_enclosure_start.py",
-    "cli/paseo_*.mjs",
-    "application/agent_binding.py",
-    "application/orca_task_context.py",
-)
-# The one place in the scanned code where a harness's name stays: the dashboard command's help
-# text for --config names the folder in which its settings discovery looks. It is a folder name
-# the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
-# go without changing that help text.
-NAMED_EXCEPTIONS = {"cli/dashboard.py": ".claude/mcp/agents-remember-settings.json"}
-HARNESS_NAMES = ("codex", "claude", "pi", "hermes", "eve", "opencode", "copilot", "omp")
-# A word ends at anything that is not a letter, at an underscore and at a change of case, so a
-# harness's name is found inside an identifier too.
-WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
-# The one identifier of the capsule compiler that carries a harness's name and selects nothing.
-INHERITED_IDENTIFIER = "codex_delivery"
 SPRINT = TaskDocumentRef(repository="agents-remember", path="sprint/task.json")
 MASTER = TaskDocumentRef(repository="agents-remember", path="master/task.json")
 LEAF = TaskDocumentRef(repository="agents-remember", path="master/01_leaf.json")
@@ -91,46 +73,6 @@ BINDING_VARIABLES = (
     "AR_TASK_REF",
 )
 SEAT_VARIABLES = ("AR_SPAWN_ROLE", "AR_HOSTED_SESSION_ID")
-
-
-def harness_names_in(text: str, excepted: str = "") -> list[str]:
-    scanned = text.replace(INHERITED_IDENTIFIER, "")
-    if excepted:
-        scanned = scanned.replace(excepted, "")
-    return [word for word in WORD.findall(scanned) if word.lower() in HARNESS_NAMES]
-
-
-def module_name(package: Path, path: Path) -> str:
-    return ".".join((package.name, *path.relative_to(package).with_suffix("").parts))
-
-
-def imported_names(package: Path, path: Path) -> set[str]:
-    """Every dotted name a module imports, relative imports resolved against its own place."""
-
-    own = module_name(package, path).split(".")
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            base = own[: len(own) - node.level] if node.level else []
-            module = ".".join([*base, *(node.module.split(".") if node.module else [])])
-            names.add(module)
-            names.update(f"{module}.{alias.name}" for alias in node.names)
-    return names
-
-
-def launch_code(package: Path) -> list[Path]:
-    """The files the harness-name scan reads: the seam, and the modules that import it."""
-
-    seam = {path for pattern in LAUNCH_CODE_PATTERNS for path in package.glob(pattern)}
-    modules = {module_name(package, path) for path in seam if path.suffix == ".py"}
-    importers = {
-        path
-        for path in package.rglob("*.py")
-        if path not in seam and modules & imported_names(package, path)
-    }
-    return sorted(seam | importers)
 
 
 def binding(role: str = "worker", *references: TaskDocumentRef) -> AgentBinding:
@@ -436,7 +378,12 @@ class RecoveryNoteTests(unittest.TestCase):
             # The document name of the sprint goes first, as a whole.
             1: "Sprint agents-remember/260713_improved-agentic-system. Master "
             "agents-remember/260921_complete-code-and-intent-review/task.json.",
-            # Then the master's; both folders are still whole.
+            # The master's name stays while it fits, to the character: ten are needed for it.
+            10: "Sprint agents-remember/260713_improved-agentic-system. Master "
+            "agents-remember/260921_complete-code-and-intent-review/task.json.",
+            # Then the master's goes; both folders are still whole.
+            11: "Sprint agents-remember/260713_improved-agentic-system. Master "
+            "agents-remember/260921_complete-code-and-intent-review.",
             20: "Sprint agents-remember/260713_improved-agentic-system. Master "
             "agents-remember/260921_complete-code-and-intent-review.",
             # Only then are the folders' slugs cut, the longer one first.
@@ -509,6 +456,32 @@ class RecoveryNoteTests(unittest.TestCase):
                 note, r"\. Sprint agents-remember/260713_(improved-)+i[a-z]*…/task…\. Assignment"
             )
             self.assertEqual(len(note), 600)
+
+    def test_a_document_name_is_given_only_with_every_other_part_whole(self) -> None:
+        # A folder without a slug is whole or at its leading id; the document of a reference
+        # that may end at its folder is named only when that folder is whole.
+        reference = "sandbox-app/mdlon-cqjkn-bjwsvcod-stawizwh/task.json"
+        at_folder = "sandbox-app/mdlon-cqjkn-bjwsvcod-stawizwh"
+        shortest = "sandbox-app/mdlon-cqjkn-…"
+        forms = {
+            len(reference): reference,
+            len(reference) - 1: at_folder,
+            len(at_folder): at_folder,
+            # Room for the document's name beside the cut folder, but not for the folder.
+            len(at_folder) - 1: shortest,
+            len(shortest) + len("/task.json"): shortest,
+            len(shortest): shortest,
+            0: shortest,
+        }
+        for width, shown in forms.items():
+            with self.subTest(width=width):
+                self.assertEqual(
+                    paseo_launch._shortened(reference, width, ends_at_folder=True), shown
+                )
+        # The most specific reference always names its document, at the least by its start.
+        self.assertEqual(
+            paseo_launch._shortened(reference, 0, ends_at_folder=False), f"{shortest}/task…"
+        )
 
     def test_the_limit_and_the_shortest_form_are_exact(self) -> None:
         taskless = context("architect")
@@ -594,9 +567,10 @@ class HandoverArtifactTests(unittest.TestCase):
         message = first_message(reference, content)
         self.assertEqual(message, f"{line}\n{content}")
 
+        receipt = self.root / "worker-receipt.json"
         with self.subTest("the same request reuses it"):
             self.assertEqual(write_handover_artifact(report, content), reference)
-            restore_handover_artifact(reference, message)
+            restore_handover_artifact(reference, message, receipt=receipt)
             self.assertEqual(
                 (stored.stat().st_ino, stored.stat().st_mtime_ns),
                 (written.st_ino, written.st_mtime_ns),
@@ -624,7 +598,7 @@ class HandoverArtifactTests(unittest.TestCase):
                     self.subTest(label),
                     self.assertRaisesRegex(ValueError, "does not match its handover artifact"),
                 ):
-                    restore_handover_artifact(reference, saved)
+                    restore_handover_artifact(reference, saved, receipt=receipt)
         with self.subTest("a path that no longer leads to the recorded file is named as such"):
             # A reference whose recorded file is not where its own path leads: nothing is
             # written there, and the refusal names both places.
@@ -637,7 +611,7 @@ class HandoverArtifactTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, re.escape(refusal)):
                 restore_handover_artifact(
-                    {**reference, "canonicalPath": elsewhere.as_posix()}, message
+                    {**reference, "canonicalPath": elsewhere.as_posix()}, message, receipt=receipt
                 )
             self.assertFalse(elsewhere.exists())
         with self.subTest("a retry over a changed artifact says how the retry gets through"):
@@ -649,12 +623,62 @@ class HandoverArtifactTests(unittest.TestCase):
                 "saved message."
             )
             with self.assertRaisesRegex(ValueError, re.escape(refusal)):
-                restore_handover_artifact(reference, message)
+                restore_handover_artifact(reference, message, receipt=receipt)
             self.assertEqual(stored.read_text(encoding="utf-8"), "another assignment")
         with self.subTest("a lost artifact is written again from the saved message"):
             stored.unlink()
-            restore_handover_artifact(reference, message)
+            restore_handover_artifact(reference, message, receipt=receipt)
             self.assertEqual(stored.read_bytes(), body)
+
+    def test_a_retry_names_a_damaged_reference_and_a_path_that_leads_to_itself(self) -> None:
+        _reports, access = self.linked_report_folder()
+        report = (access / "orca-native" / "01_LEAF-worker-request.md").as_posix()
+        content = "Compiled capsule and handover."
+        reference = write_handover_artifact(report, content)
+        message = first_message(reference, content)
+        stored = Path(reference["canonicalPath"])
+        body = stored.read_bytes()
+        receipt = self.root / "worker-receipt.json"
+        elsewhere = self.root / "elsewhere.handover.txt"
+        with self.subTest("a reference that lacks a part is refused by the receipt's name"):
+            damaged: dict[str, tuple[dict[str, Any], str]] = {
+                "no path": ({k: v for k, v in reference.items() if k != "path"}, "path"),
+                "no digest": ({k: v for k, v in reference.items() if k != "sha256"}, "sha256"),
+                "no recorded place": (
+                    {k: v for k, v in reference.items() if k != "canonicalPath"},
+                    "canonicalPath",
+                ),
+                "a path that is no text": ({**reference, "path": None}, "path"),
+                "nothing at all": ({}, "path, canonicalPath, sha256"),
+            }
+            for label, (broken, named) in damaged.items():
+                refusal = (
+                    f"The receipt {receipt} records the handover artifact of this request "
+                    f"without its {named}, so the saved first message cannot be checked "
+                    "against its file and nothing was sent. Put the reference back as the "
+                    "launch wrote it and retry."
+                )
+                with self.subTest(label), self.assertRaises(ValueError) as raised:
+                    restore_handover_artifact(broken, message, receipt=receipt)
+                self.assertEqual(str(raised.exception), refusal)
+            self.assertEqual(stored.read_bytes(), body)
+        with self.subTest("a path that leads nowhere else is not said to lead to itself"):
+            # No link stands between the given path and its file, so the path leads to itself.
+            plain = write_handover_artifact((self.root / "plain" / "report.md").as_posix(), content)
+            self.assertEqual(plain["path"], plain["canonicalPath"])
+            refusal = (
+                f"The handover artifact of this request is recorded at {elsewhere}, but the path "
+                f"the agent was given, {plain['path']}, no longer leads to that file. Put back "
+                "what that path ran through (for a leaf role, the report-access link of its "
+                "enclosure) and retry."
+            )
+            with self.assertRaises(ValueError) as raised:
+                restore_handover_artifact(
+                    {**plain, "canonicalPath": elsewhere.as_posix()},
+                    first_message(plain, content),
+                    receipt=receipt,
+                )
+            self.assertEqual(str(raised.exception), refusal)
 
     def test_the_artifact_is_a_regular_file_of_bounded_size(self) -> None:
         reports, access = self.linked_report_folder()
@@ -834,36 +858,61 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
 
         self.replace(orca_task_preparation, "_compile_handover", compiled)
 
-    def test_a_leaf_retry_puts_a_missing_report_access_link_back(self) -> None:
+    def unresolved_leaf_launch(self) -> tuple[Any, dict[str, Any], Path, Path]:
+        """A worker launch that stays unresolved: its request, receipt, link and stored artifact."""
+
         self.compile_for_the_enclosure()
         request = self.request("worker")
         self.runtime.fail("agent-create", "paseo_daemon_unreachable")
         self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
         saved = self.receipt(request)
-        reference = saved["handoverArtifact"]
         link = self.enclosures.group / "task-reports"
-        stored = Path(reference["canonicalPath"])
+        return request, saved, link, Path(saved["handoverArtifact"]["canonicalPath"])
+
+    def refused_with_nothing_sent(self, request: Any) -> str:
+        calls = len(self.runtime.calls)
+        error = self.refused(request)
+        self.assertEqual(error.status_code, 409)
+        self.assertEqual(len(self.runtime.calls), calls)
+        return str(error.detail)
+
+    def test_a_leaf_retry_puts_a_missing_report_access_link_back(self) -> None:
+        request, saved, link, stored = self.unresolved_leaf_launch()
+        reference = saved["handoverArtifact"]
         written = stored.stat()
+        recorded = (
+            f"The handover artifact of this request is recorded at {stored}, but the path the "
+            f"agent was given, {reference['path']},"
+        )
+        put_back = (
+            "Put back what that path ran through (for a leaf role, the report-access link of "
+            "its enclosure) and retry."
+        )
         with self.subTest("something else at the link's name is refused, and named"):
             link.unlink()
             link.mkdir()
-            calls = len(self.runtime.calls)
-            error = self.refused(request)
-            self.assertEqual(error.status_code, 409)
+            # A folder is at the link's name, so the given path leads to itself.
             self.assertEqual(
-                str(error.detail),
-                f"The handover artifact of this request is recorded at {stored}, but the path "
-                f"the agent was given, {reference['path']}, now leads to "
-                f"{link / 'orca-native' / stored.name}. Put back what that path ran through "
-                "(for a leaf role, the report-access link of its enclosure) and retry.",
+                self.refused_with_nothing_sent(request),
+                f"{recorded} no longer leads to that file. {put_back}",
             )
-            self.assertEqual(len(self.runtime.calls), calls)
             self.assertEqual(list(link.iterdir()), [])
             link.rmdir()
+        with self.subTest("a link that leads nowhere is not replaced and nothing is made there"):
+            nowhere = self.root / "removed-report-folder"
+            link.symlink_to(nowhere)
+            self.assertEqual(
+                self.refused_with_nothing_sent(request),
+                f"{recorded} now leads to {nowhere / 'orca-native' / stored.name}. {put_back}",
+            )
+            self.assertEqual(os.readlink(link), nowhere.as_posix())
+            self.assertFalse(nowhere.exists())
+            link.unlink()
         with self.subTest("a missing link is bound again, as the first launch bound it"):
             self.assertFalse(link.exists())
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertTrue(link.is_symlink())
+            self.assertEqual(os.readlink(link), saved["workspace"]["taskReportRoot"])
             self.assertEqual(link.resolve(), stored.parent.parent)
             self.assertEqual(Path(reference["path"]).read_text(encoding="utf-8"), self.prompt)
             self.assertEqual(
@@ -872,6 +921,67 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             )
             created = self.runtime.launch_calls()[-1][1]
             self.assertEqual(created["prompt"], saved["replayRequest"]["agent"]["prompt"])
+
+    def test_a_leaf_retry_binds_no_link_for_a_receipt_that_disagrees_with_itself(self) -> None:
+        request, saved, link, stored = self.unresolved_leaf_launch()
+        reference = saved["handoverArtifact"]
+        workspace = saved["workspace"]
+        path = self.receipt_path(request)
+        link.unlink()
+        foreign = self.root / "a-folder-of-the-caller-s-choosing"
+        foreign.mkdir()
+        elsewhere = self.root / "a-place-of-the-caller-s-choosing"
+        renamed = self.enclosures.group / "reports"
+        # A retry binds only where the receipt agrees with itself: the link's name and folder,
+        # the artifact's path under the link, its recorded place under the link's target.
+        disagreeing: dict[str, dict[str, Any]] = {
+            "another target for the link": {
+                "workspace": {**workspace, "taskReportRoot": foreign.as_posix()}
+            },
+            "another place for the link": {
+                "workspace": {**workspace, "taskReportAccessRoot": (elsewhere / "link").as_posix()}
+            },
+            "another name for the link": {
+                "workspace": {**workspace, "taskReportAccessRoot": renamed.as_posix()}
+            },
+            "another name for the link, and the artifact's path through it": {
+                "workspace": {**workspace, "taskReportAccessRoot": renamed.as_posix()},
+                "handoverArtifact": {
+                    **reference,
+                    "path": (renamed / "orca-native" / stored.name).as_posix(),
+                },
+            },
+            "the link in another folder than the workspace": {
+                "workspace": {**workspace, "path": elsewhere.as_posix()}
+            },
+            "an artifact path that leaves the link again": {
+                "handoverArtifact": {
+                    **reference,
+                    "path": f"{link.as_posix()}/../task-reports/orca-native/{stored.name}",
+                }
+            },
+        }
+        for label, changed in disagreeing.items():
+            with self.subTest(label):
+                orca_task_receipts._write_receipt(path, {**saved, **changed})
+                self.refused_with_nothing_sent(request)
+                # No link was made, at the enclosure or anywhere the receipt names.
+                self.assertFalse(link.is_symlink() or link.exists())
+                self.assertFalse(elsewhere.exists() or renamed.exists())
+                self.assertEqual(list(foreign.iterdir()), [])
+        with self.subTest("an artifact reference that lacks a part is refused by the receipt"):
+            damaged = {key: value for key, value in reference.items() if key != "canonicalPath"}
+            orca_task_receipts._write_receipt(path, {**saved, "handoverArtifact": damaged})
+            self.assertIn(
+                f"The receipt {path} records the handover artifact of this request without its "
+                "canonicalPath,",
+                self.refused_with_nothing_sent(request),
+            )
+            self.assertFalse(link.is_symlink() or link.exists())
+        with self.subTest("the receipt as the launch wrote it gets the retry through"):
+            orca_task_receipts._write_receipt(path, saved)
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+            self.assertEqual(os.readlink(link), workspace["taskReportRoot"])
 
     def test_a_leaf_agent_is_given_its_paths_through_the_report_access_link(self) -> None:
         self.compile_for_the_enclosure()
@@ -908,79 +1018,6 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         stored = canonical / f"{name}.handover.txt"
         self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
         self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
-
-
-class NoHarnessNameTests(unittest.TestCase):
-    def test_the_launch_code_names_no_harness(self) -> None:
-        scanned = launch_code(PACKAGE)
-        names = [path.relative_to(PACKAGE).as_posix() for path in scanned]
-        # The patterns find the seam's modules, the ones of this leaf among them; the import rule
-        # adds the modules that use them: the tool server's tools and the dashboard command.
-        for expected in (
-            "cli/paseo_launch.py",
-            "cli/paseo_catalog.py",
-            "cli/paseo_bridge.mjs",
-            "cli/orca_task_routes.py",
-            "cli/orca_task_receipts.py",
-            "cli/orca_task_preparation.py",
-            "cli/orca_handover_artifacts.py",
-            "cli/leaf_enclosure_start.py",
-            "application/agent_binding.py",
-            "mcp/tools/core.py",
-            "cli/dashboard.py",
-        ):
-            self.assertIn(expected, names)
-        for path, name in zip(scanned, names, strict=True):
-            with self.subTest(name):
-                text = path.read_text(encoding="utf-8")
-                found = sorted(set(harness_names_in(text, NAMED_EXCEPTIONS.get(name, ""))))
-                self.assertEqual(found, [], f"{name} names a harness: {found}")
-        # The scan sees what it is meant to catch, inside an identifier too, and passes the one
-        # inherited identifier and words that merely contain a harness's letters.
-        caught: dict[str, list[str]] = {
-            'if provider == "eve":': ["eve"],
-            "HARNESSES = ('Codex', 'pi')": ["Codex", "pi"],
-            'WITHOUT_TOOL_SERVERS = ("eve", "hermes")': ["eve", "hermes"],
-            "if is_eve_provider(provider):": ["eve"],
-            "EVE_ID = provider": ["EVE"],
-            "isClaudeProvider(entry)": ["Claude"],
-            "capsule.codex_delivery.trusted_instructions": [],
-            "an api key, several steps, an event and every option": [],
-        }
-        for text, harnesses in caught.items():
-            with self.subTest(text):
-                self.assertEqual(harness_names_in(text), harnesses)
-        # The named exception covers its one phrase and nothing else in that file.
-        phrase = NAMED_EXCEPTIONS["cli/dashboard.py"]
-        self.assertEqual(harness_names_in(f"the nearest {phrase}", phrase), [])
-        self.assertEqual(harness_names_in(f"{phrase} for claude", phrase), ["claude"])
-
-    def test_the_scan_finds_code_that_uses_the_seam_without_being_listed(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            package = Path(temporary) / "agents_remember"
-            tuple_of_names = 'WITHOUT_TOOL_SERVERS = ("eve", "hermes")\n'
-            files = {
-                "cli/paseo_launch.py": "def build():\n    return {}\n",
-                # Seam code by its use, not by its name: each imports a scanned module.
-                "cli/role_tool_rules.py": "from agents_remember.cli import paseo_launch\n",
-                "application/launch_rules.py": "import agents_remember.cli.paseo_launch\n",
-                "mcp/tools/role_agents.py": "from ...cli.paseo_launch import build\n",
-                "cli/sibling_rules.py": "from . import paseo_launch\n",
-                # A script beside the bridge.
-                "cli/paseo_bridge_rules.mjs": "export const rules = {}\n",
-                # Not launch code: it imports nothing of the seam.
-                "kernel/harness_table.py": "import json\n",
-            }
-            for name, text in files.items():
-                path = package / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text + tuple_of_names, encoding="utf-8")
-            scanned = [path.relative_to(package).as_posix() for path in launch_code(package)]
-            self.assertEqual(scanned, sorted(set(files) - {"kernel/harness_table.py"}))
-            for path in launch_code(package):
-                self.assertEqual(
-                    harness_names_in(path.read_text(encoding="utf-8")), ["eve", "hermes"]
-                )
 
 
 if __name__ == "__main__":
