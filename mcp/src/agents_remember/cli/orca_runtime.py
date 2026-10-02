@@ -1,9 +1,9 @@
 """What is left of the ONT host boundary until the Paseo leaves replace its callers.
 
-The Orca bridge script is gone: the launcher catalog and the agent, model and effort validation
-reach the host through ``paseo_bridge.py``. The launch, workspace, status and revive call sites
-that still import :func:`runtime_call` have no Paseo command yet; they are refused here with a
-named reason until PNT-R03 and PNT-R07 move them onto the bridge.
+The Orca bridge script is gone: the launcher catalog, the agent, model and effort validation and
+the launch reach the host through ``paseo_bridge.py``, and a launch needs no pairing. The status
+and revive call sites that still import :func:`runtime_call` have no Paseo command yet; they are
+refused here with a named reason until PNT-R07 moves them onto the bridge.
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ import json
 import os
 from typing import Any
 from urllib.parse import urlsplit
-
-from fastapi import HTTPException
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
@@ -60,14 +58,6 @@ def configured_pairing_code() -> str | None:
         or os.environ.get("ORCA_REMOTE_PAIRING", "").strip()
     )
     return value or None
-
-
-def require_pairing() -> None:
-    if not configured_pairing_code():
-        raise HTTPException(
-            status_code=503,
-            detail="The dashboard process has no explicit Orca pairing; no session was started.",
-        )
 
 
 class OrcaRuntimeFailure(RuntimeError):

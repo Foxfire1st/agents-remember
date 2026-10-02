@@ -19,6 +19,39 @@
 //            models and the runtime's error text; so does a provider the runtime is still
 //            discovering when the discovery time is up, provided another provider is ready.
 //
+//   workspace-open  {cwd: string}
+//            -> {serverId, workspace: {id, directory, name, projectId, projectKind}}
+//            The runtime's workspace for the directory: the existing one is reused, otherwise the
+//            runtime creates it. The runtime keys a workspace by the path text, so the caller
+//            passes a resolved path.
+//
+//   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
+//                  title, labels, prompt?}
+//            -> {serverId, existing: boolean, agent: AGENT, creationError?}
+//            One agent under the caller's agent id (a UUID) in that workspace's directory, with
+//            the provider's default permission mode. An agent that already has the id is returned
+//            with `existing: true` and nothing is created; so is one that exists although the
+//            creation answered with an error (`creationError` carries the runtime's text). A
+//            creation the runtime refuses, with no agent under the id afterwards, fails with
+//            `paseo_call_failed`. Without `model` the creation goes through the daemon client
+//            (below), because the public client requires a provider/model pair; the provider
+//            then applies its own default model. `prompt` is the first message; without it the
+//            agent is created idle.
+//
+//   agent-get  {agentId: string}
+//            -> {serverId, agent: AGENT | null}
+//            The agent with exactly that id, archived or not; null when the runtime has none.
+//
+//   agent-archive  {agentId: string}
+//            -> {serverId, agentId, found: boolean, archived: boolean, alreadyArchived?: boolean,
+//                archivedAt?: string}
+//            Archives a live agent. An agent that is already archived, or that the runtime does
+//            not have, is not an error.
+//
+//   AGENT is {id, provider, model, thinkingOptionId, title, labels, workspaceId, cwd, status,
+//   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
+//   effective one.
+//
 // The runtime is addressed by the environment paseo_bridge.py derives from `paseoRuntime`:
 //   AR_PASEO_INSTALL_PREFIX  install prefix; the client package is loaded from its node_modules
 //   AR_PASEO_URL             ws://<listen>/ws
@@ -32,6 +65,8 @@
 //     itself and wraps it in the public createPaseoApi(), so that it can read the daemon's
 //     server_info (getLastServerInfoMessage) and refuse a daemon that is not the configured one.
 //     Every call a command makes goes through the public `api` unless a row above says otherwise.
+//     `agent-create` is such a row: without a model it calls this client's createAgent(), because
+//     the public client only creates an agent for a provider/model pair.
 
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -39,7 +74,11 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const COMMANDS = {
-  catalog: readCatalog
+  catalog: readCatalog,
+  'workspace-open': openWorkspace,
+  'agent-create': createAgent,
+  'agent-get': getAgent,
+  'agent-archive': archiveAgent
 }
 
 const DEFAULT_DEADLINE_MS = 55000
@@ -166,6 +205,194 @@ function projectModel(model) {
       .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id })),
     ...(nonEmpty(model.defaultThinkingOptionId) ? { defaultEffort: model.defaultThinkingOptionId } : {})
   }
+}
+
+async function openWorkspace({ api, daemon }, input) {
+  const workspace = (await api.workspaces.open(requiredText(input, 'cwd'))).current()
+  if (!nonEmpty(workspace?.id) || !nonEmpty(workspace.workspaceDirectory)) {
+    throw failure(
+      'paseo_bridge_invalid_reply',
+      'The Paseo runtime returned a workspace without an id and a directory.'
+    )
+  }
+  return {
+    serverId: serverIdOf(daemon),
+    workspace: {
+      id: workspace.id,
+      directory: workspace.workspaceDirectory,
+      name: workspace.name ?? null,
+      projectId: workspace.projectId ?? null,
+      projectKind: workspace.projectKind ?? null
+    }
+  }
+}
+
+async function createAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const request = agentCreation(input, agentId)
+  const present = await findAgent(api, daemon, agentId)
+  if (present) return { serverId: serverIdOf(daemon), existing: true, agent: projectAgent(present) }
+  let created
+  try {
+    created = await request.create(api, daemon)
+  } catch (error) {
+    // The runtime answered with an error. Whether an agent exists under the id decides what that
+    // means: it exists (a repeat that lost its creation record, or a first prompt that failed
+    // after the agent was created), or the runtime refused the creation.
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    const after = await findAgent(api, daemon, agentId)
+    if (!after) throw error
+    return {
+      serverId: serverIdOf(daemon),
+      existing: true,
+      agent: projectAgent(after),
+      creationError: text(error?.message ?? error)
+    }
+  }
+  if (created?.id !== agentId) {
+    throw failure(
+      'paseo_bridge_invalid_reply',
+      'The Paseo runtime created an agent under another id than the one given.'
+    )
+  }
+  return { serverId: serverIdOf(daemon), existing: false, agent: projectAgent(created) }
+}
+
+// Check the payload and return how the agent is created: through the public client, or, for a
+// provider launched without a model, through the daemon client with the same request.
+function agentCreation(input, agentId) {
+  const workspaceId = requiredText(input, 'workspaceId')
+  const provider = requiredText(input, 'provider')
+  const model = optionalText(input, 'model')
+  const thinkingOptionId = optionalText(input, 'thinkingOptionId')
+  const prompt = optionalText(input, 'prompt')
+  const shared = {
+    agentId,
+    idempotencyKey: requiredText(input, 'idempotencyKey'),
+    labels: requiredLabels(input)
+  }
+  const title = requiredText(input, 'title')
+  const thinking = thinkingOptionId ? { thinkingOptionId } : {}
+  return {
+    async create(api, daemon) {
+      const workspace = api.workspaces.ref(workspaceId)
+      if (model) {
+        const handle = await workspace.agents.create({
+          ...shared,
+          config: { provider: `${provider}/${model}`, ...thinking },
+          title,
+          ...(prompt ? { prompt } : {})
+        })
+        return handle.current()
+      }
+      const cwd = (await workspace.refresh())?.workspaceDirectory
+      if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
+      return await daemon.createAgent({
+        ...shared,
+        config: { provider, cwd, title, ...thinking },
+        workspaceId,
+        ...(prompt ? { initialPrompt: prompt } : {})
+      })
+    }
+  }
+}
+
+async function getAgent({ api, daemon }, input) {
+  const agent = await findAgent(api, daemon, requiredText(input, 'agentId'))
+  return { serverId: serverIdOf(daemon), agent: agent ? projectAgent(agent) : null }
+}
+
+async function archiveAgent({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId, agentId, found: false, archived: false }
+  const archived = { serverId, agentId, found: true, archived: true }
+  if (nonEmpty(agent.archivedAt)) {
+    return { ...archived, alreadyArchived: true, archivedAt: agent.archivedAt }
+  }
+  let result
+  try {
+    result = await api.agents.ref(agentId).archive()
+  } catch (error) {
+    // Another caller may have archived or removed the agent between the lookup and this call.
+    // What the runtime holds now decides: archived or gone is not an error; anything else is.
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    const after = await findAgent(api, daemon, agentId)
+    if (!after) return { serverId, agentId, found: false, archived: false }
+    if (!nonEmpty(after.archivedAt)) throw error
+    return { ...archived, alreadyArchived: true, archivedAt: after.archivedAt }
+  }
+  return { ...archived, alreadyArchived: false, archivedAt: result.archivedAt }
+}
+
+// The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an
+// answer under another id is not the agent that was asked for. A lookup the runtime fails for
+// another reason says nothing about the agent, so it is not reported as a refused call.
+async function findAgent(api, daemon, agentId) {
+  let result
+  try {
+    result = await api.agents.ref(agentId).refresh()
+  } catch (error) {
+    if (/^Agent not found\b/.test(String(error?.message ?? ''))) return null
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_agent_lookup_failed',
+      `The Paseo runtime could not look up agent ${agentId}: ${text(error?.message ?? error)}`
+    )
+  }
+  return result?.agent?.id === agentId ? result.agent : null
+}
+
+function projectAgent(agent) {
+  return {
+    id: agent.id,
+    provider: agent.provider ?? null,
+    model: agent.model ?? null,
+    thinkingOptionId: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
+    title: agent.title ?? null,
+    labels: agent.labels ?? {},
+    workspaceId: agent.workspaceId ?? null,
+    cwd: agent.cwd ?? null,
+    status: agent.status ?? null,
+    archivedAt: agent.archivedAt ?? null,
+    createdAt: agent.createdAt ?? null
+  }
+}
+
+function serverIdOf(daemon) {
+  return daemon.getLastServerInfoMessage().serverId
+}
+
+function requiredText(input, name) {
+  const value = optionalText(input, name)
+  if (!value) throw failure('invalid_bridge_payload', `The Paseo bridge payload needs a non-empty ${name}.`)
+  return value
+}
+
+function optionalText(input, name) {
+  const value = input[name]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') {
+    throw failure('invalid_bridge_payload', `The Paseo bridge payload field ${name} must be text.`)
+  }
+  return value.trim() ? value : null
+}
+
+function requiredLabels(input) {
+  const labels = input.labels
+  const valid =
+    labels !== null &&
+    typeof labels === 'object' &&
+    !Array.isArray(labels) &&
+    Object.values(labels).every((value) => typeof value === 'string')
+  if (!valid) {
+    throw failure(
+      'invalid_bridge_payload',
+      'The Paseo bridge payload needs labels as an object of text values.'
+    )
+  }
+  return labels
 }
 
 // ---------------------------------------------------------------------------------------------

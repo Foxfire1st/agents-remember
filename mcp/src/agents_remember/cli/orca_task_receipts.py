@@ -1,4 +1,8 @@
-"""Durable request-addressed Orca execution receipts and public projections."""
+"""Durable request-addressed execution receipts and public projections.
+
+Receipts of this line live under ``paseo-native-executions``; nothing here reads the
+``orca-native-executions`` directory the ONT line wrote.
+"""
 
 from __future__ import annotations
 
@@ -23,14 +27,9 @@ from agents_remember.application.orca_task_context import (
     selection_binding,
 )
 from agents_remember.cli.orca_runtime import (
-    OrcaRuntimeFailure,
-)
-from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, run_launch_call
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaDispatchRequest,
@@ -38,6 +37,9 @@ from agents_remember.models.orca_launcher import (
     OrcaSelection,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+
+# Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
+EXECUTIONS_DIRECTORY = "paseo-native-executions"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,69 +56,74 @@ def _execute_prepared_launch(
     path: Path,
     receipt: dict[str, Any],
 ) -> JSONResponse:
-    launch_request = receipt.get("replayRequest")
-    if not isinstance(launch_request, dict):
+    """Run the receipt's saved launch call and write what the runtime answered.
+
+    The receipt already names the agent id, so running the same call again reaches the same agent.
+    """
+
+    launch_call = receipt.get("replayRequest")
+    if not isinstance(launch_call, dict):
         raise HTTPException(
             status_code=409,
-            detail="The unresolved launch has no retained replay payload; reconcile the native runtime before retrying.",
+            detail="The unresolved launch has no saved launch call; reconcile the Paseo runtime before retrying.",
         )
-    try:
-        result = _runtime_call(config, "launch-replay", {"request": launch_request})
-    except OrcaRuntimeFailure as error:
-        rejected = error.code in {
-            "agent_launch_replay_unsupported",
-            "agent_session_operation_conflict",
-            "invalid_argument",
-            "worktree_create_collision",
-        }
+    outcome = run_launch_call(config, launch_call)
+    if outcome.kind == "created":
+        receipt["execution"] = outcome.execution
+        receipt["agent"] = outcome.applied
+        if outcome.warning:
+            receipt["warning"] = outcome.warning
         receipt.update(
-            status="rejected" if rejected else "unknown",
+            status="running",
+            hostAgentExists=True,
+            detail="The Paseo runtime created the role agent; AR acceptance remains with its owner.",
+            updatedAt=_now_iso(),
+        )
+        receipt.pop("replayRequest", None)
+        _write_receipt(path, receipt)
+        return JSONResponse(_public_execution(receipt))
+    if outcome.kind == "refused":
+        if not outcome.predecessor_settled:
+            # The agent this launch was to replace is still live; the next launch archives it.
+            receipt["pendingArchiveAgentId"] = launch_call["archiveAgentId"]
+        receipt.update(
+            status="rejected",
+            hostAgentExists=False,
             detail=(
-                f"Orca rejected the prepared launch before creating a session ({error.code})."
-                if rejected
-                else f"Orca launch outcome is unresolved ({error.code}); retry this same request to replay its saved operationId."
+                "The Paseo runtime refused the launch; no agent exists under the minted agent "
+                f"id. {outcome.message}"
             ),
             updatedAt=_now_iso(),
         )
-        if rejected:
-            receipt.pop("replayRequest", None)
+        receipt.pop("replayRequest", None)
         _write_receipt(path, receipt)
-        return JSONResponse(
-            _public_execution(receipt),
-            status_code=502 if rejected else 202,
-        )
-
-    prompt = _prompt_reference(result.get("prompt"))
-    if prompt is not None:
-        receipt["prompt"] = prompt
-    outcome = result.get("outcome")
-    if not isinstance(outcome, dict) or not isinstance(result.get("worktreeId"), str):
-        receipt.update(
-            status="unknown",
-            detail="Orca returned no confirmed native session identity; retry this same request to replay its saved operationId.",
-            updatedAt=_now_iso(),
-        )
-        _write_receipt(path, receipt)
-        return JSONResponse(_public_execution(receipt), status_code=202)
-    receipt["execution"] = _execution_reference(outcome, result["worktreeId"])
-    if not receipt["execution"]:
-        receipt.update(
-            status="unknown",
-            detail="Orca returned an unrecognized native session surface; retry this same request to replay its saved operationId.",
-            updatedAt=_now_iso(),
-        )
-        _write_receipt(path, receipt)
-        return JSONResponse(_public_execution(receipt), status_code=202)
-    if isinstance(result.get("warning"), str):
-        receipt["warning"] = result["warning"][:1000]
+        return JSONResponse(_public_execution(receipt), status_code=502)
     receipt.update(
-        status="running",
-        detail="Orca accepted the native role session; AR acceptance remains with its owner.",
+        status="unknown",
+        detail=(
+            f"The launch has no usable answer ({outcome.code}): {outcome.message} Retry this "
+            "same request to repeat the saved call under the same agent id."
+        ),
         updatedAt=_now_iso(),
     )
-    receipt.pop("replayRequest", None)
     _write_receipt(path, receipt)
-    return JSONResponse(_public_execution(receipt))
+    return JSONResponse(_public_execution(receipt), status_code=202)
+
+
+def _replaced_agent_id(receipt: dict[str, Any]) -> str | None:
+    """The agent a new execution on the same selection archives before it creates its own.
+
+    That is the closed execution's agent, or the agent that execution itself still had to archive
+    when the runtime refused it.
+    """
+
+    reference = receipt.get("execution")
+    if isinstance(reference, dict) and reference.get("kind") == PASEO_AGENT_KIND:
+        agent_id = reference.get("agentId")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+    pending = receipt.get("pendingArchiveAgentId")
+    return pending if isinstance(pending, str) and pending else None
 
 
 def _receipt_path(
@@ -146,27 +153,16 @@ def _legacy_receipt_path(config: McpRuntimeConfig, selection: OrcaSelection) -> 
     key = _digest(selection_binding(selection))[:24]
     if ref:
         parent = topology.path_for_ref(ref).parent
-        return parent / "notes" / "reports" / "orca-native-executions" / f"{role}-{key}.json"
+        return parent / "notes" / "reports" / EXECUTIONS_DIRECTORY / f"{role}-{key}.json"
     return (
-        config.coordination_root
-        / "notes"
-        / "reports"
-        / "orca-native-executions"
-        / f"{role}-{key}.json"
+        config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / f"{role}-{key}.json"
     )
 
 
 def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
     if role not in TASKLESS_ROLES:
         raise ValueError("Per-request Orca receipts are reserved for taskless project roles.")
-    return (
-        config.coordination_root
-        / "notes"
-        / "reports"
-        / "orca-native-executions"
-        / role
-        / "sessions"
-    )
+    return config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / role / "sessions"
 
 
 def _message_binding_projection_reference(
@@ -189,6 +185,20 @@ def _write_message_binding_projection(
     expected_reference: dict[str, str],
 ) -> dict[str, str]:
     """Create or reuse the exact immutable binding file for one AR request ID."""
+    _place_message_binding_projection(config, request_id, binding, expected_reference)
+    return expected_reference
+
+
+def _place_message_binding_projection(
+    config: McpRuntimeConfig,
+    request_id: uuid.UUID,
+    binding: dict[str, Any],
+    expected_reference: dict[str, str],
+) -> bool:
+    """Create or reuse the binding file of one request id; say whether this call created it.
+
+    Only the launch that created the file may take it back when it is refused afterwards.
+    """
     reference = _message_binding_projection_reference(config, request_id, binding)
     if reference != expected_reference:
         raise ValueError("The message-binding projection reference does not match its content.")
@@ -196,7 +206,7 @@ def _write_message_binding_projection(
     body = _message_binding_projection_bytes(binding)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if _existing_message_binding_projection_matches(path, body):
-        return reference
+        return False
 
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -211,9 +221,10 @@ def _write_message_binding_projection(
                 raise ValueError(
                     "This request ID already has a different immutable message-binding projection."
                 ) from None
+            return False
     finally:
         Path(temporary).unlink(missing_ok=True)
-    return reference
+    return True
 
 
 def _verify_message_binding_projection(
@@ -236,7 +247,7 @@ def _message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.
         config.coordination_root
         / "notes"
         / "reports"
-        / "orca-native-executions"
+        / EXECUTIONS_DIRECTORY
         / "message-bindings"
         / f"{request_id}.json"
     ).resolve(strict=False)
@@ -442,41 +453,6 @@ def _request_digest(context: OrcaRoleContext, request: OrcaDispatchRequest) -> s
     )
 
 
-def _execution_reference(outcome: dict[str, Any], worktree_id: str) -> dict[str, str]:
-    kind = outcome.get("kind")
-    handle = outcome.get("handle")
-    if kind not in {"structured", "terminal"} or not isinstance(handle, str) or not handle:
-        return {}
-    reference = {"kind": kind, "handle": handle, "worktreeId": worktree_id}
-    pane_key = outcome.get("paneKey")
-    if kind == "terminal" and isinstance(pane_key, str) and pane_key:
-        reference["paneKey"] = pane_key
-    session_id = outcome.get("sessionId")
-    if kind == "structured" and isinstance(session_id, str) and session_id:
-        reference["sessionId"] = session_id
-    return reference
-
-
-def _prompt_reference(prompt: Any) -> dict[str, str] | None:
-    if not isinstance(prompt, dict):
-        return None
-    delivery = prompt.get("delivery")
-    outcome = prompt.get("outcome")
-    if delivery not in {"submit", "draft"} or outcome not in {
-        "journaled",
-        "handed-to-terminal",
-        "not-delivered",
-    }:
-        return None
-    reference = {"delivery": delivery, "outcome": outcome}
-    if outcome == "journaled":
-        message_id = prompt.get("messageId")
-        if not isinstance(message_id, str) or not message_id:
-            return None
-        reference["messageId"] = message_id
-    return reference
-
-
 def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     status = receipt.get("status")
     public = {
@@ -492,7 +468,6 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             "detail",
             "warning",
             "result",
-            "prompt",
             "capsuleOperation",
             "arMcpContext",
             "resumeResult",
@@ -538,7 +513,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     if isinstance(reference, dict):
         public["execution"] = {
             key: reference[key]
-            for key in ("kind", "handle", "sessionId", "worktreeId", "paneKey")
+            for key in ("kind", "serverId", "workspaceId", "agentId")
             if isinstance(reference.get(key), str)
         }
     return public
@@ -575,6 +550,35 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
 
 
 def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
+    temporary = _write_receipt_aside(path, receipt)
+    try:
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _create_receipt(path: Path, receipt: dict[str, Any]) -> bool:
+    """Create a receipt only if none exists at its address; say whether this call created it.
+
+    The complete file appears under its name in one step, and that step fails when the name is
+    taken. Of two processes that launch the same selection at the same moment, one creates the
+    receipt and the other is told that it did not.
+    """
+
+    temporary = _write_receipt_aside(path, receipt)
+    try:
+        os.link(temporary, path, follow_symlinks=False)
+    except FileExistsError:
+        return False
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
+
+
+def _write_receipt_aside(path: Path, receipt: dict[str, Any]) -> Path:
+    """Write the receipt to a synced temporary file beside its address."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
@@ -583,10 +587,10 @@ def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
             stream.write(body)
             stream.flush()
             os.fsync(stream.fileno())
-        Path(temporary).replace(path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+    return Path(temporary)
 
 
 def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
@@ -600,6 +604,72 @@ def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
         raise ValueError("A prior Orca execution archive already has this request identity.")
     history.parent.mkdir(parents=True, exist_ok=True)
     path.replace(history)
+
+
+def _archived_receipt_agent_id(path: Path, selection: OrcaSelection) -> str | None:
+    """The agent to archive when a task-bound selection has no receipt but an archived one.
+
+    The newest receipt in the history that belongs to this selection names it, as
+    :func:`_replaced_agent_id` reads it. Archiving an agent a second time is harmless. Taskless
+    roles keep one receipt per request and archive none.
+    """
+
+    if selection.role in TASKLESS_ROLES:
+        return None
+    expected = selection_binding(selection)
+    archived: list[dict[str, Any]] = []
+    for candidate in (path.parent / "history").glob("*.json"):
+        try:
+            receipt = _read_receipt(candidate)
+        except HTTPException:
+            continue  # an unreadable archived receipt names no agent and blocks no launch
+        if receipt and receipt.get("selection") == expected:
+            archived.append(receipt)
+    if not archived:
+        return None
+    return _replaced_agent_id(max(archived, key=lambda row: str(row.get("createdAt", ""))))
+
+
+def _refuse_reused_request_id(
+    config: McpRuntimeConfig, path: Path, request: OrcaDispatchRequest
+) -> None:
+    """Refuse a request id that already belongs elsewhere, before anything is prepared for it.
+
+    Called for a request that has no receipt at its address. Its id may be the id of an archived
+    execution of the task folder, which can neither be launched again nor archived a second
+    time, or of a request on another selection, whose message-binding file is written once.
+    """
+
+    archived = path.parent / "history" / f"{request.request_id}.json"
+    if archived.exists() or archived.is_symlink():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Request id {request.request_id} belongs to an archived execution of this "
+                "AR role selection's task folder; start again under a new request id."
+            ),
+        )
+    try:
+        bound = json.loads(
+            _message_binding_projection_path(config, request.request_id).read_text("utf-8")
+        )
+    except (OSError, ValueError):
+        return
+    selection = bound.get("selection") if isinstance(bound, dict) else None
+    if isinstance(selection, dict) and selection != selection_binding(request):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Request id {request.request_id} is already bound to another AR role selection "
+                f"({selection.get('role')}); nothing was prepared for this request."
+            ),
+        )
+
+
+def _discard_message_binding_projection(config: McpRuntimeConfig, request_id: uuid.UUID) -> None:
+    """Remove the binding file of a request that was refused after the file was written."""
+
+    _message_binding_projection_path(config, request_id).unlink(missing_ok=True)
 
 
 def _now_iso() -> str:

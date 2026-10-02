@@ -10,10 +10,12 @@ name, so it is never folded in here.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from agents_remember.cli import (
     dashboard,
     knowledge_ingest,
+    leaf_enclosure_start,
     memory_backfill,
     memory_citations,
     paseo_runtime,
@@ -57,7 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments[:1] == [leaf_enclosure_start.COMMAND]:
+        # Internal: the dashboard backend runs it as a child process. It is no sub-command of
+        # the public parser, so no help lists it.
+        return leaf_enclosure_start.main(arguments[1:])
+    args = build_parser().parse_args(arguments)
     return int(args.func(args))
 
 

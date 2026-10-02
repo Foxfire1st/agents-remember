@@ -15,6 +15,7 @@ from agents_remember.application.orca_task_context import (
     ROLE_LEVELS,
     TASKLESS_ROLES,
     OrcaRoleContext,
+    resolve_orca_role_context,
     selection_binding,
 )
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
@@ -28,20 +29,20 @@ from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.application.worktree_tools import worktree_start_tool, worktree_status_tool
+from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
+from agents_remember.controlplane.durable_store import declared_process_role
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
     OrcaAgentOverride,
     OrcaLauncherOptionsRequest,
     OrcaRole,
+    OrcaSelection,
 )
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
@@ -111,6 +112,10 @@ def prepare_orca_role_handover(
         config, defaults, harness_order, agent_override
     )
     workspace = _resolve_workspace(config, context)
+    if context.role in LEAF_ROLES:
+        # Creating the enclosure records it in the leaf's task document. The handover describes
+        # the documents as they stand now, so the same request compiles to the same binding again.
+        context = _current_role_context(config, context)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         OrcaHandoverRequest(
@@ -132,6 +137,20 @@ def prepare_orca_role_handover(
         ar_mcp_context=ar_mcp_context,
         handover=handover,
         request_id=request_id,
+    )
+
+
+def _current_role_context(config: McpRuntimeConfig, context: OrcaRoleContext) -> OrcaRoleContext:
+    """Resolve the selection's task documents again, as they are on disk at this moment."""
+
+    return resolve_orca_role_context(
+        config,
+        OrcaSelection(
+            role=context.role,
+            sprintDocumentRef=context.sprint.ref if context.sprint else None,
+            masterDocumentRef=context.master.ref if context.master else None,
+            taskDocumentRef=context.task.ref if context.task else None,
+        ),
     )
 
 
@@ -268,8 +287,14 @@ def _verify_leaf_revival_scope(
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
+    """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
+
+    Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
+    runtime when the launch call runs; no workspace id is kept.
+    """
+
     if context.role not in LEAF_ROLES:
-        return _ensure_orca_workspace(config, config.workspace_root)
+        return _workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
     contract_path, status = _ensure_leaf_enclosure(
         config,
@@ -279,7 +304,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
-    workspace = _ensure_orca_workspace(config, group)
+    workspace = _workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = _bind_task_report_access(group, task_reports)
@@ -338,7 +363,7 @@ def _ensure_leaf_enclosure(
         TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
     )
     if status.get("ok") is not True and not contract_path.exists():
-        created = worktree_start_tool(
+        created = _start_leaf_enclosure(
             config,
             TaskIdentity(
                 repo_id=leaf.ref.repository,
@@ -350,7 +375,6 @@ def _ensure_leaf_enclosure(
                 leaf_id=leaf.document.id,
                 parent_task=parent_task,
             ),
-            execution=StartExecution(skip_provider_setup=True),
         )
         if created.get("ok") is not True:
             raise ValueError(
@@ -371,42 +395,24 @@ def _ensure_leaf_enclosure(
     return contract_path, status
 
 
-def _ensure_orca_workspace(config: McpRuntimeConfig, path: Path) -> dict[str, str]:
+def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> dict[str, Any]:
+    """Create the enclosure with AR's worktree start, in the process entitled to run it.
+
+    The dashboard backend is not a writer of the worktree stores, so from there the start runs in
+    a short-lived child process of this build. Every other process calls the worktree owner
+    directly.
+    """
+
+    if declared_process_role() == "dashboard":
+        return start_leaf_enclosure_in_child(config, identity)
+    return worktree_start_tool(config, identity, execution=StartExecution(skip_provider_setup=True))
+
+
+def _workspace_folder(path: Path) -> dict[str, str]:
+    # The runtime keys a workspace by the path text, so the folder is always its resolved path.
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    workspaces = _runtime_call(config, "workspaces", {})
-    matches = _matching_workspace(workspaces, root)
-    if not matches:
-        _runtime_call(config, "add-folder", {"path": root.as_posix(), "displayName": root.name})
-        workspaces = _runtime_call(config, "workspaces", {})
-        matches = _matching_workspace(workspaces, root)
-    if len(matches) != 1:
-        raise ValueError(f"Orca must expose exactly one registered workspace for {root}.")
-    workspace_id = matches[0]["id"]
-    return {
-        "id": workspace_id,
-        "selector": f"id:{workspace_id}",
-        "path": root.as_posix(),
-    }
-
-
-def _matching_workspace(payload: dict[str, Any], target: Path) -> list[dict[str, str]]:
-    rows = payload.get("worktrees", [])
-    if not isinstance(rows, list):
-        return []
-    matches: list[dict[str, str]] = []
-    for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
-            continue
-        path = row.get("path")
-        if not isinstance(path, str):
-            continue
-        try:
-            if Path(path).resolve() == target:
-                matches.append({"id": row["id"]})
-        except OSError:
-            continue
-    return matches
+    return {"path": root.as_posix()}
 
 
 def _compile_handover(
