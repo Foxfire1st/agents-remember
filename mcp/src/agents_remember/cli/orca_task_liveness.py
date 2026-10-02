@@ -48,7 +48,11 @@ def _reconcile_prior_execution(
     if status["status"] not in {"completed", "failed", "stopped", "rejected"}:
         raise HTTPException(
             status_code=409,
-            detail="This AR role selection already has a live or unresolved Orca session. Refresh or revive it before starting another.",
+            detail=(
+                "This AR role selection already has an open execution (request "
+                f"{current.get('requestId')}, status {status['status']}). Refresh, retry or "
+                "revive it before starting another."
+            ),
         )
     _archive_receipt(path, current)
     return None
@@ -62,7 +66,8 @@ def _refresh_execution(
     if receipt.get("status") in {"completed", "failed", "stopped", "rejected"}:
         return _public_execution(receipt)
     reference = receipt.get("execution")
-    if not isinstance(reference, dict):
+    if not isinstance(reference, dict) or reference.get("kind") not in {"terminal", "structured"}:
+        # A Paseo agent's state is read by PNT-R07's refresh; until then the receipt stands as saved.
         return _public_execution(receipt)
     try:
         if reference.get("kind") == "terminal":

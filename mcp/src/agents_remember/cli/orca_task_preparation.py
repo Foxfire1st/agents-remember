@@ -31,9 +31,6 @@ from agents_remember.application.worktree_tools import worktree_start_tool, work
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
-from agents_remember.cli.orca_runtime import (
-    runtime_call as _runtime_call,
-)
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
 from agents_remember.kernel.agentic_settings import load_agentic_settings
@@ -268,8 +265,14 @@ def _verify_leaf_revival_scope(
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
+    """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
+
+    Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
+    runtime when the launch call runs; no workspace id is kept.
+    """
+
     if context.role not in LEAF_ROLES:
-        return _ensure_orca_workspace(config, config.workspace_root)
+        return _workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
     contract_path, status = _ensure_leaf_enclosure(
         config,
@@ -279,7 +282,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
-    workspace = _ensure_orca_workspace(config, group)
+    workspace = _workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = _bind_task_report_access(group, task_reports)
@@ -371,42 +374,11 @@ def _ensure_leaf_enclosure(
     return contract_path, status
 
 
-def _ensure_orca_workspace(config: McpRuntimeConfig, path: Path) -> dict[str, str]:
+def _workspace_folder(path: Path) -> dict[str, str]:
+    # The runtime keys a workspace by the path text, so the folder is always its resolved path.
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    workspaces = _runtime_call(config, "workspaces", {})
-    matches = _matching_workspace(workspaces, root)
-    if not matches:
-        _runtime_call(config, "add-folder", {"path": root.as_posix(), "displayName": root.name})
-        workspaces = _runtime_call(config, "workspaces", {})
-        matches = _matching_workspace(workspaces, root)
-    if len(matches) != 1:
-        raise ValueError(f"Orca must expose exactly one registered workspace for {root}.")
-    workspace_id = matches[0]["id"]
-    return {
-        "id": workspace_id,
-        "selector": f"id:{workspace_id}",
-        "path": root.as_posix(),
-    }
-
-
-def _matching_workspace(payload: dict[str, Any], target: Path) -> list[dict[str, str]]:
-    rows = payload.get("worktrees", [])
-    if not isinstance(rows, list):
-        return []
-    matches: list[dict[str, str]] = []
-    for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
-            continue
-        path = row.get("path")
-        if not isinstance(path, str):
-            continue
-        try:
-            if Path(path).resolve() == target:
-                matches.append({"id": row["id"]})
-        except OSError:
-            continue
-    return matches
+    return {"path": root.as_posix()}
 
 
 def _compile_handover(

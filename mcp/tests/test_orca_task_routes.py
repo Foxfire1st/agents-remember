@@ -23,6 +23,7 @@ from agents_remember.cli.orca_task_preparation import (
     ROLE_START_OPERATIONS,
     _bind_task_report_access,
 )
+from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
@@ -37,6 +38,16 @@ def _runtime_config(root: Path) -> McpRuntimeConfig:
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
+        paseo_runtime=parse_paseo_runtime_settings(
+            {
+                "installPrefix": (root / "paseo" / "prefix").as_posix(),
+                "home": (root / "paseo" / "home").as_posix(),
+                "listen": "127.0.0.1:6835",
+                "version": "0.11.0-beta.2",
+                "providers": {},
+                "embed": [],
+            }
+        ),
     )
 
 
@@ -156,7 +167,7 @@ class MessageBindingProjectionTests(unittest.TestCase):
                 },
             }
             receipt_path = orca_task_receipts._receipt_path(config, request, request_id)
-            workspace = {"id": "projects-id", "selector": "id:projects-id", "path": root.as_posix()}
+            workspace = {"path": root.as_posix()}
 
             def execute(
                 _config: McpRuntimeConfig,
@@ -176,7 +187,6 @@ class MessageBindingProjectionTests(unittest.TestCase):
 
             def dispatch() -> JSONResponse:
                 with (
-                    patch.object(orca_task_routes, "_require_pairing"),
                     patch.object(
                         orca_task_routes, "resolve_orca_role_context", return_value=context
                     ),
@@ -199,11 +209,7 @@ class MessageBindingProjectionTests(unittest.TestCase):
                     patch.object(
                         orca_task_preparation,
                         "_resolve_agent_selection",
-                        return_value=(
-                            "codex",
-                            {"model": "gpt-5.6-luna"},
-                            ("--model", "gpt-5.6-luna"),
-                        ),
+                        return_value=("codex", {"model": "gpt-5.6-luna"}, ()),
                     ),
                     patch.object(orca_task_preparation, "_compile_handover", return_value=prepared),
                     patch.object(orca_task_routes, "_receipt_path", return_value=receipt_path),
@@ -310,34 +316,38 @@ class OrcaNativeResultTests(unittest.TestCase):
             ]
         )
 
-    def test_native_prompt_and_pane_receipts_are_whitelisted(self) -> None:
-        self.assertEqual(
-            orca_task_receipts._execution_reference(
-                {
-                    "kind": "terminal",
-                    "handle": "term_owned",
-                    "paneKey": "tab_owned:leaf_owned",
-                    "dispatchCapability": "must-not-escape",
-                },
-                "workspace_owned",
-            ),
+    def test_public_execution_whitelists_the_host_fields_and_keeps_the_saved_call_private(
+        self,
+    ) -> None:
+        host = {
+            "kind": "paseo-agent",
+            "serverId": "srv_owned",
+            "workspaceId": "wks_owned",
+            "agentId": "8a6f0d3e-5f55-4c0b-9d53-6f0f1f6f2a10",
+        }
+        public = orca_task_receipts._public_execution(
             {
-                "kind": "terminal",
-                "handle": "term_owned",
-                "worktreeId": "workspace_owned",
-                "paneKey": "tab_owned:leaf_owned",
-            },
+                "role": "worker",
+                "status": "unknown",
+                "agentId": host["agentId"],
+                "hostAgentExists": True,
+                "pendingArchiveAgentId": "an-older-agent",
+                "execution": {**host, "internalHandle": "must-not-escape"},
+                "replayRequest": {"agent": {"agentId": host["agentId"], "prompt": "first message"}},
+            }
         )
+
+        self.assertEqual(public["execution"], host)
         self.assertEqual(
-            orca_task_receipts._prompt_reference(
-                {
-                    "delivery": "submit",
-                    "outcome": "handed-to-terminal",
-                    "dispatchCapability": "must-not-escape",
-                }
-            ),
-            {"delivery": "submit", "outcome": "handed-to-terminal"},
+            set(public), {"role", "status", "execution", "canStart", "canRetry", "canRevive"}
         )
+        # Retry needs the saved call: without it there is nothing to repeat.
+        self.assertEqual((public["canStart"], public["canRetry"]), (False, True))
+        for status in ("starting", "unknown"):
+            without_call = orca_task_receipts._public_execution(
+                {"role": "worker", "status": status}
+            )
+            self.assertEqual((without_call["canStart"], without_call["canRetry"]), (False, False))
 
     def test_report_availability_is_projected_independently_of_session_status(self) -> None:
         with TemporaryDirectory() as temporary:
@@ -419,14 +429,11 @@ class OrcaNativeResultTests(unittest.TestCase):
 
 class OrcaProjectDispatchTests(unittest.TestCase):
     def test_projects_architect_dispatch_remains_available(self) -> None:
-        with (
-            patch.object(orca_task_routes, "_require_pairing"),
-            patch.object(
-                orca_task_routes,
-                "_start_execution",
-                return_value=JSONResponse({"status": "running"}),
-            ) as start,
-        ):
+        with patch.object(
+            orca_task_routes,
+            "_start_execution",
+            return_value=JSONResponse({"status": "running"}),
+        ) as start:
             response = orca_task_routes._orca_dispatch_endpoint(
                 _runtime_config(Path("/tmp/orca-projects-test")),
                 OrcaDispatchRequest(role="architect", requestId=uuid.uuid4()),
@@ -503,7 +510,11 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                 "selection": selection_binding(first),
                 "requestDigest": "same-payload",
                 "status": "unknown",
-                "replayRequest": {"operationId": "owned-operation", "prompt": {"text": "saved"}},
+                "agentId": "owned-agent",
+                "replayRequest": {
+                    "workspace": {"cwd": workspace["path"]},
+                    "agent": {"agentId": "owned-agent", "prompt": "saved"},
+                },
             }
             orca_task_receipts._write_receipt(first_path, receipt)
             with patch.object(
@@ -524,7 +535,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
             self.assertIsNotNone(same_request)
             self.assertEqual(replay.call_count, 1)
             self.assertEqual(
-                replay.call_args.args[2]["replayRequest"]["operationId"], "owned-operation"
+                replay.call_args.args[2]["replayRequest"]["agent"]["agentId"], "owned-agent"
             )
             self.assertIsNone(second_intent)
 
