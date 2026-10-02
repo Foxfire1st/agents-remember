@@ -63,8 +63,8 @@ REMOVED_EXACT = (
     "CLAUDE_PID", "CODEX_CI", "CODEX_THREAD_ID",
 )
 REMOVED_BY_PREFIX = (
-    "PASEO_HOME", "AR_SPAWN_ROLE", "AR_HOST_RUNTIME_ROOT", "AR_DAGGER_AUTHORITY_DIGEST",
-    "AGENTS_REMEMBER_BENCHMARK_MCP_SRC",
+    "PASEO_HOME", "AR_SPAWN_ROLE", "AR_ORCA_RUNTIME_ROOT", "AR_DAGGER_AUTHORITY_DIGEST",
+    "AGENTS_REMEMBER_BENCHMARK_MCP_SRC", "ORCA_USER_DATA_PATH",
 )
 KEPT = (
     "PATH", "HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
@@ -455,7 +455,7 @@ class BuildInputTests(SandboxCase):
         self.assertEqual({environment[name] for name in KEPT if name != "PATH"}, {"kept"})
         scrub = launcher_scrub(self.layout)
         self.assertLessEqual({*REMOVED_EXACT, *own, "PWD"}, set(scrub["names"]))
-        self.assertEqual(scrub["prefixes"], ["AGENTS_REMEMBER_", "AR_", "PASEO_"])
+        self.assertEqual(scrub["prefixes"], ["AGENTS_REMEMBER_", "AR_", "ORCA_", "PASEO_"])
 
         # What a running process carries decides whether it has the sandbox's environment.
         home = {"PASEO_HOME": self.layout.paseo_home.as_posix()}

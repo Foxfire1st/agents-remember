@@ -24,12 +24,16 @@ REMOVED_PREFIXES: dict[str, str] = {
     "AR_": (
         "belong to another AR runtime or launch: the seat identity its control plane injects "
         "(AR_SPAWN_*, AR_HOSTED_SESSION_ID), a launch's workspace and capsule (AR_WORKSPACE_ROOT, "
-        "AR_BINDING_REF, AR_CAPSULE_*), the host runtime selection of the line this build was "
-        "copied from, the Eve runtime and state roots (AR_EVE_*), the experiment switch "
-        "(AR_EXPERIMENT), the settings file of a reloading dashboard (AR_DASHBOARD_DEV_*) and the "
-        "Dagger authority root (AR_DAGGER_*)"
+        "AR_BINDING_REF, AR_CAPSULE_*), the Orca runtime the ONT line selects (AR_ORCA_*), the Eve "
+        "runtime and state roots (AR_EVE_*), the experiment switch (AR_EXPERIMENT), the settings "
+        "file of a reloading dashboard (AR_DASHBOARD_DEV_*) and the Dagger authority root "
+        "(AR_DAGGER_*)"
     ),
     "AGENTS_REMEMBER_": "select another AR source tree or settings file",
+    "ORCA_": (
+        "select the ONT line's Orca runtime, profile and pairing (ORCA_USER_DATA_PATH, "
+        "ORCA_PAIRING_CODE, ORCA_REMOTE_PAIRING, ORCA_ENVIRONMENT)"
+    ),
 }
 
 # Exact name -> why it is removed.

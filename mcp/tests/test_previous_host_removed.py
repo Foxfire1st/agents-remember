@@ -4,10 +4,13 @@ The previous host of this line was Orca. Four things are shown here, in the one 
 may write that name:
 
 - item 5: no tracked file names it, in its path or its content, outside the allow-list below;
+- item 3: the one place that still names it is the sandbox tooling's list of the variables it
+  removes, and the unit test that pins that list, each with a counted number of hits;
 - item 2: a settings file that still carries the ``orcaRuntime`` block loads as if the block
   were absent;
-- item 7: the launcher routes are registered under their new paths only, and no route of the
-  dashboard application matches a former path;
+- item 7: the launcher routes are registered under their new paths only, no route of the
+  dashboard application matches a former path, and the application answers each of them 404
+  for every method;
 - the packet's recovery rule: receipts and reports the previous line left on disk are neither
   read nor changed.
 """
@@ -30,7 +33,6 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.models.role_launcher import RoleLauncherOptionsRequest
 from agents_remember.serving.app import create_app
 from agents_remember.serving.projector import ProjectionCadence
-from agents_remember.serving.static import dashboard_static_dir
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.routing import Match, Mount
@@ -72,8 +74,24 @@ ALLOWED_FILES: dict[str, str] = {
     "mcp/tests/test_role_instruction_wording.py": "PNT-R06 item 12: the forbidden strings of "
     "the role instructions",
 }
+# By file name with the number of hits (item 3): the sandbox tooling removes the variables of the
+# previous host from the environment of what it starts, which it can only do by naming their
+# prefix, and one unit test pins that list. A count that changes fails the search either way.
+ALLOWED_COUNTED_FILES: dict[str, tuple[int, str]] = {
+    "scripts/pnt_sandbox/environment.py": (
+        8,
+        "the prefix of the variables the sandbox removes before it starts the runtime, and the "
+        "reason texts of that prefix and of the `AR_` prefix",
+    ),
+    "mcp/tests/test_pnt_sandbox.py": (
+        3,
+        "pins that removal list: two variables that must be removed and the prefix in the list "
+        "the Eve launcher is given",
+    ),
+}
 
 _TOKEN = re.compile(rb"[A-Za-z0-9_]*orca[A-Za-z0-9_]*", re.IGNORECASE)
+_NAME = re.compile(rb"orca", re.IGNORECASE)
 # A word ends at anything that is not a letter, at an underscore and at a change of case.
 _WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
 
@@ -87,6 +105,10 @@ def named_in(path: str, content: bytes) -> list[str]:
 
     if path in ALLOWED_FILES:
         return []
+    if path in ALLOWED_COUNTED_FILES:
+        allowed = ALLOWED_COUNTED_FILES[path][0]
+        hits = len(_NAME.findall(content))
+        return [] if hits == allowed else [f"{path}: {hits} hits, {allowed} allowed"]
     found = [f"{path}: the path itself"] if NAME in path.casefold() else []
     for match in _TOKEN.finditer(content):
         token = match.group().decode("latin-1")
@@ -152,6 +174,21 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
         for path in ALLOWED_FILES:
             with self.subTest(path=path):
                 self.assertIn(NAME.encode(), (contents.get(path) or b"").lower())
+        # A counted file is there with exactly its count (a file that is gone has none).
+        for path, (allowed, _reason) in ALLOWED_COUNTED_FILES.items():
+            with self.subTest(counted=path):
+                self.assertEqual(len(_NAME.findall(contents.get(path) or b"")), allowed)
+        # Nothing else of the sandbox tooling names the host.
+        tooling = [path for path in files if path.startswith("scripts/pnt_sandbox/")]
+        self.assertGreater(len(tooling), 10)
+        self.assertEqual(
+            [
+                path
+                for path in tooling
+                if _NAME.search(contents.get(path) or b"") and path not in ALLOWED_COUNTED_FILES
+            ],
+            [],
+        )
 
     def test_the_allow_list_holds_unrelated_words_and_the_tests_that_must_name_the_host(
         self,
@@ -170,6 +207,18 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
         for path, reason in ALLOWED_FILES.items():
             self.assertRegex(path, r"^mcp/tests/test_\w+\.py$")
             self.assertGreater(len(reason), 40, f"{path} is allowed without a reason")
+        # The counted files are the removal list of item 3 and the unit test that pins it.
+        self.assertEqual(
+            sorted(ALLOWED_COUNTED_FILES),
+            ["mcp/tests/test_pnt_sandbox.py", "scripts/pnt_sandbox/environment.py"],
+        )
+        for path, (allowed, reason) in ALLOWED_COUNTED_FILES.items():
+            self.assertGreater(allowed, 0, f"{path} is allowed for no hit")
+            self.assertGreater(len(reason), 40, f"{path} is allowed without a reason")
+            self.assertNotIn(path, ALLOWED_FILES)
+            self.assertNotIn(
+                path, [file for files in ALLOWED_IDENTIFIERS.values() for file in files]
+            )
 
     def test_the_search_finds_each_kind_of_name_and_passes_only_what_is_listed(self) -> None:
         module = SRC + "cli/zz_launch.py"
@@ -239,6 +288,15 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
         for label, (path, content, expected) in caught.items():
             with self.subTest(label):
                 self.assertEqual(named_in(path, content), expected)
+        removal_list = "scripts/pnt_sandbox/environment.py"
+        counted = ALLOWED_COUNTED_FILES[removal_list][0]
+        for hits in (counted - 1, counted + 1, 0):
+            with self.subTest("a counted file with another number of hits", hits=hits):
+                self.assertEqual(
+                    named_in(removal_list, b'"ORCA_": "removed",\n' * hits),
+                    [f"{removal_list}: {hits} hits, {counted} allowed"],
+                )
+        self.assertEqual(named_in(removal_list, b'"ORCA_": "removed",\n' * counted), [])
         passed = {
             "a listed identifier in its file": (
                 SRC + "worktrees/integration/closeout/door_evidence.py",
@@ -399,7 +457,6 @@ class FormerRouteTests(unittest.TestCase):
         self.assertLessEqual(set(ROUTES), paths)
         self.assertEqual([path for path in paths if NAME in path.casefold()], [])
         client = TestClient(app)
-        bundle = dashboard_static_dir() is not None
         for path in FORMER_ROUTES:
             for method in METHODS:
                 with self.subTest(path=path, method=method):
@@ -408,13 +465,18 @@ class FormerRouteTests(unittest.TestCase):
                         route for route in served if route.matches(scope)[0] is not Match.NONE
                     ]
                     self.assertEqual(matching, [])
-                    # Only the static surface, mounted at the root after every API route, is
-                    # left to answer: not found for a read when a bundle is built (the build's
-                    # own notice of a missing bundle otherwise), and its method refusal for
-                    # anything but a read. No handler of the launcher runs.
-                    status = client.request(method, path, json={}).status_code
-                    expected = (404 if bundle else 503) if method == "GET" else 405
-                    self.assertEqual(status, expected)
+                    # A path under /api/ that no route has is not found, whatever the method
+                    # and whether or not a bundle is built; no handler of the launcher runs.
+                    answer = client.request(method, path, json={})
+                    self.assertEqual(
+                        (answer.status_code, answer.json()), (404, {"detail": "Not Found"})
+                    )
+        # The new routes answer in the same application.
+        frame = client.get("/api/role-launch/frame")
+        self.assertEqual((frame.status_code, frame.json()["reason"]), (200, "not-configured"))
+        for name in ("options", "dispatch", "result"):
+            with self.subTest(route=name):
+                self.assertEqual(client.post(f"/api/role-launch/{name}", json={}).status_code, 422)
 
 
 class PreviousLineReceiptTests(PaseoLaunchTestCase):
