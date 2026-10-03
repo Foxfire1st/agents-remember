@@ -180,6 +180,8 @@ class LandingStateRefresher:
                 return frozen
         observation = self._observations.get(LandingContractKey.from_contract(contract))
         if observation is None:
+            if contract.cleanup == "completed":
+                return [{**row, "detail": "no final observation recorded"} for row in pending]
             return pending
         return [fact.payload(now=now) for fact in observation.facts]
 
@@ -221,7 +223,11 @@ class LandingStateRefresher:
     async def refresh_once(self, *, now: datetime | None = None) -> None:
         attempted_at = now or datetime.now(UTC)
         contracts = self._landing_contracts()
-        active_keys = {LandingContractKey.from_contract(contract) for contract in contracts}
+        active_keys = {
+            LandingContractKey.from_contract(contract)
+            for contract in contracts
+            if contract.cleanup != "completed"
+        }
         semaphore = asyncio.Semaphore(self._max_concurrency)
         results = await asyncio.gather(
             *(self._observe_contract(contract, semaphore) for contract in contracts)
@@ -230,9 +236,7 @@ class LandingStateRefresher:
         for key, rows in results:
             if rows is not None:
                 self._publish(key, rows, attempted_at=attempted_at)
-                contract = by_key.get(key)
-                if contract is not None:
-                    self._maybe_freeze(contract, rows, attempted_at=attempted_at)
+                self._maybe_freeze(by_key[key], rows, attempted_at=attempted_at)
         # Copy-on-write publication keeps projection reads immutable and bounds retention to the
         # contracts that are landing-active in the latest enclosure sweep.
         self._observations = {
@@ -267,19 +271,23 @@ class LandingStateRefresher:
                 contract = load_contract(path)
             except (ContractError, OSError):
                 continue
-            if unobserved_landing_refs(contract) is None:
-                continue
-            # Landing freeze: a frozen finished contract left the sweep for good — its facts are served
-            # from the persisted final observation, never re-probed. A reopened task (cleanup
-            # no longer "completed") re-enters the sweep and re-freezes on its next finish.
-            # Gate on a *trustworthy* final file (mtime-cached), not mere existence: a corrupt,
-            # unparseable, or contract-predating landing-final.json is treated as absent so the
-            # contract stays in the sweep and self-heals (its next full observation atomically
-            # rewrites the file) instead of leaving the sweep forever while serving stale facts.
-            if contract.cleanup == "completed" and self._frozen_rows(contract) is not None:
+            if not self._needs_live_probe(contract):
                 continue
             contracts.append(contract)
         return contracts
+
+    def _needs_live_probe(self, contract: WorktreeContract) -> bool:
+        """Observe open landing arcs, with one finishing attempt for an arc already in flight."""
+        if contract.cleanup == "abandoned":
+            return False
+        if contract.cleanup == "completed":
+            return (
+                LandingContractKey.from_contract(contract) in self._observations
+                and self._frozen_rows(contract) is None
+            )
+        return (
+            contract.closeout_status == "completed" or contract.integration_status != "not-started"
+        )
 
     def _maybe_freeze(
         self,
@@ -291,14 +299,16 @@ class LandingStateRefresher:
         """Persist the final observation once the finished contract is fully observed.
 
         Freeze requires cleanup "completed" (the lifecycle is over — nothing left to land)
-        and every fact ``observed`` in THIS probe (a missing fact means the remote answer is
-        still outstanding; the ordinary cadence retries and freezes on the next full answer).
+        and every fact ``observed`` in THIS probe. A missing fact leaves no final file; the
+        completed contract leaves the sweep after this finishing attempt and stays explicitly
+        missing instead of repeatedly probing historical branches.
 
         No ``path.exists()`` early-return: a contract that already carries a *trusted* final
         file has left the sweep and never reaches here, so the only contracts that do are ones
         whose file is absent, corrupt, or stale — all of which we WANT to (re)write atomically.
-        This is what lets a corrupt file self-heal and a reopened→re-finished contract re-freeze
-        with fresh facts (reopen having deleted the stale file first).
+        A landing tracked while open can therefore re-freeze with fresh facts after reopening
+        (reopen having deleted the stale file first). Already-completed history is never probed
+        just to repair a missing or corrupt final file.
 
         The write is still decided on a seconds-old contract snapshot, so it can resurrect a
         file ``task_reopen`` just deleted; ``frozenAt`` is stamped with the sweep's start, which
@@ -308,6 +318,10 @@ class LandingStateRefresher:
         if contract.cleanup != "completed":
             return
         if not rows or any(row.get("factState") != "observed" for row in rows):
+            logger.warning(
+                "final landing observation incomplete for %s; no final facts recorded",
+                contract.contract_path,
+            )
             return
         path = _final_path(contract)
         frozen_rows = [
@@ -322,6 +336,8 @@ class LandingStateRefresher:
         payload = {"frozenAt": attempted_at.isoformat(), "facts": frozen_rows}
         try:
             atomic_write_text(path, json.dumps(payload, indent=1))
+            # A replacement can retain its mtime; retire the previous arc's cached facts.
+            self._frozen_cache.pop(path.as_posix(), None)
         except OSError:
             logger.warning("could not persist landing freeze for %s", path, exc_info=True)
 
@@ -361,8 +377,8 @@ def _load_final(path: Path) -> tuple[datetime, list[dict[str, object]]] | None:
     """``(frozenAt, reducer-shaped rows)``, or ``None`` for anything we cannot trust as final.
 
     A file with no usable ``frozenAt`` is treated exactly like a corrupt one: its provenance
-    cannot be checked against the contract, so it is "absent" and the leaf self-heals by
-    re-probing and re-freezing (the freeze has always written ``frozenAt``).
+    cannot be checked against the contract, so it is "absent". An in-flight landing can
+    re-freeze after its finishing probe; completed history stays explicitly missing.
     """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))

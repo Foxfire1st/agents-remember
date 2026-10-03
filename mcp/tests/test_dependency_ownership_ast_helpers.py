@@ -43,8 +43,22 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "4477446eb501ccc6e4c76e627f893c11d08edc313dc92fb399dc1d5e13316d10"
+LIFECYCLE_CATALOG_SHA256 = "91a94e074d87e911ced13f7bf2976f61af38f54a50b92595b8222357b4e57c24"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Forty-third deliberate re-pin (260928-MIK-L40, re-measured at base ``d0855daa``, 2026-10-02) --
+one consumer the census derived for the reviewer read-latency case module.** ``260928-MIK-L40``
+(MIK-R40, reviewer read latency on Git trees) adds ``mcp/tests/test_review_read_latency.py``. Its
+counts are entered through the port the dashboard route calls, so it imports the dashboard's
+composition root (``cli/dashboard.py::serving_collaborators``) and with it transitively consumes
+``fixtures/repository_profiles/node/package-lock.json``; that row gains the one path, appended
+after the Forty-second's ``test_reconsideration_surfacing.py`` without re-sorting. The leaf's
+other new case module, ``mcp/tests/test_worktree_candidate_capture.py``, consumes no governed
+artifact. **No row was added or removed, no other consumer changed and no field changed**, so the
+population stays at **sixteen contracts / eighty artifacts**, and the catalog is re-pinned from
+``4477446eb501ccc6e4c76e627f893c11d08edc313dc92fb399dc1d5e13316d10`` (the Forty-second) to
+``91a94e074d87e911ced13f7bf2976f61af38f54a50b92595b8222357b4e57c24``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta remains exactly empty.
 
 **Forty-second deliberate re-pin (260928-MIK-L14, re-measured at base ``48f680d5``, 2026-09-30) --
 one consumer the census derived for the reconsideration case module.** ``260928-MIK-L14``

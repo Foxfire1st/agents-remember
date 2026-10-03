@@ -43,6 +43,12 @@
 //     surface's `ReviewReadCache` under its key, and returning to that question renders the kept
 //     answer without a request. A refresh forgets the question it re-asks; an answer from another
 //     comparison generation empties the cache (see that module).
+//   * NO READ ON OPENING IS THROWN AWAY (MIK-R40 rule 5). The reviewer's first read waits for the
+//     catalogue to choose a subject, for a bounded time; when the catalogue is slower than the bound
+//     the task-context review is read meanwhile. If the catalogue then answers first, that read is
+//     superseded: its answer never writes the panes, but it is kept in the cache (same generation
+//     only), so "All source changes" opens from it without a second request. Only the task-context
+//     answer is kept this way; a superseded subject's answer is dropped, as before.
 //
 // WHAT IT DOES NOT DO. No timer, no retry ladder, no polling: a read happens when the question changes
 // or when the reader asks. A read that fails leaves the last coherent payload retained and lets the
@@ -199,7 +205,13 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
     continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
   );
   askReview({ ...context.request, previous }, (answered) => {
-    if (!current()) return;
+    if (!current()) {
+      // Superseded: it never writes the read state. The task-context answer is kept unshown.
+      const taskContext = context.request.selectorKind === undefined;
+      if (taskContext && whole && previous === null && answered.phase === 'reviewed')
+        context.cache.keepUnshown(askedFor, answered.payload);
+      return;
+    }
     const admitted = familyContinuationRead(answered, continuing, cursor);
     if (admitted.phase === 'reviewed') {
       // A refresh's answer states its staleness against the identity it carried; it is shown once,

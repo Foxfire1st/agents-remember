@@ -510,6 +510,38 @@ it('lands a reader who has not acted on the first family when the catalogue answ
   expect(server.catalogueReads()).toHaveLength(1);
 });
 
+it('keeps the task-context answer the bounded wait released when the catalogue answers before it (MIK-R40 rule 5)', async () => {
+  const server = delayedServer({ holdCatalogue: true });
+  const view = render(<ReviewSurface {...target} />);
+  // The catalogue is slower than the bound: the whole-task read is released and still in flight.
+  await waitFor(() => expect(server.heldFor(null)).toHaveLength(1), {
+    timeout: SUBJECT_HOLD_MS * 4,
+  });
+  // The catalogue answers first: the reader, who has not acted, is taken to the first family.
+  await server.releaseCatalogue();
+  await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1));
+  await server.answer(families[0].family_id);
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
+  );
+  // The superseded whole-task answer arrives: it never writes the panes.
+  await server.answer(null);
+  await act(async () => {});
+  expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
+  expect(view.queryByTestId('review-center-unselected')).toBeNull();
+  // It was not thrown away either: "All source changes" opens from it without another request.
+  const reads = server.reviewReads().length;
+  fireEvent.click(view.getByTestId('review-task-source'));
+  await view.findByTestId('review-center-unselected');
+  await act(async () => {});
+  expect(server.reviewReads()).toHaveLength(reads);
+  expect(server.reviewReads().filter((url) => !url.searchParams.has('selectorKind'))).toHaveLength(
+    1,
+  );
+  expect(server.held).toHaveLength(0);
+  expect(view.queryByTestId('review-reading-pending')).toBeNull();
+});
+
 const SUBJECT_REFUSAL = {
   state: 'refused',
   refusal: {

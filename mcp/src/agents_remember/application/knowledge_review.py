@@ -98,6 +98,7 @@ from agents_remember.application.review_evidence_records import (
     AUTHORED_EFFECT_KINDS,
     MatrixSelection,
     review_records_for,
+    review_records_of,
     with_selection_channels,
 )
 from agents_remember.application.review_external_git_movement import external_git_movement
@@ -208,6 +209,7 @@ __all__ = [
     "ReviewSurfaceRequest",
     "compose_review",
     "list_knowledge_review_entries",
+    "read_complete_knowledge_review",
     "read_knowledge_review",
     "resolve_review_candidate",
     "review_records_for",
@@ -252,6 +254,30 @@ def read_knowledge_review(
     if isinstance(resolved, ReviewRefusal):
         return refused(request.repository_id, resolved)
     return compose_review(resolved, request, records, probe=probe)
+
+
+def read_complete_knowledge_review(
+    config: McpRuntimeConfig, request: ReviewSurfaceRequest
+) -> KnowledgeReviewResult:
+    """One review with its complete record collection, from **one** resolution (MIK-R40 rule 2).
+
+    The dashboard's review route asks for both halves of a review: the candidate's record collections
+    and the composition that renders them. Each half used to resolve the candidate for itself, so one
+    request captured both worktrees twice and the two halves could, in principle, bind two different
+    candidates. The candidate is resolved here once and that resolution is handed to both. The
+    recheck before publication (ICR-R01) is the composition's own and is unchanged.
+    """
+
+    resolved = resolve_review_candidate(
+        config,
+        request.repository_id,
+        request.master,
+        request.leaf_id,
+        recorded=request.history == "recorded",
+    )
+    if isinstance(resolved, ReviewRefusal):
+        return refused(request.repository_id, resolved)
+    return compose_review(resolved, request, review_records_of(resolved))
 
 
 def list_knowledge_review_entries(

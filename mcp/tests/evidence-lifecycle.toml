@@ -837,6 +837,7 @@ consumers = [
   "mcp/tests/test_unexplained_change_disposition.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_reconsideration_surfacing.py",
+  "mcp/tests/test_review_read_latency.py",
 ]
 
 [[artifact]]

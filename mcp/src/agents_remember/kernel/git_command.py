@@ -215,9 +215,13 @@ def run_git(
 
 
 def run_git_with_index(
-    repo_root: Path, args: list[str], index_path: Path
+    repo_root: Path, args: list[str], index_path: Path, *, input_text: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run Git against one explicit isolated index after stripping ambient selectors."""
+    """Run Git against one explicit isolated index after stripping ambient selectors.
+
+    ``input_text`` feeds Git's stdin, for the commands that take their paths there
+    (``update-index --stdin``); without it stdin is ``DEVNULL``, as for every other command.
+    """
     environment = git_environment()
     environment["GIT_INDEX_FILE"] = index_path.as_posix()
     return _run_git(
@@ -225,7 +229,7 @@ def run_git_with_index(
         args,
         _GitRun(
             work_dir=repo_root,
-            input_text=None,
+            input_text=input_text,
             timeout=GIT_LOCAL_TIMEOUT_SECONDS,
             environment=environment,
         ),

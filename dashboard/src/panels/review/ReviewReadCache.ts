@@ -132,6 +132,16 @@ export class ReviewReadCache {
     this.reviews.set(key, payload);
   }
 
+  // Keep an answer that was read but never shown (its question was replaced while it was in flight),
+  // so the request was not issued for nothing. It may be older than what the surface shows now, so it
+  // never replaces the generation on screen: an answer from another generation is dropped. Kept, it
+  // is an answer like any other: the next answer from another generation empties it with the rest.
+  keepUnshown(key: string, payload: ReviewPayload): void {
+    const known = this.generation;
+    if (known !== null && !sameGeneration(known, comparisonGenerationOf(payload))) return;
+    this.keepReview(key, payload);
+  }
+
   forgetReview(key: string): void {
     this.reviews.delete(key);
   }

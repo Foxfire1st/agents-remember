@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
+from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, record_read
 from agents_remember.models.task_intent import require_task_intent_identity
 
 from .document import TaskDocument
@@ -67,7 +68,18 @@ def markdown_path_for(task_root: Path, doc: TaskDocument) -> Path:
 
 
 def read_task_doc(json_path: Path) -> TaskDocument:
-    return TaskDocument.model_validate_json(json_path.read_text(encoding="utf-8"))
+    try:
+        data = json_path.read_bytes()
+    except FileNotFoundError:
+        record_read(json_path, ABSENT)
+        raise
+    except OSError as error:
+        record_read(json_path, f"unreadable ({type(error).__name__})")
+        raise
+    record_read(json_path, bytes_identity(data))
+    # Preserve read_text's universal newlines; the observation names the original bytes.
+    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return TaskDocument.model_validate_json(text)
 
 
 def capture_task_doc_source(json_path: Path) -> TaskDocSourceSnapshot:

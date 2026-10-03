@@ -18,7 +18,11 @@ and memory candidate K_C -- and nothing is copied:
   its conversion (MIK-R24 rule 7, at the converted-base cache the worklist fills). The converted
   files are written as a Git tree into the memory repository's object store, so both memory sides
   are Git trees and their diff is a Git diff. The record names the conversion's inputs; a reopen
-  re-derives it and checks the tree id instead of pinning it.
+  re-derives it and checks the tree id instead of pinning it. A live read does not write the tree
+  again while Git holds it (MIK-R40 rule 3): the conversion is a pure function of its three
+  inputs, so when the leaf's latest record names the same inputs, its tree id is this
+  conversion's, and it is used once Git confirms it still holds that tree. Otherwise -- no
+  record, other inputs, or a tree Git no longer has -- the tree is written exactly as before.
 * **Knowledge sides (rule 2).** Each memory side is read through the derived index of its tree
   (MIK-R23), which is itself a dataset of the store's schema, so the landed review composition runs
   over it unchanged (rule 6). No database copy is created, retained or read.
@@ -263,16 +267,26 @@ def _live_draft(
     memory_base_tree = _require(memory_repository, f"{memory_base}^{{tree}}", "memory base")
     assert contract.memory_worktree is not None
     candidate_tree = _capture(contract.memory_worktree)
-    converted = converted_base_side(
-        coordination_root,
+    leaf_id = contract.leaf_id or contract.task_name
+    conversion = _conversion(
         memory_repository,
         memory_base,
         trees=(memory_base_tree, candidate_tree),
         code=(code_repository, base_commit),
     )
+    converted = (
+        None
+        if conversion is None
+        else _converted_base(
+            coordination_root,
+            memory_repository,
+            conversion,
+            held=_latest_converted_base(contract.task_root, leaf_id),
+        )
+    )
     return ReviewTreeComparisonRecord(
         task_id=review_task_id(contract.task_root),
-        leaf_id=contract.leaf_id or contract.task_name,
+        leaf_id=leaf_id,
         number=1,
         code_base=ReviewTreeSide(
             repository=str(code_repository), tree=base_tree, commit=base_commit
@@ -345,8 +359,45 @@ def converted_base_side(
 ) -> ReviewConvertedBase | None:
     """K_B's conversion when K_B is unconverted and K_C converted (MIK-R24 rule 7), else ``None``.
 
-    ``trees`` is (K_B's tree, K_C's tree); ``code`` is the code repository and B.
+    ``trees`` is (K_B's tree, K_C's tree); ``code`` is the code repository and B. The converted
+    files are written as a Git tree; a live leaf's comparison uses the tree its latest record
+    names instead, while Git holds it (:func:`_converted_base`).
     """
+
+    conversion = _conversion(memory_repository, memory_base, trees=trees, code=code)
+    if conversion is None:
+        return None
+    return _converted_base(coordination_root, memory_repository, conversion, held=None)
+
+
+@dataclass(frozen=True)
+class _Conversion:
+    """Everything K_B's conversion is a function of: the memory commit, the pinned conversion
+    version and the code commit it is anchored at (with the code repository that holds it)."""
+
+    memory_base: str
+    version: str
+    code_repository: Path
+    code_commit: str
+
+    def recorded_as(self, held: ReviewConvertedBase) -> bool:
+        """Whether a recorded converted base was made from exactly these inputs."""
+
+        return (held.commit, held.version, held.code_commit) == (
+            self.memory_base,
+            self.version,
+            self.code_commit,
+        )
+
+
+def _conversion(
+    memory_repository: Path,
+    memory_base: str,
+    *,
+    trees: tuple[str, str],
+    code: tuple[Path, str],
+) -> _Conversion | None:
+    """The inputs of K_B's conversion, or ``None`` when K_B is compared as it is."""
 
     base_tree, candidate_tree = trees
     if _has_marker(memory_repository, base_tree):
@@ -357,12 +408,70 @@ def converted_base_side(
     code_repository, code_base = code
     own = own_paired_code_commit(memory_repository, memory_base)
     code_commit = own if own is not None and CodeObjects(code_repository).commit(own) else code_base
-    tree = _converted_tree(
-        coordination_root, memory_repository, memory_base, (code_repository, code_commit), version
-    )
+    return _Conversion(memory_base, version, code_repository, code_commit)
+
+
+def _converted_base(
+    coordination_root: Path,
+    memory_repository: Path,
+    conversion: _Conversion,
+    *,
+    held: ReviewConvertedBase | None,
+) -> ReviewConvertedBase:
+    """K_B's conversion as a Git tree: the held one when it is this conversion, else written."""
+
+    tree = _held_tree(memory_repository, held, conversion)
+    if tree is None:
+        tree = _converted_tree(
+            coordination_root,
+            memory_repository,
+            conversion.memory_base,
+            (conversion.code_repository, conversion.code_commit),
+            conversion.version,
+        )
     return ReviewConvertedBase(
-        commit=memory_base, version=version, code_commit=code_commit, tree=tree
+        commit=conversion.memory_base,
+        version=conversion.version,
+        code_commit=conversion.code_commit,
+        tree=tree,
     )
+
+
+def _held_tree(
+    memory_repository: Path, held: ReviewConvertedBase | None, conversion: _Conversion
+) -> str | None:
+    """The recorded converted base tree, when it is this request's conversion and Git holds it.
+
+    The conversion is a pure function of its three inputs, so a record made from the same inputs
+    names this conversion's tree. A record made from other inputs names another conversion and is
+    never used, and a tree Git can no longer produce is written again by the caller, so the answer
+    is never a guess: it is the tree Git holds for these exact inputs, or ``None``.
+    """
+
+    if held is None or not conversion.recorded_as(held):
+        return None
+    return held.tree if _missing_tree(memory_repository, held.tree) is None else None
+
+
+def _latest_converted_base(task_root: Path, leaf_id: str) -> ReviewConvertedBase | None:
+    """The converted base of the leaf's readable record with the highest number, if it has one.
+
+    Only that one record file is read: the tree it names is confirmed with Git before it is used,
+    and the full list of records is read where the comparison is recorded (:func:`_record`).
+    """
+
+    directory = comparison_directory(task_root, leaf_id)
+    if not directory.is_dir():
+        return None
+    numbered = sorted(
+        (int(path.stem), path) for path in directory.glob("*.json") if path.stem.isdigit()
+    )
+    for _number, path in reversed(numbered):
+        try:
+            return ReviewTreeComparisonRecord.model_validate_json(path.read_bytes()).converted_base
+        except (OSError, ValidationError):
+            continue
+    return None
 
 
 def _converted_tree(

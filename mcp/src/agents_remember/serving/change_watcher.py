@@ -55,19 +55,21 @@ rewrite opens one ``a+b`` -- and none is an input). TTL-gated writers that run i
 retention, provider current-state refresh) cost at most one debounced echo tick per TTL
 window, whose diff emits nothing.
 
-Freshness bounds (R5, unchanged SSE semantics): a write into a quiet world becomes an SSE
-delta within ``debounce + projection time``; under sustained writes projections are floored
-to one per ``--interval`` and bounded by ``max_delay = interval`` (R2 -- the busy world keeps
-the former 1s cadence); with no writes at all, ``/api/state`` staleness -- and every
+Freshness bounds (unchanged SSE semantics): a write into a quiet world becomes an SSE
+delta within ``debounce + projection time``. Live ticks rest after completing for the greater
+of ``--interval`` and their duration capped at 3s, so sustained changes cannot keep the
+projection continuously occupying the interpreter. Changes during a tick or its rest remain
+pending; the rest adds at most 3s at the default interval, on top of running/next tick times.
+With no writes at all, ``/api/state`` staleness -- and every
 time-*derived* field or state flip (``ageSeconds``/``staleSeconds``, stale/overdue decays) --
 is bounded by the heartbeat (R3/R4; default :data:`DEFAULT_HEARTBEAT_SECONDS`). The
 volatile age fields were already stripped from the delta stream and advanced client-side
 (``dashboard/src/data/servedAges.ts``), so heartbeat-cadence refresh does not change what
 an SSE client displays between emissions.
 
-Failure posture (R7): ``watchfiles`` missing, zero watchable roots, or a crashed watch
-degrades LOUDLY (error log) to fixed ``--interval`` ticking -- exactly today's behaviour --
-and keeps retrying; fail-open, never fail-silent.
+Failure posture: ``watchfiles`` missing or a crashed watch degrades LOUDLY (error log)
+to interval-driven full refreshes and keeps retrying; zero watchable roots also retain full
+refreshes. Completed ticks still rest, so failed notifications cannot restore continuous work.
 """
 
 from __future__ import annotations
@@ -113,6 +115,10 @@ DEFAULT_HEARTBEAT_SECONDS = 15.0
 #: Settle window after the last observed change before projecting (R2): long enough to
 #: coalesce a multi-file write burst, short enough to feel immediate on the dashboard.
 DEBOUNCE_SECONDS = 0.1
+
+# A slow projection must yield time to request threads, without adding an unbounded
+# scheduler delay to the dashboard's next state update.
+MAX_PROJECTION_REST_SECONDS = 3.0
 
 #: How the raw watchfiles batches are grouped before they reach the pacer. The library
 #: default (1600ms) could delay first detection beyond the 1s max-delay bound under
@@ -289,15 +295,14 @@ class ChangePacer:
     (:meth:`notify_change` / :meth:`set_watcher_healthy`); the run loop awaits
     :meth:`wait` once per tick. Scheduling rules (all monotonic-clock):
 
-    * **floor** -- never two projections closer than ``interval`` apart (``--interval``
-      keeps its meaning as the fast-path cadence floor, so ``interval=100`` test
-      projectors stay quiet exactly as before);
+    * **floor** -- never two projections closer than ``interval`` apart; after a completed
+      projection, also rest for ``max(interval, min(duration, 3s))``;
     * **debounce** -- a change projects ``debounce`` after the *last* change of its burst;
     * **max delay** -- a sustained burst still projects within ``max_delay`` (= ``interval``)
-      of its *first* change (R2: the busy world keeps the former cadence);
+      of its *first* change, subject to the floor and completed projection's rest;
     * **heartbeat** -- with no changes, project every ``heartbeat`` seconds (R3/R4);
-    * **degraded** -- while the watcher is unhealthy, tick at the fixed ``interval``
-      exactly like the pre-adaptive loop (R7 fail-open).
+    * **degraded** -- while the watcher is unhealthy, request full refreshes at the
+      interval floor, still subject to the completed projection's rest.
     """
 
     def __init__(
@@ -321,6 +326,12 @@ class ChangePacer:
         # too slow a floor for changes racing the watcher startup).
         self._watcher_healthy = False
         self._last_wake = time.monotonic()
+        self._not_before = self._last_wake
+
+    def projection_completed(self, duration: float) -> None:
+        """Give request threads a bounded rest after a live tick, including a failed tick."""
+        rest = max(self._interval, min(duration, MAX_PROJECTION_REST_SECONDS))
+        self._not_before = time.monotonic() + rest
 
     def notify_change(self, domains: frozenset[ProjectionDomain] = ALL_PROJECTION_DOMAINS) -> None:
         """Record a (batch of) input change(s); wakes :meth:`wait` to reschedule."""
@@ -332,20 +343,20 @@ class ChangePacer:
         self._event.set()
 
     def set_watcher_healthy(self, healthy: bool) -> None:
-        """Flip between change-driven and fixed-interval (degraded) pacing."""
+        """Flip between change-driven and interval-driven full-refresh pacing."""
         self._watcher_healthy = healthy
         self._event.set()
 
     def _next_deadline(self) -> tuple[float, str]:
         """Pure scheduling core: (monotonic deadline, wake reason) for the current state."""
-        floor = self._last_wake + self._interval
+        floor = max(self._last_wake + self._interval, self._not_before)
         if not self._watcher_healthy:
             return floor, "interval"
         if self._first_pending is not None and self._last_pending is not None:
             settle = self._last_pending + self._debounce
             bound = self._first_pending + self._max_delay
             return min(max(settle, floor), max(bound, floor)), "change"
-        return self._last_wake + self._heartbeat, "heartbeat"
+        return max(self._last_wake + self._heartbeat, self._not_before), "heartbeat"
 
     async def wait(self) -> ProjectionWake:
         """Sleep until the next projection is due; return its reason and domains.
@@ -384,7 +395,7 @@ class ProjectionInputWatcher:
     Lifecycle mirrors the landing refresher: created by ``create_app`` for live serving
     (never for ``--sim`` -- replay must stay time-driven, its feeder only writes *inside*
     a tick), started/cancelled by ``Projector.run``. One watch failure never kills the
-    projector: the pacer drops to fixed-interval ticking (loudly) and the watch is
+    projector: the pacer drops to interval-driven full refreshes (loudly) and the watch is
     retried every :data:`WATCH_REFRESH_SECONDS`.
     """
 
@@ -402,7 +413,7 @@ class ProjectionInputWatcher:
         if watchfiles is None:
             logger.error(
                 "watchfiles is not installed: change-driven projection is DISABLED and the "
-                "projector falls back to fixed-interval ticking (install the 'watchfiles' "
+                "projector uses interval-driven full refreshes (install the 'watchfiles' "
                 "dependency to restore adaptive pacing)"
             )
             pacer.set_watcher_healthy(False)
@@ -426,8 +437,8 @@ class ProjectionInputWatcher:
                 raise
             except Exception:
                 logger.exception(
-                    "projection input watcher FAILED; falling back to fixed-interval "
-                    "ticking until the watch re-establishes (retry in %.0fs)",
+                    "projection input watcher FAILED; using interval-driven full refreshes "
+                    "until the watch re-establishes (retry in %.0fs)",
                     self._refresh_seconds,
                 )
                 pacer.set_watcher_healthy(False)
@@ -452,6 +463,9 @@ class ProjectionInputWatcher:
                 step=_AWATCH_STEP_MS,
                 stop_event=stop,
                 recursive=True,
+                # Coordination writers require a local POSIX filesystem. WSL's automatic
+                # polling scans that entire tree even though native inotify covers it.
+                force_polling=False,
                 # Defence-in-depth: the watched roots are deliberately container-free, but an
                 # unreadable subdir must degrade to skipping it, never crash the whole watch.
                 ignore_permission_denied=True,

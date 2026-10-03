@@ -26,6 +26,7 @@ from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
 )
+from agents_remember.application.knowledge_worklist import leaf_worklist
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.review_artifact_cleanup import (
     cleanup_review_artifacts,
@@ -887,8 +888,16 @@ def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -
     world.edit()
     item = {"kind": "unexplained_hunk", "subject": "hunk:x", "facts": {"row": FAMILY}}
     document = {"items": [item], "changes": [], "incomplete": [], "state": "open"}
+
+    def observed_document(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        # Keep the real computation's input observations before replacing its item for this
+        # history projection case; a read-free mock is correctly refused by the view's guard.
+        assert leaf_worklist(*args, **kwargs) is not None
+        return document
+
     with mock.patch(
-        "agents_remember.application.review_tree_knowledge.leaf_worklist", return_value=document
+        "agents_remember.application.review_tree_knowledge.leaf_worklist",
+        side_effect=observed_document,
     ):
         worklist = read_review_trees(world.config, _query()).worklist
     assert worklist is not None
@@ -910,7 +919,8 @@ def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -
         },
     )
     with mock.patch(
-        "agents_remember.application.review_tree_knowledge.leaf_worklist", return_value=document
+        "agents_remember.application.review_tree_knowledge.leaf_worklist",
+        side_effect=observed_document,
     ):
         worklist = read_review_trees(world.config, _query()).worklist
     assert worklist is not None

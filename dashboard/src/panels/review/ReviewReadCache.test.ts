@@ -108,3 +108,24 @@ it('treats code trees and compared snapshots as the generation', () => {
     sourceContentKey('r', 'm', 'l', 'p', 'b', 'c'),
   );
 });
+
+it('keeps an unshown answer only for the generation on screen and never lets it move that generation', () => {
+  const cache = new ReviewReadCache();
+  // Nothing was admitted yet: the unshown answer is kept, and the first admitted answer of another
+  // generation still empties the cache, as it always did.
+  cache.keepUnshown('task', payloadAt('tree-1'));
+  expect(cache.review('task')).toBeDefined();
+  cache.keepReview('family-a', payloadAt('tree-2', 'snap-2'));
+  expect(cache.review('task')).toBeUndefined();
+  // An unshown answer of the generation on screen is kept beside what was read for it.
+  const current = payloadAt('tree-2');
+  cache.keepUnshown('task', current);
+  expect(cache.review('task')).toBe(current);
+  expect(cache.review('family-a')).toBeDefined();
+  // An unshown answer of an older generation is dropped: it empties nothing and moves nothing.
+  cache.keepUnshown('late', payloadAt('tree-1'));
+  expect(cache.review('late')).toBeUndefined();
+  expect(cache.review('family-a')).toBeDefined();
+  cache.keepReview('family-b', payloadAt('tree-2', 'snap-2'));
+  expect(cache.sizes.reviews).toBe(3);
+});

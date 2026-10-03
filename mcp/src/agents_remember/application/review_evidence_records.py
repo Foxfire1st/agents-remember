@@ -114,6 +114,7 @@ __all__ = [
     "MatrixSelection",
     "review_records_for",
     "review_records_for_resolution",
+    "review_records_of",
     "with_selection_channels",
     "without_selected_matrix",
 ]
@@ -181,13 +182,27 @@ def review_records_for(
     no records.
     """
 
-    resolved = resolve_review_candidate(
-        config,
-        request.repository_id,
-        request.master,
-        request.leaf_id,
-        recorded=request.history == "recorded",
+    return review_records_of(
+        resolve_review_candidate(
+            config,
+            request.repository_id,
+            request.master,
+            request.leaf_id,
+            recorded=request.history == "recorded",
+        )
     )
+
+
+def review_records_of(
+    resolved: ReviewCandidateResolution | ReviewRefusal,
+) -> ReviewRecordInputs:
+    """The record collection of one resolution a caller already holds, or of its refusal.
+
+    A reviewer request resolves its candidate once and hands that resolution to both halves -- the
+    records here and the composition (MIK-R40 rule 2) -- so the two can never describe two different
+    candidates, and the worktrees are not captured a second time for the same answer.
+    """
+
     if isinstance(resolved, ReviewRefusal):
         return ReviewRecordInputs(channels=_unresolved_channels(resolved))
     if resolved.contract is None:  # pragma: no cover - a resolved candidate always names a contract

@@ -10,12 +10,13 @@ Adaptive waking (260712-PTS-L3): with a ``change_watcher`` the pacemaker is no l
 unconditional ``sleep(interval)`` -- the loop wakes on debounced input changes (floored to
 one projection per ``interval``; ``--interval`` keeps meaning the fast-path cadence floor)
 or on a slow ``heartbeat`` when nothing changed, so a quiet daemon idles near zero CPU.
-Freshness bounds: change -> SSE delta within debounce + projection time (plus the interval
-floor when busy); ``/api/state`` staleness and time-derived field resolution are bounded
-by the heartbeat. The live path retains fixed-slot reader-domain snapshots and invalidates
+Live ticks rest after completion for ``max(interval, min(tick duration, 3s))``. The rest
+adds at most 3s at the default interval, in addition to any running/next projection time;
+changes received meanwhile remain pending. ``/api/state`` staleness and time-derived field
+resolution are bounded by the heartbeat. The live path retains fixed-slot reader-domain snapshots and invalidates
 only the domains named by the watcher. Without a watcher (sim replay, existing tests) the
-loop keeps the exact fixed-interval full-refresh behaviour, and a failed watcher degrades
-back to it loudly (fail-open).
+loop keeps the exact fixed-interval full-refresh behaviour. A failed watcher requests full
+refreshes at the interval floor and retains the bounded rest, with errors reported loudly.
 
 Two seams keep this generic across live and sim (slice 4b): ``now`` is the clock the
 tick projects at (a replay clock under sim, wall-clock UTC live), and ``before_tick`` is
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -249,6 +251,7 @@ class Projector:
         cancellation to the serving lifespan. This keeps temp-worktree cleanup from racing a late
         atomic projection write while preserving cancellation as the caller-visible outcome.
         """
+        started = time.monotonic()
         tick = asyncio.create_task(asyncio.to_thread(self._tick_sync, moment, refresh))
         try:
             return await asyncio.shield(tick)
@@ -258,15 +261,18 @@ class Projector:
             except Exception:
                 logger.exception("projection tick failed while projector shutdown drained it")
             raise
+        finally:
+            if self._pacer is not None:
+                self._pacer.projection_completed(time.monotonic() - started)
 
     def _on_watch_task_done(self, task: asyncio.Task[None]) -> None:
-        """R7 fail-open: a finished watcher task degrades pacing to the fixed interval."""
+        """A finished watcher task switches pacing to interval-driven full refreshes."""
         if self._pacer is None or task.cancelled():
             return
         exception = task.exception()
         if exception is not None:
             logger.error(
-                "change watcher task died; falling back to fixed-interval ticking every %.1fs",
+                "change watcher task died; full refreshes use a %.1fs floor plus projection rest",
                 self._interval,
                 exc_info=exception,
             )

@@ -139,6 +139,62 @@ it('reads the catalogue once on entry, then asks the review only for the subject
   expect(catalogueReads()).toHaveLength(2);
 });
 
+// MIK-R40 rule 5 and its budgets: the entries read is budgeted at 0.3 s, and at twice that while the
+// leaf-wide view is computed. Both are inside the bounded wait, so opening the reviewer issues one
+// review read, for the subject the catalogue chose, and no whole-task read whose answer the choice
+// would then replace.
+it.each([300, 600])(
+  'opens with one review read when the catalogue answers after %i ms',
+  async (catalogueMs) => {
+    expect(catalogueMs).toBeLessThan(SUBJECT_HOLD_MS);
+    const urls: URL[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string) => {
+        const url = new URL(address, 'http://localhost');
+        urls.push(url);
+        if (url.pathname.endsWith('/entries')) {
+          await new Promise((resolve) => setTimeout(resolve, catalogueMs));
+          return response(CATALOGUE);
+        }
+        if (url.pathname.endsWith('/source-content'))
+          return response({
+            state: 'refused',
+            refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
+          });
+        return response(
+          familyReview(
+            url.searchParams.get('selectorId'),
+            recorded.comparison!.after_snapshot_digest!,
+          ),
+        );
+      }),
+    );
+    const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');
+    const view = render(
+      <ReviewSurface
+        repo="agents-remember"
+        master="review-economy"
+        leaf={`catalogue-after-${catalogueMs}-ms`}
+        onBack={() => undefined}
+      />,
+    );
+    await waitFor(
+      () =>
+        expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
+      { timeout: SUBJECT_HOLD_MS * 4 },
+    );
+    // Past the bound as well: the wait ended with the catalogue's answer, so nothing is released.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBJECT_HOLD_MS));
+    });
+    expect(reviewReads()).toHaveLength(1);
+    expect(reviewReads()[0].searchParams.get('selectorKind')).toBe('family');
+    expect(reviewReads()[0].searchParams.get('selectorId')).toBe(families[0].family_id);
+    expect(urls.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(1);
+  },
+);
+
 it('reads the task-context review and shows the source explorer when the catalogue never answers', async () => {
   const urls: URL[] = [];
   vi.stubGlobal(

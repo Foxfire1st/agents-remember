@@ -28,22 +28,46 @@ re-keyed here by :func:`snake_keys` -- identifier keys only, so a path or an ID 
 never rewritten.
 
 Each memory side is read through the index of its tree; no database copy is read or made.
+
+**Cost (MIK-R40 rule 4).** The leaf-wide view is asked for once when the reviewer opens, in the
+process that also answers every click, so it is built not to compete with them:
+
+* its worklist is computed over the two candidate trees the comparison already holds
+  (:class:`~.knowledge_worklist.leaf.CandidateTrees`), so the view captures nothing itself;
+* the knowledge diff asks Git three questions whatever the number of changed files
+  (:func:`_measured_tree_diff`);
+* both computed parts are kept in a bounded in-process memo keyed by exact identities
+  (:mod:`.review_leaf_view_memo`), so a repeat for unchanged trees computes neither;
+* the cyclic garbage collector is paused while the worklist is computed
+  (:func:`_cyclic_collector_paused`): parsing two knowledge trees allocates millions of objects,
+  which triggered several whole-heap collections, and each one stops every thread of the process.
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import re
+import threading
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
 
 from agents_remember.application.knowledge_currentness import CodeTree, invariant_currentness
 from agents_remember.application.knowledge_worklist import leaf_worklist, read_leaf_worklist
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
     resolve_review_candidate,
+)
+from agents_remember.application.review_leaf_view_memo import (
+    LeafViewParts,
+    leaf_view_key,
+    moved_inputs,
+    remember,
+    remembered,
 )
 from agents_remember.application.review_legacy_comparison import knowledge_unavailable_refusal
 from agents_remember.application.review_tree_comparison import (
@@ -55,8 +79,10 @@ from agents_remember.application.review_unexplained_lane import (
     classify_changed_path,
     unexplained_lane,
 )
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import read_git_blob_bytes, read_git_blobs_bytes, run_git
+from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.recorded_reads import recorded_reads
 from agents_remember.memory.knowledge_index import HistoryRow, KnowledgeIndex, is_indexed_path
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -99,6 +125,7 @@ _STATUS: Final[dict[str, Literal["added", "deleted", "modified", "renamed", "typ
     "T": "type_changed",
 }
 _SCHEMA_KIND = re.compile(r"^ar-([a-z-]+)/v\d+$")
+_NO_OBJECT = re.compile(r"^0+$")
 _IDENTIFIER_KEY = re.compile(r"^[a-z][A-Za-z0-9]*$")
 _CAMEL_HUMP = re.compile(r"(?<=[a-z0-9])([A-Z])")
 
@@ -173,8 +200,15 @@ def _view(
     query: ReviewTreesQuery, contract: WorktreeContract, trees: ReviewTrees
 ) -> ReviewTreesResult:
     record = trees.record
-    available = trees.before.database is not None and trees.after.database is not None
-    before_tree = trees.before.wire.tree
+    parts = _leaf_wide_parts(contract, trees)
+    if isinstance(parts, ReviewRefusal):
+        return ReviewTreesResult(
+            state="refused",
+            repository_id=query.repository_id,
+            master=query.master,
+            leaf_id=record.leaf_id,
+            refusal=parts,
+        )
     return ReviewTreesResult(
         state="trees",
         repository_id=query.repository_id,
@@ -183,14 +217,60 @@ def _view(
         comparison=record,
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
-        knowledge_diff=(
-            knowledge_tree_diff(trees.memory_repository, before_tree, record.memory_candidate.tree)
+        knowledge_diff=parts.knowledge_diff,
+        currentness=snake_keys(side_currentness(trees)),
+        worklist=parts.worklist,
+    )
+
+
+def _leaf_wide_parts(
+    contract: WorktreeContract, trees: ReviewTrees
+) -> LeafViewParts | ReviewRefusal:
+    """The view's knowledge diff and worklist: the kept ones for these exact trees, or computed.
+
+    A live comparison's parts are looked up under everything they are a function of
+    (:func:`~.review_leaf_view_memo.leaf_view_key`). They are kept only when every read behind
+    them succeeded: both knowledge sides readable, no Git read of the diff failed, and a
+    ``complete`` worklist. Anything else is returned as computed and read again next time.
+    """
+
+    key = leaf_view_key(contract, trees)
+    kept = None if key is None else remembered(key)
+    if kept is not None:
+        return kept
+    parts, settled, reads = _compute_leaf_parts(contract, trees)
+    moved = () if key is None else moved_inputs(key, reads)
+    if moved:
+        return ReviewRefusal(
+            code="candidate_unresolved",
+            detail="task document or dependency changed while the tree view was being composed",
+            next_action="reopen the review so the view is computed from stable inputs",
+            offending_input="; ".join(moved),
+        )
+    if key is not None and settled:
+        remember(key, parts, reads)
+    return parts
+
+
+def _compute_leaf_parts(
+    contract: WorktreeContract, trees: ReviewTrees
+) -> tuple[LeafViewParts, bool, dict[str, str]]:
+    """Compute the view while observing its inputs; failed reads leave it unkeepable."""
+
+    available = trees.before.database is not None and trees.after.database is not None
+    with recorded_reads() as reads:
+        measured = (
+            _measured_tree_diff(
+                trees.memory_repository,
+                trees.before.wire.tree,
+                trees.record.memory_candidate.tree,
+            )
             if available
             else None
-        ),
-        currentness=snake_keys(side_currentness(trees)),
-        worklist=worklist_view(contract, trees, live=trees.live),
-    )
+        )
+        worklist, settled = _worklist_view(contract, trees, live=trees.live)
+    parts = LeafViewParts(None if measured is None else measured.diff, worklist)
+    return parts, measured is not None and measured.complete and settled, reads
 
 
 def _focused(
@@ -256,13 +336,80 @@ def _snake(key: object) -> object:
 def knowledge_tree_diff(repository: Path, before: str, after: str) -> ReviewKnowledgeTreeDiff:
     """The knowledge files that differ between two memory trees, with their Git patches, grouped."""
 
-    changes = list(_changed_files(repository, before, after))
+    return _measured_tree_diff(repository, before, after).diff
+
+
+@dataclass(frozen=True)
+class _MeasuredDiff:
+    """One knowledge diff, and whether every Git read behind it succeeded (only then is it kept)."""
+
+    diff: ReviewKnowledgeTreeDiff
+    complete: bool
+
+
+@dataclass(frozen=True)
+class _Listed:
+    """One changed path of the two memory trees as Git lists it: its status, paths and objects."""
+
+    status: str
+    old_path: str | None
+    path: str
+    before: str | None
+    """The object the before tree holds at the old path, when it holds one there."""
+    after: str | None
+    """The object the after tree holds at the path, when it holds one there."""
+
+    @property
+    def indexed(self) -> bool:
+        return is_indexed_path(self.path) or (
+            self.old_path is not None and is_indexed_path(self.old_path)
+        )
+
+    @property
+    def sections(self) -> int:
+        """How many file sections Git's patch prints for it: a type change is a removal and an
+        addition."""
+
+        return 2 if self.status[:1] == "T" else 1
+
+    @property
+    def headers(self) -> set[str]:
+        """The exact header spellings for either core.quotePath setting."""
+
+        return {
+            f"diff --git {_quoted_git_path('a/' + (self.old_path or self.path), high)} "
+            f"{_quoted_git_path('b/' + self.path, high)}"
+            for high in (False, True)
+        }
+
+
+def _measured_tree_diff(repository: Path, before: str, after: str) -> _MeasuredDiff:
+    """The knowledge diff from a bounded number of Git children (MIK-R40 rule 4).
+
+    Git is asked three questions whatever the number of changed files: which paths changed and
+    which blobs they hold, the patch of the two trees, and the bytes of those blobs. The patch is
+    one text cut at its file headers; every cut is bound to the exact path Git listed, including
+    C-quoted names. A filename is an address: bracket or glob characters do not select siblings.
+    A failed aggregate read is retried once and leaves the result unkeepable.
+    """
+
+    listed = _listed_changes(repository, before, after)
+    patches, complete = _patches(repository, before, after, listed)
+    indexed = [(one, patch) for one, patch in zip(listed, patches, strict=True) if one.indexed]
+    documents, documents_complete = _documents(repository, [one for one, _ in indexed])
+    changes: list[ReviewKnowledgeFileChange] = []
     groups = _Groups()
-    for change in changes:
-        before_doc = _json_at(repository, before, change.old_path or change.path)
-        after_doc = _json_at(repository, after, change.path)
-        groups.add(change, before_doc, after_doc)
-    return ReviewKnowledgeTreeDiff(
+    for one, patch in indexed:
+        change = ReviewKnowledgeFileChange(
+            path=one.path,
+            old_path=one.old_path,
+            status=_STATUS.get(one.status[0], "modified"),
+            patch=patch[:_PATCH_LIMIT],
+            truncated=len(patch) > _PATCH_LIMIT,
+        )
+        changes.append(change)
+        groups.add(change, _document(documents, one.before), _document(documents, one.after))
+    diff = ReviewKnowledgeTreeDiff(
         before_tree=before,
         after_tree=after,
         changed_files=len(changes),
@@ -271,6 +418,7 @@ def knowledge_tree_diff(repository: Path, before: str, after: str) -> ReviewKnow
         history=tuple(groups.history),
         other=tuple(groups.other),
     )
+    return _MeasuredDiff(diff, complete and documents_complete)
 
 
 @dataclass
@@ -329,28 +477,8 @@ class _Groups:
             self._record(invariant, "invariant", entries=((entry_id, source, how),))
 
 
-def _changed_files(
-    repository: Path, before: str, after: str
-) -> Iterator[ReviewKnowledgeFileChange]:
-    """Every changed knowledge file the index reads, with its patch (renames kept as one change)."""
-
-    for status, old_path, path in _name_status(repository, before, after):
-        if not (is_indexed_path(path) or (old_path is not None and is_indexed_path(old_path))):
-            continue
-        patch = _patch(repository, before, after, (old_path, path) if old_path else (path,))
-        yield ReviewKnowledgeFileChange(
-            path=path,
-            old_path=old_path,
-            status=_STATUS.get(status[0], "modified"),
-            patch=patch[:_PATCH_LIMIT],
-            truncated=len(patch) > _PATCH_LIMIT,
-        )
-
-
-def _name_status(
-    repository: Path, before: str, after: str
-) -> Iterator[tuple[str, str | None, str]]:
-    """``(status, old path, path)`` for each path under the knowledge and onboarding roots."""
+def _listed_changes(repository: Path, before: str, after: str) -> list[_Listed]:
+    """Every changed path under the knowledge and onboarding roots (renames kept as one change)."""
 
     listed = run_git(
         repository,
@@ -358,7 +486,8 @@ def _name_status(
             "diff",
             "--no-color",
             "--no-ext-diff",
-            "--name-status",
+            "--raw",
+            "--no-abbrev",
             "-z",
             "-M",
             before,
@@ -373,31 +502,158 @@ def _name_status(
             f"the memory trees {before} and {after} cannot be compared: {listed.stderr}"
         )
     tokens = listed.stdout.split("\0")
+    changes: list[_Listed] = []
     position = 0
     while position < len(tokens) and tokens[position]:
-        status = tokens[position]
-        if status[0] in "RC":
-            yield status, tokens[position + 1], tokens[position + 2]
-            position += 3
-        else:
-            yield status, None, tokens[position + 1]
-            position += 2
+        _old_mode, _new_mode, old_object, new_object, status = tokens[position][1:].split(" ")
+        renamed = status[0] in "RC"
+        changes.append(
+            _Listed(
+                status=status,
+                old_path=tokens[position + 1] if renamed else None,
+                path=tokens[position + 2 if renamed else position + 1],
+                before=_held_object(old_object),
+                after=_held_object(new_object),
+            )
+        )
+        position += 3 if renamed else 2
+    return changes
 
 
-def _patch(repository: Path, before: str, after: str, paths: tuple[str, ...]) -> str:
-    shown = run_git(
-        repository,
-        ["diff", "--no-color", "--no-ext-diff", "-M", before, after, "--", *paths],
-    )
-    return shown.stdout if shown.returncode == 0 else ""
+def _held_object(object_id: str) -> str | None:
+    """The object a tree holds at a listed path; Git names none with zeros (added, deleted)."""
+
+    return None if _NO_OBJECT.match(object_id) else object_id
 
 
-def _json_at(repository: Path, tree: str, path: str) -> dict[str, Any] | None:
-    shown = run_git(repository, ["cat-file", "blob", f"{tree}:{path}"])
-    if shown.returncode != 0:
+def _patches(
+    repository: Path, before: str, after: str, listed: list[_Listed]
+) -> tuple[list[str], bool]:
+    """Exact-path patches from one aggregate read; recover a failed read once, never per file.
+
+    The prior owner recovered a failed aggregate read by asking for each file. The identical
+    batch retry preserves that successful-recovery operation within a fixed child bound
+    (L40-R1-F4). Any first read failure leaves the result unkeepable, even when recovery succeeds.
+    """
+
+    if not any(one.indexed for one in listed):
+        return [""] * len(listed), True
+    args = [
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "-M",
+        before,
+        after,
+        "--",
+        KNOWLEDGE_ROOT,
+        ONBOARDING_ROOT,
+    ]
+    whole = run_git(repository, args)
+    complete = whole.returncode == 0
+    if not complete:
+        whole = run_git(repository, args)
+    if whole.returncode != 0:
+        return [""] * len(listed), False
+    cut = _cut_patch(whole.stdout, listed)
+    if cut is None:
+        raise ValueError("the memory-tree patch sections do not match the exact changed paths")
+    return cut, complete
+
+
+def _cut_patch(patch: str, listed: list[_Listed]) -> list[str] | None:
+    """Bind Git's unchanged file-section text to the exact paths in its NUL-delimited listing."""
+
+    sections = _patch_sections(patch)
+    if sections is None:
         return None
+    cut: list[str] = []
+    position = 0
+    for one in listed:
+        taken = sections[position : position + one.sections]
+        position += one.sections
+        if len(taken) != one.sections:
+            return None
+        if not all(section.split("\n", 1)[0] in one.headers for section in taken):
+            return None
+        cut.append("".join(taken))
+    return cut if position == len(sections) else None
+
+
+def _patch_sections(patch: str) -> list[str] | None:
+    """Git's file sections, retaining their exact text and requiring the first header at zero."""
+
+    starts = [match.start() for match in re.finditer(r"(?m)^diff --git ", patch)]
+    if starts and starts[0] != 0:
+        return None
+    return [patch[start:end] for start, end in zip(starts, [*starts[1:], len(patch)], strict=True)]
+
+
+_GIT_PATH_ESCAPES: Final = {
+    7: b"\\a",
+    8: b"\\b",
+    9: b"\\t",
+    10: b"\\n",
+    11: b"\\v",
+    12: b"\\f",
+    13: b"\\r",
+    34: b'\\"',
+    92: b"\\\\",
+}
+
+
+def _quoted_git_path(path: str, quote_high: bool) -> str:
+    """Git's C-quoted header spelling; byte escapes retain Unicode and arbitrary pathname bytes."""
+
+    raw = path.encode("utf-8", "surrogateescape")
+    quoted = b"".join(
+        _GIT_PATH_ESCAPES.get(
+            byte,
+            f"\\{byte:03o}".encode()
+            if byte < 32 or byte == 127 or (quote_high and byte >= 128)
+            else bytes([byte]),
+        )
+        for byte in raw
+    )
+    text = quoted.decode("utf-8", "surrogateescape")
+    return f'"{text}"' if quoted != raw else text
+
+
+def _documents(
+    repository: Path, changes: list[_Listed]
+) -> tuple[dict[str, dict[str, Any] | None], bool]:
+    """The JSON object of every blob the changes name, read through one Git child."""
+
+    wanted = {blob for one in changes for blob in (one.before, one.after) if blob is not None}
     try:
-        loaded = json.loads(shown.stdout)
+        blobs = read_git_blobs_bytes(repository, wanted)
+    except (GitPreparationError, OSError):
+        # One object Git cannot produce as a blob fails the whole batch: each is asked for on its
+        # own, as before, so only that one is missing. The diff is then not kept.
+        return {blob: _json_of(data) for blob, data in _each_blob(repository, wanted)}, False
+    return {blob: _json_of(data) for blob, data in blobs.items()}, True
+
+
+def _each_blob(repository: Path, wanted: set[str]) -> Iterator[tuple[str, bytes]]:
+    for blob in sorted(wanted):
+        try:
+            yield blob, read_git_blob_bytes(repository, blob)
+        except (GitPreparationError, OSError):
+            continue
+
+
+def _document(
+    documents: Mapping[str, dict[str, Any] | None], blob: str | None
+) -> dict[str, Any] | None:
+    return None if blob is None else documents.get(blob)
+
+
+def _json_of(data: bytes) -> dict[str, Any] | None:
+    """A blob's JSON object, decoded as Git's text output of it was: bytes that are not UTF-8
+    survive as escapes, so a file that is no JSON object answers ``None`` exactly as before."""
+
+    try:
+        loaded = json.loads(data.decode("utf-8", "surrogateescape"))
     except ValueError:
         return None
     return loaded if isinstance(loaded, dict) else None
@@ -483,19 +739,39 @@ def worklist_view(
 ) -> ReviewWorklistView:
     """The leaf's current worklist: computed for a live leaf, the persisted one for a record."""
 
+    return _worklist_view(contract, trees, live=live)[0]
+
+
+def _worklist_view(
+    contract: WorktreeContract, trees: ReviewTrees, *, live: bool
+) -> tuple[ReviewWorklistView, bool]:
+    """The worklist view, and whether it is a computed view over complete inputs (only then is it
+    kept).
+
+    A live leaf's worklist is computed over the comparison's own two candidate trees, so it reads
+    exactly what the review compares and captures no worktree a second time.
+    """
+
     if live:
-        document = leaf_worklist(contract, persist=False)
+        candidate = CandidateTrees(
+            code=trees.record.code_candidate.tree, memory=trees.record.memory_candidate.tree
+        )
+        with _cyclic_collector_paused():
+            document = leaf_worklist(contract, persist=False, candidate=candidate)
         source: Literal["computed", "persisted", "absent"] = "computed"
     else:
         document = read_leaf_worklist(contract.contract_path)
         source = "persisted"
     if document is None:
-        return ReviewWorklistView(
-            source="absent",
-            detail="no MIK-R08 worklist applies to this leaf, or none was persisted for it",
+        return (
+            ReviewWorklistView(
+                source="absent",
+                detail="no MIK-R08 worklist applies to this leaf, or none was persisted for it",
+            ),
+            False,
         )
     items = tuple(dict(item) for item in document.get("items", ()))
-    return ReviewWorklistView(
+    view = ReviewWorklistView(
         source=source,
         bound=_bound(document.get("pairing") or {}, trees),
         state=str(document.get("state")),
@@ -504,6 +780,42 @@ def worklist_view(
         changes=tuple(snake_keys(list(document.get("changes", ())))),
         incomplete=tuple(snake_keys(list(document.get("incomplete", ())))),
     )
+    return view, live and document.get("state") == "complete"
+
+
+class _CollectorPause:
+    """How many worklist computations hold the pause, and whether the first one found it on."""
+
+    lock: Final = threading.Lock()
+    holders = 0
+    switch_back_on = False
+
+
+@contextmanager
+def _cyclic_collector_paused() -> Iterator[None]:
+    """Pause Python's cyclic garbage collector while one worklist is computed.
+
+    Computing a worklist parses both knowledge trees, which allocates millions of short-lived
+    objects. That made the collector run whole-heap collections during the parse (three or four of
+    0.1 to 0.4 s each on the real repository), and a collection stops every thread of the process:
+    each click answered meanwhile waited for them. None of those objects is in a reference cycle,
+    so reference counting frees them without the collector: the pause costs no memory (measured)
+    and makes the computation itself shorter. The collector is switched back on when the last
+    computation that paused it ends, also on an error, and only if it was on before.
+    """
+
+    with _CollectorPause.lock:
+        if _CollectorPause.holders == 0:
+            _CollectorPause.switch_back_on = gc.isenabled()
+            gc.disable()
+        _CollectorPause.holders += 1
+    try:
+        yield
+    finally:
+        with _CollectorPause.lock:
+            _CollectorPause.holders -= 1
+            if _CollectorPause.holders == 0 and _CollectorPause.switch_back_on:
+                gc.enable()
 
 
 def _bound(pairing: Mapping[str, Any], trees: ReviewTrees) -> bool:

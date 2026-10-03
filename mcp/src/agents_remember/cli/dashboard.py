@@ -78,8 +78,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     )
     from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
         list_knowledge_review_entries,
-        read_knowledge_review,
-        review_records_for,
+        read_complete_knowledge_review,
     )
     from agents_remember.application.review_intent_summary import (  # noqa: PLC0415 - composition
         read_review_intent_summary,
@@ -106,9 +105,13 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         provenance; and a dependency-currentness measurement is reported ``not_measured`` rather than
         omitted. The bundle therefore never presents an empty tuple where three different facts are
         possible, and one unreadable authority does not withdraw the collections that were readable.
+
+        The candidate is resolved once for both halves (MIK-R40 rule 2): the records and the
+        composition read the same resolution, so one request captures each worktree once and
+        rechecks it once before the answer is published.
         """
 
-        return read_knowledge_review(config, request, review_records_for(config, request))
+        return read_complete_knowledge_review(config, request)
 
     def review_entries_port(repository_id, master, leaf_id):
         """List the subjects the same resolution can be reviewed on, through the same adapter.
