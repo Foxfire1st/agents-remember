@@ -53,6 +53,7 @@ from agents_remember.worktrees.modules.startup.master_series_admission import (
     _master_series_admission_refusal,
     memory_mode_for_repository,
 )
+from agents_remember.worktrees.modules.startup.start_plan import StartContractPlan
 from agents_remember.worktrees.scheduling_mode import (
     TERMINAL_SERIES_CLEANUP,
     commanded_sprint_masters,
@@ -818,7 +819,7 @@ def _commanding_sprint_document(context, task_root: Path) -> TaskDocument | None
         return None
 
 
-def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
+def build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | WorktreeCommandResult:
     """The contract a start would create, or the refusal that says why it cannot.
 
     Both are returned rather than raised, because `worktree_start`'s handler has no `except`
@@ -973,7 +974,7 @@ def _existing_master_series_admission_refusal(
     return None
 
 
-def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
+def _build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | WorktreeCommandResult:
     assert args.task_name is not None
     assert args.worktree_name is not None
     leaf_id = resolve_start_leaf_doc_id(context, args)
@@ -1023,7 +1024,7 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
         args,
         parent_series,
     )
-    return default_contract(
+    contract = default_contract(
         ContractTask(
             name=args.task_name,
             repo_name=context.code_repository_name,
@@ -1049,3 +1050,4 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
             base_commit=memory_base,
         ),
     )
+    return StartContractPlan(contract, parent_series if args.dry_run else None)

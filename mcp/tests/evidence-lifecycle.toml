@@ -457,6 +457,7 @@ consumers = [
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_worktree_start_preview.py",
 ]
 
 [[artifact]]
@@ -838,6 +839,7 @@ consumers = [
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_worktree_start_preview.py",
 ]
 
 [[artifact]]

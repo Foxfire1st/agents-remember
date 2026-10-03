@@ -310,6 +310,8 @@ def require_parent_series(
     contract: WorktreeContract,
     *,
     operation: str,
+    dry_run: bool = False,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeContract | None:
     """Return an atomic leaf's parent series, or None for organizational direct-super work."""
 
@@ -318,9 +320,21 @@ def require_parent_series(
         return None
     _require_atomic_master(authority)
     parent_path = contract.parent_contract_path or series_contract_path(contract.task_root)
-    if not parent_path.is_file():
+    if parent_path.is_file():
+        series = _load_series(parent_path)
+    elif (
+        dry_run
+        and preview_parent is not None
+        and not parent_path.exists()
+        and not parent_path.is_symlink()
+    ):
+        # Only start planning carries the parent validated by the bootstrap owner.
+        # Durable callers still require publication, and an existing artifact is always read.
+        if preview_parent.contract_path.resolve() != parent_path.resolve():
+            raise RuntimeError(f"{operation} requires its exact parent series contract")
+        series = preview_parent
+    else:
         raise RuntimeError(f"{operation} requires its exact parent series contract")
-    series = _load_series(parent_path)
     _require_series_identity(
         _scope(contract),
         series,

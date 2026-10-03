@@ -360,6 +360,7 @@ integration = [
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
+  "mcp/tests/test_worktree_start_preview.py",
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",

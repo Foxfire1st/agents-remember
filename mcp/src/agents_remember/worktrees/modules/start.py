@@ -58,6 +58,14 @@ from agents_remember.worktrees.modules.startup.start_contract import (
 from agents_remember.worktrees.modules.startup.start_memory import (
     prepare_memory_for_start,
 )
+from agents_remember.worktrees.modules.startup.start_plan import (
+    _blocked_memory_start_result,
+    _blocked_provider_start_result,
+    _contract_after_memory_start,
+    _PreparedStartEnclosure,
+    _preview_start_enclosure,
+    _StartEnclosurePlan,
+)
 from agents_remember.worktrees.modules.startup.start_provider_preflight import (
     provider_enablement_state,
 )
@@ -91,10 +99,8 @@ from agents_remember.worktrees.task_leaf_binding import (
 )
 from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
 from agents_remember.worktrees.worktree_contract import (
-    ContractCells,
     ContractError,
     WorktreeContract,
-    amend_contract,
     contract_publication_text,
     load_contract,
 )
@@ -233,86 +239,6 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
         return _task_start_authority_refusal(error)
     return WorktreeCommandResult(
         0, {"state": "attached", "attached": True, **status_payload(contract)}
-    )
-
-
-def _blocked_memory_start_result(
-    context, args: WorktreeArgs, code_state: str, memory_state: dict[str, object]
-) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "blocked",
-            "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-            **recovery_guidance(
-                "choose_memory_recovery",
-                tool="worktree_start",
-                args={
-                    "repo_id": context.code_repository_name,
-                    "task_name": args.task_name,
-                    "worktree_name": args.worktree_name,
-                    "workflow_kind": args.workflow_kind,
-                },
-                required_args=["memory_choice"],
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-        },
-    )
-
-
-def _contract_after_memory_start(
-    contract: WorktreeContract, memory_state: dict[str, object]
-) -> WorktreeContract:
-    if contract.memory_mode == "external" and memory_state["state"] == "disabled":
-        return amend_contract(
-            replace(
-                contract,
-                memory_repo_path=None,
-                memory_source_branch="",
-                memory_work_branch="",
-                memory_base_commit="",
-                memory_worktree=None,
-                ledger_path=None,
-                memory_state="disabled",
-            ),
-            # Through the typed record, like every other vocabulary cell: `memory_state` above
-            # is free text and `memory_mode` is not.
-            ContractCells(memory_mode="disabled"),
-        )
-    reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
-    if isinstance(reconciled_base, str) and reconciled_base:
-        return replace(contract, memory_base_commit=reconciled_base)
-    return contract
-
-
-def _blocked_provider_start_result(
-    context,
-    args: WorktreeArgs,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
-) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "blocked",
-            "summary": "Worktree provider setup could not be prepared safely.",
-            **recovery_guidance(
-                "choose_provider_setup_recovery",
-                tool="worktree_start",
-                args={
-                    "repo_id": context.code_repository_name,
-                    "task_name": args.task_name,
-                    "worktree_name": args.worktree_name,
-                    "workflow_kind": args.workflow_kind,
-                    "skip_provider_setup": True,
-                },
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-        },
     )
 
 
@@ -520,16 +446,19 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if refused is not None:
         return refused
     context = resolve_context(args)
-    contract = build_start_contract(context, args)
-    if isinstance(contract, WorktreeCommandResult):
-        return contract
+    built = build_start_contract(context, args)
+    if isinstance(built, WorktreeCommandResult):
+        return built
+    contract = built.contract
     existing_result = _existing_contract_result(context, contract, args)
     if existing_result is not None:
         return existing_result
-    preflighted = _preflighted_contract(context, contract, args)
+    preflighted = _preflighted_contract(
+        context, contract, args, preview_parent=built.preview_parent
+    )
     if isinstance(preflighted, WorktreeCommandResult):
         return preflighted
-    return _create_start_enclosure(context, preflighted, args)
+    return _create_start_enclosure(context, preflighted, args, preview_parent=built.preview_parent)
 
 
 def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
@@ -623,19 +552,19 @@ def _resume_existing_location(
 
 
 def _preflighted_contract(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeContract | WorktreeCommandResult:
     """Run the pre-creation preflights, returning the blocked result or the usable contract.
 
     The returned contract remains bound to the source tips from its ordinary build.
     """
-    # A dry-run that is about to create a master's first leaf also plans the parent
-    # integration contract and branch without publishing either. That virtual parent was
-    # built from the protected source's current tip, so asking the ordinary lineage reader
-    # to load its deliberately absent contract would turn preview non-mutation into a false
-    # unavailable refusal. Only this in-process planned-parent case bypasses the filesystem
-    # projection; existing parent contracts still fail closed through the normal reader.
-    lineage_block = _parent_lineage_start_block(context, contract, args)
+    lineage_block = _parent_lineage_start_block(
+        context, contract, args, preview_parent=preview_parent
+    )
     if lineage_block is not None:
         return lineage_block
     stale_base_block = _stale_base_preflight(context, contract, args)
@@ -658,10 +587,15 @@ def _preflighted_contract(
 
 
 def _parent_lineage_start_block(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeCommandResult | None:
     parent_is_planned = (
         args.dry_run
+        and preview_parent is not None
         and bool(contract.parent_task_name)
         and contract.parent_contract_path is not None
         and not contract.parent_contract_path.exists()
@@ -685,11 +619,15 @@ def _parent_lineage_start_block(
 
 
 def _create_start_enclosure(
-    context, contract: WorktreeContract, args: WorktreeArgs
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> WorktreeCommandResult:
     """Create the code worktree, prepare memory, write the contract, and set the providers up."""
     _record_start_progress(context, contract, args, StartBeat(phase="preflight"))
-    prepared = _prepare_start_enclosure(context, contract, args)
+    prepared = _prepare_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
     contract = prepared.contract
@@ -719,27 +657,14 @@ def _create_start_enclosure(
     )
 
 
-@dataclass(frozen=True)
-class _PreparedStartEnclosure:
-    contract: WorktreeContract
-    code_state: str
-    memory_state: dict[str, object]
-    provider_plan: dict[str, object]
-
-
-@dataclass(frozen=True)
-class _StartEnclosurePlan:
-    contract: WorktreeContract
-    memory_preview: dict[str, object]
-    provider_plan: dict[str, object]
-
-
 def _prepare_start_enclosure(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> _PreparedStartEnclosure | WorktreeCommandResult:
-    planned = _plan_start_enclosure(context, contract, args)
+    planned = _plan_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(planned, WorktreeCommandResult):
         return planned
     if args.dry_run:
@@ -751,13 +676,29 @@ def _plan_start_enclosure(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> _StartEnclosurePlan | WorktreeCommandResult:
-    lineage_block = _parent_lineage_start_block(context, contract, args)
+    lineage_block = _parent_lineage_start_block(
+        context, contract, args, preview_parent=preview_parent
+    )
     if lineage_block is not None:
         return lineage_block
-    require_parent_series(contract, operation="worktree_start")
+    parent = require_parent_series(
+        contract,
+        operation="worktree_start",
+        dry_run=args.dry_run,
+        preview_parent=preview_parent,
+    )
     require_ordinary_worktree(contract, operation="worktree_start")
-    memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
+    unpublished_parent = (
+        parent
+        if args.dry_run and parent is not None and not parent.contract_path.exists()
+        else None
+    )
+    memory_preview = prepare_memory_for_start(
+        contract, replace(args, dry_run=True), preview_parent=unpublished_parent
+    )
     if memory_preview["state"] == "blocked":
         return _blocked_memory_start_result(context, args, "not-created", memory_preview)
     planned_contract = _contract_after_memory_start(contract, memory_preview)
@@ -771,16 +712,6 @@ def _plan_start_enclosure(
             provider_plan,
         )
     return _StartEnclosurePlan(planned_contract, memory_preview, provider_plan)
-
-
-def _preview_start_enclosure(plan: _StartEnclosurePlan) -> _PreparedStartEnclosure:
-    code_state = ensure_worktree(plan.contract, side="code", dry_run=True)
-    return _PreparedStartEnclosure(
-        plan.contract,
-        code_state,
-        plan.memory_preview,
-        plan.provider_plan,
-    )
 
 
 def _materialize_start_enclosure(

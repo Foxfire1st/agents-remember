@@ -43,8 +43,23 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "91a94e074d87e911ced13f7bf2976f61af38f54a50b92595b8222357b4e57c24"
+LIFECYCLE_CATALOG_SHA256 = "6f50c9f4119e5cd480309c388c4bd1c9ecfafe9ea9a5cff6c1e32131b644c9e6"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Managed-sync union re-pin, 2026-10-03 (L47-R47).** The current constant binds the union of
+landed reviewer read-latency evidence and first-leaf preview evidence. The prior source catalog
+hashes remain historical: L40 measured `91a94e074d87e911ced13f7bf2976f61af38f54a50b92595b8222357b4e57c24`;
+the pre-sync L47 candidate measured `49736bef6fec61bd0f9891894694571207a59452cf81a9222fbf609f2819eaa8`.
+Both dated rationales below are retained. The existing Node-lockfile row keeps both consumers,
+and the existing curator-coherence row keeps the first-leaf consumer. No artifact, contract,
+case or budget is added by resolution: the population remains sixteen contracts / eighty
+artifacts. The merged catalog measures `6f50c9f4119e5cd480309c388c4bd1c9ecfafe9ea9a5cff6c1e32131b644c9e6`.
+
+**Catalog consumer re-pin, 2026-10-03 (L47-R47).** The registered first-leaf preview proof
+reuses the real-Git fixture builder and therefore
+transitively consumes curator-coherence support and the portable Node lockfile. Only those two
+existing consumer rows gain the new test module; contracts and artifacts remain sixteen and eighty.
+The catalog hash above binds the resulting exact bytes.
 
 **Forty-third deliberate re-pin (260928-MIK-L40, re-measured at base ``d0855daa``, 2026-10-02) --
 one consumer the census derived for the reviewer read-latency case module.** ``260928-MIK-L40``

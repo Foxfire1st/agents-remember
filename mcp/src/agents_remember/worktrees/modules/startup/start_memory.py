@@ -33,12 +33,25 @@ def _memory_source_state(
 def prepare_memory_for_start(
     contract: WorktreeContract,
     args: WorktreeArgs,
+    *,
+    preview_parent: WorktreeContract | None = None,
 ) -> dict[str, object]:
     source_state = _memory_source_state(contract, args)
     if source_state is not None:
         return source_state
-    memory_source_branch = _ensure_memory_source_branch(contract)
     assert contract.memory_repo_path is not None
+    if (
+        args.dry_run
+        and preview_parent is not None
+        and not preview_parent.contract_path.exists()
+        and not preview_parent.contract_path.is_symlink()
+        and not branch_exists(contract.memory_repo_path, contract.memory_source_branch)
+    ):
+        # Parent admission already proved this exact unpublished series plan. Its pinned
+        # memory commit is readable without creating the future integration ref.
+        memory_source_branch = {"state": "would-create", "branch": contract.memory_source_branch}
+    else:
+        memory_source_branch = _ensure_memory_source_branch(contract)
     assert contract.memory_worktree is not None
     ledger = derive_memory_ledger(
         contract.memory_repo_path,
