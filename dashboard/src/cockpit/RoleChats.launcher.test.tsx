@@ -12,7 +12,7 @@ const AGENTS: RoleAgentChoice[] = [
     id: "codex",
     label: "Codex",
     models: [
-      { id: "gpt-a", label: "GPT A", efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High" }], defaultEffort: "low" },
+      { id: "gpt-a", label: "GPT A", efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High" }], defaultEffort: "low", isDefault: true, serviceTiers: [{ id: "default", label: "Normal" }, { id: "priority", label: "Fast" }] },
       { id: "gpt-b", label: "GPT B", efforts: [] },
     ],
   },
@@ -52,6 +52,22 @@ afterEach(() => {
 });
 
 describe("launcher bar and the host catalog", () => {
+  it("displays the configured tier, revalidates a model override and discloses other-agent defaults", async () => {
+    optionsReplies = [optionsReply({ agent: "codex", model: "gpt-a", effort: "high", serviceTier: "fast", available: true })];
+    const { getByRole, getByLabelText, getByTestId, queryByTestId } = renderLauncher();
+    const start = getByRole("button", { name: "Start role" }) as HTMLButtonElement;
+    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(getByTestId("role-service-tier").textContent).toBe("Speed: Fast");
+    expect(getByTestId("role-service-tier").getAttribute("title")).toContain("default agent");
+    fireEvent.change(getByLabelText("Role model override"), { target: { value: "gpt-b" } });
+    await waitFor(() => expect(start.disabled).toBe(true));
+    expect(getByTestId("role-choice-problem").textContent).toContain("Service tier fast is not offered");
+    fireEvent.change(getByLabelText("Role agent override"), { target: { value: "eve" } });
+    await waitFor(() => expect(start.disabled).toBe(false));
+    expect(getByTestId("role-service-tier").textContent).toBe("Speed: provider default");
+    expect(queryByTestId("role-choice-problem")).toBeNull();
+  });
+
   it("disables Start for an unoffered role default until an offered value is picked", async () => {
     optionsReplies = [optionsReply({ agent: "codex", model: "gpt-z", effort: null, available: false })];
     const { getByRole, getByLabelText, findByTestId, queryByTestId } = renderLauncher();

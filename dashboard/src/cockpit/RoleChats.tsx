@@ -493,6 +493,11 @@ function RoleLauncher({
         </label>
       ) : null}
       <div className={roleLauncherActions}>
+        {roleDefaults.serviceTier ? (
+          <span data-testid="role-service-tier" title="The role service tier applies on its default agent, including model overrides; a different agent uses its native default.">
+            {"Speed: " + (selectedAgentId === roleDefaults.agent ? (roleDefaults.serviceTier === "fast" ? "Fast" : roleDefaults.serviceTier) : "provider default")}
+          </span>
+        ) : null}
         <button className={roleLauncherButton({ tone: "primary" })} type="button" aria-label="Start role" title="Start role" disabled={!canStart} onClick={() => void onLaunch(launchSelection)}>Start</button>
         {canRetry && canRetrySelection && retryRequestId ? (
           <button className={roleLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry role launch" title="Retry the same saved launch request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>

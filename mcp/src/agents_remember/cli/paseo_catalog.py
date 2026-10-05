@@ -60,7 +60,11 @@ def launcher_catalog(config: McpRuntimeConfig, *, refresh: bool = False) -> Laun
         cached = _CATALOGS.get(scope)
         if cached is not None and not refresh:
             return cached
-        reply = bridge_call(config, "catalog", {"refresh": True} if refresh else {})
+        reply = bridge_call(
+            config,
+            "catalog",
+            {"cwd": config.workspace_root.as_posix(), **({"refresh": True} if refresh else {})},
+        )
         catalog = LauncherCatalog(
             origin=f"paseo:{uuid.uuid4().hex}",
             agents=_agents_from_reply(reply),
@@ -101,11 +105,14 @@ def launcher_options(
     catalog = launcher_catalog(config, refresh=refresh)
     agent_id = _default_agent(defaults["agent"], harness_order, catalog)
     refusal = _selection_refusal(catalog, agent_id, defaults["model"], defaults["effort"])
+    tier = defaults.get("serviceTier")
+    refusal = refusal or _tier_refusal(catalog, agent_id, defaults["model"], tier)
     return {
         "roleDefaults": {
             "agent": agent_id,
             "model": defaults["model"],
             "effort": defaults["effort"],
+            "serviceTier": tier,
             "available": refusal is None,
         },
         "agents": [dict(agent) for agent in catalog.agents],
@@ -141,7 +148,40 @@ def resolve_agent_selection(
         raise refusal
     assert agent_id is not None
     options = {key: value for key, value in (("model", model_id), ("effort", effort_id)) if value}
+    tier = defaults.get("serviceTier") if same_default_agent else None
+    refusal = _tier_refusal(catalog, agent_id, model_id, tier)
+    if refusal is not None:
+        raise refusal
+    if tier is not None:
+        options["serviceTier"] = "priority" if tier == "fast" else tier
     return agent_id, options
+
+
+def _tier_refusal(
+    catalog: LauncherCatalog,
+    agent_id: str | None,
+    model_id: str | None,
+    tier: str | None,
+) -> LaunchSelectionRefused | None:
+    if tier is None:
+        return None
+    agent = catalog.agent(agent_id) if agent_id else None
+    models = agent["models"] if agent else ()
+    model = (
+        next((row for row in models if row["id"] == model_id), None)
+        if model_id
+        else next((row for row in models if row.get("isDefault") is True), None)
+    )
+    native_tier = "priority" if tier == "fast" else tier
+    if model and any(row["id"] == native_tier for row in model["serviceTiers"]):
+        return None
+    detail = model.get("serviceTierError") if model else "native default model unavailable"
+    return LaunchSelectionRefused(
+        "service_tier_not_offered",
+        f"The Paseo runtime does not offer service tier {tier!r} (native {native_tier!r}) "
+        f"for agent {agent_id!r}, model {model_id or 'native default'!r}."
+        + (f" {detail}" if detail else ""),
+    )
 
 
 def provider_accepts_tool_servers(config: McpRuntimeConfig, agent_id: str) -> bool:
@@ -244,12 +284,21 @@ def _model_row(model: Any) -> dict[str, Any]:
     if not isinstance(efforts, list):
         raise _unreadable_catalog()
     default_effort = model.get("defaultEffort")
+    tiers = model.get("serviceTiers", [])
+    if not isinstance(tiers, list):
+        raise _unreadable_catalog()
     return {
         "id": model["id"],
         "label": model["label"] if _is_text(model.get("label")) else model["id"],
         **({"description": model["description"]} if _is_text(model.get("description")) else {}),
         **({"isDefault": True} if model.get("isDefault") is True else {}),
         "efforts": [_effort_row(effort) for effort in efforts],
+        "serviceTiers": [_effort_row(tier) for tier in tiers],
+        **(
+            {"serviceTierError": model["serviceTierError"]}
+            if _is_text(model.get("serviceTierError"))
+            else {}
+        ),
         **({"defaultEffort": default_effort} if _is_text(default_effort) else {}),
     }
 

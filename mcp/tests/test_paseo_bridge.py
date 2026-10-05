@@ -111,12 +111,12 @@ class BridgeProcessTests(unittest.TestCase):
                     patch.object(paseo_bridge.subprocess, "run") as run,
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {})
+                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(raised.exception.code, code)
                 run.assert_not_called()
             self.assertTrue(str(raised.exception).startswith("The Paseo daemon of "))
         with self.assertRaises(PaseoBridgeFailure) as unconfigured:
-            bridge_call(runtime_config(Path("/trusted"), None), "catalog", {})
+            bridge_call(runtime_config(Path("/trusted"), None), "catalog", {"cwd": "/work/folder"})
         self.assertTrue(str(unconfigured.exception).startswith("no Paseo runtime configured: "))
 
     def test_the_script_is_pointed_at_the_configured_runtime_and_no_other(self) -> None:
@@ -136,13 +136,15 @@ class BridgeProcessTests(unittest.TestCase):
                 patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
                 patch.object(paseo_bridge.subprocess, "run", return_value=completed) as run,
             ):
-                reply = bridge_call(config, "catalog", {"refresh": True})
+                reply = bridge_call(config, "catalog", {"cwd": "/work/folder", "refresh": True})
 
         self.assertEqual(reply, {"providers": []})
         self.assertEqual(
             run.call_args.args[0], ["/usr/bin/node", BRIDGE_SCRIPT.as_posix(), "catalog"]
         )
-        self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"refresh": True})
+        self.assertEqual(
+            json.loads(run.call_args.kwargs["input"]), {"cwd": "/work/folder", "refresh": True}
+        )
         self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
         self.assertEqual(
@@ -180,7 +182,7 @@ class BridgeProcessTests(unittest.TestCase):
                     patch.object(paseo_bridge.subprocess, "run", side_effect=[outcome]),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {})
+                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(raised.exception.code, code)
                 self.assertLessEqual(len(str(raised.exception)), 800)
             with (
@@ -188,7 +190,7 @@ class BridgeProcessTests(unittest.TestCase):
                 patch.object(paseo_bridge.subprocess, "run") as run,
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
-                bridge_call(config, "catalog", {})
+                bridge_call(config, "catalog", {"cwd": "/work/folder"})
             self.assertEqual(raised.exception.code, "paseo_bridge_unavailable")
             run.assert_not_called()
 
@@ -230,7 +232,7 @@ class BridgeProcessTests(unittest.TestCase):
                     ),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {})
+                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
                 message = str(raised.exception)
                 self.assertTrue(message.endswith("Its standard error says: " + cause), message)
@@ -250,7 +252,7 @@ class BridgeProcessTests(unittest.TestCase):
                     ),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {})
+                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(
                     str(raised.exception),
                     "The Paseo bridge call 'catalog' returned an unreadable reply.",
@@ -272,7 +274,7 @@ class BridgeProcessTests(unittest.TestCase):
                     patch.object(paseo_bridge.shutil, "which", return_value=writer.as_posix()),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {})
+                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
                 if redirect:
                     self.assertTrue(
@@ -295,7 +297,7 @@ class BridgeProcessTests(unittest.TestCase):
                 patch.object(paseo_bridge, "PASEO_BRIDGE_TIMEOUT_SECONDS", 0.5),
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
-                bridge_call(config, "catalog", {})
+                bridge_call(config, "catalog", {"cwd": "/work/folder"})
             self.assertEqual(raised.exception.code, "paseo_bridge_timeout")
             self.assertLess(time.monotonic() - started, 10)
             pid = int((root / "pid").read_text(encoding="utf-8"))
@@ -344,6 +346,7 @@ export function createPaseoApi(daemon) {
         if (entries.some((entry) => entry.status === 'loading')) await never()
         return { entries }
       },
+      listFeatures: async () => ({ features: [] }),
       listModels: async (provider) => {
         const listing = scenario.models[provider]
         if (listing === 'hang') await never()
@@ -383,6 +386,8 @@ class BridgeScriptTests(unittest.TestCase):
         (package / "dist" / "index.js").write_text(FAKE_CLIENT_ROOT, encoding="utf-8")
 
     def call(self, command: str, payload: dict[str, Any], **scenario: Any) -> dict[str, Any]:
+        if command == "catalog":
+            payload = {"cwd": "/work/folder", **payload}
         scenario_path = self.root / "scenario.json"
         base = {"url": "ws://127.0.0.1:6833/ws", "serverId": SERVER_ID, "models": {}}
         scenario_path.write_text(json.dumps({**base, **scenario}), encoding="utf-8")
@@ -434,7 +439,11 @@ class BridgeScriptTests(unittest.TestCase):
             entry("off", "loading", enabled=False),
         ]
         reply = self.call(
-            "catalog", {}, entries=entries, refreshedEntries=[entry("late")], models=models
+            "catalog",
+            {"cwd": "/work/folder"},
+            entries=entries,
+            refreshedEntries=[entry("late")],
+            models=models,
         )
 
         self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": "0.11.0-beta.2"})
@@ -464,9 +473,11 @@ class BridgeScriptTests(unittest.TestCase):
                         "isDefault": True,
                         "efforts": [{"id": "low", "label": "Low"}, {"id": "high", "label": "high"}],
                         "defaultEffort": "high",
+                        "serviceTiers": [],
                     },
-                    {"id": "gpt-b", "label": "gpt-b", "efforts": []},
+                    {"id": "gpt-b", "label": "gpt-b", "efforts": [], "serviceTiers": []},
                     {
+                        "serviceTiers": [],
                         "id": "gpt-c",
                         "label": "gpt-c",
                         "efforts": [{"id": "low", "label": "low"}, {"id": "high", "label": "high"}],
@@ -538,13 +549,17 @@ class BridgeScriptTests(unittest.TestCase):
         with self.subTest("a refresh the runtime never answers"):
             started = time.monotonic()
             with self.assertRaises(PaseoBridgeFailure) as raised:
-                self.call("catalog", {"refresh": True}, **healthy, refresh="hang")
+                self.call(
+                    "catalog", {"cwd": "/work/folder", "refresh": True}, **healthy, refresh="hang"
+                )
             self.assertEqual(raised.exception.code, "paseo_bridge_timeout")
             self.assertLess(time.monotonic() - started, 5)
         with self.subTest("a crash of the script carries the error Node reports"):
             crash = "the daemon answered with a frame the client cannot read"
             with self.assertRaises(PaseoBridgeFailure) as raised:
-                self.call("catalog", {}, **healthy, connect="crash", crash=crash)
+                self.call(
+                    "catalog", {"cwd": "/work/folder"}, **healthy, connect="crash", crash=crash
+                )
             self.assertEqual(raised.exception.code, "paseo_bridge_invalid_reply")
             self.assertTrue(str(raised.exception).endswith("says: TypeError: " + crash))
         with self.subTest("a payload that never arrives is inside the deadline"):
@@ -579,7 +594,10 @@ class BridgeScriptTests(unittest.TestCase):
             self.assertEqual(self.refusal(**healthy), "paseo_client_unavailable")
             modules.unlink()
             (self.root / "another-install").rename(modules)
-            self.assertEqual(self.call("catalog", {}, **healthy)["providers"][0]["id"], "codex")
+            self.assertEqual(
+                self.call("catalog", {"cwd": "/work/folder"}, **healthy)["providers"][0]["id"],
+                "codex",
+            )
         with self.subTest("client package missing from the prefix"):
             shutil.rmtree(self.root / "prefix" / "node_modules")
             self.assertEqual(self.refusal(**healthy), "paseo_client_unavailable")

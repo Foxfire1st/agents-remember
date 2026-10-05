@@ -103,6 +103,7 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return scenario.connectionLost ? { status: 'disconnected' } : this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId, version: this.config.appVersion } }
+  async listProviderFeatures(options) { record({ via: 'features', options }); return { features: scenario.features ?? [{ type: 'select', id: 'service_tier', options: [{ id: 'default', label: 'Normal' }, { id: 'priority', label: 'Fast' }] }] } }
   async createAgent(options) { return create('daemon', options, options.workspaceId, options.config.cwd) }
   async addProject(cwd) {
     record({ via: 'addProject', cwd })
@@ -119,6 +120,7 @@ export function createPaseoApi(daemon) {
     dispose: async () => {},
     providers: {
       waitForReady: async () => ({ entries: scenario.entries ?? [] }),
+      listFeatures: async () => ({ features: [] }),
       listModels: async () => ({ models: [] })
     },
     config: {
@@ -264,6 +266,8 @@ class AgentCommandScriptTests(unittest.TestCase):
         (package / "dist" / "index.js").write_text(FAKE_CLIENT_ROOT, encoding="utf-8")
 
     def call(self, command: str, payload: dict[str, Any], **scenario: Any) -> dict[str, Any]:
+        if command == "catalog":
+            payload = {"cwd": "/work/folder", **payload}
         scenario_path = self.root / "scenario.json"
         base = {
             "url": "ws://127.0.0.1:6835/ws",
@@ -284,6 +288,40 @@ class AgentCommandScriptTests(unittest.TestCase):
 
         lines = (self.root / "record.jsonl").read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines]
+
+    def test_service_tier_is_native_creation_data_and_unsupported_is_rejected_before_create(
+        self,
+    ) -> None:
+        payload = {
+            "agentId": AGENT_ID,
+            "idempotencyKey": "ar-role-launch:tier",
+            "workspaceId": "wks_fake",
+            "provider": "codex",
+            "model": "gpt-6.1-sol",
+            "thinkingOptionId": "xhigh",
+            "title": "Architect",
+            "labels": {},
+            "featureValues": {"service_tier": "priority"},
+        }
+        for model in ["gpt-6.1-sol", None]:
+            with self.subTest(model=model):
+                call = {**payload}
+                if model is None:
+                    del call["model"]
+                self.call("agent-create", call)
+                records = self.recorded()
+                created = next(row for row in records if row["via"] in {"public", "daemon"})
+                self.assertEqual(
+                    created["options"]["config"]["featureValues"], {"service_tier": "priority"}
+                )
+                self.assertEqual(created["options"]["config"]["thinkingOptionId"], "xhigh")
+        with self.assertRaisesRegex(PaseoBridgeFailure, "not offered"):
+            self.call("agent-create", payload, features=[])
+        self.assertFalse(any(row["via"] in {"public", "daemon", "send"} for row in self.recorded()))
+        invalid = {**payload, "featureValues": {"fast_mode": True}}
+        with self.assertRaisesRegex(PaseoBridgeFailure, "service_tier"):
+            self.call("agent-create", invalid)
+        self.assertEqual(self.recorded(), [])
 
     def failure(self, command: str, payload: dict[str, Any], **scenario: Any) -> PaseoBridgeFailure:
         with self.assertRaises(PaseoBridgeFailure) as raised:

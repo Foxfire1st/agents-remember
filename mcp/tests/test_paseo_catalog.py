@@ -38,8 +38,9 @@ CATALOG: dict[str, Any] = {
                     "isDefault": True,
                     "efforts": [{"id": "low", "label": "Low"}, {"id": "high", "label": "High"}],
                     "defaultEffort": "low",
+                    "serviceTiers": [],
                 },
-                {"id": "gpt-b", "label": "GPT B", "efforts": []},
+                {"id": "gpt-b", "label": "GPT B", "efforts": [], "serviceTiers": []},
             ],
         },
         {"id": "eve", "label": "Eve", "models": []},
@@ -78,7 +79,7 @@ def runtime_config(
 def defaults(
     agent: str | None = "codex", model: str | None = None, effort: str | None = None
 ) -> dict[str, str | None]:
-    return {"agent": agent, "model": model, "effort": effort}
+    return {"agent": agent, "model": model, "effort": effort, "serviceTier": None}
 
 
 class FakeBridge:
@@ -156,21 +157,31 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertIsNone(bound["execution"])
         self.assertEqual(
             taskless["roleDefaults"],
-            {"agent": "codex", "model": "gpt-a", "effort": "high", "available": True},
+            {
+                "agent": "codex",
+                "model": "gpt-a",
+                "effort": "high",
+                "serviceTier": None,
+                "available": True,
+            },
         )
         self.assertRegex(taskless["catalogOrigin"], r"^paseo:[0-9a-f]{32}$")
         self.assertEqual(taskless["agents"], CATALOG["providers"])
         model_less, failed = taskless["agents"][1], taskless["agents"][2]
         self.assertEqual(model_less, {"id": "eve", "label": "Eve", "models": []})
         self.assertEqual(failed["listingError"], "auth missing")
-        self.assertEqual(bridge.calls, [("catalog", {})])
+        self.assertEqual(
+            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})]
+        )
 
     def test_catalog_is_cached_per_runtime_and_only_a_refresh_rediscovers(self) -> None:
         bridge = self.bridge()
         first = self.options(defaults())
         other_role = self.options(defaults("eve"), role="manager")
         other_agent = self.options(defaults(), agentId="eve")
-        self.assertEqual(bridge.calls, [("catalog", {})])
+        self.assertEqual(
+            bridge.calls, [("catalog", {"cwd": self.config.workspace_root.as_posix()})]
+        )
         self.assertEqual(first["catalogOrigin"], other_role["catalogOrigin"])
         self.assertEqual(first["catalogOrigin"], other_agent["catalogOrigin"])
         self.assertEqual(other_agent["agents"], first["agents"])
@@ -179,7 +190,10 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertEqual(len(bridge.calls), 1, "a launch re-read a catalog that was cached")
 
         refreshed = self.options(defaults(), refreshCatalog=True)
-        self.assertEqual(bridge.calls[1:], [("catalog", {"refresh": True})])
+        self.assertEqual(
+            bridge.calls[1:],
+            [("catalog", {"cwd": self.config.workspace_root.as_posix(), "refresh": True})],
+        )
         self.assertNotEqual(refreshed["catalogOrigin"], first["catalogOrigin"])
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
 
@@ -203,7 +217,11 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
 
         forget_launcher_catalogs()
         resolve_agent_selection(self.config, defaults(), HARNESS_ORDER, None)
-        self.assertEqual(bridge.calls[6:], [("catalog", {})], "a launch must load an empty cache")
+        self.assertEqual(
+            bridge.calls[6:],
+            [("catalog", {"cwd": self.config.workspace_root.as_posix()})],
+            "a launch must load an empty cache",
+        )
 
     def test_an_unoffered_default_is_flagged_and_never_replaced(self) -> None:
         self.bridge()
@@ -229,13 +247,25 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
             detected = launcher_options(self.config, defaults(None), HARNESS_ORDER)
             self.assertEqual(
                 detected["roleDefaults"],
-                {"agent": "codex", "model": None, "effort": None, "available": True},
+                {
+                    "agent": "codex",
+                    "model": None,
+                    "effort": None,
+                    "serviceTier": None,
+                    "available": True,
+                },
             )
         with self.subTest("no agent configured and none of the harnesses offered"):
             nothing = launcher_options(self.config, defaults(None), ("claude",))
             self.assertEqual(
                 nothing["roleDefaults"],
-                {"agent": None, "model": None, "effort": None, "available": False},
+                {
+                    "agent": None,
+                    "model": None,
+                    "effort": None,
+                    "serviceTier": None,
+                    "available": False,
+                },
             )
 
     def test_a_partial_catalog_is_kept_and_a_failed_discovery_caches_nothing(self) -> None:
@@ -402,6 +432,70 @@ class LaunchValidationTests(PaseoCatalogTestCase):
                 request_id=uuid.uuid4(),
             )
         resolve_workspace.assert_not_called()
+
+
+class ServiceTierCatalogTests(PaseoCatalogTestCase):
+    def test_fast_is_independent_and_model_override_revalidates_capability(self) -> None:
+        catalog = copy.deepcopy(CATALOG)
+        model = catalog["providers"][0]["models"][0]
+        model["id"] = "gpt-6.1-sol"
+        model["efforts"] += [{"id": "xhigh", "label": "xhigh"}, {"id": "max", "label": "max"}]
+        model["serviceTiers"] = [
+            {"id": "default", "label": "Normal"},
+            {"id": "priority", "label": "Fast"},
+        ]
+        self.bridge(catalog)
+        for effort in ["xhigh", "max"]:
+            role = {**defaults("codex", "gpt-6.1-sol", effort), "serviceTier": "fast"}
+            agent, options = resolve_agent_selection(self.config, role, HARNESS_ORDER, None)
+            self.assertEqual(
+                (agent, options),
+                ("codex", {"model": "gpt-6.1-sol", "effort": effort, "serviceTier": "priority"}),
+            )
+            shown = launcher_options(self.config, role, HARNESS_ORDER)
+            self.assertEqual(shown["roleDefaults"]["serviceTier"], "fast")
+            self.assertTrue(shown["roleDefaults"]["available"])
+            with self.assertRaisesRegex(LaunchSelectionRefused, "service tier"):
+                resolve_agent_selection(
+                    self.config,
+                    role,
+                    HARNESS_ORDER,
+                    RoleAgentOverride(agentId="codex", modelId="gpt-b"),
+                )
+            self.assertEqual(
+                resolve_agent_selection(
+                    self.config, role, HARNESS_ORDER, RoleAgentOverride(agentId="eve")
+                ),
+                ("eve", {}),
+            )
+        for tier in ["default", "priority"]:
+            role = {**defaults("codex"), "serviceTier": tier}
+            self.assertEqual(
+                resolve_agent_selection(self.config, role, HARNESS_ORDER, None),
+                ("codex", {"serviceTier": tier}),
+            )
+        self.assertEqual(
+            resolve_agent_selection(self.config, defaults("codex"), HARNESS_ORDER, None),
+            ("codex", {}),
+        )
+
+    def test_unsupported_tier_and_exact_unavailable_model_are_not_substituted(self) -> None:
+        self.bridge()
+        for tier in ["fast", "default", "unadvertised"]:
+            with self.assertRaisesRegex(LaunchSelectionRefused, "service tier"):
+                resolve_agent_selection(
+                    self.config,
+                    {**defaults("codex", "gpt-a"), "serviceTier": tier},
+                    HARNESS_ORDER,
+                    None,
+                )
+        with self.assertRaisesRegex(LaunchSelectionRefused, "gpt-6.1-sol"):
+            resolve_agent_selection(
+                self.config,
+                {**defaults("codex", "gpt-6.1-sol", "xhigh"), "serviceTier": "fast"},
+                HARNESS_ORDER,
+                None,
+            )
 
 
 if __name__ == "__main__":

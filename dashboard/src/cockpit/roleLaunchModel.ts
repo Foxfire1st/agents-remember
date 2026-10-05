@@ -36,6 +36,9 @@ export interface RoleModelChoice {
   label: string;
   efforts?: RoleEffortChoice[];
   defaultEffort?: string;
+  isDefault?: boolean;
+  serviceTiers?: RoleEffortChoice[];
+  serviceTierError?: string;
 }
 
 export const EMPTY_ROLE_MODELS: RoleModelChoice[] = [];
@@ -53,6 +56,7 @@ export interface RoleDefaults {
   agent?: string;
   model?: string;
   effort?: string;
+  serviceTier?: string;
   /** False when the host's catalog does not offer this default; it is never replaced. */
   available?: boolean;
 }
@@ -337,7 +341,17 @@ export function launchChoiceProblem(
   if (!agent) return "Agent " + override.agentId + " is not offered by the Paseo runtime.";
   const modelId = override.modelId || roleValue(override.agentId === defaults.agent, defaults.model);
   const onRoleModel = override.agentId === defaults.agent && modelId === roleValue(true, defaults.model);
-  return unofferedModelOrEffort(agent, modelId, override.effortId || roleValue(onRoleModel, defaults.effort));
+  return unofferedModelOrEffort(agent, modelId, override.effortId || roleValue(onRoleModel, defaults.effort)) ||
+    unofferedServiceTier(agent, modelId, roleValue(override.agentId === defaults.agent, defaults.serviceTier));
+}
+
+function unofferedServiceTier(agent: RoleAgentChoice, modelId: string | undefined, tier: string | undefined): string | null {
+  if (!tier) return null;
+  const model = modelId ? agent.models.find((row) => row.id === modelId) : agent.models.find((row) => row.isDefault);
+  const native = tier === "fast" ? "priority" : tier;
+  return model?.serviceTiers?.some((row) => row.id === native) ? null :
+    "Service tier " + tier + " is not offered for " + agent.label + "/" + (modelId ?? "native default") +
+    (model?.serviceTierError ? ": " + model.serviceTierError : ".");
 }
 
 /** A role default that applies; the backend sends an unset default as null, read here as unset. */
@@ -347,7 +361,7 @@ function roleValue(applies: boolean, value: string | undefined): string | undefi
 
 function unofferedRoleDefault(defaults: RoleDefaults): string | null {
   if (defaults.available !== false) return null;
-  const configured = [defaults.agent, defaults.model, defaults.effort].filter(Boolean).join(" · ");
+  const configured = [defaults.agent, defaults.model, defaults.effort, defaults.serviceTier].filter(Boolean).join(" · ");
   return configured
     ? "Role default " + configured + " is not offered by the Paseo runtime; pick an agent, model or effort it offers."
     : "No agent is configured for this role; pick an agent the Paseo runtime offers.";

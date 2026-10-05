@@ -500,6 +500,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "createdAt": _now_iso(),
         "workspace": workspace,
         "agent": {"id": provider, **session_options},
+        "sessionOptions": session_options,
         "requestedAgentOverride": (
             request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
             if request.agent_override

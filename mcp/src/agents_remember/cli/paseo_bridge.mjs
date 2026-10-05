@@ -289,6 +289,7 @@ async function main() {
 // ---------------------------------------------------------------------------------------------
 
 async function readCatalog({ api, daemon, deadline }, input) {
+  const cwd = requiredText(input, 'cwd')
   const remaining = deadline - Date.now()
   const discoveryDeadline = deadline - Math.min(LISTING_RESERVE_MS, remaining / 5)
   const listingDeadline = deadline - Math.min(REPLY_RESERVE_MS, remaining / 20)
@@ -315,7 +316,7 @@ async function readCatalog({ api, daemon, deadline }, input) {
     enabled
       .filter((entry) => entry.status === 'ready' || entry.status === 'loading')
       .map((entry) =>
-        entry.status === 'ready' ? listProvider(api, entry, listingDeadline) : stillLoading(entry)
+        entry.status === 'ready' ? listProvider(api, entry, listingDeadline, cwd) : stillLoading(entry)
       )
   )
   if (daemon.getConnectionState().status !== 'connected') {
@@ -342,7 +343,7 @@ function stillLoading(entry) {
   }
 }
 
-async function listProvider(api, entry, deadline) {
+async function listProvider(api, entry, deadline, cwd) {
   const row = { id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider }
   try {
     const listing = await within(
@@ -352,7 +353,17 @@ async function listProvider(api, entry, deadline) {
     )
     if (listing?.error) return { ...row, models: [], listingError: text(listing.error) }
     const models = Array.isArray(listing?.models) ? listing.models : []
-    return { ...row, models: models.filter((model) => nonEmpty(model?.id)).map(projectModel) }
+    const projected = await Promise.all(models.filter((model) => nonEmpty(model?.id)).map(async (model) => {
+      const result = projectModel(model)
+      try {
+        const features = await within(api.providers.listFeatures({ provider: `${entry.provider}/${model.id}`, cwd }), deadline, () => new Error('Service tier discovery timed out'))
+        if (features.error) throw new Error(features.error)
+        return { ...result, serviceTiers: tierOptions(features.features) }
+      } catch (error) {
+        return { ...result, serviceTiers: [], serviceTierError: text(error?.message ?? error) }
+      }
+    }))
+    return { ...row, models: projected }
   } catch (error) {
     return { ...row, models: [], listingError: text(error?.message ?? error) }
   }
@@ -370,6 +381,11 @@ function projectModel(model) {
       .map((option) => ({ id: option.id, label: nonEmpty(option.label) ?? option.id })),
     ...(nonEmpty(model.defaultThinkingOptionId) ? { defaultEffort: model.defaultThinkingOptionId } : {})
   }
+}
+
+function tierOptions(features) {
+  const feature = Array.isArray(features) ? features.find((row) => row.id === 'service_tier' && row.type === 'select') : null
+  return (feature?.options ?? []).map(({ id, label }) => ({ id, label }))
 }
 
 async function readRuntimeInfo({ daemon }) {
@@ -520,6 +536,11 @@ function agentCreation(input, agentId) {
   const provider = requiredText(input, 'provider')
   const model = optionalText(input, 'model')
   const thinkingOptionId = optionalText(input, 'thinkingOptionId')
+  const featureValues = input.featureValues
+  if (featureValues !== undefined && (featureValues === null || typeof featureValues !== 'object' ||
+    Array.isArray(featureValues) || Object.keys(featureValues).length !== 1 || !nonEmpty(featureValues.service_tier))) {
+    throw failure('invalid_bridge_payload', 'featureValues must contain only a nonempty service_tier string.')
+  }
   const prompt = optionalText(input, 'prompt')
   const idempotencyKey = requiredText(input, 'idempotencyKey')
   const shared = { agentId, idempotencyKey, labels: requiredLabels(input) }
@@ -550,6 +571,7 @@ function agentCreation(input, agentId) {
   // What the runtime keeps with the agent and applies again on every resume of its session.
   const kept = {
     ...(thinkingOptionId ? { thinkingOptionId } : {}),
+    ...(featureValues ? { featureValues } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
     ...(mcpServers ? { mcpServers } : {})
   }
@@ -560,6 +582,15 @@ function agentCreation(input, agentId) {
     // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
     async create(api, daemon) {
       const workspace = api.workspaces.ref(workspaceId)
+      let cwd
+      if (featureValues) {
+        cwd = (await workspace.refresh())?.workspaceDirectory
+        if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
+        const features = await daemon.listProviderFeatures({ provider, cwd, ...(model ? { model } : {}) })
+        if (features.error || !tierOptions(features.features).some(({ id }) => id === featureValues.service_tier)) {
+          throw new Error(`Service tier ${featureValues.service_tier} is not offered for ${provider}/${model ?? 'native default'}${features.error ? ': ' + features.error : ''}`)
+        }
+      }
       if (model) {
         const handle = await workspace.agents.create({
           ...shared,
@@ -569,7 +600,7 @@ function agentCreation(input, agentId) {
         })
         return handle.current()
       }
-      const cwd = (await workspace.refresh())?.workspaceDirectory
+      cwd = cwd ?? (await workspace.refresh())?.workspaceDirectory
       if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
       return await daemon.createAgent({
         ...shared,
@@ -987,11 +1018,13 @@ async function findAgent(api, daemon, agentId) {
 }
 
 function projectAgent(agent) {
+  const serviceTier = agent.features?.find((feature) => feature.id === 'service_tier')?.value
   return {
     id: agent.id,
     provider: agent.provider ?? null,
     model: agent.model ?? null,
     thinkingOptionId: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
+    ...(typeof serviceTier === 'string' ? { serviceTier } : {}),
     title: agent.title ?? null,
     labels: agent.labels ?? {},
     workspaceId: agent.workspaceId ?? null,

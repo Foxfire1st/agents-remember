@@ -384,6 +384,8 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["model"] = launch.session_options["model"]
     if launch.session_options.get("effort"):
         agent["thinkingOptionId"] = launch.session_options["effort"]
+    if launch.session_options.get("serviceTier"):
+        agent["featureValues"] = {"service_tier": launch.session_options["serviceTier"]}
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
         "workspace": workspace_call(launch.context, launch.folder),
@@ -503,7 +505,11 @@ def _created_outcome(reply: dict[str, Any], agent_id: str, workspace_id: str) ->
         )
     agent_workspace = agent.get("workspaceId")
     applied: dict[str, str] = {"id": provider}
-    for key, source in (("model", "model"), ("effort", "thinkingOptionId")):
+    for key, source in (
+        ("model", "model"),
+        ("effort", "thinkingOptionId"),
+        ("serviceTier", "serviceTier"),
+    ):
         value = agent.get(source)
         if isinstance(value, str) and value:
             applied[key] = value

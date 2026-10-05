@@ -168,6 +168,11 @@ class FakeRuntime:
                 # What the runtime applied: the provider's own default when no model was given.
                 "model": payload.get("model") or f"{payload['provider']}-default",
                 "thinkingOptionId": payload.get("thinkingOptionId"),
+                **(
+                    {"serviceTier": payload["featureValues"]["service_tier"]}
+                    if "featureValues" in payload
+                    else {}
+                ),
                 "title": payload["title"],
                 "labels": payload["labels"],
                 "workspaceId": payload["workspaceId"],

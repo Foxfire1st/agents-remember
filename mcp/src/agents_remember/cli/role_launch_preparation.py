@@ -226,7 +226,12 @@ def _role_defaults(
     knobs = settings.resolved_role_knobs(context.role, ROLE_LEVELS[context.role])
     agent_id = knobs.harness or settings.spawn_harness
     return (
-        {"agent": agent_id, "model": knobs.model, "effort": knobs.effort},
+        {
+            "agent": agent_id,
+            "model": knobs.model,
+            "effort": knobs.effort,
+            "serviceTier": knobs.service_tier,
+        },
         tuple(harness.id for harness in settings.harnesses),
     )
 

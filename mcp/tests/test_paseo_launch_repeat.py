@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import unittest
 import uuid
@@ -716,6 +717,55 @@ class RuntimeReplyTests(RepeatTestCase):
                 "rejected": True,
             },
         )
+
+
+class ServiceTierReplayTests(RepeatTestCase):
+    def test_success_preserves_requested_and_observed_tier_and_old_calls_replay_unchanged(
+        self,
+    ) -> None:
+        catalog = copy.deepcopy(launch.CATALOG)
+        catalog["providers"][0]["models"][0]["serviceTiers"] = [
+            {"id": "default", "label": "Normal"},
+            {"id": "priority", "label": "Fast"},
+        ]
+        for tier in [None, "fast"]:
+            with (
+                self.subTest(tier=tier),
+                patch.object(self.runtime, "_catalog", return_value=catalog),
+                patch.object(
+                    launch.role_launch_preparation,
+                    "_role_defaults",
+                    return_value=(
+                        {**launch.ROLE_DEFAULTS[0], "serviceTier": tier},
+                        launch.ROLE_DEFAULTS[1],
+                    ),
+                ),
+            ):
+                request = self.request("architect")
+                self.runtime.fail("agent-create", "paseo_bridge_timeout")
+                self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+                saved = copy.deepcopy(self.receipt(request))
+                expected = {"service_tier": "priority"} if tier else None
+                self.assertEqual(saved["replayRequest"]["agent"].get("featureValues"), expected)
+                with patch.object(
+                    launch.role_launch_preparation,
+                    "_role_defaults",
+                    side_effect=AssertionError("Replay must not resolve changed defaults"),
+                ):
+                    status, public = self.dispatch(request)
+                self.assertEqual(status, 200)
+                self.assertEqual(
+                    public["sessionOptions"],
+                    {
+                        "model": "gpt-a",
+                        "effort": "low",
+                        **({"serviceTier": "priority"} if tier else {}),
+                    },
+                )
+                if tier:
+                    self.assertEqual(self.receipt(request)["agent"]["serviceTier"], "priority")
+                self.assertEqual(self.runtime.launch_calls()[-1][1].get("featureValues"), expected)
+                self.assertEqual(self.receipt(request)["agentId"], saved["agentId"])
 
 
 if __name__ == "__main__":

@@ -15,11 +15,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application import terminal_tools
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
     RoleKnobs,
@@ -334,6 +337,77 @@ class QualityGateSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "executor") as caught:
             load_agentic_settings(self.coordination_root)
         self.assertIn(str(path), str(caught.exception))
+
+
+class ServiceTierSettingsTests(unittest.TestCase):
+    def test_tier_inherits_independently_of_model_and_effort(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            global_root, local_root = Path(folder) / "global", Path(folder) / "local"
+            write_settings(
+                global_root,
+                {
+                    "orchestration": {
+                        "roles": {
+                            "architect": {
+                                "harness": "codex",
+                                "model": "gpt-6.1-sol",
+                                "effort": "xhigh",
+                                "serviceTier": "fast",
+                            }
+                        }
+                    }
+                },
+            )
+            write_settings(
+                local_root,
+                {
+                    "orchestration": {
+                        "roles": {"architect": {"effort": "max"}},
+                        "rolesPerLevel": {"portfolio": {"architect": {"serviceTier": "default"}}},
+                    }
+                },
+            )
+            settings = load_agentic_settings(global_root, local_root)
+            role = settings.role_knobs("architect")
+            self.assertEqual(
+                (role.model, role.effort, role.service_tier), ("gpt-6.1-sol", "max", "fast")
+            )
+            scoped = settings.resolved_role_knobs("architect", "portfolio")
+            self.assertEqual(
+                (scoped.model, scoped.effort, scoped.service_tier),
+                ("gpt-6.1-sol", "max", "default"),
+            )
+            self.assertIsNone(settings.role_knobs("worker").service_tier)
+
+    def test_tier_refuses_invalid_shapes_and_fast_boolean(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for value in [True, False, 1, [], {}, None, "", " "]:
+                with self.subTest(value=value):
+                    write_settings(
+                        root, {"orchestration": {"roles": {"architect": {"serviceTier": value}}}}
+                    )
+                    with self.assertRaisesRegex(AgenticSettingsError, "serviceTier"):
+                        load_agentic_settings(root)
+            write_settings(root, {"orchestration": {"roles": {"architect": {"fast": True}}}})
+            with self.assertRaisesRegex(AgenticSettingsError, "fast"):
+                load_agentic_settings(root)
+
+    def test_legacy_terminal_route_refuses_configured_tier_instead_of_dropping_it(self) -> None:
+
+        settings = SimpleNamespace(
+            resolved_role_knobs=lambda *_args: RoleKnobs(service_tier="fast")
+        )
+        with patch.object(terminal_tools, "load_agentic_settings", return_value=settings):
+            dispatch, refusal = terminal_tools._resolve_harness_dispatch(
+                SimpleNamespace(coordination_root=Path("/unused")),
+                task_document_ref=None,
+                level=None,
+                env={"AR_SPAWN_ROLE": "architect"},
+                which=None,
+            )
+        self.assertIsNone(dispatch)
+        self.assertIn("serviceTier", refusal["detail"])
 
 
 if __name__ == "__main__":

@@ -449,6 +449,32 @@ Read cadence above).
 
 ### orchestration.roles, orchestration.rolesPerLevel
 
+For Paseo role launches, optional `serviceTier` selects processing service independently of
+`model` and reasoning `effort`. It is a nonempty string with the same global/repository/per-level
+inheritance as the other role fields. `fast` intentionally requests native `priority`, the Fast
+option advertised by the pinned Paseo provider; `default` requests the advertised Normal option.
+Other values must match an advertised native `service_tier` option exactly. No `fast` boolean,
+launch argument or reasoning-effort downgrade is used. Missing capability refuses before creation.
+
+The tier default applies on the role's default agent, including explicit model overrides; each
+actual model (or advertised native default when unset) is checked. Choosing another agent
+explicitly uses that provider's defaults, as with the role's model/effort defaults. An unset tier
+adds no feature override. The logical setting is displayed in launch options; immutable
+`sessionOptions` records resolved requested native creation values, while `agent.serviceTier`
+is observed only when the host reports its feature value. Replay uses its saved call and does
+not apply subsequently changed role defaults to an existing actor. Legacy terminal spawning
+refuses a configured tier because it has no Paseo feature channel.
+
+```json
+"architect": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh", "serviceTier": "fast" }
+```
+
+Model/effort/tier availability remains dynamic. The earlier private Codex CLI0.156.1 catalog
+lacked the exact example model; the isolated CLI0.160.0 metadata qualification now advertises
+`gpt-6.1-sol`, `xhigh`/`max`, and native `default`/`priority`. No launcher substitution or paid
+model turn was used to establish that metadata. Unknown choices still refuse on the actual runtime.
+
+
 `orchestration.roles.<role>` overrides a role file's knob block per role
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
 `system-specialist`, `reviewer`).
