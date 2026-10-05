@@ -1,12 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { css } from "../../styled-system/css";
-import { PaseoFrameControl, type PaseoControlState, type PaseoFrameView } from "./paseoFrameControl";
+import type { SeriesNode, TaskDocNode } from "../types/projection";
+import { PaseoNavigation } from "./PaseoNavigation";
+import { groupPaseoChats } from "./paseoNavigationModel";
+import {
+  PaseoFrameControl,
+  type PaseoControlState,
+  type PaseoFrameView,
+} from "./paseoFrameControl";
 import {
   parseFrameDescriptor,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoFrameDescriptor,
   type PaseoFrameUnavailableReason,
+  type PaseoHierarchySnapshot,
 } from "./paseoFrameModel";
 
 const UNAVAILABLE_HEADLINE: Record<PaseoFrameUnavailableReason, string> = {
@@ -34,6 +42,7 @@ const frameElement = css({
   border: "0",
   background: "var(--bg)",
 });
+const frameBody = css({ display: "flex", flex: "1", minHeight: "0", minWidth: "0" });
 const frameNotice = css({
   display: "flex",
   flexShrink: "0",
@@ -102,10 +111,17 @@ function FrameUnavailable({
 }) {
   return (
     <div className={frameShell}>
-      <div role="status" className={frameMessage} data-testid="paseo-frame-unavailable" data-reason={reason}>
+      <div
+        role="status"
+        className={frameMessage}
+        data-testid="paseo-frame-unavailable"
+        data-reason={reason}
+      >
         <span>{UNAVAILABLE_HEADLINE[reason]}</span>
         {detail ? <span className={frameDetail}>{detail}</span> : null}
-        <button type="button" className={frameButton} onClick={onRetry}>Retry</button>
+        <button type="button" className={frameButton} onClick={onRetry}>
+          Retry
+        </button>
       </div>
     </div>
   );
@@ -117,22 +133,23 @@ function FrameUnavailable({
  * agent of the execution the launcher bar displays. The frame is granted clipboard read and
  * write for the embedded origin only. It stays mounted while the pane is hidden.
  */
-export function PaseoChatFrame({
-  active,
-  scope,
-  target,
-}: {
+interface PaseoChatFrameProps {
   active: boolean;
+  navigationOpen: boolean;
   /** Identity of the launcher selection; a change means another execution is being displayed. */
   scope: string;
   target: PaseoAgentTarget | null;
-}) {
-  const [started, setStarted] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [descriptor, setDescriptor] = useState<PaseoFrameDescriptor | null>(null);
+  taskDocuments: TaskDocNode[];
+  series: SeriesNode[];
+}
+
+function useFrameController(scope: string, target: PaseoAgentTarget | null) {
   const [frame, setFrame] = useState<PaseoFrameView | null>(null);
   const [control, setControl] = useState<PaseoControlState>("waiting");
   const [agentProblem, setAgentProblem] = useState<string | null>(null);
+  const [hierarchy, setHierarchy] = useState<PaseoHierarchySnapshot | null>(null);
+  const [hierarchyProblem, setHierarchyProblem] = useState<string | null>(null);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [controller] = useState(
     () =>
@@ -141,38 +158,19 @@ export function PaseoChatFrame({
         setControl,
         setFrame,
         setAgentProblem,
+        setHierarchy,
+        setHierarchyProblem,
+        setSelection: setSelectedAgentIds,
       }),
   );
-
-  useEffect(() => {
-    if (active) setStarted(true);
-  }, [active]);
-
-  // The frame route, on first activation and on every Retry.
-  useEffect(() => {
-    if (!started) return;
-    let cancelled = false;
-    void fetchFrameDescriptor().then((next) => {
-      if (cancelled) return;
-      setDescriptor(next);
-      if (next.available) {
-        controller.start(next, attempt > 0);
-      } else {
-        controller.stop();
-        setFrame(null);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [started, attempt, controller]);
-
   const agentId = target?.agentId;
   const workspaceId = target?.workspaceId;
   useEffect(() => {
-    controller.display(scope, agentId ? { agentId, ...(workspaceId ? { workspaceId } : {}) } : null);
+    controller.display(
+      scope,
+      agentId ? { agentId, ...(workspaceId ? { workspaceId } : {}) } : null,
+    );
   }, [controller, scope, agentId, workspaceId]);
-
   useEffect(() => {
     const onMessage = (event: MessageEvent) => controller.receive(event);
     window.addEventListener("message", onMessage);
@@ -181,27 +179,91 @@ export function PaseoChatFrame({
       controller.stop();
     };
   }, [controller]);
+  return {
+    frame,
+    control,
+    agentProblem,
+    hierarchy,
+    hierarchyProblem,
+    selectedAgentIds,
+    frameRef,
+    controller,
+  };
+}
 
+/** Fetch the embed descriptor on first activation and each explicit Retry. */
+function useFrameDescriptor(active: boolean, controller: PaseoFrameControl) {
+  const [started, setStarted] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [descriptor, setDescriptor] = useState<PaseoFrameDescriptor | null>(null);
+  useEffect(() => {
+    if (active) setStarted(true);
+  }, [active]);
+  useEffect(() => {
+    if (!started) return;
+    let cancelled = false;
+    void fetchFrameDescriptor().then((next) => {
+      if (cancelled) return;
+      setDescriptor(next);
+      if (next.available) controller.start(next, attempt > 0);
+      else controller.stop();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [started, attempt, controller]);
   const retry = () => {
     controller.stop();
     setDescriptor(null);
-    setFrame(null);
     setAttempt((current) => current + 1);
   };
+  return { started, descriptor, retry };
+}
 
+export function PaseoChatFrame({
+  active,
+  navigationOpen,
+  scope,
+  target,
+  taskDocuments,
+  series,
+}: PaseoChatFrameProps) {
+  const state = useFrameController(scope, target);
+  const { started, descriptor, retry } = useFrameDescriptor(active, state.controller);
+  const groups = useMemo(
+    () =>
+      groupPaseoChats(
+        state.hierarchy ?? { agents: [], projects: [], workspaces: [] },
+        taskDocuments,
+        series,
+      ),
+    [state.hierarchy, taskDocuments, series],
+  );
   if (!started) return <div className={frameShell} />;
-  if (descriptor && !descriptor.available) {
-    return <FrameUnavailable reason={descriptor.reason} detail={descriptor.detail} onRetry={retry} />;
-  }
-  if (!descriptor || !frame) return <FrameLoading />;
+  if (descriptor && !descriptor.available)
+    return (
+      <FrameUnavailable reason={descriptor.reason} detail={descriptor.detail} onRetry={retry} />
+    );
+  if (!descriptor || !state.frame) return <FrameLoading />;
   return (
     <EmbeddedFrame
       available={descriptor}
-      frame={frame}
-      frameRef={frameRef}
-      control={control}
-      agentProblem={agentProblem}
+      frame={state.frame}
+      frameRef={state.frameRef}
+      control={state.control}
+      agentProblem={state.agentProblem}
       onRetry={retry}
+      navigationOpen={navigationOpen}
+      groups={groups}
+      selectedAgentIds={state.selectedAgentIds}
+      navigationLoading={!state.hierarchy}
+      hierarchyProblem={state.hierarchyProblem}
+      onNavigate={(agent) =>
+        state.controller.navigate({
+          agentId: agent.agentId,
+          ...(agent.workspaceId ? { workspaceId: agent.workspaceId } : {}),
+        })
+      }
     />
   );
 }
@@ -209,54 +271,108 @@ export function PaseoChatFrame({
 function FrameLoading() {
   return (
     <div className={frameShell}>
-      <div role="status" className={frameMessage}>Loading embedded chat…</div>
+      <div role="status" className={frameMessage}>
+        Loading embedded chat…
+      </div>
     </div>
   );
 }
 
-function EmbeddedFrame({
-  available,
-  frame,
-  frameRef,
-  control,
-  agentProblem,
-  onRetry,
-}: {
+interface EmbeddedFrameProps {
   available: AvailablePaseoFrame;
   frame: PaseoFrameView;
   frameRef: React.RefObject<HTMLIFrameElement | null>;
   control: PaseoControlState;
   agentProblem: string | null;
   onRetry: () => void;
-}) {
+  navigationOpen: boolean;
+  groups: ReturnType<typeof groupPaseoChats>;
+  selectedAgentIds: string[];
+  navigationLoading: boolean;
+  hierarchyProblem: string | null;
+  onNavigate: Parameters<typeof PaseoNavigation>[0]["onSelect"];
+}
+
+function EmbeddedFrame(props: EmbeddedFrameProps) {
+  const {
+    available,
+    frame,
+    frameRef,
+    control,
+    navigationOpen,
+    groups,
+    selectedAgentIds,
+    navigationLoading,
+    hierarchyProblem,
+    onNavigate,
+  } = props;
   return (
     <div className={frameShell} data-testid="paseo-frame" data-control={control}>
+      <FrameNotices {...props} />
+      <div className={frameBody}>
+        {navigationOpen ? (
+          <PaseoNavigation
+            groups={groups}
+            selectedAgentIds={selectedAgentIds}
+            loading={navigationLoading}
+            unavailable={Boolean(hierarchyProblem)}
+            enabled={control === "ready" && !hierarchyProblem}
+            onSelect={onNavigate}
+          />
+        ) : null}
+        <iframe
+          key={frame.generation}
+          ref={frameRef}
+          title="Role chats"
+          src={frame.src}
+          referrerPolicy="origin"
+          allow={
+            "clipboard-read " + available.frameOrigin + "; clipboard-write " + available.frameOrigin
+          }
+          className={frameElement}
+        />
+      </div>
+      {control === "waiting" ? (
+        <div role="status" className={frameOverlay} data-testid="paseo-frame-connecting">
+          Connecting embedded chat…
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FrameNotices({
+  available,
+  control,
+  agentProblem,
+  hierarchyProblem,
+  onRetry,
+}: EmbeddedFrameProps) {
+  return (
+    <>
       {control === "unavailable" ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-control-banner">
           <span>embedded chat control unavailable</span>
-          <button type="button" className={frameButton} onClick={onRetry}>Retry</button>
+          <button type="button" className={frameButton} onClick={onRetry}>
+            Retry
+          </button>
         </div>
       ) : null}
       {agentProblem ? (
-        <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">{agentProblem}</div>
+        <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">
+          {agentProblem}
+        </div>
+      ) : null}
+      {hierarchyProblem ? (
+        <div role="status" className={frameNotice} data-testid="paseo-frame-hierarchy-problem">
+          {hierarchyProblem}
+        </div>
       ) : null}
       {available.projectsWorkspaceDetail ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-workspace-problem">
           The Projects workspace could not be opened: {available.projectsWorkspaceDetail}
         </div>
       ) : null}
-      <iframe
-        key={frame.generation}
-        ref={frameRef}
-        title="Role chats"
-        src={frame.src}
-        referrerPolicy="origin"
-        allow={"clipboard-read " + available.frameOrigin + "; clipboard-write " + available.frameOrigin}
-        className={frameElement}
-      />
-      {control === "waiting" ? (
-        <div role="status" className={frameOverlay} data-testid="paseo-frame-connecting">Connecting embedded chat…</div>
-      ) : null}
-    </div>
+    </>
   );
 }

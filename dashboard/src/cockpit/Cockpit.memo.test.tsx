@@ -18,7 +18,6 @@ import { CockpitShell } from "./Cockpit";
 const counts = vi.hoisted(() => ({
   engineRoom: 0,
   detailPanel: 0,
-  sessionsView: 0,
   fileViewer: 0,
   attentionQueue: 0,
   lifecycleList: 0,
@@ -45,17 +44,6 @@ vi.mock("../panels/detail-panel/DetailPanel", async (importOriginal) => {
     return <Real {...props} />;
   });
   return { ...mod, DetailPanel: Counted };
-});
-
-vi.mock("../panels/session-cockpit/sessions-view/SessionsView", async (importOriginal) => {
-  const { memo } = await import("react");
-  const mod = await importOriginal<typeof import("../panels/session-cockpit/sessions-view/SessionsView")>();
-  const Real = mod.SessionsView;
-  const Counted = memo(function CountedSessionsView(props: ComponentProps<typeof Real>) {
-    counts.sessionsView += 1;
-    return <Real {...props} />;
-  });
-  return { ...mod, SessionsView: Counted };
 });
 
 vi.mock("../panels/file-viewer/FileViewer", async (importOriginal) => {
@@ -223,7 +211,6 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // Every persistent layer mounted exactly once (all are keep-alive, hidden via display).
     expect(counts.engineRoom).toBe(1);
     expect(counts.detailPanel).toBe(1);
-    expect(counts.sessionsView).toBe(1);
     expect(counts.fileViewer).toBe(1);
     expect(counts.attentionQueue).toBe(1);
     expect(counts.lifecycleList).toBe(1);
@@ -246,8 +233,6 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // collection has its own memo gate, so these controller renders do not rebuild it while hidden.
     expect(counts.attentionQueue).toBe(5);
     expect(counts.lifecycleList).toBe(5);
-    // AR Sessions stays mounted but dormant while Role chats is the selected chat mode.
-    expect(counts.sessionsView).toBe(1);
   });
 
   it("keeps the visibility/aria contract and DOM identity across switches (keep-alive intact)", () => {
@@ -257,18 +242,14 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     const railRight = container.querySelector(".rail--right") as HTMLElement;
     const room = container.querySelector('[data-testid="engine-room"]') as HTMLElement;
     const roomLayer = room.parentElement as HTMLElement;
-    const chats = container.querySelector('[data-testid="sessions-view"]') as HTMLElement;
-    const arPanel = chats.parentElement as HTMLElement;
-    const chatsLayerEl = arPanel.parentElement as HTMLElement;
-    const rolePanel = container.querySelector("#chats-panel-role") as HTMLElement;
+    const chats = container.querySelector('[data-testid="role-chats-pane"]') as HTMLElement;
+    const chatsLayerEl = chats.parentElement as HTMLElement;
 
     // Railed Operations: rails shown, keep-alive layers hidden via display + aria-hidden.
     expect(railLeft.style.display).toBe("flex");
     expect(roomLayer.style.display).toBe("none");
     expect(roomLayer.getAttribute("aria-hidden")).toBe("true");
     expect(chatsLayerEl.style.display).toBe("none");
-    expect(arPanel.style.display).toBe("none");
-    expect(rolePanel.style.display).toBe("flex");
 
     fireEvent.click(getByRole("radio", { name: "Engine Room" }));
     expect(railLeft.style.display).toBe("none");
@@ -280,21 +261,16 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     fireEvent.click(getByRole("radio", { name: "Chats" }));
     expect(chatsLayerEl.style.display).toBe("flex");
     expect(chatsLayerEl.getAttribute("aria-hidden")).toBe("false");
-    expect(rolePanel.style.display).toBe("flex");
-    expect(arPanel.style.display).toBe("none");
     expect(roomLayer.style.display).toBe("none");
 
-    fireEvent.click(getByRole("tab", { name: "AR Sessions" }));
-    expect(arPanel.style.display).toBe("flex");
-    expect(rolePanel.style.display).toBe("none");
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
+    expect(container.querySelector('[data-testid="role-chats-pane"]')).toBe(chats);
 
     fireEvent.click(getByRole("radio", { name: "Operations" }));
     // Same DOM nodes throughout — hidden-not-unmounted survived the memo change.
     expect(container.querySelector(".rail--left")).toBe(railLeft);
     expect(container.querySelector(".rail--right")).toBe(railRight);
     expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
+    expect(container.querySelector('[data-testid="role-chats-pane"]')).toBe(chats);
     expect(railLeft.style.display).toBe("flex");
     expect(roomLayer.style.display).toBe("none");
     expect(chatsLayerEl.style.display).toBe("none");

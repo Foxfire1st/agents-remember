@@ -104,6 +104,12 @@ export class DaemonClient {
   getConnectionState() { return scenario.connectionLost ? { status: 'disconnected' } : this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId, version: this.config.appVersion } }
   async createAgent(options) { return create('daemon', options, options.workspaceId, options.config.cwd) }
+  async addProject(cwd) {
+    record({ via: 'addProject', cwd })
+    if (scenario.projectError) throw new Error(scenario.projectError)
+    return { project: { projectId: scenario.projectId ?? 'prj_mapped' } }
+  }
+  async renameProject(projectId, name) { record({ via: 'renameProject', projectId, name }) }
 }
 """
 FAKE_CLIENT_ROOT = """
@@ -122,6 +128,27 @@ export function createPaseoApi(daemon) {
       }
     },
     workspaces: {
+      create: async (options) => {
+        record({ via: 'workspaces.create', options })
+        if (scenario.workspaceCreateError) throw new Error(scenario.workspaceCreateError)
+        const workspace = {
+          id: 'wks_' + options.idempotencyKey.slice(-16),
+          workspaceDirectory: scenario.mappedDirectory ?? options.source.path,
+          projectId: scenario.mappedProjectId ?? options.source.projectId,
+          projectKind: 'non_git', archivingAt: scenario.archivingAt ?? null,
+          name: 'previous title'
+        }
+        return {
+          refresh: async () => {
+            record({ via: 'workspace.refresh', id: workspace.id })
+            return scenario.mappedMissing ? null : workspace
+          },
+          setTitle: async (title) => {
+            record({ via: 'workspace.setTitle', id: workspace.id, title })
+            return { title }
+          }
+        }
+      },
       open: async (cwd) => {
         record({ via: 'workspaces.open', cwd })
         if (scenario.openError) throw new Error(scenario.openError)
@@ -287,6 +314,90 @@ class AgentCommandScriptTests(unittest.TestCase):
             (refused.code, str(refused)), ("paseo_call_failed", "Directory not found: /gone")
         )
         self.assertEqual(self.failure("workspace-open", {}).code, "invalid_bridge_payload")
+
+    def test_task_workspace_identity_ignores_titles_and_separates_masters_at_one_cwd(self) -> None:
+        payload: dict[str, Any] = {
+            "cwd": "/projects",
+            "masterProject": {
+                "directory": "/tasks/master",
+                "key": "repo/master/task.json",
+                "name": "M · Master",
+            },
+            "task": {"key": "repo/master/task.json", "title": "M · Master"},
+        }
+        first = self.call("workspace-open", payload)
+        calls = self.recorded()
+        expected_key = (
+            "ar-task-workspace:v2:"
+            + hashlib.sha256(
+                json.dumps(
+                    [payload["masterProject"]["key"], payload["task"]["key"]], separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+        )
+        self.assertEqual(
+            calls[:3],
+            [
+                {"via": "addProject", "cwd": "/tasks/master"},
+                {"via": "renameProject", "projectId": "prj_mapped", "name": "M · Master"},
+                {
+                    "via": "workspaces.create",
+                    "options": {
+                        "source": {
+                            "kind": "directory",
+                            "path": "/projects",
+                            "projectId": "prj_mapped",
+                        },
+                        "idempotencyKey": expected_key,
+                    },
+                },
+            ],
+        )
+        self.assertEqual(len(expected_key), 85)
+        self.assertEqual(first["workspace"]["projectId"], "prj_mapped")
+        self.assertEqual(calls[-1]["via"], "workspace.setTitle")
+        payload["task"]["title"] = "M · Edited"
+        changed = self.call("workspace-open", payload)
+        self.assertEqual(changed["workspace"]["id"], first["workspace"]["id"])
+        self.assertEqual(changed["workspace"]["name"], "M · Edited")
+        payload["masterProject"].update(directory="/tasks/other", key="repo/other/task.json")
+        payload["task"]["key"] = "repo/other/task.json"
+        other = self.call("workspace-open", payload, projectId="prj_other")
+        self.assertNotEqual(other["workspace"]["id"], first["workspace"]["id"])
+        self.assertEqual(other["workspace"]["directory"], first["workspace"]["directory"])
+
+    def test_explicit_workspace_refuses_partial_and_wrong_placement_without_directory_fallback(
+        self,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "cwd": "/projects",
+            "masterProject": {"directory": "/tasks/m", "key": "repo/m/task.json", "name": "M"},
+            "task": {"key": "repo/m/task.json", "title": "M"},
+        }
+        for incomplete in (
+            {"cwd": "/projects", "task": payload["task"]},
+            {**payload, "masterProject": None},
+            {**payload, "task": {}},
+            {**payload, "masterProject": {"directory": "/tasks/m"}},
+        ):
+            with self.subTest(incomplete=incomplete):
+                self.assertEqual(
+                    self.failure("workspace-open", incomplete).code, "invalid_bridge_payload"
+                )
+                self.assertEqual(self.recorded(), [])
+        for scenario in (
+            {"mappedProjectId": "prj_wrong"},
+            {"mappedDirectory": "/wrong"},
+            {"mappedMissing": True},
+            {"archivingAt": "2026-10-03T00:00:00Z"},
+            {"workspaceCreateError": "workspace_request_key_conflict"},
+        ):
+            with self.subTest(scenario=scenario):
+                self.assertEqual(
+                    self.failure("workspace-open", payload, **scenario).code, "paseo_call_failed"
+                )
+                self.assertNotIn("workspaces.open", [call["via"] for call in self.recorded()])
+                self.assertNotIn("workspace.setTitle", [call["via"] for call in self.recorded()])
 
     def test_agent_create_uses_the_given_id_and_tells_created_existing_and_refused_apart(
         self,

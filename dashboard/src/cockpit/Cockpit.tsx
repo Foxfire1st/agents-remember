@@ -10,7 +10,7 @@ import {
 import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
-import { ChatsModePanels } from "./RoleChats";
+import { RoleChatsPane } from "./RoleChats";
 import {
   preferLiveSession,
   startCatalogPollDriver,
@@ -357,7 +357,7 @@ const RAIL_ENTER = { initial: { opacity: 0 }, animate: { opacity: 1 } };
 const RAIL_ENTER_STILL = {};
 const RAIL_TRANSITION = { duration: 0.18 };
 // Memoization contract (tab-switch CPU): every persistent layer below
-// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, SessionsView, RailChat,
+// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, RailChat,
 // the notes reader — is a React.memo component whose props are either state/store slices or
 // useCallback-stable. A view switch then re-renders ONLY the shell's own chrome (grid/display
 // flips + ModeBar) instead of reconciling the whole tree; the layers keep updating from their own
@@ -741,11 +741,8 @@ function MainLayers({
   view,
   takeover,
   selectedId,
-  viewedLeafKey,
-  selectedLifecycleId,
   taskDocuments,
   taskSeries,
-  contextMaster,
   onOpen,
   onOpenChangeSet,
   onOpenNotes,
@@ -754,11 +751,8 @@ function MainLayers({
   view: CockpitView;
   takeover: boolean;
   selectedId: string | null;
-  viewedLeafKey: string | undefined;
-  selectedLifecycleId: string | undefined;
   taskDocuments: TaskDocNode[];
   taskSeries: SeriesNode[];
-  contextMaster: string | undefined;
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
   onOpenNotes: (target: NotesReaderTarget) => void;
@@ -795,15 +789,12 @@ function MainLayers({
       <ViewLayer visible={view === "files"} className={filesLayer}>
         <FileViewer active={view === "files"} />
       </ViewLayer>
-      {/* Both chat modes stay mounted across dashboard view switches. */}
+      {/* Role chats stay mounted across dashboard view switches. */}
       <ViewLayer visible={view === "chats"} className={chatsLayer}>
-        <ChatsModePanels
+        <RoleChatsPane
           active={view === "chats" && !takeover}
-          selectedLifecycleId={selectedLifecycleId}
-          selectedLeafKey={viewedLeafKey}
           taskDocuments={taskDocuments}
           series={taskSeries}
-          contextMaster={contextMaster}
         />
       </ViewLayer>
     </main>
@@ -848,11 +839,8 @@ function RailedBody({
         view={state.view}
         takeover={state.takeover}
         selectedId={state.selectedId}
-        viewedLeafKey={state.viewedLeafKey}
-        selectedLifecycleId={state.selectedLifecycleId}
         taskDocuments={state.taskDocuments}
         taskSeries={state.taskSeries}
-        contextMaster={state.contextMaster}
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}
         onOpenNotes={actions.openNotes}

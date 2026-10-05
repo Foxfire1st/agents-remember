@@ -14,7 +14,6 @@ import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { RailChat } from "../panels/RailChat";
-import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
 import { metricsFor } from "../types/projection";
 import type {
@@ -766,19 +765,16 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
 });
 
 describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
-  it("defaults to Role chats in Chats, switches to AR Sessions, and keeps one Chats cockpit mounted", () => {
+  it("directly shows one persistent Role chats pane without an old-chat selector", () => {
     seed("engine-fleet");
     const { container, getByRole, queryByRole } = render(<CockpitShell />);
 
     expect(getByRole("radio", { name: "Operations" }).getAttribute("aria-checked")).toBe("true");
     expect(queryByRole("radio", { name: "Sessions" })).toBeNull();
 
-    // The internal sessions-* markers remain the WebTUI/keyboard implementation scope, but there is
-    // only one product route and one mounted PTY owner.
-    const chats = container.querySelector('[data-testid="sessions-view"]');
+    const chats = container.querySelector('[data-testid="role-chats-pane"]');
     expect(chats).not.toBeNull();
-    const arPanel = chats?.parentElement as HTMLElement;
-    const chatsLayer = arPanel.parentElement as HTMLElement;
+    const chatsLayer = chats?.parentElement as HTMLElement;
     expect(chatsLayer.style.display).toBe("none");
     expect(chatsLayer.getAttribute("aria-hidden")).toBe("true");
 
@@ -786,25 +782,13 @@ describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
     // The left rail stays mounted, hidden (keep-alive), while Chats goes full-bleed.
     expect((container.querySelector(".rail--left") as HTMLElement).style.display).toBe("none");
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
-
-    const roleTab = getByRole("tab", { name: "Role chats" });
-    const arSessionsTab = getByRole("tab", { name: "AR Sessions" });
-    expect(roleTab.getAttribute("aria-selected")).toBe("true");
-    expect(arSessionsTab.getAttribute("aria-selected")).toBe("false");
+    expect(container.querySelector('[data-testid="role-chats-pane"]')).toBe(chats);
+    expect(queryByRole("tablist", { name: "Chats mode" })).toBeNull();
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBeNull();
     expect(chatsLayer.style.display).toBe("flex");
     expect(chatsLayer.getAttribute("aria-hidden")).toBe("false");
-    expect(arPanel.style.display).toBe("none");
-    expect(arPanel.getAttribute("aria-hidden")).toBe("true");
-
-    fireEvent.click(arSessionsTab);
-    expect(roleTab.getAttribute("aria-selected")).toBe("false");
-    expect(arSessionsTab.getAttribute("aria-selected")).toBe("true");
-    expect(arPanel.style.display).toBe("flex");
-    expect(arPanel.getAttribute("aria-hidden")).toBe("false");
-
     fireEvent.click(getByRole("radio", { name: "Operations" }));
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
+    expect(container.querySelector('[data-testid="role-chats-pane"]')).toBe(chats);
     expect(chatsLayer.style.display).toBe("none");
     expect(chatsLayer.getAttribute("aria-hidden")).toBe("true");
   });
@@ -846,7 +830,6 @@ describe("persistent layers are exported memoized (260721 tab-switch CPU)", () =
   it("exports every persistent layer as a React.memo component", () => {
     const layers: Array<[string, unknown]> = [
       ["DetailPanel", DetailPanel],
-      ["SessionsView", SessionsView],
       ["EngineRoom", EngineRoom],
       ["FileViewer", FileViewer],
       ["AttentionQueue", AttentionQueue],

@@ -39,6 +39,7 @@ import {
   MemoryStorage,
   OWN_LOOK,
   WORKSPACE_URL,
+  emptyHierarchyClient,
   memoryOf,
   newTab,
   pageLoad,
@@ -131,7 +132,7 @@ describe("one reload per page load", () => {
     expect(load.replace).not.toHaveBeenCalled();
   });
 
-  it("repairs a first-visit deep link with the same single reload, and closes the sidebar otherwise", () => {
+  it("repairs a first-visit deep link with the same single reload, and collapses the native sidebar once otherwise", () => {
     const deepLink = WORKSPACE_URL + "?open=agent:a1";
     const tab = newTab(DEFAULT_LOOK);
     // First visit: the app bounced the deep link to its project picker; the look is not stored yet.
@@ -161,22 +162,56 @@ describe("one reload per page load", () => {
     }
     vi.advanceTimersByTime(10_000); // (their wait for the app's sidebar toggle ends)
 
-    // Nothing to store and nothing to repair: no reload; an open sidebar is closed by the app's toggle.
-    const toggled = vi.fn();
-    document.body.innerHTML = '<button data-testid="menu-button"></button><div data-testid="sidebar-footer"></div>';
-    (document.querySelector('[data-testid="menu-button"]') as HTMLElement).addEventListener("click", toggled);
-    (document.querySelector('[data-testid="sidebar-footer"]') as HTMLElement).getBoundingClientRect = () =>
-      ({ width: 320 }) as DOMRect;
-    const settledTab = newTab(DEFAULT_LOOK);
-    applyEmbedLook(settledTab.local);
-    const warm = pageLoad(settledTab);
-    expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
-    expect(warm.replace).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(300);
-    expect(toggled).toHaveBeenCalledTimes(1);
-    // Once per page load: a second evaluation in the same page does not do it again.
-    expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
+    // Both saved states become initially collapsed; the grouped AR sidebar owns navigation.
+    for (const initiallyOpen of [false, true]) {
+      document.body.innerHTML = `<button data-testid="menu-button" aria-expanded="${initiallyOpen}"></button>`;
+      const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
+      const settledTab = newTab(DEFAULT_LOOK, initiallyOpen);
+      applyEmbedLook(settledTab.local);
+      const warm = pageLoad(settledTab);
+      const stop = watchAppWrites(warm.page);
+      const toggled = vi.fn(() => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open));
+        warm.appWrites(PANEL_STATE_KEY, panelState(open));
+      });
+      toggle.addEventListener("click", toggled);
+      expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
+      expect(warm.replace).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(300);
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(toggled).toHaveBeenCalledTimes(initiallyOpen ? 1 : 0);
+      // The user's mouse click opens it, and another plugin evaluation does not close it.
+      toggle.click();
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
+      vi.advanceTimersByTime(10_000);
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      toggle.click();
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(toggled).toHaveBeenCalledTimes(initiallyOpen ? 3 : 2);
+      stop();
+    }
+  });
+
+  it("keeps a user's native menu click before the first startup poll, including a descendant icon", () => {
+    document.body.innerHTML = '<button data-testid="menu-button" aria-expanded="false"><span data-testid="menu-icon"></span></button>';
+    const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
+    const icon = document.querySelector('[data-testid="menu-icon"]') as HTMLElement;
+    const tab = newTab(DEFAULT_LOOK);
+    applyEmbedLook(tab.local);
+    const load = pageLoad(tab);
+    const toggled = vi.fn(() => {
+      toggle.setAttribute("aria-expanded", String(toggle.getAttribute("aria-expanded") !== "true"));
+    });
+    toggle.addEventListener("click", toggled);
+
+    expect(bootstrapEmbed(load.page, DASHBOARD)).toBe(false);
+    icon.click();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(10_000);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggled).toHaveBeenCalledTimes(1);
   });
 
@@ -253,6 +288,7 @@ describe("who frames the page", () => {
 
 describe("the control channel inside the frame", () => {
   function fakeClient() {
+    const catalog = emptyHierarchyClient();
     const opened: Array<Record<string, string> | undefined> = [];
     const agents: Record<string, { archivedAt: string | null; workspaceId: string } | Error> = {
       live: { archivedAt: null, workspaceId: "wks_leaf" },
@@ -260,9 +296,12 @@ describe("the control channel inside the frame", () => {
       broken: new Error("socket closed"),
     };
     const client: BridgeClient = {
+      ...catalog,
       openScreen: (input) => opened.push(input.params),
       paseo: {
+        ...catalog.paseo,
         agents: {
+          ...catalog.paseo.agents,
           ref: (agentId) => {
             const known = agents[agentId];
             const handle = { archivedAt: null as unknown, workspaceId: null as string | null, refresh: async () => {
@@ -276,6 +315,7 @@ describe("the control channel inside the frame", () => {
           },
         },
         workspaces: {
+          ...catalog.paseo.workspaces,
           ref: (workspaceId) => ({
             refresh: async () => {
               if (workspaceId === "wks_broken") throw new Error("socket closed");
@@ -287,15 +327,19 @@ describe("the control channel inside the frame", () => {
     };
     return { client, opened };
   }
-  const answers = (posted: Posted[]) => posted.map((entry) => entry.data);
+  const answers = (posted: Posted[]) => posted.map((entry) => entry.data).filter((data) => !["hierarchy", "selection"].includes(String(data.type)));
   const flush = () => vi.advanceTimersByTimeAsync(0);
 
-  it("reports ready to the listed parent only, hides the header row, and stops cleanly", () => {
+  it("reports ready to the listed parent only, leaves native navigation visible, and stops cleanly", () => {
+    document.body.innerHTML = '<div data-testid="composer-dock-header" style="display:flex"><button data-testid="menu-button"></button></div>';
+    const header = document.querySelector('[data-testid="composer-dock-header"]') as HTMLElement;
     const load = pageLoad(newTab());
     const stop = installBridge(fakeClient().client, load.page, DASHBOARD);
 
-    expect(load.posted).toEqual([{ data: { source: "ar-plugin", type: "ready" }, targetOrigin: DASHBOARD }]);
-    expect(document.getElementById("ar-plugin-embed-style")?.textContent).toContain('[data-testid="composer-dock-header"]');
+    expect(answers(load.posted)).toEqual([{ source: "ar-plugin", type: "ready" }]);
+    expect(document.getElementById("ar-plugin-embed-style")).toBeNull();
+    expect(getComputedStyle(header).display).toBe("flex");
+    expect(header.querySelector('[data-testid="menu-button"]')).not.toBeNull();
     expect(load.listening()).toBe(1);
 
     stop();
@@ -307,6 +351,7 @@ describe("the control channel inside the frame", () => {
     const load = pageLoad(newTab());
     const { client, opened } = fakeClient();
     installBridge(client, load.page, DASHBOARD);
+    await flush();
     load.posted.length = 0;
 
     load.receive({ type: "ar.ping" }, { origin: "http://evil.test" });
@@ -688,11 +733,14 @@ describe("seeing the app's own storage writes (the real page)", () => {
 });
 
 describe("starting the client part: which parent is trusted and what follows", () => {
+  const catalog = emptyHierarchyClient();
   const client: BridgeClient = {
+    ...catalog,
     openScreen: () => {},
     paseo: {
-      agents: { ref: () => ({ archivedAt: null, workspaceId: null, refresh: async () => ({}) }) },
-      workspaces: { ref: () => ({ refresh: async () => ({}) }) },
+      ...catalog.paseo,
+      agents: { ...catalog.paseo.agents, ref: () => ({ archivedAt: null, workspaceId: null, refresh: async () => ({}) }) },
+      workspaces: { ...catalog.paseo.workspaces, ref: () => ({ refresh: async () => ({}) }) },
     },
   };
   const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -703,7 +751,11 @@ describe("starting the client part: which parent is trusted and what follows", (
     applyEmbedLook(tab.local);
     return tab;
   }
-  const ready = [{ data: { source: "ar-plugin", type: "ready" }, targetOrigin: DASHBOARD }];
+  const ready = [
+    { data: { source: "ar-plugin", type: "ready" }, targetOrigin: DASHBOARD },
+    { data: { source: "ar-plugin", type: "selection", agentIds: [] }, targetOrigin: DASHBOARD },
+    { data: { source: "ar-plugin", type: "hierarchy", projects: [], workspaces: [], agents: [] }, targetOrigin: DASHBOARD },
+  ];
 
   it("standalone tab: takes the user's look back and never reads the list", async () => {
     const tab = framedTab();
@@ -830,7 +882,7 @@ describe("starting the client part: which parent is trusted and what follows", (
     // The second evaluation answers at once, on the first one's verified parent ...
     let answer: (list: typeof EMBED) => void = () => {};
     startClientPart(frame.page, client, () => new Promise((resolve) => (answer = resolve)));
-    expect(frame.posted).toEqual(ready);
+    expect(frame.posted).toEqual(ready.slice(0, 2));
     expect(frame.listening()).toBe(1);
     expect(frame.watched()).toBe(true);
     // ... and the list, which no longer has the parent, takes the channel and the look away.

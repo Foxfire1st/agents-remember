@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { css, cva } from "../../styled-system/css";
-import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import { sameTaskDocumentRef } from "../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
@@ -47,39 +46,6 @@ import {
 import { PaseoChatFrame } from "./PaseoChatFrame";
 import { paseoAgentTarget } from "./paseoFrameModel";
 
-const chatsModeTabs = css({
-  display: "flex",
-  flexShrink: 0,
-  gap: "0.25rem",
-  paddingBottom: "0.35rem",
-});
-const chatsModeTab = cva({
-  base: {
-    font: "inherit",
-    fontSize: "0.7rem",
-    letterSpacing: "0.06em",
-    paddingInline: "0.55rem",
-    paddingBlock: "0.2rem",
-    borderRadius: "2px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    cursor: "pointer",
-    background: "transparent",
-    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-  },
-  variants: {
-    selected: {
-      true: { color: "amber", borderColor: "amber" },
-      false: { color: "muted", borderColor: "grid" },
-    },
-  },
-});
-const chatsModePanel = css({
-  display: "flex",
-  flex: "1",
-  minHeight: "0",
-  minWidth: "0",
-});
 const rolePane = css({
   display: "flex",
   flex: "1",
@@ -218,6 +184,8 @@ const roleLauncherMeta = css({
   overflowWrap: "anywhere",
 });
 function RoleLauncher({
+  navigationOpen,
+  onToggleNavigation,
   taskDocuments,
   series,
   roleDefaults,
@@ -239,6 +207,8 @@ function RoleLauncher({
   onRefreshCatalog,
   onRefreshResult,
 }: {
+  navigationOpen: boolean;
+  onToggleNavigation: () => void;
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
   roleDefaults: RoleDefaults;
@@ -343,6 +313,15 @@ function RoleLauncher({
 
   return (
     <div className={roleLauncherGrid} data-testid="role-launcher">
+      <button
+        className={roleLauncherButton({ tone: "quiet" })}
+        type="button"
+        aria-expanded={navigationOpen}
+        aria-label={navigationOpen ? "Hide chat navigation" : "Show chat navigation"}
+        onClick={onToggleNavigation}
+      >
+        {navigationOpen ? "Hide navigation" : "Show navigation"}
+      </button>
       <label className={`${roleLauncherField} ${roleLauncherRoleField}`}>
         Role
         <select
@@ -559,7 +538,7 @@ function RoleLauncher({
 // How soon the options are read again after the backend answered that a launch is in progress.
 const LAUNCH_REREAD_MS = 1500;
 
-function RoleChatsPane({
+export function RoleChatsPane({
   active,
   taskDocuments,
   series,
@@ -568,6 +547,7 @@ function RoleChatsPane({
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
 }) {
+  const [navigationOpen, setNavigationOpen] = useState(true);
   const [selection, setSelection] = useState<RoleLaunchSelection>({ role: "architect" });
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
@@ -1063,6 +1043,8 @@ function RoleChatsPane({
   return (
     <section aria-label="Role chats" className={rolePane} data-testid="role-chats-pane">
       <RoleLauncher
+        navigationOpen={navigationOpen}
+        onToggleNavigation={() => setNavigationOpen((current) => !current)}
         taskDocuments={taskDocuments}
         series={series}
         roleDefaults={roleDefaults}
@@ -1084,79 +1066,7 @@ function RoleChatsPane({
         onRefreshCatalog={refreshCatalog}
         onRefreshResult={refreshResult}
       />
-      <PaseoChatFrame active={active} scope={frameScope} target={frameTarget} />
+      <PaseoChatFrame active={active} scope={frameScope} target={frameTarget} taskDocuments={taskDocuments} series={series} navigationOpen={navigationOpen} />
     </section>
-  );
-}
-
-export function ChatsModePanels({
-  active,
-  selectedLifecycleId,
-  selectedLeafKey,
-  taskDocuments,
-  series,
-  contextMaster,
-}: {
-  active: boolean;
-  selectedLifecycleId: string | undefined;
-  selectedLeafKey: string | undefined;
-  taskDocuments: TaskDocNode[];
-  series: SeriesNode[];
-  contextMaster: string | undefined;
-}) {
-  const [chatsMode, setChatsMode] = useState<"role" | "ar">("role");
-  return (
-    <>
-      <div role="tablist" aria-label="Chats mode" className={chatsModeTabs}>
-        <button
-          id="chats-mode-role"
-          type="button"
-          role="tab"
-          aria-selected={chatsMode === "role"}
-          aria-controls="chats-panel-role"
-          className={chatsModeTab({ selected: chatsMode === "role" })}
-          onClick={() => setChatsMode("role")}
-        >
-          Role chats
-        </button>
-        <button
-          id="chats-mode-ar"
-          type="button"
-          role="tab"
-          aria-selected={chatsMode === "ar"}
-          aria-controls="chats-panel-ar"
-          className={chatsModeTab({ selected: chatsMode === "ar" })}
-          onClick={() => setChatsMode("ar")}
-        >
-          AR Sessions
-        </button>
-      </div>
-      <div
-        id="chats-panel-role"
-        role="tabpanel"
-        aria-labelledby="chats-mode-role"
-        aria-hidden={chatsMode !== "role"}
-        style={{ display: chatsMode === "role" ? "flex" : "none" }}
-        className={chatsModePanel}
-      >
-        <RoleChatsPane active={active && chatsMode === "role"} taskDocuments={taskDocuments} series={series} />
-      </div>
-      <div
-        id="chats-panel-ar"
-        role="tabpanel"
-        aria-labelledby="chats-mode-ar"
-        aria-hidden={chatsMode !== "ar"}
-        style={{ display: chatsMode === "ar" ? "flex" : "none" }}
-        className={chatsModePanel}
-      >
-        <SessionsView
-          active={active && chatsMode === "ar"}
-          selectedLifecycleId={selectedLifecycleId}
-          selectedLeafKey={selectedLeafKey}
-          taskDocuments={taskDocuments}
-          contextMaster={contextMaster}
-        />
-      </div>
-    </>
   );
 }

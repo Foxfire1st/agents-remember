@@ -3,12 +3,11 @@
 // itself, then inside the launcher against the result and dispatch routes.
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatsModePanels } from "./RoleChats";
+import { RoleChatsPane } from "./RoleChats";
 import { HOST_UNREACHABLE_LINE, RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
 import { tasklessRequestStorageKey, type RoleScopedExecution } from "./roleLaunchModel";
 import type { TaskDocNode } from "../types/projection";
 
-vi.mock("../panels/session-cockpit/sessions-view/SessionsView", () => ({ SessionsView: () => null }));
 
 const REQUEST_ID = "5f0c1f6e-8a53-4d5b-9d53-6f0f1f6f2a10";
 const REPORT = { path: "/projects/.agents-remember/reports/architect.md", canonicalPath: "/projects/.agents-remember/reports/architect.md", available: false };
@@ -107,7 +106,7 @@ describe("launcher bar and the execution's state", () => {
       }
       return new Response(JSON.stringify({ available: false }), { status: 503 });
     }));
-    return render(<ChatsModePanels active selectedLifecycleId={undefined} selectedLeafKey={undefined} taskDocuments={taskDocuments} series={[]} contextMaster={undefined} />);
+    return render(<RoleChatsPane active taskDocuments={taskDocuments} series={[]} />);
   }
 
   beforeEach(() => {

@@ -1,10 +1,12 @@
 import {
   agentProblemText,
+  parentProblemText,
   parsePluginMessage,
   paseoFrameUrl,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoPluginMessage,
+  type PaseoHierarchySnapshot,
 } from "./paseoFrameModel";
 
 /** How long the embedded application has to report ready, or to answer a request to show an agent. */
@@ -24,6 +26,9 @@ export interface PaseoFramePane {
   setControl(state: PaseoControlState): void;
   setFrame(update: (current: PaseoFrameView | null) => PaseoFrameView | null): void;
   setAgentProblem(text: string | null): void;
+  setHierarchy(snapshot: PaseoHierarchySnapshot | null): void;
+  setHierarchyProblem(text: string | null): void;
+  setSelection(agentIds: string[]): void;
 }
 
 /**
@@ -48,6 +53,7 @@ export class PaseoFrameControl {
   private deadline: number | null = null;
   private scope: string | null = null;
   private seenAgent: string | null = null;
+  private selectedAgentIds = new Set<string>();
 
   constructor(private readonly pane: PaseoFramePane) {}
 
@@ -62,6 +68,10 @@ export class PaseoFrameControl {
     this.available = available;
     this.pending = null;
     this.settled = null;
+    this.selectedAgentIds.clear();
+    this.pane.setHierarchy(null);
+    this.pane.setHierarchyProblem(null);
+    this.pane.setSelection([]);
     this.setControl("waiting");
     this.load(afterRetry ? this.wanted : null);
     this.arm();
@@ -72,6 +82,10 @@ export class PaseoFrameControl {
     this.clearDeadline();
     this.available = null;
     this.pending = null;
+    this.selectedAgentIds.clear();
+    this.pane.setHierarchy(null);
+    this.pane.setHierarchyProblem(null);
+    this.pane.setSelection([]);
   }
 
   /**
@@ -95,6 +109,15 @@ export class PaseoFrameControl {
     this.sync();
   }
 
+  /** A deliberate chat-navigation click, independent of the launcher's unchanged selection. */
+  navigate(target: PaseoAgentTarget): void {
+    this.wanted = target;
+    this.settled = null;
+    this.loaded = null;
+    this.pane.setAgentProblem(null);
+    this.sync();
+  }
+
   /** A message event of the dashboard window; everything but the embedded application is ignored. */
   receive(event: MessageEvent): void {
     const frameWindow = this.pane.frameWindow();
@@ -102,9 +125,36 @@ export class PaseoFrameControl {
     if (event.origin !== this.available.frameOrigin || event.source !== frameWindow) return;
     const message = parsePluginMessage(event.data);
     if (!message) return;
-    if (message.type === "ready" || message.type === "pong") this.onReady();
-    else if (message.type === "shown") this.onShown(message.agentId);
-    else this.onError(message);
+    this.onMessage(message);
+  }
+
+  private onMessage(message: PaseoPluginMessage): void {
+    switch (message.type) {
+      case "hierarchy":
+        this.pane.setHierarchy(message);
+        this.pane.setHierarchyProblem(null);
+        break;
+      case "hierarchy-error":
+        this.pane.setHierarchyProblem("Chat catalog unavailable: " + message.message);
+        break;
+      case "selection":
+        this.selectedAgentIds = new Set(message.agentIds);
+        this.pane.setSelection(message.agentIds);
+        break;
+      case "navigation-error":
+        if (this.selectedAgentIds.has(message.sourceAgentId))
+          this.pane.setAgentProblem(parentProblemText(message.code, message.message));
+        break;
+      case "ready":
+      case "pong":
+        this.onReady();
+        break;
+      case "shown":
+        this.onShown(message.agentId);
+        break;
+      case "error":
+        this.onError(message);
+    }
   }
 
   /** Also after the plugin restarted inside the page: an unanswered request is sent again. */

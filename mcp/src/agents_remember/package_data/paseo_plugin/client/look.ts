@@ -9,7 +9,7 @@ import type { PluginPage, StorageLike } from "./page";
 // through `recordAppWrite`), so at the next page load it is proof and not a guess.
 //
 // UNSUPPORTED Paseo behaviour this file relies on. Paseo has no plugin interface for selecting a
-// theme, setting fonts or hiding chrome; a Paseo release can change any of these:
+// theme, setting fonts or selecting the sidebar; a Paseo release can change any of these:
 //   - localStorage["@paseo:app-settings"]: theme, pluginThemeId, uiFontFamily, monoFontFamily;
 //   - the app reading that store once, when its page loads, and writing its WHOLE in-memory
 //     settings back on any settings change (which is how a tab that runs one look can overwrite
@@ -23,8 +23,8 @@ import type { PluginPage, StorageLike } from "./page";
 //   - localStorage["panel-state"].state.desktop.agentListOpen (the left sidebar), which the app
 //     may not have written yet on a first visit and whose default is "open", and the app
 //     writing its whole panel state on any panel change;
-//   - the test ids "composer-dock-header" (workspace header row), "menu-button" (the app's own
-//     sidebar toggle) and "sidebar-footer" (present while the sidebar is shown);
+//   - the test id "menu-button" (the app's own sidebar toggle), its aria-expanded state, and
+//     document click events identifying the toggle or a descendant;
 //   - the wall clock (`Date.now()`) being one clock for every tab of the browser: the record
 //     keeps the time of the last write of the stored settings (load.ts compares it with the
 //     moment a page began to load).
@@ -38,8 +38,6 @@ export const APP_SETTINGS_KEY = "@paseo:app-settings";
 export const PANEL_STATE_KEY = "panel-state";
 // The look the user had outside the frame, kept so a standalone tab can take it back.
 export const STANDALONE_LOOK_KEY = "ar-plugin:standalone-look";
-const HEADER_STYLE_ID = "ar-plugin-embed-style";
-const HIDE_HEADER_CSS = '[data-testid="composer-dock-header"]{display:none !important}';
 // What the app shows while it has stored no sidebar state yet.
 const SIDEBAR_OPEN_BY_DEFAULT = true;
 const SIDEBAR_SETTLE_MS = 250;
@@ -143,7 +141,7 @@ function lookWriter(own: StandaloneLook, settings: Record<string, unknown>): Wri
 
 /**
  * Who wrote the sidebar's stored state last. Its content says nothing, so without a record that
- * holds it goes with the settings' mark: a frame that stored its look also closed the sidebar.
+ * holds it goes with the settings' mark.
  */
 function sidebarWriter(own: StandaloneLook, flag: boolean | null): Writer {
   const mark = own.sidebar;
@@ -165,10 +163,6 @@ export function applyEmbedLook(storage: StorageLike): string[] {
     const flag = sidebarFlag(storage);
     const usersLook = !own || lookWriter(own, settings) === "user";
     const usersSidebar = !own || sidebarWriter(own, flag) === "user";
-    // When the settings change the page is about to load again, so the sidebar is closed in the
-    // store and starts closed. Unchanged settings leave it to the app's own toggle, whose write
-    // is recorded when it happens.
-    const closes = changed.length > 0 && Boolean(readJson(storage, PANEL_STATE_KEY)?.state?.desktop);
     // The memory first: the user's look is never overwritten before it is kept.
     writeJson(storage, STANDALONE_LOOK_KEY, {
       appSettings: usersLook ? lookOf(settings) : own.appSettings,
@@ -176,11 +170,10 @@ export function applyEmbedLook(storage: StorageLike): string[] {
       stored: "frame",
       seen: { ...EMBED_LOOK },
       at: changed.length > 0 ? Date.now() : own?.at,
-      sidebar: { stored: changed.length > 0 || !usersSidebar ? "frame" : "user", seen: closes ? false : flag },
+      sidebar: { stored: usersSidebar ? "user" : "frame", seen: flag },
     } satisfies StandaloneLook);
     if (changed.length > 0) {
       writeJson(storage, APP_SETTINGS_KEY, { ...settings, ...EMBED_LOOK });
-      setSidebarFlag(storage, false);
     }
     return changed;
   } catch {
@@ -269,35 +262,30 @@ export function recordAppWrite(storage: StorageLike, usersLook: boolean, key: st
   }
 }
 
-export function setWorkspaceHeaderHidden(document: PluginPage["document"], hidden: boolean): void {
-  const existing = document.getElementById(HEADER_STYLE_ID);
-  if (!hidden) {
-    existing?.remove();
-    return;
-  }
-  if (existing) return;
-  const style = document.createElement("style");
-  style.id = HEADER_STYLE_ID;
-  style.textContent = HIDE_HEADER_CSS;
-  document.head.appendChild(style);
-}
-
 /**
- * Close the left sidebar once the workspace is on screen, through the app's own toggle, when the
- * page loaded with it open. It runs once per page load: afterwards the sidebar is the user's
- * (Paseo's shortcut reopens it).
+ * Collapse the native sidebar once the workspace is on screen, through the app's own toggle,
+ * leaving the grouped AR sidebar as the initial navigation. Afterwards the visible toggle leaves
+ * closing and reopening it to the user. A menu click before the first poll also takes ownership.
  */
-export function closeSidebarAtLoad(page: PluginPage): void {
+export function collapseNativeSidebarAtLoad(page: PluginPage): void {
   let attempts = 0;
+  const onMenuClick = (event: Event) => {
+    if ((event.target as Element | null)?.closest?.('[data-testid="menu-button"]')) finish();
+  };
+  const finish = () => {
+    page.window.clearInterval(timer);
+    page.document.removeEventListener("click", onMenuClick, true);
+  };
   const timer = page.window.setInterval(() => {
     attempts += 1;
     const toggle = page.document.querySelector('[data-testid="menu-button"]');
-    if (toggle) {
-      const footer = page.document.querySelector('[data-testid="sidebar-footer"]');
-      if (footer && footer.getBoundingClientRect().width > 0) toggle.click();
-      page.window.clearInterval(timer);
+    const expanded = toggle?.getAttribute("aria-expanded");
+    if (expanded === "true" || expanded === "false") {
+      finish();
+      if (expanded === "true") toggle.click();
     } else if (attempts >= SIDEBAR_ATTEMPTS) {
-      page.window.clearInterval(timer);
+      finish();
     }
   }, SIDEBAR_SETTLE_MS);
+  page.document.addEventListener("click", onMenuClick, true);
 }

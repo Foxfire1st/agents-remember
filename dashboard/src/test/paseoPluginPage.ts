@@ -11,6 +11,25 @@ import {
   recordAppWrite,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/look";
 import type { PluginPage, StorageLike, WriteListener } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
+import type { HierarchyClient } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/hierarchy";
+
+/** A healthy empty host for cases concerned with the existing look/navigation channel. */
+export function emptyHierarchyClient(): HierarchyClient {
+  const directory = () => {
+    const value = { entries: [], pageInfo: { hasMore: false, nextCursor: null }, subscription: {
+      subscribe(observer: any) { observer.snapshot(value); return () => {}; },
+      release: async () => {},
+    } };
+    return Promise.resolve(value);
+  };
+  return {
+    paseo: {
+      projects: { list: async () => ({ projects: [] }), subscribe: () => () => {} },
+      agents: { list: directory }, workspaces: { list: directory },
+    },
+    addComposerPill: () => ({ update() {}, remove() {} }),
+  };
+}
 
 export const DASHBOARD = "http://127.0.0.1:9797";
 export const DAEMON = "http://127.0.0.1:6820";
@@ -71,10 +90,11 @@ export function pageLoad(
     postMessage: (data: Record<string, unknown>, targetOrigin: string) => posted.push({ data, targetOrigin }),
   };
   const pageWindow: Record<string, unknown> = {
-    addEventListener: (_type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => listeners.add(listener),
-    removeEventListener: (_type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => listeners.delete(listener),
+    addEventListener: (type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => { if (type === "message") listeners.add(listener); },
+    removeEventListener: (type: string, listener: (typeof listeners extends Set<infer L> ? L : never)) => { if (type === "message") listeners.delete(listener); },
     setInterval: (handler: () => void, ms: number) => window.setInterval(handler, ms),
     clearInterval: (timer: number) => window.clearInterval(timer),
+    MutationObserver: window.MutationObserver,
   };
   pageWindow.parent = framedBy === null ? pageWindow : parent;
   const replace = vi.fn();
@@ -89,6 +109,10 @@ export function pageLoad(
       getElementById: (id: string) => document.getElementById(id),
       createElement: (tag: string) => document.createElement(tag),
       querySelector: (selector: string) => document.querySelector(selector),
+      querySelectorAll: (selector: string) => document.querySelectorAll(selector),
+      documentElement: document.documentElement,
+      addEventListener: document.addEventListener.bind(document),
+      removeEventListener: document.removeEventListener.bind(document),
     },
     location: {
       href,

@@ -3,10 +3,9 @@
 // options error is shown with a Refresh control that repeats the call.
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatsModePanels } from "./RoleChats";
+import { RoleChatsPane } from "./RoleChats";
 import { launchChoiceProblem, type RoleAgentChoice, type RoleDefaults } from "./roleLaunchModel";
 
-vi.mock("../panels/session-cockpit/sessions-view/SessionsView", () => ({ SessionsView: () => null }));
 
 const AGENTS: RoleAgentChoice[] = [
   {
@@ -31,14 +30,7 @@ function optionsReply(roleDefaults: Record<string, unknown>): Reply {
 
 function renderLauncher() {
   return render(
-    <ChatsModePanels
-      active
-      selectedLifecycleId={undefined}
-      selectedLeafKey={undefined}
-      taskDocuments={[]}
-      series={[]}
-      contextMaster={undefined}
-    />,
+    <RoleChatsPane active taskDocuments={[]} series={[]} />,
   );
 }
 
@@ -69,6 +61,16 @@ describe("launcher bar and the host catalog", () => {
     const start = getByRole("button", { name: "Start role" }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
     expect(optionsRequests).toEqual([{ role: "architect" }]);
+    const unavailable = await findByTestId("paseo-frame-unavailable");
+    const toggle = getByRole("button", { name: "Hide chat navigation" });
+    expect(toggle.closest('[data-testid="role-launcher"]')?.querySelector("button,select,input")).toBe(toggle);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(await findByTestId("paseo-frame-unavailable")).toBe(unavailable);
+    fireEvent.click(getByRole("button", { name: "Show chat navigation" }));
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(optionsRequests).toEqual([{ role: "architect" }]);
+    expect(start.disabled).toBe(true);
 
     // Naming the role's own agent keeps the role's unoffered model, so Start stays disabled.
     fireEvent.change(getByLabelText("Role agent override"), { target: { value: "codex" } });

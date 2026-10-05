@@ -29,11 +29,12 @@
 //            The server id of the configured daemon and nothing else. An answer means that the
 //            daemon is reachable and is the configured one; no runtime function is called.
 //
-//   workspace-open  {cwd: string}
+//   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
 //            -> {serverId, workspace: {id, directory, name, projectId, projectKind}}
-//            The runtime's workspace for the directory: the existing one is reused, otherwise the
-//            runtime creates it. The runtime keys a workspace by the path text, so the caller
-//            passes a resolved path.
+//            Master/task placement creates or replays one directory workspace under the explicit
+//            project, keyed by canonical master/task refs. Names follow the saved payload; an old
+//            replay may restore older display names. Cwd-only controller and persisted v1 calls
+//            retain directory-open semantics. Explicit placement never falls back to that path.
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
 //                  title, labels, prompt?, systemPrompt?, parentAgentId?,
@@ -193,6 +194,7 @@
 //     `agent-create` is such a row: without a model it calls this client's createAgent(), because
 //     the public client only creates an agent for a provider/model pair.
 
+import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -375,7 +377,41 @@ async function readRuntimeInfo({ daemon }) {
 }
 
 async function openWorkspace({ api, daemon }, input) {
-  const workspace = (await api.workspaces.open(requiredText(input, 'cwd'))).current()
+  const cwd = requiredText(input, 'cwd')
+  let workspace
+  if (!('masterProject' in input) && !('task' in input)) {
+    workspace = (await api.workspaces.open(cwd)).current()
+  } else {
+    const { masterProject, task } = input
+    if (!masterProject || typeof masterProject !== 'object' || Array.isArray(masterProject) ||
+        !task || typeof task !== 'object' || Array.isArray(task)) {
+      throw failure('invalid_bridge_payload', 'Master/task workspace placement must be complete.')
+    }
+    const directory = requiredText(masterProject, 'directory')
+    const masterKey = requiredText(masterProject, 'key')
+    const name = requiredText(masterProject, 'name')
+    const taskKey = requiredText(task, 'key')
+    const title = requiredText(task, 'title')
+    const project = (await daemon.addProject(directory)).project
+    if (!nonEmpty(project?.projectId)) {
+      throw failure('paseo_bridge_invalid_reply', 'The Paseo runtime returned a project without an id.')
+    }
+    await daemon.renameProject(project.projectId, name)
+    const idempotencyKey = 'ar-task-workspace:v2:' + createHash('sha256')
+      .update(JSON.stringify([masterKey, taskKey])).digest('hex')
+    const handle = await api.workspaces.create({
+      source: { kind: 'directory', path: cwd, projectId: project.projectId }, idempotencyKey
+    })
+    // Creation replay holds an old descriptor; refresh before trusting membership or liveness.
+    workspace = await handle.refresh()
+    if (!workspace || workspace.archivingAt || workspace.archivedAt ||
+        workspace.projectId !== project.projectId ||
+        !nonEmpty(workspace.workspaceDirectory) || path.resolve(workspace.workspaceDirectory) !== path.resolve(cwd)) {
+      throw failure('paseo_call_failed', 'The Paseo task workspace is unavailable or has different placement.')
+    }
+    const named = await handle.setTitle(title)
+    workspace = { ...workspace, name: named.title }
+  }
   if (!nonEmpty(workspace?.id) || !nonEmpty(workspace.workspaceDirectory)) {
     throw failure(
       'paseo_bridge_invalid_reply',

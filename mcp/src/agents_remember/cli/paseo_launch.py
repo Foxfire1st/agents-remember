@@ -386,9 +386,27 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["thinkingOptionId"] = launch.session_options["effort"]
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
-        "workspace": {"cwd": launch.folder},
+        "workspace": workspace_call(launch.context, launch.folder),
         "agent": agent,
     }
+
+
+def workspace_call(context: RoleLaunchContext, folder: str) -> dict[str, Any]:
+    """Stored native placement; controller roles retain their Projects workspace."""
+
+    workspace: dict[str, Any] = {"cwd": folder}
+    if context.master is not None:
+        task = context.effective_task
+        assert task is not None
+        workspace.update(
+            masterProject={
+                "directory": context.master.path.parent.resolve().as_posix(),
+                "key": context.master.ref.key,
+                "name": f"{context.master.document.id} · {context.master.document.title}",
+            },
+            task={"key": task.ref.key, "title": f"{task.document.id} · {task.document.title}"},
+        )
+    return workspace
 
 
 def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
@@ -421,7 +439,12 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
     agent = call.get("agent")
     folder = workspace.get("cwd") if isinstance(workspace, dict) else None
     agent_id = agent.get("agentId") if isinstance(agent, dict) else None
-    if not isinstance(agent, dict) or not isinstance(folder, str) or not isinstance(agent_id, str):
+    if (
+        not isinstance(workspace, dict)
+        or not isinstance(agent, dict)
+        or not isinstance(folder, str)
+        or not isinstance(agent_id, str)
+    ):
         raise ValueError("The saved launch call is incomplete and cannot be repeated.")
     predecessor = call.get("archiveAgentId")
     predecessor_settled = not predecessor
@@ -429,7 +452,8 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
         if predecessor:
             bridge_call(config, "agent-archive", {"agentId": predecessor})
             predecessor_settled = True
-        opened = bridge_call(config, "workspace-open", {"cwd": folder})
+        # Persisted v1 calls contain only cwd; their original replay semantics stay exact.
+        opened = bridge_call(config, "workspace-open", workspace)
         workspace_id = opened_workspace_id(opened, folder)
         created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
         return _created_outcome(created, agent_id, workspace_id)

@@ -19,9 +19,11 @@ import { arEmbedList } from "./shared/rpc";
 // Everything that reaches the page is unsupported and lives under client/. Each file lists what
 // it relies on:
 //   client/page.ts    the browser objects themselves, and seeing the app's own storage writes
-//   client/look.ts    stored settings and chrome: theme, fonts, sidebar, header row; who wrote them
+//   client/look.ts    stored settings: theme, fonts, sidebar; who wrote them; initial sidebar toggle
 //   client/load.ts    once per page load: first-visit repair, the one reload, which look runs
 //   client/bridge.ts  the control channel with the dashboard and who the parent page is
+//   client/hierarchy.ts public SDK catalog and agent-specific Parent actions, while trusted
+//   client/selection.ts pinned web DOM adapter for the set of visible selected native chats
 //   client/start.ts   the decision: which parent is trusted and what follows (it reads the
 //                     page's origin and nothing else)
 //

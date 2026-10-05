@@ -361,7 +361,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
 
     Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
-    runtime when the launch call runs; no workspace id is kept.
+    runtime when the saved launch call runs; master/task placement is separate from this cwd.
     """
 
     if context.role not in LEAF_ROLES:
@@ -449,7 +449,7 @@ def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> d
 
 
 def workspace_folder(path: Path) -> dict[str, str]:
-    # The runtime keys a workspace by the path text, so the folder is always its resolved path.
+    # Directory placement and native membership both use this resolved execution folder.
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return {"path": root.as_posix()}

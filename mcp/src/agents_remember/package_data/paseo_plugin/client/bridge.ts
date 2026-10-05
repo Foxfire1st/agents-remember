@@ -1,4 +1,6 @@
-import { PLUGIN_ID, setWorkspaceHeaderHidden } from "./look";
+import { PLUGIN_ID } from "./look";
+import { startHierarchy, type HierarchyClient } from "./hierarchy";
+import { watchSelectedChats } from "./selection";
 import type { PluginPage } from "./page";
 
 // The control channel between the AR dashboard and the app it frames.
@@ -24,16 +26,16 @@ export interface EmbedEntry {
 }
 
 /** What the bridge uses of the plugin's client context (a `PluginClientContext` satisfies it). */
-export interface BridgeClient {
-  paseo: {
-    agents: {
+export interface BridgeClient extends HierarchyClient {
+  paseo: HierarchyClient["paseo"] & {
+    agents: HierarchyClient["paseo"]["agents"] & {
       ref(agentId: string): {
         refresh(): Promise<unknown>;
         readonly archivedAt: unknown;
         readonly workspaceId: string | null;
       };
     };
-    workspaces: { ref(workspaceId: string): { refresh(): Promise<unknown> } };
+    workspaces: HierarchyClient["paseo"]["workspaces"] & { ref(workspaceId: string): { refresh(): Promise<unknown> } };
   };
   openScreen(input: { screenId: string; params?: Record<string, string> }): void;
 }
@@ -104,8 +106,27 @@ export function installBridge(
   page: PluginPage,
   parentOrigin: string,
 ): () => void {
-  const post = (payload: Record<string, unknown>) => {
+  let live = true;
+  let knownAgents = new Map<string, { parentAgentId: string | null }>();
+  let selectedCandidates: string[] = [];
+  let lastSelection = "";
+  const send = (payload: Record<string, unknown>) => {
+    if (!live) return;
     page.window.parent.postMessage({ source: PLUGIN_ID, ...payload }, parentOrigin);
+  };
+  const publishSelection = () => {
+    const agentIds = selectedCandidates.filter((id) => knownAgents.has(id));
+    const value = JSON.stringify(agentIds);
+    if (value === lastSelection) return;
+    lastSelection = value;
+    send({ type: "selection", agentIds });
+  };
+  const post = (payload: Record<string, unknown>) => {
+    send(payload);
+    if (payload.type === "hierarchy") {
+      knownAgents = new Map((payload.agents as Array<{ agentId: string; parentAgentId: string | null }>).map((agent) => [agent.agentId, agent]));
+      publishSelection();
+    }
   };
   // The stamp makes every request a new set of screen params, so asking for what was shown last
   // navigates again after the user moved elsewhere in the app.
@@ -113,21 +134,27 @@ export function installBridge(
     client.openScreen({ screenId: OPEN_SCREEN_ID, params: { ...params, at: String(Date.now()) } });
   };
 
-  const openAgent = async (agentId: string) => {
+  const openAgent = async (agentId: string, sourceAgentId?: string) => {
+    const currentParent = () => !sourceAgentId || (selectedCandidates.includes(sourceAgentId) && knownAgents.get(sourceAgentId)?.parentAgentId === agentId);
+    const failure = (code: string, message: string) => {
+      if (!live || !currentParent()) return;
+      post(sourceAgentId
+        ? { type: "navigation-error", context: "parent", sourceAgentId, targetAgentId: agentId, code, message }
+        : { type: "error", code, agentId, message });
+    };
     const agent = client.paseo.agents.ref(agentId);
     try {
-      await agent.refresh();
+      const refreshed = await agent.refresh();
+      if (!live || !currentParent()) return;
+      if (!refreshed) { failure("agent-not-found", "the runtime has no such agent"); return; }
+      if (agent.archivedAt) { failure("agent-archived", "the agent is archived"); return; }
+      open({ agentId });
     } catch (error) {
       const message = errorText(error);
       const code = /not found/i.test(message) ? "agent-not-found" : "open-failed";
-      post({ type: "error", code, agentId, message });
+      failure(code, message);
       return;
     }
-    if (agent.archivedAt) {
-      post({ type: "error", code: "agent-archived", agentId, message: "the agent is archived" });
-      return;
-    }
-    open({ agentId });
     post({ type: "shown", agentId, workspaceId: agent.workspaceId });
   };
 
@@ -163,11 +190,17 @@ export function installBridge(
   };
 
   page.window.addEventListener("message", onMessage);
-  setWorkspaceHeaderHidden(page.document, true);
   post({ type: "ready" });
+  const stopHierarchy = startHierarchy(client, post, (sourceAgentId, parentId) => openAgent(parentId, sourceAgentId));
+  const stopSelection = watchSelectedChats(page, (agentIds) => {
+    selectedCandidates = agentIds;
+    publishSelection();
+  });
 
   return () => {
+    live = false;
+    stopSelection();
+    stopHierarchy();
     page.window.removeEventListener("message", onMessage);
-    setWorkspaceHeaderHidden(page.document, false);
   };
 }

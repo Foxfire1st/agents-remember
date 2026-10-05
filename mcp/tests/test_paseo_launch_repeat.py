@@ -142,6 +142,14 @@ class RepeatAfterChangeTests(RepeatTestCase):
                     )
                     self.assertIn("agents-remember-task", stored["mcpServers"])
                     self.assertIn(artifact.as_posix(), stored["systemPrompt"])
+                    self.assertEqual(
+                        [
+                            payload
+                            for command, payload in self.runtime.calls
+                            if command == "workspace-open"
+                        ],
+                        [saved["replayRequest"]["workspace"]],
+                    )
                 # The artifact holds what was compiled at the launch. The repeat neither wrote it
                 # again nor compared it with what a compilation would give now.
                 self.assertEqual(artifact.read_text(encoding="utf-8"), compiled_at_launch)
@@ -163,6 +171,40 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 elsewhere = self.refused(self.request(other, request.request_id))
                 self.assertIn("already bound to another AR role selection", str(elsewhere.detail))
                 self.close_execution(request, "completed")
+
+
+class WorkspacePlacementTests(RepeatTestCase):
+    def test_roles_share_one_task_workspace_and_saved_placement(self) -> None:
+        executions = []
+        for role in ("worker", "reviewer", "curator"):
+            request = self.request(role)
+            self.runtime.fail("agent-create", "paseo_bridge_timeout", after_effect=True)
+            self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
+            saved = self.receipt(request)["replayRequest"]["workspace"]
+            self.assertEqual(saved["task"]["key"], launch.LEAF_REF.key)
+            self.assertEqual(saved["masterProject"]["key"], launch.MASTER_REF.key)
+            executions.append(self.dispatch(request)[1]["execution"])
+        self.assertEqual(len({item["workspaceId"] for item in executions}), 1)
+        self.assertEqual(len({item["agentId"] for item in executions}), 3)
+        self.assertEqual(len(self.runtime.workspaces), 1)
+
+    def test_persisted_cwd_only_launch_is_replayed_without_new_placement(self) -> None:
+        request = self.request("manager")
+        with (
+            patch.object(
+                role_launch_receipts, "run_launch_call", side_effect=RuntimeError("crash")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self.dispatch(request)
+        saved = self.receipt(request)
+        original = {"cwd": self.config.workspace_root.resolve().as_posix()}
+        saved["replayRequest"]["workspace"] = original
+        self.receipt_path(request).write_text(json.dumps(saved), encoding="utf-8")
+        status, public = self.dispatch(request)
+        self.assertEqual((status, public["status"]), (200, "running"))
+        self.assertEqual(self.runtime.launch_calls()[0], ("workspace-open", original))
+        self.assertNotIn("ar.task-ref", self.agent_of(request)["labels"])
 
 
 class ReplacedExecutionTests(RepeatTestCase):

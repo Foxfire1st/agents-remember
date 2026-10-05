@@ -57,25 +57,30 @@ describe("the look stored for the frame and the look remembered for a standalone
     });
   });
 
-  it("remembers the user's look before it stores the AR look, and stores it once", () => {
-    const tab = newTab(OWN_LOOK);
-
-    expect(applyEmbedLook(tab.local)).toEqual(["theme", "pluginThemeId", "uiFontFamily", "monoFontFamily"]);
-    expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
-    expect(sidebarOf(tab)).toBe(false);
-    const remembered = {
-      appSettings: OWN_LOOK,
-      agentListOpen: true,
-      stored: "frame",
-      seen: EMBED_LOOK,
-      at: Date.now(),
-      sidebar: { stored: "frame", seen: false },
-    };
-    expect(memoryOf(tab)).toEqual(remembered);
-
-    // The next frame load finds the AR look: nothing to change, nothing to remember.
-    expect(applyEmbedLook(tab.local)).toEqual([]);
-    expect(memoryOf(tab)).toEqual(remembered);
+  it("remembers the user's look and open or closed sidebar before storing the AR look", () => {
+    for (const open of [false, true]) {
+      const tab = newTab(OWN_LOOK, open);
+      expect(applyEmbedLook(tab.local)).toEqual(["theme", "pluginThemeId", "uiFontFamily", "monoFontFamily"]);
+      expect(settingsOf(tab)).toEqual({ ...EMBED_LOOK, language: "system" });
+      // Storing a theme does not toggle the native sidebar; only its native button does that.
+      expect(sidebarOf(tab)).toBe(open);
+      const remembered = {
+        appSettings: OWN_LOOK,
+        agentListOpen: open,
+        stored: "frame",
+        seen: EMBED_LOOK,
+        at: Date.now(),
+        sidebar: { stored: "user", seen: open },
+      };
+      expect(memoryOf(tab)).toEqual(remembered);
+      expect(applyEmbedLook(tab.local)).toEqual([]);
+      expect(memoryOf(tab)).toEqual(remembered);
+      // The native initial collapse does not overwrite the standalone choice.
+      recordedSidebar(tab, false, false);
+      expect(restoreStandaloneLook(tab.local).changed).toBe(true);
+      expect(sidebarOf(tab)).toBe(open);
+      expect(settingsOf(tab)).toEqual({ ...OWN_LOOK, language: "system" });
+    }
   });
 
   it("never overwrites the user's look before it is kept", () => {
@@ -165,9 +170,8 @@ describe("the look stored for the frame and the look remembered for a standalone
     recordedWrite(tab, true, usersNewLook);
     expect(memoryOf(tab)).toMatchObject({ appSettings: usersNewLook, stored: "user", seen: usersNewLook });
 
-    // The tab's next load leaves the settings alone. Only the sidebar, which the frame closed
-    // when it stored its look and nobody has written since, is put back.
-    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: true, usersLook: true });
+    // The tab's next load leaves both the user's settings and untouched sidebar alone.
+    expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: false, usersLook: true });
     expect(settingsOf(tab)).toEqual({ ...usersNewLook, language: "system" });
     expect(sidebarOf(tab)).toBe(true);
     expect(restoreStandaloneLook(tab.local)).toMatchObject({ changed: false, usersLook: true });
@@ -306,15 +310,16 @@ describe("the look stored for the frame and the look remembered for a standalone
   it("records who wrote the sidebar's state: the user's is kept, the frame's is put back", () => {
     const tab = newTab(OWN_LOOK);
     applyEmbedLook(tab.local);
-    // Inside the frame the user reopens the sidebar: still the frame's state, not remembered.
+    // The native toggle opens the frame's sidebar: its state is recorded, not remembered.
     recordedSidebar(tab, false, true);
     expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "frame", seen: true } });
     recordedSidebar(tab, false, false);
     expect(restoreStandaloneLook(tab.local).changed).toBe(true);
     expect(sidebarOf(tab)).toBe(true);
 
-    // The frame loads again and closes it; then the user closes the sidebar in the standalone tab.
+    // The user closes the sidebar inside the frame, then chooses closed in the standalone tab.
     applyEmbedLook(tab.local);
+    recordedSidebar(tab, false, false);
     expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "frame", seen: false } });
     recordedSidebar(tab, true, false);
     expect(memoryOf(tab)).toMatchObject({ agentListOpen: false, sidebar: { stored: "user", seen: false } });
@@ -335,7 +340,7 @@ describe("the look stored for the frame and the look remembered for a standalone
     expect(sidebarOf(tab)).toBe(true);
     expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "user", seen: true } });
     applyEmbedLook(tab.local);
-    expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "frame", seen: false } });
+    expect(memoryOf(tab)).toMatchObject({ agentListOpen: true, sidebar: { stored: "user", seen: true } });
 
     // Mark "frame": the frame's is put back.
     tab.local.put(PANEL_STATE_KEY, panelState(true));

@@ -1,4 +1,4 @@
-import { applyEmbedLook, closeSidebarAtLoad, recordAppWrite, restoreStandaloneLook } from "./look";
+import { applyEmbedLook, collapseNativeSidebarAtLoad, recordAppWrite, restoreStandaloneLook } from "./look";
 import type { PluginPage } from "./page";
 
 // What the client part does once per page load: store or take back a look, repair a first-visit
@@ -118,7 +118,7 @@ export function bootstrapEmbed(page: PluginPage, parentOrigin: string): boolean 
   const requested = requestedUrl(page);
   const bounced = requested !== page.location.href && BOUNCE_PATHS.includes(page.location.pathname);
   if ((changed.length > 0 || bounced) && reloadOnce(page, requested, parentOrigin)) return true;
-  closeSidebarAtLoad(page);
+  collapseNativeSidebarAtLoad(page);
   return false;
 }
 

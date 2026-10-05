@@ -145,11 +145,18 @@ class FakeRuntime:
 
     def _workspace_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         cwd = payload["cwd"]
-        workspace_id = self.workspaces.setdefault(cwd, f"wks_{len(self.workspaces) + 1}")
+        key = self.workspace_key(payload)
+        workspace_id = self.workspaces.setdefault(key, f"wks_{len(self.workspaces) + 1}")
         return {
             "serverId": SERVER_ID,
             "workspace": {"id": workspace_id, "directory": self.opened_directory or cwd},
         }
+
+    @staticmethod
+    def workspace_key(payload: dict[str, Any]) -> str:
+        if "masterProject" not in payload:
+            return payload["cwd"]
+        return f"{payload['masterProject']['key']}:{payload['task']['key']}"
 
     def _agent_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = payload["agentId"]
@@ -531,8 +538,28 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
 
                 self.assertEqual((status, public["status"]), (200, "running"))
                 opened, created = self.runtime.launch_calls()
-                self.assertEqual(opened, ("workspace-open", {"cwd": folder}))
-                agent_id = created[1]["agentId"]
+                task = self.master if role == "manager" else self.leaf
+                expected_workspace: dict[str, Any] = (
+                    {
+                        "cwd": folder,
+                        "masterProject": {
+                            "directory": self.master.path.parent.as_posix(),
+                            "key": MASTER_REF.key,
+                            "name": f"MASTER · {self.master.document.title}",
+                        },
+                        "task": {
+                            "key": task.ref.key,
+                            "title": f"{task.document.id} · {task.document.title}",
+                        },
+                    }
+                    if role in ("manager", "worker")
+                    else {"cwd": folder}
+                )
+                self.assertEqual(opened, ("workspace-open", expected_workspace))
+                agent_id, workspace_id = (
+                    created[1]["agentId"],
+                    self.runtime.workspaces[self.runtime.workspace_key(expected_workspace)],
+                )
                 definition, note = self.given_to_agent(request, agent_id, task_labels)
                 self.assertEqual(
                     created,
@@ -541,7 +568,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                         {
                             "agentId": agent_id,
                             "idempotencyKey": f"ar-role-launch:{request.request_id}",
-                            "workspaceId": self.runtime.workspaces[folder],
+                            "workspaceId": workspace_id,
                             "provider": "codex",
                             "model": "gpt-a",
                             "thinkingOptionId": "low",
@@ -562,7 +589,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 host = {
                     "kind": "paseo-agent",
                     "serverId": SERVER_ID,
-                    "workspaceId": self.runtime.workspaces[folder],
+                    "workspaceId": workspace_id,
                     "agentId": agent_id,
                 }
                 receipt = self.receipt(request)
@@ -580,8 +607,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                     path.relative_to(self.root).as_posix().startswith(receipt_directory)
                 )
                 self.runtime.agents.clear()
-        # The receipt and the artifact were on disk, with the agent id, before each call to the
-        # runtime.
+        # The receipt and artifact were stored before each runtime call.
         self.assertEqual(len(observed), 8)
         for _command, saved, payload, stored in observed:
             self.assertEqual(saved["status"], "starting")
@@ -598,9 +624,13 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             ),
             sorted({f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}),
         )
-        # One workspace per folder, asked for by directory; AR created the leaf's enclosure.
         self.assertEqual(
-            self.runtime.workspaces, {projects: "wks_1", self.enclosures.group.as_posix(): "wks_2"}
+            self.runtime.workspaces,
+            {
+                projects: "wks_1",
+                f"{MASTER_REF.key}:{MASTER_REF.key}": "wks_2",
+                f"{MASTER_REF.key}:{LEAF_REF.key}": "wks_3",
+            },
         )
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.enclosures.start_calls[0].leaf_id, "01_LEAF")
@@ -735,7 +765,13 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
             self.assertEqual(self.enclosures.start_calls, ["started by the child process"])
             self.assertEqual(
                 self.runtime.launch_calls()[0],
-                ("workspace-open", {"cwd": self.enclosures.group.as_posix()}),
+                (
+                    "workspace-open",
+                    paseo_launch.workspace_call(
+                        self.context(self.config, self.request("worker")),
+                        self.enclosures.group.as_posix(),
+                    ),
+                ),
             )
             self.assertEqual(self.dispatch(self.request("reviewer"))[0], 200)
             self.assertEqual(len(calls), 1, "an existing enclosure is found, not started again")
