@@ -23,7 +23,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `ping` | Liveness check; returns server name/version/transport. | — |
-| `server_info` | Report resolved roots, allowed repos/providers, and the tool list. | — |
+| `server_info` | Report resolved roots, allowed repos/providers, and the tool list. A server that a role launch started for one agent also reports `toolServer`, the name under which that agent was given this server (`agents-remember-task`; `server` stays the package's own name), and `agentBinding`: that agent's id, role, task references, request id and report path. | — |
 | `resolve_context` | Resolve a repository's coordination/memory context (topology, roots, settings, storage, pathRules). | `repo_id`, optional `task_name` / `contract_path` / `worktree_name` / `topology` |
 | `context_packet` | Bundle repo state, paths, memory, worktree, and provider status into one packet. | `repo_id`, `include_providers=true`, `include_drift=false` |
 

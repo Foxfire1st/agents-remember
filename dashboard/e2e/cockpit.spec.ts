@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+
 import { expect, test } from "@playwright/test";
 
 type Oklch = readonly [lightness: number, chroma: number, hue: number];
@@ -79,6 +81,97 @@ test("empty state renders without items", async ({ page }) => {
 });
 
 const scenarioUrl = (name: string) => `/dev/bench?scenario=${name}&effects=off`;
+
+test('Role chats receives clipboard Permissions Policy in its cross-origin frame', async ({
+  page,
+}) => {
+  const frameServer = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><head><script>
+      const policy = document.permissionsPolicy ?? document.featurePolicy;
+      const allows = (feature) => Boolean(policy?.allowsFeature?.(feature));
+      const allowlist = (feature) => JSON.stringify(policy?.getAllowlistForFeature?.(feature) ?? null);
+      document.documentElement.dataset.policyApi = String(Boolean(policy?.allowsFeature));
+      document.documentElement.dataset.clipboardRead = String(allows("clipboard-read"));
+      document.documentElement.dataset.clipboardWrite = String(allows("clipboard-write"));
+      document.documentElement.dataset.clipboardReadAllowlist = allowlist("clipboard-read");
+      document.documentElement.dataset.clipboardWriteAllowlist = allowlist("clipboard-write");
+    </script></head><body>clipboard policy probe</body></html>`);
+  });
+  await new Promise<void>((resolve, reject) => {
+    frameServer.once('error', reject);
+    frameServer.listen(0, '127.0.0.1', resolve);
+  });
+  const address = frameServer.address();
+  if (!address || typeof address === 'string')
+    throw new Error('clipboard frame server did not bind TCP');
+  // The frame route names the base URL for this dashboard origin; the pane builds the frame URL
+  // from it and grants clipboard access to that origin only.
+  const frameOrigin = `http://127.0.0.1:${address.port}`;
+  const frameUrl = `${frameOrigin}/`;
+
+  try {
+    await page.route('**/api/role-launch/frame', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          frameBaseUrl: frameOrigin,
+          serverId: 'srv_clipboard_policy_e2e',
+          projectsWorkspaceId: null,
+          projectsWorkspaceDetail: null,
+        }),
+      }),
+    );
+    await page.route('**/api/role-launch/options', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          roleDefaults: { agent: 'codex', model: null, effort: null },
+          agents: [{ id: 'codex', label: 'Codex', models: [] }],
+          catalogOrigin: 'clipboard-policy-e2e',
+          execution: null,
+          executions: [],
+        }),
+      }),
+    );
+
+    // The application's own page, not a bench scenario: a scenario answers every /api request
+    // from its in-page authority, so the two routes mocked above would never be asked there.
+    await page.goto('/?effects=off');
+    await page.getByRole('radio', { name: 'Chats' }).click();
+    const frame = page.frameLocator('iframe[title="Role chats"]');
+    await expect(frame.locator('html')).toHaveAttribute('data-policy-api', 'true');
+    await expect(frame.locator('html')).toHaveAttribute('data-clipboard-read', 'true');
+    await expect(frame.locator('html')).toHaveAttribute('data-clipboard-write', 'true');
+    const embeddedOriginOnly = JSON.stringify([frameOrigin]);
+    await expect(frame.locator('html')).toHaveAttribute(
+      'data-clipboard-read-allowlist',
+      embeddedOriginOnly,
+    );
+    await expect(frame.locator('html')).toHaveAttribute(
+      'data-clipboard-write-allowlist',
+      embeddedOriginOnly,
+    );
+
+    await page.evaluate((url) => {
+      const control = document.createElement('iframe');
+      control.title = 'Clipboard policy control without delegation';
+      control.src = url;
+      document.body.append(control);
+    }, frameUrl);
+    const control = page.frameLocator(
+      'iframe[title="Clipboard policy control without delegation"]',
+    );
+    await expect(control.locator('html')).toHaveAttribute('data-clipboard-read', 'false');
+    await expect(control.locator('html')).toHaveAttribute('data-clipboard-write', 'false');
+  } finally {
+    await page.goto('about:blank').catch(() => undefined);
+    await new Promise<void>((resolve) => frameServer.close(() => resolve()));
+  }
+});
 
 test("Chats owns responsive inspector intent, inert separators, keyboard resize, and focus recovery", async ({
   page,

@@ -41,10 +41,54 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 16
-LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "6f50c9f4119e5cd480309c388c4bd1c9ecfafe9ea9a5cff6c1e32131b644c9e6"
+LIFECYCLE_CONTRACT_COUNT = 19
+LIFECYCLE_ARTIFACT_COUNT = 83
+LIFECYCLE_CATALOG_SHA256 = "dc24a320370a3181f9d59252562689b586b9b0c8fae76863d81536be19c944f7"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Direct MIK/PNT import union re-pin, 2026-10-05.** The current pin binds the surviving
+MIK catalog (sixteen contracts / eighty artifacts) and the PNT catalog (nineteen contracts /
+sixty-nine artifacts): nineteen contracts / eighty-three artifacts in the composed tree.
+All fourteen MIK-only artifact rows and all three PNT-only support artifacts/contracts survive;
+common consumer lists retain both branches' real paths. No new evidence artifact is introduced
+by this conflict resolution. The composed census adds the R17 typed-refusal module
+``mcp/tests/test_agentic_settings.py`` as a real consumer of the existing Node lockfile fixture.
+The current digest is measured from the resolved TOML above.
+All branch-specific counts and hashes in the histories below describe their earlier candidates.
+
+**PNT branch re-pin history (historical).**
+
+The ``261001-PNT`` rename leaf (L9, PNT-R08) changed consumer lines only. Two test modules were
+renamed with the seam they test (``test_role_handover_binding.py``, ``test_role_launch_routes.py``)
+and stand under their new names in the two rows that listed them. The leaf's new module
+``test_previous_host_removed.py`` reaches the dispatch route through the launch cases it reuses, so
+it is a consumer of the node lockfile and of ``paseo_launch_test_support.py``; and
+``test_task_scoped_mcp.py`` now imports the tool server's entry point for the removed start option,
+which makes it a consumer of the node lockfile. No artifact and no contract was added or removed:
+the counts stay 19 and 69; the digest this value replaces was ``09cb0ac8…``.
+
+The ``261001-PNT`` master pass's fix round then completed three consumer lists so that both
+integration cases below pass on the merged tree: the two rows this line had inherited incomplete
+(``curator_coherence_test_support.py`` gained three consumers, the node lockfile fourteen: every
+test module that reaches the dispatch route reaches the portable profile runtime the lockfile is
+an input of) and the pass's own ``paseo_launch_test_support.py`` row, which the merge of the
+role-start leaf had left one consumer short (``test_paseo_role_messages.py``). Eighteen consumer
+lines, no new artifact and no new contract: the counts stay 19 and 69; the digest this value
+replaces was ``4c1b5f02…``.
+
+The ``261001-PNT`` master pass registered the three support modules that line's leaves introduced
+without a row: ``mcp/tests/paseo_runtime_test_support.py`` (L1),
+``mcp/tests/pnt_sandbox_test_support.py`` (L2) and ``mcp/tests/paseo_launch_test_support.py`` (L5),
+each with a ``[[contract]]`` row and one ``[[artifact]]`` row of ``kind = "shared-support"`` in the
+sibling pattern. The consumer lists are ``RepositoryDependencyFacts.observed_test_consumers`` for
+each path; the launch module's includes the four modules that build on the launch fixture. Contract
+count **16 -> 19**, artifact count **66 -> 69**; the digest this value replaces was ``f0cb5fec…``.
+The same pass removed ``scripts/pnt_sandbox/__init__.py``: as a package it made ``scripts/`` an import
+root, under which the script-local imports of ``scripts/e2e_harness`` resolved to nothing and
+thirteen of that directory's rows failed their consumer proof. The two findings this line inherited
+(``curator_coherence_test_support.py`` and the node lockfile) are left as inherited.
+
+**MIK branch re-pin history (historical).**
 
 **Managed-sync union re-pin, 2026-10-03 (L47-R47).** The current constant binds the union of
 landed reviewer read-latency evidence and first-leaf preview evidence. The prior source catalog

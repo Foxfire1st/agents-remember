@@ -325,6 +325,8 @@ def create_app(
             authorization=LocalOperatorAuthorizationResolver.for_workspace(config.workspace_root),
         ),
     )
+    if collaborators.extra_api_routes is not None:
+        collaborators.extra_api_routes(app)
     mount_static(app)
     return app
 

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME, read_agent_binding
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.runtime.skills import skills_install_tool
 from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
 from .. import SERVER_NAME, SERVER_VERSION
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
@@ -32,6 +35,10 @@ def ping_payload() -> dict[str, Any]:
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
+    # A server that a role launch started for one agent says which agent and which AR work, and
+    # the name under which that agent was given it: ``server`` is the package's own name, which
+    # the agent's instructions use for another installation's server.
+    binding = read_agent_binding()
     return _tool_payload(
         "server_info",
         {
@@ -51,29 +58,29 @@ def server_info_payload(
             "tools": list(PUBLIC_TOOLS),
             "reservedTools": list(RESERVED_TOOLS),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
+            **(
+                {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
+                if binding is not None
+                else {}
+            ),
         },
     )
 
 
 def context_packet_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
+    request: ContextPacketRequest,
     *,
-    include_providers: bool = True,
-    include_drift: bool = False,
-    include_freshness: bool = False,
+    task_context: TaskScopedReaderContext | None = None,
 ) -> dict[str, Any]:
+    scoped_config = task_scoped_mcp_config_for_reader(
+        config,
+        repository_id=request.repo_id,
+        task_context=task_context,
+    )
     return _tool_payload(
         "context_packet",
-        build_context_packet(
-            config,
-            ContextPacketRequest(
-                repo_id=repo_id,
-                include_providers=include_providers,
-                include_drift=include_drift,
-                include_freshness=include_freshness,
-            ),
-        ),
+        build_context_packet(scoped_config, request),
     )
 
 

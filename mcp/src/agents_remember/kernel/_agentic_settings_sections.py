@@ -3,6 +3,8 @@ agent-notifier, spawn, and the quality gate."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
     DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
@@ -184,6 +186,7 @@ def _parse_roles(
             # Deliberately a free string here: the native adapter's dynamic catalog validates it at
             # launch; an explicitly mapped non-native harness validates it at dispatch.
             effort = _require_string(knobs["effort"], f"{owner}.{role}.effort", source)
+        service_tier = _parse_service_tier(knobs, f"{owner}.{role}", source)
         # The free-form escape hatch (260703-L16): shape-checked, never content-validated.
         launch_args: tuple[str, ...] = ()
         if "launchArgs" in knobs:
@@ -208,11 +211,21 @@ def _parse_roles(
             harness=harness,
             model=model,
             effort=effort,
+            service_tier=service_tier,
             launch_args=launch_args,
             prompt_keywords=prompt_keywords,
             session_commands=session_commands,
         )
     return parsed
+
+
+def _parse_service_tier(knobs: dict[str, Any], owner: str, source: str) -> str | None:
+    if "serviceTier" not in knobs:
+        return None
+    value = _require_string(knobs["serviceTier"], f"{owner}.serviceTier", source)
+    if not value.strip():
+        raise AgenticSettingsError(f"{owner}.serviceTier must be a nonempty string ({source})")
+    return value
 
 
 def _parse_roles_per_level(

@@ -524,6 +524,13 @@ class ServingCollaborators:
     with no instructions.
     """
 
+    extra_api_routes: Callable[[Any], None] | None = None
+    """The composition root's routes, registered before the final static mount.
+
+    This keeps optional dashboard adapters above ``serving`` in the import graph while allowing
+    the app factory to preserve route precedence over its catch-all asset mount.
+    """
+
 
 INFERRED_LIVE_INPUTS = LiveProjectionInputs()
 

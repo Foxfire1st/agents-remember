@@ -7,7 +7,7 @@ session, lifecycle, adapter, and vendor ids remain separate control-plane correl
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -66,3 +66,20 @@ class TaskDocumentRef(BaseModel):
         """Opaque comparison/debug key; never an agent-facing replacement identity."""
 
         return f"{self.repository}/{self.path}"
+
+
+class TaskScopedReaderContext(BaseModel):
+    """The exact task and canonical enclosure asserted by one reader call."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_document_ref: TaskDocumentRef
+    contract_path: str
+
+    @field_validator("contract_path")
+    @classmethod
+    def _contract_path_is_absolute_posix(cls, value: str) -> str:
+        path = Path(value)
+        if not value or not path.is_absolute() or path.as_posix() != value or ".." in path.parts:
+            raise ValueError("contract_path must be one normalized absolute POSIX path")
+        return value

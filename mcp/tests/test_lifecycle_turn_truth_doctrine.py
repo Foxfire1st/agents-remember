@@ -85,6 +85,7 @@ WHAT THIS DOES NOT COVER (stated, not implied)
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from dataclasses import dataclass
@@ -97,33 +98,14 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCTRINE_TREE = "skills/l-01-agent-lifecycles"
 TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
-# Every surface that must speak the completion-truth vocabulary, as exact path literals so the
-# dependency-ownership selector observes this module as their consumer.
-#
-# Re-pointed at the consolidated corpus (R01's one-home ruling, 2026-09-16). The boundary's one home
-# is now `core/acceptance.md`: the retired `SKILL.md` section *is* that file, verbatim, and the
-# consolidated `SKILL.md` cites it instead of restating it, so it stopped speaking the vocabulary --
-# and this census rule's own remedy for a row whose surface went silent is to remove the row. The
-# seven other surfaces added here already composed completion from terminal/finalizer truth in the
-# consolidated tree and were simply never declared. The roster is a declaration, not a wish list: it
-# must EQUAL the speakers in both directions, so every entry below is a measured speaker and every
-# measured speaker is an entry. `roles/worker.md` keeps its row because its own side of the boundary
-# is restored to the wording this module reads (see OWED_STATEMENTS).
+# Every retained legacy AR surface that still composes completion-truth wording. Compact role
+# capsules no longer carry those role/operation relay instructions, so they are not kept on this
+# roster merely to preserve stale wording. The roster equals the actual remaining speakers.
 COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/core/acceptance.md",
-    "skills/l-01-agent-lifecycles/operations/curation.md",
-    "skills/l-01-agent-lifecycles/operations/recovery.md",
-    "skills/l-01-agent-lifecycles/operations/review.md",
     "skills/l-01-agent-lifecycles/reference/rulings.md",
-    "skills/l-01-agent-lifecycles/roles/architect.md",
-    "skills/l-01-agent-lifecycles/roles/curator.md",
     "skills/l-01-agent-lifecycles/roles/designer.md",
-    "skills/l-01-agent-lifecycles/roles/manager.md",
-    "skills/l-01-agent-lifecycles/roles/orchestrator.md",
-    "skills/l-01-agent-lifecycles/roles/reviewer.md",
     "skills/l-01-agent-lifecycles/roles/strategist.md",
-    "skills/l-01-agent-lifecycles/roles/system-specialist.md",
-    "skills/l-01-agent-lifecycles/roles/worker.md",
     "skills/l-01-agent-lifecycles/templates/master-handover-packet.md",
 )
 # The completion-truth vocabulary itself: a surface uses it when it composes completion from
@@ -131,15 +113,9 @@ COMPLETION_TRUTH_ROSTER = (
 # same act as composing completion, and three criteria/history files name it for other reasons.
 COMPLETION_TRUTH_VOCABULARY = re.compile(r"terminal/finalizer|terminal truth", re.IGNORECASE)
 
-# Surfaces that state the relay's own mechanical side without composing completion.
-#
-# Verified against the consolidated corpus rather than assumed: both members still state the relay's
-# own side ("the relay itself never inspects the artifact" in the worker file, "The relay never
-# inspects it" in the turn-report template), and no surface that newly states it was left out.
-RELAY_MECHANICS_SURFACES = (
-    "skills/l-01-agent-lifecycles/roles/worker.md",
-    "skills/l-01-agent-lifecycles/templates/turn-report.md",
-)
+# Retained legacy template that states an AR relay's mechanical side. Capsule roles no longer
+# describe that relay; what a Worker tells the agent that started it is checked separately below.
+RELAY_MECHANICS_SURFACES = ("skills/l-01-agent-lifecycles/templates/turn-report.md",)
 
 # The one reading every completion-truth surface must carry: the terminal outcome ends a turn and
 # nothing more. Written as one alternation so a legitimate rephrasing inside the pattern passes.
@@ -496,37 +472,6 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "nudges, rejects, replaces, or escalates",
         "needs no second model-authored completion post",
     ),
-    "skills/l-01-agent-lifecycles/roles/orchestrator.md": (
-        "Terminal/finalizer truth then attests only that this turn ended",
-        "wakes the architect, who validates the super-exit packet",
-    ),
-    "skills/l-01-agent-lifecycles/roles/manager.md": (
-        "never opens or evaluates the artifact",
-        "only that the provider turn ended",
-        "never attests that the report exists, is current, or satisfies its requirement",
-        "open and validate the required artifact, candidate identity, evidence, and acceptance "
-        "envelope",
-        "before advancing lifecycle state",
-        "this seat's own detected handoff defect",
-    ),
-    "skills/l-01-agent-lifecycles/roles/worker.md": (
-        "terminal/finalizer truth attests only that this turn ended",
-        "never that the report exists, is current, or satisfies its requirement",
-        "the owning seat detects after your turn-ended state signal wakes it",
-        "Never author a second model-authored completion post",
-    ),
-    "skills/l-01-agent-lifecycles/roles/reviewer.md": (
-        "Terminal/finalizer truth then attests only that this turn ended",
-        "wakes the decider, who validates the verdict independently",
-    ),
-    "skills/l-01-agent-lifecycles/roles/curator.md": (
-        "terminal/finalizer evidence then attests only that this turn ended",
-        "wakes the manager, who validates it",
-    ),
-    "skills/l-01-agent-lifecycles/roles/system-specialist.md": (
-        "Terminal/finalizer state then attests only that this turn ended",
-        "wakes the orchestrator, which validates the report",
-    ),
     "skills/l-01-agent-lifecycles/roles/strategist.md": (
         "Terminal/finalizer truth then attests only that this turn ended",
         "wakes the architect, who validates the artifact",
@@ -726,6 +671,89 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
             with self.subTest(surface=relative):
                 self._assert_owed(relative)
 
+    def test_a_worker_tells_only_a_parent_agent_and_only_once_that_its_report_is_written(
+        self,
+    ) -> None:
+        worker = normalize(read_surface("skills/l-01-agent-lifecycles/roles/worker.md"))
+        self.assertRegex(
+            worker,
+            r"when a parent agent started you, tell it once that the report is written"
+            r".{0,40}one role_message on agents-remember-task to its agent id",
+            "only a Worker with a parent agent sends the completion message, and it sends one",
+        )
+        self.assertIn("a worker started from the dashboard has no parent", worker)
+        self.assertIn("sends no such message", worker)
+        self.assertIn("a finished turn is not ar acceptance", worker)
+
+    def test_delivered_coordinator_capsules_check_candidate_evidence_before_acceptance(
+        self,
+    ) -> None:
+        manifest = json.loads((TREE_LITERAL / "composition-manifest.json").read_text())
+        cases = (
+            (
+                "architect",
+                "review",
+                (
+                    "review the full candidate diff",
+                    "check each requirement against its evidence class",
+                    "test result is evidence, not semantic acceptance",
+                ),
+            ),
+            (
+                "manager",
+                "coordination",
+                (
+                    "inspect each deliverable",
+                    "required evidence",
+                    "never substitute shell commits or a finished turn for ar acceptance",
+                ),
+            ),
+            (
+                "orchestrator",
+                "coordination",
+                (
+                    "inspect the worker's actual diff",
+                    "targeted check results",
+                    "do not claim acceptance or landing from the status of an agent in paseo",
+                ),
+            ),
+        )
+
+        for role, operation, markers in cases:
+            with self.subTest(role=role, operation=operation):
+                role_entry = manifest["roles"][role]
+                operation_entry = manifest["operations"][operation]
+                self.assertIn(operation, role_entry["operations"])
+                role_text = (TREE_LITERAL / role_entry["file"]).read_text(encoding="utf-8")
+                operation_text = (TREE_LITERAL / operation_entry["source"]).read_text(
+                    encoding="utf-8"
+                )
+                delivered = normalize(role_text + "\n" + operation_text)
+                self.assertEqual(
+                    [marker for marker in markers if normalize(marker) not in delivered],
+                    [],
+                    f"{role}+{operation} no longer checks its candidate/evidence boundary",
+                )
+
+                if role == "manager":
+                    weakened = role_text.replace(
+                        "Inspect each deliverable, complete changed-file diff, required evidence, "
+                        "and report before handing it onward.",
+                        "Hand each deliverable onward.",
+                        1,
+                    )
+                    self.assertNotEqual(weakened, role_text, "the mutation site must be present")
+                    weakened_delivery = normalize(weakened + "\n" + operation_text)
+                    self.assertIn(
+                        "inspect each deliverable",
+                        [
+                            marker
+                            for marker in markers
+                            if normalize(marker) not in weakened_delivery
+                        ],
+                        "removing candidate inspection must make the guard fail",
+                    )
+
 
 class ConvergenceTeethTests(unittest.TestCase):
     """The re-pointed data kept the detectors' teeth: one mutant pair per reconciled site.
@@ -789,7 +817,7 @@ class ConvergenceTeethTests(unittest.TestCase):
     def test_a_contradicting_sentence_added_to_a_roster_surface_still_fails_it(self) -> None:
         """The per-surface check is state-and-deny aware, and this is the packet's own named failure."""
 
-        relative = "skills/l-01-agent-lifecycles/roles/manager.md"
+        relative = "skills/l-01-agent-lifecycles/core/acceptance.md"
         shipped = read_surface(relative)
         self.assertEqual(contradictions(shipped), ())
         self.assertEqual(classify_reading(shipped), Reading.STATED)

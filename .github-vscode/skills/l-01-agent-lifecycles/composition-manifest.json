@@ -1,6 +1,6 @@
 {
   "schema": "ar-role-capsule-composition/v1",
-  "authority": "skills/l-01-agent-lifecycles/SKILL.md (thin router) · this file is routing metadata only",
+  "authority": "skills/l-01-agent-lifecycles/SKILL.md (thin role-capsule router) · this file is routing metadata only",
   "entry_router": "skills/l-01-agent-lifecycles/SKILL.md",
   "authoritative_tree": "skills/",
   "role_order": [
@@ -17,35 +17,28 @@
   ],
   "routing_conditions": [
     {
-      "id": "spawn-role-env",
-      "condition": "AR_SPAWN_ROLE is set by the hosted-seat control plane",
-      "selects": "role",
-      "role_from": "AR_SPAWN_ROLE",
-      "never_selects": "launcher",
-      "fail_closed_when": "the value has no matching roles/<value>.md, or the role env arrives without its matching plane-injected hosted-session identity"
+      "id": "supplied-native-role-binding",
+      "condition": "The AR role launcher or the role_start tool supplies one supported role and one applicable operation.",
+      "selects": "role-and-operation",
+      "role_from": "the explicit handover role id",
+      "operation_from": "the explicit handover operation id",
+      "task_from": "only canonical task references supplied in the handover",
+      "never_selects": "an inferred role, task, repository, parent, or default operation",
+      "fail_closed_when": "role or operation is missing, unsupported, or inapplicable, or supplied bindings conflict"
     },
     {
-      "id": "fresh-session-role-brief",
-      "condition": "the first user message is a templates/*-brief.md-shaped dispatch or a first line of the form 'ROLE BRIEF - <role>'",
-      "selects": "role",
-      "role_from": "the brief's named role",
-      "never_selects": "launcher",
-      "fail_closed_when": "the named role has no matching roles/<role>.md"
-    },
-    {
-      "id": "ambient-launcher",
-      "condition": "no spawn-role env, no role brief: a developer opened this session",
-      "selects": "launcher",
-      "never_selects": "role",
-      "is_role": false,
-      "instruction_source": "core/launcher.md",
-      "note": "a distinct routing condition, not a role; the launcher dispatches a real role seat instead of taking one"
+      "id": "manual-taskless-projects-role",
+      "condition": "Architect or System Specialist is explicitly selected for a manual Projects launch with no task binding.",
+      "selects": "the supplied role and one applicable operation",
+      "role_from": "the explicit launcher selection",
+      "task_from": "none; no synthetic task reference is created",
+      "requires": "ask only for a missing outcome/repository or system concern/report scope"
     }
   ],
   "operations": {
     "orientation": {
       "source": "operations/orientation.md",
-      "purpose": "Opening a turn: read the brief and its durable inputs, establish trust facts, state the current state back.",
+      "purpose": "Read the supplied role binding and durable inputs; ask only for missing taskless target facts.",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -61,7 +54,7 @@
     },
     "planning": {
       "source": "operations/planning.md",
-      "purpose": "Deciding what will be built: reframing, evidence-backed design, requirement compilation, topology, plan review.",
+      "purpose": "Shape a bounded plan and requirement set; preserve flat ownership when it fits.",
       "applies_to_roles": [
         "architect",
         "designer",
@@ -71,14 +64,14 @@
     },
     "implementation": {
       "source": "operations/implementation.md",
-      "purpose": "Building the assigned scope inside the leaf worktree and producing the builder artifacts.",
+      "purpose": "Implement one selected leaf and report its change and verification evidence.",
       "applies_to_roles": [
         "worker"
       ]
     },
     "review": {
       "source": "operations/review.md",
-      "purpose": "The requested independent review seam and its exact baseline / fix-verification mode contract.",
+      "purpose": "Independently review the complete assigned candidate or sealed fix-verification scope.",
       "applies_to_roles": [
         "reviewer",
         "manager",
@@ -88,7 +81,7 @@
     },
     "curation": {
       "source": "operations/curation.md",
-      "purpose": "The leaf coherence pass: reconcile intended, current, and implemented meaning and write affected onboarding.",
+      "purpose": "Reconcile intent, code, reports, onboarding, and admitted knowledge for one leaf.",
       "applies_to_roles": [
         "curator",
         "manager"
@@ -96,7 +89,7 @@
     },
     "coordination": {
       "source": "operations/coordination.md",
-      "purpose": "Driving a portfolio or master-series from durable state, including the targeted-check contract closeout consumes.",
+      "purpose": "Start and message role agents on the Paseo host against exact canonical AR task references.",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -105,15 +98,16 @@
     },
     "authorized-closeout": {
       "source": "operations/closeout.md",
-      "purpose": "The authorized Git code/memory transaction and the targeted-check contract it consumes.",
+      "purpose": "Coordinate the existing authorized paired code/memory closeout with its exact evidence.",
       "applies_to_roles": [
         "manager",
-        "orchestrator"
+        "orchestrator",
+        "architect"
       ]
     },
     "recovery": {
       "source": "operations/recovery.md",
-      "purpose": "Resuming, resyncing, repairing, or retiring a run whose state moved: the bounded recovery moves.",
+      "purpose": "Resume the same task and the same role agents; reconcile uncertainty before retrying.",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -121,7 +115,8 @@
         "worker",
         "curator",
         "system-specialist",
-        "bootstrap"
+        "bootstrap",
+        "reviewer"
       ]
     },
     "bootstrap": {
@@ -163,18 +158,26 @@
       "file": "roles/architect.md",
       "altitude": "sprint",
       "tools": [
+        "context_packet",
+        "gate_decide",
+        "gate_list",
+        "knowledge_diff",
+        "knowledge_read",
         "read_ar_files",
-        "grepai_search",
-        "cgc_symbol_search",
+        "role_message",
+        "role_start",
         "task_doc",
-        "dispatch_agent",
-        "lifecycle_gate",
-        "message_child"
+        "worktree_closeout_apply",
+        "worktree_closeout_preview",
+        "worktree_integrate",
+        "worktree_start",
+        "worktree_status",
+        "worktree_sync"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "developer-facing owner seat; design conversation, decision-item relay, and drawing board",
+      "seat": "Projects-level semantic owner; may be launched taskless and may coordinate flat work.",
       "core": [
         "authority",
         "invariants",
@@ -187,7 +190,8 @@
         "planning",
         "coordination",
         "review",
-        "recovery"
+        "recovery",
+        "authorized-closeout"
       ],
       "templates": [
         "architect-brief.md",
@@ -201,18 +205,25 @@
       "file": "roles/orchestrator.md",
       "altitude": "sprint",
       "tools": [
+        "context_packet",
+        "knowledge_read",
         "read_ar_files",
-        "grepai_search",
-        "cgc_symbol_search",
+        "role_message",
+        "role_start",
         "task_doc",
-        "dispatch_agent",
-        "lifecycle_gate",
-        "worktree_status"
+        "worktree_attach",
+        "worktree_closeout_apply",
+        "worktree_closeout_preview",
+        "worktree_integrate",
+        "worktree_operation_control",
+        "worktree_start",
+        "worktree_status",
+        "worktree_sync"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "sprint-local spawned backend portfolio and orchestration seat; never developer-facing",
+      "seat": "Optional sprint portfolio coordinator of role agents.",
       "core": [
         "authority",
         "invariants",
@@ -301,19 +312,25 @@
       "file": "roles/manager.md",
       "altitude": "master",
       "tools": [
+        "context_packet",
+        "knowledge_read",
         "read_ar_files",
-        "grepai_search",
-        "cgc_symbol_search",
+        "role_message",
+        "role_start",
         "task_doc",
-        "dispatch_agent",
-        "lifecycle_gate",
+        "worktree_attach",
+        "worktree_closeout_apply",
+        "worktree_closeout_preview",
+        "worktree_integrate",
+        "worktree_operation_control",
+        "worktree_start",
         "worktree_status",
-        "worktree_closeout_apply"
+        "worktree_sync"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "sprint-local coordination seat per master; drives exactly one master's leaf loop",
+      "seat": "Optional selected-master coordinator; coordinates leaf owners and evidence.",
       "core": [
         "authority",
         "invariants",
@@ -348,15 +365,22 @@
       "file": "roles/worker.md",
       "altitude": "leaf",
       "tools": [
-        "grepai_search",
+        "cgc_callees",
+        "cgc_callers",
+        "cgc_dependencies",
         "cgc_symbol_search",
+        "context_packet",
+        "grepai_search",
+        "knowledge_read",
         "read_ar_files",
-        "message_parent"
+        "role_message",
+        "task_doc",
+        "worktree_status"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "one leaf worktree, short-lived, fresh session; the builder with a no-commit contract",
+      "seat": "One selected leaf implementation owner in the AR-paired task enclosure.",
       "core": [
         "authority",
         "invariants",
@@ -381,14 +405,23 @@
       "file": "roles/curator.md",
       "altitude": "leaf",
       "tools": [
-        "read_ar_files",
+        "context_packet",
+        "curator_coherence",
+        "knowledge_change",
+        "knowledge_diff",
+        "knowledge_integrity_check",
+        "knowledge_project",
+        "knowledge_read",
         "memory_quality_check",
-        "curator_coherence"
+        "read_ar_files",
+        "role_message",
+        "route_index_refresh",
+        "task_doc"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "fresh per leaf after builder and (when requested) reviewer; writes onboarding only",
+      "seat": "Curator for one selected leaf memory/onboarding scope and admitted knowledge records.",
       "core": [
         "authority",
         "invariants",
@@ -411,15 +444,23 @@
       "file": "roles/reviewer.md",
       "altitude": "leaf | master | sprint, by seam",
       "tools": [
-        "grepai_search",
+        "cgc_callees",
+        "cgc_callers",
+        "cgc_dependencies",
         "cgc_symbol_search",
+        "context_packet",
+        "grepai_search",
+        "knowledge_diff",
+        "knowledge_read",
         "read_ar_files",
-        "message_parent"
+        "role_message",
+        "task_doc",
+        "worktree_status"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "short-lived adversarial reviewer at the requested seam; verdicts are evidence, not decisions",
+      "seat": "Independent reviewer for one selected leaf candidate and named requirement.",
       "core": [
         "authority",
         "invariants",
@@ -428,7 +469,8 @@
       ],
       "operations": [
         "orientation",
-        "review"
+        "review",
+        "recovery"
       ],
       "templates": [
         "verdict.md",
@@ -448,13 +490,16 @@
       "file": "roles/system-specialist.md",
       "altitude": "sprint",
       "tools": [
+        "context_packet",
+        "provider_diagnostics",
         "provider_status",
-        "provider_diagnostics"
+        "read_ar_files",
+        "role_message"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "provider-degradation investigator; report first, fixes only after an explicit orchestrator order",
+      "seat": "Taskless Projects provider/system investigator; reports before authorized remediation.",
       "core": [
         "authority",
         "invariants",
@@ -547,13 +592,13 @@
   },
   "composition_order": [
     "role",
-    "operation",
-    "repository-specialization"
+    "operation"
   ],
   "notes": [
-    "Routing metadata only: this file carries no instruction prose and no copies of any source section.",
-    "Exactly one source per instruction. core/ is authored once; a role file states its own seat's side of a shared rule and never restates the whole of it.",
-    "Task facts are a separate context channel and are not part of this manifest.",
-    "The launcher is a routing condition, not a role: the role registry is exactly the entries in role_order."
+    "Routing metadata only: the role route composes exactly one role source and one applicable operation source.",
+    "The frozen core map remains metadata for compiler compatibility; shared core blocks are not injected into role capsules.",
+    "Canonical task references and workspace bindings travel in the handover as data, separate from instruction blocks.",
+    "The compiler vocabulary retains ten role ids and nine operation ids; the role launcher exposes only the seven current UI roles.",
+    "Paseo is the host. Role agents start and message each other with the AR tools role_start and role_message on the agents-remember-task tool server."
   ]
 }

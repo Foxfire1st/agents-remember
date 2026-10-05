@@ -29,6 +29,7 @@ from .lifecycle import register_lifecycle_tools
 from .memory import register_memory_tools
 from .orchestration import register_orchestration_tools
 from .providers import register_provider_tools
+from .role_agents import register_role_agent_tools
 from .sessions import register_session_tools
 from .tasks import register_task_tools
 from .worktrees import register_worktree_tools
@@ -49,6 +50,7 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_gate_tools,
     register_orchestration_tools,
     register_capsule_and_skill_tools,
+    register_role_agent_tools,
     register_knowledge_tools,
 )
 

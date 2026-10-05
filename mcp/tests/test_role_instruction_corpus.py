@@ -6,17 +6,16 @@ blocks, and the JSON composition manifest that routes a role to its sources. The
 the properties a consumer depends on:
 
 * every role in the registry has exactly one readable role source;
-* every role source carries the agreed readable order and its machine-readable knob block;
+* role sources remain well-formed, self-contained instructions without operator knobs;
 * the manifest resolves to files that exist, for every role and every operation;
-* the role registry is exactly the ten roles, and the ambient launcher is a routing condition
-  rather than a role;
+* the role registry is exactly the ten roles, and native role routing remains separate from the
+  retained ambient launcher metadata;
 * the manifest shares no prose (it is a metadata plane);
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
   reference;
 * a manifest that points at a missing source is reported rather than silently accepted; and
-* curation is complete on every leaf: the retired optional/narrow-curation sentences are gone
-  from the canonical tree and from all nine generated copies, and every source that must state
-  the rule still states it.
+* retired optional/narrow-curation sentences are gone from the canonical tree and all nine copies,
+  while the compact curator role and operation preserve the current scoped-check policy.
 """
 
 from __future__ import annotations
@@ -43,18 +42,6 @@ ROLE_ORDER = (
     "reviewer",
     "system-specialist",
     "bootstrap",
-)
-
-# The approved capsule shape, in order (developer ruling 2026-09-17; the developer-approved
-# worker file `notes/briefs/worker-role-approved.md` is the exemplar). Each entry is the prefix a
-# role file's H2 must begin with; the fourth and sixth carry the seat's own suffix after the dash.
-REQUIRED_SECTIONS = (
-    "## Inputs",
-    "## Process",
-    "## Outputs",
-    "## What you may do",
-    "## What you must not do",
-    "## Stop and ",
 )
 
 #: The retired machine-readable block. Knobs are settings, not role-file content.
@@ -258,16 +245,18 @@ def test_manifest_resolves_every_role_and_operation_source(tmp_path: Path) -> No
 
     assert _resolve_sources(LIFECYCLE_ROOT, manifest) == []
 
-    # The registry is exactly the ten roles, and the ambient launcher is not one of them.
+    # The registry is exactly the ten roles; ambient launch metadata remains separate from native
+    # role routing and is still exercised by the existing AR launcher tests.
     assert list(manifest["role_order"]) == list(ROLE_ORDER)
     assert "launcher" not in manifest["roles"]
     conditions = {condition["id"] for condition in manifest["routing_conditions"]}
-    assert "ambient-launcher" in conditions
+    assert conditions == {"supplied-native-role-binding", "manual-taskless-projects-role"}
+    assert manifest["launcher"]["routing_condition"] == "ambient-launcher"
 
-    # Every role must be reachable from the router's own registry.
+    # The router delegates source selection to the manifest rather than naming every role file.
     router = (LIFECYCLE_ROOT / manifest["entry_router"].split("/")[-1]).read_text(encoding="utf-8")
-    for role in ROLE_ORDER:
-        assert f"`roles/{role}.md`" in router, f"router does not register `roles/{role}.md`"
+    assert "composition-manifest.json" in router
+    assert "one applicable operation" in router
 
     # The manifest is routing metadata: it must not carry instruction prose.
     assert manifest_prose_lines(MANIFEST_PATH) == [], (
@@ -406,23 +395,12 @@ def test_manifest_carries_routing_metadata_not_copied_payloads(tmp_path: Path) -
     )
 
 
-def test_every_role_source_is_a_capsule_shaped_function() -> None:
-    """Each role file is the developer-approved capsule shape, and nothing else.
+def test_every_role_source_is_concise_and_well_formed() -> None:
+    """Every role is a concise, parseable source with its own duties and no inherited core.
 
-    The shape a role file ships in was ruled by the developer on 2026-09-17 and the worker file
-    (``notes/briefs/worker-role-approved.md``, sha256 ``a07e92e1…``) is the approved exemplar:
-
-    * frontmatter declaring the canonical skill-scoped name and a description;
-    * a heading and a one-line statement of what the seat is;
-    * ``Inputs`` · ``Process`` · ``Outputs`` in that order, then the seat's own may/must-not and
-      stop-and-escalate sections;
-    * **no ``Inherits:`` line** — a capsule composes no shared ``Core —`` block, so a role file
-      that inherited one would state obligations nothing delivers;
-    * **no operator-knob table** — ``harness``/``model``/``effort``/``launchArgs``/
-      ``sessionCommands``/``promptKeywords`` live in settings and the seat cannot set them;
-    * no sibling role file cited to learn a duty from, which is the amalgamation the same ruling
-      forbids. One sanctioned case exists and is named below: the architect may wear the designer
-      hat inline, which requires naming that file.
+    The compact role-capsule ruling supersedes the old fixed section order and minimum-length
+    convention. This check protects actual source identity and self-containment while role-specific
+    contract tests cover the duties that matter.
     """
 
     manifest = _manifest()
@@ -435,9 +413,6 @@ def test_every_role_source_is_a_capsule_shaped_function() -> None:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
 
-        # The file must be a real document, not a stub.
-        assert len(lines) > 40, f"{path} is too short to be a role source"
-
         # Frontmatter with the canonical skill-scoped name and a description.
         assert lines[0] == "---", f"{path} does not open a YAML frontmatter block"
         end = lines.index("---", 1)
@@ -447,6 +422,12 @@ def test_every_role_source_is_a_capsule_shaped_function() -> None:
         )
         assert any(line.startswith("description: ") for line in frontmatter), (
             f"{path} frontmatter must declare a description"
+        )
+        assert any(line.startswith("# ") for line in lines[end + 1 :]), (
+            f"{path} must have a readable role heading"
+        )
+        assert any(line.startswith("## ") for line in lines[end + 1 :]), (
+            f"{path} must organize its role-specific instructions"
         )
 
         # The retired inheritance line and the retired machine block are gone.
@@ -469,15 +450,6 @@ def test_every_role_source_is_a_capsule_shaped_function() -> None:
         assert "orchestration.rolesPerLevel" not in text, (
             f"{path} still documents its own settings override keys"
         )
-
-        # The approved order, in order: every required section is present, and the positions
-        # are ascending. A section may carry its own suffix after the em dash (``## Stop and
-        # report — …``), and an extra seat-specific section may sit between two required ones.
-        positions = []
-        for heading in REQUIRED_SECTIONS:
-            assert heading in text, f"{path} is missing a section beginning '{heading}'"
-            positions.append(text.index(heading))
-        assert positions == sorted(positions), f"{path} headings are out of the approved order"
 
         # A role is self-contained: naming a sibling role file is the amalgamation the ruling
         # forbids, except where the seat genuinely runs that file as a hat.
@@ -677,16 +649,15 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 
 
 # --------------------------------------------------------------------------------------
-# Curation is complete on every leaf — the retired optional-curation doctrine
+# Current scoped-curation policy and retired optional-curation wording
 # --------------------------------------------------------------------------------------
 #
 # The registry of retired sentences, the registry of the retired loop-gate field pairing, and the
 # readers for both live in `agents_remember_test_support.testing.curation_doctrine`; these cases are
 # the assertions over the real tree. The defect they exist for is not a typo: a sentence that
 # presents the memory-quality operation as a developer-request-only diagnostic, or as something a
-# named scoped check may stand in for, tells a curator seat that complete curation is somebody
-# else's decision. No per-file case can see it, because every individual sentence is plausible
-# alone -- what has to hold is the agreement of the whole shipped corpus with the rule.
+# named scoped check may stand in for, is still rejected. Ordinary compact curation remains scoped
+# to task requirements; a full memory-quality run is required only when the task or owner asks for it.
 #
 # The loop-gate registry is the same shape of defect in a different material: the memory-quality
 # result publishes the raw checklist status as `qualityChecklistStatus` and the combined status as
@@ -703,14 +674,14 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 # carries the rule at all, so a stale copy cannot ship.
 
 from agents_remember_test_support.testing.curation_doctrine import (
-    CURATION_COMPLETENESS_STATEMENTS,
+    CURATION_POLICY_STATEMENTS,
     CURATION_DOCTRINE_SURFACES,
     GENERATED_SKILL_COPIES,
     RETIRED_CURATION_STATEMENTS,
     RETIRED_LOOP_GATE_FIELD_PAIRING,
     doctrine_files,
     gates_the_retired_loop_gate_pairing,
-    missing_completeness_statements,
+    missing_curation_policy_statements,
     missing_loop_gate_statements,
     normalize_statement,
     retired_curation_findings,
@@ -719,8 +690,8 @@ from agents_remember_test_support.testing.curation_doctrine import (
 )
 
 
-class CurationIsCompleteOnEveryLeafTests:
-    """The shipped corpus states the rule, and no copy still ships a sentence that denied it."""
+class CurationPolicyTests:
+    """Compact curator instructions carry the scoped policy and no retired deferral wording."""
 
     def test_no_shipped_surface_still_carries_a_retired_curation_statement(self) -> None:
         findings = retired_curation_findings(REPOSITORY_ROOT)
@@ -742,8 +713,8 @@ class CurationIsCompleteOnEveryLeafTests:
         """A census that quietly examined nothing is the one way this check can lie."""
 
         canonical = doctrine_files(REPOSITORY_ROOT, "skills")
-        assert len(canonical) > len(CURATION_COMPLETENESS_STATEMENTS), (
-            "the canonical scan examined no more surfaces than the declared statements"
+        assert len(canonical) > len(CURATION_POLICY_STATEMENTS), (
+            "the retired-wording scan examined no more surfaces than the current policy set"
         )
         for copy_root in GENERATED_SKILL_COPIES:
             assert doctrine_files(REPOSITORY_ROOT, copy_root), f"{copy_root} produced no surfaces"
@@ -759,9 +730,9 @@ class CurationIsCompleteOnEveryLeafTests:
             + "\n  ".join(gate_documents)
         )
 
-    def test_every_canonical_source_states_the_complete_curation_rule(self) -> None:
+    def test_each_compact_curation_source_states_its_scoped_check_policy(self) -> None:
         missing: list[str] = []
-        for relative, statements in CURATION_COMPLETENESS_STATEMENTS.items():
+        for relative, statements in CURATION_POLICY_STATEMENTS.items():
             path = REPOSITORY_ROOT / relative
             assert path.is_file(), f"declared curation-doctrine source is missing: {relative}"
             reading = normalize_statement(path.read_text(encoding="utf-8"))
@@ -771,20 +742,20 @@ class CurationIsCompleteOnEveryLeafTests:
                 if normalize_statement(statement) not in reading
             )
         assert missing == [], (
-            "a canonical source that must state complete curation no longer does:\n  "
+            "a compact curation source is missing its current scoped-check policy:\n  "
             + "\n  ".join(missing)
         )
 
-    def test_every_generated_copy_carries_the_rule_its_canonical_original_states(self) -> None:
-        """A stale copy is a real defect: a seat on that harness reads the old sentence."""
+    def test_every_generated_copy_carries_the_policy_its_canonical_original_states(self) -> None:
+        """A stale copy is a real defect: a seat on that harness reads the old policy."""
 
         missing: list[str] = []
         for copy_root in GENERATED_SKILL_COPIES:
             root = REPOSITORY_ROOT / copy_root
             assert root.is_dir(), f"generated skill copy is missing: {copy_root}"
-            missing.extend(missing_completeness_statements(root, copy_root))
+            missing.extend(missing_curation_policy_statements(root, copy_root))
         assert missing == [], (
-            "generated skill copies do not carry the complete-curation rule:\n  "
+            "generated skill copies do not carry the scoped-curation policy:\n  "
             + "\n  ".join(missing)
         )
 
@@ -837,8 +808,8 @@ class CurationGuardTeethTests:
         shutil.copytree(SKILLS_ROOT, staged)
         seeded = staged / "l-01-agent-lifecycles" / "roles" / "curator.md"
         original = seeded.read_text(encoding="utf-8")
-        mutated = original.replace("qualityChecklistStatus", RETIRED_LOOP_GATE_FIELD_PAIRING, 1)
-        assert mutated != original, "seed site not found in the staged role file"
+        mutated = f"{original}\n\n{RETIRED_LOOP_GATE_FIELD_PAIRING}\n"
+        assert mutated != original
         # Both sides of the matcher, on two texts: the corrected carrier must not read as the
         # pairing while the one-token seed must, so the reader is not vacuously reporting.
         assert not gates_the_retired_loop_gate_pairing(original), (

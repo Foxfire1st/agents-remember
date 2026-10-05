@@ -94,7 +94,7 @@ KNOWN_ROLES = frozenset(
     }
 )
 KNOWN_ROLE_KNOB_FIELDS = frozenset(
-    {"harness", "model", "effort", "launchArgs", "promptKeywords", "sessionCommands"}
+    {"harness", "model", "effort", "serviceTier", "launchArgs", "promptKeywords", "sessionCommands"}
 )
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
@@ -202,6 +202,7 @@ class RoleKnobs:
     harness: str | None = None
     model: str | None = None
     effort: str | None = None
+    service_tier: str | None = None
     launch_args: tuple[str, ...] = ()
     prompt_keywords: tuple[str, ...] = ()
     session_commands: tuple[str, ...] = ()
@@ -314,6 +315,7 @@ class AgenticSettings:
             harness=override.harness or base.harness,
             model=override.model or base.model,
             effort=override.effort or base.effort,
+            service_tier=override.service_tier or base.service_tier,
             launch_args=override.launch_args or base.launch_args,
             prompt_keywords=override.prompt_keywords or base.prompt_keywords,
             session_commands=override.session_commands or base.session_commands,

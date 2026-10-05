@@ -26,7 +26,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 from starlette.responses import PlainTextResponse, Response
-from starlette.types import Receive, Scope, Send
+from starlette.routing import Match, Mount
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,45 @@ class MissingDashboardBundle:
         await response(scope, receive, send)
 
 
+class UnknownApiPathsAreNotFound:
+    """The static surface, behind one rule for the API's own path space.
+
+    The mount at ``/`` catches every path no route has. A path under ``/api/`` that no route has
+    is not an asset of the cockpit, so it is answered ``404`` whatever the method and whether or
+    not a bundle is built -- not with the static surface's ``405`` for a write, nor with its
+    missing-bundle notice for a read. An API path that was removed therefore reads as gone for
+    every method, without the application naming it.
+
+    A path a route does have, asked with a method that route does not serve, still reaches the
+    static surface, and its answer for that request is unchanged.
+    """
+
+    API_ROOT = "/api"
+
+    def __init__(self, static: ASGIApp, app: FastAPI) -> None:
+        self._static = static
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and self._is_unknown_api_path(scope):
+            raise HTTPException(status_code=404)
+        await self._static(scope, receive, send)
+
+    def _is_unknown_api_path(self, scope: Scope) -> bool:
+        path, root = scope["path"], scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root) :]
+        if path != self.API_ROOT and not path.startswith(self.API_ROOT + "/"):
+            return False
+        # The routes are read at the time of the request: the mount is registered last, and
+        # only another mount could catch the path the way this one did.
+        return all(
+            route.matches(scope)[0] is Match.NONE
+            for route in self._app.router.routes
+            if not isinstance(route, Mount)
+        )
+
+
 def _bundle_root() -> Traversable:
     """The one place the shipped-bundle path is spelled."""
     return resources.files("agents_remember").joinpath("package_data", "dashboard")
@@ -114,7 +154,9 @@ def mount_static(app: FastAPI) -> None:
 
     Registered after the ``/api`` routes so the greedy ``/`` mount only catches paths the
     API did not. A missing bundle is non-fatal -- the server starts, the API serves, and the
-    static surface reports what is missing instead of returning a bare 404.
+    static surface reports what is missing instead of returning a bare 404. Either surface sits
+    behind :class:`UnknownApiPathsAreNotFound`: a path under ``/api/`` that no route has is
+    answered ``404`` and never reaches it.
     """
     static_dir = dashboard_static_dir()
     if static_dir is None:
@@ -124,6 +166,12 @@ def mount_static(app: FastAPI) -> None:
             expected,
             BUILD_COMMAND,
         )
-        app.mount("/", MissingDashboardBundle(expected), name="dashboard")
+        app.mount(
+            "/", UnknownApiPathsAreNotFound(MissingDashboardBundle(expected), app), name="dashboard"
+        )
         return
-    app.mount("/", DashboardStaticFiles(directory=static_dir, html=True), name="dashboard")
+    app.mount(
+        "/",
+        UnknownApiPathsAreNotFound(DashboardStaticFiles(directory=static_dir, html=True), app),
+        name="dashboard",
+    )

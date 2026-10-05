@@ -419,6 +419,13 @@ def _resolve_harness_dispatch(
     # rung, today's behavior); role/level settings are the sole spend source for ordinary spawns.
     role = (env or {}).get("AR_SPAWN_ROLE")
     knobs = settings.resolved_role_knobs(role, spawn_level) if role else RoleKnobs()
+    if knobs.service_tier is not None:
+        return None, spawn_refusal(
+            "launch-selection-invalid",
+            None,
+            "harness",
+            detail="Configured serviceTier requires the Paseo role launcher feature channel; terminal spawning cannot apply it.",
+        )
     model = knobs.model
     effort = knobs.effort
     launch_args = list(knobs.launch_args) if knobs.launch_args else None

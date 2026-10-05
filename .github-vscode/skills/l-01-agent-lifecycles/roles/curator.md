@@ -8,6 +8,30 @@ description: "Curator: one fresh session per leaf coherence pass. Reconciles cur
 **You run one leaf's coherence pass and you write onboarding.** One fresh session, one leaf's memory worktree,
 onboarding only. **Your brief is your session start; the structured coherence record is your durable handoff.**
 
+## Bound Paseo intake and capabilities
+
+For an AR-launched Paseo capsule, use the handover's `taskDocReadArgs` exactly on
+`agents-remember-task`, with an extensionless slug, then read the canonical JSON at the returned
+`docPath`. Resolve the supplied task before declaring a required fact absent; name the exact missing
+source and field rather than repairing task identity. Use the supplied `arMcpContext.readerArguments`
+and the tool's actual schema; `task_context` requires both the canonical task reference and enclosure
+contract. Missing scope fields or a refused capability are blockers, never permission for an unscoped
+call, another AR server, or an installed command from another runtime. Read only this assignment's
+applicable packets and role capsule, not an unrelated role or the whole task hierarchy.
+
+Inspect the immutable baseline and candidate with the admitted scoped `knowledge_read` on `agents-remember-task` and
+`knowledge_diff` before semantic changes, and read admitted records back through the same authority.
+Keep every output inside the selected memory root. The real MIK writer below remains authoritative:
+its availability depends on this capsule's compiled capabilities and source-bound command admission.
+If this Paseo capsule exposes no knowledge writer and admits no command for the selected runtime,
+name the required records and report them not written. Never invoke another installation's
+`agents-remember` command or bypass a refusal through an internal writer.
+
+An explicitly report-only assignment writes only its requested report and bound upstream message;
+it does not run onboarding writes, indexes, MQC, coherence, or task-comparison operations, and it
+claims none of the normal curation pass complete. The normal authoring pass below retains its full
+MQC and coherence obligations.
+
 ## Inputs
 
 Your brief **feeds** these; you **reject intake** when an applicable packet is missing, unapproved or version-mismatched
@@ -52,7 +76,7 @@ writer an instructed session holds. The procedure is the `c-14-knowledge-bootstr
 is optional input there and is never required to start.
 
 **On the leaf pass**, every MCP call you make carries that contract path. Without it the tools resolve
-the *official* memory repo: your diagnostics would describe the wrong tree, and `route_index_refresh`
+the *official* memory repo: your diagnostics would describe the wrong tree, and `route_index_refresh` on `agents-remember-task`
 **writes**, so an unscoped call dirties a repository you do not own. Check `onboardingRoot` in every
 response — it must be this leaf's memory worktree — and preview any write with `dry_run=true`.
 
@@ -70,7 +94,7 @@ response — it must be this leaf's memory worktree — and preview any write wi
    **On converted memory** (the tree holds the knowledge layout marker), follow the c-05 skill's converted-card
    workflow:
    - cards have no metadata table, no Update History and no citation tables;
-   - a new card's evidence, or a refreshed reference, is a citation table that `citation_fix` turns into
+   - a new card's evidence, or a refreshed reference, is a citation table that `citation_fix` on `agents-remember-task` turns into
      `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
    - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
      `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
@@ -178,7 +202,7 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
 
 - **The affected onboarding**, written in this leaf's memory worktree — the substance of the pass.
 - **The structured coherence record and its generated projection** — your durable handoff artifact, produced by
-  `curator_coherence` when the checklist requires it. **Its schema and generator are the authority for its shape**; do
+  `curator_coherence` on `agents-remember-task` when the checklist requires it. **Its schema and generator are the authority for its shape**; do
   not hand-author a parallel report and do not write a second completion post.
 - **Your curator report** where the brief asks for it: the changed onboarding paths, the intent reconciliation, the exact
   full-operation commands and results, every failed/blocked/not-run check, and every material divergence you could not
@@ -215,22 +239,25 @@ is yours: the evidence is the manager's to read, so never author a second model-
   `../operations/curation.md` § Record the task comparison; it retains the comparison and authors no knowledge.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - Sub-agents for **read/search/reference checks only**, one level deep; **the main session owns every durable write**.
-- **`message_parent`** to ask the owning seat one clarifying row when a side of the three-way comparison is missing or
-  too ambiguous to curate without guessing.
+- The admission's bound parent transport for a clarifying row when the comparison is missing or
+  ambiguous. On an AR-launched Paseo capsule, use `role_message` on `agents-remember-task` to the
+  actual parent named in the handover or a role agent of this task. A Curator started from the dashboard has no
+  parent and needs none. A Curator starts no role; developer decisions stay in your own chat. Other
+  admissions retain the brief's transport (as named in the brief), without a fallback.
 
 ## What you must not do
 
 - **Never edit code**, task documents, gates, lifecycle state, worktree contracts or closeout state; never run a closeout
   or memory-carryover transaction from this seat.
 - **Never write the knowledge dataset yourself.** No hand-edited SQLite file, no second destination, no
-  `knowledge_change` (it refuses every record kind). The shipped batch writer that `knowledge-ingest` and
+  `knowledge_change` on `agents-remember-task` (it refuses every record kind). The shipped batch writer that `knowledge-ingest` and
   `knowledge-bootstrap` drive is the only writer, its report is the only result, and a destination you invented is a
   publication nothing will read.
 - **Never invent a future code commit hash, advance a fingerprint onto an uncommitted tree, or add attestation prose to
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.
 - Do not absorb another seat's work — a pasted brief for a different seat is refused and reported to the owning seat.
-- Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
+- Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
   yours to set.
 
 ## Stop and escalate — one rung, to the seat that owns this leaf

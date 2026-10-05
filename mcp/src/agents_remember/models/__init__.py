@@ -53,6 +53,7 @@ from agents_remember.models.providers import (
 )
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.models.tokens import (
     DEFAULT_TOKEN_COUNTER,
     ApproximateTokenCounter,
@@ -141,6 +142,7 @@ __all__ = [
     "ServerInfoResponse",
     "SkillsInstallResponse",
     "StrictResponseModel",
+    "TaskScopedReaderContext",
     "TiktokenTokenCounter",
     "ToolResponse",
     "Transport",

@@ -51,6 +51,27 @@ rejected or worker-blocked requirement is a contradiction/blocker to report, nev
 intent to write. Atomic child leaves have no leaf route-review record; when review is requested,
 their accumulated change is reviewed on the canonical master at master-to-parent integration.
 
+## Bound Paseo intake and capabilities
+
+For an AR-launched Paseo capsule, read the supplied task with its exact `taskDocReadArgs` on
+`agents-remember-task` (extensionless slug), then read the canonical JSON at the returned `docPath`.
+Use the handover's `arMcpContext.readerArguments` and the actual tool schemas; `task_context` carries
+both the canonical task reference and enclosure contract. Missing scope fields and refused
+capabilities are blockers, not permission to use another AR server or an unscoped command. Read the
+assignment's applicable task packets, not an unrelated role or the complete hierarchy by default.
+
+Read the immutable baseline and candidate through admitted scoped `knowledge_read` on `agents-remember-task`/`knowledge_diff`
+before semantic changes, preserve the baseline, and read admitted records back under that authority.
+The MIK writer below remains the owner. Use only the source-bound command admitted for the selected
+runtime; if this compiled Paseo capsule exposes no writer and admits no such command, report the
+required records not written. That limitation belongs to this capsule, not MIK generally. Never use
+another installation's command or an internal writer to bypass the refusal. Verify every output
+resolves inside the selected memory root.
+
+An explicit report-only assignment delivers only its requested report and bound upstream message,
+without onboarding writes, MQC, coherence, indexes, or comparison production. It does not claim the
+normal authoring pass complete; that pass retains all the full-operation obligations below.
+
 ## Normal workflow
 
 1. **Reconcile three ways.** The pass succeeds only when these three bodies agree, or every material
@@ -83,6 +104,13 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    independent read found (`confirmed` / `mismatch` / `unavailable`), and a refused publication established nothing.
    A partial hand-off therefore stays partial and visible; it is never rounded up to "the batch went through". Carry
    the confirmed published identity into the handoff, because it is what the next task's planner reads.
+   **On converted MIK memory, the same admitted command is the file writer:**
+   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list>
+   --authorization-ref <ref> --commit --json`. It writes the selected memory worktree and publishes no
+   dataset; `--baseline`, `--publish` and `--publish-to` are refused there. Its `entries`, `records`
+   and `history` sections and report follow `../templates/curator-handoff-list.md` (MIK-R12), including
+   worklist history, onboarding traces and governing decision records (MIK-R13). Use that converted
+   contract rather than dataset publication flags, and read its per-entry results back.
 4. **Examine family coverage and author it as part of the same list.** For every scoped obligation, decide whether
    the evidence and the project's intent justify a joint obligation with others. Where they do, author the `family`
    key `../templates/curator-handoff-list.md` states: the family identity (reusing a stored `family_id` where the
@@ -116,7 +144,7 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    - entity catalog → only for real load-bearing entity changes;
    - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
      resort only**, never the default drop point for an inconvenient finding;
-   - generated route indexes → regenerate with `route_index_refresh` scoped to this leaf.
+   - generated route indexes → regenerate with `route_index_refresh` on `agents-remember-task` scoped to this leaf.
 6. **Reject overview-dumping and task-log-dumping.** Preserve a truth when it is important to future
    correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
    facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
@@ -143,8 +171,9 @@ producer with the MCP authority settings and this leaf's enclosure contract:
 agents-remember review-record-comparison --config <MCP authority settings> --contract <leaf enclosure contract> --json
 ```
 
-Use the non-editable installed package, just as for `knowledge-ingest`; unpublished checkout code
-must not write to the live coordination root. The command delegates to the existing comparison
+Use the non-editable source-bound package admitted for this selected runtime, just as for
+`knowledge-ingest`; another installation and unpublished checkout code must not write to the live
+coordination root. A capsule without this producer reports the exact capability gap. The command delegates to the existing comparison
 freeze owner. Read the report's `state`, generation identity and refusal, not just the exit status.
 Read whether the producer wrote or reused a record and carry its exact generation identity;
 prior immutable generations remain available when a successor is recorded.
@@ -226,7 +255,7 @@ and names the areas it did not reach; it never claims the foundation complete fo
   `agents-remember knowledge-ingest` on the leaf entry and the taskless
   `agents-remember knowledge-bootstrap` on the repository-foundation entry; it never writes the
   dataset itself, never edits SQLite, never
-  selects a destination of its own, and never treats the mounted `knowledge_change` tool as a write
+  selects a destination of its own, and never treats the mounted `knowledge_change` on `agents-remember-task` tool as a write
   route — it refuses every record kind and only names the real entry point. `--commit` stays the
   knowledge-batch write word: it is not a Git action and not an acceptance, and a zero exit is not
   proof that every entry committed or that anything was published. The report's per-entry outcomes,
@@ -271,6 +300,11 @@ and names the areas it did not reach; it never claims the foundation complete fo
   convert a subset result into a full-quality claim.
 
 ## Handoff / exit
+
+On an AR-launched Paseo capsule, return with bound `role_message` on `agents-remember-task` to the
+actual parent named in the handover or a role agent of this task; a dashboard launch may have no
+parent and needs none. A Curator starts no role. Developer decisions stay in your own chat. Other
+admissions keep their brief's transport, without a fallback between transports.
 
 The curator's exit returns to the owning manager: the changed onboarding paths, the intent
 reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.

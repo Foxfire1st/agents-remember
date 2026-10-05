@@ -78,6 +78,7 @@ from .providers import (
     provider_watchers_payload,
 )
 from .read_files import read_ar_files_payload
+from .role_agents import role_message_payload, role_start_payload
 from .structural_agent import (
     dispatch_agent_payload,
     message_child_payload,
@@ -174,6 +175,8 @@ __all__ = [
     "rename_self_payload",
     "resolve_context_payload",
     "retire_child_payload",
+    "role_message_payload",
+    "role_start_payload",
     "route_index_refresh_payload",
     "runtime_install_payload",
     "server_info_payload",

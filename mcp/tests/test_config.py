@@ -9,10 +9,15 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    PaseoRuntimeNotConfigured,
+    require_paseo_runtime,
+)
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     load_config,
+    load_paseo_runtime_settings,
 )
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_worktree_support import init_repo
@@ -44,6 +49,149 @@ def settings_payload(root: Path) -> dict:
 
 
 class McpConfigTests(unittest.TestCase):
+    def test_optional_paseo_runtime_block_is_exact_and_fail_loud(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            path = root / "mcp-settings.json"
+            payload = settings_payload(root)
+
+            write_json(path, payload)
+            self.assertIsNone(load_config(path).paseo_runtime)
+            self.assertIsNone(load_paseo_runtime_settings(path))
+            with self.assertRaisesRegex(PaseoRuntimeNotConfigured, "^no Paseo runtime configured"):
+                require_paseo_runtime(None, source=path)
+
+            block = {
+                "installPrefix": (root / "paseo").as_posix(),
+                "home": (root / "paseo-home").as_posix(),
+                "listen": "127.0.0.1:6820",
+                "version": "0.11.0-beta.2",
+                "providers": {"hermes": {"extends": "acp", "command": ["hermes", "acp"]}},
+                "embed": [
+                    {
+                        "dashboardOrigin": "http://127.0.0.1:9797",
+                        "frameBaseUrl": "http://127.0.0.1:6820",
+                    },
+                    {
+                        "dashboardOrigin": "https://fox.example.ts.net",
+                        "frameBaseUrl": "https://fox.example.ts.net:8443",
+                    },
+                ],
+            }
+            payload["paseoRuntime"] = block
+            write_json(path, payload)
+            configured = load_config(path).paseo_runtime
+            assert configured is not None
+            self.assertEqual(configured, load_paseo_runtime_settings(path))
+            self.assertEqual(configured.install_prefix, root / "paseo")
+            self.assertEqual(configured.home, root / "paseo-home")
+            self.assertEqual((configured.listen_host, configured.listen_port), ("127.0.0.1", 6820))
+            self.assertEqual(configured.version, "0.11.0-beta.2")
+            self.assertEqual(configured.providers, block["providers"])
+            self.assertEqual(configured.embed_payload(), block["embed"])
+            self.assertEqual(require_paseo_runtime(configured, source=path), configured)
+
+            # The spellings a browser itself reports are kept as written.
+            canonical = [
+                {"dashboardOrigin": origin, "frameBaseUrl": "http://127.0.0.1:6820"}
+                for origin in (
+                    "http://127.0.0.1:9797",
+                    "http://localhost:9797",
+                    "http://[::1]:9797",
+                    "http://[::ffff:7f00:1]:9797",
+                    "http://[2001:db8::1:0:0:1]",
+                    "https://xn--bcher-kva.example",
+                )
+            ]
+            payload["paseoRuntime"] = {**block, "embed": canonical}
+            write_json(path, payload)
+            kept = require_paseo_runtime(load_config(path).paseo_runtime, source=path)
+            self.assertEqual(kept.embed_payload(), canonical)
+
+            payload["paseoRuntime"] = {**block, "providers": {}, "embed": []}
+            write_json(path, payload)
+            self.assertEqual(load_paseo_runtime_settings(path), load_config(path).paseo_runtime)
+            self.assertEqual(
+                require_paseo_runtime(load_config(path).paseo_runtime, source=path).embed, ()
+            )
+
+            origin = {"dashboardOrigin": "http://127.0.0.1:9797"}
+            invalid: list[tuple[dict, str]] = [
+                ({key: value for key, value in block.items() if key != fact}, f"must define {fact}")
+                for fact in block
+            ] + [
+                ({**block, "password": "x"}, "unsupported paseoRuntime setting"),
+                ({**block, "home": "relative/home"}, "must be an absolute path"),
+                ({**block, "listen": "127.0.0.1"}, "host:port"),
+                ({**block, "listen": "127.0.0.1:0"}, "host:port"),
+                ({**block, "providers": {"hermes": "hermes acp"}}, "provider id to an object"),
+                ({**block, "embed": {}}, "embed must be a list"),
+                ({**block, "embed": [origin]}, "exactly dashboardOrigin and frameBaseUrl"),
+                (
+                    {**block, "embed": [{**origin, "frameBaseUrl": "http://u:p@127.0.0.1:6820"}]},
+                    "frameBaseUrl must be",
+                ),
+                (
+                    {
+                        **block,
+                        "embed": [
+                            {
+                                "dashboardOrigin": "http://127.0.0.1:9797/",
+                                "frameBaseUrl": "http://127.0.0.1:6820",
+                            }
+                        ],
+                    },
+                    "dashboardOrigin must be",
+                ),
+                ({**block, "embed": [block["embed"][0]] * 2}, "more than once"),
+            ]
+            invalid += [
+                ({**block, "version": version}, "one exact Paseo version")
+                for version in (
+                    "^0.11.0-beta.2",
+                    "~0.11.0",
+                    ">=0.11.0",
+                    "0.11",
+                    "0.11.x",
+                    "beta",
+                    "0.11.0 || 0.12.0",
+                    "0.11.0 - 0.12.0",
+                    "0.11.0-beta.2+build",
+                    "v0.11.0-beta.2",
+                    " 0.11.0-beta.2 ",
+                )
+            ]
+            # A dashboard origin must be spelled the way a browser reports it.
+            invalid += [
+                (
+                    {**block, "embed": [{**block["embed"][0], "dashboardOrigin": spelling}]},
+                    "exactly as a browser reports it",
+                )
+                for spelling in (
+                    "HTTP://127.0.0.1:9797",
+                    "http://LocalHost:9797",
+                    "http://localhost:80",
+                    "https://fox.example.ts.net:443",
+                    "http://b\u00fccher.example",
+                    "http://[0:0:0:0:0:0:0:1]:9797",
+                    "http://[::ffff:127.0.0.1]:9797",
+                    "http://[::A]:9797",
+                    "http://[fe80::1%25eth0]:9797",
+                    "http://127.1:9797",
+                    "http://0x7f.0.0.1:9797",
+                    "http://2130706433:9797",
+                    "http://127.0.0.01:9797",
+                    "http://a%41:9797",
+                    "http://a b:9797",
+                    "http://ex_ample:9797",
+                )
+            ]
+            for candidate, message in invalid:
+                payload["paseoRuntime"] = candidate
+                write_json(path, payload)
+                with self.subTest(message=message), self.assertRaisesRegex(ConfigError, message):
+                    load_config(path)
+
     def test_two_repository_ids_cannot_share_one_git_common_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

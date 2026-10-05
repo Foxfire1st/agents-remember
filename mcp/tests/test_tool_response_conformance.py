@@ -110,7 +110,8 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 96 call sites name 89 ids at the merged base: some tools have
+    adapter surface it describes. 98 call sites name 91 ids on the PNT line (96 and 89 at the
+    master's merged base, before the role tools): some tools have
     two entry points (``operator_inbox_post_payload`` and
     ``registered_operator_inbox_post_payload``), and the five ``knowledge_*`` builders route
     through the choke point as of ``260918-TSIP-L10`` -- before that they returned a raw dict,
@@ -219,14 +220,22 @@ def advertised_tool_names() -> set[str]:
 # one edit here -- and it is asserted ALONGSIDE the live-surface equality below, never instead
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
-ROSTER_SIZE = 72
+#
+# 74 on the PNT line: the ONT line registered its role-preparation tool without this edit (73
+# against the 72 written here, so this case failed on that base), and PNT-R06 removes that tool
+# and adds `role_start` and `role_message`.
+ROSTER_SIZE = 74
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
-TOOL_MODULE_COUNT = 20
-TOOL_HANDLER_COUNT = 96
+#
+# 21 modules and 98 handlers on the PNT line: the ONT line added one module with one handler
+# (its role-preparation tool) without this edit; PNT-R06 replaces it with `role_agents.py`, whose
+# two handlers are `role_start_payload` and `role_message_payload`.
+TOOL_MODULE_COUNT = 21
+TOOL_HANDLER_COUNT = 98
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -470,8 +479,8 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 20 modules hold 96 handlers and 96 call sites at the merged base -- the same
-        96 the registration census reports, so the two readings cannot drift apart -- and the
+        handlers. 21 modules hold 98 handlers and 98 call sites on the PNT line (20, 96 and 96
+        at the master's merged base) -- the same count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring
         nothing. This is the case the five ``knowledge_*`` builders failed before
@@ -516,7 +525,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             )
         self.assertEqual(TOOL_HANDLER_COUNT, handlers, "the tool-handler population changed")
         # Derived, not transcribed: the walk above and the id-literal census read the same
-        # 96 call sites from the same modules by two different routes.
+        # call sites from the same modules by two different routes.
         self.assertEqual(
             sum(len(sites) for sites in adapter_tool_ids().values()),
             call_sites_total,

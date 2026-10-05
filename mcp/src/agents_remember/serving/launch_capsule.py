@@ -96,6 +96,13 @@ class LaunchCapsuleRequest:
     The carrier is per-harness — Codex's instruction field, eve's launch environment — so the
     resolver is told which one it is supplying and compiles once, for that carrier.
     """
+    allow_project_task_binding: bool = False
+    """Explicitly allow a sprint/master task binding at the configured Projects workspace.
+
+    The role-aware project launcher uses this only for orchestrator/manager launches when no task
+    enclosure exists. The canonical task remains admitted; no taskless identity or fake worktree is
+    created. Leaf roles and all other launch points leave it disabled.
+    """
 
     @property
     def is_role_configured(self) -> bool:

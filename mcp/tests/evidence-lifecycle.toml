@@ -80,6 +80,20 @@ evidence_node = "mcp/tests/test_migration_census.py::test_the_seed_writes_every_
 id = "tool-refusal-census-cases"
 owner = "mcp/tests/tool_refusal_census_support.py"
 evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
+[[contract]]
+id = "paseo-runtime-command-cases"
+owner = "mcp/tests/paseo_runtime_test_support.py"
+evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
+
+[[contract]]
+id = "paseo-launch-given-to-agent-cases"
+owner = "mcp/tests/paseo_launch_test_support.py"
+evidence_node = "mcp/tests/test_paseo_launch.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+
+[[contract]]
+id = "pnt-sandbox-process-cases"
+owner = "mcp/tests/pnt_sandbox_test_support.py"
+evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
 [[artifact]]
 path = "mcp/tests/_control_plane.py"
 kind = "shared-support"
@@ -458,6 +472,9 @@ consumers = [
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_worktree_start_preview.py",
+  "mcp/tests/test_role_handover_binding.py",
+  "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_route_index_memory_scope.py",
 ]
 
 [[artifact]]
@@ -687,6 +704,7 @@ permanence_rationale = "The lockfile freezes the portable Node fixture runtime i
 replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_distinct_fixture_adapters_and_decoders_complete_the_declared_protocol"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_active_projector_singleflight.py",
   "mcp/tests/test_agent_notifier_seat.py",
@@ -840,6 +858,22 @@ consumers = [
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_worktree_start_preview.py",
+  "mcp/tests/test_leaf_enclosure_start.py",
+  "mcp/tests/test_paseo_agent_tools.py",
+  "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_frame.py",
+  "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_messages.py",
+  "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_runtime.py",
+  "mcp/tests/test_paseo_status.py",
+  "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_role_handover_binding.py",
+  "mcp/tests/test_role_instruction_wording.py",
+  "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_task_scoped_mcp.py",
 ]
 
 [[artifact]]
@@ -2096,4 +2130,64 @@ consumers = [
   "mcp/tests/test_knowledge_file_formats.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+]
+[[artifact]]
+path = "mcp/tests/paseo_runtime_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "paseo-runtime-command-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "a hand-written stand-in for the npm and Paseo command lines of the pinned runtime (0.11.0-beta.2): `FakePaseo` keeps the daemon configuration in the home's real config.json and models what a running daemon holds, and the settings, plugin and file-state helpers build the fixtures of the runtime cases"
+introduced_by = "261001-PNT-L1"
+lifetime = "permanent"
+permanence_rationale = "The provision, status and stop commands are judged by what a running daemon holds after them, not by the files they wrote: a start-only setting applies at a start, a live one at a reload, a plugin's files when it is loaded. The stand-in keeps exactly that state, so a case can tell a converged runtime from files that merely look right; no real daemon can be started in the unit lane. It is a module of its own because the runtime test module would exceed the file-size limit with it."
+replacement_contract = "contract:paseo-runtime-command-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_paseo_runtime.py",
+]
+
+[[artifact]]
+path = "mcp/tests/paseo_launch_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "paseo-launch-given-to-agent-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the expectations of what one launch gives its agent, derived in the test from the launch fixture alone: the handover artifact and the first message that names it, the tool-server definition with its binding variables, and the recovery note"
+introduced_by = "261001-PNT-L5"
+lifetime = "permanent"
+permanence_rationale = "What a launch gives an agent is asserted for every role class through the dispatch route, and each expectation is built from the fixture independently of the launch code, so that a change to that code cannot move both sides at once. It is a module of its own because the launch test module would exceed the file-size limit with it; the modules that build on the launch fixture inherit it from there."
+replacement_contract = "contract:paseo-launch-given-to-agent-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_paseo_agent_tools.py",
+  "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_messages.py",
+  "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_status.py",
+  "mcp/tests/test_previous_host_removed.py",
+]
+
+[[artifact]]
+path = "mcp/tests/pnt_sandbox_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "pnt-sandbox-process-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the sandbox tooling under scripts/pnt_sandbox, imported once for both test modules, with a sandbox directory per case and an Operations stand-in whose dashboard, supervisor and listener are real child processes read from the real /proc"
+introduced_by = "261001-PNT-L2"
+lifetime = "permanent"
+permanence_rationale = "The tooling's refusals and its stop depend on who holds a port, on a process's identity, environment and working directory, and on what a signal leaves behind; those are facts of real processes, so the stand-in starts real children and replaces only what would run the build, npm or Paseo. It is shared because the safety-check module and the process module use the same directory fixture, child processes and stand-in, and because the tooling package may be put on the import path by one module only."
+replacement_contract = "contract:pnt-sandbox-process-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_pnt_sandbox.py",
+  "mcp/tests/test_pnt_sandbox_processes.py",
 ]

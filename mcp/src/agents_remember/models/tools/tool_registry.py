@@ -74,6 +74,7 @@ from agents_remember.models.providers import (
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
+from agents_remember.models.role_agents import RoleMessageResponse, RoleStartResponse
 from agents_remember.models.role_capsule_resources import (
     RoleCapsuleResponse,
     SkillCatalogListResponse,
@@ -245,6 +246,8 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "role_capsule_compile": RoleCapsuleResponse,
     "skill_catalog_list": SkillCatalogListResponse,
     "skill_catalog_read": SkillCatalogReadResponse,
+    "role_start": RoleStartResponse,
+    "role_message": RoleMessageResponse,
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_change": KnowledgeChangeResponse,
     "knowledge_diff": KnowledgeDiffResponse,

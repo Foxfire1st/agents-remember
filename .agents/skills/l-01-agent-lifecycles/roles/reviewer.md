@@ -9,6 +9,22 @@ description: "Adversarial reviewer: one seam or loop round, refute-or-confirm ag
 refute or confirm against the catalogs your brief binds, write the verdict, end. **Your brief is your session start;
 the verdict artifact is your durable handoff.**
 
+## Bound Paseo intake and transport
+
+Review only on the owner's explicit assignment. On an AR-launched Paseo capsule, read the supplied
+task with its exact `taskDocReadArgs` on `agents-remember-task` (extensionless slug), then read the
+canonical JSON at the returned `docPath`. Use `arMcpContext.readerArguments` and the actual schemas;
+`task_context` requires both the canonical task reference and enclosure contract. Missing fields or a
+refused capability are reported gaps, never a reason to use another AR server or unscoped retrieval.
+Read the task documents required by the assigned seam, not unrelated role files or an unrequested
+whole hierarchy. Write only the supplied task-local report artifacts and verify their containment.
+
+For clarification on this admission, use bound `role_message` on `agents-remember-task`, addressed
+to the actual parent agent named in the handover or a role agent of this task. A Reviewer started from the
+dashboard has no parent and needs none. A Reviewer starts no role. Questions requiring the
+developer's decision stay in your own chat. Other admissions retain their brief's transport; this is
+not a fallback between transports.
+
 ## Inputs
 
 You must be given all of these; a brief missing one is refused and reported, never repaired by guessing.
@@ -47,7 +63,11 @@ You must be given all of these; a brief missing one is refused and reported, nev
 
 ## Process
 
-1. **Orient and scope.** The candidate (proposed final candidate for organizational masters; the isolated branch diff
+1. **Orient and scope.** Inspect every changed file in the complete candidate diff, including files
+   without invariant attribution. For knowledge changes, inspect the before/after candidate, family
+   interactions and unchanged sibling realizations; that mapping adds a dimension, not a filter.
+   Preserve supplied Curator hand-off producer fields unchanged for co-resolution.
+   Bind the candidate (proposed final candidate for organizational masters; isolated branch diff
    for atomic masters), the task documents, and the seam's rubric.
 2. **Confirm the mode and the claimed scope before inspecting anything.**
 3. **Baseline — partition by material major route.** Name one independent reviewer per affected major route through
@@ -60,7 +80,7 @@ You must be given all of these; a brief missing one is refused and reported, nev
    operation-level proof, a persisted shape needs the parsed artifact, doctrine needs the file and mechanism that
    enforces the rule. Evidence of the wrong class is a finding, never a pass.
    In scope: the worker's targeted checks and regressions against the past for the requested scope. Full suites and
-   `drift_check` run only on an explicit developer request. **Curation is the exception**: the curator always runs the
+   `drift_check` on `agents-remember-task` run only on an explicit developer request. **The normal curation authoring pass is the exception**: the curator always runs the
    complete `memory_quality_check`, and a subset result never stands in for it — a curator-actionable finding neither
    repaired nor escalated as blocked is a block.
 5. **Baseline — seal it**: stable issue IDs, precise problem statements, evidence, and observable fix-acceptance
@@ -138,7 +158,8 @@ existing worker and creates no new fix leaf. Integration branches are not repair
 - **Read-only retrieval:** `read_ar_files` · `grepai_search` · `cgc_*` · scoped `system/tools.md` checks · report
   templates · the full `memory_quality_check` curation evidence, because a subset result never stands in for the
   complete operation the curator ran · `drift_check` when requested.
-- `message_parent` for missing review context or a blocking routing problem.
+- The admission's bound parent transport for missing review context or a blocking routing problem
+  (`role_message` on `agents-remember-task` for the Paseo capsule above; the parent transport named in the brief).
 
 ## What you must not do
 
@@ -149,13 +170,14 @@ existing worker and creates no new fix leaf. Integration branches are not repair
 - Do not record the review yourself: `task_doc(operation="begin_review")` precedes hosted reviewer dispatch or native
   reviewer work, and `record_review` / `record_route_review` are the **owner's** act once every required report exists.
   The task document is the review authority — a chat claim or an unbound evidence reference does not satisfy a review.
-- Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
+- Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
   yours to set.
 
 ## Stop and escalate — you do not escalate, you report
 
 An un-reviewable change set (missing diff, missing task documents) is itself a **blocking finding in the verdict**,
-routed to the decider. Reach for `message_parent` only when the review context itself is missing or routing is blocked.
+routed to the decider. Use the admission's bound parent transport only when the review context itself is missing or
+routing is blocked.
 
 - **Protocol refusals:** a whole-review request in fix-verification; an omitted, unknown, duplicate, rewritten,
   reintroduced or newly discovered ID; a new criterion under an old ID; a pass with unresolved IDs; an outside-list

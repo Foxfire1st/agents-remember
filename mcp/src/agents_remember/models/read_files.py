@@ -5,7 +5,8 @@ of repo-relative paths inside an AR-managed repo. Per-file ``status`` is the
 onboarding-lookup outcome (``found | missing | disabled | unsupported |
 not_requested``); ``source`` is independent of status (present whenever the
 source file exists and decodes as UTF-8 text). The packet also auto-attaches the
-repo overview and the governing route-overview chain, deduplicated per lifecycle.
+repo overview and the governing route-overview chain, deduplicated per lifecycle
+and code/onboarding root.
 
 Token fields are stamped by ``finalize_payload_tokens`` at the ``_tool_payload``
 choke point -- this module never sets them.
@@ -57,8 +58,8 @@ class ReadArFilesResponse(ToolResponse):
     """``read_ar_files``: paired source+onboarding reads + auto-attached overviews.
 
     ``repository_overview`` and ``route_overviews`` are the session-deduplicated
-    front-door: each is served once per lifecycle, or again when its content
-    changed; both are omitted when already served unchanged (or when
+    front-door: each is served once per lifecycle and code/onboarding root, or
+    again when its content changed; both are omitted when already served unchanged (or when
     ``onboarding`` was suppressed for every file).
 
     ``published_intent`` is the repository's published intent, read through the

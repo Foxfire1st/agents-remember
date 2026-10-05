@@ -1,15 +1,9 @@
-"""The retired optional-curation doctrine, as a census a test can read.
+"""Curation instruction regressions and the current native-capsule policy.
 
-A shipped instruction sentence is product: a spawned curator reads its brief literally, so a
-sentence presenting the memory-quality operation as a developer-request-only diagnostic, or as
-something a named scoped check may stand in for, tells that seat complete curation is somebody
-else's decision. No per-file case can catch that defect, because each individual sentence is
-plausible alone -- what has to hold is the agreement of the shipped corpus with the rule.
-
-This module owns the reading half of that check and nothing else: the registry of retired
-sentences with the surface each lived on, the exact statement every canonical source that must
-state the rule states it in, and the readers a test calls. It is deliberately free of pytest and
-of any repository constant so a case can point it at a staged or synthetic tree; the caller
+This module guards exact retired wording and verifies the compact curation surfaces state their
+MIK normal-authoring contract: complete memory quality and required coherence. A report-only
+admission remains bounded and claims none of that normal authoring pass complete. It is deliberately free of
+pytest and repository constants so a case can point it at a staged or synthetic tree; the caller
 supplies the repository root.
 
 Matching is on a normalized reading -- markdown emphasis stripped, line wrapping collapsed -- and
@@ -18,9 +12,9 @@ different column is still the same statement, while doctrine that legitimately s
 explicit developer request still governs full code quality and full tests) cannot read as a
 regression. A statement is reported only on the files that shipped it.
 
-This is not a semantic check. A corpus that denied the rule in fresh vocabulary this registry has
-never seen would pass; what it buys is that the exact retired sentences cannot come back, and
-that the shipped corpus keeps the sentence stating the rule.
+The retired-wording scan is not a semantic check. A corpus that denied the rule in fresh vocabulary
+this registry has never seen would pass; the positive checks cover the exact compact sources whose
+scope is part of the native capsule contract.
 
 A second, independent registry covers the loop gate's **field names**, which are facts about the
 shipped tool rather than matters of doctrine. The memory-quality result publishes the raw checklist
@@ -40,9 +34,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-#: The one sentence every canonical surface that must state the rule carries in some phrasing.
-#: A row of :data:`CURATION_COMPLETENESS_STATEMENTS` is the exact form that surface uses.
-COMPLETE_CURATION_RULE = "Curation is always complete"
+#: The normal MIK curation pass remains complete on both canonical surfaces.
+COMPLETE_CURATION_RULE = (
+    "Curation is always complete: a named scoped check never stands in for the full operation"
+)
 
 #: The nine generated skill copies ``scripts/sync-skills.py`` owns, relative to the repository
 #: root. A stale copy is a real defect: a seat on that harness reads the old sentence.
@@ -211,6 +206,19 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
             "rather than the pass it verifies"
         ),
     ),
+    RetiredCurationStatement(
+        statement=(
+            "Run the scoped checks required by the task. Run the full `memory_quality_check` "
+            "operation only when the task or owner explicitly requests it; when requested, "
+            "do not substitute a narrower check."
+        ),
+        sources=(
+            "skills/l-01-agent-lifecycles/operations/curation.md",
+            "skills/l-01-agent-lifecycles/roles/curator.md",
+        ),
+        probe="operation only when the task or owner explicitly requests it",
+        reason="the prototype made the normal MIK authoring pass's complete operation optional",
+    ),
 )
 
 #: The loop-gate field pairing the shipped tool retired from its own instruction prose. The
@@ -246,55 +254,16 @@ LOOP_GATE_REASON = (
     f"with curatorActionableCount"
 )
 
-#: Every canonical source that must state the rule, and the exact form it states it in. A row
-#: exists because that sentence is the shipped answer to the retired wording in that file.
-CURATION_COMPLETENESS_STATEMENTS: dict[str, tuple[str, ...]] = {
-    "skills/c-02-memory-quality-control/SKILL.md": (COMPLETE_CURATION_RULE,),
-    "skills/c-05-create-or-update-onboarding-files/SKILL.md": (
-        "The curator's complete handoff enforces this",
-    ),
-    "skills/c-09-git-worktree-manager/SKILL.md": ("the curator's complete memory-quality result",),
-    "skills/c-12-closeout/SKILL.md": ("curation is already complete before it starts",),
-    "skills/c-13-install-and-onboard/SKILL.md": ("curation is always complete",),
-    "skills/l-01-agent-lifecycles/core/authority.md": ("Curation is never deferred that way",),
-    "skills/l-01-agent-lifecycles/operations/closeout.md": ("Curation is never deferred that way",),
+#: The compact native curation surfaces and their exact scoped-check contract.
+CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/operations/curation.md": (
-        f"{COMPLETE_CURATION_RULE}: a named scoped check never",
-        *LOOP_GATE_CORRECTED_FIELDS,
+        COMPLETE_CURATION_RULE,
+        "prepare → publish → validate",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
-        f"{COMPLETE_CURATION_RULE}: a named scoped check never",
-        "curatorActionableCount=0",
-        *LOOP_GATE_CORRECTED_FIELDS,
+        "Curation is always complete: a named scoped check never stands in for it",
+        "prepare → publish → validate",
     ),
-    "skills/l-01-agent-lifecycles/roles/manager.md": ("runs the brief's complete check set",),
-    "skills/l-01-agent-lifecycles/roles/orchestrator.md": (
-        "curator's complete memory-quality result travel with the edge",
-    ),
-    "skills/l-01-agent-lifecycles/roles/reviewer.md": (
-        "full `memory_quality_check` curation evidence",
-    ),
-    "skills/l-01-agent-lifecycles/roles/worker.md": ("curation is the one exception",),
-    "skills/l-01-agent-lifecycles/templates/curator-brief.md": (
-        f"{COMPLETE_CURATION_RULE}: run the full memory-quality operation",
-        *LOOP_GATE_CORRECTED_FIELDS,
-    ),
-    "skills/l-01-agent-lifecycles/templates/manager-brief.md": (
-        "Curation is never deferred that way",
-    ),
-    "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": (
-        "complete handoff reports",
-    ),
-    "skills/l-01-agent-lifecycles/templates/onboarding-coherency.md": (
-        "Checks — curation is complete",
-    ),
-    "skills/l-01-agent-lifecycles/templates/verdict.md": (
-        "full `memory_quality_check` curation result",
-    ),
-    "skills/l-01-agent-lifecycles/templates/worker-brief.md": (
-        "Curation is the exception: the curator always runs the full",
-    ),
-    "skills/w-02-light-task-workflow/master-template.md": (COMPLETE_CURATION_RULE,),
 }
 
 
@@ -382,7 +351,7 @@ def retired_loop_gate_findings(root: Path) -> list[str]:
 def missing_loop_gate_statements(root: Path) -> list[str]:
     """Every declared loop-gate document under ``root`` whose corrected field names are absent.
 
-    The positive half of the document census, mirroring :func:`missing_completeness_statements`:
+    The positive half of the document census, mirroring :func:`missing_curation_policy_statements`:
     membership in :data:`LOOP_GATE_DOCUMENTS` is a promise that the document states the corrected
     gate, so a document that loses a field name is reported here instead of quietly leaving the set.
     """
@@ -402,27 +371,24 @@ def missing_loop_gate_statements(root: Path) -> list[str]:
     return missing
 
 
-def missing_completeness_statements(root: Path, surface: str) -> list[str]:
-    """Every declared canonical source under ``root`` whose completeness statement is absent."""
+def missing_curation_policy_statements(root: Path, surface: str) -> list[str]:
+    """Every declared compact curation source under ``root`` missing its scoped-check rule."""
 
     missing: list[str] = []
-    for relative, statements in CURATION_COMPLETENESS_STATEMENTS.items():
+    for relative, statements in CURATION_POLICY_STATEMENTS.items():
         target = root / relative.removeprefix("skills/")
         if not target.is_file():
             missing.append(f"{surface}: {relative} is missing")
             continue
         reading = normalize_statement(target.read_text(encoding="utf-8"))
-        if normalize_statement(COMPLETE_CURATION_RULE) in reading or any(
-            normalize_statement(statement) in reading for statement in statements
-        ):
+        if any(normalize_statement(statement) in reading for statement in statements):
             continue
         missing.append(f"{surface}: {relative}")
     return missing
 
 
 __all__ = [
-    "COMPLETE_CURATION_RULE",
-    "CURATION_COMPLETENESS_STATEMENTS",
+    "CURATION_POLICY_STATEMENTS",
     "CURATION_DOCTRINE_SURFACES",
     "GENERATED_SKILL_COPIES",
     "LOOP_GATE_CORRECTED_FIELDS",
@@ -432,7 +398,7 @@ __all__ = [
     "RetiredCurationStatement",
     "doctrine_files",
     "gates_the_retired_loop_gate_pairing",
-    "missing_completeness_statements",
+    "missing_curation_policy_statements",
     "missing_loop_gate_statements",
     "normalize_statement",
     "retired_curation_findings",

@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
+from agents_remember.application.agent_binding import TOOL_SERVER_NAME, read_agent_binding
 from agents_remember.application.runtime import startup as server_startup
 
 # Application owns process trust and startup composition; transport only invokes it.
@@ -55,6 +56,29 @@ def _complete_fastmcp_settings() -> None:
     FastMCPSettings.model_rebuild(_types_namespace={"FastMCP": FastMCP})
 
 
+# What the tool server of a launched agent states about itself as its MCP instructions. A harness
+# may show the line beside the name under which it lists the server, which need not be spelled
+# as the agent's assignment spells it.
+LAUNCHED_SERVER_INSTRUCTIONS = (
+    f"This server is {TOOL_SERVER_NAME}: the Agents Remember tool server of the AR build that "
+    "launched this agent, and the one to use for this assignment."
+)
+
+
+def launched_server_instructions() -> str | None:
+    """The instructions of a server that a role launch started for one agent; otherwise none.
+
+    A binding that cannot be read states none either: the server starts as it did before, and a
+    ``server_info`` call says what is wrong with the binding.
+    """
+
+    try:
+        bound = read_agent_binding() is not None
+    except ValueError:
+        return None
+    return LAUNCHED_SERVER_INSTRUCTIONS if bound else None
+
+
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     bind_worktree_services(build_default_worktree_services())
@@ -62,7 +86,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # tags tool calls onto it once a lifecycle is started.
     server_startup.initialize_mcp_application(config)
     _complete_fastmcp_settings()
-    server = AgentsRememberMCP("Agents Remember")
+    server = AgentsRememberMCP("Agents Remember", instructions=launched_server_instructions())
     # The tool surface itself lives in `.registration`, one module per family; this loop is
     # the only place that decides which families a server advertises.
     for register_tools in TOOL_REGISTRARS:

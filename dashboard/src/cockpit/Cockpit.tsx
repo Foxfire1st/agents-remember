@@ -10,6 +10,7 @@ import {
 import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { RoleChatsPane } from "./RoleChats";
 import {
   preferLiveSession,
   startCatalogPollDriver,
@@ -50,13 +51,13 @@ import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { RailChat } from "../panels/RailChat";
 import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
-import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import { Topology } from "../panels/Topology";
-import type { EngineProcessNode, TaskDocNode } from "../types/projection";
+import type { EngineProcessNode, SeriesNode, TaskDocNode } from "../types/projection";
 
 // A stable empty array so the `analytics?.taskDocuments ?? …` selector never returns a fresh reference
 // (which would churn the zustand snapshot and re-render every tick).
 const EMPTY_TASK_DOCS: TaskDocNode[] = [];
+const EMPTY_SERIES: SeriesNode[] = [];
 const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell: persistent command chrome that never hides the alarms —
@@ -361,7 +362,7 @@ const RAIL_ENTER = { initial: { opacity: 0 }, animate: { opacity: 1 } };
 const RAIL_ENTER_STILL = {};
 const RAIL_TRANSITION = { duration: 0.18 };
 // Memoization contract (tab-switch CPU): every persistent layer below
-// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, SessionsView, RailChat,
+// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, RailChat,
 // the notes reader — is a React.memo component whose props are either state/store slices or
 // useCallback-stable. A view switch then re-renders ONLY the shell's own chrome (grid/display
 // flips + ModeBar) instead of reconciling the whole tree; the layers keep updating from their own
@@ -409,6 +410,7 @@ interface CockpitShellState {
   viewedLeafKey: string | undefined;
   viewedTask: ViewedTaskContext | undefined;
   taskDocuments: TaskDocNode[];
+  taskSeries: SeriesNode[];
   engineProcesses: EngineProcessNode[];
   contextMaster: string | undefined;
   fullBleed: boolean;
@@ -447,6 +449,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
   const viewedLeafKey = viewedTask?.leafKey;
   const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  const taskSeries = useDashboard((s) => s.analytics?.series ?? EMPTY_SERIES);
   const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
   const contextMaster = useDashboard((s) =>
     masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
@@ -472,6 +475,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     viewedLeafKey,
     viewedTask,
     taskDocuments,
+    taskSeries,
     engineProcesses,
     contextMaster,
     fullBleed,
@@ -754,10 +758,8 @@ function MainLayers({
   view,
   takeover,
   selectedId,
-  viewedLeafKey,
-  selectedLifecycleId,
   taskDocuments,
-  contextMaster,
+  taskSeries,
   onOpen,
   onOpenChangeSet,
   onOpenNotes,
@@ -766,10 +768,8 @@ function MainLayers({
   view: CockpitView;
   takeover: boolean;
   selectedId: string | null;
-  viewedLeafKey: string | undefined;
-  selectedLifecycleId: string | undefined;
   taskDocuments: TaskDocNode[];
-  contextMaster: string | undefined;
+  taskSeries: SeriesNode[];
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
   onOpenNotes: (target: NotesReaderTarget) => void;
@@ -806,18 +806,12 @@ function MainLayers({
       <ViewLayer visible={view === "files"} className={filesLayer}>
         <FileViewer active={view === "files"} />
       </ViewLayer>
-      {/* The sole product-facing Chats cockpit is never unmounted — only hidden — so its PTY
-          buffers, WebSockets, focus, drafts, and inspector state survive a view switch. The
-          display:none hiding DESTROYS the timeline's DOM scroll offset, so `active` also
-          reports the takeover cover: the timeline restores its remembered per-session scroll
-          position on every re-show. */}
+      {/* Role chats stay mounted across dashboard view switches. */}
       <ViewLayer visible={view === "chats"} className={chatsLayer}>
-        <SessionsView
+        <RoleChatsPane
           active={view === "chats" && !takeover}
-          selectedLifecycleId={selectedLifecycleId}
-          selectedLeafKey={viewedLeafKey}
           taskDocuments={taskDocuments}
-          contextMaster={contextMaster}
+          series={taskSeries}
         />
       </ViewLayer>
     </main>
@@ -862,10 +856,8 @@ function RailedBody({
         view={state.view}
         takeover={state.takeover}
         selectedId={state.selectedId}
-        viewedLeafKey={state.viewedLeafKey}
-        selectedLifecycleId={state.selectedLifecycleId}
         taskDocuments={state.taskDocuments}
-        contextMaster={state.contextMaster}
+        taskSeries={state.taskSeries}
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}
         onOpenNotes={actions.openNotes}

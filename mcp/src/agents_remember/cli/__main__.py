@@ -6,8 +6,8 @@ maintenance and migration commands, the knowledge write plane's ingest and its *
 ``knowledge-validate`` validator, ``knowledge-index`` derived index, ``knowledge-worklist``
 change-to-knowledge worklist and read-only
 ``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
-and report, the review plane's ``review-record-comparison`` entry, and the existing
-``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
+and report, the review plane's ``review-record-comparison`` entry, the Paseo runtime commands,
+and the existing ``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
 console script -- harness configs launch the server by that exact name, so it is never folded in
 here.
 """
@@ -15,6 +15,7 @@ here.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from agents_remember.cli import (
     dashboard,
@@ -27,8 +28,10 @@ from agents_remember.cli import (
     knowledge_routes,
     knowledge_validate,
     knowledge_worklist,
+    leaf_enclosure_start,
     memory_backfill,
     memory_citations,
+    paseo_runtime,
     review_comparison_record,
 )
 
@@ -120,11 +123,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_comparison_record.add_arguments(record)
     record.set_defaults(func=review_comparison_record.run)
+    paseo = sub.add_parser(
+        "paseo",
+        help="Provision, inspect or stop the pinned Paseo runtime the settings describe.",
+    )
+    paseo_runtime.add_arguments(paseo)
+    paseo.set_defaults(func=paseo_runtime.run)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments[:1] == [leaf_enclosure_start.COMMAND]:
+        # Internal: the dashboard backend runs it as a child process. It is no sub-command of
+        # the public parser, so no help lists it.
+        return leaf_enclosure_start.main(arguments[1:])
+    args = build_parser().parse_args(arguments)
     return int(args.func(args))
 
 

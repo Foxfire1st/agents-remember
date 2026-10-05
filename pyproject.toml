@@ -61,7 +61,7 @@ typeCheckingMode = "basic"
 executionEnvironments = [
   { root = "mcp/src", extraPaths = ["mcp/src"] },
   { root = "mcp/test_support", extraPaths = ["mcp/src", "mcp/test_support"] },
-  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/test_support", "mcp/tests"] },
+  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/test_support", "mcp/tests", "scripts"] },
   { root = "scripts", extraPaths = ["mcp/src", "mcp/test_support"] },
 ]
 

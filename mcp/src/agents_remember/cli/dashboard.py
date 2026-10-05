@@ -22,7 +22,9 @@ from agents_remember.application.task_docs.task_execution_registration import (
     register_operator_inbox_execution_evidence,
     register_terminal_catalog_execution_evidence,
 )
+from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.cli.role_launch_routes import register_role_launch_routes
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
@@ -35,6 +37,7 @@ from agents_remember.serving.app import create_app
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS
 from agents_remember.serving.projector import ProjectionCadence, ProjectionReplay
 from agents_remember.serving.sim import SimError, SimSetup, build_sim, parse_sim_speed
+from agents_remember.worktrees.services import bind_worktree_services
 
 # Dev hot-reload (``--reload``): uvicorn's reloader re-imports the app per worker restart, so it
 # needs an import-string *factory*, not a pre-built app object. Handing it an object does NOT
@@ -163,6 +166,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         review_intent_summary=review_intent_summary_port,
         review_trees=review_trees_port,
         knowledge_reader=knowledge_reader_port,
+        extra_api_routes=partial(register_role_launch_routes, config=config),
     )
 
 
@@ -187,9 +191,10 @@ def _dev_app():
     stamp "dashboard" onto every later test in the same interpreter.
     """
     declare_process_role("dashboard")
+    bind_worktree_services(build_default_worktree_services())
     config = load_config(os.environ[_DEV_CONFIG_ENV])
     heartbeat_env = os.environ.get(_DEV_HEARTBEAT_ENV)
-    return create_app(
+    app = create_app(
         config,
         cadence=ProjectionCadence(
             interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
@@ -197,6 +202,7 @@ def _dev_app():
         ),
         collaborators=serving_collaborators(config),
     )
+    return app
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -283,6 +289,7 @@ def run(args: argparse.Namespace) -> int:
     # test suite calls in-process, and declaring there would stamp "dashboard" onto every
     # later test in the same interpreter.
     declare_process_role("dashboard")
+    bind_worktree_services(build_default_worktree_services())
     resolved = _resolve_settings(args)
     if resolved is None:
         return 1
@@ -366,14 +373,12 @@ def _build_app(
 ) -> _DashboardApp | None:
     """The app to serve — live state, or a replayed fixture; None when the fixture is unusable."""
     if not args.sim:
-        return _DashboardApp(
-            create_app(
-                config,
-                cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
-                collaborators=serving_collaborators(config),
-            ),
-            None,
+        app = create_app(
+            config,
+            cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
+            collaborators=serving_collaborators(config),
         )
+        return _DashboardApp(app, None)
     try:
         sim = build_sim(config, Path(args.sim), speed=parse_sim_speed(args.sim_speed))
     except SimError as error:

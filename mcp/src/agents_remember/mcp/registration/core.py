@@ -4,11 +4,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.context_packet import ContextPacketRequest
 from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.core import ServingBuildPayload
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
 from ..tools import (
     context_packet_payload,
@@ -42,6 +44,9 @@ def _register_identity_tools(
     def server_info() -> dict[str, Any]:
         """Report the resolved configuration: coordination/workspace/transcript roots, allowed
         repo ids, allowed provider ids, full tool list, and the boot-resolved package identity.
+        A server that a role launch started for one agent also reports toolServer, the name
+        under which that agent was given this server (server is the package's own name), and
+        agentBinding: that agent's id, role, task references, request id and report path.
         Read-only; reflects the settings and exact runtime loaded at startup (settings-file or
         package changes need a harness restart to take effect)."""
         return server_info_payload(config, serving_build)
@@ -56,18 +61,24 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         include_providers: bool = True,
         include_drift: bool = False,
         include_freshness: bool = False,
+        task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """Bundle a repository's current state into one packet: repo/git state, resolved paths,
         memory mode/storage, worktree state, and (optionally) provider status, drift, and branch
         freshness (include_freshness fetches remote-tracking refs and reports ahead/behind for the
         code and memory checkouts plus whether the ledger maps code HEAD). Read-only apart from
-        that optional fetch. Preferred single call to orient at task start."""
+        that optional fetch. For a canonical leaf, pass task_context with task_document_ref and
+        contract_path together; the admitted enclosure supplies code and memory roots, and repo_id
+        must match its repository. Omit task_context for configured Projects scope."""
         return context_packet_payload(
             config,
-            repo_id,
-            include_providers=include_providers,
-            include_drift=include_drift,
-            include_freshness=include_freshness,
+            ContextPacketRequest(
+                repo_id=repo_id,
+                include_providers=include_providers,
+                include_drift=include_drift,
+                include_freshness=include_freshness,
+            ),
+            task_context=task_context,
         )
 
     @server.tool()
@@ -75,6 +86,7 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         repo_id: str,
         files: list[dict[str, Any]],
         refresh: bool = False,
+        task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """Read-only batch read of up to 5 repo-relative paths inside an AR-managed repo,
         each paired with its file-level onboarding. Per file pass {"path": "...", "source":
@@ -89,8 +101,16 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         the read for the research phase (the lifecycle up to the build decision): use it
         instead of a native read to get each file paired with its onboarding plus the
         repository and governing route overviews. Native read is the edit precondition once
-        building begins."""
-        return read_ar_files_payload(config, repo_id, files, refresh=refresh)
+        building begins. For a canonical leaf, pass task_context with task_document_ref and
+        contract_path together; the admitted enclosure supplies code and memory roots, and repo_id
+        must match its repository. Omit task_context for configured Projects scope."""
+        return read_ar_files_payload(
+            config,
+            repo_id,
+            files,
+            refresh=refresh,
+            task_context=task_context,
+        )
 
     @server.tool()
     def resolve_context(

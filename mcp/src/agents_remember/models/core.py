@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import ResponseModel
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 Transport = Literal["stdio"]
 
@@ -25,6 +26,20 @@ class ServingBuildPayload(BaseModel):
     dashboardBuild: str | None = None
     # Only ever True or absent -- see ``ServingBuild.payload``.
     dirty: bool | None = None
+
+
+class AgentBindingPayload(BaseModel):
+    """The agent a tool server was started for by a role launch, and the AR work it is bound to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str
+    role: str
+    requestId: str
+    reportPath: str
+    sprintDocumentRef: TaskDocumentRef | None = None
+    masterDocumentRef: TaskDocumentRef | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
 
 
 class PingResponse(ResponseModel):
@@ -47,3 +62,7 @@ class ServerInfoResponse(ResponseModel):
     tools: list[str] = Field(default_factory=list)
     reservedTools: list[str] = Field(default_factory=list)
     servingBuild: ServingBuildPayload
+    # Both present only on a tool server that a role launch started for one agent: the name
+    # under which the launch gave that agent this server, and the agent's binding.
+    toolServer: str | None = None
+    agentBinding: AgentBindingPayload | None = None

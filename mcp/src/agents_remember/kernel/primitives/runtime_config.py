@@ -30,6 +30,11 @@ from agents_remember.kernel.primitives.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
 )
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    PaseoRuntimeSettings,
+    PaseoRuntimeSettingsError,
+    parse_paseo_runtime_settings,
+)
 from agents_remember.kernel.primitives.provider_degradation_settings import (
     ProviderDegradationSettings,
     ProviderDegradationSettingsError,
@@ -146,6 +151,8 @@ class McpRuntimeConfig:
         default_factory=ProviderDegradationSettings
     )
     retirement: RetirementSettings = field(default_factory=RetirementSettings)
+    # ``None`` is the named state "no Paseo runtime configured" (paseo_runtime_settings.py).
+    paseo_runtime: PaseoRuntimeSettings | None = None
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -295,6 +302,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         config_path=config_path,
     )
     retirement = parse_retirement_settings(data.get("retirement"))
+    paseo_runtime = _paseo_runtime_block(data)
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -311,7 +319,25 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         orchestration=orchestration,
         provider_degradation=provider_degradation,
         retirement=retirement,
+        paseo_runtime=paseo_runtime,
     )
+
+
+def load_paseo_runtime_settings(config_path: str | Path) -> PaseoRuntimeSettings | None:
+    """Read only the ``paseoRuntime`` block of an MCP settings file.
+
+    The Paseo runtime commands own no coordination state, so they read this one block from the
+    named file instead of going through ``load_config``, whose checkout selection replaces or
+    refuses the authority file for undeclared processes loaded from a source checkout.
+    """
+    return _paseo_runtime_block(_read_config_mapping(require_config_path(config_path)))
+
+
+def _paseo_runtime_block(data: dict[str, Any]) -> PaseoRuntimeSettings | None:
+    try:
+        return parse_paseo_runtime_settings(data.get("paseoRuntime"))
+    except PaseoRuntimeSettingsError as error:
+        raise ConfigError(str(error)) from error
 
 
 def _parse_repository_entry(
