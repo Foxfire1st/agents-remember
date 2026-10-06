@@ -1,6 +1,6 @@
 [tool.ruff]
 line-length = 100
-# Match the package's only supported Python minor line.
+# Keep Ruff syntax rewrites at Python 3.13; runtime requirements are separate.
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -54,7 +54,7 @@ exclude = [
   "dist",
   "node_modules",
 ]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 typeCheckingMode = "basic"
 # The wrapper supplies its selected interpreter through ``--pythonpath`` so primary and linked
 # worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.

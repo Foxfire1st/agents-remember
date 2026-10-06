@@ -388,8 +388,8 @@ def missing_curation_policy_statements(root: Path, surface: str) -> list[str]:
 
 
 __all__ = [
-    "CURATION_POLICY_STATEMENTS",
     "CURATION_DOCTRINE_SURFACES",
+    "CURATION_POLICY_STATEMENTS",
     "GENERATED_SKILL_COPIES",
     "LOOP_GATE_CORRECTED_FIELDS",
     "LOOP_GATE_DOCUMENTS",

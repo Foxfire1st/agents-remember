@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check Agents Remember file-level onboarding drift.
 
-Requires Python 3.9+ and git. Uses only the Python standard library.
+Requires Python 3.14 and git. Uses only the Python standard library.
 
 This module is a thin facade. Implementation lives in focused sibling modules
 (models, git_ops, discovery, entities, inline, sidecar, report). Public names

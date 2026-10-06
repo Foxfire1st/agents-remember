@@ -674,8 +674,8 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 # carries the rule at all, so a stale copy cannot ship.
 
 from agents_remember_test_support.testing.curation_doctrine import (
-    CURATION_POLICY_STATEMENTS,
     CURATION_DOCTRINE_SURFACES,
+    CURATION_POLICY_STATEMENTS,
     GENERATED_SKILL_COPIES,
     RETIRED_CURATION_STATEMENTS,
     RETIRED_LOOP_GATE_FIELD_PAIRING,

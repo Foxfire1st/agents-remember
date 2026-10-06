@@ -15,9 +15,9 @@ import type { HierarchyClient } from "../../../mcp/src/agents_remember/package_d
 
 /** A healthy empty host for cases concerned with the existing look/navigation channel. */
 export function emptyHierarchyClient(): HierarchyClient {
-  const directory = () => {
-    const value = { entries: [], pageInfo: { hasMore: false, nextCursor: null }, subscription: {
-      subscribe(observer: any) { observer.snapshot(value); return () => {}; },
+  const directory = <T,>() => {
+    const value = { entries: [] as T[], pageInfo: { hasMore: false, nextCursor: null }, subscription: {
+      subscribe(observer: { snapshot(value: { entries: T[]; pageInfo: { hasMore: boolean; nextCursor: null } }): void }) { observer.snapshot(value); return () => {}; },
       release: async () => {},
     } };
     return Promise.resolve(value);

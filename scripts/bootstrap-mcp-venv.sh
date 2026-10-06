@@ -31,7 +31,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 "$script_dir/install-python-runtime.sh" --prefix "$prefix"
-runtime_python="$prefix/bin/python3.13"
+runtime_python="$prefix/bin/python$AR_PYTHON_MINOR"
 "$runtime_python" "$script_dir/check-python-runtime.py" \
   --expected-version "$AR_PYTHON_VERSION" \
   --expected-base-prefix "$prefix" \

@@ -25,11 +25,11 @@ Setup is agent-driven. Ask your agent to:
    from a single `--repo` list such as `--repo my-app shared-lib`. You can also
    do those replacements by hand. These packages include the harness-visible skills,
    hooks/rules/instructions, MCP settings templates, and local renderers.
-2. **Wire the MCP server** — Register Agents Remember MCP with `uvx` and the
-   copied settings file:
+2. **Wire the MCP server** — Build a wheel from this checkout (`uv build --wheel mcp`
+   at the repository root), then register it with `uvx` and the copied settings file:
 
    ```text
-   uvx agents-remember-mcp@latest --config /absolute/path/to/agents-remember-settings.json
+   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
    ```
 
    Use the `agents-remember-settings.json` path from the copied harness package.
@@ -48,8 +48,9 @@ copying the harness package and wiring the MCP server.
 
 ## Requirements
 
-- Python **3.13** (the package declares `requires-python >=3.13,<3.14`; Python
-  3.14 remains outside the supported range until its dependency/runtime audit).
+The requirements here describe the current checkout and wheels built from it: Python 3.14 (`>=3.14,<3.15`), with 3.14.8 pinned only for managed development and CI. The published `3.0.0rc8` release is historical and requires Python 3.13 (`>=3.13,<3.14`). An official release of the Python 3.14 build is pending; use a locally built wheel for this checkout.
+
+- Python **3.14** (the package declares `requires-python >=3.14,<3.15`).
 - an MCP-capable coding harness
 - [uv](https://docs.astral.sh/uv/) (for `uvx`) or pip
 - Git for repository and memory ledger operations (configure `user.name` /
@@ -67,7 +68,7 @@ renderers and Python hook scripts.
 
 Repository development, the MCP registration, detached lifecycle workers, and
 Dagger acceptance use the contract in `scripts/python-runtime-contract.env`.
-The current managed runtime is official source-built CPython 3.13.15. Its
+The current managed runtime is official source-built CPython 3.14.8. Its
 installer verifies the Python.org source digest and the pinned `python-build`
 definition before compilation; uv installs the frozen project dependencies but
 is forbidden from substituting a managed Python distribution.
@@ -92,27 +93,29 @@ Agents Remember data root.
 
 ## Install And Run
 
-The simplest path is `uvx`, which fetches and runs the server on demand — no
-manual virtualenv or PATH setup:
+Build a wheel from the current checkout, then run that artifact on Python 3.14:
 
 ```text
-uvx agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
+uv build --wheel mcp
+uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
 ```
 
-Or install with pip and use the console command:
+Or install the same local wheel into an existing Python 3.14 environment:
 
 ```text
-python -m pip install agents-remember-mcp
+python -m pip install /absolute/path/to/built-wheel.whl
 agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
 ```
 
-The package also ships the umbrella CLI `agents-remember`, which carries the
-mission-control `dashboard` subcommand. Install it as a uv tool — latest
-stable, no version pin; pinning (`agents-remember-mcp==X.Y.Z`, also usable
-with `uvx --from`) is the debugging/repro path:
+The source and published artifacts currently share the version string `3.0.0rc8`;
+the published artifact has the historical Python 3.13 range. The local wheel path
+identifies the current Python 3.14 build without claiming that it is published.
+
+For the mission-control dashboard, build and sync its bundle before building the
+wheel (run `npm --prefix dashboard run build`, then `python3 scripts/sync-dashboard.py`), then install the local artifact:
 
 ```text
-uv tool install agents-remember-mcp
+uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
 agents-remember dashboard
 ```
 
@@ -126,10 +129,8 @@ detaches it so it survives the terminal that started it (`--status` /
 ensure the daemon — adopting a healthy one, starting a missing one, and
 restarting on version mismatch.
 
-> **Pre-release note (until 3.0.0 final):** `3.0.0rcN` pre-releases are
-> skipped by default version resolution — install the dashboard-capable CLI
-> with `uv tool install --prerelease allow agents-remember-mcp`, and pin the
-> server registration (`agents-remember-mcp==3.0.0rcN`) instead of `@latest`.
+> Published pre-releases use their own release metadata. The current Python 3.14
+> checkout build uses the local wheel until an official release is available.
 
 The config path must be **absolute**, the settings file must live **outside the
 `ar-coordination/` runtime folder**, and it should live **under your harness's
@@ -205,6 +206,10 @@ installed console command) and the absolute settings path:
 {
   "command": "uvx",
   "args": [
+    "--python",
+    "3.14",
+    "--from",
+    "/absolute/path/to/built-wheel.whl",
     "agents-remember-mcp",
     "--config",
     "/absolute/path/to/agents-remember-settings.json"

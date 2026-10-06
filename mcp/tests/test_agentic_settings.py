@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -31,6 +31,7 @@ from agents_remember.kernel.agentic_settings import (
     merge_settings,
 )
 from agents_remember.kernel.harnesses import HARNESSES
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 
 def write_settings(root: Path, data: dict) -> Path:
@@ -400,14 +401,14 @@ class ServiceTierSettingsTests(unittest.TestCase):
         )
         with patch.object(terminal_tools, "load_agentic_settings", return_value=settings):
             dispatch, refusal = terminal_tools._resolve_harness_dispatch(
-                SimpleNamespace(coordination_root=Path("/unused")),
+                cast(McpRuntimeConfig, SimpleNamespace(coordination_root=Path("/unused"))),
                 task_document_ref=None,
                 level=None,
                 env={"AR_SPAWN_ROLE": "architect"},
                 which=None,
             )
         self.assertIsNone(dispatch)
-        self.assertIn("serviceTier", refusal["detail"])
+        self.assertIn("serviceTier", cast(dict[str, str], refusal)["detail"])
 
 
 if __name__ == "__main__":

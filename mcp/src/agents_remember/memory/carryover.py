@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Carry landed branch onboarding into an ordinary external-memory recovery leaf.
 
-Requires Python 3.10+ and git.
+Requires Python 3.14 and git.
 """
 
 from __future__ import annotations

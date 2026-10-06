@@ -87,16 +87,18 @@ That repo contains the live onboarding layer, so you can inspect how by-path mem
 
 ## Requirements
 
+The requirements here describe the current checkout and wheels built from it: Python 3.14 (`>=3.14,<3.15`), with 3.14.8 pinned only for managed development and CI. The published `3.0.0rc8` release is historical and requires Python 3.13 (`>=3.13,<3.14`). An official release of the Python 3.14 build is pending; use a locally built wheel for this checkout.
+
 Before the Quickstart, make sure the host has:
 
-- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.13** — the package supports `>=3.13,<3.14`; repository development uses the verified source-built 3.13.15 contract documented in the MCP README.
+- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.14** — the package supports `>=3.14,<3.15`; repository development uses the verified source-built 3.14.8 contract documented in the MCP README.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
 - **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
 
 Providers, Docker, and Ollama are only needed for the optional Docker-backed
 providers; the core by-path memory works without them. Claude Code hooks do not
 require `jq`; the current starter package uses a Python hook. Full detail and
-troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
+troubleshooting live in the [current MCP README](mcp/README.md).
 
 ## Quickstart
 
@@ -113,11 +115,11 @@ Ask your agent to:
    `--repo my-app shared-lib`. You can also do those replacements by hand. These
    packages include the harness-visible skills, hooks/rules/instructions, and
    MCP settings templates.
-2. **Wire the MCP server** — Register Agents Remember MCP from
-   [PyPI](https://pypi.org/project/agents-remember-mcp/) with `uvx`:
+2. **Wire the MCP server** — Build this checkout's wheel with `uv build --wheel mcp`
+   and register that local artifact with `uvx`:
 
    ```text
-   uvx agents-remember-mcp@latest --config /absolute/path/to/agents-remember-settings.json
+   uvx --python 3.14 --from /absolute/path/to/built-wheel.whl agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
    ```
 
    Use the `agents-remember-settings.json` path from the copied harness package.
@@ -137,12 +139,13 @@ After that, normal work runs through the `l-01-agent-lifecycles` skill: develope
 
 ## Run The Dashboard
 
-The mission-control dashboard ships inside the MCP package. Install the CLI
-once with uv — latest stable, no version pin — then start the cockpit from
-anywhere in your workspace:
+The mission-control dashboard ships inside a wheel containing its built bundle.
+For this checkout, build and sync the dashboard bundle before building the wheel
+(run `npm --prefix dashboard run build`, then `python3 scripts/sync-dashboard.py`). Install that local wheel
+with uv, then start the cockpit from your workspace:
 
 ```text
-uv tool install agents-remember-mcp
+uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
 agents-remember dashboard
 ```
 
@@ -165,15 +168,9 @@ healthy one, starting a missing one, and restarting on version mismatch so an
 upgrade is picked up by the next session
 ([Settings Reference](docs/reference/settings-json.md)).
 
-Pinning a version is the debugging/repro path, not the default: `uv tool
-install 'agents-remember-mcp==3.0.0rc8'`, or one-shot without installing,
-`uvx --from 'agents-remember-mcp==3.0.0rc8' agents-remember dashboard`.
-
-> **Pre-release note (until 3.0.0 final):** the dashboard currently ships in
-> `3.0.0rcN` pre-releases, which default version resolution skips. Install with
-> `uv tool install --prerelease allow agents-remember-mcp`, and register the
-> MCP server with an explicit `agents-remember-mcp==3.0.0rcN` pin instead of
-> `@latest`.
+For a reproducible checkout build, retain the exact local wheel and its hash.
+Published `3.0.0rc8` is the historical Python 3.13 artifact, so its pip/uv pin is
+not an installation example for the current Python 3.14 build.
 
 ## Documentation
 
@@ -319,7 +316,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `3.0.0rc8` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+The source package version remains `3.0.0rc8` while this Python 3.14 candidate awaits an official release. The published artifact with that version is the historical Python 3.13 release. Agents Remember is actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 

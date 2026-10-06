@@ -12,7 +12,7 @@ _EXECUTION_POLICIES = (
     CheckerExecutionPolicy(
         checker=range_resolution.CHECK_NAME,
         validatorVersion="citation-range-resolution/v1",
-        runtimeVersion="python-3.13-memory-quality/v1",
+        runtimeVersion="python-3.14-memory-quality/v1",
         correctiveOwner="memory-curator",
     ),
 )

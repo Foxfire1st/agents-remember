@@ -91,10 +91,13 @@ class RouteIndexMemoryScopeTests(unittest.TestCase):
                 context=cast(CoordinationContext, None),
                 contract=contract,
             )
-            with patch(
-                "agents_remember.worktrees.integration.configured_contract_authority.load_config",
-                return_value=configured,
-            ), self.assertRaisesRegex(AuthorityError, "OFFICIAL memory repo"):
+            with (
+                patch(
+                    "agents_remember.worktrees.integration.configured_contract_authority.load_config",
+                    return_value=configured,
+                ),
+                self.assertRaisesRegex(AuthorityError, "OFFICIAL memory repo"),
+            ):
                 _refuse_official_memory(scoped, scoped_repository, forged_leaf_scope)
 
             official_scope = MemoryScope(

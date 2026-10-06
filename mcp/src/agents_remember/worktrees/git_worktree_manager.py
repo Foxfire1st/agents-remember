@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Manage Agents Remember task Git lifecycle.
 
-Requires Python 3.10+ and git. Uses only the Python standard library.
+Requires Python 3.14 and git. Uses only the Python standard library.
 """
 
 from __future__ import annotations

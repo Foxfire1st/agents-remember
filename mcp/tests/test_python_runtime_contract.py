@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,47 @@ def _contract() -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key] = value.strip("'\"")
     return values
+
+
+def test_unsupported_version_is_named_before_importing_new_stdlib_modules() -> None:
+    checker = REPOSITORY_ROOT / "scripts/check-python-runtime.py"
+    expected = _contract()["AR_PYTHON_VERSION"]
+    program = r"""
+import builtins
+import runpy
+import sys
+
+checker, expected = sys.argv[1:]
+original_import = builtins.__import__
+
+def import_without_new_stdlib(name, *args, **kwargs):
+    origin = args[0] if args else kwargs.get("globals", {})
+    if (
+        isinstance(origin, dict)
+        and origin.get("__file__") == checker
+        and (name == "compression" or name.startswith("compression."))
+    ):
+        raise ModuleNotFoundError("compression is unavailable before Python 3.14")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_new_stdlib
+sys.version_info = (3, 13, 15, "final", 0)
+sys.argv = [checker, "--expected-version", expected]
+runpy.run_path(checker, run_name="__main__")
+"""
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", program, checker.as_posix(), expected],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f"Agents Remember Python runtime refusal: expected Python {expected}, "
+        f"observed 3.13.15 at {sys.executable}\n"
+    )
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -57,6 +99,7 @@ def _runtime_fixture(tmp_path: Path) -> _RuntimeFixture:
             "AR_TEST_LOG": log.as_posix(),
             "AR_TEST_BUILD_COMMIT": contract["AR_PYTHON_BUILD_COMMIT"],
             "AR_TEST_PYTHON_VERSION": contract["AR_PYTHON_VERSION"],
+            "AR_TEST_PYTHON_MINOR": contract["AR_PYTHON_MINOR"],
             "AR_TEST_SOURCE_SHA": contract["AR_PYTHON_SOURCE_SHA256"],
             "AR_TEST_SOURCE_URL": contract["AR_PYTHON_SOURCE_URL"],
         }
@@ -136,8 +179,8 @@ set -eu
 printf 'python-build %s\n' "$*" >> "$AR_TEST_LOG"
 prefix="$3"
 mkdir -p "$prefix/bin"
-printf '#!/usr/bin/env sh\nexit 0\n' > "$prefix/bin/python3.13"
-chmod +x "$prefix/bin/python3.13"
+printf '#!/usr/bin/env sh\nexit 0\n' > "$prefix/bin/python$AR_TEST_PYTHON_MINOR"
+chmod +x "$prefix/bin/python$AR_TEST_PYTHON_MINOR"
 PYTHON_BUILD
     chmod +x "$executable"
     ;;

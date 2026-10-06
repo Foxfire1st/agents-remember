@@ -7,13 +7,13 @@ name = "agents-remember-mcp"
 version = "3.0.0rc8"
 description = "Model Context Protocol server for Agents Remember."
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 # The supported minor line and platforms live here so consumers do not need to clone the
-# repository to discover them. Ruff, Pyright, GitHub quality/release, and Dagger all target
-# Python 3.13; managed project runtimes pin the exact 3.13.15 source build. Windows is
+# repository to discover them. Pyright, GitHub quality/release, and Dagger target
+# Python 3.14; Ruff syntax rewrites stay at 3.13. Managed runtimes pin 3.14.8. Windows is
 # supported through WSL, which presents as Linux and therefore has no separate classifier.
 classifiers = [
-  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS",
 ]
@@ -45,11 +45,10 @@ dependencies = [
   # `memory_quality/style/citations/grammars.py` was measured against are listed in that
   # module's `MEASURED_VERSIONS`, and a test fails when these pins stop admitting them.
   #
-  # Wheel coverage checked on PyPI 2026-08-02 rather than assumed, against Python 3.13 on
-  # the two platforms this project claims below: tree-sitter ships cp310-cp314
-  # wheels for manylinux/musllinux x86_64 and aarch64 and for macOS x86_64 and arm64; the
-  # three grammars ship abi3 wheels (cp310-abi3, cp39-abi3 for typescript) covering the
-  # same set. No source build and no compiler is needed on any supported target.
+  # The lock's Python 3.14 wheel records cover all four packages on manylinux x86_64
+  # and aarch64, musllinux x86_64, and macOS x86_64 and arm64. Musllinux aarch64 wheels
+  # are absent for tree-sitter and tree-sitter-typescript; those targets need a source
+  # build. Tree-sitter uses cp314 wheels; the three grammars use abi3 wheels.
   "tree-sitter>=0.26,<0.27",
   "tree-sitter-python>=0.25,<0.26",
   "tree-sitter-typescript>=0.23.2,<0.24",

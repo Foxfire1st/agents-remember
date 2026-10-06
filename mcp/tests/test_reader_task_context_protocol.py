@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -52,7 +53,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     "repo": self.repo_id,
                     "createdAt": "2026-09-28T10:00:00+00:00",
                     "master": "task.md",
-                    "seriesContractPath": self.contract.parent_contract_path.as_posix(),
+                    "seriesContractPath": cast(Path, self.contract.parent_contract_path).as_posix(),
                     "enclosures": [
                         {
                             "leafId": self.contract.leaf_id,
@@ -153,7 +154,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                 self.assertEqual(leaf_packet["repo"]["root"], leaf_code.as_posix())
                 self.assertEqual(
                     leaf_packet["paths"]["memoryRoot"],
-                    self.contract.memory_worktree.as_posix(),
+                    cast(Path, self.contract.memory_worktree).as_posix(),
                 )
                 self.assertNotEqual(
                     base_packet["paths"]["memoryRoot"], leaf_packet["paths"]["memoryRoot"]
@@ -207,7 +208,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
 
                 wrong_contract_context = {
                     **self.task_context,
-                    "contract_path": self.contract.parent_contract_path.as_posix(),
+                    "contract_path": cast(Path, self.contract.parent_contract_path).as_posix(),
                 }
                 wrong_contract = await client.call_tool(
                     "read_ar_files",
@@ -245,7 +246,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         )
 
 
-def _resolve_schema(root: dict[str, object], schema: dict[str, object]) -> dict[str, object]:
+def _resolve_schema(root: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
     reference = schema.get("$ref")
     if isinstance(reference, str) and reference.startswith("#/$defs/"):
         definitions = root.get("$defs", {})
@@ -261,7 +262,7 @@ def _resolve_schema(root: dict[str, object], schema: dict[str, object]) -> dict[
     raise AssertionError(f"No object schema reference found: {schema!r}")
 
 
-def _structured(result) -> dict[str, object]:
+def _structured(result) -> dict[str, Any]:
     if result.isError:
         raise AssertionError(_tool_error_text(result))
     assert result.structuredContent is not None

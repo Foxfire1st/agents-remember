@@ -13,8 +13,7 @@ thread-safe, so no lock is needed. Within a single millisecond two ids share no
 ordering guarantee, which is fine: order *within* one lifecycle is the JSONL
 append order, and the id is only the cross-lifecycle merge/unique key.
 
-(stdlib `uuid.uuid7` would supersede this once the Python floor reaches 3.14;
-keeping minting in one module makes that a one-function swap.)
+Keep this ULID format stable when the Python runtime is upgraded.
 """
 
 from __future__ import annotations
