@@ -6,29 +6,33 @@ dependency graph and requires every ``consumer_scope = "exact"`` artifact's decl
 list to equal the test modules that actually reach it, so it is red exactly when a module starts or
 stops consuming a governed artifact -- with the catalog's own bytes untouched.
 
-That is a *different* gate from the **catalog byte pin** in
-``mcp/tests/test_dependency_ownership_ast_helpers.py`` (``LIFECYCLE_CATALOG_SHA256``,
-``LIFECYCLE_CONTRACT_COUNT``, ``LIFECYCLE_ARTIFACT_COUNT``), which says only that the catalog file is
-byte-for-byte the one that was measured, at the populations it was measured at. The two run in one
-test and therefore read as one gate; they are not. A catalog whose bytes are exactly the pinned ones
-can still be wrong about the tree, and its documented repair is a registry row, not a re-pin -- which
-is why the pin's constants move when a row is *added*, not when the tree drifts.
-``test_evidence_catalog_gate_boundaries.py`` holds the case that reddens this oracle while the pin
-stays green.
+The catalog must also be in canonical form (:mod:`catalog_canonical`): contract rows ordered by
+``id``, artifact rows by ``path``, every ``consumers`` list ascending without duplicates. The loader
+refuses anything else and names the command that writes it, ``--write``, which also sets each
+``exact`` and ``exact-source`` list to what this oracle derives.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import json
-import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
+from agents_remember_test_support.testing.catalog_canonical import (
+    WRITE_COMMAND,
+    CatalogWriteError,
+    layout_findings,
+    list_findings,
+    read_catalog,
+    row_order_defects,
+    write_canonical_catalogs,
+)
 from agents_remember_test_support.testing.dependency_facts import RepositoryDependencyFacts
 from agents_remember_test_support.testing.evidence_governance import (
     LIFECYCLE_CATALOG_PATH,
@@ -38,6 +42,10 @@ from agents_remember_test_support.testing.evidence_governance import (
 CATALOG_PATH = Path(LIFECYCLE_CATALOG_PATH)
 CATALOG_SCHEMA = "ar-test-evidence-lifecycle/v3"
 CONTRACT_REFERENCE_PREFIX = "contract:"
+UNREPAIRED_ROW = (
+    "the command does not repair this row, because no listed consumer exists and the source "
+    "tree shows none: remove the row by hand if the artifact is retired"
+)
 NODE_REFERENCE_PREFIX = "node:"
 
 
@@ -180,17 +188,18 @@ def load_evidence_inventory(
     project_root: Path,
     *,
     today: date | None = None,
+    build_facts: Callable[[Path], RepositoryDependencyFacts] | None = None,
 ) -> EvidenceInventory:
-    """Load and completely validate the repository-owned evidence catalog."""
+    """Load and completely validate the repository-owned evidence catalog.
+
+    ``build_facts`` replaces :meth:`RepositoryDependencyFacts.build`, so that a caller running
+    both catalog loaders can derive the source graph once.
+    """
 
     root = project_root.resolve()
     catalog = root / CATALOG_PATH
-    try:
-        with catalog.open("rb") as handle:
-            raw = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise EvidenceLifecycleError(f"cannot read evidence catalog {catalog}: {error}") from error
-    findings: list[str] = []
+    text, raw = read_catalog("evidence catalog", catalog, EvidenceLifecycleError)
+    findings: list[str] = _canonical_form_findings(raw, text)
     if raw.get("schema_version") != CATALOG_SCHEMA:
         findings.append(f"schema_version must be {CATALOG_SCHEMA!r}")
     large_fixture_bytes = raw.get("large_fixture_bytes")
@@ -200,7 +209,7 @@ def load_evidence_inventory(
     elif large_fixture_bytes <= 0:
         findings.append("large_fixture_bytes must be a positive integer")
     contracts = _load_contracts(raw.get("contract"), findings)
-    facts = RepositoryDependencyFacts.build(root)
+    facts = (build_facts or RepositoryDependencyFacts.build)(root)
     if facts.parse_error is not None:
         findings.append(f"source-derived consumer graph is incomplete: {facts.parse_error}")
     if facts.ambiguous_modules:
@@ -223,6 +232,23 @@ def load_evidence_inventory(
             f"test evidence lifecycle has {len(findings)} finding(s):\n{rendered}"
         )
     return EvidenceInventory(tuple(artifacts), tuple(contracts), large_fixture_bytes)
+
+
+def _canonical_form_findings(raw: Mapping[str, object], text: str) -> list[str]:
+    """One finding per contract or artifact row, and per consumers list, out of canonical form."""
+
+    contracts = raw.get("contract")
+    artifacts = raw.get("artifact")
+    findings: list[str] = layout_findings(text, raw, LIFECYCLE_CATALOG_PATH)
+    if isinstance(contracts, list):
+        keys = [row.get("id") for row in contracts if isinstance(row, Mapping)]
+        findings.extend(row_order_defects(keys, "contract", "id"))
+    if isinstance(artifacts, list):
+        rows = [row for row in artifacts if isinstance(row, Mapping)]
+        findings.extend(row_order_defects([row.get("path") for row in rows], "artifact", "path"))
+        for row in rows:
+            findings.extend(list_findings(str(row.get("path")), "consumers", row.get("consumers")))
+    return findings
 
 
 def _load_contracts(raw: object, findings: list[str]) -> list[EvidenceContract]:
@@ -383,16 +409,22 @@ def _validate_path_and_consumers(
         findings.append(f"{item.path}: duplicate catalog entry")
     seen.add(item.path)
     if not (root / item.path).is_file():
-        findings.append(f"{item.path}: cataloged artifact does not exist")
-    missing_consumers = [value for value in item.consumers if not (root / value).is_file()]
-    if missing_consumers:
-        findings.append(f"{item.path}: missing consumers {missing_consumers}")
+        findings.append(
+            f"{item.path}: cataloged artifact does not exist; the command removes no row: "
+            "delete the row if the artifact is retired"
+        )
     observed_paths = (
         facts.observed_source_consumers(Path(item.path))
         if item.consumer_scope is ConsumerScope.EXACT_SOURCE
         else facts.observed_test_consumers(Path(item.path))
     )
     observed = {path.as_posix() for path in observed_paths}
+    missing_consumers = [value for value in item.consumers if not (root / value).is_file()]
+    if missing_consumers:
+        # The command derives the list, or drops the missing lines while one consumer is left.
+        repaired = bool(observed) or len(missing_consumers) < len(item.consumers)
+        remedy = f"run {WRITE_COMMAND}" if repaired else UNREPAIRED_ROW
+        findings.append(f"{item.path}: missing consumers {missing_consumers}; {remedy}")
     declared = set(item.consumers)
     if observed != declared:
         missing = sorted(observed - declared)
@@ -599,13 +631,33 @@ def _validate_catalog_coverage(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Validate both test catalogs (the lifecycle catalog and the lane manifest), or ``--write``."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--json-output", type=Path)
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="rewrite both test catalogs to canonical form instead of validating them",
+    )
     args = parser.parse_args(argv)
+    if args.write:
+        return _write(args.project_root)
+    # Imported here: lane_manifest imports this module for EvidenceCategory.
+    from agents_remember_test_support.testing.lane_manifest import (  # noqa: PLC0415
+        LaneManifestError,
+        load_lane_manifest,
+    )
+
+    # Deriving the source graph is most of the run, and both loaders need the same one, so it
+    # is built once. Each loader still asks for it only after it parsed its own catalog: an
+    # unparseable lifecycle catalog is refused before any graph is built.
+    build_facts = functools.cache(RepositoryDependencyFacts.build)
     try:
-        inventory = load_evidence_inventory(args.project_root)
-    except EvidenceLifecycleError as error:
+        inventory = load_evidence_inventory(args.project_root, build_facts=build_facts)
+        load_lane_manifest(args.project_root, build_facts=build_facts)
+    except (EvidenceLifecycleError, LaneManifestError) as error:
         print(error)
         return 1
     payload = inventory.payload()
@@ -613,6 +665,19 @@ def main(argv: list[str] | None = None) -> int:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
         args.json_output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     print(f"evidence-lifecycle: PASS ({len(inventory.artifacts)} governed artifacts)")
+    return 0
+
+
+def _write(project_root: Path) -> int:
+    try:
+        report = write_canonical_catalogs(project_root)
+    except CatalogWriteError as error:
+        print(f"evidence-lifecycle: nothing written: {error}")
+        return 1
+    for line in report:
+        print(line)
+    if not report:
+        print("evidence-lifecycle: both catalogs were already canonical; nothing changed")
     return 0
 
 

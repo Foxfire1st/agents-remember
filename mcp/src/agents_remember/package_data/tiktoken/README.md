@@ -36,8 +36,8 @@ rather than silently repaired.
 expected SHA-256 from the installed tiktoken and fails if either stops matching the shipped
 file, so a version bump that moves the URL is caught. It corrupts *copies* of this file in a
 temporary directory -- CRLF-mangled, truncated to half its bytes, one byte flipped -- and
-requires the refusal each time, never touching the file here. And it fails if the
-`.gitattributes` entry stops naming the file that is actually shipped.
+requires the refusal each time, never touching the file here. It does not check the
+`.gitattributes` entry.
 
 ## Refreshing it
 
@@ -55,8 +55,8 @@ tiktoken, so the two cannot drift apart silently:
     print(hashlib.sha256(data).hexdigest())
     PY
 
-Then rename the `-text` entry in the repository's `.gitattributes` to match --
-`test_the_gitattributes_entry_names_the_shipped_file` stays red until you do. That entry is
+Then rename the `-text` entry in the repository's `.gitattributes` to match, by hand: no
+test checks that the entry names the shipped file. That entry is
 what stops a `core.autocrlf=true` checkout from rewriting the line endings of a file whose
 bytes are its identity, which would leave that clone -- and only that clone -- unable to
 start the server at all.

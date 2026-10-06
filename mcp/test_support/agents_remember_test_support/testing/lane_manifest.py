@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import tomllib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from agents_remember_test_support.testing.catalog_canonical import (
+    LANE_CATALOG_PATH,
+    WRITE_COMMAND,
+    lane_files,
+    layout_findings,
+    list_findings,
+    read_catalog,
+)
 from agents_remember_test_support.testing.dependency_facts import (
     RepositoryDependencyFacts,
     is_test_module,
 )
 from agents_remember_test_support.testing.evidence_lifecycle import EvidenceCategory
 
-LANE_MANIFEST_PATH = Path("mcp/tests/test-evidence-lanes.toml")
+LANE_MANIFEST_PATH = Path(LANE_CATALOG_PATH)
 LANE_MANIFEST_SCHEMA = "ar-test-evidence-lanes/v1"
 ACCEPTING_CATEGORIES = frozenset(set(EvidenceCategory) - {EvidenceCategory.DIAGNOSTIC})
 
@@ -96,25 +104,30 @@ class LaneManifest:
         return (allowed, *tuple(sorted((*files, *overrides))))
 
 
-def load_lane_manifest(project_root: Path) -> LaneManifest:
-    """Load and independently prove the complete test-file and override population."""
+def load_lane_manifest(
+    project_root: Path,
+    *,
+    build_facts: Callable[[Path], RepositoryDependencyFacts] | None = None,
+) -> LaneManifest:
+    """Load and independently prove the complete test-file and override population.
+
+    ``build_facts`` replaces :meth:`RepositoryDependencyFacts.build`, so that a caller running
+    both catalog loaders can derive the source graph once.
+    """
 
     root = project_root.resolve()
     path = root / LANE_MANIFEST_PATH
-    try:
-        with path.open("rb") as handle:
-            raw = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise LaneManifestError(f"cannot read evidence lane manifest {path}: {error}") from error
-    findings: list[str] = []
+    text, raw = read_catalog("evidence lane manifest", path, LaneManifestError)
+    listed = lane_files(raw, path, LaneManifestError)
+    findings: list[str] = layout_findings(text, raw, LANE_CATALOG_PATH)
     if raw.get("schema_version") != LANE_MANIFEST_SCHEMA:
         findings.append(f"schema_version must be {LANE_MANIFEST_SCHEMA!r}")
     unknown_top_level = set(raw) - {"schema_version", "files", "override"}
     if unknown_top_level:
         findings.append(f"unknown top-level fields: {sorted(unknown_top_level)}")
-    files = _load_files(root, raw.get("files"), findings)
+    files = _load_files(root, listed, findings)
     overrides = _load_overrides(root, raw.get("override", []), files, findings)
-    facts = RepositoryDependencyFacts.build(root)
+    facts = (build_facts or RepositoryDependencyFacts.build)(root)
     if facts.parse_error is not None:
         findings.append(f"test population could not be derived: {facts.parse_error}")
     expected = set(facts.tests)
@@ -122,7 +135,10 @@ def load_lane_manifest(project_root: Path) -> LaneManifest:
     missing = sorted(path.as_posix() for path in expected - declared)
     stale = sorted(path.as_posix() for path in declared - expected)
     if missing:
-        findings.append(f"test files without an explicit lane: {missing}")
+        findings.append(
+            f"test files without an explicit lane: {missing}; list each in its lane in "
+            f"{LANE_CATALOG_PATH}, then run {WRITE_COMMAND}"
+        )
     if stale:
         findings.append(f"lane rows that are not current test files: {stale}")
     if findings:
@@ -144,12 +160,9 @@ def load_lane_manifest(project_root: Path) -> LaneManifest:
 
 def _load_files(
     root: Path,
-    raw: object,
+    raw: Mapping[str, object],
     findings: list[str],
 ) -> dict[Path, EvidenceCategory]:
-    if not isinstance(raw, dict):
-        findings.append("[files] must map every accepting category to an explicit path list")
-        return {}
     files: dict[Path, EvidenceCategory] = {}
     seen_categories: set[EvidenceCategory] = set()
     for category_text, values in raw.items():
@@ -183,6 +196,7 @@ def _load_file_category(
     if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
         findings.append(f"{category.value}: lane membership must be a string list")
         return category
+    findings.extend(list_findings(category.value, "lane list", values))
     for value in values:
         _load_file_lane(root, value, category, files, findings)
     return category
@@ -199,6 +213,8 @@ def _load_file_lane(
     if relative is None:
         return
     previous = files.get(relative)
+    if previous is category:
+        return  # listed twice in one lane: the lane list's own finding reports the duplicate
     if previous is not None:
         findings.append(
             f"{relative.as_posix()}: conflicting file lanes "
@@ -206,7 +222,12 @@ def _load_file_lane(
         )
         return
     source = root / relative
-    if not source.is_file() or not is_test_module(relative):
+    if not source.is_file():
+        findings.append(
+            f"{relative.as_posix()}: lane member is not a current Python test file: the file "
+            f"does not exist; run {WRITE_COMMAND}"
+        )
+    elif not is_test_module(relative):
         findings.append(f"{relative.as_posix()}: lane member is not a current Python test file")
     files[relative] = category
 

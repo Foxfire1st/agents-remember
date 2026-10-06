@@ -6,8 +6,16 @@ mcp/src/agents_remember/package_data/dashboard/assets/*.js whitespace=-blank-at-
 # file's SHA-256 before every load and refuses to start on any copy whose bytes differ. A
 # line-ending conversion on a checkout with core.autocrlf=true is exactly that, so without
 # this line those clones -- and only those -- cannot start the server at all. Marked binary
-# so no EOL or text filter can touch it. Refreshing the vocabulary renames this entry, and
-# mcp/tests/test_cold_start.py::test_the_gitattributes_entry_names_the_shipped_file stays
-# red until it is renamed; the procedure is in
+# so no EOL or text filter can touch it. Refreshing the vocabulary renames this entry by
+# hand. No test checks that the entry names the shipped file, so a forgotten rename shows
+# only on a core.autocrlf=true clone. The procedure is in
 # mcp/src/agents_remember/package_data/tiktoken/README.md.
 mcp/src/agents_remember/package_data/tiktoken/fb374d419588a4632f3f557e76b4b70aebbca790 -text
+
+# The two test-evidence catalogs are lists that every change extends. Git merges them by taking
+# both sides' added lines (MIK-R51), so two changes that add a test file no longer stop a sync.
+# The union can leave a line twice, a list out of order, or the line of a file that one side
+# deleted; both catalog loaders refuse that and name the command that repairs it:
+#   python -m agents_remember_test_support.testing.evidence_lifecycle --project-root . --write
+mcp/tests/test-evidence-lanes.toml merge=union
+mcp/tests/evidence-lifecycle.toml merge=union

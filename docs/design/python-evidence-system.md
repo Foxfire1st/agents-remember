@@ -77,8 +77,9 @@ recordings, recording generators, migration proofs, and shared support. Every en
 - cadence, source version or generator, and the task/reason that introduced it;
 - lifetime plus either a permanence rationale or an expiry date;
 - an executable replacement contract; and
-- every current consumer. Test artifacts use `exact` or `all-tests`; permanent executable
-  support outside the test tree uses `exact-source`, which is checked against the same
+- every current consumer. Test artifacts use `exact` or `all-tests`; support whose consumers are
+  other source files and not test modules (the harness under `scripts/e2e_harness`, and one
+  fixture model in the test tree) uses `exact-source`, which is checked against the same
   source-derived import and literal-reference graph.
 
 The catalog is validated in local static hooks and in both Dagger quality modes. It fails on an
@@ -87,10 +88,36 @@ expired migration, nonexistent replacement node/contract, or missing rationale. 
 references are parsed and must name exactly one real top-level function or class method; prose that
 merely resembles a selector is not sufficient.
 
-The current inventory contains 47 artifacts: 32 shared-support files, 11 recordings, two
-fixtures, and two recording generators. Thirty-three are permanent, 13 are versioned, and one
-is demo-only. The permanent population includes the source-derived ambient role-chat E2E harness;
-there is no surviving task/date-shaped migration proof in the governed population.
+Both catalogs are kept in one canonical form: contract rows ordered by `id`, artifact rows by `path`,
+every list ascending without duplicates, one path per line in double quotes with a comma after it,
+every table header at the start of its own line. Git merges them as unions of added lines
+(`.gitattributes`). Both loaders refuse a catalog that is not in this form and name the command that
+writes it:
+`python -m agents_remember_test_support.testing.evidence_lifecycle --project-root . --write`.
+
+The command makes no decision. It orders rows and lists, removes duplicate lines, and sets the
+consumer list of each `exact` and `exact-source` row to the set derived from the source tree; a row
+for which the source tree shows no consumer keeps its list as written and is named. It removes each
+lane line and consumer line whose file no longer exists, which a union merge can bring back, and
+prints it. It removes no row: a row whose own file is gone is named, and a row that would be left
+without a consumer keeps its list as written. It refuses what it cannot read or cannot keep, such as
+a table header that is not at the start of its own line, a list whose key or closing bracket it does
+not find, a comment inside a list or a row listed twice, and a refusal writes nothing to either catalog.
+Without `--write` the same command is the validator: it loads the lifecycle catalog and then the
+lane manifest.
+
+No byte or count of a catalog is pinned. The loader checks what the source tree can prove: that every
+contract's owner path and evidence node, and every row's replacement contract, names an existing
+target, that no row or contract is unreferenced or missing, and that each consumer list equals the
+derived set (for an `all-tests` row: every test module). The other descriptive fields of a row
+(`kind`, `authority`, `category`, `fidelity`, `cadence`, `lifetime`, the `owner` label,
+`introduced_by` and a retargeted contract) are checked only against the loader's rules for their
+values; within those rules a change is data that a reviewer of a diff reads like any other line.
+
+This document states no size of the inventory and no split by kind or lifetime, because every
+change that adds or retires an artifact would change them; the validator prints the current number
+of governed artifacts. The permanent population includes the source-derived ambient role-chat E2E
+harness; there is no surviving task/date-shaped migration proof in the governed population.
 
 ## Fixture authority
 

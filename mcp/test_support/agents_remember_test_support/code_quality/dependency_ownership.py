@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tomllib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -336,7 +335,7 @@ class DependencyOwnershipGraph:
             affected = changed_catalog_consumers(
                 previous.stdout, (self.project_root / CATALOG_PATH).read_text(encoding="utf-8")
             )
-        except (OSError, tomllib.TOMLDecodeError) as error:
+        except (OSError, EvidenceLifecycleError) as error:
             return SelectionReason(SelectionReasonKind.UNRESOLVED, CATALOG_PATH, str(error))
         if affected is None:
             return SelectionReason(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
@@ -18,6 +17,7 @@ sys.path[:0] = [
     str(REPOSITORY_ROOT / "mcp" / "test_support"),
 ]
 
+from agents_remember_test_support.testing.catalog_canonical import lane_files, read_catalog
 from agents_remember_test_support.testing.hermetic_bootstrap import (
     activate_current_pytest_environment,
     candidate_test_process,
@@ -104,13 +104,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     # Read existing file membership once; no source census, dependency graph, or collection probe.
-    with (REPOSITORY_ROOT / "mcp/tests/test-evidence-lanes.toml").open("rb") as stream:
-        files = tomllib.load(stream)["files"]
-    config.stash[_INTEGRATION_FILES] = frozenset(
-        REPOSITORY_ROOT / path
-        for category in ("integration", "stress-durability")
-        for path in files[category]
-    )
+    manifest = REPOSITORY_ROOT / "mcp/tests/test-evidence-lanes.toml"
+    _, document = read_catalog("evidence lane manifest", manifest, pytest.UsageError)
+    files = lane_files(document, manifest, pytest.UsageError)
+    try:
+        config.stash[_INTEGRATION_FILES] = frozenset(
+            REPOSITORY_ROOT / path
+            for category in ("integration", "stress-durability")
+            for path in files[category]
+        )
+    except (KeyError, TypeError) as error:
+        raise pytest.UsageError(
+            f"evidence lane manifest {manifest}: the [files] table must hold the lanes "
+            f"integration and stress-durability as lists of paths ({error!r})"
+        ) from error
     if config.getoption("certify"):
         from agents_remember_test_support.testing.certifying_bootstrap import (  # noqa: PLC0415
             prepare_certifying_pytest_bootstrap,
