@@ -5,6 +5,9 @@
 // or refusal), so the rail's expansion, scroll, focus and open
 // disclosures survive a selection, and the previous subject's reading is never shown under the new
 // subject's name.
+// The family tree is the tree the reader has walked (MIK-R39, `walkedTree.ts`): selecting a row it shows
+// adds the selected subject's families and removes none, so `k` can step back to every change passed;
+// any other selection starts it afresh.
 // For a tree comparison the rail also offers the unexplained-changes lane's two destinations after the
 // families (MIK-R32); choosing one swaps the reading area for the lane, and choosing a family returns.
 // Its diffs mark each hunk with the intents whose recorded ranges it meets (MIK-R34); following a
@@ -12,13 +15,14 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
+import type { ReviewFamilyContextEntry } from '../../data/reviewFamily';
 import { selectedRevision } from './SubjectReview';
 import { carriedPage } from '../../data/review';
 import type { LaneRead, ReviewUnexplainedLane } from '../../data/reviewLane';
 import { treeComparisonNumber, useReviewTrees } from '../../data/reviewTrees';
 import type { ReviewPageRequest } from './ReviewReadCycle';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
-import { FamilyTree, type FamilySelection } from './FamilyTree';
+import { FamilyTree, type FamilySelection, type WalkedTree } from './FamilyTree';
 import { ReviewNavigation, type ReviewNavigationState } from './ReviewNavigation';
 import { ReviewScopeHeader } from './ReviewScopeHeader';
 import { SourceExplorer, type DiffLayout } from './SourceExplorer';
@@ -29,6 +33,15 @@ import { MarkerReturn } from './IntentMarkers';
 import { IntentMarkerScope, markerInventory, useIntentMarkerScope } from './intentMarkerScope';
 import { InvariantTargetState, useInvariantTargetState } from './MarkerTargetState';
 import { workspaceMarkerMoves } from './markerNavigation';
+import {
+  NO_FAMILY_CONTEXT,
+  type TreeIntent,
+  type Walk,
+  type WalkedSubject,
+  keptFamilies,
+  subjectTitle,
+  useWalkedTree,
+} from './walkedTree';
 
 // The one sticky offset of the stacked layout (MIK-L33 x MIK-L34): while a followed marker's way back
 // is open it holds the top (`markerReturn`: 0.5rem down, 2rem tall), and every other sticky control
@@ -164,6 +177,18 @@ function ReadingStatusCenter({ reading }: { reading: ReadingStatus }) {
   );
 }
 
+// A selection's request to land focus on the selected node once its answer is shown. `scrollOnly`
+// (a refresh) only brings the node into view; `answered` is set when an answer has arrived after the
+// request was made.
+interface FocusRequest {
+  from: Element | null;
+  // The tree intent that was current when the request was made. A render from before the selection
+  // (its passive effect can run late, after the reader's next click) must not take the request.
+  after: number;
+  scrollOnly?: boolean;
+  answered?: boolean;
+}
+
 export interface WorkspaceState {
   chosen: FamilySelection | null;
   setChosen: (selection: FamilySelection | null) => void;
@@ -184,7 +209,11 @@ export interface WorkspaceState {
   setLane: (next: LaneSelection | null) => void;
   // Set by an explicit selection with the element that had focus then; the answer's focus lands on
   // the selected node only if the reader has not moved focus elsewhere in the meantime.
-  focusSelection: React.RefObject<{ from: Element | null } | null>;
+  focusSelection: React.RefObject<FocusRequest | null>;
+  // The latest selection as far as the family tree is concerned (MIK-R39): an in-tree selection
+  // keeps the tree the reader has walked, anything else starts it afresh. See `walkedTree.ts`.
+  treeIntent: TreeIntent;
+  beginSelection: (keepTree: boolean) => void;
 }
 
 export function useWorkspaceState(): WorkspaceState {
@@ -196,7 +225,10 @@ export function useWorkspaceState(): WorkspaceState {
   const [lane, setLaneState] = useState<LaneSelection | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const center = useRef<HTMLDivElement>(null);
-  const focusSelection = useRef<{ from: Element | null } | null>(null);
+  const focusSelection = useRef<FocusRequest | null>(null);
+  const [treeIntent, setTreeIntent] = useState<TreeIntent>({ id: 0, keep: false });
+  const beginSelection = (keepTree: boolean) =>
+    setTreeIntent((previous) => ({ id: previous.id + 1, keep: keepTree }));
   const openFromCenter = (path: string) => {
     opener.current = document.activeElement as HTMLElement | null;
     setOpenPath(path);
@@ -232,17 +264,21 @@ export function useWorkspaceState(): WorkspaceState {
     lane,
     setLane,
     focusSelection,
+    treeIntent,
+    beginSelection,
   };
 }
 
+// The selection to mark. `shown` are the families a mark may sit on: the answer's own for the reading
+// area, the walked tree's for the rail (a kept family's row is a row of the tree, not of the answer).
 function selectedContext(
   payload: ReviewPayload,
   chosen: FamilySelection | null,
   selectorId?: string,
+  shown: ReviewFamilyContextEntry[] = payload.family_context?.entries ?? [],
 ): FamilySelection | null {
-  const entries = payload.family_context?.entries ?? [];
-  if (chosen && entries.some((entry) => entry.family_id === chosen.familyId)) return chosen;
-  return initialContext(payload, entries, selectorId);
+  if (chosen && shown.some((entry) => entry.family_id === chosen.familyId)) return chosen;
+  return initialContext(payload, payload.family_context?.entries ?? [], selectorId);
 }
 
 interface ReviewWorkspaceProps {
@@ -284,6 +320,53 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   );
 }
 
+// The tree the reader has walked (MIK-R39), the selection marks on the reading area and on the tree,
+// and the two selections that start in the tree: a row, and a family's roster continuation.
+function useWalkedSelection(
+  shown: {
+    payload: ReviewPayload;
+    reading: ReadingStatus | null;
+    selectorId?: string;
+    scope: string;
+  },
+  actions: {
+    state: WorkspaceState;
+    navigation?: ReviewNavigationState;
+    onPageSelect: (page: ReviewPageRequest | undefined) => void;
+  },
+) {
+  const { payload, reading, selectorId, scope } = shown;
+  const { state, navigation, onPageSelect } = actions;
+  const walk = useWalkedTree(payload, scope, state.treeIntent);
+  const walked = walk.families.map((family) => family.entry);
+  // While unanswered, only the reader's explicit choice is marked: deriving one from the previous
+  // payload would mark that subject's family as the requested subject's context.
+  const marked = (entries?: ReviewFamilyContextEntry[]) =>
+    reading ? state.chosen : selectedContext(payload, state.chosen, selectorId, entries);
+  const rosterNext = (family: string, _side: string, continuation: string) => {
+    const page: ReviewPageRequest = { of: 'family_members', continuation };
+    // A kept family's cursor was published for an earlier subject and the server continues it only
+    // for a subject whose context holds the family: selecting the family continues it.
+    const inContext = (payload.family_context?.entries ?? []).some(
+      (entry) => entry.family_id === family,
+    );
+    if (inContext || !navigation) onPageSelect(page);
+    else
+      navigation.onSelect(
+        { kind: 'family', id: family },
+        { familyId: family },
+        { keepTree: true, page },
+      );
+  };
+  return {
+    walk,
+    chosen: marked(),
+    treeChosen: marked(walked),
+    choose: (selection: FamilySelection) => chooseSubject(walked, selection, state, navigation),
+    rosterNext,
+  };
+}
+
 // `open` while a followed marker's way back is shown: the workspace then holds the sticky offset.
 function useMarkerReturnState(): 'open' | undefined {
   return useContext(IntentMarkerScope)?.origin ? 'open' : undefined;
@@ -302,15 +385,12 @@ function WorkspaceBody({
   navigation,
   laneRead = null,
 }: ReviewWorkspaceProps) {
-  useSelectionFocus(payload, state);
+  useSelectionFocus(payload, state, reading);
   const returning = useMarkerReturnState();
-  // While unanswered, only the reader's explicit choice is marked: deriving one from the previous
-  // payload would mark that subject's family as the requested subject's context.
-  const chosen = reading ? state.chosen : selectedContext(payload, state.chosen, selectorId);
-  const choose = (selection: FamilySelection) =>
-    chooseSubject(payload, selection, state, navigation);
-  const rosterNext = (_family: string, _side: string, continuation: string) =>
-    onPageSelect({ of: 'family_members', continuation });
+  const { walk, chosen, treeChosen, choose, rosterNext } = useWalkedSelection(
+    { payload, reading, selectorId, scope: `${repo}/${master}/${leaf}/${history ?? 'live'}` },
+    { state, navigation, onPageSelect },
+  );
   return (
     <div
       className={workspace}
@@ -343,7 +423,8 @@ function WorkspaceBody({
         leaf={leaf}
         state={state}
         navigation={navigation}
-        chosen={chosen}
+        chosen={treeChosen}
+        walk={walk}
         rosterNext={rosterNext}
         onSelect={choose}
         laneRead={laneRead}
@@ -488,6 +569,7 @@ function WorkspaceRail({
   state,
   navigation,
   chosen,
+  walk,
   rosterNext,
   onSelect,
   laneRead,
@@ -501,14 +583,26 @@ function WorkspaceRail({
   navigation?: ReviewNavigationState;
   onSelect: (selection: FamilySelection) => void;
   chosen: FamilySelection | null;
+  walk: Walk;
   rosterNext: (family: string, side: string, continuation: string) => void;
   laneRead: LaneRead<ReviewUnexplainedLane> | null;
   // The answered subject (none while another is read): an intent marker's unknown-membership target.
   subject?: ReviewNavigationState['subject'];
 }) {
-  const context = payload.family_context;
-  // While a lane destination is on screen, no family node is the current selection.
-  const treeChosen = state.lane ? null : chosen;
+  const tree = walkedTreeOf(walk, payload, navigation?.catalogue);
+  const families = (
+    <FamilyRailContext
+      payload={payload}
+      state={state}
+      walked={tree}
+      // While a lane destination is on screen, no family node is the current selection.
+      chosen={state.lane ? null : chosen}
+      onSelect={onSelect}
+      rosterNext={rosterNext}
+      selectable={Boolean(navigation?.catalogue.entries?.length)}
+      subject={subject}
+    />
+  );
   return (
     <aside className={rail}>
       <div className={shell}>
@@ -516,28 +610,13 @@ function WorkspaceRail({
         {navigation ? (
           <ReviewNavigation
             {...navigation}
-            loadedFamilyIds={context?.entries.map((entry) => entry.family_id)}
+            loadedFamilyIds={tree.entries.map((entry) => entry.family_id)}
+            listLoaded={tree.kept.size > 0}
           >
-            <FamilyRailContext
-              payload={payload}
-              state={state}
-              chosen={treeChosen}
-              onSelect={onSelect}
-              rosterNext={rosterNext}
-              selectable={Boolean(navigation.catalogue.entries?.length)}
-              subject={subject}
-            />
+            {families}
           </ReviewNavigation>
         ) : (
-          <FamilyRailContext
-            payload={payload}
-            state={state}
-            chosen={treeChosen}
-            onSelect={onSelect}
-            rosterNext={rosterNext}
-            selectable={false}
-            subject={subject}
-          />
+          families
         )}
         <RailLaneDestinations laneRead={laneRead} state={state} />
       </div>
@@ -580,9 +659,46 @@ function RailLaneDestinations({
   );
 }
 
+// What the family tree draws (MIK-R39): the walked families, which of them are kept and for which
+// subject they were last read, and what to say of an answer that composed no family context.
+function walkedTreeOf(
+  walk: Walk,
+  payload: ReviewPayload,
+  catalogue?: ReviewNavigationState['catalogue'],
+): WalkedTree {
+  const context = payload.family_context;
+  const composed = context?.state === 'recorded' || context?.state === 'partial';
+  return {
+    entries: walk.families.map((family) => family.entry),
+    kept: new Map(
+      keptFamilies(walk).map(({ entry, readFor, answer }) => [
+        entry.family_id,
+        readForLabel(readFor, answer, catalogue),
+      ]),
+    ),
+    notice: walk.notice,
+    subjectState: composed
+      ? null
+      : `For the selected subject: ${emptyFamilyDescription(context?.state ?? 'absent', false)}`,
+  };
+}
+
+function readForLabel(
+  subject: WalkedSubject | undefined,
+  answer: ReviewPayload,
+  catalogue?: ReviewNavigationState['catalogue'],
+): string {
+  if (!subject) return 'an earlier subject';
+  const entry = catalogue?.entries?.find(
+    (row) => row.selector_kind === subject.kind && row.selector_id === subject.id,
+  );
+  return `${subject.kind} ${entry?.label ?? subjectTitle(answer, subject)}`;
+}
+
 function FamilyRailContext({
   payload,
   state,
+  walked,
   chosen,
   rosterNext,
   selectable,
@@ -591,6 +707,7 @@ function FamilyRailContext({
 }: {
   payload: ReviewPayload;
   state: WorkspaceState;
+  walked: WalkedTree;
   chosen: FamilySelection | null;
   rosterNext: (family: string, side: string, continuation: string) => void;
   selectable: boolean;
@@ -605,11 +722,12 @@ function FamilyRailContext({
   // Above a composed tree too: the state is what a follow focuses (review R1 F3), not the tree's
   // auto-selected row, whose name says nothing of it.
   const unknownState = unknown ? <InvariantTargetState target={unknown} context={context} /> : null;
-  return context && composed ? (
+  return composed || walked.entries.length > 0 ? (
     <>
       {unknownState}
       <FamilyTree
-        context={context}
+        context={context ?? NO_FAMILY_CONTEXT}
+        walked={walked}
         selection={chosen}
         onSelect={onSelect}
         onRosterNext={rosterNext}
@@ -649,18 +767,75 @@ function emptyFamilyDescription(state: string, canChoose: boolean): string {
   return 'Family context could not be read for this comparison. Source review remains available.';
 }
 
-function useSelectionFocus(payload: ReviewPayload, state: WorkspaceState): void {
-  const { center, focusSelection } = state;
+// The answer of a selection moves focus to the selected node. A selection that needs no new answer
+// (the same subject again) moves it when the selection itself is made, and a request left by a
+// refresh only brings the selected node into view: the rail keeps its scroll across the new answer.
+function useSelectionFocus(
+  payload: ReviewPayload,
+  state: WorkspaceState,
+  reading: ReadingStatus | null,
+): void {
+  const { center, focusSelection, treeIntent } = state;
+  const pending = reading !== null;
+  const unavailable = reading !== null && reading.problem !== null;
+  const seen = useRef(payload);
   useEffect(() => {
     const request = focusSelection.current;
-    if (!request) return;
+    const answered = seen.current !== payload;
+    seen.current = payload;
+    if (!request || treeIntent.id <= request.after) return;
+    // Only a render made after the request can answer it: the answer a late effect of an earlier
+    // render sees was on screen before the reader asked.
+    if (answered) request.answered = true;
+    if (pending) {
+      if (unavailable) revealUnavailableRead(request, center.current, treeIntent);
+      return;
+    }
+    if (request.scrollOnly && !request.answered) return;
     focusSelection.current = null;
-    // A reader who moved focus while the subject was pending keeps it: only focus still on the
-    // selecting control, or lost with an unmounted node (`body`), is moved to the selection.
-    const active = document.activeElement;
-    if (active !== null && active !== document.body && active !== request.from) return;
-    (selectionNode(center.current) ?? center.current)?.focus();
-  }, [payload, center, focusSelection]);
+    landFocus(request, center.current, treeIntent);
+  }, [payload, pending, unavailable, treeIntent, center, focusSelection]);
+}
+
+// OR-R042: a failed/refused selection reveals its own status without landing focus early or
+// consuming the request that a successful retry still needs.
+function revealUnavailableRead(
+  request: FocusRequest,
+  center: HTMLElement | null,
+  intent: TreeIntent,
+): void {
+  if (selectionFocusAvailable(request) && stackedTreeRead(intent))
+    center?.scrollIntoView({ block: 'start' });
+}
+
+function landFocus(request: FocusRequest, center: HTMLElement | null, intent: TreeIntent): void {
+  if (request.scrollOnly) {
+    selectionNode(center)?.scrollIntoView?.({ block: 'nearest' });
+    return;
+  }
+  // A reader who moved focus while the subject was pending keeps it: only focus still on the
+  // selecting control, or lost with an unmounted node (`body`), is moved to the selection.
+  if (!selectionFocusAvailable(request)) return;
+  focusSelectedRead(center, intent);
+}
+
+function selectionFocusAvailable(request: FocusRequest): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || active === request.from;
+}
+
+function stackedTreeRead(intent: TreeIntent): boolean {
+  return intent.keep && window.matchMedia('(max-width: 60rem)').matches;
+}
+
+function focusSelectedRead(center: HTMLElement | null, intent: TreeIntent): void {
+  const node = selectionNode(center) ?? center;
+  // OR-R033: a stacked in-tree activation reveals its read while focus stays on its row. Other
+  // selections and the shared lane/file reveal path keep their existing scroll behavior.
+  if (stackedTreeRead(intent)) {
+    node?.focus({ preventScroll: true });
+    center?.scrollIntoView({ block: 'start' });
+  } else node?.focus();
 }
 
 // What a selection focuses: an intent marker's unknown-membership target as its own state (MIK-R34,
@@ -705,15 +880,14 @@ function sourceAttribution(
   );
 }
 
+// A selection of a row the tree shows, which may be a kept family's: the walked tree keeps (MIK-R39).
 function chooseSubject(
-  payload: ReviewPayload,
+  walked: ReviewFamilyContextEntry[],
   selection: FamilySelection,
   state: WorkspaceState,
   navigation?: ReviewNavigationState,
 ): void {
-  const family = payload.family_context?.entries.find(
-    (entry) => entry.family_id === selection.familyId,
-  );
+  const family = walked.find((entry) => entry.family_id === selection.familyId);
   if (!family) {
     state.setChosen(selection);
     return;
@@ -722,9 +896,11 @@ function chooseSubject(
     (row) => row.invariant_revision_id === selection.memberRevisionId,
   );
   if (selection.memberRevisionId === undefined) {
-    navigation?.onSelect({ kind: 'family', id: selection.familyId }, selection);
+    navigation?.onSelect({ kind: 'family', id: selection.familyId }, selection, { keepTree: true });
   } else if (member?.invariant_id) {
-    navigation?.onSelect({ kind: 'invariant', id: member.invariant_id }, selection);
+    navigation?.onSelect({ kind: 'invariant', id: member.invariant_id }, selection, {
+      keepTree: true,
+    });
   }
   state.setChosen(selection);
 }

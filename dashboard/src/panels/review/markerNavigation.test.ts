@@ -92,3 +92,19 @@ describe('the return', () => {
     expect(calls[0]).toBe('setChosen {"familyId":"fam-a","memberRevisionId":"rev-a"}');
   });
 });
+
+// MIK-R39 rule 9: following a marker and the return from it are outside selections, so the walked
+// tree starts afresh. The default of `onSelect` is the outside selection; only a selection of a tree
+// row passes `keepTree`, and neither move here does.
+describe('the walked tree (MIK-R39)', () => {
+  it('follows and returns as outside selections', () => {
+    const { state, calls } = workspace();
+    const nav = navigation(calls);
+    const moves = workspaceMarkerMoves(state, nav);
+    const restore = moves.capture();
+    moves.open({ invariant: 'INV-X', invariantKey: 'inv-x', familyKey: 'fam-b', state: 'member' });
+    restore();
+    expect(vi.mocked(nav.onSelect).mock.calls).toHaveLength(2);
+    for (const call of vi.mocked(nav.onSelect).mock.calls) expect(call).toHaveLength(2);
+  });
+});

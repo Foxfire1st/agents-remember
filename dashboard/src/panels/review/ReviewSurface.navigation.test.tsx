@@ -9,6 +9,12 @@
 // failed or refused selection is stated in the reading area for that subject while the shell stays
 // usable; focus the reader moved while waiting is not taken back; and a catalogue that answers after
 // the bounded wait does not move a reader who has started working.
+//
+// The last two cases force an order a busy machine produces on its own: the reader selects again in
+// the turn in which the previous answer's commit becomes visible, before React has run that commit's
+// passive effects. The late effect of the earlier render must leave the new selection's focus request
+// alone (`FocusRequest.after` in `ReviewWorkspace.tsx`): focus lands on the row selected last, by
+// pointer and by `j`, and no key press is lost. Both fail every time without that guard.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
@@ -21,6 +27,22 @@ import type {
 } from '../../data/review';
 import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import { ReviewSurface } from './ReviewSurface';
+import {
+  CHANGES,
+  J,
+  R6R,
+  R6R_ID,
+  WAIT,
+  familyBlock,
+  open,
+  press,
+  selectedName,
+  selectedNode,
+  serveWorld,
+} from './walk.test-utils';
+
+// A cold render of a real answer on a loaded machine can take longer than the library's 5 s default.
+vi.setConfig({ testTimeout: 60000 });
 
 const captured = JSON.parse(
   readFileSync(
@@ -407,6 +429,19 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(familyItem(view, families[0].family_id)).toBe(family);
   expect(document.activeElement).toBe(familyNode);
   expect(technical.open && roster.open).toBe(true);
+  // MIK-R39: the invariant's review showed the other families too; clicking the first family's row
+  // leaves them in the tree, tagged as kept and last read for the invariant.
+  const invariantLabel = families
+    .flatMap((one) => [...one.before.members, ...one.after.members])
+    .find((member) => member.invariant_id === INVARIANT)!.display_label;
+  const kept = families.slice(1).map((one) => familyItem(view, one.family_id));
+  expect(kept.length).toBeGreaterThan(0);
+  expect(kept.map((item) => item.dataset.familyKept)).toEqual(kept.map(() => 'true'));
+  for (const item of kept)
+    expect(within(item).getByTestId('review-family-kept').textContent).toBe(
+      `kept · last read for invariant ${invariantLabel}`,
+    );
+  expect(familyItem(view, families[0].family_id).dataset.familyKept).toBeUndefined();
 });
 
 it('settles on the latest of rapid selections and never shows a superseded answer', async () => {
@@ -660,4 +695,85 @@ it('leaves focus where the reader moved it while the selected subject was pendin
   expect(document.activeElement).toBe(
     within(familyItem(view, families[0].family_id)).getByTestId('review-family-open'),
   );
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Forced order: a selection made before the passive effects of the previous answer's commit have run.
+
+it('lands focus on a family chosen in the turn that shows the previous answer, before its effects have run', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      if (url.pathname.endsWith('/entries')) return response(catalogueBody);
+      if (url.pathname.endsWith('/source-content')) return response(contentFor(url));
+      return response(reviewFor(url));
+    }),
+  );
+  const view = render(<ReviewSurface {...target} />);
+  // The second family is chosen inside the wait that first sees the first family. The wait's check
+  // runs from a mutation observer, so the click is made after the commit that shows the first family
+  // and before React has run that commit's passive effects. The wait ends with the check that clicks.
+  await waitFor(() => {
+    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
+    fireEvent.click(subjectButton(view, families[1].family_id));
+  });
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id),
+  );
+  // Focus lands on the row the tree marks as the selection: the second family's, not the page body
+  // (where it falls when the late effect has spent the request on the first family's row).
+  await waitFor(() => {
+    const selected = selectedNode(view);
+    expect(selected?.dataset.family).toBe(families[1].family_id);
+    expect(document.activeElement).toBe(selected);
+  });
+});
+
+it('keeps every j pressed in the turn that shows the previous answer, and lands focus on each selected row', async () => {
+  // The real-data world of the MIK-R39 tests: family FAM-R6R095RW with its seven changes.
+  serveWorld();
+  const view = open(R6R);
+  await view.findAllByTestId('review-change-badge', undefined, WAIT);
+  within(familyBlock(view, R6R_ID)).getByTestId('review-family-open').focus();
+  const shows = (change: string) =>
+    view.getByTestId('review-surface').dataset.reviewPending === undefined &&
+    selectedNode(view) !== null &&
+    selectedName(view) === change;
+  const landedOn = (change: string) =>
+    waitFor(() => {
+      expect(shows(change)).toBe(true);
+      expect(document.activeElement).toBe(selectedNode(view));
+    }, WAIT);
+  // The second press is made by a mutation observer, in the first microtask in which the first
+  // change's answer is shown: after its commit and before React has run that commit's passive effects.
+  let pressedAgain = false;
+  const observer = new MutationObserver(() => {
+    if (pressedAgain || !shows(CHANGES[0])) return;
+    pressedAgain = true;
+    press(J);
+  });
+  observer.observe(view.container, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: true,
+  });
+  try {
+    // The first press, made again until the keymap's binding (itself a passive effect) takes it.
+    const before = selectedNode(view);
+    await waitFor(() => {
+      if (selectedNode(view) === before) press(J);
+      expect(selectedNode(view)).not.toBe(before);
+    }, WAIT);
+    await waitFor(() => expect(pressedAgain, 'the second press is made').toBe(true), WAIT);
+  } finally {
+    observer.disconnect();
+  }
+  // The second change is selected and focus is on its row, not back on the first change's row.
+  await landedOn(CHANGES[1]);
+  // So the third press steps from the row the reader is on: to the third change, not to the second
+  // again (a press that selects the row already selected is a press lost).
+  press(J);
+  await landedOn(CHANGES[2]);
 });

@@ -12,7 +12,7 @@ import type {
 } from '../../data/review';
 import { mergeChangeKinds } from './changeTriage';
 
-function mergeMember(
+export function mergeMember(
   previous: ReviewFamilyMember | undefined,
   next: ReviewFamilyMember,
 ): ReviewFamilyMember | null {

@@ -1,7 +1,8 @@
 // Recorded subject navigation. The catalogue supplies identity; the review supplies family content.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useReviewCatalogue } from '../../data/useReviewCatalogue';
 import type { FamilySelection } from './FamilyTree';
+import type { ReviewPageRequest } from './ReviewReadCycle';
 import { css } from '../../../styled-system/css';
 import type { ReviewEntry, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import type { ReviewCatalogueRead } from '../../data/useReviewCatalogue';
@@ -10,10 +11,22 @@ export interface ReviewSubject {
   kind: ReviewSelectorKind;
   id: string;
 }
+// How a selection treats the family tree the reader has walked (MIK-R39). By default a selection
+// starts the tree afresh; `keepTree` marks the selection of a row the tree shows. `page` asks for a
+// page of the subject's review (a kept family's roster continuation).
+export interface SelectionOptions {
+  keepTree?: boolean;
+  page?: ReviewPageRequest;
+}
+
 export interface ReviewNavigationState {
   catalogue: ReviewCatalogueRead & { refresh: () => void };
   subject?: ReviewSubject;
-  onSelect: (subject: ReviewSubject | undefined, context?: FamilySelection) => void;
+  onSelect: (
+    subject: ReviewSubject | undefined,
+    context?: FamilySelection,
+    options?: SelectionOptions,
+  ) => void;
 }
 
 // The navigation the surface drives: the state above plus the two signals the read cycle needs.
@@ -91,7 +104,13 @@ export function ReviewNavigation({
   onSelect,
   children,
   loadedFamilyIds = [],
-}: ReviewNavigationState & { children?: React.ReactNode; loadedFamilyIds?: string[] }) {
+  listLoaded = false,
+}: ReviewNavigationState & {
+  children?: React.ReactNode;
+  loadedFamilyIds?: string[];
+  // The tree holds a kept family: the catalogue then lists every family the tree shows (MIK-R39).
+  listLoaded?: boolean;
+}) {
   const families = (catalogue.entries ?? []).filter((entry) => entry.selector_kind === 'family');
   const invariants = (catalogue.entries ?? []).filter(
     (entry) => entry.selector_kind === 'invariant',
@@ -104,6 +123,7 @@ export function ReviewNavigation({
         subject={subject}
         onSelect={onSelect}
         loadedFamilyIds={loadedFamilyIds}
+        listLoaded={listLoaded}
       >
         {children}
       </CatalogueFamilies>
@@ -263,32 +283,33 @@ function CatalogueFamilies({
   subject,
   onSelect,
   loadedFamilyIds,
+  listLoaded,
   children,
 }: {
   entries: ReviewEntry[];
   subject?: ReviewSubject;
   onSelect: ReviewNavigationState['onSelect'];
   loadedFamilyIds: string[];
+  listLoaded: boolean;
   children?: React.ReactNode;
 }) {
-  const firstLoaded = entries.find((entry) => loadedFamilyIds.includes(entry.selector_id));
-  return (
-    <>
-      {entries.map((entry) =>
-        loadedFamilyIds.includes(entry.selector_id) ? (
-          entry === firstLoaded ? (
-            <div key={entry.selector_id}>{children}</div>
-          ) : null
-        ) : (
-          <SubjectButton
-            key={entry.selector_id}
-            entry={entry}
-            subject={subject}
-            onSelect={onSelect}
-          />
-        ),
-      )}
-      {!firstLoaded ? children : null}
-    </>
+  const button = (entry: ReviewEntry) => (
+    <SubjectButton key={entry.selector_id} entry={entry} subject={subject} onSelect={onSelect} />
   );
+  // The tree is one keyed child among the rows, so it keeps its identity (its open disclosures and
+  // scroll) however the walk moves the place it stands in. It stands in the place of the first
+  // family it shows. While it shows a kept family, every family it shows also keeps its catalogue row
+  // (without badges): choosing it starts the tree afresh with that family alone (MIK-R39).
+  const nodes: React.ReactNode[] = [];
+  let placed = false;
+  for (const entry of entries) {
+    const loaded = loadedFamilyIds.includes(entry.selector_id);
+    if (loaded && !placed) {
+      nodes.push(<Fragment key="tree">{children}</Fragment>);
+      placed = true;
+    }
+    if (!loaded || listLoaded) nodes.push(button(entry));
+  }
+  if (!placed) nodes.push(<Fragment key="tree">{children}</Fragment>);
+  return <>{nodes}</>;
 }

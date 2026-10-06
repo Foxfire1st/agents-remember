@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-10-06T19:02:38+02:00",
+  "producer": "L39 Worker / capture_refusal.py / public reviewer HTTP route",
+  "route": "GET /api/review/intent",
+  "url": "http://127.0.0.1:18892/api/review/intent?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L33&selectorKind=invariant&selectorId=00000000-0000-0000-0000-000000000000",
+  "params": {
+    "repo": "agents-remember",
+    "master": "260928_maintained-invariant-knowledge",
+    "leaf": "260928-MIK-L33",
+    "selectorKind": "invariant",
+    "selectorId": "00000000-0000-0000-0000-000000000000"
+  },
+  "status": 400,
+  "sha256": "a07bc47b4dd357992dae6580e4d3a1a70755554567118a3ae920c88cea38677b",
+  "bytes": 927,
+  "source_commit": "beb9473e21f3e173094da4f1437798660c3abb52",
+  "scratch_world": "/tmp/mik-run3/l39/r42-restartB/real",
+  "condition": "The real route is asked for an invariant selector absent from this comparison. This genuine refused body is preserved verbatim and replayed as the controlled refused result of an in-tree read; no refusal body is authored by hand."
+}

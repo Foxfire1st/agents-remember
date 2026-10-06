@@ -1,0 +1,253 @@
+{
+  "captured_at": "2026-10-04T15:58:35+00:00",
+  "producer": "260928-MIK-L39 worker, capture_real_bodies.py (kept with the leaf's evidence)",
+  "command": "REQUEST_LOG=<log> PYTHONPATH=<L39 worktree>/mcp/src <mcp venv python> serve_scratch.py, then capture_real_bodies.py <review folder> <this file>",
+  "route": "create_app routes registered by serve_scratch.py with serving_collaborators(config), over HTTP on 127.0.0.1:18852",
+  "source_tree": "260928-mik-l39 worktree, base e40d1f21660386f9b091ae5e6fee595a467d4cef (no file under mcp/ changed)",
+  "scratch": "/tmp/mik-run2/l39/scratch: --shared clones of the real code repository at e40d1f21 and of the real memory repository at 40ae8395 (converted); leaf 260928-MIK-L33 from lane D2's setup_leaf.py (R33): four scratch code edits and five scratch-authored curator edits in the leaf's own worktrees, then its curate step (12 entries re-recorded at the candidate blob)",
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/walkReal.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33"
+      },
+      "status": 200,
+      "seconds": 0.73,
+      "sha256": "0d0eb94d3c7b767fdaffdc7ee437e5b7206e3d0a79057e00e7d72ba295353552",
+      "bytes": 19949
+    },
+    {
+      "file": "src/panels/review/walkReal.FAM-R6R095RW.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "family",
+        "selectorId": "b9f95278-5712-5867-aa87-6e225aed4d45"
+      },
+      "status": 200,
+      "seconds": 1.92,
+      "sha256": "d345fc4ac573e6afefe0625bfffa797a0f33e0b3764fbb1dc8ad8f5ad7b4918f",
+      "bytes": 162049
+    },
+    {
+      "file": "src/panels/review/walkReal.FAM-2HBJREC2.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "family",
+        "selectorId": "ccd6de6f-cfca-549c-8ee0-08fc418f3fd9"
+      },
+      "status": 200,
+      "seconds": 1.77,
+      "sha256": "10a59a89899d8283c155ad3c617deff34503c3f82ec6b77c1d92bb1e6c5cff8b",
+      "bytes": 208940
+    },
+    {
+      "file": "src/panels/review/walkReal.task.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33"
+      },
+      "status": 200,
+      "seconds": 1.51,
+      "sha256": "4b231d8104b7e510f3bc9a87cec0741ea79bc279fd3c8de74e7fa2692c63c938",
+      "bytes": 15110
+    },
+    {
+      "file": "src/panels/review/walkReal.lane.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "comparison": 1,
+        "lane": "files"
+      },
+      "status": 200,
+      "seconds": 0.06,
+      "sha256": "49441fc848b0d0b91ab681418b2f5e5ec651c6f28c71111f55fd499ab44cbcf2",
+      "bytes": 3239
+    },
+    {
+      "file": "src/panels/review/walkReal.file.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "comparison": 1,
+        "file": "dashboard/src/panels/review/familyWalkMerge.ts"
+      },
+      "status": 200,
+      "seconds": 0.06,
+      "sha256": "6e6d7cad9f64f9d1989104cc5a0ead6a231bc4c0fa0c0b9a48e2449750dd1a41",
+      "bytes": 5614
+    },
+    {
+      "file": "src/panels/review/walkReal.source.captured.json",
+      "route": "GET /api/review/intent/source-content",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+        "beforeCodeTreeId": "e40d1f21660386f9b091ae5e6fee595a467d4cef",
+        "afterCodeTreeId": "d3e51778a3d5ad422c8c96508e1a01b191173c5d"
+      },
+      "status": 200,
+      "seconds": 1.37,
+      "sha256": "341c356ee5afec5a6b89ca0aa57b403380d2940d3a127320157237b1aefa6c27",
+      "bytes": 15582
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-2E8MG43K.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "97c94e1f-38e1-51db-ade2-f7bc3438024b"
+      },
+      "status": 200,
+      "seconds": 1.97,
+      "sha256": "4f14481cc791f17e0aaebda7ca1840a83b6bfb8084e0deb60757f71ea0b40595",
+      "bytes": 163363
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-ZS9ZS878.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "a336c721-8feb-5017-b1bf-653bb1680364"
+      },
+      "status": 200,
+      "seconds": 1.95,
+      "sha256": "5d1eb3686b4f381591156f6f7489807a1d4c564c3cb0153884b467087bdb20a6",
+      "bytes": 163306
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-555EHWM8.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "f587f769-dbcc-5d50-ba56-260f333110f1"
+      },
+      "status": 200,
+      "seconds": 1.72,
+      "sha256": "0245a689c8ece334a18786e46cde626b66bdb921cb48fe2191f2951c97689c61",
+      "bytes": 162761
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-BR5MTSTY.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e"
+      },
+      "status": 200,
+      "seconds": 1.7,
+      "sha256": "affb6984d57c265e6cf15187a4453dd5f034d9c5245b2fec669bb2fedd567b3e",
+      "bytes": 162651
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-H8EM1VJR.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "94989116-7997-5332-a9e8-43b9c9c6fe73"
+      },
+      "status": 200,
+      "seconds": 1.57,
+      "sha256": "0c3e9e196f475f48665170e1a0396c82ba6ffc55a0e6db6902045142f0ee6987",
+      "bytes": 162789
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-VPX81HXV.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817"
+      },
+      "status": 200,
+      "seconds": 1.57,
+      "sha256": "983755cc50dc1fb1ec10bdc725d45b6ae2bde500ee7aee0f27ed069c3a6d5dfb",
+      "bytes": 163355
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-2TQGXFAX.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c"
+      },
+      "status": 200,
+      "seconds": 1.61,
+      "sha256": "8f7c78f220033e5be620ef4fff4c36007b88f182cdb49a26f8acab4d6ce01423",
+      "bytes": 223559
+    },
+    {
+      "file": "src/panels/review/walkReal.INV-2TQGXFAX-page2.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "invariant",
+        "selectorId": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+        "pageSize": 2
+      },
+      "status": 200,
+      "seconds": 5.26,
+      "sha256": "f45e53965ecc866f48a2aa2690a08d77f714ee76fa919e0697873838e79e7327",
+      "bytes": 61541
+    },
+    {
+      "file": "src/panels/review/walkReal.FAM-R6R095RW-continued.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L33",
+        "selectorKind": "family",
+        "selectorId": "b9f95278-5712-5867-aa87-6e225aed4d45",
+        "pageSize": 2,
+        "pageOf": "family_members",
+        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjkzYmY5M2EzNTgzZGVjOWE5N2UzYjA3MjExYTFlZDFkNTIzZjg1NmI3OWExMGQ0MTAzMTA5YTc5MDhhNDM2NzQiLCJzZWVkX2RpZ2VzdCI6ImRhYmE3ZDFhZjVmZTUyMTQ1MDllY2MyY2E0ZTVlNmFhOWRhZWY2N2Y3ODU2OTY0Mjg2NzQ4NDllYTc0ZDU1ZDkiLCJtYW5pZmVzdF9kaWdlc3QiOiI0YWQwYTI0NTc2OWRiOTQyZjJlOWQzNjM3ZjYxMDRmMjMyMDI3ZDZiYWFkMDRhZGEyMGU4MDYzMTM0MTZkZThiIiwibG9naWNhbF9kaWdlc3QiOiJhZWEyZTdlYTJkYThiNDA5MDUzZjBmNmZjZDU1MjdkYzBhNjUyZmU0MzI1YTk0MTY4NWNhYjI1OWRhYzUwODgzIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
+      },
+      "status": 200,
+      "seconds": 1.72,
+      "sha256": "758a6cbd60c589291ad2ba7b88630970f3d5aa83677333e6ac7d6d061efa1aa5",
+      "bytes": 45881
+    }
+  ],
+  "partial_round": "MIK-L39 round 2 (2026-10-04T19:56:00+00:00): the same scratch leaf and route, requested with the server's own pageSize=2, so a real family is partial; the continuation is the cursor the first body published for FAM-R6R095RW's before side."
+}

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import {
   useObservedComparison,
@@ -6,6 +6,7 @@ import {
   useReviewNavigation,
   type ReviewNavigationState,
   type ReviewSubject,
+  type SelectionOptions,
 } from './ReviewNavigation';
 
 import type {
@@ -450,6 +451,37 @@ function ReviewHeader({
   );
 }
 
+// Every selection but the one of a row the family tree shows starts the walked tree afresh (MIK-R39).
+function subjectSelection(parts: {
+  navigation: ReturnType<typeof useReviewNavigation>;
+  workspace: ReturnType<typeof useWorkspaceState>;
+  setInstead: (failure: ReviewFailure | null) => void;
+  setSelection: (page: ReviewPageRequest | undefined) => void;
+}) {
+  const { navigation, workspace, setInstead, setSelection } = parts;
+  const selectSubject = (
+    subject: ReviewSubject | undefined,
+    context?: FamilySelection,
+    options?: SelectionOptions,
+  ) => {
+    workspace.focusSelection.current = {
+      from: document.activeElement,
+      after: workspace.treeIntent.id,
+    };
+    workspace.beginSelection(options?.keepTree === true);
+    navigation.onSelect(subject);
+    setInstead(null);
+    setSelection(options?.page);
+    workspace.setChosen(context ?? null);
+  };
+  // The offer to open the task context after a refusal is an outside selection too.
+  const openTaskContext = (failure: ReviewFailure) => {
+    workspace.beginSelection(false);
+    setInstead(failure);
+  };
+  return { selectSubject, openTaskContext };
+}
+
 function useSurface({
   repo,
   master,
@@ -474,13 +506,12 @@ function useSurface({
   const workspace = useWorkspaceState();
   // One cache per mounted surface: reclaimed with it (see `ReviewReadCache`).
   const [cache] = useState(() => new ReviewReadCache());
-  const selectSubject = (subject: ReviewSubject | undefined, context?: FamilySelection) => {
-    workspace.focusSelection.current = { from: document.activeElement };
-    navigation.onSelect(subject);
-    setInstead(null);
-    setSelection(undefined);
-    workspace.setChosen(context ?? null);
-  };
+  const { selectSubject, openTaskContext } = subjectSelection({
+    navigation,
+    workspace,
+    setInstead,
+    setSelection,
+  });
   const cycle = useReviewReadCycle({
     repo,
     master,
@@ -509,6 +540,7 @@ function useSurface({
   useObservedComparison(navigation.observeComparison, shown);
   const asked = instead === null ? navigation.subject : undefined;
   const problem = problemOf(read);
+  const { refreshReview, retryReview } = useRefreshReview(workspace, read, cycle.refresh);
   // The owner's failure or refusal for the requested subject, rendered in the reading area.
   const problemBlock = (label: string) =>
     problem === null ? null : (
@@ -516,14 +548,15 @@ function useSurface({
         origin={read.phase === 'refused' ? 'refusal' : 'failure'}
         problem={problem}
         subject={label}
-        onRetry={retryFor(read, cycle.refresh)}
-        onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
+        onRetry={retryFor(read, retryReview)}
+        onOpenTaskContext={insteadFor(read, problem, instead, openTaskContext)}
       />
     );
   return {
     ...{ repo, master, leaf, selectorKind, selectorId, history, onBack, navigation, selectSubject },
     ...{ instead, setInstead, selection, setSelection, workspace, cache, frame, coherent, shown },
-    ...{ read, carried: cycle.carried, refresh: cycle.refresh, problem },
+    ...{ read, carried: cycle.carried, refreshReview, retryReview, problem },
+    openTaskContext,
     reading:
       frame === null || shown !== null
         ? null
@@ -531,9 +564,55 @@ function useSurface({
   };
 }
 
+// A refresh shows the comparison as it reads now, not the tree walked before it (MIK-R39), and asks
+// for the selected row to be brought into view once its answer is shown. A refresh whose read fails
+// or is refused has no such answer: its request is dropped, so that a later answer for the subject
+// on screen (a roster continuation, a page) does not move the rail. The reader's retry of that
+// failed read is the refresh again and asks what it asked. The retry of any other failed read (a
+// selection's, a page's) reads again and asks nothing more, as before.
+function useRefreshReview(
+  workspace: ReturnType<typeof useWorkspaceState>,
+  read: ReviewRead,
+  refresh: () => void,
+): { refreshReview: () => void; retryReview: () => void } {
+  const { focusSelection } = workspace;
+  // The read on screen when the refresh was asked: a failure shown then is not the refresh's own.
+  const asked = useRef<ReviewRead | null>(null);
+  // The failed or refused read of a refresh, once its request is dropped.
+  const failed = useRef<ReviewRead | null>(null);
+  const settle = useCallback(
+    (shown: ReviewRead) => {
+      const unanswered = shown.phase === 'failed' || shown.phase === 'refused';
+      if (unanswered && shown !== asked.current && focusSelection.current?.scrollOnly) {
+        focusSelection.current = null;
+        failed.current = shown;
+      }
+    },
+    [focusSelection],
+  );
+  useEffect(() => settle(read), [read, settle]);
+  const refreshReview = () => {
+    workspace.beginSelection(false);
+    focusSelection.current = {
+      from: document.activeElement,
+      after: workspace.treeIntent.id,
+      scrollOnly: true,
+    };
+    asked.current = read;
+    refresh();
+  };
+  const retryReview = () => {
+    // A retry made in the turn that shows the failure comes before that turn's effects.
+    settle(read);
+    if (failed.current === read) refreshReview();
+    else refresh();
+  };
+  return { refreshReview, retryReview };
+}
+
 export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
   const surface = useSurface(props);
-  const { repo, master, leaf, history, read, shown, reading, refresh, instead } = surface;
+  const { repo, master, leaf, history, read, shown, reading, instead } = surface;
   // Any reading gesture makes the subject on screen the reader's own: a catalogue that answers late
   // then fills the navigation without moving the reader (see `useReviewNavigation`).
   const root = useRef<HTMLDivElement>(null);
@@ -564,7 +643,7 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
           onBack={surface.onBack}
           refresh={
             <ReviewRefresh
-              onRefresh={refresh}
+              onRefresh={surface.refreshReview}
               busy={read.phase === 'loading'}
               generation={generationOf(read, surface.carried, shown)}
             />
@@ -575,8 +654,8 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
           instead={instead}
           shown={shown}
           lastCoherent={read.phase === 'failed' ? surface.coherent : null}
-          onRetry={retryFor(read, refresh)}
-          onOpenTaskContext={insteadFor(read, surface.problem, instead, surface.setInstead)}
+          onRetry={retryFor(read, surface.retryReview)}
+          onOpenTaskContext={insteadFor(read, surface.problem, instead, surface.openTaskContext)}
           readingInWorkspace={reading !== null}
         />
         <ReviewPanes

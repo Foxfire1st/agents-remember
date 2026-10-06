@@ -1,0 +1,118 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "9951c5d393eef86fcbbfd2a4fcfa4aa2bc2698e8"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "d3e51778a3d5ad422c8c96508e1a01b191173c5d"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "e40d1f21660386f9b091ae5e6fee595a467d4cef",
+   "repository": "/tmp/mik-run2/l39/scratch/agents-remember",
+   "tree": "9951c5d393eef86fcbbfd2a4fcfa4aa2bc2698e8"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L33/1",
+   "repository": "/tmp/mik-run2/l39/scratch/agents-remember",
+   "tree": "d3e51778a3d5ad422c8c96508e1a01b191173c5d"
+  },
+  "leaf_id": "260928-MIK-L33",
+  "memory_base": {
+   "commit": "40ae8395de72fd3d1cc275c03b723e6ff4a53fb3",
+   "repository": "/tmp/mik-run2/l39/scratch/coord/memory-repos/ar-agents-remember",
+   "tree": "6e81c9d377248679408c5725ee68e74c7d5a1392"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L33/1",
+   "repository": "/tmp/mik-run2/l39/scratch/coord/memory-repos/ar-agents-remember",
+   "tree": "1dcbb8b5fc3cec8ffc16c9b36e116aaab788a4b5"
+  },
+  "number": 1,
+  "recorded_at": "2026-10-04T15:53:21+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [],
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "6e81c9d377248679408c5725ee68e74c7d5a1392"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "1dcbb8b5fc3cec8ffc16c9b36e116aaab788a4b5"
+  }
+ ],
+ "lane": {
+  "attributed": 4,
+  "attribution_unknown": 0,
+  "changed_total": 4,
+  "detail": "4 changed file(s): 4 attributed, 0 unexplained, 0 of unknown attribution",
+  "paths": [
+   {
+    "bucket": "attributed",
+    "path": "dashboard/src/panels/review/FamilyReviewCenter.tsx"
+   },
+   {
+    "bucket": "attributed",
+    "path": "dashboard/src/panels/review/FamilyTree.tsx"
+   },
+   {
+    "bucket": "attributed",
+    "path": "dashboard/src/panels/review/ReviewSurface.tsx"
+   },
+   {
+    "bucket": "attributed",
+    "path": "dashboard/src/panels/review/familyWalkMerge.ts"
+   }
+  ],
+  "state": "measured",
+  "unexplained": 0,
+  "unexplained_changes": {
+   "attributed_files": 1,
+   "bucket_files": 0,
+   "files": [
+    {
+     "bucket": "attributed",
+     "content": "text",
+     "counts": {
+      "attribution_unknown": 0,
+      "hunks": 1,
+      "linked": 0,
+      "unexplained": 1
+     },
+     "path": "dashboard/src/panels/review/ReviewSurface.tsx",
+     "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-1EJ1NP47, RLZ-9ZV5SCXK, RLZ-X8ZT1K8Z; on the after side RLZ-1EJ1NP47, RLZ-9ZV5SCXK, RLZ-X8ZT1K8Z)",
+     "status": "modified",
+     "unknown_reasons": []
+    }
+   ],
+   "hunks": 1,
+   "non_text": 0
+  },
+  "unknown_attribution": {
+   "attributed_files": 0,
+   "bucket_files": 0,
+   "files": [],
+   "hunks": 0,
+   "non_text": 0
+  },
+  "unmeasured": []
+ },
+ "leaf_id": "260928-MIK-L33",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

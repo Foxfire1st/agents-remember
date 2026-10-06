@@ -39,6 +39,18 @@ export interface FamilySelection {
   memberRevisionId?: string;
 }
 
+// The tree the reader has walked (MIK-R39), drawn in place of the selected subject's context alone.
+// `kept` names, by family, the families that are not in the selected subject's context and the
+// subject each was last read for.
+export interface WalkedTree {
+  entries: ReviewFamilyContextEntry[];
+  kept: ReadonlyMap<string, string>;
+  // Said beside the tree: the walk started again because the comparison changed.
+  notice?: string | null;
+  // Said above the tree when the selected subject's own answer composed no family context.
+  subjectState?: string | null;
+}
+
 const shell = css({
   background: 'bgPanel',
   borderWidth: '1px',
@@ -609,27 +621,46 @@ function MemberRoster({
   );
 }
 
+// A kept family's tag (MIK-R39): visible beside its row, and the row's accessible description.
+function keptMarks(keptFor: string | undefined, id: string) {
+  if (keptFor === undefined) return { item: {}, node: {}, tag: null };
+  return {
+    item: { 'data-family-kept': 'true' },
+    node: { 'aria-describedby': id },
+    tag: (
+      <p id={id} className={muted} data-testid="review-family-kept">
+        kept · last read for {keptFor}
+      </p>
+    ),
+  };
+}
+
 function FamilyNode({
   entry,
   selected,
   onSelect,
   onRosterNext,
   order,
+  keptFor,
 }: {
   entry: ReviewFamilyContextEntry;
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
   order: TreeOrder;
+  // Set for a kept family: the subject it was last read for (MIK-R39).
+  keptFor?: string;
 }) {
   const familyCurrent =
     selected?.familyId === entry.family_id && selected.memberRevisionId === undefined;
+  const kept = keptMarks(keptFor, `${useId()}-kept`);
   return (
     <li
       className={familyBlock}
       data-testid="review-family"
       data-family={entry.family_id}
       data-family-state={entry.state}
+      {...kept.item}
       data-members-unreturned={familyTriage(entry)?.partial ? 'true' : undefined}
     >
       <button
@@ -640,12 +671,14 @@ function FamilyNode({
         data-family={entry.family_id}
         {...familyChangeAttributes(entry)}
         aria-current={familyCurrent ? 'true' : undefined}
+        {...kept.node}
         onClick={() => onSelect({ familyId: entry.family_id })}
         onKeyDown={treeArrow}
       >
         ▾ {familyLabel(entry)}
         <GuaranteeChangeBadge kinds={entry.change_kinds} />
       </button>
+      {kept.tag}
       <FamilyBreakdown triage={familyTriage(entry)} />
       <FamilyGuarantees entry={entry} />
       <details>
@@ -667,17 +700,22 @@ function FamilyNode({
   );
 }
 
+// The scope line counts the families of the selected subject's context and the kept ones apart.
 function filterScope(
   query: string,
   shownFamilies: number,
   totalFamilies: number,
   shownMembers: number,
   totalMembers: number,
+  kept = 0,
 ): string {
+  const other = totalFamilies - kept;
+  const families = kept === 0 ? `${totalFamilies} families` : `${other} families · ${kept} kept`;
   if (query === '') {
-    return `${totalFamilies} families · ${totalMembers} member revisions shown · full sibling context`;
+    return `${families} · ${totalMembers} member revisions shown · full sibling context`;
   }
-  return `Filter “${query}”: ${shownFamilies}/${totalFamilies} families · ${shownMembers}/${totalMembers} member revisions. Matching families retain all siblings.`;
+  const filtered = kept === 0 ? '' : ` (${other} of this subject · ${kept} kept)`;
+  return `Filter “${query}”: ${shownFamilies}/${totalFamilies} families${filtered} · ${shownMembers}/${totalMembers} member revisions. Matching families retain all siblings.`;
 }
 
 export function familyMatches(entry: ReviewFamilyContextEntry, needle: string): boolean {
@@ -719,7 +757,9 @@ function FamilyList({
   onSelect,
   onRosterNext,
   order,
+  kept,
 }: {
+  kept?: ReadonlyMap<string, string>;
   shown: ReviewFamilyContextEntry[];
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
@@ -736,51 +776,47 @@ function FamilyList({
           onSelect={onSelect}
           onRosterNext={onRosterNext}
           order={order}
+          keptFor={kept?.get(entry.family_id)}
         />
       ))}
     </ul>
   );
 }
 
-export function FamilyTree({
-  context,
-  selection,
-  onSelect,
-  onRosterNext,
+const NONE_KEPT: ReadonlyMap<string, string> = new Map();
+
+// The families to draw: the walked tree's when there is one, else the context's own.
+function treeParts(context: ReviewFamilyContext, walked?: WalkedTree) {
+  return { families: walked?.entries ?? context.entries, kept: walked?.kept ?? NONE_KEPT };
+}
+
+function filtered(families: ReviewFamilyContextEntry[], query: string) {
+  const needle = query.trim().toLowerCase();
+  const count = (list: ReviewFamilyContextEntry[]) =>
+    list.reduce((total, entry) => total + memberRows(entry).length, 0);
+  const shown = families.filter((entry) => needle === '' || familyMatches(entry, needle));
+  return { shown, shownMembers: count(shown), allMembers: count(families) };
+}
+
+// What the tree shows, for the traversal status: the families under the filter, each with the number
+// of member rows returned for it, and the order they are listed in.
+function rowsShown(shown: ReviewFamilyContextEntry[], order: TreeOrder): string {
+  return [order, ...shown.map((entry) => `${entry.family_id}:${memberRows(entry).length}`)].join(
+    ' ',
+  );
+}
+
+function FamilyFilter({
   query,
   onQuery,
-  embedded = false,
-  tree = false,
+  scope,
 }: {
-  embedded?: boolean;
-  // A tree comparison (MIK-R25): labels compare text bytes, not revision identities alone.
-  tree?: boolean;
-  context: ReviewFamilyContext;
-  selection: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
   query: string;
   onQuery: (next: string) => void;
+  scope: string;
 }) {
-  const needle = query.trim().toLowerCase();
-  // A tree comparison's change facts order the tree and drive j/k (MIK-R33); a dataset review has
-  // none, and its tree is exactly the landed one.
-  const triaged = hasChangeFacts(context.entries);
-  const order = useTreeOrder();
-  const root = useRef<HTMLElement>(null);
-  const traversal = useChangeTraversal(root, triaged);
-  const allMembers = context.entries.reduce((total, entry) => total + memberRows(entry).length, 0);
-  const shown = context.entries.filter((entry) => needle === '' || familyMatches(entry, needle));
-  const shownMembers = shown.reduce((total, entry) => total + memberRows(entry).length, 0);
-  const composed = context.entries.length > 0;
-
   return (
-    <section
-      ref={root}
-      className={embedded ? css({ minWidth: 0 }) : shell}
-      data-testid="review-family-tree"
-      data-family-state={context.state}
-    >
+    <>
       <label className={sectionLabel} htmlFor="review-family-filter">
         Find family, guarantee or member
       </label>
@@ -797,9 +833,90 @@ export function FamilyTree({
         }}
       />
       <p className={muted} data-testid="review-family-filter-scope">
-        {filterScope(query, shown.length, context.entries.length, shownMembers, allMembers)}
+        {scope}
       </p>
-      <FamilyContextDetails context={context} composed={composed} />
+    </>
+  );
+}
+
+function noneShown(composed: boolean, query: string, families: number): string {
+  return composed
+    ? `no family context matches “${query}”. The ${families} composed context(s) are unchanged by this filter; clear it to see them.`
+    : 'this review composed no family context, so there is nothing here to filter.';
+}
+
+function WalkNotes({ walked }: { walked?: WalkedTree }) {
+  return (
+    <>
+      {walked?.notice ? (
+        <p className={muted} role="status" data-testid="review-family-walk-notice">
+          {walked.notice}
+        </p>
+      ) : null}
+      {walked?.subjectState ? (
+        <p className={muted} data-testid="review-family-subject-state">
+          {walked.subjectState}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+export function FamilyTree({
+  context,
+  selection,
+  onSelect,
+  onRosterNext,
+  query,
+  onQuery,
+  embedded = false,
+  tree = false,
+  walked,
+}: {
+  embedded?: boolean;
+  // The walked tree to draw instead of `context`'s own families (MIK-R39); `context` is then the
+  // selected subject's context, which "Family context details" describes.
+  walked?: WalkedTree;
+  // A tree comparison (MIK-R25): labels compare text bytes, not revision identities alone.
+  tree?: boolean;
+  context: ReviewFamilyContext;
+  selection: FamilySelection | null;
+  onSelect: (selection: FamilySelection) => void;
+  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
+  query: string;
+  onQuery: (next: string) => void;
+}) {
+  // A tree comparison's change facts order the tree and drive j/k (MIK-R33); a dataset review has
+  // none, and its tree is exactly the landed one.
+  const { families, kept } = treeParts(context, walked);
+  const triaged = hasChangeFacts(families);
+  const order = useTreeOrder();
+  const root = useRef<HTMLElement>(null);
+  const { shown, shownMembers, allMembers } = filtered(families, query);
+  const traversal = useChangeTraversal(root, triaged, rowsShown(shown, order));
+  const composed = families.length > 0;
+
+  return (
+    <section
+      ref={root}
+      className={embedded ? css({ minWidth: 0 }) : shell}
+      data-testid="review-family-tree"
+      data-family-state={context.state}
+    >
+      <FamilyFilter
+        query={query}
+        onQuery={onQuery}
+        scope={filterScope(
+          query,
+          shown.length,
+          families.length,
+          shownMembers,
+          allMembers,
+          kept.size,
+        )}
+      />
+      <WalkNotes walked={walked} />
+      <FamilyContextDetails context={context} composed={context.entries.length > 0} />
       {triaged ? (
         <TriageControls order={order} onMove={traversal.move} status={traversal.status} />
       ) : null}
@@ -811,13 +928,12 @@ export function FamilyTree({
             onSelect={onSelect}
             onRosterNext={onRosterNext}
             order={triaged ? order : 'authored'}
+            kept={kept}
           />
         </TreeComparisonScope>
       ) : (
         <p className={muted} data-testid="review-family-none-shown">
-          {composed
-            ? `no family context matches “${query}”. The ${context.entries.length} composed context(s) are unchanged by this filter; clear it to see them.`
-            : 'this review composed no family context, so there is nothing here to filter.'}
+          {noneShown(composed, query, families.length)}
         </p>
       )}
     </section>

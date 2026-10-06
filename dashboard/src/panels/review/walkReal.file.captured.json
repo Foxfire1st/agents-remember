@@ -1,0 +1,218 @@
+{
+ "code_sides": [
+  {
+   "side": "base",
+   "state": "available",
+   "tree": "9951c5d393eef86fcbbfd2a4fcfa4aa2bc2698e8"
+  },
+  {
+   "side": "candidate",
+   "state": "available",
+   "tree": "d3e51778a3d5ad422c8c96508e1a01b191173c5d"
+  }
+ ],
+ "comparison": {
+  "code_base": {
+   "commit": "e40d1f21660386f9b091ae5e6fee595a467d4cef",
+   "repository": "/tmp/mik-run2/l39/scratch/agents-remember",
+   "tree": "9951c5d393eef86fcbbfd2a4fcfa4aa2bc2698e8"
+  },
+  "code_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L33/1",
+   "repository": "/tmp/mik-run2/l39/scratch/agents-remember",
+   "tree": "d3e51778a3d5ad422c8c96508e1a01b191173c5d"
+  },
+  "leaf_id": "260928-MIK-L33",
+  "memory_base": {
+   "commit": "40ae8395de72fd3d1cc275c03b723e6ff4a53fb3",
+   "repository": "/tmp/mik-run2/l39/scratch/coord/memory-repos/ar-agents-remember",
+   "tree": "6e81c9d377248679408c5725ee68e74c7d5a1392"
+  },
+  "memory_candidate": {
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L33/1",
+   "repository": "/tmp/mik-run2/l39/scratch/coord/memory-repos/ar-agents-remember",
+   "tree": "1dcbb8b5fc3cec8ffc16c9b36e116aaab788a4b5"
+  },
+  "number": 1,
+  "recorded_at": "2026-10-04T15:53:21+00:00",
+  "schema": "ar-review-tree-comparison/v1",
+  "task_id": "260928_maintained-invariant-knowledge"
+ },
+ "entries": [],
+ "file_classification": {
+  "bucket": "attributed",
+  "content": "text",
+  "counts": {
+   "attribution_unknown": 0,
+   "hunks": 1,
+   "linked": 1,
+   "unexplained": 0
+  },
+  "hunks": [
+   {
+    "after": {
+     "count": 1,
+     "start": 121
+    },
+    "before": {
+     "count": 1,
+     "start": 121
+    },
+    "classification": "linked",
+    "links": [
+     {
+      "end_line": 170,
+      "families": [
+       {
+        "family": "FAM-R6R095RW",
+        "family_key": "b9f95278-5712-5867-aa87-6e225aed4d45",
+        "family_revision": 5,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-95V4M24E",
+      "invariant": "INV-ZS9ZS878",
+      "invariant_key": "a336c721-8feb-5017-b1bf-653bb1680364",
+      "invariant_revision": 3,
+      "invariant_revision_key": "02449dee-6977-5f5c-b74f-77c3a0060d28",
+      "kind": "realization",
+      "side": "before",
+      "start_line": 116
+     },
+     {
+      "end_line": 170,
+      "families": [
+       {
+        "family": "FAM-R6R095RW",
+        "family_key": "b9f95278-5712-5867-aa87-6e225aed4d45",
+        "family_revision": 5,
+        "state": "member"
+       }
+      ],
+      "id": "RLZ-95V4M24E",
+      "invariant": "INV-ZS9ZS878",
+      "invariant_key": "a336c721-8feb-5017-b1bf-653bb1680364",
+      "invariant_revision": 4,
+      "invariant_revision_key": "daf09f6a-9601-5c55-9e2e-38bf4cb13b76",
+      "kind": "realization",
+      "side": "after",
+      "start_line": 116
+     }
+    ],
+    "unknown": []
+   }
+  ],
+  "mode_change": false,
+  "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+  "reason": "a recorded entry supplies a range at its recorded blob (on the before side RLZ-95V4M24E, RLZ-MFB6RVT0, RLZ-P11731P7, RLZ-QSAXX7C0, RLZ-VFBRX7HF; on the after side RLZ-95V4M24E, RLZ-MFB6RVT0, RLZ-P11731P7, RLZ-QSAXX7C0, RLZ-VFBRX7HF)",
+  "sides": [
+   {
+    "blob": "66aee9172b3a62f04e2556efc399e3c630baa11f",
+    "entries": [
+     {
+      "end_line": 170,
+      "id": "RLZ-95V4M24E",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 116
+     },
+     {
+      "end_line": 102,
+      "id": "RLZ-MFB6RVT0",
+      "invariant": "INV-53F058MT",
+      "kind": "realization",
+      "start_line": 76
+     },
+     {
+      "end_line": 60,
+      "id": "RLZ-P11731P7",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 37
+     },
+     {
+      "end_line": 74,
+      "id": "RLZ-QSAXX7C0",
+      "invariant": "INV-53F058MT",
+      "kind": "realization",
+      "start_line": 62
+     },
+     {
+      "end_line": 35,
+      "id": "RLZ-VFBRX7HF",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 15
+     }
+    ],
+    "knowledge": "available",
+    "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+    "side": "before"
+   },
+   {
+    "blob": "1b4285a09eafc9636865a704282751a483710524",
+    "entries": [
+     {
+      "end_line": 170,
+      "id": "RLZ-95V4M24E",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 116
+     },
+     {
+      "end_line": 102,
+      "id": "RLZ-MFB6RVT0",
+      "invariant": "INV-53F058MT",
+      "kind": "realization",
+      "start_line": 76
+     },
+     {
+      "end_line": 60,
+      "id": "RLZ-P11731P7",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 37
+     },
+     {
+      "end_line": 74,
+      "id": "RLZ-QSAXX7C0",
+      "invariant": "INV-53F058MT",
+      "kind": "realization",
+      "start_line": 62
+     },
+     {
+      "end_line": 35,
+      "id": "RLZ-VFBRX7HF",
+      "invariant": "INV-ZS9ZS878",
+      "kind": "realization",
+      "start_line": 15
+     }
+    ],
+    "knowledge": "available",
+    "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+    "side": "after"
+   }
+  ],
+  "status": "modified"
+ },
+ "knowledge_sides": [
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "before",
+   "state": "available",
+   "tree": "6e81c9d377248679408c5725ee68e74c7d5a1392"
+  },
+  {
+   "index_state": "complete",
+   "problems": [],
+   "side": "after",
+   "state": "available",
+   "tree": "1dcbb8b5fc3cec8ffc16c9b36e116aaab788a4b5"
+  }
+ ],
+ "leaf_id": "260928-MIK-L33",
+ "master": "260928_maintained-invariant-knowledge",
+ "repository_id": "agents-remember",
+ "state": "trees"
+}

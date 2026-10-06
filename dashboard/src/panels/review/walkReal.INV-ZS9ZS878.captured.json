@@ -1,0 +1,2980 @@
+{
+ "operation": "read_knowledge_review",
+ "payload": {
+  "candidate": {
+   "leaf_id": "260928-MIK-L33",
+   "master": "260928_maintained-invariant-knowledge",
+   "repository_id": "agents-remember",
+   "task_ref": "260928_maintained-invariant-knowledge"
+  },
+  "comparison": {
+   "after_code_tree_id": "d3e51778a3d5ad422c8c96508e1a01b191173c5d",
+   "after_snapshot_digest": "71012756779b57f952d353eff4a4eab8a3413cb8c4d86ea72f871fb52bfb68c7",
+   "before_code_tree_id": "e40d1f21660386f9b091ae5e6fee595a467d4cef",
+   "before_snapshot_digest": "aea2e7ea2da8b409053f0f6fcd5527dc0a652fe4325a941685cab259dac50883",
+   "binding_digest": "f3e1d88d81e581ff31aa3375a3de61fc207e5632262323eb05c88c7da1028348",
+   "knowledge_compared": true,
+   "policy_version": "recorded-two-snapshot-union/v1",
+   "reference": "f3e1d88d81e581ff31aa3375a3de61fc207e5632262323eb05c88c7da1028348",
+   "selector_digest": "3e26a47e54860ad88eaea8606f597d2a4641639eed82135248ff2d9581fe673f"
+  },
+  "evidence": {
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "verification_observations",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "evidence_claims",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessment_state": "unassessed",
+   "assessments": [],
+   "channels": [
+    {
+     "detail": "The live curator authority 260928-MIK-L33-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "owner": "curator_coherence.load_curator_coherence_generation",
+     "record_count": 0,
+     "records": "assessments",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no detection run, so no detector signal exists for this review; the detection owner answered for the runs it holds",
+     "owner": "detection.read_detection_run",
+     "record_count": 0,
+     "records": "detection_signals",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate's dataset answers for this exact candidate and records no verification observation for it; the evidence owner's own answer is a measured zero, not an unread authority",
+     "owner": "knowledge_evidence.read_evidence_scope",
+     "record_count": 0,
+     "records": "verification_observations",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no evidence claim, so no authored evidence exists for this review; the evidence owner answered for the claims it holds",
+     "owner": "evidence_records.claim_record",
+     "record_count": 0,
+     "records": "evidence_claims",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this candidate records no assessment, so no binding existed to measure; a measured zero of assessments is not a measured binding",
+     "owner": "review_assessment_currentness.comparison_currentness_measurement",
+     "record_count": 0,
+     "records": "assessment_currentness",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+     "owner": "knowledge_views.read_knowledge_view:review_matrix",
+     "record_count": 0,
+     "records": "authored_effects",
+     "state": "none_recorded",
+     "unreadable": []
+    }
+   ],
+   "context": [],
+   "evidence_links": [],
+   "evidence_state": "none_recorded",
+   "observations": [],
+   "source_inspection_available": true,
+   "unresolved": []
+  },
+  "family_context": {
+   "detail": "this family context is partial: every part it did establish is carried, and the parts it could not establish are stated with their reason -- b9f95278-5712-5867-aa87-6e225aed4d45 (partial: the family b9f95278-5712-5867-aa87-6e225aed4d45 is read at the before family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and the after family revision 0085407b-fd42-584e-adf3-4eaefcb5df98, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 23 recorded membership(s) and this page supplies 23 member context update(s): the remainder is 63 of the read walk's 92 item(s) and is reached with the continuation beside it; after: the after snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 24 recorded membership(s) and this page supplies 24 member context update(s): the remainder is 68 of the read walk's 96 item(s) and is reached with the continuation beside it)",
+   "entries": [
+    {
+     "after": {
+      "detail": "the after snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 24 recorded membership(s) and this page supplies 24 member context update(s): the remainder is 68 of the read walk's 96 item(s) and is reached with the continuation beside it",
+      "family_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "family_revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "guarantee": {
+       "display_version": "r5",
+       "family_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "joint_guarantee": "Within a bound comparison, all changed source files remain reachable while selected intent, recorded evidence and family context stay together and inspection state survives navigation.",
+       "payload_digest": "7b9fd4b20583d42ef1e00c7e0668b86a88dbdf14c4707baa5dabc18e9e9ca40b",
+       "provenance": {
+        "actor_ref": "260921-ICR/260921-ICR-L46",
+        "authorization_ref": "text-knowledge:knowledge/families/FAM-R6R095RW-Coherent-intent-and-source-review.json",
+        "operation_id": "ed2a99f2-e020-5749-90d7-8663bd3caffb",
+        "origin_refs": [],
+        "recorded_at": "1970-01-01T00:00:00+00:00"
+       },
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "state_at_origin": "proposed"
+      },
+      "members": [
+       {
+        "applicability": "Everything the review surface renders under a selected subject's heading while that subject has not answered: the reading area, scope header subject lines, technical record panes and the tree's selection mark.",
+        "detail": "the after snapshot records membership ef54052d-4fc4-557e-8c99-cbde458b3a56 placing the exact invariant revision 0561f2a6-d7f8-52b2-ae57-355c54e09233 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-8VQR13WX",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The surface is handed only the read keyed to the question on screen.",
+         "Task-level facts (source inventory, code trees, record label) and the frame's comparison-level explorer attribution may remain; they belong to no subject."
+        ],
+        "exclusions": [
+         "The rail's frame-derived mapped/unmapped attribution labels, which are comparison-level (A2-O3).",
+         "A retained coherent payload of the same question after a failed refresh (R17)."
+        ],
+        "invariant_id": "d4437eb9-2114-5f5e-b698-ea64166d61be",
+        "invariant_revision_id": "0561f2a6-d7f8-52b2-ae57-355c54e09233",
+        "lifecycle": "proposed",
+        "member_id": "ef54052d-4fc4-557e-8c99-cbde458b3a56",
+        "other_family_revision_ids": [],
+        "payload_digest": "eef5010ea33d37ce52f2449197ebe8adec57443cd36bfcffd04cfddc8cbf0fc4",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-8VQR13WX-ICR-R24-v3-L48-no-cross-subject-labelling.json",
+         "operation_id": "e7a35f26-5153-5370-b379-7618422e3263",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The surface is handed a read only for the question on screen, so between a selection and its answer nothing of the previous subject's reading, records, comparison identity, currentness or family context is shown under the new subject's heading, and the tree marks only the reader's explicit choice."
+       },
+       {
+        "applicability": "The focus move applied after a selected subject's answer lands in the mounted workspace.",
+        "detail": "the after snapshot records membership a57fff84-b869-5859-a3dd-ff5fb554bc2a placing the exact invariant revision 0d466c6f-efad-52a1-b1cf-de813be89009 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-MCVSM81V",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Focus moves to the rail's target-state notice when one is shown, else to the selected tree node, else to the reading-area column, and only when the active element is still the one recorded at selection time or has fallen to body."
+        ],
+        "exclusions": [
+         "Scroll position after an answer, which follows the focused node in a real browser (O-R1-2)."
+        ],
+        "invariant_id": "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+        "invariant_revision_id": "0d466c6f-efad-52a1-b1cf-de813be89009",
+        "lifecycle": "proposed",
+        "member_id": "a57fff84-b869-5859-a3dd-ff5fb554bc2a",
+        "other_family_revision_ids": [],
+        "payload_digest": "b59c9c0735cda8ae73231f159701bb9e1752d4a4ef7c13448c2fb06b6b6770b7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-MCVSM81V-L48-R1-F2.json",
+         "operation_id": "a991e0a8-84f8-5573-a43b-defda95e58f4",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When a selected subject's answer lands, focus moves to the selected tree node -- or to the rail's target-state notice when the workspace shows one (a marker target whose family membership is unknown) -- only if the reader has not moved focus elsewhere since the selection (focus still on the selecting control or fallen to body); focus the reader moved while the subject was pending is kept."
+       },
+       {
+        "applicability": "The reviewer opened with no subject, when the subject catalogue answers after the bounded first-read wait (SUBJECT_HOLD_MS) has already released the task-context read.",
+        "detail": "the after snapshot records membership d6aad7e8-879d-52eb-8ed6-d6bab7a62c7b placing the exact invariant revision 122a5bed-7de0-5125-adf1-df85d28c5eff in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-RMTHRQ0K",
+        "display_version": "r1",
+        "essential_conditions": [
+         "A reader gesture is a pointerdown, keydown, wheel or touchstart observed passively on the surface root.",
+         "Engagement is ignored while the hold is still settling, and never overwrites an explicit selection made by the same gesture."
+        ],
+        "exclusions": [
+         "A catalogue that answers within the bounded wait, which selects its first subject as before.",
+         "A refused or empty catalogue."
+        ],
+        "invariant_id": "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+        "invariant_revision_id": "122a5bed-7de0-5125-adf1-df85d28c5eff",
+        "lifecycle": "proposed",
+        "member_id": "d6aad7e8-879d-52eb-8ed6-d6bab7a62c7b",
+        "other_family_revision_ids": [],
+        "payload_digest": "e4bd41cc027849ce71f575ba106b4d8e79b8a45cad275254ea066e393199c8f2",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-RMTHRQ0K-L48-late-catalogue-L47-R2-O-R2-1.json",
+         "operation_id": "3dd13827-9837-52e9-9e5b-2bf86fec7df2",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When the subject catalogue answers after the bounded first-read wait, a reader who has acted in the reviewer (pointer, key, wheel or touch) keeps the subject, view and focus they have and the catalogue only fills the navigation; a reader who has not acted is landed on the first family in the same mounted workspace."
+       },
+       {
+        "applicability": "Family context composed for an invariant-identity or exact-invariant-revision selection within one bound review comparison.",
+        "detail": "the after snapshot records membership ef9ed302-7e9f-5e52-9dee-0e6528e52243 placing the exact invariant revision 1df102e5-a40c-5a6d-b1d4-5605543728d0 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-RT13RESK",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The existing invariant read policy discovers only the union of directly related family identities on the two bound snapshots; completed sibling rosters do not discover further families.",
+         "Each discovered identity is resolved on both bound snapshots through the existing family owner, using the family\u2019s full authored revision population and existing predecessor-based head rule rather than the membership-bearing subset.",
+         "A unique authored head supplies its own guarantee and exact roster. Competing legitimate heads, including memberless heads, remain explicit unresolved candidates; genuinely absent or unreadable family sides keep their distinct states.",
+         "Primary invariant revision, statement, conditions and evidence remain independently composed, and family rosters use the existing comparison/subject-bound continuation and complete source-inventory owners."
+        ],
+        "exclusions": [
+         "No inferred membership, inherited roster, arbitrary latest head, extra family traversal, current-store substitution or fabricated historical counterpart.",
+         "Explicit family-revision requests retain their existing exact-revision selection and recorded-history contract; this does not replace them with a head lookup.",
+         "This obligation does not certify historical assessment loading, all evidence channels, installed browser behavior or whole-product acceptance."
+        ],
+        "invariant_id": "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+        "invariant_revision_id": "1df102e5-a40c-5a6d-b1d4-5605543728d0",
+        "lifecycle": "proposed",
+        "member_id": "ef9ed302-7e9f-5e52-9dee-0e6528e52243",
+        "other_family_revision_ids": [],
+        "payload_digest": "407f0e3257bc851f1ea36547bb3c47748ad06ee037c601057fb79310018f3e0c",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-RT13RESK-ICR-L40-C2.json",
+         "operation_id": "5e6b3f02-af81-5860-a6a2-23466b5dc715",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Each discovered family is composed independently on both bound snapshots through the existing family owner and authored-head rule. Missing membership of the selected invariant neither erases an existing family counterpart nor pins the family to a historical predecessor that still cites the member."
+       },
+       {
+        "applicability": "Review reads started by successive selections, refreshes or page requests on one mounted surface.",
+        "detail": "the after snapshot records membership 5078052d-5820-5d64-83c0-4074d79c2f76 placing the exact invariant revision 2c9314c2-511d-5bff-a6c8-d7baff4e5c56 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-W5CTZJGD",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Every read takes the next sequence number; only the newest may write displayed read/frame/retained state.",
+         "The unshown reuse exception is only an unpaged whole-task request with no refresh identity and an admitted reviewed answer, keyed by the same task/history/question identity.",
+         "A known incompatible code-tree/snapshot generation rejects unshown reuse; when no generation is known the answer establishes it and a later different generation clears the stores."
+        ],
+        "exclusions": [
+         "Cancelling the superseded network request; it is ignored, not aborted (O-R1-3).",
+         "Superseded selected subjects, paged continuations, refresh answers, failures and refusals never use the unshown whole-task reuse exception."
+        ],
+        "invariant_id": "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+        "invariant_revision_id": "2c9314c2-511d-5bff-a6c8-d7baff4e5c56",
+        "lifecycle": "proposed",
+        "member_id": "5078052d-5820-5d64-83c0-4074d79c2f76",
+        "other_family_revision_ids": [],
+        "payload_digest": "08dc66da0459f63c5b0a8d1c0892ae55ec7107579599830b9c51dc2ea841bc11",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-W5CTZJGD-ICR-R24-v3-L48-latest-selection-wins.json",
+         "operation_id": "671dc341-db3a-5856-bacb-25e6e3f2d4ca",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Rapid selected-subject reads A\u2192B\u2192C settle on C: superseded selected-subject answers neither display nor enter the cache, so returning to B asks again; an admitted superseded whole-task answer may be kept unshown for its compatible comparison generation without moving the displayed generation or writing the panes."
+       },
+       {
+        "applicability": "Central review of an invariant for which the comparison owner confirms no recorded family membership.",
+        "detail": "the after snapshot records membership 80bb1faf-692a-5ebe-a77f-cfd0019bf725 placing the exact invariant revision 3f7f4f01-bc13-5f26-9567-1ae663c9b545 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-BR5MTSTY",
+        "display_version": "r2",
+        "essential_conditions": [
+         "A valid selected-invariant read supplies its statement, source attribution and evidence."
+        ],
+        "exclusions": [
+         "Confirmed no-family does not include uninitialized, unreadable, unselected or partial family knowledge.",
+         "No family is invented to make the central reading path available."
+        ],
+        "invariant_id": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+        "invariant_revision_id": "3f7f4f01-bc13-5f26-9567-1ae663c9b545",
+        "lifecycle": "proposed",
+        "member_id": "80bb1faf-692a-5ebe-a77f-cfd0019bf725",
+        "other_family_revision_ids": [],
+        "payload_digest": "108eab6c55920ace2f8d9489d968a3961de1ff81f09742bd301f9d02132c2e90",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-BR5MTSTY-ICR-L37-UI-CLAUSE-04.json",
+         "operation_id": "ff98bbc0-71e5-5368-a34e-de69afeb659a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A confirmed no-family invariant retains the same central statement, source-expression and evidence reading path."
+       },
+       {
+        "applicability": "A newly selected subject whose review read fails in transport or is refused by the owner while the task context has an admitted frame.",
+        "detail": "the after snapshot records membership 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 placing the exact invariant revision 503b9098-b7b1-5273-aaec-ca41c14d8d08 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-WQZ2WFCN",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The problem is stated once, in the reading area, through the owner's ReviewProblemBlock labelled with the requested subject; retry is offered for a transport failure and the source-changes offer for an intent-only refusal."
+        ],
+        "exclusions": [
+         "The first read's failure or refusal, which has no frame and keeps the surface-level R16 rendering.",
+         "A failed refresh of the displayed subject, which keeps its retained coherent payload and surface-level failure (R17)."
+        ],
+        "invariant_id": "608758dd-48f7-54f6-8ef6-616b78aa064a",
+        "invariant_revision_id": "503b9098-b7b1-5273-aaec-ca41c14d8d08",
+        "lifecycle": "proposed",
+        "member_id": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+        "movement_reference": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+        "other_family_revision_ids": [],
+        "payload_digest": "34839c5462d20016734d3ce42bf4bc02523b0adfa908ebf115670534b83e4f83",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-WQZ2WFCN-L48-R1-F1.json",
+         "operation_id": "85cd693a-1edb-56c8-8d75-aefeec89df86",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When the review read of a newly selected subject fails or is refused and the task context has an admitted frame, the workspace, navigation, family tree and complete source explorer stay mounted and usable, and the reading area alone states the owner's failure or refusal (brief line, reason and recovery disclosure, retry on transport failure) labelled with the requested subject, showing nothing of the previous subject."
+       },
+       {
+        "applicability": "The central statement comparison for a selected invariant.",
+        "detail": "the after snapshot records membership dbf279c5-8019-584a-95fe-3c67579d3349 placing the exact invariant revision 537ca8ca-9fe2-53ab-a550-17267f83bc53 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-21SDZECS",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The primary owner revision_selection matches the requested subject kind and identity.",
+         "The before and after statement operands come from that same selected-subject read."
+        ],
+        "exclusions": [
+         "Ambiguous or unresolved heads do not establish a before/after pair.",
+         "A retained roster revision is context and does not select the primary statement comparison.",
+         "This obligation does not promise a manual per-side pairing control."
+        ],
+        "invariant_id": "ff22ba43-5910-5812-89c4-1a6befedee7a",
+        "invariant_revision_id": "537ca8ca-9fe2-53ab-a550-17267f83bc53",
+        "lifecycle": "proposed",
+        "member_id": "dbf279c5-8019-584a-95fe-3c67579d3349",
+        "other_family_revision_ids": [],
+        "payload_digest": "187e644f403fca4b84412dc53443d894c0d8caa470b4e3e3605185f732350109",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-21SDZECS-ICR-L37-UI-CLAUSE-02.json",
+         "operation_id": "f3092195-d865-516f-9803-c5217b28525c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The selected invariant statement uses the primary owner's exact before and after operands and revision selection; ambiguous or unresolved selections create no inferred pair."
+       },
+       {
+        "applicability": "Source exploration for a comparison with a measured source inventory.",
+        "detail": "the after snapshot records membership ad25dc9e-9009-5163-8784-275e4b452c30 placing the exact invariant revision 619bed22-5629-5caa-8213-81d3f9d0c608 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-4DVNECH3",
+        "display_version": "r3",
+        "essential_conditions": [
+         "Attribution labels come from the backend: the mapped and unmapped partitions of a dataset review, or the lane's file buckets of a tree comparison, shown as pending while the lane is being read.",
+         "Semantic navigation may select expressions but does not filter the source inventory."
+        ],
+        "exclusions": [
+         "Unlisted continuation pages are not counted as already rendered.",
+         "A path absent from both attribution partitions is unknown, not inferred unmapped."
+        ],
+        "invariant_id": "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+        "invariant_revision_id": "619bed22-5629-5caa-8213-81d3f9d0c608",
+        "lifecycle": "proposed",
+        "member_id": "ad25dc9e-9009-5163-8784-275e4b452c30",
+        "other_family_revision_ids": [],
+        "payload_digest": "29fe57138401922bad3c162bf42a9229cb59fb69a6bf20fca16f5fc4fe515331",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-4DVNECH3-ICR-L37-UI-03.json",
+         "operation_id": "0b715e35-8d16-5746-91af-c4f8a8f7f498",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The complete changed-file inventory remains reachable independently of semantic selection, with mapped, unmapped and unknown attribution stated from the backend's classification: the mapped and unmapped partitions of a dataset review, and the unexplained-changes lane's per-file bucket of a tree comparison."
+       },
+       {
+        "applicability": "Subject selection inside the normal task Intent Reviewer, and the task entry that opens it.",
+        "detail": "the after snapshot records membership 8515a5b0-ab9f-50b5-af4b-36b8ad77600d placing the exact invariant revision 6801cb3c-12f7-5ebb-8e5f-5517007d3971 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-2E8MG43K",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The catalogue read returns recorded invariant and family subjects for the selected repository, master and leaf.",
+         "The catalogue is read when the reviewer is mounted, keyed on the comparison (repository, master, leaf and history) and its snapshot generation, not on the global analytics document."
+        ],
+        "exclusions": [
+         "Unavailable or refused catalogue reads do not establish an empty knowledge dataset.",
+         "The task entry's changed-intent summary read, which is not a catalogue read.",
+         "Re-reads caused by the reviewer's own refresh or by a new snapshot generation of the same comparison."
+        ],
+        "invariant_id": "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+        "invariant_revision_id": "6801cb3c-12f7-5ebb-8e5f-5517007d3971",
+        "lifecycle": "proposed",
+        "member_id": "8515a5b0-ab9f-50b5-af4b-36b8ad77600d",
+        "other_family_revision_ids": [],
+        "payload_digest": "2c8f3e0b00944c796817eb3fc4d2bccfbd7d4849655f89bf9f3ce68dbf25e2bd",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-2E8MG43K-ICR-L37-UI-01.json",
+         "operation_id": "4007f695-916b-50d7-86b5-50ecb8115c39",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The task entry reads no subject catalogue; the reviewer reads the recorded-subject catalogue once when it is opened, keyed on its comparison, and exposes that complete catalogue for subject selection inside the review. (Scratch rewording, same revision, for the MIK-R33 rule 8 rerun.)"
+       },
+       {
+        "applicability": "Family and member review of recorded before/after family context.",
+        "detail": "the after snapshot records membership 4c147a33-1263-5d97-b3bf-f1fd85ee9104 placing the exact invariant revision 797998f4-1ebc-5242-a3ee-372604be82b8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-H8EM1VJR",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The context owner supplies exact selected family revisions and member rows; unchanged carried siblings remain visible."
+        ],
+        "exclusions": [
+         "A partial roster remains partial until its continuation is read; no absent sibling content is invented.",
+         "Displayed context is not an authored assessment or proof that a family guarantee is preserved."
+        ],
+        "invariant_id": "94989116-7997-5332-a9e8-43b9c9c6fe73",
+        "invariant_revision_id": "797998f4-1ebc-5242-a3ee-372604be82b8",
+        "lifecycle": "proposed",
+        "member_id": "4c147a33-1263-5d97-b3bf-f1fd85ee9104",
+        "other_family_revision_ids": [],
+        "payload_digest": "8f01a83e6eee6072c00e743371daaee738e7971a693e3c4ac40d2081c984649b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-H8EM1VJR-ICR-L37-UI-02.json",
+         "operation_id": "ada4f678-344a-52f6-baf7-6242bcf5fccf",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The family tree keeps the independently authored guarantee and unchanged member statements beside the selected intent and its bound source expressions."
+       },
+       {
+        "applicability": "The Jump to selected review control in the existing review workspace.",
+        "detail": "the after snapshot records membership 064cc0bf-7ad5-5da8-8030-2865cc6e7540 placing the exact invariant revision 7c37fb5e-9295-5ede-8646-d90e8f95b5e6 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZE4QPG25",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The existing center is the focus and scroll target.",
+         "The jump focuses without the browser default scroll and explicitly aligns the target start."
+        ],
+        "exclusions": [
+         "The jump changes no layout, full-file disclosure, source selection or persisted knowledge."
+        ],
+        "invariant_id": "96228200-c6bd-5e09-a738-cd9705c513ce",
+        "invariant_revision_id": "7c37fb5e-9295-5ede-8646-d90e8f95b5e6",
+        "lifecycle": "proposed",
+        "member_id": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+        "movement_reference": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+        "other_family_revision_ids": [],
+        "payload_digest": "5d88d75435f2f596f16c018c8cb3d761057cf206b206cd713c615baddf389096",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZE4QPG25-ICR-L37-UI-CLAUSE-05.json",
+         "operation_id": "34bbb54f-dccd-569a-b5d0-e93cf1c35cd8",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Jump to selected review preserves keyboard focus while explicitly aligning the existing center scroll target at its start."
+       },
+       {
+        "applicability": "Client continuation of a displayed comparison and primary subject along one exact family-side-revision roster walk.",
+        "detail": "the after snapshot records membership 19569b80-e387-55d0-a4c0-5052b99f002e placing the exact invariant revision 875ad52b-804f-567c-be2f-dedf8eba9bf1 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-53F058MT",
+        "display_version": "r3",
+        "essential_conditions": [
+         "The admitted response agrees with comparison, candidate, selected subject/revisions, cursor, family selection, side/revision, guarantee and page scope.",
+         "The request still owns the current read sequence and is not an ordinary refresh.",
+         "A rejected continuation states failure and retains the coherent display; a whole-review refusal retains the existing suppression rule."
+        ],
+        "exclusions": [
+         "Merging across subjects, tasks, history selections, generations or immutable-content conflicts.",
+         "Replacement reads caused by refresh or a changed question."
+        ],
+        "invariant_id": "717049e6-bebb-5d09-859d-6efdae6f363a",
+        "invariant_revision_id": "875ad52b-804f-567c-be2f-dedf8eba9bf1",
+        "lifecycle": "proposed",
+        "member_id": "19569b80-e387-55d0-a4c0-5052b99f002e",
+        "movement_reference": "19569b80-e387-55d0-a4c0-5052b99f002e",
+        "other_family_revision_ids": [],
+        "payload_digest": "2d40a968c21dda736bff4c9bcd1980242119ec1ae0d3d5a8cae2fd886b9a032b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-53F058MT-ICR-L38-P2.json",
+         "operation_id": "89bb33d7-8c1d-5b1c-9180-0ab33f93ca3d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Family accumulation admits only a successful continuation of the displayed comparison, primary subject and exact family-side-revision walk; refresh, subject/history changes, stale responses and late superseded reads cannot import earlier family context."
+       },
+       {
+        "applicability": "Opening recorded family and invariant subjects from family/member navigation in the normal reviewer.",
+        "detail": "the after snapshot records membership 1c88e2c1-a963-568e-8d38-547fbd6115be placing the exact invariant revision 8840a91a-d28f-5ca2-b9fb-d93347fb35e8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-YVVW1XCN",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The roster provides the member canonical invariant identity.",
+         "The clicked family and revision remain navigation context while the existing reader obtains the selected subject payload."
+        ],
+        "exclusions": [
+         "An unaddressable roster member remains explicit context and cannot reuse another subject judgment.",
+         "The browser does not choose dataset paths or revision heads."
+        ],
+        "invariant_id": "d5a5651b-cec2-5776-a970-8622d5223bb6",
+        "invariant_revision_id": "8840a91a-d28f-5ca2-b9fb-d93347fb35e8",
+        "lifecycle": "proposed",
+        "member_id": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+        "movement_reference": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+        "other_family_revision_ids": [],
+        "payload_digest": "cb2371a5c78575d687c232562e56b70b97faddad95544ed6f4c7860da0ce6b65",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-YVVW1XCN-ICR-L37-UI-CLAUSE-01.json",
+         "operation_id": "09c47ace-1810-55c3-a01a-5b9c9375067c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A reviewer opens a recorded family or invariant through the existing subject reader, and a family member selection uses its canonical invariant identity while retaining the family and revision as navigation context."
+       },
+       {
+        "applicability": "Projection of a bounded family roster page for an exact selected family revision in a bound review snapshot.",
+        "detail": "the after snapshot records membership a6ff83b8-ab9a-5448-8179-1b604167dec7 placing the exact invariant revision a2f25a1f-937b-5e1d-8e12-238bdded9cf3 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-49H32B3F",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The page is selected by the existing knowledge read policy and carries content, membership or realization items.",
+         "Only revision IDs represented by those page items are resolved through the recorded membership owner."
+        ],
+        "exclusions": [
+         "Unselected revision content and whole-roster fetches.",
+         "Family or invariant revision selection, semantic grouping, and authored guarantee or assessment inference."
+        ],
+        "invariant_id": "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+        "invariant_revision_id": "a2f25a1f-937b-5e1d-8e12-238bdded9cf3",
+        "lifecycle": "proposed",
+        "member_id": "a6ff83b8-ab9a-5448-8179-1b604167dec7",
+        "other_family_revision_ids": [],
+        "payload_digest": "6131b939e7bb02d5751c0bc5294b04ca73fce57f3880f4641340cd905a3d117b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-49H32B3F-ICR-L38-P1.json",
+         "operation_id": "b00962ab-8a5d-52c1-98a9-6f705907a9c5",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A bounded family page transports member context for every exact member revision represented by content, membership or realization items, using the existing recorded membership owner without fetching unselected content."
+       },
+       {
+        "applicability": "The Intent Reviewer surface (ReviewSurface) when the reader selects a family, an invariant or the whole task after the task context has at least one admitted review payload.",
+        "detail": "the after snapshot records membership 5b0a8f63-69ed-5fd1-84d8-edd78ff2c5c5 placing the exact invariant revision aae21ba6-5ce4-5a76-94fb-79c1bae2cae0 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-KKJYVB40",
+        "display_version": "r1",
+        "essential_conditions": [
+         "A frame (the task context's last admitted payload for the same repo, master, leaf and record) exists.",
+         "The selected subject's review has not answered yet; only then is the reading area replaced by the pending statement keyed to the requested question."
+        ],
+        "exclusions": [
+         "The reviewer's first read, which has no frame and is stated at the surface level.",
+         "A different leaf or record, whose frame is never reused.",
+         "Server-side read latency of a first visit to a subject."
+        ],
+        "invariant_id": "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+        "invariant_revision_id": "aae21ba6-5ce4-5a76-94fb-79c1bae2cae0",
+        "lifecycle": "proposed",
+        "member_id": "5b0a8f63-69ed-5fd1-84d8-edd78ff2c5c5",
+        "other_family_revision_ids": [],
+        "payload_digest": "9683187985f368f26f7467963f3ae15744d1f161d963286fb012314566c7a575",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-KKJYVB40-ICR-R24-v3-L48-mounted-reviewer.json",
+         "operation_id": "1b83a102-fb26-5d06-8857-cc06c91bd82d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Selecting a family, an invariant or the whole task keeps the review workspace, its navigation, family tree, source explorer and open disclosures mounted as the same DOM; while the selected subject is being read only the reading area changes, to a pending state bound to the requested question's key and labelled with the requested subject, and navigation stays usable."
+       },
+       {
+        "applicability": "Deduplication of family expression excerpts from carried before/after realization claims.",
+        "detail": "the after snapshot records membership 2078580b-5831-552a-abd2-4146f51b5b4e placing the exact invariant revision b809298d-94cb-57cb-96eb-0533c7165747 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-XX178P3W",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Claims are grouped by repository path and recorded source identity.",
+         "Observed identities and resolution outcomes remain separate per-side readings."
+        ],
+        "exclusions": [
+         "The same path with different recorded identities must remain distinct.",
+         "A realization mismatch is not an authored semantic verdict or the comparison source-inventory count."
+        ],
+        "invariant_id": "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+        "invariant_revision_id": "b809298d-94cb-57cb-96eb-0533c7165747",
+        "lifecycle": "proposed",
+        "member_id": "2078580b-5831-552a-abd2-4146f51b5b4e",
+        "movement_reference": "2078580b-5831-552a-abd2-4146f51b5b4e",
+        "other_family_revision_ids": [],
+        "payload_digest": "486d9db5b7d81f94d946508047edf8f41eccc521287b2ff41ba65d8ec4324660",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-XX178P3W-ICR-L37-UI-06.json",
+         "operation_id": "1b6cd4d0-c8aa-53bf-9bdb-46573dbf494d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Expression grouping keeps recorded source identity in the deduplication key and observed identities as per-side readings."
+       },
+       {
+        "applicability": "Whole-subject review answers and changed-file content answers read by one mounted review surface.",
+        "detail": "the after snapshot records membership 53ebb3cd-1c8a-5817-bdbb-737e0ca49855 placing the exact invariant revision c1aa2fa7-2a70-5ee0-9222-c0d26e8492f4 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-MC654E0T",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The answer was admitted, is whole (not a page) and carried no refresh identity; content answers are kept only when state is content with an expansion.",
+         "Both stores are bounded LRU (24 reviews, 32 content answers) and live only as long as the mounted surface."
+        ],
+        "exclusions": [
+         "Paged and roster-continuation reads, which stay owned by the read cycle.",
+         "Refusals and failures, which are always asked again.",
+         "Re-validating a moved live candidate on return; the reader's refresh re-asks (O-R1-1, by design).",
+         "Content rendered outside a review surface, which has no cache."
+        ],
+        "invariant_id": "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+        "invariant_revision_id": "c1aa2fa7-2a70-5ee0-9222-c0d26e8492f4",
+        "lifecycle": "proposed",
+        "member_id": "53ebb3cd-1c8a-5817-bdbb-737e0ca49855",
+        "other_family_revision_ids": [],
+        "payload_digest": "624487e242bc9e7948bc5177b4d2887e71d7c12bb6d5c8cbbc7b4b95cdece075",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-MC654E0T-ICR-R24-v3-L48-per-comparison-reuse.json",
+         "operation_id": "82211cbe-d38b-598a-ab53-9877321393d6",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "An admitted whole-subject review and an opened file's content are read once per comparison generation: returning to a subject or reopening a file for the same code-tree and snapshot pair issues no request, a refresh always re-asks, an answer from another generation empties both stores, refusals and failures are not kept, and both stores are bounded least-recently-used stores owned by one mounted surface."
+       },
+       {
+        "applicability": "The shared catalogue hook when repository, master or leaf target changes.",
+        "detail": "the after snapshot records membership 8c7c4718-89ee-50cf-b703-eb934cc2d694 placing the exact invariant revision c9b1e161-0c09-5a37-bbe7-3d6346379302 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-555EHWM8",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The read target key must match the current target before rows can be returned.",
+         "Only the current mounted request sequence may complete the read."
+        ],
+        "exclusions": [
+         "The hook does not create catalogue rows or choose a published dataset."
+        ],
+        "invariant_id": "f587f769-dbcc-5d50-ba56-260f333110f1",
+        "invariant_revision_id": "c9b1e161-0c09-5a37-bbe7-3d6346379302",
+        "lifecycle": "proposed",
+        "member_id": "8c7c4718-89ee-50cf-b703-eb934cc2d694",
+        "other_family_revision_ids": [],
+        "payload_digest": "5c77c201aa2aa403efee177f4dd081d98fc29df2b56f75de5ce363da5092a6bf",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-555EHWM8-ICR-L37-UI-07.json",
+         "operation_id": "81c98eb6-c104-502f-bf42-1e03be32481c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Another task's catalogue entries are not exposed while the current task's catalogue read is pending."
+       },
+       {
+        "applicability": "Review source-content reads (/api/review/intent/source-content) of one leaf's review comparison, for a path its requested measured tree pair does not list as changed.",
+        "detail": "the after snapshot records membership 4e944ceb-e0fd-5e4a-9115-72898dcdefdd placing the exact invariant revision cfe92be3-0d5c-5db1-a144-512a190fa08e in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content; the membership owner records the same exact revision in 1 further family revision(s), which this value names rather than copying",
+        "display_label": "INV-2TQGXFAX",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Every bound snapshot was read and none records a realization at the exact path.",
+         "The refusal is source_content_unresolved and names what each snapshot answered."
+        ],
+        "exclusions": [
+         "A link that could not be determined because bound knowledge was unreadable (refused as undetermined instead).",
+         "Unmeasured pairs, which refuse through the leaf change-set bound."
+        ],
+        "invariant_id": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+        "invariant_revision_id": "cfe92be3-0d5c-5db1-a144-512a190fa08e",
+        "lifecycle": "proposed",
+        "member_id": "4e944ceb-e0fd-5e4a-9115-72898dcdefdd",
+        "other_family_revision_ids": [
+         "f6aa1f45-63d7-5639-83a2-bad0efa9fd39"
+        ],
+        "payload_digest": "ac421ed0b42d32d026642cabdf5d4b039cf3b416347b193a8d389d971b55b7d5",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-2TQGXFAX-ICR-R03-v1-L43-unrelated-unchanged-refused.json",
+         "operation_id": "d14d044a-f884-526d-8d23-7fe2965694b9",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "An unchanged path that no realization recorded in the comparison's knowledge links is refused with source_content_unresolved naming what each snapshot answered, and no content is read for it."
+       },
+       {
+        "applicability": "Main expression and family realization-detail presentation over bounded or unavailable family roster context.",
+        "detail": "the after snapshot records membership c273f61d-098b-54b9-971c-0001c02c64b0 placing the exact invariant revision d08b6300-c541-55c2-87d2-28c4967589fc in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-VPX81HXV",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Loaded member contexts and loaded source claims are distinguished from the read owner cumulative item counts.",
+         "A recorded side is fully loaded only when its page is complete, its measured membership population is present and member content is recorded.",
+         "Partial or unavailable context states its limit and retains any owner-published continuation."
+        ],
+        "exclusions": [
+         "Inferring absent stored attribution or unchanged unreturned expressions from an empty loaded set.",
+         "Semantic acceptance, whole-source inventory filtering, or replacement of source/evidence owners."
+        ],
+        "invariant_id": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+        "invariant_revision_id": "d08b6300-c541-55c2-87d2-28c4967589fc",
+        "lifecycle": "proposed",
+        "member_id": "c273f61d-098b-54b9-971c-0001c02c64b0",
+        "other_family_revision_ids": [],
+        "payload_digest": "5ccafae8ee15ece71608b5971d18dbcf1f22106ceaa840526e2cf163f41d4664",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-VPX81HXV-ICR-L38-P5.json",
+         "operation_id": "56b53c72-a2b7-5fba-90da-f16edc9080ab",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Partial linked-source views state that links are not yet fully loaded and retain user-driven roster continuation; loaded member counts are distinguished from the read owner's cumulative item counts."
+       },
+       {
+        "applicability": "Sparse family-member updates within one successfully admitted family-side-revision continuation walk.",
+        "detail": "the after snapshot records membership c28e6645-8d11-57cc-af07-15846b9c47ca placing the exact invariant revision daf09f6a-9601-5c55-9e2e-38bf4cb13b76 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZS9ZS878",
+        "display_version": "r4",
+        "essential_conditions": [
+         "A recorded member retains its exact invariant revision and payload identity.",
+         "Sources unite by exact claim identity without replacing conflicting content.",
+         "Repeated first pages from another walk do not reset that walk; an identical accepted replay is idempotent."
+        ],
+        "exclusions": [
+         "A second canonical dataset, traversal policy or cache authority.",
+         "Alteration of the latest response primary statement, complete source inventory, evidence or authored assessment."
+        ],
+        "invariant_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+        "invariant_revision_id": "daf09f6a-9601-5c55-9e2e-38bf4cb13b76",
+        "lifecycle": "proposed",
+        "member_id": "c28e6645-8d11-57cc-af07-15846b9c47ca",
+        "other_family_revision_ids": [],
+        "payload_digest": "e90dfc3d62d690ce1891bdd40032f7641fe9e2c606dabf8fcf07f23e24264e22",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZS9ZS878-ICR-L38-P3.json",
+         "operation_id": "da1c68bb-942b-545d-b9a6-cc27fd307212",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Within one admitted family-side-revision walk, sparse member updates retain delivered immutable content and unite sources by exact claim identity; replay is idempotent and another walk's repeated first page cannot erase progress. (Scratch revision for the MIK-R33 rule 8 rerun.)"
+       },
+       {
+        "applicability": "Central evidence and authored assessment display for a selected subject.",
+        "detail": "the after snapshot records membership 0945a390-98b9-5305-8466-14ae9a9942df placing the exact invariant revision e0bb085f-4a15-5254-95c0-8ed8d6424cd8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZY0YMXMQ",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The payload is the requested subject owner read and preserves record currentness, applicability and provenance.",
+         "Candidate-level execution is labelled as candidate input, separately from authored subject judgment."
+        ],
+        "exclusions": [
+         "A family-selected payload cannot establish a member assessment absence.",
+         "Missing or unreadable record channels are not a favorable or unassessed default.",
+         "No passing execution creates a semantic assessment."
+        ],
+        "invariant_id": "3158556a-3770-53ef-ad54-e0b625aec472",
+        "invariant_revision_id": "e0bb085f-4a15-5254-95c0-8ed8d6424cd8",
+        "lifecycle": "proposed",
+        "member_id": "0945a390-98b9-5305-8466-14ae9a9942df",
+        "movement_reference": "0945a390-98b9-5305-8466-14ae9a9942df",
+        "other_family_revision_ids": [],
+        "payload_digest": "f9e1446ae82ab64b4d0577f3ce04d813c180a61a4069ec11123df3fc5f7026c7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZY0YMXMQ-ICR-L37-UI-CLAUSE-03.json",
+         "operation_id": "1493d881-434c-5fd1-b05c-0a3ce1797008",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The central evidence view displays the selected subject owner's authored assessment with its recorded currentness and applicability, separately from candidate execution observations."
+       },
+       {
+        "applicability": "Display preferences and expression inspection during one mounted review workspace.",
+        "detail": "the after snapshot records membership 87e65396-6802-5d2f-ba87-e95e82414e6e placing the exact invariant revision f813eb5d-e9db-5bee-97f3-08d8419a61f2 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-Z385RTQS",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Workspace state survives comparison-page reads and diff-layout switches.",
+         "Closing an expanded expression returns focus to its retained opener when that element is available."
+        ],
+        "exclusions": [
+         "These transient display choices are not persisted knowledge or durable cross-session preferences."
+        ],
+        "invariant_id": "f1091f2c-3fa5-5178-bafb-211fdd04a23c",
+        "invariant_revision_id": "f813eb5d-e9db-5bee-97f3-08d8419a61f2",
+        "lifecycle": "proposed",
+        "member_id": "87e65396-6802-5d2f-ba87-e95e82414e6e",
+        "other_family_revision_ids": [],
+        "payload_digest": "0f65d5198db8c436f94cb62a99af33b517e01b0e34080027810f43de380985e7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-Z385RTQS-ICR-L37-UI-04.json",
+         "operation_id": "a2b6d1dc-9f28-5fa7-b55b-f4b40e0cb703",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Diff layout and full-file disclosure are workspace state, with changed regions as the default and focus retained when an expression closes."
+       }
+      ],
+      "members_total": 24,
+      "page": {
+       "complete": false,
+       "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjcyMzA0MTRhNzYzMGI3NzA5NTQxODA5OWE3Zjg4YjEwYmU5YzJjZjY2NGQ4ZTRjYmNlOGVmNzYwYjBkMGMzOGYiLCJzZWVkX2RpZ2VzdCI6ImRhYmE3ZDFhZjVmZTUyMTQ1MDllY2MyY2E0ZTVlNmFhOWRhZWY2N2Y3ODU2OTY0Mjg2NzQ4NDllYTc0ZDU1ZDkiLCJtYW5pZmVzdF9kaWdlc3QiOiIwNmNiNGYwZjI1NjcyN2I3YmYzNzdmODU1ZTUyYmEwNzk1ODdmNDBkYWMyY2E2NmUzNDgyNDBmYjMxMWRlNWM0IiwibG9naWNhbF9kaWdlc3QiOiI3MTAxMjc1Njc3OWI1N2Y5NTJkMzUzZWZmNGE0ZWFiOGEzNDEzY2I4YzRkODZlYTcyZjg3MWZiNTJiZmI2OGM3Iiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjI4fQ==",
+       "counts": {
+        "advertised_expansions_total": 1,
+        "distinct_source_locations_total": 41,
+        "distinct_source_paths_total": 22,
+        "family_revisions_total": 1,
+        "invariant_revisions_total": 24,
+        "memberships_total": 24,
+        "primary_items_remaining": 68,
+        "primary_items_returned": 28,
+        "primary_items_total": 96,
+        "realization_claims_total": 46,
+        "unresolved_anchor_total": 0
+       },
+       "members_total": 24,
+       "scope": [
+        "side=after",
+        "family_revision_id=0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "policy_version=recorded-family-frontier/v1",
+        "page_size=64"
+       ],
+       "state": "first_page"
+      },
+      "recorded_revision_ids": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": {
+      "detail": "the before snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 23 recorded membership(s) and this page supplies 23 member context update(s): the remainder is 63 of the read walk's 92 item(s) and is reached with the continuation beside it",
+      "family_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "family_revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "guarantee": {
+       "display_version": "r5",
+       "family_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "joint_guarantee": "Within a bound comparison, all changed source files remain reachable while selected intent, recorded evidence and family context stay together and inspection state survives navigation.",
+       "payload_digest": "7b9fd4b20583d42ef1e00c7e0668b86a88dbdf14c4707baa5dabc18e9e9ca40b",
+       "provenance": {
+        "actor_ref": "260921-ICR/260921-ICR-L46",
+        "authorization_ref": "text-knowledge:knowledge/families/FAM-R6R095RW-Coherent-intent-and-source-review.json",
+        "operation_id": "ed2a99f2-e020-5749-90d7-8663bd3caffb",
+        "origin_refs": [],
+        "recorded_at": "1970-01-01T00:00:00+00:00"
+       },
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "state_at_origin": "proposed"
+      },
+      "members": [
+       {
+        "applicability": "Sparse family-member updates within one successfully admitted family-side-revision continuation walk.",
+        "detail": "the before snapshot records membership c28e6645-8d11-57cc-af07-15846b9c47ca placing the exact invariant revision 02449dee-6977-5f5c-b74f-77c3a0060d28 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZS9ZS878",
+        "display_version": "r3",
+        "essential_conditions": [
+         "A recorded member retains its exact invariant revision and payload identity.",
+         "Sources unite by exact claim identity without replacing conflicting content.",
+         "Repeated first pages from another walk do not reset that walk; an identical accepted replay is idempotent."
+        ],
+        "exclusions": [
+         "A second canonical dataset, traversal policy or cache authority.",
+         "Alteration of the latest response primary statement, complete source inventory, evidence or authored assessment."
+        ],
+        "invariant_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+        "invariant_revision_id": "02449dee-6977-5f5c-b74f-77c3a0060d28",
+        "lifecycle": "proposed",
+        "member_id": "c28e6645-8d11-57cc-af07-15846b9c47ca",
+        "other_family_revision_ids": [],
+        "payload_digest": "b9fb5a7586109f18a111ad9fbbd03580cc2c936672f704f91dcdfb0acc324338",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZS9ZS878-ICR-L38-P3.json",
+         "operation_id": "da1c68bb-942b-545d-b9a6-cc27fd307212",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Within one admitted family-side-revision walk, sparse member updates retain delivered immutable content and unite sources by exact claim identity; replay is idempotent and another walk's repeated first page cannot erase progress."
+       },
+       {
+        "applicability": "Everything the review surface renders under a selected subject's heading while that subject has not answered: the reading area, scope header subject lines, technical record panes and the tree's selection mark.",
+        "detail": "the before snapshot records membership ef54052d-4fc4-557e-8c99-cbde458b3a56 placing the exact invariant revision 0561f2a6-d7f8-52b2-ae57-355c54e09233 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-8VQR13WX",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The surface is handed only the read keyed to the question on screen.",
+         "Task-level facts (source inventory, code trees, record label) and the frame's comparison-level explorer attribution may remain; they belong to no subject."
+        ],
+        "exclusions": [
+         "The rail's frame-derived mapped/unmapped attribution labels, which are comparison-level (A2-O3).",
+         "A retained coherent payload of the same question after a failed refresh (R17)."
+        ],
+        "invariant_id": "d4437eb9-2114-5f5e-b698-ea64166d61be",
+        "invariant_revision_id": "0561f2a6-d7f8-52b2-ae57-355c54e09233",
+        "lifecycle": "proposed",
+        "member_id": "ef54052d-4fc4-557e-8c99-cbde458b3a56",
+        "other_family_revision_ids": [],
+        "payload_digest": "eef5010ea33d37ce52f2449197ebe8adec57443cd36bfcffd04cfddc8cbf0fc4",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-8VQR13WX-ICR-R24-v3-L48-no-cross-subject-labelling.json",
+         "operation_id": "e7a35f26-5153-5370-b379-7618422e3263",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The surface is handed a read only for the question on screen, so between a selection and its answer nothing of the previous subject's reading, records, comparison identity, currentness or family context is shown under the new subject's heading, and the tree marks only the reader's explicit choice."
+       },
+       {
+        "applicability": "The focus move applied after a selected subject's answer lands in the mounted workspace.",
+        "detail": "the before snapshot records membership a57fff84-b869-5859-a3dd-ff5fb554bc2a placing the exact invariant revision 0d466c6f-efad-52a1-b1cf-de813be89009 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-MCVSM81V",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Focus moves to the rail's target-state notice when one is shown, else to the selected tree node, else to the reading-area column, and only when the active element is still the one recorded at selection time or has fallen to body."
+        ],
+        "exclusions": [
+         "Scroll position after an answer, which follows the focused node in a real browser (O-R1-2)."
+        ],
+        "invariant_id": "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+        "invariant_revision_id": "0d466c6f-efad-52a1-b1cf-de813be89009",
+        "lifecycle": "proposed",
+        "member_id": "a57fff84-b869-5859-a3dd-ff5fb554bc2a",
+        "other_family_revision_ids": [],
+        "payload_digest": "b59c9c0735cda8ae73231f159701bb9e1752d4a4ef7c13448c2fb06b6b6770b7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-MCVSM81V-L48-R1-F2.json",
+         "operation_id": "a991e0a8-84f8-5573-a43b-defda95e58f4",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When a selected subject's answer lands, focus moves to the selected tree node -- or to the rail's target-state notice when the workspace shows one (a marker target whose family membership is unknown) -- only if the reader has not moved focus elsewhere since the selection (focus still on the selecting control or fallen to body); focus the reader moved while the subject was pending is kept."
+       },
+       {
+        "applicability": "The reviewer opened with no subject, when the subject catalogue answers after the bounded first-read wait (SUBJECT_HOLD_MS) has already released the task-context read.",
+        "detail": "the before snapshot records membership d6aad7e8-879d-52eb-8ed6-d6bab7a62c7b placing the exact invariant revision 122a5bed-7de0-5125-adf1-df85d28c5eff in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-RMTHRQ0K",
+        "display_version": "r1",
+        "essential_conditions": [
+         "A reader gesture is a pointerdown, keydown, wheel or touchstart observed passively on the surface root.",
+         "Engagement is ignored while the hold is still settling, and never overwrites an explicit selection made by the same gesture."
+        ],
+        "exclusions": [
+         "A catalogue that answers within the bounded wait, which selects its first subject as before.",
+         "A refused or empty catalogue."
+        ],
+        "invariant_id": "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+        "invariant_revision_id": "122a5bed-7de0-5125-adf1-df85d28c5eff",
+        "lifecycle": "proposed",
+        "member_id": "d6aad7e8-879d-52eb-8ed6-d6bab7a62c7b",
+        "other_family_revision_ids": [],
+        "payload_digest": "e4bd41cc027849ce71f575ba106b4d8e79b8a45cad275254ea066e393199c8f2",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-RMTHRQ0K-L48-late-catalogue-L47-R2-O-R2-1.json",
+         "operation_id": "3dd13827-9837-52e9-9e5b-2bf86fec7df2",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When the subject catalogue answers after the bounded first-read wait, a reader who has acted in the reviewer (pointer, key, wheel or touch) keeps the subject, view and focus they have and the catalogue only fills the navigation; a reader who has not acted is landed on the first family in the same mounted workspace."
+       },
+       {
+        "applicability": "Family context composed for an invariant-identity or exact-invariant-revision selection within one bound review comparison.",
+        "detail": "the before snapshot records membership ef9ed302-7e9f-5e52-9dee-0e6528e52243 placing the exact invariant revision 1df102e5-a40c-5a6d-b1d4-5605543728d0 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-RT13RESK",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The existing invariant read policy discovers only the union of directly related family identities on the two bound snapshots; completed sibling rosters do not discover further families.",
+         "Each discovered identity is resolved on both bound snapshots through the existing family owner, using the family\u2019s full authored revision population and existing predecessor-based head rule rather than the membership-bearing subset.",
+         "A unique authored head supplies its own guarantee and exact roster. Competing legitimate heads, including memberless heads, remain explicit unresolved candidates; genuinely absent or unreadable family sides keep their distinct states.",
+         "Primary invariant revision, statement, conditions and evidence remain independently composed, and family rosters use the existing comparison/subject-bound continuation and complete source-inventory owners."
+        ],
+        "exclusions": [
+         "No inferred membership, inherited roster, arbitrary latest head, extra family traversal, current-store substitution or fabricated historical counterpart.",
+         "Explicit family-revision requests retain their existing exact-revision selection and recorded-history contract; this does not replace them with a head lookup.",
+         "This obligation does not certify historical assessment loading, all evidence channels, installed browser behavior or whole-product acceptance."
+        ],
+        "invariant_id": "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+        "invariant_revision_id": "1df102e5-a40c-5a6d-b1d4-5605543728d0",
+        "lifecycle": "proposed",
+        "member_id": "ef9ed302-7e9f-5e52-9dee-0e6528e52243",
+        "other_family_revision_ids": [],
+        "payload_digest": "407f0e3257bc851f1ea36547bb3c47748ad06ee037c601057fb79310018f3e0c",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-RT13RESK-ICR-L40-C2.json",
+         "operation_id": "5e6b3f02-af81-5860-a6a2-23466b5dc715",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Each discovered family is composed independently on both bound snapshots through the existing family owner and authored-head rule. Missing membership of the selected invariant neither erases an existing family counterpart nor pins the family to a historical predecessor that still cites the member."
+       },
+       {
+        "applicability": "Review reads started by successive selections, refreshes or page requests on one mounted surface.",
+        "detail": "the before snapshot records membership 5078052d-5820-5d64-83c0-4074d79c2f76 placing the exact invariant revision 2c9314c2-511d-5bff-a6c8-d7baff4e5c56 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-W5CTZJGD",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Every read takes the next sequence number; only the newest may write displayed read/frame/retained state.",
+         "The unshown reuse exception is only an unpaged whole-task request with no refresh identity and an admitted reviewed answer, keyed by the same task/history/question identity.",
+         "A known incompatible code-tree/snapshot generation rejects unshown reuse; when no generation is known the answer establishes it and a later different generation clears the stores."
+        ],
+        "exclusions": [
+         "Cancelling the superseded network request; it is ignored, not aborted (O-R1-3).",
+         "Superseded selected subjects, paged continuations, refresh answers, failures and refusals never use the unshown whole-task reuse exception."
+        ],
+        "invariant_id": "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+        "invariant_revision_id": "2c9314c2-511d-5bff-a6c8-d7baff4e5c56",
+        "lifecycle": "proposed",
+        "member_id": "5078052d-5820-5d64-83c0-4074d79c2f76",
+        "other_family_revision_ids": [],
+        "payload_digest": "08dc66da0459f63c5b0a8d1c0892ae55ec7107579599830b9c51dc2ea841bc11",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-W5CTZJGD-ICR-R24-v3-L48-latest-selection-wins.json",
+         "operation_id": "671dc341-db3a-5856-bacb-25e6e3f2d4ca",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Rapid selected-subject reads A\u2192B\u2192C settle on C: superseded selected-subject answers neither display nor enter the cache, so returning to B asks again; an admitted superseded whole-task answer may be kept unshown for its compatible comparison generation without moving the displayed generation or writing the panes."
+       },
+       {
+        "applicability": "Central review of an invariant for which the comparison owner confirms no recorded family membership.",
+        "detail": "the before snapshot records membership 80bb1faf-692a-5ebe-a77f-cfd0019bf725 placing the exact invariant revision 3f7f4f01-bc13-5f26-9567-1ae663c9b545 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-BR5MTSTY",
+        "display_version": "r2",
+        "essential_conditions": [
+         "A valid selected-invariant read supplies its statement, source attribution and evidence."
+        ],
+        "exclusions": [
+         "Confirmed no-family does not include uninitialized, unreadable, unselected or partial family knowledge.",
+         "No family is invented to make the central reading path available."
+        ],
+        "invariant_id": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+        "invariant_revision_id": "3f7f4f01-bc13-5f26-9567-1ae663c9b545",
+        "lifecycle": "proposed",
+        "member_id": "80bb1faf-692a-5ebe-a77f-cfd0019bf725",
+        "other_family_revision_ids": [],
+        "payload_digest": "108eab6c55920ace2f8d9489d968a3961de1ff81f09742bd301f9d02132c2e90",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-BR5MTSTY-ICR-L37-UI-CLAUSE-04.json",
+         "operation_id": "ff98bbc0-71e5-5368-a34e-de69afeb659a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A confirmed no-family invariant retains the same central statement, source-expression and evidence reading path."
+       },
+       {
+        "applicability": "A newly selected subject whose review read fails in transport or is refused by the owner while the task context has an admitted frame.",
+        "detail": "the before snapshot records membership 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 placing the exact invariant revision 503b9098-b7b1-5273-aaec-ca41c14d8d08 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-WQZ2WFCN",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The problem is stated once, in the reading area, through the owner's ReviewProblemBlock labelled with the requested subject; retry is offered for a transport failure and the source-changes offer for an intent-only refusal."
+        ],
+        "exclusions": [
+         "The first read's failure or refusal, which has no frame and keeps the surface-level R16 rendering.",
+         "A failed refresh of the displayed subject, which keeps its retained coherent payload and surface-level failure (R17)."
+        ],
+        "invariant_id": "608758dd-48f7-54f6-8ef6-616b78aa064a",
+        "invariant_revision_id": "503b9098-b7b1-5273-aaec-ca41c14d8d08",
+        "lifecycle": "proposed",
+        "member_id": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+        "movement_reference": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+        "other_family_revision_ids": [],
+        "payload_digest": "34839c5462d20016734d3ce42bf4bc02523b0adfa908ebf115670534b83e4f83",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-WQZ2WFCN-L48-R1-F1.json",
+         "operation_id": "85cd693a-1edb-56c8-8d75-aefeec89df86",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "When the review read of a newly selected subject fails or is refused and the task context has an admitted frame, the workspace, navigation, family tree and complete source explorer stay mounted and usable, and the reading area alone states the owner's failure or refusal (brief line, reason and recovery disclosure, retry on transport failure) labelled with the requested subject, showing nothing of the previous subject."
+       },
+       {
+        "applicability": "The central statement comparison for a selected invariant.",
+        "detail": "the before snapshot records membership dbf279c5-8019-584a-95fe-3c67579d3349 placing the exact invariant revision 537ca8ca-9fe2-53ab-a550-17267f83bc53 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-21SDZECS",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The primary owner revision_selection matches the requested subject kind and identity.",
+         "The before and after statement operands come from that same selected-subject read."
+        ],
+        "exclusions": [
+         "Ambiguous or unresolved heads do not establish a before/after pair.",
+         "A retained roster revision is context and does not select the primary statement comparison.",
+         "This obligation does not promise a manual per-side pairing control."
+        ],
+        "invariant_id": "ff22ba43-5910-5812-89c4-1a6befedee7a",
+        "invariant_revision_id": "537ca8ca-9fe2-53ab-a550-17267f83bc53",
+        "lifecycle": "proposed",
+        "member_id": "dbf279c5-8019-584a-95fe-3c67579d3349",
+        "other_family_revision_ids": [],
+        "payload_digest": "187e644f403fca4b84412dc53443d894c0d8caa470b4e3e3605185f732350109",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-21SDZECS-ICR-L37-UI-CLAUSE-02.json",
+         "operation_id": "f3092195-d865-516f-9803-c5217b28525c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The selected invariant statement uses the primary owner's exact before and after operands and revision selection; ambiguous or unresolved selections create no inferred pair."
+       },
+       {
+        "applicability": "Source exploration for a comparison with a measured source inventory.",
+        "detail": "the before snapshot records membership ad25dc9e-9009-5163-8784-275e4b452c30 placing the exact invariant revision 619bed22-5629-5caa-8213-81d3f9d0c608 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-4DVNECH3",
+        "display_version": "r3",
+        "essential_conditions": [
+         "Attribution labels come from the backend: the mapped and unmapped partitions of a dataset review, or the lane's file buckets of a tree comparison, shown as pending while the lane is being read.",
+         "Semantic navigation may select expressions but does not filter the source inventory."
+        ],
+        "exclusions": [
+         "Unlisted continuation pages are not counted as already rendered.",
+         "A path absent from both attribution partitions is unknown, not inferred unmapped."
+        ],
+        "invariant_id": "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+        "invariant_revision_id": "619bed22-5629-5caa-8213-81d3f9d0c608",
+        "lifecycle": "proposed",
+        "member_id": "ad25dc9e-9009-5163-8784-275e4b452c30",
+        "other_family_revision_ids": [],
+        "payload_digest": "29fe57138401922bad3c162bf42a9229cb59fb69a6bf20fca16f5fc4fe515331",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-4DVNECH3-ICR-L37-UI-03.json",
+         "operation_id": "0b715e35-8d16-5746-91af-c4f8a8f7f498",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The complete changed-file inventory remains reachable independently of semantic selection, with mapped, unmapped and unknown attribution stated from the backend's classification: the mapped and unmapped partitions of a dataset review, and the unexplained-changes lane's per-file bucket of a tree comparison."
+       },
+       {
+        "applicability": "Subject selection inside the normal task Intent Reviewer, and the task entry that opens it.",
+        "detail": "the before snapshot records membership 8515a5b0-ab9f-50b5-af4b-36b8ad77600d placing the exact invariant revision 6801cb3c-12f7-5ebb-8e5f-5517007d3971 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-2E8MG43K",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The catalogue read returns recorded invariant and family subjects for the selected repository, master and leaf.",
+         "The catalogue is read when the reviewer is mounted, keyed on the comparison (repository, master, leaf and history) and its snapshot generation, not on the global analytics document."
+        ],
+        "exclusions": [
+         "Unavailable or refused catalogue reads do not establish an empty knowledge dataset.",
+         "The task entry's changed-intent summary read, which is not a catalogue read.",
+         "Re-reads caused by the reviewer's own refresh or by a new snapshot generation of the same comparison."
+        ],
+        "invariant_id": "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+        "invariant_revision_id": "6801cb3c-12f7-5ebb-8e5f-5517007d3971",
+        "lifecycle": "proposed",
+        "member_id": "8515a5b0-ab9f-50b5-af4b-36b8ad77600d",
+        "other_family_revision_ids": [],
+        "payload_digest": "1667914dce7b7f7f415a0a461a73c32ee3058c300ab0819841ab04089facf22d",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-2E8MG43K-ICR-L37-UI-01.json",
+         "operation_id": "4007f695-916b-50d7-86b5-50ecb8115c39",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The task entry reads no subject catalogue; the reviewer reads the recorded-subject catalogue once when it is opened, keyed on its comparison, and exposes that complete catalogue for subject selection inside the review."
+       },
+       {
+        "applicability": "Family and member review of recorded before/after family context.",
+        "detail": "the before snapshot records membership 4c147a33-1263-5d97-b3bf-f1fd85ee9104 placing the exact invariant revision 797998f4-1ebc-5242-a3ee-372604be82b8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-H8EM1VJR",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The context owner supplies exact selected family revisions and member rows; unchanged carried siblings remain visible."
+        ],
+        "exclusions": [
+         "A partial roster remains partial until its continuation is read; no absent sibling content is invented.",
+         "Displayed context is not an authored assessment or proof that a family guarantee is preserved."
+        ],
+        "invariant_id": "94989116-7997-5332-a9e8-43b9c9c6fe73",
+        "invariant_revision_id": "797998f4-1ebc-5242-a3ee-372604be82b8",
+        "lifecycle": "proposed",
+        "member_id": "4c147a33-1263-5d97-b3bf-f1fd85ee9104",
+        "other_family_revision_ids": [],
+        "payload_digest": "8f01a83e6eee6072c00e743371daaee738e7971a693e3c4ac40d2081c984649b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-H8EM1VJR-ICR-L37-UI-02.json",
+         "operation_id": "ada4f678-344a-52f6-baf7-6242bcf5fccf",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The family tree keeps the independently authored guarantee and unchanged member statements beside the selected intent and its bound source expressions."
+       },
+       {
+        "applicability": "The Jump to selected review control in the existing review workspace.",
+        "detail": "the before snapshot records membership 064cc0bf-7ad5-5da8-8030-2865cc6e7540 placing the exact invariant revision 7c37fb5e-9295-5ede-8646-d90e8f95b5e6 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZE4QPG25",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The existing center is the focus and scroll target.",
+         "The jump focuses without the browser default scroll and explicitly aligns the target start."
+        ],
+        "exclusions": [
+         "The jump changes no layout, full-file disclosure, source selection or persisted knowledge."
+        ],
+        "invariant_id": "96228200-c6bd-5e09-a738-cd9705c513ce",
+        "invariant_revision_id": "7c37fb5e-9295-5ede-8646-d90e8f95b5e6",
+        "lifecycle": "proposed",
+        "member_id": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+        "movement_reference": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+        "other_family_revision_ids": [],
+        "payload_digest": "5d88d75435f2f596f16c018c8cb3d761057cf206b206cd713c615baddf389096",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZE4QPG25-ICR-L37-UI-CLAUSE-05.json",
+         "operation_id": "34bbb54f-dccd-569a-b5d0-e93cf1c35cd8",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Jump to selected review preserves keyboard focus while explicitly aligning the existing center scroll target at its start."
+       },
+       {
+        "applicability": "Client continuation of a displayed comparison and primary subject along one exact family-side-revision roster walk.",
+        "detail": "the before snapshot records membership 19569b80-e387-55d0-a4c0-5052b99f002e placing the exact invariant revision 875ad52b-804f-567c-be2f-dedf8eba9bf1 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-53F058MT",
+        "display_version": "r3",
+        "essential_conditions": [
+         "The admitted response agrees with comparison, candidate, selected subject/revisions, cursor, family selection, side/revision, guarantee and page scope.",
+         "The request still owns the current read sequence and is not an ordinary refresh.",
+         "A rejected continuation states failure and retains the coherent display; a whole-review refusal retains the existing suppression rule."
+        ],
+        "exclusions": [
+         "Merging across subjects, tasks, history selections, generations or immutable-content conflicts.",
+         "Replacement reads caused by refresh or a changed question."
+        ],
+        "invariant_id": "717049e6-bebb-5d09-859d-6efdae6f363a",
+        "invariant_revision_id": "875ad52b-804f-567c-be2f-dedf8eba9bf1",
+        "lifecycle": "proposed",
+        "member_id": "19569b80-e387-55d0-a4c0-5052b99f002e",
+        "movement_reference": "19569b80-e387-55d0-a4c0-5052b99f002e",
+        "other_family_revision_ids": [],
+        "payload_digest": "2d40a968c21dda736bff4c9bcd1980242119ec1ae0d3d5a8cae2fd886b9a032b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-53F058MT-ICR-L38-P2.json",
+         "operation_id": "89bb33d7-8c1d-5b1c-9180-0ab33f93ca3d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Family accumulation admits only a successful continuation of the displayed comparison, primary subject and exact family-side-revision walk; refresh, subject/history changes, stale responses and late superseded reads cannot import earlier family context."
+       },
+       {
+        "applicability": "Opening recorded family and invariant subjects from family/member navigation in the normal reviewer.",
+        "detail": "the before snapshot records membership 1c88e2c1-a963-568e-8d38-547fbd6115be placing the exact invariant revision 8840a91a-d28f-5ca2-b9fb-d93347fb35e8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-YVVW1XCN",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The roster provides the member canonical invariant identity.",
+         "The clicked family and revision remain navigation context while the existing reader obtains the selected subject payload."
+        ],
+        "exclusions": [
+         "An unaddressable roster member remains explicit context and cannot reuse another subject judgment.",
+         "The browser does not choose dataset paths or revision heads."
+        ],
+        "invariant_id": "d5a5651b-cec2-5776-a970-8622d5223bb6",
+        "invariant_revision_id": "8840a91a-d28f-5ca2-b9fb-d93347fb35e8",
+        "lifecycle": "proposed",
+        "member_id": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+        "movement_reference": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+        "other_family_revision_ids": [],
+        "payload_digest": "cb2371a5c78575d687c232562e56b70b97faddad95544ed6f4c7860da0ce6b65",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-YVVW1XCN-ICR-L37-UI-CLAUSE-01.json",
+         "operation_id": "09c47ace-1810-55c3-a01a-5b9c9375067c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A reviewer opens a recorded family or invariant through the existing subject reader, and a family member selection uses its canonical invariant identity while retaining the family and revision as navigation context."
+       },
+       {
+        "applicability": "Projection of a bounded family roster page for an exact selected family revision in a bound review snapshot.",
+        "detail": "the before snapshot records membership a6ff83b8-ab9a-5448-8179-1b604167dec7 placing the exact invariant revision a2f25a1f-937b-5e1d-8e12-238bdded9cf3 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-49H32B3F",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The page is selected by the existing knowledge read policy and carries content, membership or realization items.",
+         "Only revision IDs represented by those page items are resolved through the recorded membership owner."
+        ],
+        "exclusions": [
+         "Unselected revision content and whole-roster fetches.",
+         "Family or invariant revision selection, semantic grouping, and authored guarantee or assessment inference."
+        ],
+        "invariant_id": "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+        "invariant_revision_id": "a2f25a1f-937b-5e1d-8e12-238bdded9cf3",
+        "lifecycle": "proposed",
+        "member_id": "a6ff83b8-ab9a-5448-8179-1b604167dec7",
+        "other_family_revision_ids": [],
+        "payload_digest": "6131b939e7bb02d5751c0bc5294b04ca73fce57f3880f4641340cd905a3d117b",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-49H32B3F-ICR-L38-P1.json",
+         "operation_id": "b00962ab-8a5d-52c1-98a9-6f705907a9c5",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "A bounded family page transports member context for every exact member revision represented by content, membership or realization items, using the existing recorded membership owner without fetching unselected content."
+       },
+       {
+        "applicability": "The Intent Reviewer surface (ReviewSurface) when the reader selects a family, an invariant or the whole task after the task context has at least one admitted review payload.",
+        "detail": "the before snapshot records membership 5b0a8f63-69ed-5fd1-84d8-edd78ff2c5c5 placing the exact invariant revision aae21ba6-5ce4-5a76-94fb-79c1bae2cae0 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-KKJYVB40",
+        "display_version": "r1",
+        "essential_conditions": [
+         "A frame (the task context's last admitted payload for the same repo, master, leaf and record) exists.",
+         "The selected subject's review has not answered yet; only then is the reading area replaced by the pending statement keyed to the requested question."
+        ],
+        "exclusions": [
+         "The reviewer's first read, which has no frame and is stated at the surface level.",
+         "A different leaf or record, whose frame is never reused.",
+         "Server-side read latency of a first visit to a subject."
+        ],
+        "invariant_id": "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+        "invariant_revision_id": "aae21ba6-5ce4-5a76-94fb-79c1bae2cae0",
+        "lifecycle": "proposed",
+        "member_id": "5b0a8f63-69ed-5fd1-84d8-edd78ff2c5c5",
+        "other_family_revision_ids": [],
+        "payload_digest": "9683187985f368f26f7467963f3ae15744d1f161d963286fb012314566c7a575",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-KKJYVB40-ICR-R24-v3-L48-mounted-reviewer.json",
+         "operation_id": "1b83a102-fb26-5d06-8857-cc06c91bd82d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Selecting a family, an invariant or the whole task keeps the review workspace, its navigation, family tree, source explorer and open disclosures mounted as the same DOM; while the selected subject is being read only the reading area changes, to a pending state bound to the requested question's key and labelled with the requested subject, and navigation stays usable."
+       },
+       {
+        "applicability": "Deduplication of family expression excerpts from carried before/after realization claims.",
+        "detail": "the before snapshot records membership 2078580b-5831-552a-abd2-4146f51b5b4e placing the exact invariant revision b809298d-94cb-57cb-96eb-0533c7165747 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-XX178P3W",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Claims are grouped by repository path and recorded source identity.",
+         "Observed identities and resolution outcomes remain separate per-side readings."
+        ],
+        "exclusions": [
+         "The same path with different recorded identities must remain distinct.",
+         "A realization mismatch is not an authored semantic verdict or the comparison source-inventory count."
+        ],
+        "invariant_id": "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+        "invariant_revision_id": "b809298d-94cb-57cb-96eb-0533c7165747",
+        "lifecycle": "proposed",
+        "member_id": "2078580b-5831-552a-abd2-4146f51b5b4e",
+        "movement_reference": "2078580b-5831-552a-abd2-4146f51b5b4e",
+        "other_family_revision_ids": [],
+        "payload_digest": "486d9db5b7d81f94d946508047edf8f41eccc521287b2ff41ba65d8ec4324660",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-XX178P3W-ICR-L37-UI-06.json",
+         "operation_id": "1b6cd4d0-c8aa-53bf-9bdb-46573dbf494d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Expression grouping keeps recorded source identity in the deduplication key and observed identities as per-side readings."
+       },
+       {
+        "applicability": "Whole-subject review answers and changed-file content answers read by one mounted review surface.",
+        "detail": "the before snapshot records membership 53ebb3cd-1c8a-5817-bdbb-737e0ca49855 placing the exact invariant revision c1aa2fa7-2a70-5ee0-9222-c0d26e8492f4 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-MC654E0T",
+        "display_version": "r1",
+        "essential_conditions": [
+         "The answer was admitted, is whole (not a page) and carried no refresh identity; content answers are kept only when state is content with an expansion.",
+         "Both stores are bounded LRU (24 reviews, 32 content answers) and live only as long as the mounted surface."
+        ],
+        "exclusions": [
+         "Paged and roster-continuation reads, which stay owned by the read cycle.",
+         "Refusals and failures, which are always asked again.",
+         "Re-validating a moved live candidate on return; the reader's refresh re-asks (O-R1-1, by design).",
+         "Content rendered outside a review surface, which has no cache."
+        ],
+        "invariant_id": "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+        "invariant_revision_id": "c1aa2fa7-2a70-5ee0-9222-c0d26e8492f4",
+        "lifecycle": "proposed",
+        "member_id": "53ebb3cd-1c8a-5817-bdbb-737e0ca49855",
+        "other_family_revision_ids": [],
+        "payload_digest": "624487e242bc9e7948bc5177b4d2887e71d7c12bb6d5c8cbbc7b4b95cdece075",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L48",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-MC654E0T-ICR-R24-v3-L48-per-comparison-reuse.json",
+         "operation_id": "82211cbe-d38b-598a-ab53-9877321393d6",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "An admitted whole-subject review and an opened file's content are read once per comparison generation: returning to a subject or reopening a file for the same code-tree and snapshot pair issues no request, a refresh always re-asks, an answer from another generation empties both stores, refusals and failures are not kept, and both stores are bounded least-recently-used stores owned by one mounted surface."
+       },
+       {
+        "applicability": "The shared catalogue hook when repository, master or leaf target changes.",
+        "detail": "the before snapshot records membership 8c7c4718-89ee-50cf-b703-eb934cc2d694 placing the exact invariant revision c9b1e161-0c09-5a37-bbe7-3d6346379302 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-555EHWM8",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The read target key must match the current target before rows can be returned.",
+         "Only the current mounted request sequence may complete the read."
+        ],
+        "exclusions": [
+         "The hook does not create catalogue rows or choose a published dataset."
+        ],
+        "invariant_id": "f587f769-dbcc-5d50-ba56-260f333110f1",
+        "invariant_revision_id": "c9b1e161-0c09-5a37-bbe7-3d6346379302",
+        "lifecycle": "proposed",
+        "member_id": "8c7c4718-89ee-50cf-b703-eb934cc2d694",
+        "other_family_revision_ids": [],
+        "payload_digest": "5c77c201aa2aa403efee177f4dd081d98fc29df2b56f75de5ce363da5092a6bf",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-555EHWM8-ICR-L37-UI-07.json",
+         "operation_id": "81c98eb6-c104-502f-bf42-1e03be32481c",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Another task's catalogue entries are not exposed while the current task's catalogue read is pending."
+       },
+       {
+        "applicability": "Main expression and family realization-detail presentation over bounded or unavailable family roster context.",
+        "detail": "the before snapshot records membership c273f61d-098b-54b9-971c-0001c02c64b0 placing the exact invariant revision d08b6300-c541-55c2-87d2-28c4967589fc in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-VPX81HXV",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Loaded member contexts and loaded source claims are distinguished from the read owner cumulative item counts.",
+         "A recorded side is fully loaded only when its page is complete, its measured membership population is present and member content is recorded.",
+         "Partial or unavailable context states its limit and retains any owner-published continuation."
+        ],
+        "exclusions": [
+         "Inferring absent stored attribution or unchanged unreturned expressions from an empty loaded set.",
+         "Semantic acceptance, whole-source inventory filtering, or replacement of source/evidence owners."
+        ],
+        "invariant_id": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+        "invariant_revision_id": "d08b6300-c541-55c2-87d2-28c4967589fc",
+        "lifecycle": "proposed",
+        "member_id": "c273f61d-098b-54b9-971c-0001c02c64b0",
+        "other_family_revision_ids": [],
+        "payload_digest": "5ccafae8ee15ece71608b5971d18dbcf1f22106ceaa840526e2cf163f41d4664",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-VPX81HXV-ICR-L38-P5.json",
+         "operation_id": "56b53c72-a2b7-5fba-90da-f16edc9080ab",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Partial linked-source views state that links are not yet fully loaded and retain user-driven roster continuation; loaded member counts are distinguished from the read owner's cumulative item counts."
+       },
+       {
+        "applicability": "Central evidence and authored assessment display for a selected subject.",
+        "detail": "the before snapshot records membership 0945a390-98b9-5305-8466-14ae9a9942df placing the exact invariant revision e0bb085f-4a15-5254-95c0-8ed8d6424cd8 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-ZY0YMXMQ",
+        "display_version": "r2",
+        "essential_conditions": [
+         "The payload is the requested subject owner read and preserves record currentness, applicability and provenance.",
+         "Candidate-level execution is labelled as candidate input, separately from authored subject judgment."
+        ],
+        "exclusions": [
+         "A family-selected payload cannot establish a member assessment absence.",
+         "Missing or unreadable record channels are not a favorable or unassessed default.",
+         "No passing execution creates a semantic assessment."
+        ],
+        "invariant_id": "3158556a-3770-53ef-ad54-e0b625aec472",
+        "invariant_revision_id": "e0bb085f-4a15-5254-95c0-8ed8d6424cd8",
+        "lifecycle": "proposed",
+        "member_id": "0945a390-98b9-5305-8466-14ae9a9942df",
+        "movement_reference": "0945a390-98b9-5305-8466-14ae9a9942df",
+        "other_family_revision_ids": [],
+        "payload_digest": "f9e1446ae82ab64b4d0577f3ce04d813c180a61a4069ec11123df3fc5f7026c7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-ZY0YMXMQ-ICR-L37-UI-CLAUSE-03.json",
+         "operation_id": "1493d881-434c-5fd1-b05c-0a3ce1797008",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "The central evidence view displays the selected subject owner's authored assessment with its recorded currentness and applicability, separately from candidate execution observations."
+       },
+       {
+        "applicability": "Display preferences and expression inspection during one mounted review workspace.",
+        "detail": "the before snapshot records membership 87e65396-6802-5d2f-ba87-e95e82414e6e placing the exact invariant revision f813eb5d-e9db-5bee-97f3-08d8419a61f2 in family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and its recorded revision content",
+        "display_label": "INV-Z385RTQS",
+        "display_version": "r2",
+        "essential_conditions": [
+         "Workspace state survives comparison-page reads and diff-layout switches.",
+         "Closing an expanded expression returns focus to its retained opener when that element is available."
+        ],
+        "exclusions": [
+         "These transient display choices are not persisted knowledge or durable cross-session preferences."
+        ],
+        "invariant_id": "f1091f2c-3fa5-5178-bafb-211fdd04a23c",
+        "invariant_revision_id": "f813eb5d-e9db-5bee-97f3-08d8419a61f2",
+        "lifecycle": "proposed",
+        "member_id": "87e65396-6802-5d2f-ba87-e95e82414e6e",
+        "other_family_revision_ids": [],
+        "payload_digest": "0f65d5198db8c436f94cb62a99af33b517e01b0e34080027810f43de380985e7",
+        "provenance": {
+         "actor_ref": "260921-ICR/260921-ICR-L46",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-Z385RTQS-ICR-L37-UI-04.json",
+         "operation_id": "a2b6d1dc-9f28-5fa7-b55b-f4b40e0cb703",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "Diff layout and full-file disclosure are workspace state, with changed regions as the default and focus retained when an expression closes."
+       }
+      ],
+      "members_total": 23,
+      "page": {
+       "complete": false,
+       "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjkzYmY5M2EzNTgzZGVjOWE5N2UzYjA3MjExYTFlZDFkNTIzZjg1NmI3OWExMGQ0MTAzMTA5YTc5MDhhNDM2NzQiLCJzZWVkX2RpZ2VzdCI6ImRhYmE3ZDFhZjVmZTUyMTQ1MDllY2MyY2E0ZTVlNmFhOWRhZWY2N2Y3ODU2OTY0Mjg2NzQ4NDllYTc0ZDU1ZDkiLCJtYW5pZmVzdF9kaWdlc3QiOiI0YWQwYTI0NTc2OWRiOTQyZjJlOWQzNjM3ZjYxMDRmMjMyMDI3ZDZiYWFkMDRhZGEyMGU4MDYzMTM0MTZkZThiIiwibG9naWNhbF9kaWdlc3QiOiJhZWEyZTdlYTJkYThiNDA5MDUzZjBmNmZjZDU1MjdkYzBhNjUyZmU0MzI1YTk0MTY4NWNhYjI1OWRhYzUwODgzIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjI5fQ==",
+       "counts": {
+        "advertised_expansions_total": 0,
+        "distinct_source_locations_total": 40,
+        "distinct_source_paths_total": 21,
+        "family_revisions_total": 1,
+        "invariant_revisions_total": 23,
+        "memberships_total": 23,
+        "primary_items_remaining": 63,
+        "primary_items_returned": 29,
+        "primary_items_total": 92,
+        "realization_claims_total": 45,
+        "unresolved_anchor_total": 0
+       },
+       "members_total": 23,
+       "scope": [
+        "side=before",
+        "family_revision_id=0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "policy_version=recorded-family-frontier/v1",
+        "page_size=64"
+       ],
+       "state": "first_page"
+      },
+      "recorded_revision_ids": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "side": "before",
+      "state": "recorded"
+     },
+     "candidates": [],
+     "change_kinds": {
+      "family": "FAM-R6R095RW",
+      "guarantee": "unchanged",
+      "guarantee_detail": "the guarantee text of FAM-R6R095RW is the same on both sides",
+      "members": [
+       {
+        "authored_position": 21,
+        "evidence": [
+         "INV-ZS9ZS878 revision 3 \u2192 4",
+         "realization RLZ-95V4M24E re-anchored",
+         "the hunk of dashboard/src/panels/review/familyWalkMerge.ts at before 121,1 after 121,1 intersects realization RLZ-95V4M24E on the before side",
+         "the hunk of dashboard/src/panels/review/familyWalkMerge.ts at before 121,1 after 121,1 intersects realization RLZ-95V4M24E on the after side"
+        ],
+        "implementation": "established",
+        "intent": "established",
+        "invariant": "INV-ZS9ZS878",
+        "marks": [
+         "implementation"
+        ],
+        "member_id": "c28e6645-8d11-57cc-af07-15846b9c47ca",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "intent",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 6,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-8VQR13WX",
+        "marks": [],
+        "member_id": "ef54052d-4fc4-557e-8c99-cbde458b3a56",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 11,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-MCVSM81V",
+        "marks": [],
+        "member_id": "a57fff84-b869-5859-a3dd-ff5fb554bc2a",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 12,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-RMTHRQ0K",
+        "marks": [],
+        "member_id": "d6aad7e8-879d-52eb-8ed6-d6bab7a62c7b",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 13,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-RT13RESK",
+        "marks": [],
+        "member_id": "ef9ed302-7e9f-5e52-9dee-0e6528e52243",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 15,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-W5CTZJGD",
+        "marks": [],
+        "member_id": "5078052d-5820-5d64-83c0-4074d79c2f76",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 7,
+        "evidence": [
+         "realization RLZ-KPXX9Y7G re-anchored",
+         "the hunk of dashboard/src/panels/review/FamilyReviewCenter.tsx at before 800,1 after 800,1 intersects realization RLZ-KPXX9Y7G on the before side",
+         "the hunk of dashboard/src/panels/review/FamilyReviewCenter.tsx at before 800,1 after 800,1 intersects realization RLZ-KPXX9Y7G on the after side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-BR5MTSTY",
+        "marks": [],
+        "member_id": "80bb1faf-692a-5ebe-a77f-cfd0019bf725",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 16,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-WQZ2WFCN",
+        "marks": [],
+        "member_id": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 0,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-21SDZECS",
+        "marks": [],
+        "member_id": "dbf279c5-8019-584a-95fe-3c67579d3349",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 3,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-4DVNECH3",
+        "marks": [],
+        "member_id": "ad25dc9e-9009-5163-8784-275e4b452c30",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 1,
+        "evidence": [
+         "INV-2E8MG43K keeps revision 2, but its text differs"
+        ],
+        "implementation": "not_established",
+        "intent": "established",
+        "invariant": "INV-2E8MG43K",
+        "marks": [
+         "text_differs"
+        ],
+        "member_id": "8515a5b0-ab9f-50b5-af4b-36b8ad77600d",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "intent",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": true,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 8,
+        "evidence": [
+         "realization RLZ-NF0112J4 re-anchored",
+         "the hunk of dashboard/src/panels/review/FamilyReviewCenter.tsx at before 800,1 after 800,1 intersects realization RLZ-NF0112J4 on the before side",
+         "the hunk of dashboard/src/panels/review/FamilyReviewCenter.tsx at before 800,1 after 800,1 intersects realization RLZ-NF0112J4 on the after side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-H8EM1VJR",
+        "marks": [],
+        "member_id": "4c147a33-1263-5d97-b3bf-f1fd85ee9104",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 20,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-ZE4QPG25",
+        "marks": [],
+        "member_id": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 4,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-53F058MT",
+        "marks": [],
+        "member_id": "19569b80-e387-55d0-a4c0-5052b99f002e",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 18,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-YVVW1XCN",
+        "marks": [],
+        "member_id": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 2,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-49H32B3F",
+        "marks": [],
+        "member_id": "a6ff83b8-ab9a-5448-8179-1b604167dec7",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 9,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-KKJYVB40",
+        "marks": [],
+        "member_id": "5b0a8f63-69ed-5fd1-84d8-edd78ff2c5c5",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 17,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-XX178P3W",
+        "marks": [],
+        "member_id": "2078580b-5831-552a-abd2-4146f51b5b4e",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 10,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-MC654E0T",
+        "marks": [],
+        "member_id": "53ebb3cd-1c8a-5817-bdbb-737e0ca49855",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 5,
+        "evidence": [
+         "realization RLZ-6VEXGB6W re-anchored"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-555EHWM8",
+        "marks": [],
+        "member_id": "8c7c4718-89ee-50cf-b703-eb934cc2d694",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 14,
+        "evidence": [
+         "realization RLZ-YRVX77Q4 re-anchored",
+         "the hunk of dashboard/src/panels/review/FamilyTree.tsx at before 222,1 after 222,1 intersects realization RLZ-YRVX77Q4 on the before side",
+         "the hunk of dashboard/src/panels/review/FamilyTree.tsx at before 222,1 after 222,1 intersects realization RLZ-YRVX77Q4 on the after side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-VPX81HXV",
+        "marks": [],
+        "member_id": "c273f61d-098b-54b9-971c-0001c02c64b0",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 22,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-ZY0YMXMQ",
+        "marks": [],
+        "member_id": "0945a390-98b9-5305-8466-14ae9a9942df",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 19,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-Z385RTQS",
+        "marks": [],
+        "member_id": "87e65396-6802-5d2f-ba87-e95e82414e6e",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 23,
+        "evidence": [
+         "INV-2TQGXFAX joined FAM-R6R095RW"
+        ],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-2TQGXFAX",
+        "marks": [],
+        "member_id": "4e944ceb-e0fd-5e4a-9115-72898dcdefdd",
+        "membership": "established",
+        "membership_reasons": [],
+        "primary": "membership",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       }
+      ],
+      "members_total": 24
+     },
+     "detail": "the family b9f95278-5712-5867-aa87-6e225aed4d45 is read at the before family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and the after family revision 0085407b-fd42-584e-adf3-4eaefcb5df98, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 23 recorded membership(s) and this page supplies 23 member context update(s): the remainder is 63 of the read walk's 92 item(s) and is reached with the continuation beside it; after: the after snapshot's recorded roster of family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 holds 24 recorded membership(s) and this page supplies 24 member context update(s): the remainder is 68 of the read walk's 96 item(s) and is reached with the continuation beside it",
+     "display_label": "Coherent intent and source review",
+     "family_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "label_side": "after",
+     "selection": {
+      "after_heads": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "after_retained": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "after_revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "before_heads": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "before_retained": [
+       "0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "before_revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "state": "compared",
+      "statement": "the family b9f95278-5712-5867-aa87-6e225aed4d45 is read at the before family revision 0085407b-fd42-584e-adf3-4eaefcb5df98 and the after family revision 0085407b-fd42-584e-adf3-4eaefcb5df98, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history"
+     },
+     "state": "partial"
+    }
+   ],
+   "families_remaining": 0,
+   "families_returned": 1,
+   "families_total": 1,
+   "limitations": [],
+   "membership_rows_total": 47,
+   "references": {
+    "applicability": "knowledge.applicability",
+    "assessments": "evidence.assessments",
+    "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them",
+    "evidence_links": "evidence.evidence_links",
+    "join_key": "invariant_revision_id",
+    "observations": "evidence.observations",
+    "relationship_union": "source.relationships",
+    "source_inventory": "source.inventory"
+   },
+   "state": "partial",
+   "unique_member_revision_total": 25
+  },
+  "knowledge": {
+   "after_conditions": [
+    "A recorded member retains its exact invariant revision and payload identity.",
+    "Sources unite by exact claim identity without replacing conflicting content.",
+    "Repeated first pages from another walk do not reset that walk; an identical accepted replay is idempotent."
+   ],
+   "after_statement": {
+    "detail": "the after snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "Within one admitted family-side-revision walk, sparse member updates retain delivered immutable content and unite sources by exact claim identity; replay is idempotent and another walk's repeated first page cannot erase progress. (Scratch revision for the MIK-R33 rule 8 rerun.)"
+   },
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "detection_signals",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "authored_effects",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessments": [],
+   "authored_effects": [],
+   "before_conditions": [
+    "A recorded member retains its exact invariant revision and payload identity.",
+    "Sources unite by exact claim identity without replacing conflicting content.",
+    "Repeated first pages from another walk do not reset that walk; an identical accepted replay is idempotent."
+   ],
+   "before_statement": {
+    "detail": "the before snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "Within one admitted family-side-revision walk, sparse member updates retain delivered immutable content and unite sources by exact claim identity; replay is idempotent and another walk's repeated first page cannot erase progress."
+   },
+   "context": [],
+   "family_ids": [
+    "b9f95278-5712-5867-aa87-6e225aed4d45"
+   ],
+   "field_changes": [
+    {
+     "after_value": "2c8f3e0b00944c796817eb3fc4d2bccfbd7d4849655f89bf9f3ce68dbf25e2bd",
+     "before_value": "1667914dce7b7f7f415a0a461a73c32ee3058c300ab0819841ab04089facf22d",
+     "field": "payload_digest",
+     "item_id": "6801cb3c-12f7-5ebb-8e5f-5517007d3971",
+     "item_kind": "invariant"
+    },
+    {
+     "after_value": "The task entry reads no subject catalogue; the reviewer reads the recorded-subject catalogue once when it is opened, keyed on its comparison, and exposes that complete catalogue for subject selection inside the review. (Scratch rewording, same revision, for the MIK-R33 rule 8 rerun.)",
+     "before_value": "The task entry reads no subject catalogue; the reviewer reads the recorded-subject catalogue once when it is opened, keyed on its comparison, and exposes that complete catalogue for subject selection inside the review.",
+     "field": "statement",
+     "item_id": "6801cb3c-12f7-5ebb-8e5f-5517007d3971",
+     "item_kind": "invariant"
+    }
+   ],
+   "invariant_ids": [
+    "a336c721-8feb-5017-b1bf-653bb1680364",
+    "d4437eb9-2114-5f5e-b698-ea64166d61be",
+    "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+    "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+    "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+    "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+    "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+    "608758dd-48f7-54f6-8ef6-616b78aa064a",
+    "ff22ba43-5910-5812-89c4-1a6befedee7a",
+    "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+    "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+    "94989116-7997-5332-a9e8-43b9c9c6fe73",
+    "96228200-c6bd-5e09-a738-cd9705c513ce",
+    "717049e6-bebb-5d09-859d-6efdae6f363a",
+    "d5a5651b-cec2-5776-a970-8622d5223bb6",
+    "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+    "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+    "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+    "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+    "f587f769-dbcc-5d50-ba56-260f333110f1",
+    "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+    "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+    "3158556a-3770-53ef-ad54-e0b625aec472",
+    "f1091f2c-3fa5-5178-bafb-211fdd04a23c"
+   ],
+   "revision_groups": [
+    {
+     "record_id": "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "3158556a-3770-53ef-ad54-e0b625aec472",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "608758dd-48f7-54f6-8ef6-616b78aa064a",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "717049e6-bebb-5d09-859d-6efdae6f363a",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "94989116-7997-5332-a9e8-43b9c9c6fe73",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "96228200-c6bd-5e09-a738-cd9705c513ce",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "d4437eb9-2114-5f5e-b698-ea64166d61be",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "d5a5651b-cec2-5776-a970-8622d5223bb6",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "f1091f2c-3fa5-5178-bafb-211fdd04a23c",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "f587f769-dbcc-5d50-ba56-260f333110f1",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "ff22ba43-5910-5812-89c4-1a6befedee7a",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "selected_revision_count": 1,
+     "side": "before"
+    },
+    {
+     "record_id": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "3158556a-3770-53ef-ad54-e0b625aec472",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "608758dd-48f7-54f6-8ef6-616b78aa064a",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "717049e6-bebb-5d09-859d-6efdae6f363a",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "94989116-7997-5332-a9e8-43b9c9c6fe73",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "96228200-c6bd-5e09-a738-cd9705c513ce",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "d4437eb9-2114-5f5e-b698-ea64166d61be",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "d5a5651b-cec2-5776-a970-8622d5223bb6",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "f1091f2c-3fa5-5178-bafb-211fdd04a23c",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "f587f769-dbcc-5d50-ba56-260f333110f1",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "ff22ba43-5910-5812-89c4-1a6befedee7a",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "selected_revision_count": 1,
+     "side": "after"
+    }
+   ],
+   "revision_selection": {
+    "after_heads": [
+     "daf09f6a-9601-5c55-9e2e-38bf4cb13b76"
+    ],
+    "after_retained": [
+     "daf09f6a-9601-5c55-9e2e-38bf4cb13b76"
+    ],
+    "after_revision_id": "daf09f6a-9601-5c55-9e2e-38bf4cb13b76",
+    "before_heads": [
+     "02449dee-6977-5f5c-b74f-77c3a0060d28"
+    ],
+    "before_retained": [
+     "02449dee-6977-5f5c-b74f-77c3a0060d28"
+    ],
+    "before_revision_id": "02449dee-6977-5f5c-b74f-77c3a0060d28",
+    "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+    "record_kind": "invariant",
+    "state": "compared",
+    "statement": "the invariant a336c721-8feb-5017-b1bf-653bb1680364 comparison uses the before head 02449dee-6977-5f5c-b74f-77c3a0060d28 and the after head daf09f6a-9601-5c55-9e2e-38bf4cb13b76, each the unique retained revision with no recorded successor in its snapshot's selected population; 0 other retained revision(s) remain selectable history"
+   },
+   "selection_state": "subject_selected",
+   "signals": [],
+   "unresolved": []
+  },
+  "limitations": [
+   "limitation:records_present_outside_the_selection",
+   "limitation:no_semantic_assessment_performed",
+   "omitted:present_outside_the_declared_selection:3",
+   "omitted:present_outside_the_declared_selection:1",
+   "review:trees:1",
+   "history:intent:before:available",
+   "knowledge-index:before:complete",
+   "history:intent:after:available",
+   "knowledge-index:after:complete"
+  ],
+  "source": {
+   "attributed_changed_paths": [
+    "dashboard/src/panels/review/FamilyReviewCenter.tsx",
+    "dashboard/src/panels/review/FamilyTree.tsx",
+    "dashboard/src/panels/review/ReviewSurface.tsx",
+    "dashboard/src/panels/review/familyWalkMerge.ts"
+   ],
+   "attribution": {
+    "attributed_total": 4,
+    "changed_total": 4,
+    "complete": true,
+    "confirmed_unregistered_total": 0,
+    "detail": "4 measured changed path(s) at the changed-path granularity: 4 attributed, 0 confirmed to have no valid registered attribution, and 0 of undetermined attribution. Snapshot inspection: before inspected; after inspected. Every required snapshot/scope completely inspected or legitimately known empty: True. This denominator is the whole measured change population of the bound pair. A resolved path-level mapping establishes that a recorded claim's bytes are at this path and never that every change inside it realizes that claim",
+    "granularity": "changed_path",
+    "paths": [
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "dashboard/src/panels/review/FamilyReviewCenter.tsx",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "2 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "dashboard/src/panels/review/FamilyTree.tsx",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "dashboard/src/panels/review/ReviewSurface.tsx",
+      "unresolved_mapping_count": 0
+     },
+     {
+      "bucket": "attributed",
+      "detail": "10 registered realization claim(s) hold the recorded bytes at this path, and 0 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "selected_subject",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+      "unresolved_mapping_count": 0
+     }
+    ],
+    "sides": [
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (12 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 12,
+      "side": "before",
+      "state": "inspected"
+     },
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (12 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 12,
+      "side": "after",
+      "state": "inspected"
+     }
+    ],
+    "state": "measured",
+    "subject_scope_complete": true,
+    "unknown_attribution_total": 0
+   },
+   "expansion_command": "git diff --raw -z --no-renames e40d1f21660386f9b091ae5e6fee595a467d4cef d3e51778a3d5ad422c8c96508e1a01b191173c5d",
+   "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+   "inventory": {
+    "after_code_tree_id": "d3e51778a3d5ad422c8c96508e1a01b191173c5d",
+    "before_code_tree_id": "e40d1f21660386f9b091ae5e6fee595a467d4cef",
+    "command": "git -C /tmp/mik-run2/l39/scratch/agents-remember diff --raw -z --no-renames e40d1f21660386f9b091ae5e6fee595a467d4cef d3e51778a3d5ad422c8c96508e1a01b191173c5d",
+    "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
+    "entries": [
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "dashboard/src/panels/review/FamilyReviewCenter.tsx",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "dashboard/src/panels/review/FamilyTree.tsx",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "dashboard/src/panels/review/ReviewSurface.tsx",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "dashboard/src/panels/review/familyWalkMerge.ts",
+      "status": "modified"
+     }
+    ],
+    "listed_total": 4,
+    "partial": false,
+    "state": "measured",
+    "unrepresentable_paths": []
+   },
+   "locations": [],
+   "relationships": [
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 064cc0bf-7ad5-5da8-8030-2865cc6e7540 at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "7c37fb5e-9295-5ede-8646-d90e8f95b5e6",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 064cc0bf-7ad5-5da8-8030-2865cc6e7540 at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "7c37fb5e-9295-5ede-8646-d90e8f95b5e6",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "064cc0bf-7ad5-5da8-8030-2865cc6e7540",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 064cc0bf-7ad5-5da8-8030-2865cc6e7540 at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 064cc0bf-7ad5-5da8-8030-2865cc6e7540 at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 064cc0bf-7ad5-5da8-8030-2865cc6e7540, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 0945a390-98b9-5305-8466-14ae9a9942df at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "e0bb085f-4a15-5254-95c0-8ed8d6424cd8",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "0945a390-98b9-5305-8466-14ae9a9942df",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 0945a390-98b9-5305-8466-14ae9a9942df at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "e0bb085f-4a15-5254-95c0-8ed8d6424cd8",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "0945a390-98b9-5305-8466-14ae9a9942df",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 0945a390-98b9-5305-8466-14ae9a9942df at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 0945a390-98b9-5305-8466-14ae9a9942df at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 0945a390-98b9-5305-8466-14ae9a9942df, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 19569b80-e387-55d0-a4c0-5052b99f002e at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "875ad52b-804f-567c-be2f-dedf8eba9bf1",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "19569b80-e387-55d0-a4c0-5052b99f002e",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 19569b80-e387-55d0-a4c0-5052b99f002e at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "875ad52b-804f-567c-be2f-dedf8eba9bf1",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "19569b80-e387-55d0-a4c0-5052b99f002e",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 19569b80-e387-55d0-a4c0-5052b99f002e at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 19569b80-e387-55d0-a4c0-5052b99f002e at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 19569b80-e387-55d0-a4c0-5052b99f002e, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 1c88e2c1-a963-568e-8d38-547fbd6115be at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "8840a91a-d28f-5ca2-b9fb-d93347fb35e8",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 1c88e2c1-a963-568e-8d38-547fbd6115be at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "8840a91a-d28f-5ca2-b9fb-d93347fb35e8",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "1c88e2c1-a963-568e-8d38-547fbd6115be",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 1c88e2c1-a963-568e-8d38-547fbd6115be at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 1c88e2c1-a963-568e-8d38-547fbd6115be at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 1c88e2c1-a963-568e-8d38-547fbd6115be, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 2078580b-5831-552a-abd2-4146f51b5b4e at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "b809298d-94cb-57cb-96eb-0533c7165747",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "2078580b-5831-552a-abd2-4146f51b5b4e",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 2078580b-5831-552a-abd2-4146f51b5b4e at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "b809298d-94cb-57cb-96eb-0533c7165747",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "2078580b-5831-552a-abd2-4146f51b5b4e",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 2078580b-5831-552a-abd2-4146f51b5b4e at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 2078580b-5831-552a-abd2-4146f51b5b4e at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 2078580b-5831-552a-abd2-4146f51b5b4e, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 at None",
+      "item_coverage": "selected_both",
+      "member_revision_id": "503b9098-b7b1-5273-aaec-ca41c14d8d08",
+      "reached_via": [
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+      ],
+      "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+      "record_kind": "family",
+      "relationship_id": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+      "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records family b9f95278-5712-5867-aa87-6e225aed4d45 through relationship 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 at None",
+       "item_coverage": "selected_both",
+       "member_revision_id": "503b9098-b7b1-5273-aaec-ca41c14d8d08",
+       "reached_via": [
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98",
+        "member_of_selected_family:0085407b-fd42-584e-adf3-4eaefcb5df98"
+       ],
+       "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+       "record_kind": "family",
+       "relationship_id": "27e509f2-0aa0-5ac8-ae88-53b6cc1bd483",
+       "revision_id": "0085407b-fd42-584e-adf3-4eaefcb5df98",
+       "side": "before",
+       "state": "recorded"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_recorded_relationship",
+     "record_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the baseline records membership 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) and the candidate records membership 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483 at no readable address (revision 0085407b-fd42-584e-adf3-4eaefcb5df98) under family b9f95278-5712-5867-aa87-6e225aed4d45; the association is displayed as unchanged paired by the same recorded relationship 27e509f2-0aa0-5ac8-ae88-53b6cc1bd483, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses",
+     "transition": "unchanged"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records invariant a336c721-8feb-5017-b1bf-653bb1680364 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+      "item_coverage": "selected_both",
+      "reached_via": [],
+      "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+      "record_kind": "invariant",
+      "side": "after",
+      "state": "ungoverned"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records invariant a336c721-8feb-5017-b1bf-653bb1680364 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+       "item_coverage": "selected_both",
+       "reached_via": [],
+       "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+       "record_kind": "invariant",
+       "side": "before",
+       "state": "ungoverned"
+      }
+     ],
+     "gaps": [],
+     "lineage": [],
+     "pairing_basis": "same_governed_identity",
+     "record_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+     "record_kind": "invariant",
+     "relationship_kind": "governing_route",
+     "statement": "the invariant a336c721-8feb-5017-b1bf-653bb1680364 is associated with the same governing route on both snapshots (no governing route)",
+     "transition": "unchanged"
+    }
+   ],
+   "remaining": [
+    {
+     "name": "locations_remaining",
+     "value": 65
+    },
+    {
+     "name": "changed_paths_outside_selection",
+     "value": 3
+    },
+    {
+     "name": "unattributed_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "unknown_attribution_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "records_present_outside_selection",
+     "value": 3
+    },
+    {
+     "name": "references_unresolved",
+     "value": 0
+    }
+   ],
+   "unattributed_changed_paths": [],
+   "unknown_attribution_changed_paths": [],
+   "unresolved": [
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "02449dee-6977-5f5c-b74f-77c3a0060d28"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "cfe92be3-0d5c-5db1-a144-512a190fa08e"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "daf09f6a-9601-5c55-9e2e-38bf4cb13b76"
+    }
+   ]
+  },
+  "staleness": {
+   "moved": [],
+   "state": "current",
+   "statement": "the displayed comparison is the candidate's current comparison"
+  },
+  "submission": {
+   "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+   "none_is_approval": true,
+   "proposed_dispositions": [
+    "concern_found",
+    "no_concern_found",
+    "unresolved"
+   ],
+   "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+   "state": "unavailable"
+  },
+  "surface_version": "knowledge-review-surface/1"
+ },
+ "repository_id": "agents-remember",
+ "state": "review"
+}

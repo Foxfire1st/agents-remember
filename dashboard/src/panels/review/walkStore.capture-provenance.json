@@ -1,0 +1,119 @@
+{
+  "captured_at": "2026-10-04T15:56:14+00:00",
+  "producer": "260928-MIK-L39 worker, capture_store_bodies.py (kept with the leaf's evidence)",
+  "command": "PYTHONPATH=mcp/tests:mcp/src <mcp venv python> capture_store_bodies.py <scratch> <review folder> <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l39 worktree, base e40d1f21660386f9b091ae5e6fee595a467d4cef (no file under mcp/ changed)",
+  "comparison": "STORE-AUTHORED fixture: mcp/tests/test_review_change_kinds.py build_world (a live leaf over four Git trees; every memory side read through its derived index)",
+  "attempts": "one capture per body; each body is the first answer",
+  "not_kept": "The same run also captured walkStore.INV-AAAAAA.captured.json and walkStore.INV-HHHHHH.captured.json, and the script still does. No test loads them, so they were removed on 2026-10-05 and their records are not listed here.",
+  "fixtures": [
+    {
+      "file": "src/panels/review/walkStore.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1"
+      },
+      "status": 200,
+      "seconds": 0.17,
+      "sha256": "f660066b9fb0093cbc8d08dabcf40c98676663707c51177629c1d2d503e19283",
+      "bytes": 2922
+    },
+    {
+      "file": "src/panels/review/walkStore.shared.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "e701c262-50a6-553b-bab6-691caed0fb04"
+      },
+      "status": 200,
+      "seconds": 0.33,
+      "sha256": "fadaa6a39190e30b18f7522cd509ca80995385c9c24f2ba92631b906fd3b5e12",
+      "bytes": 167364
+    },
+    {
+      "file": "src/panels/review/walkStore.FAM-F00001.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0"
+      },
+      "status": 200,
+      "seconds": 0.25,
+      "sha256": "4fcb32769e3f2022f787d437f410d4328a37fb0b8c80b34d19b16cb99eace722",
+      "bytes": 147279
+    },
+    {
+      "file": "src/panels/review/walkStore.FAM-F00002.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44"
+      },
+      "status": 200,
+      "seconds": 0.21,
+      "sha256": "e2a31b8b39bcebd93897c04d1b3863f6c994860e1169220eb560c7c05462e841",
+      "bytes": 58741
+    },
+    {
+      "file": "src/panels/review/walkStore.INV-PPPPPP.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "a6312ea8-654b-5f11-8f5b-5881ea910b60"
+      },
+      "status": 200,
+      "seconds": 0.24,
+      "sha256": "e81ea3f2d64f0bfe251b6d8e6da6a71cb15383a969a92c2b72269744219f5f01",
+      "bytes": 58785
+    },
+    {
+      "file": "src/panels/review/walkStore.sharedPage.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "e701c262-50a6-553b-bab6-691caed0fb04",
+        "pageSize": 2
+      },
+      "status": 200,
+      "seconds": 0.28,
+      "sha256": "8bb02f3d33c10c22a26de9389d0d961c8f5d849595f31741c146bc0b07d0f569",
+      "bytes": 49980
+    },
+    {
+      "file": "src/panels/review/walkStore.FAM-F00001Continued.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0",
+        "pageSize": 2,
+        "pageOf": "family_members",
+        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjRjNjEzOThkZWM1ZTc4MmUwOTRkNmM0YWM2NGUwODA5YmZmMzI5ODk3ZDMyN2FiMmM2MTQ1NDg4YTJkNTViNDgiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI2NGQ2OGY5NmYzOTllYzJlNTEyMDNjYWM3YWJkMjU2MGZhNzU2NjI5ZGY1ZWJiMjVjYjRhZDEwN2E0OWU1MTljIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
+      },
+      "status": 200,
+      "seconds": 0.24,
+      "sha256": "48da1c486ebd6b040602a68fe088d7d82130e08bbcf49545357cc788c0e45a72",
+      "bytes": 37642
+    }
+  ]
+}

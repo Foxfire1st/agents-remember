@@ -71,7 +71,7 @@ export interface ComparisonGeneration {
   snapshots?: string;
 }
 
-function comparisonGenerationOf(payload: ReviewPayload): ComparisonGeneration {
+export function comparisonGenerationOf(payload: ReviewPayload): ComparisonGeneration {
   const inventory = payload.source.inventory;
   const comparison = payload.comparison;
   return {
