@@ -6,27 +6,31 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
+
+import anyio
+
+from mcp import types
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.worktree_services import (
-    bind_worktree_services,
-    build_default_worktree_services,
-)
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.mcp.registration.core import register_core_tools
+from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.observer.ambient import reset_ambient
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.services import reset_worktree_services
-from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
 from test_worktree_support import open_external_contract_fixture
+
+PROTOCOL_WAIT_SECONDS = 60
 
 
 class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
@@ -35,6 +39,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.contract = open_external_contract_fixture(self.root)
+        assert self.contract.parent_contract_path is not None
         self.repo_id = self.contract.repo_name
         slug = self.contract.leaf_id.lower().replace("_", "-")
         self.task_ref = TaskDocumentRef(
@@ -84,15 +89,20 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.config = load_config(self.settings)
-        self.server = FastMCP("task-reader-context-protocol-test")
-        register_core_tools(self.server, self.config)
-        bind_worktree_services(build_default_worktree_services())
+        # The product factory pairs the process-wide request union with its server dispatcher.
+        # A bare FastMCP drops tools/list after another test installs the extended union.
+        self.server = create_server(self.config)
 
     def tearDown(self) -> None:
+        reset_ambient()
         reset_worktree_services()
         self.temporary.cleanup()
 
     def test_registered_readers_use_call_local_admitted_leaf_context(self) -> None:
+        assert (
+            self.contract.memory_worktree is not None
+            and self.contract.parent_contract_path is not None
+        )
         marker_name = ".__ar_reader_scope_protocol.txt"
         base_code = self.config.repositories[self.repo_id].path
         leaf_code = self.contract.code_worktree
@@ -235,7 +245,7 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         try:
             # The in-memory protocol session exercises registered handlers without launching the
             # stdio server, the host runtime, or any Git operation.
-            asyncio.run(exercise_protocol())
+            _run_protocol(exercise_protocol)
         finally:
             for marker in created:
                 marker.unlink(missing_ok=True)
@@ -244,6 +254,54 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
             {"base": _git_status(base_code), "leaf": _git_status(leaf_code)},
             status_before,
         )
+
+    def test_late_tool_list_response_times_out_and_closes_the_handler(self) -> None:
+        handler_closed: list[bool] = []
+
+        async def late_tools(request):
+            try:
+                await anyio.sleep_forever()
+            finally:
+                handler_closed.append(True)
+
+        async def exercise_late_response() -> None:
+            async with create_connected_server_and_client_session(
+                self.server._mcp_server
+            ) as client:
+
+                async def list_tools() -> None:
+                    await client.list_tools()
+
+                # Start the short response deadline after session initialization; Git status
+                # and startup keep their normal limits.
+                with self.assertRaisesRegex(
+                    AssertionError, "MCP reader protocol responses did not arrive"
+                ):
+                    await _await_protocol(list_tools, wait_seconds=3)
+
+        with mock.patch.dict(
+            self.server._mcp_server.request_handlers, {types.ListToolsRequest: late_tools}
+        ):
+            _run_protocol(exercise_late_response)
+        self.assertEqual(handler_closed, [True])
+        self.test_registered_readers_use_call_local_admitted_leaf_context()
+
+
+def _run_protocol(exercise: Callable[[], Awaitable[None]]) -> None:
+    anyio.run(_await_protocol, exercise)
+
+
+async def _await_protocol(
+    exercise: Callable[[], Awaitable[None]], *, wait_seconds: float = PROTOCOL_WAIT_SECONDS
+) -> None:
+    try:
+        with anyio.fail_after(wait_seconds):
+            await exercise()
+    except TimeoutError as error:
+        raise AssertionError(
+            "MCP reader protocol responses did not arrive and the session did not "
+            f"finish within {wait_seconds} seconds"
+        ) from error
 
 
 def _resolve_schema(root: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
@@ -262,7 +320,7 @@ def _resolve_schema(root: dict[str, Any], schema: dict[str, Any]) -> dict[str, A
     raise AssertionError(f"No object schema reference found: {schema!r}")
 
 
-def _structured(result) -> dict[str, Any]:
+def _structured(result: types.CallToolResult) -> dict[str, Any]:
     if result.isError:
         raise AssertionError(_tool_error_text(result))
     assert result.structuredContent is not None
@@ -281,6 +339,7 @@ def _git_status(root: Path) -> str:
         capture_output=True,
         check=True,
         text=True,
+        timeout=PROTOCOL_WAIT_SECONDS,
     )
     return result.stdout
 

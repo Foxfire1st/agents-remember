@@ -27,6 +27,7 @@ from agents_remember.application.memory_tools import (
     memory_init_tool,
     route_index_refresh_tool,
 )
+from agents_remember.errors import ConfiguredContractAuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.memory import (
@@ -98,18 +99,33 @@ def citation_fix_payload(
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "citation_fix",
-        bounded_citation_fix(
-            citation_fix_tool(
-                config,
-                repo_id=repo_id,
-                contract_path=contract_path,
-                dry_run=dry_run,
-                operation_scope=operation_scope,
-            )
+    try:
+        payload = citation_fix_tool(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            dry_run=dry_run,
+            operation_scope=operation_scope,
+        )
+    except ConfiguredContractAuthorityError as error:
+        payload = _citation_authority_refusal(repo_id, contract_path, error)
+    return _tool_payload("citation_fix", bounded_citation_fix(payload))
+
+
+def _citation_authority_refusal(
+    repo_id: str, contract_path: str, error: ConfiguredContractAuthorityError
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": "configured-contract-authority-invalid",
+        "repoId": repo_id,
+        "contractPath": contract_path,
+        "detail": (
+            f"The citation operation was refused because the contract's {error.side} {error.name} "
+            "does not match the configured repository authority."
         ),
-    )
+        "nextAction": "developer-decision",
+    }
 
 
 MAX_INLINE_CITATION_ITEMS = 50
@@ -169,16 +185,17 @@ def citation_migrate_payload(
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "citation_migrate",
-        citation_migrate_tool(
+    try:
+        payload = citation_migrate_tool(
             config,
             repo_id=repo_id,
             contract_path=contract_path,
             dry_run=dry_run,
             operation_scope=operation_scope,
-        ),
-    )
+        )
+    except ConfiguredContractAuthorityError as error:
+        payload = _citation_authority_refusal(repo_id, contract_path, error)
+    return _tool_payload("citation_migrate", payload)
 
 
 def route_index_refresh_payload(

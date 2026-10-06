@@ -28,12 +28,13 @@ from agents_remember.application.memory_tools import (
     CitationOperationScope,
     citation_migrate_tool,
 )
+from agents_remember.errors import AuthorityError, ConfiguredContractAuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
 from agents_remember.mcp.registration.memory import register_memory_tools
-from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_migrate_payload
+from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload, citation_migrate_payload
 from agents_remember.models.tools.tool_registry import (
     PUBLIC_TOOL_RESPONSE_MODELS,
 )
@@ -98,6 +99,57 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
         reached.assert_called_once()
         self.assertEqual(reached.call_args.kwargs["dry_run"], True)
         self.assertEqual(payload["operation"], "citation_migrate")
+
+    def test_citation_tools_name_a_configured_contract_authority_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
+            contract = "tasks/x/enclosures/leaf/series-contract.md"
+            for tool, payload_builder in (
+                ("citation_fix", citation_fix_payload),
+                ("citation_migrate", citation_migrate_payload),
+            ):
+                with (
+                    self.subTest(tool=tool),
+                    mock.patch(
+                        f"agents_remember.mcp.tools.memory.{tool}_tool",
+                        side_effect=ConfiguredContractAuthorityError(
+                            side="memory", name="candidate"
+                        ),
+                    ),
+                ):
+                    payload = payload_builder(
+                        config, "agents-remember", contract_path=contract, dry_run=True
+                    )
+                    self.assertFalse(payload["ok"])
+                    self.assertEqual(payload["operation"], tool)
+                    self.assertEqual(payload["status"], "configured-contract-authority-invalid")
+                    self.assertEqual(payload["repoId"], "agents-remember")
+                    self.assertEqual(payload["contractPath"], contract)
+                    self.assertIn("memory candidate", payload["detail"])
+                    self.assertEqual(payload["nextAction"], "developer-decision")
+
+    def test_citation_tools_propagate_other_authority_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
+            for tool, payload_builder in (
+                ("citation_fix", citation_fix_payload),
+                ("citation_migrate", citation_migrate_payload),
+            ):
+                error = AuthorityError("unrelated authority failure")
+                with (
+                    self.subTest(tool=tool),
+                    mock.patch(f"agents_remember.mcp.tools.memory.{tool}_tool", side_effect=error),
+                ):
+                    with self.assertRaises(AuthorityError) as raised:
+                        payload_builder(
+                            config,
+                            "agents-remember",
+                            contract_path="tasks/x/enclosures/leaf/series-contract.md",
+                            dry_run=True,
+                        )
+                    self.assertIs(raised.exception, error)
 
 
 class CitationMigrateReachesTheMigrationTests(unittest.TestCase):

@@ -72,11 +72,20 @@ from agents_remember.observer.ambient import ambient
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
 
+from mcp import types
+
 REPO = "repo-a"
 ADOPT_REPO = "adopt-repo"
 MASTER = "m"
 LEAF_ID = "L1"
 WORKTREE_NAME = "w"
+SESSION_WAIT_SECONDS = 60
+TOOL_RESPONSE_WAIT_SECONDS = 60
+
+
+class _ToolCallTimeout(AssertionError):
+    """A sweep deadline failed; it is not a product exception to classify as a raiser."""
+
 
 # ---------------------------------------------------------------------------------------
 # T34: the tools that lose the whole envelope. Owner L6 -- REPAIRED, and the pin is now
@@ -432,14 +441,33 @@ class EntryPointWorld:
     # -- the production entry point ------------------------------------------------------
 
     async def _call(self, name: str, args: dict[str, Any]):
-        async with create_connected_server_and_client_session(self.server._mcp_server) as client:
-            return await client.call_tool(name, args)
+        phase = "session initialization"
+        wait_seconds = SESSION_WAIT_SECONDS
+        try:
+            with anyio.fail_after(wait_seconds) as deadline:
+                async with create_connected_server_and_client_session(
+                    self.server._mcp_server
+                ) as client:
+                    phase = "tool response"
+                    wait_seconds = TOOL_RESPONSE_WAIT_SECONDS
+                    deadline.deadline = anyio.current_time() + wait_seconds
+                    result = await client.call_tool(name, args)
+                    phase = "session cleanup"
+                    wait_seconds = SESSION_WAIT_SECONDS
+                    deadline.deadline = anyio.current_time() + wait_seconds
+                return result
+        except TimeoutError as error:
+            raise _ToolCallTimeout(
+                f"MCP sweep tool '{name}' {phase} did not finish within {wait_seconds} seconds"
+            ) from error
 
     def call(self, name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         """Invoke one registered tool exactly as a consumer does, and read back what arrived."""
 
         try:
             result = anyio.run(self._call, name, args)
+        except _ToolCallTimeout:
+            raise
         except BaseException as exc:
             return f"RAISED {type(exc).__name__}", None
         if result.isError:
@@ -971,6 +999,7 @@ class EntryPointProbeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.world = EntryPointWorld()
+        cls.addClassCleanup(cls.world.close)
         cls.world.build()
         cls.before_contract = cls.world.contract.read_bytes()
         cls.before_worktrees = _git(cls.world.code, "worktree", "list")
@@ -978,10 +1007,6 @@ class EntryPointProbeTests(unittest.TestCase):
         cls.before_memory = cls.world.repository_state(cls.world.memory)
         cls.before_coordination = cls.world.coordination_census()
         cls.results = cls.world.sweep()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.world.close()
 
     def test_every_public_tool_answers_in_the_products_own_vocabulary(self) -> None:
         broken = {
@@ -1266,13 +1291,33 @@ class ChokePointControlTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.world = EntryPointWorld()
+        cls.addClassCleanup(cls.world.close)
         world = cls.world
         declare_test_process()
         cls.good = (world.call("ping", {})[1]) or {}
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.world.close()
+    def test_a_tool_that_never_answers_fails_by_name_and_closes_its_handler(self) -> None:
+        handler_closed: list[bool] = []
+
+        async def no_response(request):
+            try:
+                await anyio.sleep_forever()
+            finally:
+                handler_closed.append(True)
+
+        with (
+            mock.patch.dict(
+                self.world.server._mcp_server.request_handlers,
+                {types.CallToolRequest: no_response},
+            ),
+            mock.patch(f"{__name__}.TOOL_RESPONSE_WAIT_SECONDS", 3),
+            self.assertRaisesRegex(
+                _ToolCallTimeout, "'ping' tool response did not finish within 3 seconds"
+            ),
+        ):
+            self.world.call("ping", {})
+        self.assertEqual(handler_closed, [True])
+        self.assertEqual("payload", classify("ping", self.world.call("ping", {}))[0])
 
     def test_a_payload_its_model_forbids_is_refused_by_the_choke_point(self) -> None:
         self.assertTrue(self.good, "the control needs a real payload to corrupt")

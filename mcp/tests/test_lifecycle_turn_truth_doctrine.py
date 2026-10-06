@@ -98,13 +98,16 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCTRINE_TREE = "skills/l-01-agent-lifecycles"
 TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
-# Every retained legacy AR surface that still composes completion-truth wording. Compact role
-# capsules no longer carry those role/operation relay instructions, so they are not kept on this
-# roster merely to preserve stale wording. The roster equals the actual remaining speakers.
+# Every canonical surface that composes completion-truth wording belongs on this roster.
+# The composed curation operation and curator/reviewer role documents retain that sentence and
+# its mechanical reading, so they participate alongside the other remaining speakers.
 COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/core/acceptance.md",
+    "skills/l-01-agent-lifecycles/operations/curation.md",
     "skills/l-01-agent-lifecycles/reference/rulings.md",
+    "skills/l-01-agent-lifecycles/roles/curator.md",
     "skills/l-01-agent-lifecycles/roles/designer.md",
+    "skills/l-01-agent-lifecycles/roles/reviewer.md",
     "skills/l-01-agent-lifecycles/roles/strategist.md",
     "skills/l-01-agent-lifecycles/templates/master-handover-packet.md",
 )
