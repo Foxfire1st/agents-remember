@@ -10,6 +10,12 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.errors import TaskIntentError
+from agents_remember.kernel.recorded_reads import (
+    ABSENT,
+    bytes_identity,
+    observed_resolve,
+    record_read,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
     TASK_INTENT_SCHEMA,
@@ -332,21 +338,29 @@ def _approved_packet_ref(
     task_root: Path,
     reference: ApprovedRequirementPacketRef,
 ) -> TaskIntentRequirementPacket:
-    root = task_root.resolve()
+    root = observed_resolve(task_root)
     supplied = Path(reference.path)
-    resolved = (root / supplied).resolve(strict=False)
+    resolved = observed_resolve(root / supplied)
     if supplied.is_absolute() or not resolved.is_relative_to(root) or resolved.suffix != ".md":
         raise TaskIntentError(
             "task-intent-requirement-packet-outside-task",
             f"requirement packet must be one task-relative Markdown file: {reference.path}",
         )
     try:
-        text = resolved.read_text(encoding="utf-8")
+        data = resolved.read_bytes()
     except OSError as exc:
+        record_read(
+            root / supplied,
+            ABSENT if isinstance(exc, FileNotFoundError) else f"unreadable ({type(exc).__name__})",
+        )
         raise TaskIntentError(
             "task-intent-requirement-packet-missing",
             f"approved requirement packet is absent or unreadable: {reference.path}",
         ) from exc
+    # The confined owner reads once. Keep the caller's logical locator in the memo so
+    # retargeting a symlink cannot hide behind unchanged bytes at its former physical target.
+    record_read(root / supplied, bytes_identity(data))
+    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     metadata = _packet_metadata(text, packet_path=reference.path)
     identifiers = {metadata[key] for key in ("Stable ID", "Requirement ID") if key in metadata}
     if identifiers != {reference.stableId} or metadata.get("Version") != reference.version:

@@ -164,6 +164,7 @@ from agents_remember.application.review_task_context import task_context_review
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge.request_digests import same_request_digests
 from agents_remember.models.knowledge.diff import (
     DIFF_DISPLAY_MAX_ITEMS,
     KnowledgeDiffBudget,
@@ -268,16 +269,17 @@ def read_complete_knowledge_review(
     recheck before publication (ICR-R01) is the composition's own and is unchanged.
     """
 
-    resolved = resolve_review_candidate(
-        config,
-        request.repository_id,
-        request.master,
-        request.leaf_id,
-        recorded=request.history == "recorded",
-    )
-    if isinstance(resolved, ReviewRefusal):
-        return refused(request.repository_id, resolved)
-    return compose_review(resolved, request, review_records_of(resolved))
+    with same_request_digests():
+        resolved = resolve_review_candidate(
+            config,
+            request.repository_id,
+            request.master,
+            request.leaf_id,
+            recorded=request.history == "recorded",
+        )
+        if isinstance(resolved, ReviewRefusal):
+            return refused(request.repository_id, resolved)
+        return compose_review(resolved, request, review_records_of(resolved))
 
 
 def list_knowledge_review_entries(

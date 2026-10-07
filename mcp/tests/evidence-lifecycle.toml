@@ -1105,6 +1105,8 @@ consumers = [
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",

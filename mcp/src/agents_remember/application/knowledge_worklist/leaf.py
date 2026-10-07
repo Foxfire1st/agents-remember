@@ -89,7 +89,10 @@ from agents_remember.memory.knowledge_index import (
     directory_snapshot,
     git_tree_snapshot,
 )
-from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
+from agents_remember.memory_quality.knowledge_validator.trees import (
+    KnowledgeTree,
+    knowledge_tree_from_git,
+)
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, LAYOUT_MARKER_PATH
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
@@ -101,6 +104,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 __all__ = [
     "WORKLIST_FILE_NAME",
     "CandidateTrees",
+    "CapturedBase",
     "ExplicitSides",
     "LeafWorklistRecompute",
     "leaf_expected_effects",
@@ -186,6 +190,15 @@ class CandidateTrees:
 
 
 @dataclass(frozen=True)
+class CapturedBase:
+    """The review's already paired B/K_B, including the immutable tree K_B is read as."""
+
+    code: str
+    memory: str
+    read_tree: str
+
+
+@dataclass(frozen=True)
 class ExplicitSides:
     """The four sides named directly (the command line, and evidence runs on scratch copies).
 
@@ -209,6 +222,8 @@ class ExplicitSides:
     """The leaf's declared ``expectedKnowledgeEffects`` (MIK-R11); ``None`` declares none."""
     coordination_root: Path | None = None
     """Where requirement endpoints' owning tasks live (MIK-R14); ``None`` resolves none."""
+    held_base_tree: str | None = None
+    """The captured comparison's converted K_B tree; read it without converting again."""
 
 
 def _git(repository: Path, *args: str) -> str | None:
@@ -331,9 +346,17 @@ def _sides(
     converted_base = not base_files.converted
     try:
         if converted_base:
-            base, coverage = _converted_base_side(
-                sides, memory_base_commit, base_commit, candidate_tree_files, base_snapshot.key
-            )
+            if sides.held_base_tree is None:
+                base, coverage = _converted_base_side(
+                    sides, memory_base_commit, base_commit, candidate_tree_files, base_snapshot.key
+                )
+            else:
+                label = f"converted:{base_snapshot.key}"
+                held = knowledge_tree_from_git(
+                    sides.memory_repository, sides.held_base_tree, label=label
+                )
+                base = KnowledgeSide.from_tree("K_B", label, held)
+                coverage = _files_coverage(dict(held.files))
         else:
             base = KnowledgeSide.from_snapshot("K_B", base_snapshot)
             coverage = _git_coverage(sides.memory_repository, base_snapshot.key)
@@ -427,7 +450,10 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
 
 
 def _leaf_converted(
-    contract: WorktreeContract, memory_repository: Path, candidate: CandidateTrees | None
+    contract: WorktreeContract,
+    memory_repository: Path,
+    candidate: CandidateTrees | None,
+    base: CapturedBase | None = None,
 ) -> bool:
     """The cheap applicability probe: K_C, or the official line K_B pairs on, holds the marker."""
 
@@ -436,7 +462,11 @@ def _leaf_converted(
         in_candidate = _holds_marker(memory_repository, candidate.memory)
     else:
         in_candidate = (contract.memory_worktree / LAYOUT_MARKER_PATH).is_file()
-    return in_candidate or _official_converted(memory_repository, contract.memory_source_branch)
+    return in_candidate or (
+        _holds_marker(memory_repository, base.read_tree)
+        if base is not None
+        else _official_converted(memory_repository, contract.memory_source_branch)
+    )
 
 
 def leaf_gate_applies(contract: WorktreeContract, candidate: CandidateTrees) -> bool:
@@ -453,6 +483,7 @@ def leaf_worklist(
     *,
     persist: bool = True,
     candidate: CandidateTrees | None = None,
+    base: CapturedBase | None = None,
 ) -> dict[str, Any] | None:
     """Compute (and persist) a leaf's worklist from its contract; ``None`` where it does not apply.
 
@@ -465,7 +496,7 @@ def leaf_worklist(
         return None
     memory_repository = contract.memory_repo_path or contract.memory_worktree
     try:
-        converted = _leaf_converted(contract, memory_repository, candidate)
+        converted = _leaf_converted(contract, memory_repository, candidate, base)
     except LayoutProbeError as error:  # never taken for unconverted memory
         document: dict[str, Any] | None = incomplete_worklist(
             Incomplete("layout marker", str(error)), owner=contract.leaf_id or None, pairing=None
@@ -473,7 +504,7 @@ def leaf_worklist(
     else:
         if not converted:
             return None  # cheap applicability probe before any capture: nothing is converted
-        document = _leaf_document(contract, memory_repository, candidate)
+        document = _leaf_document(contract, memory_repository, candidate, base)
     path = worklist_path(contract)
     if persist and document is not None and path is not None:
         persist_worklist(path, document)
@@ -481,7 +512,10 @@ def leaf_worklist(
 
 
 def _leaf_document(
-    contract: WorktreeContract, memory_repository: Path, candidate: CandidateTrees | None
+    contract: WorktreeContract,
+    memory_repository: Path,
+    candidate: CandidateTrees | None,
+    base: CapturedBase | None = None,
 ) -> dict[str, Any] | None:
     """The worklist over the contract's sides, once the leaf is known to be converted."""
 
@@ -489,11 +523,15 @@ def _leaf_document(
     try:
         expected_effects = leaf_expected_effects(contract)
         maintenance_scope = leaf_maintenance_scope(contract)
-        memory_base = paired_memory_commit(
-            memory_repository,
-            contract.memory_source_branch,
-            contract.code_repo_path,
-            contract.code_base_commit,
+        memory_base = (
+            base.memory
+            if base is not None
+            else paired_memory_commit(
+                memory_repository,
+                contract.memory_source_branch,
+                contract.code_repo_path,
+                contract.code_base_commit,
+            )
         )
     except LeafDocumentUnresolved as error:
         return incomplete_worklist(
@@ -506,7 +544,7 @@ def _leaf_document(
         contract,
         ExplicitSides(
             code_repository=contract.code_repo_path,
-            base=contract.code_base_commit,
+            base=contract.code_base_commit if base is None else base.code,
             memory_repository=memory_repository,
             memory_base=memory_base,
             memory_candidate=contract.memory_worktree if candidate is None else candidate.memory,
@@ -517,6 +555,7 @@ def _leaf_document(
             cache_directory=default_base_cache_directory(contract.coordination_root),
             expected_effects=expected_effects,
             coordination_root=contract.coordination_root,
+            held_base_tree=None if base is None else base.read_tree,
         ),
     )
 
@@ -546,6 +585,7 @@ def worklist_over(contract: WorktreeContract, sides: ExplicitSides) -> dict[str,
         code_repository=sides.code_repository,
         code_base=sides.base,
         cache_directory=sides.cache_directory,
+        held_base_tree=sides.held_base_tree,
     )
     # MIK-R30's items join the one list (ruling Q2), over the worklist's own B..C paths.
     document = worklist_onboarding(document, contract, request)

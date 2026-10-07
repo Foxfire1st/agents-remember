@@ -159,6 +159,11 @@ ReviewRefusalCode = Literal[
     "comparison_page_unreadable",
     "source_content_unresolved",
     "review_adapter_unavailable",
+    # The leaf-wide tree view only (MIK-R42): its worklist computation could not start before its
+    # deadline because the reviewer was computing other worklists, and an input it read kept
+    # changing while it was composed.
+    "reviewer_busy",
+    "inputs_changing",
 ]
 
 # The three bounded collections one review composes, declared once so the request, the payload and

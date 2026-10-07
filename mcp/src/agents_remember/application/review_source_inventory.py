@@ -36,8 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.application.review_relationship_movement import source_locations
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS, run_git
 from agents_remember.memory.knowledge.diff_display import (
+    TREE_DIFF_ARGS,
     TreeChange,
     TreeDifferenceProbe,
     TreePaths,
@@ -84,8 +85,12 @@ SOURCE_INVENTORY_REFERENCE = "review:source-change-inventory-of-the-bound-code-t
 # another, and reporting a rename would attribute the candidate's *new* path to a baseline path no
 # recorded anchor names. ``-z`` is what makes the two interfaces delimiter-safe: records are
 # NUL-terminated and a pathname is carried whole, however many tabs or newlines it contains.
-_RAW_ARGS = ("diff", "--raw", "-z", "--no-renames")
-_NUMSTAT_ARGS = ("diff", "--numstat", "-z", "--no-renames")
+#
+# The raw question is the display seam's own tuple, the one its published expansion command is
+# built from, and ``inventory_command`` below publishes it too: the call and both published texts
+# have that one source.
+_RAW_ARGS = TREE_DIFF_ARGS
+_NUMSTAT_ARGS = ("diff", *PARSED_DIFF_OPTIONS, "--numstat", "-z", "--no-renames")
 
 # The Git status letters this vocabulary names. A letter outside the table is still listed, as
 # ``unknown`` with its own letter stated, rather than dropped or mapped onto a neighbouring status.
@@ -415,14 +420,19 @@ def inventory_command(before: TreeSide, after: TreeSide) -> str:
     branch, a working tree or ``HEAD``: a caller can reproduce the whole change set from this value
     without reading this module, and reproducing it cannot silently become a comparison of whatever
     is checked out now. A side that named no tree is stated as such rather than substituted.
+
+    The words between the root and the two ids are ``_RAW_ARGS``, the tuple the measurement itself
+    passes to Git, so the published text names every option the call ran with.
     """
 
     root = after.root or before.root
     prefix = "" if root is None else f"git -C {root} "
-    return (
-        f"{prefix}diff --raw -z --no-renames "
-        f"{before.tree_id or '<no baseline tree requested>'} "
-        f"{after.tree_id or '<no candidate tree requested>'}"
+    return prefix + " ".join(
+        (
+            *_RAW_ARGS,
+            before.tree_id or "<no baseline tree requested>",
+            after.tree_id or "<no candidate tree requested>",
+        )
     )
 
 
@@ -634,11 +644,12 @@ def _remaining(
 ) -> tuple[ReviewRemainingCount, ...]:
     """Return the pane's persistent counts, each stating its own measurement or its own reason.
 
-    Two of the five are the attribution partition's own numbers and they are counted at the
-    changed-path granularity: the paths confirmed to carry no valid registered attribution, and the
-    measured changed paths that no link to the selected subject reaches. ``changed_paths_outside_
-    selection`` is that second number and not the length of two other lists summed -- the population
-    it names is the measured change population, so a mapped *unchanged* file cannot increment it.
+    The counts read from ``attribution`` are the attribution partition's own numbers and they are
+    counted at the changed-path granularity: the measured changed paths that no link to the selected
+    subject reaches, the paths confirmed to carry no valid registered attribution, and the paths
+    whose attribution could not be determined. ``changed_paths_outside_selection`` is the first of
+    those and not the length of two other lists summed -- the population it names is the measured
+    change population, so a mapped *unchanged* file cannot increment it.
 
     A count the attribution could not measure states why rather than reporting zero: an unmeasured
     population has no count, and the reason carries the partition's own sentence about which side or

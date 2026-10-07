@@ -47,7 +47,7 @@ from agents_remember.application.knowledge_worklist.registry import (
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import StorageSettings
-from agents_remember.kernel.recorded_reads import record_read
+from agents_remember.kernel.recorded_reads import observed_exists
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
@@ -105,6 +105,8 @@ class TraceSideRequest:
     """B, the commit an unconverted K_B converts at when its own trailer names none."""
     cache_directory: Path | None = None
     """The converted-base cache (:mod:`.base_cache`); ``None`` converts on every run."""
+    held_base_tree: str | None = None
+    """The comparison's already converted K_B; no new conversion when supplied."""
 
 
 def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | None:
@@ -141,15 +143,23 @@ def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | 
         )
     converted_base = not base.converted
     if converted_base:
-        base = KnowledgeTree(
-            label=f"converted:{request.memory_base}",
-            files=converted_base_files(
+        base = (
+            knowledge_tree_from_git(
                 request.memory_repository,
-                request.memory_base,
-                code=(request.code_repository, request.code_base),
-                version=version,
-                cache_directory=request.cache_directory,
-            ),
+                request.held_base_tree,
+                label=f"converted:{request.memory_base}",
+            )
+            if request.held_base_tree is not None
+            else KnowledgeTree(
+                label=f"converted:{request.memory_base}",
+                files=converted_base_files(
+                    request.memory_repository,
+                    request.memory_base,
+                    code=(request.code_repository, request.code_base),
+                    version=version,
+                    cache_directory=request.cache_directory,
+                ),
+            )
         )
     return OnboardingTraceSides(
         owner=request.owner,
@@ -177,8 +187,8 @@ def _onboarding_and_history(tree: KnowledgeTree) -> dict[str, bytes]:
 def trace_context(contract: WorktreeContract) -> Any:
     """The storage settings the gate reads: the memory worktree's own, as closeout resolves them.
 
-    Every settings file read is recorded (:func:`record_read`): the coordination fallback lies in no
-    tree, so a caller that reuses a verdict (the gate's memo) must see it change.
+    The existing settings selectors/readers record their actual absence and consumed bytes. No
+    separate before/after hash can conceal a changed-and-restored settings read.
     """
 
     settings = (
@@ -186,25 +196,15 @@ def trace_context(contract: WorktreeContract) -> Any:
         if contract.memory_worktree is None
         else contract.memory_worktree / "system/settings.md"
     )
-    if settings is not None and settings.is_file():
-        record_read(settings)
+    if settings is not None and observed_exists(settings) and settings.is_file():
         storage, _ = resolver.parse_coordination_settings(settings)
         return _TraceContext(storage=storage, code_repository_name=contract.repo_name)
-    if settings is not None:
-        record_read(settings)  # absent: the fallback below is taken because of it
     try:
         context = contract_context(contract)
     except AgentsRememberError:
-        record_read(Path(contract.coordination_root) / "system" / "settings.md")
         # No settings anywhere: the resolver's default storage, which stores every source's card
         # (the strictest reading: every changed file is gated).
         return _TraceContext(storage=StorageSettings(), code_repository_name=contract.repo_name)
-    for read in (
-        getattr(context, "settings_path", None),
-        getattr(context, "path_settings_path", None),
-    ):
-        if isinstance(read, Path):
-            record_read(read)
     return context
 
 

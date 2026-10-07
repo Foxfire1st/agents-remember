@@ -31,6 +31,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
 )
+from agents_remember.kernel.reviewer_worklist_process import ReviewerWorklistProcesses
 from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving._app_common import ServingCollaborators
 from agents_remember.serving.app import create_app
@@ -96,6 +97,8 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         compile_launch_capsule,
     )
 
+    worklist_processes = ReviewerWorklistProcesses()
+
     def review_port(request):
         """Render one review through the application adapter, with its complete record collection.
 
@@ -150,7 +153,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     def review_trees_port(query):
         """The tree view of the same resolution (MIK-R25): four trees, knowledge diff, worklist."""
 
-        return read_review_trees(config, query)
+        return read_review_trees(config, query, processes=worklist_processes)
 
     def knowledge_reader_port(query):
         """The path-based knowledge reader (MIK-R29): one read-only view of one memory tree."""
@@ -165,6 +168,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         review_source_content=review_source_content_port,
         review_intent_summary=review_intent_summary_port,
         review_trees=review_trees_port,
+        review_trees_shutdown=worklist_processes.shutdown,
         knowledge_reader=knowledge_reader_port,
         extra_api_routes=partial(register_role_launch_routes, config=config),
     )

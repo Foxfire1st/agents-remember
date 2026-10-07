@@ -27,10 +27,12 @@ without a manifest -- or with one that is not an approved-requirement corpus thi
 has approval state ``unknown`` and never triggers a reconsideration.
 
 **Recording what was read.** The approval state lives outside every Git tree, in the owning task's
-files. Every ``requirements/manifest.json`` this module reads for approval, and every packet it
-hands the owner to resolve, is recorded through :func:`agents_remember.kernel.recorded_reads.record_read`
--- the SHA-256 of the exact bytes read, ``absent`` or ``unreadable`` -- so a caller that reuses a
-result computed from them (the mandatory gate's memo, MIK-R09) can tell whether anything changed.
+files. Every ``requirements/manifest.json`` this module reads for approval is recorded here through
+:func:`agents_remember.kernel.recorded_reads.record_read` -- the SHA-256 of the exact bytes read,
+``absent`` or ``unreadable``. A packet handed to the owner is not recorded here: the owner
+(:func:`agents_remember.tasks.task_intent._approved_packet_ref`) reads the packet and records that
+read itself, in the same three forms. Both records serve a caller that reuses a result computed
+from these files (the mandatory gate's memo, MIK-R09), so it can tell whether anything changed.
 """
 
 from __future__ import annotations
@@ -111,7 +113,6 @@ def resolve_requirement_endpoint(
             TASK_OUTSIDE_TASKS,
             f"task repository {reference.task.repository!r} is not one directory under tasks/",
         )
-    record_read(task_root / reference.packet)  # recorded before the owner reads it: a race misses
     resolution = consume_owner_resolution(
         task_root,
         RequirementOwnerRef(
@@ -167,7 +168,7 @@ def _manifest(task_root: Path) -> dict[str, Any] | str:
         record_read(path, ABSENT)
         return f"the task has no {MANIFEST_PATH}"
     except OSError as error:
-        record_read(path)
+        record_read(path, f"unreadable ({type(error).__name__})")
         return f"{MANIFEST_PATH} cannot be read: {error}"
     record_read(path, bytes_identity(data))  # the identity of exactly the bytes this lookup reads
     try:

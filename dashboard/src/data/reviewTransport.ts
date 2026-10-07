@@ -75,6 +75,10 @@ const TOKEN_BY_CODE: Record<string, ReviewFailureToken> = {
   candidate_not_live: "unavailable-history",
   candidate_unresolved: "unavailable-history",
   review_adapter_unavailable: "unavailable-history",
+  // The leaf-wide tree view only: the reviewer was busy past the request's deadline, or an input it
+  // read kept changing while it was composed. Both are transient, and both are retried by the reader.
+  reviewer_busy: "unavailable-history",
+  inputs_changing: "unavailable-history",
   unavailable: "unavailable-history",
   "bad-request": "validation",
   "bad-path": "authority",
@@ -158,10 +162,13 @@ function networkFailure(cause: unknown): ReviewFailure {
 // The one GET a review read makes. The body is read whatever the status: a body that carries this
 // route's `state` *is* the answer (a payload, a subject list, or a typed refusal), and anything else
 // is a failure. The caller admits the states it knows; an unadmitted one is reported, not rendered.
-export async function getReviewJson<T>(url: string): Promise<T> {
+//
+// A caller whose answer may be superseded passes a `signal`: aborting it cancels the request itself,
+// which the server notices as a disconnect and stops the work it was doing for it.
+export async function getReviewJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url);
+    response = await (signal === undefined ? fetch(url) : fetch(url, { signal }));
   } catch (cause) {
     throw new ReviewTransportError(networkFailure(cause));
   }

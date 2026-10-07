@@ -18,13 +18,14 @@ from agents_remember.kernel.coordination_context.setting_values import (
     require_mapping,
     string_list,
 )
+from agents_remember.kernel.recorded_reads import observed_text
 
 
 def parse_json_settings(
     settings_path: Path,
 ) -> tuple[StorageSettings, CrossRepoSettings]:
     try:
-        data = json.loads(settings_path.read_text(encoding="utf-8"))
+        data = json.loads(observed_text(settings_path))
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid JSON settings in {settings_path}: {error}") from error
 

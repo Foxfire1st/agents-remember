@@ -27,13 +27,15 @@ touched" -- and never when it sits at the range's edge.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.git_command import (
+    DIFF_PREFIX_OPTIONS,
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     run_git,
@@ -72,6 +74,8 @@ BLOB_DIFF_ARGS: Final = (
     "--diff-algorithm=myers",
     "--no-indent-heuristic",
     "--unified=0",
+    "--inter-hunk-context=0",
+    *DIFF_PREFIX_OPTIONS,
 )
 _HUNK_HEADER: Final = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _BINARY_MARKER: Final = "Binary files "
@@ -223,6 +227,20 @@ class CodeTrees:
         except Exception as error:  # a tree the store does not hold: named, never an empty tree
             raise CodeReadError(f"the code tree {tree} cannot be read: {error}") from error
 
+    def warm(self, paths: Iterable[str]) -> None:
+        """Read the blobs of ``paths`` on both sides in batches, before they are asked for one by one.
+
+        Each blob a classification or a hunk needs would otherwise cost its own ``git cat-file``.
+        This is a read-ahead of exact blobs the run is about to read, and nothing more: a blob
+        that cannot be read here is read, and fails, where it is used, as it always did.
+        """
+
+        with suppress(CodeReadError, CodeObjectError):
+            trees = (self.base(), self.candidate())
+            self.objects.prefetch(
+                tree[path] for path in set(paths) for tree in trees if path in tree
+            )
+
     def hunks(self, old: str, new: str) -> tuple[Hunk, ...] | None:
         """The zero-context hunks from blob ``old`` to blob ``new`` (``None`` for a binary pair)."""
 
@@ -233,7 +251,10 @@ class CodeTrees:
             result = run_git(
                 self.repository,
                 [*BLOB_DIFF_ARGS, old, new],
-                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+                # Git's environment context option overrides even --unified=0.
+                GitRunnerOptions(
+                    timeout=GIT_METADATA_TIMEOUT_SECONDS, identity={"GIT_DIFF_OPTS": ""}
+                ),
             )
             if result.returncode != 0:
                 raise CodeReadError(
@@ -307,7 +328,7 @@ class CodeTrees:
             return None
         result = run_git(
             self.repository,
-            ["grep", "-l", "-z", "-F", "-e", leaf, self.candidate_tree],
+            ["grep", "--no-color", "-l", "-z", "-F", "-e", leaf, self.candidate_tree],
             GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
         )
         if result.returncode not in (0, 1):

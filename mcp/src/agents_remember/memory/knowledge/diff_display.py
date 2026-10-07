@@ -48,6 +48,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS
 from agents_remember.memory.knowledge.diff import DiffComparison, DiffItemComparison
 from agents_remember.memory.knowledge.diff_attribution import (
     AttributionReader,
@@ -78,6 +79,7 @@ from agents_remember.models.knowledge.diff import (
 __all__ = [
     "DIFF_EXPANSION_REFERENCE",
     "DIFF_LIMITATION_ORDER",
+    "TREE_DIFF_ARGS",
     "AttributionReader",
     "DiffDisplay",
     "MappingFact",
@@ -98,6 +100,13 @@ __all__ = [
 # caller can act on and not a cached artifact whose freshness would have to be trusted.
 DIFF_EXPANSION_REFERENCE = "diff_knowledge_scope:full-selected-candidate-source-diff"
 
+# The Git arguments of the source measurement, in front of the two tree ids. This module never runs
+# them: the application layer's probe does
+# (:func:`agents_remember.application.review_source_inventory.tree_difference_observation`), and it
+# passes this very tuple. The published command below is built from the same tuple, so the text a
+# reader is handed and the arguments the measurement executes have one source and cannot differ.
+TREE_DIFF_ARGS = ("diff", *PARSED_DIFF_OPTIONS, "--raw", "-z", "--no-renames")
+
 # The command this operation's expansion reference describes. It is stated in full so the reference
 # is reproducible without reading this module: the two tree objects are substituted, never a branch,
 # a working tree or ``HEAD``, because those name whatever is checked out now rather than the two
@@ -110,7 +119,7 @@ DIFF_EXPANSION_REFERENCE = "diff_knowledge_scope:full-selected-candidate-source-
 # interface that loses the identity the response just preserved would make the boundary example --
 # "a tab/newline filename remains the same address used for file expansion" -- false in the one place
 # a reader acts on it.
-TREE_DIFF_COMMAND = "git diff --raw -z --no-renames {before_tree} {after_tree}"
+TREE_DIFF_COMMAND = " ".join(("git", *TREE_DIFF_ARGS, "{before_tree}", "{after_tree}"))
 
 # The declared order limitations are reported in. It is fixed so two responses that established the
 # same limits present them identically, whatever order their items happened to be built in.

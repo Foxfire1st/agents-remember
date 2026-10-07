@@ -39,6 +39,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.kernel.recorded_reads import (
     ABSENT,
     CONFLICTING,
+    bytes_identity,
     record_read,
     recorded_reads,
 )
@@ -878,7 +879,15 @@ def test_every_file_read_is_in_the_read_set_and_a_conflicting_read_is_never_kept
     with recorded_reads() as reads:
         trace_context(world.contract)
     coordination = (world.root / "system" / "settings.md").as_posix()
-    assert reads.get(coordination) == ABSENT  # the settings fallback is recorded as read
+    assert world.contract.memory_worktree is not None
+    settings = (world.contract.memory_worktree / "system" / "settings.md").as_posix()
+    assert (
+        reads.get(f"exists:{settings}") == ABSENT
+    )  # the actual settings selection observed its absence
+    assert reads.get(world.contract.contract_path.as_posix()) == bytes_identity(
+        world.contract.contract_path.read_bytes()
+    )
+    assert coordination not in reads  # resolution stopped before consuming this unrelated file
 
     with recorded_reads() as reads:
         record_read(Path("manifest.json"), "sha256:1")

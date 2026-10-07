@@ -25,6 +25,7 @@ from agents_remember.kernel.coordination_context.setting_values import (
     required_clean_string,
     string_list,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 
 __all__ = [
     "apply_json_storage_mode",
@@ -51,15 +52,15 @@ def parse_coordination_settings(
     fallback_storage = StorageSettings()
     fallback_cross_repo = CrossRepoSettings()
     path_settings_path = path_settings_path_for(settings_path)
-    if path_settings_path.exists():
+    if observed_exists(path_settings_path):
         return parse_json_settings(path_settings_path)
 
-    if not settings_path.exists():
+    if not observed_exists(settings_path):
         return fallback_storage, fallback_cross_repo
 
     selected_storage: StorageSettings | None = None
     selected_cross_repo = CrossRepoSettings()
-    for block in extract_yaml_blocks(settings_path.read_text(encoding="utf-8")):
+    for block in extract_yaml_blocks(observed_text(settings_path)):
         storage, cross_repo, saw_settings = parse_settings_block(block)
         if not saw_settings:
             continue

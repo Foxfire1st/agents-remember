@@ -18,7 +18,6 @@ The capture's own identity matrix is ``test_worktree_candidate_capture``.
 
 from __future__ import annotations
 
-import gc
 import json
 import subprocess
 import time
@@ -54,7 +53,7 @@ from agents_remember.application.review_leaf_view_memo import (
 from agents_remember.application.review_tree_comparison import ReviewTrees
 from agents_remember.application.review_tree_knowledge import knowledge_tree_diff
 from agents_remember.cli.dashboard import serving_collaborators
-from agents_remember.kernel import git_command
+from agents_remember.kernel import git_command, reviewer_worklist_process
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity
 from agents_remember.memory.knowledge_index import is_indexed_path, text_uuid
@@ -409,12 +408,12 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
 ) -> None:
     world.edit()
     ports = _ports(world)
-    worklists = mock.Mock(wraps=review_tree_knowledge.leaf_worklist)
+    worklists = mock.Mock(wraps=review_tree_knowledge.isolated_leaf_worklist)
     diffs = mock.Mock(wraps=review_tree_knowledge._measured_tree_diff)
     snapshots = mock.Mock(wraps=worklist_leaf.directory_snapshot)
     code_captures = mock.Mock(wraps=worklist_leaf._captured_code)
     with (
-        mock.patch.object(review_tree_knowledge, "leaf_worklist", worklists),
+        mock.patch.object(review_tree_knowledge, "isolated_leaf_worklist", worklists),
         mock.patch.object(review_tree_knowledge, "_measured_tree_diff", diffs),
         mock.patch.object(worklist_leaf, "directory_snapshot", snapshots),
         mock.patch.object(worklist_leaf, "_captured_code", code_captures),
@@ -427,7 +426,9 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
         candidate = worklists.call_args.kwargs["candidate"]
         assert candidate.code == view.comparison.code_candidate.tree
         assert candidate.memory == view.comparison.memory_candidate.tree
-        assert worklists.call_args.kwargs["persist"] is False
+        base = worklists.call_args.kwargs["base"]
+        assert base.code == view.comparison.code_base.commit
+        assert base.memory == view.comparison.memory_base.commit
         assert view.worklist.source == "computed" and view.worklist.bound
         assert snapshots.call_count == 0 and code_captures.call_count == 0
         assert first.captures == {"code": 1, "memory": 1} and first.full_captures == 0
@@ -478,14 +479,16 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
 def test_a_view_behind_which_a_read_failed_is_never_kept(world: World) -> None:  # noqa: F811
     world.edit()
     ports = _ports(world)
-    computed = review_tree_knowledge.leaf_worklist
+    computed = review_tree_knowledge.isolated_leaf_worklist
 
     # An incomplete worklist run (an input it could not read) is returned and read again next time.
     def incomplete(*args: Any, **kwargs: Any) -> Any:
         document = dict(computed(*args, **kwargs) or {})
         return {**document, "state": "incomplete", "incomplete": [{"input": "git", "detail": "-"}]}
 
-    with mock.patch.object(review_tree_knowledge, "leaf_worklist", side_effect=incomplete) as runs:
+    with mock.patch.object(
+        review_tree_knowledge, "isolated_leaf_worklist", side_effect=incomplete
+    ) as runs:
         for expected in (1, 2):
             view = ports.trees(_query())
             assert view.worklist is not None and view.worklist.state == "incomplete"
@@ -522,7 +525,9 @@ def test_a_view_behind_which_a_read_failed_is_never_kept(world: World) -> None: 
 
     with (
         mock.patch.object(review_tree_knowledge, "run_git", failing_first_patch),
-        mock.patch.object(review_tree_knowledge, "leaf_worklist", wraps=computed) as recovered_runs,
+        mock.patch.object(
+            review_tree_knowledge, "isolated_leaf_worklist", wraps=computed
+        ) as recovered_runs,
     ):
         recovered = ports.trees(_query())
         assert recovered.knowledge_diff is not None
@@ -572,13 +577,27 @@ def test_an_unreadable_task_input_is_observed_and_never_memoized_even_when_the_w
                 raise failure("the task JSON cannot be read")
             return read(source)
 
+        reply = reviewer_worklist_process._reply
+
+        def child_observed(
+            data: bytes, request: Any, decode: Any = reply, seen: str = identity
+        ) -> Any:
+            result = decode(data, request)
+            # The original failure now occurs in two interpreters; replay the child's same
+            # read failure, rather than pretend a parent-only monkeypatch also changes it.
+            result["reads"][path.as_posix()] = seen
+            return result
+
         with (
             mock.patch.object(Path, "read_bytes", denied),
+            mock.patch.object(reviewer_worklist_process, "_reply", child_observed),
             mock.patch.object(
                 task_store, "record_read", wraps=task_store.record_read
             ) as observations,
             mock.patch.object(
-                review_tree_knowledge, "leaf_worklist", wraps=review_tree_knowledge.leaf_worklist
+                review_tree_knowledge,
+                "isolated_leaf_worklist",
+                wraps=review_tree_knowledge.isolated_leaf_worklist,
             ) as runs,
         ):
             for expected in (1, 2):
@@ -627,7 +646,7 @@ def test_a_task_edit_restored_during_computation_refuses_and_the_next_read_uses_
             ],
         }
     ).encode()
-    worklist = review_tree_knowledge.leaf_worklist
+    worklist = review_tree_knowledge.isolated_leaf_worklist
     expected_effects = worklist_leaf.leaf_expected_effects
     for timing in ("before-both", "between-lookups", "absent-then-present"):
         LEAF_VIEW_MEMO.clear()
@@ -664,14 +683,17 @@ def test_a_task_edit_restored_during_computation_refuses_and_the_next_read_uses_
             finally:
                 _restore_task_document(path, restored)
 
-        with mock.patch.object(review_tree_knowledge, "leaf_worklist", race):
+        with mock.patch.object(review_tree_knowledge, "isolated_leaf_worklist", race):
             refused = ports.trees(_query())
         assert consumed[0]["state"] == "complete"
         assert len(consumed[0]["items"]) > len(baseline.worklist.items)
         assert refused.state == "refused" and refused.refusal is not None
-        assert refused.refusal.code == "candidate_unresolved"
+        # The read is computed once more on the state that exists now (MIK-R42); this race repeats
+        # itself, so the answer is the accurate "inputs keep changing", never a kept view.
+        assert len(consumed) == 2
+        assert refused.refusal.code == "inputs_changing"
         assert str(path) in (refused.refusal.offending_input or "")
-        assert "reopen" in refused.refusal.next_action
+        assert "retry" in refused.refusal.next_action
         assert len(LEAF_VIEW_MEMO) == 0
         served = ports.trees(_query())
         LEAF_VIEW_MEMO.clear()
@@ -965,27 +987,6 @@ def test_exact_filename_patches_keep_quoted_bytes_and_do_not_expand_to_siblings_
                     assert legacy.returncode == 0 and legacy.stdout.count("diff --git ") == 2
                     assert "diff --git a/onboarding/pkg/patternx.py.json" in legacy.stdout
                     assert "diff --git a/onboarding/pkg/patternx.py.json" not in patches[path]
-
-
-def test_the_cyclic_collector_is_paused_only_while_a_worklist_is_computed() -> None:
-    paused = review_tree_knowledge._cyclic_collector_paused
-    assert gc.isenabled()
-    with paused():
-        assert not gc.isenabled()
-        with paused():  # a second computation in another thread shares the pause
-            assert not gc.isenabled()
-        assert not gc.isenabled()
-    assert gc.isenabled()
-    with pytest.raises(RuntimeError), paused():
-        raise RuntimeError("the computation failed")
-    assert gc.isenabled()
-    gc.disable()
-    try:
-        with paused():
-            assert not gc.isenabled()
-        assert not gc.isenabled()  # it was off before: the pause does not switch it on
-    finally:
-        gc.enable()
 
 
 # -- rule 6: never a stale answer ---------------------------------------------------------------------

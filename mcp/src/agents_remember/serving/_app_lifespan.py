@@ -338,6 +338,8 @@ def _serving_lifespan(
         try:
             yield
         finally:
+            if runtime.review_trees_shutdown is not None:
+                await asyncio.to_thread(runtime.review_trees_shutdown)
             for task in background:
                 task.cancel()
             for task in background:

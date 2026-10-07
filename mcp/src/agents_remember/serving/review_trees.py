@@ -16,13 +16,20 @@ composed without the port answers non-2xx (503), because then no answer exists a
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import contextvars
+import threading
+import weakref
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from agents_remember.kernel.reviewer_worklist_process import worklist_request
 from agents_remember.models.knowledge.review_trees import ReviewTreesResult
 
 __all__ = [
@@ -41,6 +48,11 @@ MAX_INVARIANT_KEY_LENGTH = 64
 # A repository-relative path, bounded like every path the review vocabulary carries.
 MAX_FILE_PATH_LENGTH = 4096
 LANE_FILES = "files"
+# The reviewer's blocking reads run on this route's own threads, never on the event loop's shared
+# default executor, which the dashboard's background loops fill with their own blocking work
+# (MIK-R42). A read waiting for a worklist child holds one thread; reads beyond the pool's size
+# wait for a free thread, and the background loops can never take these threads.
+REVIEW_READ_THREADS = 16
 
 
 @dataclass(frozen=True)
@@ -122,11 +134,41 @@ class ReviewTreesSelection:
 NO_SELECTION = ReviewTreesSelection()
 
 
+async def _request_result(
+    request: Request, port: ReviewTreesPort, query: ReviewTreesQuery, executor: ThreadPoolExecutor
+) -> ReviewTreesResult:
+    """Keep the blocking collaborator off the loop, draining its process on real cancellation."""
+
+    cancellation = threading.Event()
+    with worklist_request(cancellation):
+        context = contextvars.copy_context()
+    worker = asyncio.ensure_future(
+        asyncio.get_running_loop().run_in_executor(executor, lambda: context.run(port, query))
+    )
+    try:
+        while not worker.done():
+            await asyncio.wait((worker,), timeout=0.1)
+            if await request.is_disconnected():
+                cancellation.set()
+        return await worker
+    except asyncio.CancelledError:
+        cancellation.set()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(worker)
+        raise
+
+
 def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> None:
     """Register the read-only tree view route. Must be called BEFORE the greedy static mount."""
 
+    executor = ThreadPoolExecutor(
+        max_workers=REVIEW_READ_THREADS, thread_name_prefix="review-trees"
+    )
+    weakref.finalize(app, executor.shutdown, wait=False)
+
     @app.get(KNOWLEDGE_REVIEW_TREES_ROUTE)
-    def api_review_trees(
+    async def api_review_trees(
+        request: Request,
         repo: str,
         master: str,
         leaf: str,
@@ -147,7 +189,9 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
                 },
                 status_code=400,
             )
-        result = port(
+        result = await _request_result(
+            request,
+            port,
             ReviewTreesQuery(
                 repository_id=repo,
                 master=master,
@@ -157,6 +201,7 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
                 invariants=selection.named(),
                 lane=selection.lane == LANE_FILES,
                 file=selection.file,
-            )
+            ),
+            executor,
         )
         return JSONResponse(result.model_dump(mode="json", by_alias=True, exclude_none=True))

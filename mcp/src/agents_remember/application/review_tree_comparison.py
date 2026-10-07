@@ -36,6 +36,8 @@ The record is ``ar-review-tree-comparison/v1`` under the task's durable reports
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -109,6 +111,10 @@ __all__ = [
 
 REVIEW_COMPARISONS_DIRECTORY: Final = "review-comparisons"
 _ZERO_OBJECT: Final = "0" * 40
+# A pin another reader of the same new comparison is creating holds Git's ref lock for moments.
+_RECORDING: Final = threading.Lock()
+_PIN_ATTEMPTS: Final = 5
+_PIN_RETRY_SECONDS: Final = 0.02
 _SIDES: Final = ("before", "after")
 _PIN_ACTION: Final = (
     "make the named repository writable (or remove the conflicting ref if it is stale), then "
@@ -546,6 +552,20 @@ def _mktree(repository: Path, blobs: Mapping[str, str]) -> str:
 def _record(
     contract: WorktreeContract, draft: ReviewTreeComparisonRecord
 ) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
+    """Record the comparison, or reuse the latest record of the same four trees.
+
+    Readers of one dashboard that open the same new comparison at once take turns here (MIK-R42):
+    the number is one more than the highest that exists, so two of them racing past each other
+    would record the same trees twice, under two numbers and two pins.
+    """
+
+    with _RECORDING:
+        return _recorded(contract, draft)
+
+
+def _recorded(
+    contract: WorktreeContract, draft: ReviewTreeComparisonRecord
+) -> tuple[ReviewTreeComparisonRecord, Path] | ReviewRefusal:
     directory = comparison_directory(contract.task_root, draft.leaf_id)
     existing = comparison_records(contract.task_root, draft.leaf_id)
     if existing and existing[-1].same_trees(draft):
@@ -577,6 +597,12 @@ def _record(
     if pinned is not None:
         return pinned
     path = directory / f"{number}.json"
+    if path.is_file():
+        # A concurrent reader of the very same new comparison recorded it first (MIK-R42): its
+        # record is the comparison, and it is the one every reader answers with.
+        raced = comparison_records(contract.task_root, draft.leaf_id)
+        if raced and raced[-1].number == number and raced[-1].same_trees(draft):
+            return raced[-1], path
     atomic_write_bytes(path, canonical_json_bytes(record.model_dump(mode="json", by_alias=True)))
     return record, path
 
@@ -608,19 +634,43 @@ def _pin(record: ReviewTreeComparisonRecord) -> ReviewRefusal | None:
         if side.ref is None:
             continue
         repository = Path(side.repository)
-        current = _git(repository, "rev-parse", "--verify", "--quiet", side.ref)
-        if current == side.tree:
-            continue
-        result = run_git(repository, ["update-ref", side.ref, side.tree, _ZERO_OBJECT])
-        if result.returncode != 0:
+        created, current, reason = _create_pin(repository, side.ref, side.tree)
+        if created is None:
             for done_repository, done_ref in made:
                 run_git(done_repository, ["update-ref", "-d", done_ref])
-            reason = result.stderr.strip() or "update-ref failed"
             if current is not None:
                 reason = f"the ref already names {current}, not the candidate {side.tree}"
             return _pin_refusal(side.repository, side.ref, reason)
-        made.append((repository, side.ref))
+        if created:
+            made.append((repository, side.ref))
     return None
+
+
+def _create_pin(repository: Path, ref: str, tree: str) -> tuple[bool | None, str | None, str]:
+    """Create one pin if it is absent: ``(True, …)`` made, ``(False, …)`` already named ``tree``.
+
+    Pinning is idempotent (MIK-R42): readers opening the same new comparison at once all try to
+    create the same pin, and a ref that already names this very tree is the answer they wanted,
+    whoever made it. A brief lock held by another of them is retried. ``None`` is a refusal: the
+    ref names something else, or Git failed for another reason (``current`` and the reason say).
+    """
+
+    reason = "update-ref failed"
+    for attempt in range(_PIN_ATTEMPTS):
+        current = _git(repository, "rev-parse", "--verify", "--quiet", ref)
+        if current == tree:
+            return False, current, ""
+        if current is not None:
+            return None, current, reason
+        result = run_git(repository, ["update-ref", ref, tree, _ZERO_OBJECT])
+        if result.returncode == 0:
+            return True, None, ""
+        reason = result.stderr.strip() or reason
+        if "cannot lock ref" not in reason and "already exists" not in reason:
+            break
+        time.sleep(_PIN_RETRY_SECONDS * (attempt + 1))
+    current = _git(repository, "rev-parse", "--verify", "--quiet", ref)
+    return (False, current, "") if current == tree else (None, current, reason)
 
 
 def _pin_refusal(repository: str, ref: str, reason: str) -> ReviewRefusal:

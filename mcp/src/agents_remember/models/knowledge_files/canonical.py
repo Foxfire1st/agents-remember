@@ -34,11 +34,15 @@ class CanonicalFormatError(ValueError):
 
 
 def _refuse_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    counts = Counter(key for key, _ in pairs)
-    duplicates = sorted(key for key, count in counts.items() if count > 1)
-    if duplicates:
+    # The hook runs once per JSON object, and a tree of thousands of knowledge files has hundreds of
+    # thousands of them: building the dict first and counting only when it came out shorter
+    # than the pairs (a repeated key collapsed) gives the same answer and the same refusal.
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        counts = Counter(key for key, _ in pairs)
+        duplicates = sorted(key for key, count in counts.items() if count > 1)
         raise CanonicalFormatError(f"object repeats key(s): {duplicates}")
-    return dict(pairs)
+    return result
 
 
 def _refuse_constant(name: str) -> Any:

@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS, run_git
 from agents_remember.memory.knowledge.diff_display import TreeSide
 from agents_remember.models.knowledge.review_relationships import (
     ReviewRelationshipMovement,
@@ -40,11 +40,16 @@ __all__ = [
     "with_rename_inferences",
 ]
 
-# The Git interface the rename inference is measured with, published in full so a reader reproduces
-# the inference without this module: the two bound tree objects are substituted and never a branch, a
-# working tree or ``HEAD``. ``--find-renames`` is the one place this surface asks Git for a
-# similarity inference, and its answer is labelled as an inference everywhere it is displayed.
-RENAME_INFERENCE_COMMAND = "git diff --raw -z --find-renames {before_tree} {after_tree}"
+# The Git arguments the rename inference is measured with, in front of the two tree ids.
+# ``--find-renames`` is the one place this surface asks Git for a similarity inference, and its answer
+# is labelled as an inference everywhere it is displayed.
+_RENAME_ARGS = ("diff", *PARSED_DIFF_OPTIONS, "--raw", "-z", "--find-renames")
+
+# The same interface as the published text, in full so a reader reproduces the inference without this
+# module: the two bound tree objects are substituted and never a branch, a working tree or ``HEAD``.
+# It is built from the tuple the measurement passes to Git, so the text and the executed arguments
+# have one source and cannot differ.
+RENAME_INFERENCE_COMMAND = " ".join(("git", *_RENAME_ARGS, "{before_tree}", "{after_tree}"))
 
 # The Git status letters that carry *two* paths in the ``-z`` raw form: a rename and a copy print the
 # old name and then the new one, while every other status prints one path.
@@ -106,10 +111,7 @@ def git_rename_inference(before: TreeSide, after: TreeSide) -> RenameObservation
         return RenameObservations(available=False, detail=_MISSING_TREE_RENAME_DETAIL)
     if before.root is None or after.root is None:
         return RenameObservations(available=False, detail=_UNROOTED_RENAME_DETAIL)
-    result = run_git(
-        Path(after.root),
-        ["diff", "--raw", "-z", "--find-renames", before.tree_id, after.tree_id],
-    )
+    result = run_git(Path(after.root), [*_RENAME_ARGS, before.tree_id, after.tree_id])
     if result.returncode != 0:
         return RenameObservations(
             available=False,

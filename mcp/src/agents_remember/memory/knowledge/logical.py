@@ -29,6 +29,7 @@ from agents_remember.memory.knowledge.connection import (
     open_read_only_database,
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge.request_digests import digest_in_request
 from agents_remember.memory.knowledge.schema_generations import (
     SchemaGeneration,
     generation_for_name,
@@ -74,7 +75,11 @@ def resolve_generation(generation: SchemaGeneration | str) -> SchemaGeneration:
 def logical_digest(connection: apsw.Connection, generation: SchemaGeneration | str) -> str:
     """Return the canonical logical digest of the dataset this connection holds open."""
 
-    return sha256_digest(logical_body(connection, generation))
+    return digest_in_request(
+        connection,
+        resolve_generation(generation),
+        lambda: sha256_digest(logical_body(connection, generation)),
+    )
 
 
 def logical_body(connection: apsw.Connection, generation: SchemaGeneration | str) -> dict[str, Any]:

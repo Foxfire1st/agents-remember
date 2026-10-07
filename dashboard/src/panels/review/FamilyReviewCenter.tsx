@@ -33,7 +33,7 @@ import {
   guaranteeTextChange,
   useTreeComparison,
 } from './IntentWordDiff';
-import { LeafKnowledgeChanges } from './LeafKnowledgeChanges';
+import { LeafKnowledgeChanges, LeafKnowledgeNotice } from './LeafKnowledgeChanges';
 import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
@@ -988,7 +988,8 @@ function knowledgePanel(
   payload: ReviewPayload,
   open = false,
 ): React.ReactNode {
-  if (leafTrees?.phase !== 'trees') return null;
+  if (leafTrees?.phase !== 'trees')
+    return leafTrees ? <LeafKnowledgeNotice read={leafTrees} /> : null;
   return (
     <LeafKnowledgeChanges
       trees={leafTrees.trees}

@@ -507,6 +507,9 @@ class ServingCollaborators:
     diff of the memory trees and the worklist view. Omitting it refuses that route by name.
     """
 
+    review_trees_shutdown: Callable[[], None] | None = None
+    """Stop and reap the tree route's transient child computations at serving shutdown."""
+
     knowledge_reader: KnowledgeReaderPort | None = None
     """The path-based knowledge reader (MIK-R29): read-only views of any converted memory tree.
 
@@ -563,6 +566,7 @@ class _ServingRuntime:
     )
     interval: float
     capsule_launch: LaunchCapsuleResolverPort | None = None
+    review_trees_shutdown: Callable[[], None] | None = None
 
     @property
     def observer_root(self) -> Path:

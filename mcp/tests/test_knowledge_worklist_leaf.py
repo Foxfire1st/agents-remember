@@ -23,6 +23,7 @@ from agents_remember.application.knowledge_worklist import (
     worklist_for_sides,
 )
 from agents_remember.application.knowledge_worklist import base_cache as worklist_base_cache
+from agents_remember.application.knowledge_worklist import code as worklist_code
 from agents_remember.application.knowledge_worklist import leaf as worklist_leaf
 from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.knowledge_writer.memory_state import Owner
@@ -34,6 +35,7 @@ from agents_remember.mcp.tools.knowledge import (
     IntegrityCheckRequest,
     knowledge_integrity_check_payload,
 )
+from agents_remember.memory.conversion import code_objects
 from agents_remember.memory_quality.knowledge_worklist_section import (
     WORKLIST_SECTION_HEADING,
     knowledge_worklist_lines,
@@ -762,3 +764,37 @@ def test_converted_bases_are_cached_by_commit_version_and_code_commit(tmp_path: 
         third = worklist_for_sides(inside)
     assert third == first and converting.called
     assert not (memory / ".cache").exists()
+
+
+def test_warming_reads_the_changed_blobs_in_one_batch_and_never_fails_the_run(
+    tmp_path: Path,
+) -> None:
+    """MIK-R42: a read-ahead of exact blobs; a blob it cannot read fails where it is used."""
+
+    code = tmp_path / "code"
+    _init(code)
+    base = commit(code, {CODE_FILE: CODE_V1, LINES_FILE: NOTES_V1})
+    candidate = commit(code, {CODE_FILE: CODE_V1 + "\nVALUE = 2\n", LINES_FILE: NOTES_V1 + "x\n"})
+    trees = CodeTrees.open(
+        code,
+        git(code, "rev-parse", f"{base}^{{tree}}"),
+        git(code, "rev-parse", f"{candidate}^{{tree}}"),
+    )
+    with mock.patch.object(
+        code_objects, "read_git_blobs_bytes", wraps=code_objects.read_git_blobs_bytes
+    ) as batches:
+        trees.warm([CODE_FILE, LINES_FILE, "pkg/not-in-either-tree.py"])
+        assert batches.call_count == 1
+        wanted = {
+            trees.base()[CODE_FILE],
+            trees.candidate()[CODE_FILE],
+            trees.candidate()[LINES_FILE],
+        }
+        assert wanted <= set(batches.call_args.args[1])
+        for blob in wanted:
+            trees.objects.blob(blob)  # answered from the read-ahead
+        assert batches.call_count == 1
+    failing = CodeTrees.open(code, "0" * 40, "0" * 40)
+    failing.warm([CODE_FILE])  # a tree the store lacks is reported where it is used, not here
+    with pytest.raises(worklist_code.CodeReadError):
+        failing.base()

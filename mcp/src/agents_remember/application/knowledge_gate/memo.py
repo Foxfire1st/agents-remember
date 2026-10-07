@@ -24,6 +24,8 @@ recorded_reads`), and the verdict is kept with that read set. Before a kept verd
 recorded file is hashed again: any difference -- a newly approved version, a manifest that appeared
 or vanished, edited settings -- is a miss, and the gate recomputes. A file read twice with different
 identities during one evaluation makes the verdict unkeepable.
+Actual locator/root selections are checked first, before following a byte locator whose target
+may have changed since the computation.
 
 **Bounds, belt and braces.** At most :data:`CAPACITY` verdicts are kept, least recently used first
 out, and none is served after :data:`MAX_AGE_SECONDS`.
@@ -40,12 +42,11 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.runtime.startup import measuring_build_stamp
-from agents_remember.kernel.recorded_reads import CONFLICTING, file_identity
+from agents_remember.kernel.recorded_reads import changed_observations, has_failed_observation
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -81,7 +82,7 @@ class _Kept:
     reads: tuple[tuple[str, str], ...]
 
     def still_read_the_same(self) -> bool:
-        return all(file_identity(Path(path)) == seen for path, seen in self.reads)
+        return not changed_observations(dict(self.reads))
 
 
 GATE_MEMO: Final[BoundedMemo[GateMemoKey, _Kept]] = BoundedMemo(CAPACITY)
@@ -139,5 +140,5 @@ def remembered(key: GateMemoKey, *, now: float | None = None) -> GateResult | No
 def remember(key: GateMemoKey, result: GateResult, reads: dict[str, str]) -> None:
     """Keep a verdict over complete inputs (:attr:`GateResult.memoisable`) with its read set."""
 
-    if result.memoisable and CONFLICTING not in reads.values():
+    if result.memoisable and not has_failed_observation(reads):
         GATE_MEMO.put(key, _Kept(time.monotonic(), result, tuple(sorted(reads.items()))))

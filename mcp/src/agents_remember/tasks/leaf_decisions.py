@@ -11,6 +11,17 @@ identity doubt instead of skipping what it cannot read:
 An unreadable JSON file that names no leaf (a preview or other sibling artifact) is not the leaf's
 document and is left alone, exactly as the terminal resolver leaves it.
 
+**What the lookup records as read (MIK-R42).** To find the leaf's document the lookup opens every
+``*.json`` of the folder, but a sibling it merely rules out is not an input of anything computed
+from the leaf's document: only the leaf's own document is recorded
+(:func:`~agents_remember.kernel.recorded_reads.recorded_reads`), with the bytes parsed. A write to a
+sibling that does not claim the leaf therefore invalidates nothing; a sibling that begins to claim
+the leaf changes the answer of the next lookup (two claims are ambiguous; one claim is a different
+document), which every keyed caller makes again before it uses anything it kept. A sibling that
+could not be read cannot be ruled out, so its failed read stays recorded, and a lookup that cannot
+establish the document records everything it opened. With no claimant it also records the JSON
+listing it consumed, so a document missing during the lookup cannot reappear unnoticed.
+
 * :func:`leaf_decision_refusal` -- a planned ``dropped`` history row cites one decision entry of
   the leaf's task document by its ``at``; the knowledge writer asks this at write time and refuses
   the row on any answer but "resolved". Two entries sharing that ``at`` are ambiguous.
@@ -25,6 +36,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.recorded_reads import (
+    observed_json_files,
+    observed_text,
+    recorded_reads,
+    replay_reads,
+)
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
 from agents_remember.tasks.store import read_task_doc
@@ -40,21 +57,38 @@ def strict_leaf_doc(task_root: Path, leaf_id: str) -> tuple[Path, TaskDocument] 
     """The leaf's one task document, ``None`` when it has none, or :class:`LeafDocumentUnresolved`."""
 
     try:
-        found = resolve_terminal_leaf_doc(task_root, leaf_id)
+        with recorded_reads() as opened:
+            paths = observed_json_files(task_root)
+            found = resolve_terminal_leaf_doc(task_root, leaf_id)
+            broken = _unreadable_claims(paths, leaf_id)
     except TerminalLeafResolutionError as error:
+        replay_reads(opened)
         raise LeafDocumentUnresolved(str(error)) from error
-    broken = _unreadable_claims(task_root, leaf_id)
     if broken:
+        replay_reads(opened)
         raise LeafDocumentUnresolved(
             f"the task document of leaf {leaf_id!r} cannot be read: {'; '.join(broken)}"
         )
+    if found is None:
+        replay_reads(opened)
+        return None
+    claimed = found[0].resolve(strict=False)
+    # A sibling read in full and ruled out is not an input. One that could not be read cannot be
+    # ruled out, so its failed read stays recorded for every caller that keeps a result.
+    replay_reads(
+        {
+            path: seen
+            for path, seen in opened.items()
+            if Path(path).resolve(strict=False) == claimed or not seen.startswith("sha256:")
+        }
+    )
     return found
 
 
-def _unreadable_claims(task_root: Path, leaf_id: str) -> list[str]:
+def _unreadable_claims(paths: tuple[Path, ...], leaf_id: str) -> list[str]:
     want = leaf_id.strip().lower()
     broken: list[str] = []
-    for path in sorted(task_root.glob("*.json")):
+    for path in paths:
         try:
             read_task_doc(path)
         except (OSError, ValueError) as error:
@@ -65,7 +99,7 @@ def _unreadable_claims(task_root: Path, leaf_id: str) -> list[str]:
 
 def _names_leaf(path: Path, want: str) -> bool:
     try:
-        raw: Any = json.loads(path.read_text(encoding="utf-8"))
+        raw: Any = json.loads(observed_text(path))
     except (OSError, ValueError):
         return False  # not JSON at all: nothing identifies it (a stem match is the resolver's)
     if not isinstance(raw, dict) or raw.get("kind") == "master":

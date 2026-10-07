@@ -8,6 +8,7 @@ from agents_remember.kernel.memory_mode import (
     Topology,
     refuse_removed_memory_mode,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_resolve
 
 DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
 
@@ -65,15 +66,15 @@ def extract_yaml_blocks(markdown_text: str) -> list[str]:
 
 
 def external_memory_root(coordination_root: Path, code_repository_name: str) -> Path:
-    return (coordination_root / "memory-repos" / f"ar-{code_repository_name}").resolve()
+    return observed_resolve(coordination_root / "memory-repos" / f"ar-{code_repository_name}")
 
 
 def settings_path_for_roots(memory_root: Path, coordination_root: Path) -> Path:
     memory_settings = memory_root / "system" / "settings.md"
     coordination_settings = coordination_root / "system" / "settings.md"
-    if memory_settings.exists():
+    if observed_exists(memory_settings):
         return memory_settings
-    if coordination_settings.exists():
+    if observed_exists(coordination_settings):
         return coordination_settings
     return memory_settings
 
@@ -88,7 +89,7 @@ def memory_roots_from_settings(
     coordination root. A settings file anywhere else is not a supported memory location, so
     it is refused by its own path rather than silently resolving to some other root.
     """
-    settings_root = settings_path.resolve().parent.parent
+    settings_root = observed_resolve(settings_path).parent.parent
     if (
         settings_root.name == f"ar-{code_repository_name}"
         and settings_root.parent.name == "memory-repos"
@@ -101,12 +102,12 @@ def memory_roots_from_settings(
 
 def resolve_coordination_root_hint(coordination_root: Path | None) -> Path:
     if coordination_root is not None:
-        return coordination_root.resolve()
+        return observed_resolve(coordination_root)
 
     runtime_root = agents_repo_from_script().resolve()
     if looks_like_installed_coordination_root(runtime_root):
         return runtime_root
-    return (runtime_root / DEFAULT_AR_COORDINATION_ROOT).resolve()
+    return observed_resolve(runtime_root / DEFAULT_AR_COORDINATION_ROOT)
 
 
 def find_code_repository_root(workspace_root: Path, code_repository_name: str) -> Path:

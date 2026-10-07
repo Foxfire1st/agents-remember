@@ -37,6 +37,11 @@ from agents_remember.kernel.memory_mode import (
     refuse_removed_memory_mode,
     require_supported_topology,
 )
+from agents_remember.kernel.recorded_reads import (
+    observed_exists,
+    observed_path_exists,
+    observed_resolve,
+)
 
 
 def detect_coordination_selection(
@@ -49,11 +54,13 @@ def detect_coordination_selection(
     roots = _selection_roots(code_repository_name, code_repository_root, coordination_root_hint)
     _refuse_requested_removed_topology(requested_topology)
     if settings_path is not None:
-        return _selection_from_settings(settings_path.resolve(), code_repository_name, roots)
+        return _selection_from_settings(
+            observed_resolve(settings_path), code_repository_name, roots
+        )
     _refuse_legacy_repository_memory_root(roots)
     if requested_topology == "external":
         return _required_external_selection(code_repository_name, roots)
-    if roots["external_root"].exists():
+    if observed_path_exists(roots["external_root"]):
         settings = settings_path_for_roots(roots["external_root"], roots["coordination_root"])
         return CoordinationSelection(
             "external", roots["coordination_root"], roots["external_root"], settings
@@ -78,7 +85,7 @@ def _refuse_legacy_repository_memory_root(roots: dict[str, Path]) -> None:
     in a state whose memory this product can no longer resolve, and quietly falling through to
     the external root would hide that from the developer.
     """
-    if roots["internal_root"].exists():
+    if observed_path_exists(roots["internal_root"]):
         refuse_removed_memory_mode("internal", artifact=roots["internal_root"].as_posix())
 
 
@@ -102,7 +109,7 @@ def _selection_from_settings(
     coordination_root, memory_root = memory_roots_from_settings(
         resolved_settings, code_repository_name
     )
-    if not memory_root.exists():
+    if not observed_path_exists(memory_root):
         raise _missing_memory_error(code_repository_name, roots)
     return CoordinationSelection("external", coordination_root, memory_root, resolved_settings)
 
@@ -110,7 +117,7 @@ def _selection_from_settings(
 def _required_external_selection(
     code_repository_name: str, roots: dict[str, Path]
 ) -> CoordinationSelection:
-    if not roots["external_root"].exists():
+    if not observed_path_exists(roots["external_root"]):
         raise _missing_memory_error(code_repository_name, roots)
     settings = settings_path_for_roots(roots["external_root"], roots["coordination_root"])
     return CoordinationSelection(
@@ -218,7 +225,7 @@ def _context_from_selection(
         settings_path=hints.settings_path,
     )
     resolved_settings = (
-        hints.settings_path.resolve() if hints.settings_path else selection.settings_path
+        observed_resolve(hints.settings_path) if hints.settings_path else selection.settings_path
     )
     storage, cross_repo = parse_coordination_settings(resolved_settings)
     return build_coordination_context(
@@ -241,10 +248,10 @@ def _contract_coordination_root(
     coordination_root: Path | None,
     contract_reader: ContractReaderPort,
 ) -> Path | None:
-    if contract_path is None or not contract_path.exists():
+    if contract_path is None or not observed_exists(contract_path):
         return coordination_root
     try:
-        return contract_reader.load_contract(contract_path.resolve()).coordination_root
+        return contract_reader.load_contract(observed_resolve(contract_path)).coordination_root
     except Exception:
         return coordination_root
 

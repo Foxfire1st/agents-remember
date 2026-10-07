@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
@@ -94,6 +96,14 @@ GIT_LOCAL_TIMEOUT_SECONDS = 300
 GIT_REMOTE_TIMEOUT_SECONDS = 120
 GIT_METADATA_TIMEOUT_SECONDS = 30
 GIT_BULK_REMOTE_TIMEOUT_SECONDS = 1800
+
+# What a caller that parses ``git diff`` output passes, so the user's Git configuration cannot
+# change the format it parses (MIK-R42): ``diff.noprefix``, ``diff.srcPrefix``/``diff.dstPrefix``
+# and ``diff.mnemonicPrefix`` change the ``a/``/``b/`` of every file header, ``diff.external``
+# replaces the output with a driver's, and forced colour (``color.ui``, ``color.diff``) wraps it in
+# escape sequences. Command-line options win over every one of them.
+DIFF_PREFIX_OPTIONS = ("--src-prefix=a/", "--dst-prefix=b/")
+PARSED_DIFF_OPTIONS = ("--no-color", "--no-ext-diff", *DIFF_PREFIX_OPTIONS)
 
 
 @dataclass(frozen=True)
@@ -359,6 +369,29 @@ def read_git_blob_bytes(root: Path, blob_id: str) -> bytes:
     return _read_git_bytes(root, ["cat-file", "blob", blob_id])
 
 
+_BLOB_READS: ContextVar[dict[tuple[str, str], bytes] | None] = ContextVar(
+    "git_blob_reads", default=None
+)
+
+
+@contextmanager
+def shared_blob_reads() -> Iterator[None]:
+    """Within the block, a blob read from a repository is not read from it a second time.
+
+    A blob ID is the hash of its bytes, so a repeated read can only return the same bytes; the
+    block just keeps the first answer. One computation that reads the same Git trees through more
+    than one owner (the worklist's snapshots, its onboarding trace and its held base) pays the
+    ``git cat-file`` for each blob once. The cache lives and dies with the block, and is keyed by
+    repository too, so an object one repository lacks is still missing from it.
+    """
+
+    token = _BLOB_READS.set({})
+    try:
+        yield
+    finally:
+        _BLOB_READS.reset(token)
+
+
 def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes]:
     """Read many fully named blobs' original bytes through one ``git cat-file --batch``.
 
@@ -371,6 +404,26 @@ def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes
         require_git_object_id(blob_id)
     if not requested:
         return {}
+    shared = _BLOB_READS.get()
+    held = {} if shared is None else _held_blobs(shared, root, requested)
+    missing = [blob_id for blob_id in requested if blob_id not in held]
+    blobs = _batch_blobs(root, missing) if missing else {}
+    if shared is not None:
+        shared.update({(root.as_posix(), blob_id): data for blob_id, data in blobs.items()})
+    return {blob_id: held[blob_id] if blob_id in held else blobs[blob_id] for blob_id in requested}
+
+
+def _held_blobs(
+    shared: dict[tuple[str, str], bytes], root: Path, requested: list[str]
+) -> dict[str, bytes]:
+    return {
+        blob_id: shared[(root.as_posix(), blob_id)]
+        for blob_id in requested
+        if (root.as_posix(), blob_id) in shared
+    }
+
+
+def _batch_blobs(root: Path, requested: list[str]) -> dict[str, bytes]:
     result = _run_git(
         root,
         ["cat-file", "--batch"],

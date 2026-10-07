@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Literal, NoReturn, cast, get_args
 
 from agents_remember.errors import MemoryModeUnsupportedError
+from agents_remember.kernel.recorded_reads import observed_resolve
 
 Topology = Literal["external"]
 """Where a repository's durable memory root lives. ``internal`` was removed."""
@@ -59,7 +60,7 @@ MEMORY_MODE_REMEDIES: tuple[str, ...] = (
 
 def legacy_internal_memory_root(code_repository_root: Path) -> Path:
     """The removed repo-sidecar memory root, returned only so existing state can be reported."""
-    return (code_repository_root / LEGACY_INTERNAL_MEMORY_DIRNAME).resolve()
+    return observed_resolve(code_repository_root / LEGACY_INTERNAL_MEMORY_DIRNAME)
 
 
 def legacy_internal_coordination_root(code_repository_root: Path) -> Path:

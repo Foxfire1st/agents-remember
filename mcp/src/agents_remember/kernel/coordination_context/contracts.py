@@ -14,6 +14,7 @@ from agents_remember.kernel.coordination_context.models import (
     ContractReaderPort,
     EnclosureSelector,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_resolve
 
 
 def resolve_contract(
@@ -22,7 +23,7 @@ def resolve_contract(
     code_repository_name: str,
     reader: ContractReaderPort,
 ) -> tuple[Any | None, Path | None]:
-    candidate = selector.contract_path.resolve() if selector.contract_path else None
+    candidate = observed_resolve(selector.contract_path) if selector.contract_path else None
     if candidate is None and selector.task_name:
         candidate = reader.find_task_contract(
             coordination_root,
@@ -37,7 +38,7 @@ def resolve_contract(
         )
     if candidate is None:
         return None, None
-    if not candidate.exists():
+    if not observed_exists(candidate):
         return None, candidate
     try:
         return reader.load_contract(candidate), candidate

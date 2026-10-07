@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 
 LEDGER_SCHEMA = "ar-memory-ledger/v1"
 LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
@@ -213,17 +214,17 @@ def ledger_to_text(ledger: MemoryLedger) -> str:
 
 
 def load_ledger(path: Path) -> MemoryLedger:
-    if not path.exists():
+    if not observed_exists(path):
         raise LedgerError(f"memory ledger does not exist: {path}")
-    return parse_ledger_text(path.read_text(encoding="utf-8"))
+    return parse_ledger_text(observed_text(path))
 
 
 def load_ledger_unvalidated(path: Path) -> MemoryLedger:
     """Load a ledger's structure so a malformed header can be recomputed rather than refused."""
 
-    if not path.exists():
+    if not observed_exists(path):
         raise LedgerError(f"memory ledger does not exist: {path}")
-    return parse_ledger_text_unvalidated(path.read_text(encoding="utf-8"))
+    return parse_ledger_text_unvalidated(observed_text(path))
 
 
 def write_ledger(path: Path, ledger: MemoryLedger) -> None:

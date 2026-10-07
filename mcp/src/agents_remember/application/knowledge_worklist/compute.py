@@ -243,6 +243,7 @@ class _Run:
         inputs = self.inputs
         changes, unrepresentable, renamed = _changes(inputs)
         changed_paths = {change.path for change in changes}
+        inputs.code.warm(change.path for change in changes if change.content == "text")
         classifier = Classifier(inputs.code, inputs.base, renamed)
         knowledge, touched, reached, stale = self._scope(classifier, changed_paths)
         family_items = self._family_items(reached, touched, stale, knowledge)

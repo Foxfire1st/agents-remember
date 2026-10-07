@@ -283,6 +283,10 @@ class _ServingFixture:
         self.created: list[asyncio.Task[object]] = []
         self.prime = mock.AsyncMock(side_effect=self._record_projection_prime)
         self.shutdown = mock.Mock()
+        self.worklist_shutdown_threads: list[threading.Thread] = []
+        self.worklist_shutdown = mock.Mock(
+            side_effect=lambda: self.worklist_shutdown_threads.append(threading.current_thread())
+        )
         self.app = FastAPI()
         self.runtime = cast(
             _ServingRuntime,
@@ -291,6 +295,7 @@ class _ServingFixture:
                 observer_root=root,
                 projector=SimpleNamespace(prime=self.prime, run=_parked_forever),
                 host=SimpleNamespace(shutdown=self.shutdown),
+                review_trees_shutdown=self.worklist_shutdown,
                 liveness_clock=self.clock.now,
                 liveness_sweeper=sweeper,
                 # The real publisher on the fixture's own root and virtual clock, so a case reads
@@ -363,11 +368,16 @@ class _ServingFixture:
                     mock.patch.object(lifespan_module, "_agent_notifier_loop", _parked_forever)
                 )
             lifespan = _serving_lifespan(self.runtime, cast(ProviderMetricsStore, mock.Mock()))
+            shutdowns = self.worklist_shutdown.call_count
             async with lifespan(self.app):
                 # Startup is complete here: the prime has returned (or raised) and no created
                 # task has run yet, so this step is the boundary the startup-order cases read.
                 self._record_startup("lifespan-yield")
                 yield
+            assert self.worklist_shutdown.call_count == shutdowns + 1
+            assert all(
+                thread is not threading.main_thread() for thread in self.worklist_shutdown_threads
+            )
 
 
 def _observer_tasks(tasks: list[asyncio.Task[object]]) -> list[asyncio.Task[object]]:

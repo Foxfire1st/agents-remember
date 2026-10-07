@@ -20,6 +20,7 @@ from agents_remember.kernel.memory_mode import (
     is_removed_memory_mode,
     refuse_removed_memory_mode,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 from agents_remember.models.worktree import (
     CleanupStatus,
     CloseoutStatus,
@@ -454,9 +455,9 @@ def load_contract(path: Path) -> WorktreeContract:
     refusal that says a field is missing without saying which file to open sends them
     hunting through a tasks tree for it.
     """
-    if not path.exists():
+    if not observed_exists(path):
         raise ContractError(f"worktree contract does not exist: {path}")
-    contract = parse_contract_text(path.read_text(encoding="utf-8"), path=path)
+    contract = parse_contract_text(observed_text(path), path=path)
     if contract.unknown_cells:
         logger.warning(
             "worktree contract %s carries %d cell(s) outside their vocabulary: %s",

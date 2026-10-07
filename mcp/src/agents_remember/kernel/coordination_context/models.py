@@ -204,8 +204,8 @@ class CoordinationContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
-    # From the worktree contract whenever one is in scope: `resolver.build_coordination_context`
-    # (resolver.py line 284) reads `contract.memory_mode` straight into this field, falling back
+    # From the worktree contract whenever one is in scope: `build_coordination_context` in
+    # `resolver.py` reads `contract.memory_mode` straight into this field, falling back
     # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
     # contract's, and this alias is the one declaration rather than a second copy of the pair.
     memory_mode: MemoryMode

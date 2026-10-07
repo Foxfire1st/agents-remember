@@ -26,7 +26,6 @@ from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
 )
-from agents_remember.application.knowledge_worklist import leaf_worklist
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.review_artifact_cleanup import (
     cleanup_review_artifacts,
@@ -41,6 +40,7 @@ from agents_remember.application.review_comparison_freeze import (
 )
 from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
+from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import text_uuid
@@ -892,11 +892,11 @@ def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -
     def observed_document(*args: Any, **kwargs: Any) -> dict[str, Any]:
         # Keep the real computation's input observations before replacing its item for this
         # history projection case; a read-free mock is correctly refused by the view's guard.
-        assert leaf_worklist(*args, **kwargs) is not None
+        assert isolated_leaf_worklist(*args, **kwargs) is not None
         return document
 
     with mock.patch(
-        "agents_remember.application.review_tree_knowledge.leaf_worklist",
+        "agents_remember.application.review_tree_knowledge.isolated_leaf_worklist",
         side_effect=observed_document,
     ):
         worklist = read_review_trees(world.config, _query()).worklist
@@ -919,7 +919,7 @@ def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -
         },
     )
     with mock.patch(
-        "agents_remember.application.review_tree_knowledge.leaf_worklist",
+        "agents_remember.application.review_tree_knowledge.isolated_leaf_worklist",
         side_effect=observed_document,
     ):
         worklist = read_review_trees(world.config, _query()).worklist

@@ -253,13 +253,54 @@ export const reviewTrees = (
   leaf: string,
   address: ReviewTreesAddress = {},
   base = '',
+  signal?: AbortSignal,
 ): Promise<ReviewTreesResult> => {
   const params: Record<string, string> = { repo, master, leaf };
   if (address.comparison !== undefined) params.comparison = String(address.comparison);
   if (address.recorded) params.history = 'recorded';
   if (address.invariants?.length) params.invariants = address.invariants.join(',');
-  return getReviewJson<ReviewTreesResult>(`${base}/api/review/trees?${qs(params)}`);
+  return getReviewJson<ReviewTreesResult>(`${base}/api/review/trees?${qs(params)}`, signal);
 };
+
+// The server answers `reviewer_busy` at once when too many computations are queued, and a full
+// queue drains in about twenty seconds; `inputs_changing` comes after it computed twice over inputs
+// that moved. The reader therefore asks again with a growing delay, for about half a minute (a
+// bounded number of times), before it says "unavailable" (MIK-R42). The "computing" notice stays up
+// throughout, because the read state only changes with the final answer. Aborting the signal ends
+// the wait and the request in flight.
+export const TRANSIENT_CODES = ['reviewer_busy', 'inputs_changing'];
+export const BUSY_DELAYS_MS = [1500, 2000, 3000, 4000, 5000, 6000, 8000];
+export const BUSY_RETRIES = BUSY_DELAYS_MS.length;
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException('superseded', 'AbortError'));
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
+export async function reviewTreesRetryingBusy(
+  repo: string,
+  master: string,
+  leaf: string,
+  address: ReviewTreesAddress,
+  signal: AbortSignal,
+): Promise<ReviewTreesResult> {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await reviewTrees(repo, master, leaf, address, '', signal);
+    const busy = result.state === 'refused' && TRANSIENT_CODES.includes(result.refusal?.code ?? '');
+    if (!busy || attempt >= BUSY_RETRIES) return result;
+    await pause(BUSY_DELAYS_MS[attempt], signal);
+  }
+}
 
 // What a view renders. `trees` and `problem` are never both present.
 export type ReviewTreesRead =
@@ -335,24 +376,31 @@ export function useReviewTreeEntries(
   const [read, setRead] = useState<{ key: string; read: ReviewTreesRead } | null>(null);
   useEffect(() => {
     if (comparison === undefined || !wanted) return undefined;
-    let mounted = true;
+    const superseded = new AbortController();
     const apply = (next: ReviewTreesRead) => {
-      if (mounted) setRead({ key, read: next });
+      if (!superseded.signal.aborted) setRead({ key, read: next });
     };
-    void reviewTrees(repo, master, leaf, { comparison, invariants: wanted.split(',') }).then(
+    void reviewTrees(
+      repo,
+      master,
+      leaf,
+      { comparison, invariants: wanted.split(',') },
+      '',
+      superseded.signal,
+    ).then(
       (result) => apply(reviewTreesRead(result)),
       (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
     );
-    return () => {
-      mounted = false;
-    };
+    return () => superseded.abort();
   }, [repo, master, leaf, comparison, wanted, key]);
   if (comparison === undefined || !wanted) return null;
   return read?.key === key ? read.read : { phase: 'loading' };
 }
 
-// The tree view read for one task context. A superseded answer (the props moved while it was in
-// flight) is dropped by sequence number, so it cannot land on the leaf shown now.
+// The tree view read for one task context. A superseded read (the props moved while it was in
+// flight) is aborted, so the server stops computing it, and its answer is dropped by sequence
+// number as well, so it cannot land on the leaf shown now. A `reviewer_busy` answer is retried a
+// bounded number of times before it is shown as unavailable.
 export function useReviewTrees(
   repo: string,
   master: string,
@@ -367,17 +415,21 @@ export function useReviewTrees(
   useEffect(() => {
     if (!enabled) return undefined;
     const seq = ++reads.current;
-    let mounted = true;
+    const superseded = new AbortController();
     const apply = (next: ReviewTreesRead) => {
-      if (mounted && reads.current === seq) setRead({ key, read: next });
+      if (!superseded.signal.aborted && reads.current === seq) setRead({ key, read: next });
     };
-    void reviewTrees(repo, master, leaf, { comparison, recorded }).then(
+    void reviewTreesRetryingBusy(
+      repo,
+      master,
+      leaf,
+      { comparison, recorded },
+      superseded.signal,
+    ).then(
       (result) => apply(reviewTreesRead(result)),
       (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
     );
-    return () => {
-      mounted = false;
-    };
+    return () => superseded.abort();
   }, [repo, master, leaf, comparison, recorded, key, enabled]);
   if (!enabled) return null;
   return read?.key === key ? read.read : { phase: 'loading' };

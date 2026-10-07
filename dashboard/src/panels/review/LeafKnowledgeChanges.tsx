@@ -10,6 +10,7 @@ import type {
   ReviewTreesResult,
   ReviewWorklistView,
 } from '../../data/reviewTrees';
+import type { ReviewTreesRead } from '../../data/reviewTrees';
 import { degradedKnowledgeSides } from '../../data/reviewTrees';
 import {
   hunkLinkage,
@@ -78,6 +79,39 @@ export function LeafKnowledgeChanges({
       <Currentness trees={trees} />
       {worklist ? <Worklist worklist={worklist} /> : null}
     </details>
+  );
+}
+
+// While the leaf-wide read computes (the first view of a large leaf takes several seconds), and when it
+// finally gives no answer, the panel says so instead of being absent: a missing panel reads as "this
+// leaf changed no knowledge".
+export function LeafKnowledgeNotice({ read }: { read: ReviewTreesRead }) {
+  if (read.phase !== 'loading' && read.phase !== 'unavailable') return null;
+  const computing = read.phase === 'loading';
+  const notice = computing
+    ? {
+        id: 'review-leaf-knowledge-pending',
+        tone: muted,
+        statusId: 'review-leaf-knowledge-computing',
+      }
+    : { id: 'review-leaf-knowledge-unavailable', tone: mark, statusId: undefined };
+  return (
+    <section
+      className={shell}
+      data-testid={notice.id}
+      data-review-code={read.phase === 'unavailable' ? read.problem.code : undefined}
+      data-review-state={read.phase === 'unavailable' ? read.problem.token : undefined}
+    >
+      <h3 className={label}>Knowledge changes in this leaf</h3>
+      <p className={notice.tone} role="status" data-testid={notice.statusId}>
+        {read.phase === 'loading'
+          ? 'Computing the knowledge changes of this leaf. The first read of a large leaf takes several seconds; the review stays usable.'
+          : `The knowledge changes of this leaf are unavailable: ${read.problem.detail}`}
+      </p>
+      {read.phase === 'unavailable' && read.problem.nextAction ? (
+        <p className={muted}>Next: {read.problem.nextAction}.</p>
+      ) : null}
+    </section>
   );
 }
 

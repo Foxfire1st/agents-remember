@@ -13,6 +13,7 @@ per comparison and a repeat for unchanged trees costs the captures and the looku
 * the contract's identity: its path and the SHA-256 of its bytes, which carry B and every branch;
 * the parent line's memory tip (the line K_B pairs on) and the leaf's own memory ``HEAD``;
 * the SHA-256 of the leaf's task document (its maintenance scope and declared effects);
+* the bytes of the task documents the lookup actually consumed for this leaf (``task_reads``);
 * the build that computed it (``measuring_build_stamp``);
 * the code base tree, K_B's tree, and the tree K_B is compared as (its conversion when K_B is
   unconverted), exactly as the comparison record names them;
@@ -22,6 +23,8 @@ per comparison and a repeat for unchanged trees costs the captures and the looku
 computation read is recorded with the SHA-256 of the bytes read
 (:func:`agents_remember.kernel.recorded_reads.recorded_reads`), and before a kept view is served
 each recorded file is hashed again. Any difference is a miss, and the view is computed again.
+Actual locator and root selections are recorded too and checked before byte rows, so a retargeted
+locator cannot reuse its old judgment or cause a byte read outside its original confinement.
 
 **What is never kept.** A view whose worklist is not ``complete``, a view with an unreadable
 knowledge side, a diff behind which a Git read failed, and a computation that read one file twice
@@ -29,8 +32,18 @@ with different contents. The next request reads again.
 
 The task reader records the bytes it actually parses, including both worklist lookups. Before the
 view is returned or kept, those observations must equal the request's task-input snapshot, and
-every observed dependency must still have its observed bytes. A changed-and-restored task therefore
-refuses the raced view rather than returning or keeping it under the original inputs (L40-R1-F3).
+every observed dependency must still have its observed bytes. A mismatching computation is tried
+once more; two mismatching attempts refuse instead of returning or keeping a raced view.
+
+**Only what the view read** (MIK-R42). The strict task lookup records the leaf's own document and
+nothing it merely ruled out when a claimant is established
+(:func:`agents_remember.tasks.leaf_decisions.strict_leaf_doc`), so a
+write to another leaf's document, a new document or an edit of the master's own ``task.json``
+neither changes the key nor fails a kept view's recheck. A document the computation read that the
+key did not identify, or read with other bytes, is a change; a document the key identified that the
+computation did not read at all is not (:func:`moved_inputs`).
+When the lookup runs and finds no claimant it records all opened documents and its JSON listing;
+this is evidence of absence, not a computation that never performed the lookup.
 
 **Bounds.** At most :data:`CAPACITY` views are kept, least recently used first out, and none is
 served after :data:`MAX_AGE_SECONDS`. The memo lives in the process that serves the reviewer: a
@@ -52,7 +65,13 @@ from typing import TYPE_CHECKING, Final
 
 from agents_remember.application.knowledge_gate import memo as gate_memo
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
-from agents_remember.kernel.recorded_reads import ABSENT, CONFLICTING, file_identity, recorded_reads
+from agents_remember.kernel.recorded_reads import (
+    ABSENT,
+    changed_observations,
+    has_failed_observation,
+    recorded_reads,
+    replay_reads,
+)
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeTreeDiff,
@@ -110,7 +129,7 @@ class _Kept:
     reads: tuple[tuple[str, str], ...]
 
     def still_read_the_same(self) -> bool:
-        return all(file_identity(Path(path)) == seen for path, seen in self.reads)
+        return not changed_observations(dict(self.reads))
 
 
 LEAF_VIEW_MEMO: Final[BoundedMemo[LeafViewKey, _Kept]] = BoundedMemo(CAPACITY)
@@ -164,19 +183,26 @@ def remembered(key: LeafViewKey, *, now: float | None = None) -> LeafViewParts |
         return None
     if not kept.still_read_the_same():
         return None  # a file outside the trees changed since: compute again
+    replay_reads(dict(kept.reads))
     return kept.parts
 
 
-def moved_inputs(key: LeafViewKey, reads: dict[str, str]) -> tuple[str, ...]:
-    """Actual reads that differ from the request's task inputs or from their bytes now."""
+def moved_inputs(key: LeafViewKey | None, reads: dict[str, str]) -> tuple[str, ...]:
+    """Actual reads that differ from the request's task inputs or from their bytes now.
+
+    A task document that the key named and the computation never opened is *not read*, which is
+    not a change (a worklist that applies to no leaf stops before it reads the task).
+    """
 
     # L40-R1-F3: a task can change and return to its original bytes during the computation.
     # Compare the bytes actually parsed by both lookups with the request's input snapshot.
-    expected, actual = dict(key.task_reads), dict(_task_reads(key.task_root, reads))
+    expected, actual = (
+        ({}, {}) if key is None else (dict(key.task_reads), dict(_task_reads(key.task_root, reads)))
+    )
     moved = {
-        path for path in expected.keys() | actual.keys() if expected.get(path) != actual.get(path)
+        path for path, seen in actual.items() if path not in expected or expected[path] != seen
     }
-    moved.update(path for path, seen in reads.items() if file_identity(Path(path)) != seen)
+    moved.update(changed_observations(reads))
     return tuple(sorted(moved))
 
 
@@ -194,8 +220,7 @@ def remember(key: LeafViewKey, parts: LeafViewParts, reads: dict[str, str]) -> N
     """Keep the parts of a view over complete inputs, with the files it read outside the trees."""
 
     if (
-        CONFLICTING in reads.values()
-        or any(seen.startswith("unreadable (") for seen in reads.values())
+        has_failed_observation(reads)
         or ABSENT in dict(_task_reads(key.task_root, reads)).values()
         or moved_inputs(key, reads)
     ):

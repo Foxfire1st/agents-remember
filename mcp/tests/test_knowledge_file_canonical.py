@@ -69,6 +69,8 @@ def test_only_identified_entry_positions_are_sorted() -> None:
     ("payload", "reason"),
     [
         (b'{"a": 1, "a": 2}', "repeats key"),
+        (b'{"b": 1, "a": 2, "a": 3, "b": 4, "c": 5}', r"repeats key\(s\): \['a', 'b'\]"),
+        (b'{"x": {"a": 1, "a": 1}}', "repeats key"),
         (b'{"a": NaN}', "not a JSON value"),
         ('﻿{"a": 1}'.encode(), "byte-order mark"),
         (b'{"a": "\xff"}', "UTF-8"),

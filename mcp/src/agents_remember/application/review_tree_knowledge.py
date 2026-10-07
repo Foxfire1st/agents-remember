@@ -38,26 +38,22 @@ process that also answers every click, so it is built not to compete with them:
   (:func:`_measured_tree_diff`);
 * both computed parts are kept in a bounded in-process memo keyed by exact identities
   (:mod:`.review_leaf_view_memo`), so a repeat for unchanged trees computes neither;
-* the cyclic garbage collector is paused while the worklist is computed
-  (:func:`_cyclic_collector_paused`): parsing two knowledge trees allocates millions of objects,
-  which triggered several whole-heap collections, and each one stops every thread of the process.
+* each uncached worklist runs in the exact package's child interpreter (MIK-R42), so parsing
+  knowledge trees and cyclic collection do not compete with the dashboard's subject reads.
 """
 
 from __future__ import annotations
 
-import gc
 import json
 import re
-import threading
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from agents_remember.application.knowledge_currentness import CodeTree, invariant_currentness
-from agents_remember.application.knowledge_worklist import leaf_worklist, read_leaf_worklist
-from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
+from agents_remember.application.knowledge_worklist import read_leaf_worklist
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees, CapturedBase
 from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
     resolve_review_candidate,
@@ -79,13 +75,23 @@ from agents_remember.application.review_unexplained_lane import (
     classify_changed_path,
     unexplained_lane,
 )
-from agents_remember.kernel.git_command import read_git_blob_bytes, read_git_blobs_bytes, run_git
+from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
+from agents_remember.kernel.git_command import (
+    PARSED_DIFF_OPTIONS,
+    read_git_blob_bytes,
+    read_git_blobs_bytes,
+    run_git,
+)
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.kernel.recorded_reads import recorded_reads
+from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
+from agents_remember.kernel.reviewer_worklist_process import (
+    ReviewerWorklistProcesses,
+    WorklistProcessError,
+)
 from agents_remember.memory.knowledge_index import HistoryRow, KnowledgeIndex, is_indexed_path
-from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
-from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, REFERENCE_MAX_LENGTH
+from agents_remember.models.knowledge.review import ReviewRefusal, ReviewRefusalCode
 from agents_remember.models.knowledge.review_lane import (
     ReviewFileClassification,
     ReviewUnexplainedLane,
@@ -112,9 +118,10 @@ __all__ = [
     "read_review_trees",
     "side_currentness",
     "snake_keys",
-    "worklist_view",
 ]
 
+# One computation, and at most one more when an input the view read changed meanwhile.
+_COMPUTE_ATTEMPTS: Final = 2
 _HISTORY_PREFIX: Final = f"{KNOWLEDGE_ROOT}/history/"
 _PATCH_LIMIT: Final = PROSE_MAX_LENGTH - 200
 _STATUS: Final[dict[str, Literal["added", "deleted", "modified", "renamed", "type_changed"]]] = {
@@ -130,7 +137,12 @@ _IDENTIFIER_KEY = re.compile(r"^[a-z][A-Za-z0-9]*$")
 _CAMEL_HUMP = re.compile(r"(?<=[a-z0-9])([A-Z])")
 
 
-def read_review_trees(config: McpRuntimeConfig, query: ReviewTreesQuery) -> ReviewTreesResult:
+def read_review_trees(
+    config: McpRuntimeConfig,
+    query: ReviewTreesQuery,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
+) -> ReviewTreesResult:
     """The tree view of one leaf: its comparison, knowledge diff, currentness and worklist."""
 
     found = _comparison(config, query)
@@ -156,7 +168,7 @@ def read_review_trees(config: McpRuntimeConfig, query: ReviewTreesQuery) -> Revi
         return _focused(query, trees, lane=unexplained_lane(trees))
     if query.invariants:
         return _focused(query, trees, entries=tree_entries(trees, query.invariants))
-    return _view(query, contract, trees)
+    return _view(query, contract, trees, processes=processes)
 
 
 def _comparison(
@@ -197,10 +209,14 @@ def _resolved(
 
 
 def _view(
-    query: ReviewTreesQuery, contract: WorktreeContract, trees: ReviewTrees
+    query: ReviewTreesQuery,
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
 ) -> ReviewTreesResult:
     record = trees.record
-    parts = _leaf_wide_parts(contract, trees)
+    parts = _leaf_wide_parts(contract, trees, processes=processes)
     if isinstance(parts, ReviewRefusal):
         return ReviewTreesResult(
             state="refused",
@@ -224,7 +240,10 @@ def _view(
 
 
 def _leaf_wide_parts(
-    contract: WorktreeContract, trees: ReviewTrees
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
 ) -> LeafViewParts | ReviewRefusal:
     """The view's knowledge diff and worklist: the kept ones for these exact trees, or computed.
 
@@ -232,43 +251,70 @@ def _leaf_wide_parts(
     (:func:`~.review_leaf_view_memo.leaf_view_key`). They are kept only when every read behind
     them succeeded: both knowledge sides readable, no Git read of the diff failed, and a
     ``complete`` worklist. Anything else is returned as computed and read again next time.
+
+    An input the view read that changed while it was being computed (MIK-R42 ruling 2) does not
+    refuse the reader: the view is computed once more on the state that exists now, with a key
+    taken again. Two mismatching attempts are answered as such; sharing may have supplied the
+    first attempt from a computation that began before this request.
     """
 
-    key = leaf_view_key(contract, trees)
-    kept = None if key is None else remembered(key)
-    if kept is not None:
-        return kept
-    parts, settled, reads = _compute_leaf_parts(contract, trees)
-    moved = () if key is None else moved_inputs(key, reads)
-    if moved:
-        return ReviewRefusal(
-            code="candidate_unresolved",
-            detail="task document or dependency changed while the tree view was being composed",
-            next_action="reopen the review so the view is computed from stable inputs",
-            offending_input="; ".join(moved),
-        )
-    if key is not None and settled:
-        remember(key, parts, reads)
-    return parts
+    moved: tuple[str, ...] = ()
+    for _attempt in range(_COMPUTE_ATTEMPTS):
+        key = leaf_view_key(contract, trees)
+        kept = None if key is None else remembered(key)
+        if kept is not None:
+            return kept
+        try:
+            parts, settled, reads = _compute_leaf_parts(contract, trees, processes=processes)
+        except WorklistProcessError as error:
+            return ReviewRefusal(
+                code=cast(ReviewRefusalCode, error.code),
+                detail=str(error)[:PROSE_MAX_LENGTH],
+                next_action=error.next_action,
+                offending_input="reviewer worklist process",
+            )
+        moved = moved_inputs(key, reads)
+        if not moved:
+            if key is not None and settled:
+                remember(key, parts, reads)
+            return parts
+    return ReviewRefusal(
+        code="inputs_changing",
+        detail=(
+            "task documents or other inputs of the view did not match the request in "
+            f"either of {_COMPUTE_ATTEMPTS} computation attempts: {'; '.join(moved)}"
+        )[:PROSE_MAX_LENGTH],
+        next_action="retry once the named inputs stop changing",
+        offending_input="; ".join(moved)[:REFERENCE_MAX_LENGTH],
+    )
 
 
 def _compute_leaf_parts(
-    contract: WorktreeContract, trees: ReviewTrees
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
 ) -> tuple[LeafViewParts, bool, dict[str, str]]:
     """Compute the view while observing its inputs; failed reads leave it unkeepable."""
 
     available = trees.before.database is not None and trees.after.database is not None
-    with recorded_reads() as reads:
-        measured = (
-            _measured_tree_diff(
-                trees.memory_repository,
-                trees.before.wire.tree,
-                trees.record.memory_candidate.tree,
+    reads: dict[str, str] = {}
+    try:
+        with recorded_reads() as reads:
+            measured = (
+                _measured_tree_diff(
+                    trees.memory_repository,
+                    trees.before.wire.tree,
+                    trees.record.memory_candidate.tree,
+                )
+                if available
+                else None
             )
-            if available
-            else None
-        )
-        worklist, settled = _worklist_view(contract, trees, live=trees.live)
+            worklist, settled = _worklist_view(
+                contract, trees, live=trees.live, processes=processes
+            )
+    finally:
+        replay_reads(reads)
     parts = LeafViewParts(None if measured is None else measured.diff, worklist)
     return parts, measured is not None and measured.complete and settled, reads
 
@@ -484,8 +530,7 @@ def _listed_changes(repository: Path, before: str, after: str) -> list[_Listed]:
         repository,
         [
             "diff",
-            "--no-color",
-            "--no-ext-diff",
+            *PARSED_DIFF_OPTIONS,
             "--raw",
             "--no-abbrev",
             "-z",
@@ -540,8 +585,7 @@ def _patches(
         return [""] * len(listed), True
     args = [
         "diff",
-        "--no-color",
-        "--no-ext-diff",
+        *PARSED_DIFF_OPTIONS,
         "-M",
         before,
         after,
@@ -734,16 +778,12 @@ def side_currentness(trees: ReviewTrees) -> dict[str, dict[str, Any]]:
 # -- rule 3: the worklist view -----------------------------------------------------------------------
 
 
-def worklist_view(
-    contract: WorktreeContract, trees: ReviewTrees, *, live: bool
-) -> ReviewWorklistView:
-    """The leaf's current worklist: computed for a live leaf, the persisted one for a record."""
-
-    return _worklist_view(contract, trees, live=live)[0]
-
-
 def _worklist_view(
-    contract: WorktreeContract, trees: ReviewTrees, *, live: bool
+    contract: WorktreeContract,
+    trees: ReviewTrees,
+    *,
+    live: bool,
+    processes: ReviewerWorklistProcesses | None = None,
 ) -> tuple[ReviewWorklistView, bool]:
     """The worklist view, and whether it is a computed view over complete inputs (only then is it
     kept).
@@ -756,8 +796,16 @@ def _worklist_view(
         candidate = CandidateTrees(
             code=trees.record.code_candidate.tree, memory=trees.record.memory_candidate.tree
         )
-        with _cyclic_collector_paused():
-            document = leaf_worklist(contract, persist=False, candidate=candidate)
+        if trees.record.code_base.commit is None or trees.record.memory_base.commit is None:
+            raise WorklistProcessError("reviewer worklist comparison has no captured base commits")
+        base = CapturedBase(
+            code=trees.record.code_base.commit,
+            memory=trees.record.memory_base.commit,
+            read_tree=trees.before.wire.tree,
+        )
+        document = isolated_leaf_worklist(
+            contract, candidate=candidate, base=base, processes=processes
+        )
         source: Literal["computed", "persisted", "absent"] = "computed"
     else:
         document = read_leaf_worklist(contract.contract_path)
@@ -770,6 +818,14 @@ def _worklist_view(
             ),
             False,
         )
+    if (
+        live
+        and document.get("state") == "complete"
+        and not _bound(document.get("pairing") or {}, trees)
+    ):
+        raise WorklistProcessError(
+            "reviewer worklist child result does not bind the supplied comparison"
+        )
     items = tuple(dict(item) for item in document.get("items", ()))
     view = ReviewWorklistView(
         source=source,
@@ -781,41 +837,6 @@ def _worklist_view(
         incomplete=tuple(snake_keys(list(document.get("incomplete", ())))),
     )
     return view, live and document.get("state") == "complete"
-
-
-class _CollectorPause:
-    """How many worklist computations hold the pause, and whether the first one found it on."""
-
-    lock: Final = threading.Lock()
-    holders = 0
-    switch_back_on = False
-
-
-@contextmanager
-def _cyclic_collector_paused() -> Iterator[None]:
-    """Pause Python's cyclic garbage collector while one worklist is computed.
-
-    Computing a worklist parses both knowledge trees, which allocates millions of short-lived
-    objects. That made the collector run whole-heap collections during the parse (three or four of
-    0.1 to 0.4 s each on the real repository), and a collection stops every thread of the process:
-    each click answered meanwhile waited for them. None of those objects is in a reference cycle,
-    so reference counting frees them without the collector: the pause costs no memory (measured)
-    and makes the computation itself shorter. The collector is switched back on when the last
-    computation that paused it ends, also on an error, and only if it was on before.
-    """
-
-    with _CollectorPause.lock:
-        if _CollectorPause.holders == 0:
-            _CollectorPause.switch_back_on = gc.isenabled()
-            gc.disable()
-        _CollectorPause.holders += 1
-    try:
-        yield
-    finally:
-        with _CollectorPause.lock:
-            _CollectorPause.holders -= 1
-            if _CollectorPause.holders == 0 and _CollectorPause.switch_back_on:
-                gc.enable()
 
 
 def _bound(pairing: Mapping[str, Any], trees: ReviewTrees) -> bool:

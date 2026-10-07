@@ -34,9 +34,11 @@ from agents_remember.kernel.git_command import (
     admit_private_git_preparation,
     inspect_git_preparation,
     preparation_command,
+    read_git_blobs_bytes,
     read_git_commit_bytes,
     run_git,
     run_git_preparation,
+    shared_blob_reads,
 )
 from agents_remember.kernel.git_preparation import (
     GitPreparationError,
@@ -116,6 +118,49 @@ class DecoyRepositoryTests(unittest.TestCase):
             self.assertEqual(head_commit(decoy), decoy_before)  # the decoy did NOT
             self.assertEqual((real / "real.txt").read_text(encoding="utf-8"), "two\n")
             self.assertFalse((decoy / "real.txt").exists())
+
+
+class SharedBlobReadTests(unittest.TestCase):
+    """Within a shared-read block a blob is read from a repository once (MIK-R42)."""
+
+    def test_a_repeated_read_is_answered_from_the_block_and_never_crosses_repositories(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first, second = Path(tmp) / "first", Path(tmp) / "second"
+            for repo in (first, second):
+                _init(repo)
+            _commit(first, "a.txt", "alpha\n")
+            _commit(first, "b.txt", "beta\n")
+            alpha, beta = (
+                run_git(first, ["rev-parse", f"HEAD:{name}"]).stdout.strip()
+                for name in ("a.txt", "b.txt")
+            )
+            spawned = []
+            real = subprocess.run
+
+            def counting(argv: list[str], *args: object, **kwargs: object) -> object:
+                spawned.append(argv)
+                return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+            with patch("agents_remember.kernel.git_command.subprocess.run", counting):
+                read_git_blobs_bytes(first, [alpha])
+                read_git_blobs_bytes(first, [alpha])
+                assert len(spawned) == 2  # outside a block every read goes to Git
+                spawned.clear()
+                with shared_blob_reads():
+                    one = read_git_blobs_bytes(first, [alpha, beta])
+                    again = read_git_blobs_bytes(first, [beta, alpha])
+                    assert len(spawned) == 1 and one == again
+                    assert list(again) == sorted([alpha, beta])
+                    read_git_blobs_bytes(first, [alpha])
+                    assert len(spawned) == 1
+                    # The same blob ID is not the same object in a repository that lacks it.
+                    with self.assertRaises(GitPreparationError):
+                        read_git_blobs_bytes(second, [alpha])
+                spawned.clear()
+                read_git_blobs_bytes(first, [alpha])
+                assert len(spawned) == 1  # the block's answers did not outlive it
 
 
 class RunnerContractTests(unittest.TestCase):
