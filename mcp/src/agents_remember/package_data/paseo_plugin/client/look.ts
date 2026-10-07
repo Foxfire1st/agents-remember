@@ -38,6 +38,8 @@ export const APP_SETTINGS_KEY = "@paseo:app-settings";
 export const PANEL_STATE_KEY = "panel-state";
 // The look the user had outside the frame, kept so a standalone tab can take it back.
 export const STANDALONE_LOOK_KEY = "ar-plugin:standalone-look";
+// One opening migration for the sidebar that earlier embedded builds closed on every load.
+export const SIDEBAR_OPENED_KEY = "ar-plugin:native-sidebar-opened-v1";
 // What the app shows while it has stored no sidebar state yet.
 const SIDEBAR_OPEN_BY_DEFAULT = true;
 const SIDEBAR_SETTLE_MS = 250;
@@ -263,14 +265,30 @@ export function recordAppWrite(storage: StorageLike, usersLook: boolean, key: st
 }
 
 /**
- * Collapse the native sidebar once the workspace is on screen, through the app's own toggle,
- * leaving the grouped AR sidebar as the initial navigation. Afterwards the visible toggle leaves
- * closing and reopening it to the user. A menu click before the first poll also takes ownership.
+ * Open an old stored closed sidebar once per browser, through the app's own toggle. After this
+ * migration the host owns its stored open/closed state. A missing state already means open.
+ * A user click before the first poll also takes ownership; no later load changes their choice.
  */
-export function collapseNativeSidebarAtLoad(page: PluginPage): void {
+export function openNativeSidebarOnce(page: PluginPage): void {
+  const storage = page.localStorage;
+  const migrated = () => storage.getItem(SIDEBAR_OPENED_KEY) !== null;
+  const mark = () => storage.setItem(SIDEBAR_OPENED_KEY, "done");
+  try {
+    if (migrated()) return;
+    if (sidebarFlag(storage) !== false) {
+      mark();
+      return;
+    }
+  } catch {
+    // Without a durable marker an automatic click could repeat at every load.
+    return;
+  }
   let attempts = 0;
   const onMenuClick = (event: Event) => {
-    if ((event.target as Element | null)?.closest?.('[data-testid="menu-button"]')) finish();
+    if ((event.target as Element | null)?.closest?.('[data-testid="menu-button"]')) {
+      finish();
+      try { mark(); } catch { /* No automatic click without the marker. */ }
+    }
   };
   const finish = () => {
     page.window.clearInterval(timer);
@@ -282,7 +300,13 @@ export function collapseNativeSidebarAtLoad(page: PluginPage): void {
     const expanded = toggle?.getAttribute("aria-expanded");
     if (expanded === "true" || expanded === "false") {
       finish();
-      if (expanded === "true") toggle.click();
+      try {
+        if (migrated()) return;
+        mark();
+      } catch {
+        return;
+      }
+      if (expanded === "false") toggle.click();
     } else if (attempts >= SIDEBAR_ATTEMPTS) {
       finish();
     }

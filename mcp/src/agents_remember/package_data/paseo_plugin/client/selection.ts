@@ -9,6 +9,15 @@ import type { PluginPage } from "./page";
 const AGENT_TAB_PREFIX = "workspace-tab-agent_";
 const SELECTED_TABS = `[data-testid^="${AGENT_TAB_PREFIX}"][aria-selected="true"]`;
 
+// The hierarchy subscribes before the bridge starts this page's live publisher. Fan out the
+// same value after the bridge receives it; do not retain an earlier selection or read it twice.
+const selectedChatListeners = new Set<(agentIds: string[]) => void>();
+
+export function onSelectedChats(changed: (agentIds: string[]) => void): () => void {
+  selectedChatListeners.add(changed);
+  return () => { selectedChatListeners.delete(changed); };
+}
+
 export function watchSelectedChats(page: PluginPage, changed: (agentIds: string[]) => void): () => void {
   let last = "";
   const publish = () => {
@@ -24,6 +33,7 @@ export function watchSelectedChats(page: PluginPage, changed: (agentIds: string[
     if (value === last) return;
     last = value;
     changed(agentIds);
+    for (const listener of selectedChatListeners) listener(agentIds);
   };
   const observer = new page.window.MutationObserver(publish);
   observer.observe(page.document.documentElement, {

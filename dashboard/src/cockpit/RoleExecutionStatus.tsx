@@ -1,46 +1,32 @@
-// The launcher bar's lines about the selected execution: its status and detail, the note that
-// the host could not be reached, the agent's last reply, the report path, and the Revive control.
-// The status comes from the agent's state on every refresh; nothing here polls.
+// The launcher shows one actionable failure line. Execution details belong to the chat.
 import type { RoleScopedExecution } from "./roleLaunchModel";
 
-export const HOST_UNREACHABLE_LINE = "host unreachable; showing the last known status";
-// The reason of a daemon that does not answer; every other reason is shown beside the line.
-const DAEMON_DOWN_REASON = "paseo_daemon_unreachable";
+export const HOST_UNREACHABLE_LINE = "The host is unreachable. Check the connection and refresh.";
 
 export function RoleExecutionStatus({
   execution,
+  failure,
+  failureTestId,
   className,
 }: {
-  execution: RoleScopedExecution;
+  execution?: RoleScopedExecution;
+  failure?: string;
+  failureTestId?: string;
   className: string;
 }) {
-  const summary = execution.result?.summary;
-  const report = execution.report;
-  const reason = execution.hostUnreachableReason;
+  const reason = execution?.hostUnreachableReason;
+  const hostFailure = execution?.hostUnreachable
+    ? HOST_UNREACHABLE_LINE + (reason ? " (" + reason + ")" : "")
+    : undefined;
+  const uncertainty = execution?.status.toLowerCase() === "unknown"
+    ? "The launch is unresolved. " + (execution.detail || "No usable execution receipt has been returned.") + " Refresh the result or retry the same saved request."
+    : undefined;
+  const message = [failure, hostFailure, uncertainty].filter(Boolean).join(" ");
+  if (!message) return null;
   return (
-    <>
-      <div className={className} role="status" data-status={execution.status.toLowerCase()} data-testid="role-execution-status">
-        Current role execution: {execution.status}
-        {execution.detail ? " · " + execution.detail : ""}
-      </div>
-      {execution.hostUnreachable ? (
-        <div className={className} role="status" data-testid="role-host-unreachable" title={reason} style={{ color: "var(--alarm)" }}>
-          {HOST_UNREACHABLE_LINE}
-          {reason && !reason.startsWith(DAEMON_DOWN_REASON) ? " (" + reason + ")" : ""}
-        </div>
-      ) : null}
-      {summary ? (
-        <div className={className} data-testid="role-result-summary" style={{ maxHeight: "6.5rem", overflowY: "auto", whiteSpace: "pre-wrap" }}>
-          Last reply: {summary}
-        </div>
-      ) : null}
-      {report?.path ? (
-        <div className={className} data-testid="role-report-path" title={report.canonicalPath}>
-          Report: {report.path}
-          {report.available ? "" : " (not written yet)"}
-        </div>
-      ) : null}
-    </>
+    <div className={className} role="alert" data-testid={failure ? failureTestId : "role-host-unreachable"} style={{ color: "var(--alarm)" }}>
+      {message}
+    </div>
   );
 }
 

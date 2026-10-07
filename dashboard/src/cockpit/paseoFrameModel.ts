@@ -10,30 +10,6 @@ export interface PaseoAgentTarget {
   workspaceId?: string;
 }
 
-const AGENT_STATUSES = ["initializing", "idle", "running", "error", "closed"] as const;
-export type PaseoAgentStatus = (typeof AGENT_STATUSES)[number];
-
-export interface PaseoHierarchyAgent {
-  agentId: string;
-  name: string;
-  provider: string;
-  status: PaseoAgentStatus;
-  pendingPermissionCount: number;
-  requiresAttention: boolean;
-  attentionReason: "finished" | "error" | "permission" | null;
-  providerUnavailable: boolean;
-  workspaceId: string | null;
-  parentAgentId: string | null;
-  archivedAt: string | null;
-  labels: Record<string, string>;
-}
-
-export interface PaseoHierarchySnapshot {
-  agents: PaseoHierarchyAgent[];
-  projects: { projectId: string; name: string }[];
-  workspaces: { workspaceId: string; projectId: string | null; name: string }[];
-}
-
 export type PaseoFrameUnavailableReason =
   "not-configured" | "origin-not-listed" | "unreachable" | "backend";
 
@@ -55,8 +31,6 @@ export type PaseoPluginMessage =
   | { type: "pong" }
   | { type: "shown"; agentId?: string; workspaceId?: string }
   | { type: "error"; code: string; agentId?: string; message?: string }
-  | ({ type: "hierarchy" } & PaseoHierarchySnapshot)
-  | { type: "hierarchy-error"; message: string }
   | { type: "selection"; agentIds: string[] }
   | {
       type: "navigation-error";
@@ -186,49 +160,6 @@ function nullableText(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && value.length > 0);
 }
 
-function agentActivity(row: Record<string, unknown>): boolean {
-  return (
-    Boolean(text(row.provider)) &&
-    AGENT_STATUSES.some((status) => status === row.status) &&
-    Number.isSafeInteger(row.pendingPermissionCount) &&
-    (row.pendingPermissionCount as number) >= 0 &&
-    typeof row.requiresAttention === "boolean" &&
-    [null, "finished", "error", "permission"].some((reason) => reason === row.attentionReason) &&
-    typeof row.providerUnavailable === "boolean"
-  );
-}
-
-function hierarchy(message: Record<string, unknown>): PaseoHierarchySnapshot | null {
-  const { agents, projects, workspaces } = message;
-  if (!Array.isArray(agents) || !Array.isArray(projects) || !Array.isArray(workspaces)) return null;
-  const validAgents = agents.every((value) => {
-    const row = record(value);
-    const labels = record(row?.labels);
-    return (
-      row &&
-      text(row.agentId) &&
-      typeof row.name === "string" &&
-      [row.workspaceId, row.parentAgentId, row.archivedAt].every(nullableText) &&
-      labels &&
-      Object.values(labels).every((label) => typeof label === "string") &&
-      agentActivity(row)
-    );
-  });
-  const validProjects = projects.every((value) => {
-    const row = record(value);
-    return row && text(row.projectId) && typeof row.name === "string";
-  });
-  const validWorkspaces = workspaces.every((value) => {
-    const row = record(value);
-    return (
-      row && text(row.workspaceId) && nullableText(row.projectId) && typeof row.name === "string"
-    );
-  });
-  if (!validAgents || !validProjects || !validWorkspaces) return null;
-  if (new Set(agents.map((row) => row.agentId)).size !== agents.length) return null;
-  return { agents, projects, workspaces } as PaseoHierarchySnapshot;
-}
-
 /** A message of the AR plugin's control channel, or `null` for anything else. */
 export function parsePluginMessage(data: unknown): PaseoPluginMessage | null {
   const message = record(data);
@@ -253,14 +184,6 @@ export function parsePluginMessage(data: unknown): PaseoPluginMessage | null {
 
 function parseNavigationMessage(message: Record<string, unknown>): PaseoPluginMessage | null {
   switch (message.type) {
-    case "hierarchy": {
-      const snapshot = hierarchy(message);
-      return snapshot ? { type: "hierarchy", ...snapshot } : null;
-    }
-    case "hierarchy-error": {
-      const detail = text(message.message);
-      return detail ? { type: "hierarchy-error", message: detail } : null;
-    }
     case "selection":
       return selectionMessage(message.agentIds);
     case "navigation-error":

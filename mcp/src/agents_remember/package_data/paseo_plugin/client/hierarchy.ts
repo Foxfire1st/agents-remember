@@ -1,6 +1,8 @@
 // Public Paseo SDK directories and per-agent composer pills share this one embed lifetime.
 // The structural types are the injected subset of @getpaseo/client and @getpaseo/plugin/client;
 // this browser-independent code is exercised by the dashboard's existing TypeScript test gate.
+import { onSelectedChats } from "./selection";
+
 export interface NativeProject {
   projectId: string;
   projectDisplayName: string;
@@ -88,22 +90,24 @@ export function startHierarchy(
   const pills = new Map<string, { workspaceId: string; parentId: string; registration: Registration }>();
   const subscriptions: Subscription<any>[] = [];
   const listeners: Array<() => void> = [];
+  let selectedCandidates = new Set<string>();
   let queued: Array<{ kind: "project.update" | "agent_update" | "workspace_update"; apply: () => void }> = [];
   let agentSnapshot: Directory<{ agent: NativeAgent }> | undefined;
   let workspaceSnapshot: Directory<NativeWorkspace> | undefined;
 
   const publish = () => {
-    if (!live || !ready) return;
+    if (!live) return;
     for (const [id, pill] of pills) {
       const agent = agents.get(id);
-      if (!agent || agent.archivedAt || agent.workspaceId !== pill.workspaceId || !agent.labels?.["paseo.parent-agent-id"]?.trim()) {
+      if (!selectedCandidates.has(id) || !agent || agent.archivedAt || agent.workspaceId !== pill.workspaceId || !agent.labels?.["paseo.parent-agent-id"]?.trim()) {
         pill.registration.remove();
         pills.delete(id);
       }
     }
+    if (!ready) return;
     for (const agent of agents.values()) {
       const parentId = agent.labels?.["paseo.parent-agent-id"]?.trim();
-      if (!parentId || !agent.workspaceId || agent.archivedAt) continue;
+      if (!selectedCandidates.has(agent.id) || !parentId || !agent.workspaceId || agent.archivedAt) continue;
       const current = pills.get(agent.id);
       if (current?.parentId === parentId) continue;
       const button: ParentButton = {
@@ -133,6 +137,10 @@ export function startHierarchy(
     const value = JSON.stringify(snapshot);
     if (value !== last) { last = value; post(snapshot); }
   };
+  listeners.push(onSelectedChats((agentIds) => {
+    selectedCandidates = new Set(agentIds);
+    publish();
+  }));
   const change = (kind: "project.update" | "agent_update" | "workspace_update", apply: () => void) => {
     if (!live) return;
     if (!ready) queued.push({ kind, apply });

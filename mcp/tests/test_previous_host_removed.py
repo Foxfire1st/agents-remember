@@ -407,6 +407,7 @@ ROUTES = {
     "/api/role-launch/options": {"POST"},
     "/api/role-launch/dispatch": {"POST"},
     "/api/role-launch/result": {"POST"},
+    "/api/role-launch/report": {"POST"},
 }
 METHODS = ("GET", "POST", "PUT", "DELETE")
 
@@ -423,7 +424,7 @@ class FormerRouteTests(unittest.TestCase):
             transcript_root=root / "coordination" / "logs" / "mcp",
         )
 
-    def test_the_launcher_registers_its_four_routes_and_answers_404_on_the_former_paths(
+    def test_the_launcher_registers_its_five_routes_and_answers_404_on_the_former_paths(
         self,
     ) -> None:
         app = FastAPI()
@@ -438,10 +439,10 @@ class FormerRouteTests(unittest.TestCase):
                 with self.subTest(path=path, method=method):
                     self.assertEqual(client.request(method, path, json={}).status_code, 404)
         # The new paths are served: without a configured runtime the frame route says so, and
-        # the three others judge the request body they were sent.
+        # the four others judge the request body they were sent.
         frame = client.get("/api/role-launch/frame")
         self.assertEqual((frame.status_code, frame.json()["reason"]), (200, "not-configured"))
-        for path in ("options", "dispatch", "result"):
+        for path in ("options", "dispatch", "result", "report"):
             with self.subTest(path=path):
                 self.assertEqual(client.post(f"/api/role-launch/{path}", json={}).status_code, 422)
 

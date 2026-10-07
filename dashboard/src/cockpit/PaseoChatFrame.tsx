@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { css } from "../../styled-system/css";
-import type { SeriesNode, TaskDocNode } from "../types/projection";
-import { PaseoNavigation } from "./PaseoNavigation";
-import { groupPaseoChats } from "./paseoNavigationModel";
 import {
   PaseoFrameControl,
   type PaseoControlState,
@@ -14,7 +11,6 @@ import {
   type PaseoAgentTarget,
   type PaseoFrameDescriptor,
   type PaseoFrameUnavailableReason,
-  type PaseoHierarchySnapshot,
 } from "./paseoFrameModel";
 
 const UNAVAILABLE_HEADLINE: Record<PaseoFrameUnavailableReason, string> = {
@@ -135,21 +131,15 @@ function FrameUnavailable({
  */
 interface PaseoChatFrameProps {
   active: boolean;
-  navigationOpen: boolean;
   /** Identity of the launcher selection; a change means another execution is being displayed. */
   scope: string;
   target: PaseoAgentTarget | null;
-  taskDocuments: TaskDocNode[];
-  series: SeriesNode[];
 }
 
 function useFrameController(scope: string, target: PaseoAgentTarget | null) {
   const [frame, setFrame] = useState<PaseoFrameView | null>(null);
   const [control, setControl] = useState<PaseoControlState>("waiting");
   const [agentProblem, setAgentProblem] = useState<string | null>(null);
-  const [hierarchy, setHierarchy] = useState<PaseoHierarchySnapshot | null>(null);
-  const [hierarchyProblem, setHierarchyProblem] = useState<string | null>(null);
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [controller] = useState(
     () =>
@@ -158,9 +148,6 @@ function useFrameController(scope: string, target: PaseoAgentTarget | null) {
         setControl,
         setFrame,
         setAgentProblem,
-        setHierarchy,
-        setHierarchyProblem,
-        setSelection: setSelectedAgentIds,
       }),
   );
   const agentId = target?.agentId;
@@ -183,9 +170,6 @@ function useFrameController(scope: string, target: PaseoAgentTarget | null) {
     frame,
     control,
     agentProblem,
-    hierarchy,
-    hierarchyProblem,
-    selectedAgentIds,
     frameRef,
     controller,
   };
@@ -222,23 +206,11 @@ function useFrameDescriptor(active: boolean, controller: PaseoFrameControl) {
 
 export function PaseoChatFrame({
   active,
-  navigationOpen,
   scope,
   target,
-  taskDocuments,
-  series,
 }: PaseoChatFrameProps) {
   const state = useFrameController(scope, target);
   const { started, descriptor, retry } = useFrameDescriptor(active, state.controller);
-  const groups = useMemo(
-    () =>
-      groupPaseoChats(
-        state.hierarchy ?? { agents: [], projects: [], workspaces: [] },
-        taskDocuments,
-        series,
-      ),
-    [state.hierarchy, taskDocuments, series],
-  );
   if (!started) return <div className={frameShell} />;
   if (descriptor && !descriptor.available)
     return (
@@ -253,17 +225,6 @@ export function PaseoChatFrame({
       control={state.control}
       agentProblem={state.agentProblem}
       onRetry={retry}
-      navigationOpen={navigationOpen}
-      groups={groups}
-      selectedAgentIds={state.selectedAgentIds}
-      navigationLoading={!state.hierarchy}
-      hierarchyProblem={state.hierarchyProblem}
-      onNavigate={(agent) =>
-        state.controller.navigate({
-          agentId: agent.agentId,
-          ...(agent.workspaceId ? { workspaceId: agent.workspaceId } : {}),
-        })
-      }
     />
   );
 }
@@ -285,12 +246,6 @@ interface EmbeddedFrameProps {
   control: PaseoControlState;
   agentProblem: string | null;
   onRetry: () => void;
-  navigationOpen: boolean;
-  groups: ReturnType<typeof groupPaseoChats>;
-  selectedAgentIds: string[];
-  navigationLoading: boolean;
-  hierarchyProblem: string | null;
-  onNavigate: Parameters<typeof PaseoNavigation>[0]["onSelect"];
 }
 
 function EmbeddedFrame(props: EmbeddedFrameProps) {
@@ -299,27 +254,11 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
     frame,
     frameRef,
     control,
-    navigationOpen,
-    groups,
-    selectedAgentIds,
-    navigationLoading,
-    hierarchyProblem,
-    onNavigate,
   } = props;
   return (
     <div className={frameShell} data-testid="paseo-frame" data-control={control}>
       <FrameNotices {...props} />
       <div className={frameBody}>
-        {navigationOpen ? (
-          <PaseoNavigation
-            groups={groups}
-            selectedAgentIds={selectedAgentIds}
-            loading={navigationLoading}
-            unavailable={Boolean(hierarchyProblem)}
-            enabled={control === "ready" && !hierarchyProblem}
-            onSelect={onNavigate}
-          />
-        ) : null}
         <iframe
           key={frame.generation}
           ref={frameRef}
@@ -345,7 +284,6 @@ function FrameNotices({
   available,
   control,
   agentProblem,
-  hierarchyProblem,
   onRetry,
 }: EmbeddedFrameProps) {
   return (
@@ -361,11 +299,6 @@ function FrameNotices({
       {agentProblem ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">
           {agentProblem}
-        </div>
-      ) : null}
-      {hierarchyProblem ? (
-        <div role="status" className={frameNotice} data-testid="paseo-frame-hierarchy-problem">
-          {hierarchyProblem}
         </div>
       ) : null}
       {available.projectsWorkspaceDetail ? (

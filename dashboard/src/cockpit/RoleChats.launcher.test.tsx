@@ -23,6 +23,7 @@ const AGENTS: RoleAgentChoice[] = [
 type Reply = { status: number; body: unknown };
 let optionsReplies: Reply[] = [];
 let optionsRequests: Record<string, unknown>[] = [];
+let optionsBarrier: Promise<void> | null = null;
 
 function optionsReply(roleDefaults: Record<string, unknown>): Reply {
   return { status: 200, body: { roleDefaults, agents: AGENTS, catalogOrigin: "paseo:1", executions: [] } };
@@ -37,10 +38,12 @@ function renderLauncher() {
 beforeEach(() => {
   optionsReplies = [];
   optionsRequests = [];
+  optionsBarrier = null;
   sessionStorage.clear();
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     if (url !== "/api/role-launch/options") return new Response(JSON.stringify({ available: false, frameUrl: null }), { status: 503 });
     optionsRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    if (optionsBarrier) await optionsBarrier;
     const reply = optionsReplies.length > 1 ? optionsReplies.shift() : optionsReplies[0];
     return new Response(JSON.stringify(reply?.body), { status: reply?.status ?? 500 });
   }));
@@ -70,7 +73,7 @@ describe("launcher bar and the host catalog", () => {
 
   it("disables Start for an unoffered role default until an offered value is picked", async () => {
     optionsReplies = [optionsReply({ agent: "codex", model: "gpt-z", effort: null, available: false })];
-    const { getByRole, getByLabelText, findByTestId, queryByTestId } = renderLauncher();
+    const { getByRole, getByLabelText, findByTestId, queryByTestId, queryByRole } = renderLauncher();
 
     const problem = await findByTestId("role-choice-problem");
     expect(problem.textContent).toContain("Role default codex · gpt-z is not offered by the Paseo runtime");
@@ -78,13 +81,9 @@ describe("launcher bar and the host catalog", () => {
     expect(start.disabled).toBe(true);
     expect(optionsRequests).toEqual([{ role: "architect" }]);
     const unavailable = await findByTestId("paseo-frame-unavailable");
-    const toggle = getByRole("button", { name: "Hide chat navigation" });
-    expect(toggle.closest('[data-testid="role-launcher"]')?.querySelector("button,select,input")).toBe(toggle);
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(queryByRole("button", { name: /chat navigation/ })).toBeNull();
+    expect(getByLabelText("Role").closest('[data-testid="role-launcher"]')?.querySelector("button,select,input")).toBe(getByLabelText("Role"));
     expect(await findByTestId("paseo-frame-unavailable")).toBe(unavailable);
-    fireEvent.click(getByRole("button", { name: "Show chat navigation" }));
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(optionsRequests).toEqual([{ role: "architect" }]);
     expect(start.disabled).toBe(true);
 
@@ -122,40 +121,44 @@ describe("launcher bar and the host catalog", () => {
     const refresh = getByRole("button", { name: "Refresh role agents" }) as HTMLButtonElement;
     expect(refresh.disabled).toBe(false);
 
+    let release!: () => void;
+    optionsBarrier = new Promise<void>((resolve) => { release = resolve; });
     fireEvent.click(refresh);
+    await waitFor(() => expect(refresh.disabled).toBe(true));
+    expect(queryByRole("alert")?.textContent).toContain("no Paseo runtime configured");
+    release();
     await waitFor(() => expect(optionsRequests).toEqual([{ role: "architect" }, { role: "architect", refreshCatalog: true }]));
     await waitFor(() => expect(queryByRole("alert")).toBeNull());
     expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("shows a launch in progress as such, not as an error, and reads again", async () => {
+  it("rereads a launch in progress without an ordinary status line", async () => {
     // The backend's launch lock is held by a launch: the options route marks its refusal.
     optionsReplies = [
       { status: 409, body: { detail: "A role launch or result check is already in progress.", launchInProgress: true } },
       optionsReply({ agent: "codex", model: null, effort: null, available: true }),
     ];
-    const { getByRole, findByTestId, queryByRole, queryByTestId } = renderLauncher();
+    const { getByRole, getByTestId, queryByRole } = renderLauncher();
 
-    const line = await findByTestId("role-launch-in-progress");
-    expect(line.getAttribute("role")).toBe("status");
-    expect(line.textContent).toBe("A launch is in progress in this dashboard; this is read again when it has answered.");
+    await waitFor(() => expect(optionsRequests.length).toBe(1));
+    expect(getByTestId("role-launcher").querySelector('[role="status"]')).toBeNull();
     expect(queryByRole("alert")).toBeNull();
     expect(optionsRequests).toEqual([{ role: "architect" }]);
     expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(true);
 
-    // No click: the launcher reads again by itself, and the line goes when the read succeeds.
+    // No click: the launcher reads again by itself and restores Start when the read succeeds.
     await waitFor(() => expect(optionsRequests.length).toBe(2), { timeout: 4000 });
-    await waitFor(() => expect(queryByTestId("role-launch-in-progress")).toBeNull());
+    await waitFor(() => expect(getByTestId("role-launcher").querySelector('[role="status"],[role="alert"]')).toBeNull());
     expect(queryByRole("alert")).toBeNull();
     expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("keeps showing another refusal of the options route as an error", async () => {
     optionsReplies = [{ status: 409, body: { detail: "The selected Projects repository is not admitted by MCP settings." } }];
-    const { findByRole, queryByTestId } = renderLauncher();
+    const { findByRole, getByTestId } = renderLauncher();
 
     expect((await findByRole("alert")).textContent).toContain("(HTTP 409): The selected Projects repository is not admitted");
-    expect(queryByTestId("role-launch-in-progress")).toBeNull();
+    expect(getByTestId("role-launcher").querySelector('[role="status"]')).toBeNull();
     expect(optionsRequests.length).toBe(1);
   });
 });

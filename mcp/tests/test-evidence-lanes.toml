@@ -259,6 +259,7 @@ unit-regression = [
   "mcp/tests/test_role_instruction_corpus.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_report.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_serving_notifier_handoff.py",

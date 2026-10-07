@@ -334,3 +334,31 @@ describe("Cockpit notes reader takeover", () => {
     expect(view.getByTestId("notes-reader-viewer")).toBe(reader);
   });
 });
+
+
+describe("role report in the existing reader", () => {
+  it("renders the supplied report with the shared pane, no listing, and its existing back control", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const onBack = vi.fn();
+    const view = render(<NotesReaderViewer kind="role-report" report={{ path: "role.md", language: "markdown", content: "The **report**.", size: 15, truncated: false }} onBack={onBack} />);
+    expect((await view.findByText("report")).tagName.toLowerCase()).toBe("strong");
+    expect(view.queryByTestId("notes-rail")).toBeNull();
+    expect(view.container.querySelectorAll('[data-testid="dual-pane"]')).toHaveLength(1);
+    expect(view.getByTestId("notes-reader-open").textContent).toBe("role.md");
+    expect(view.getByText("Report")).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(view.getByTestId("notes-reader-back"));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+it("retains the supplied role report body, name and truncation notice in the shared pane", async () => {
+  const view = render(<NotesReaderViewer kind="role-report" report={{ path: "written-role.md", language: "markdown", content: "A **bounded** report.", size: 2097216, truncated: true }} onBack={vi.fn()} />);
+  expect((await view.findByText("bounded")).tagName.toLowerCase()).toBe("strong");
+  expect(view.getByTestId("notes-reader-open").textContent).toBe("written-role.md");
+  expect(view.getByTestId("notes-trunc-banner").textContent).toBe("Showing the first 2 MiB of 2,097,216 bytes");
+  expect(view.container.querySelectorAll('[data-testid="dual-pane"]')).toHaveLength(1);
+  expect(view.getByTestId("sidecar-pane").textContent).toBe("A bounded report.");
+});

@@ -3,6 +3,8 @@ import { css, cva } from "../../styled-system/css";
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import { sameTaskDocumentRef } from "../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
+import { readRoleReport, type RoleReportContent } from "../data/roleReport";
+import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import {
   EMPTY_ROLE_EFFORTS,
   EMPTY_ROLE_MODELS,
@@ -184,21 +186,19 @@ const roleLauncherMeta = css({
   overflowWrap: "anywhere",
 });
 function RoleLauncher({
-  navigationOpen,
-  onToggleNavigation,
   taskDocuments,
   series,
   roleDefaults,
   agents,
   selection,
   currentScopedExecution,
+  failureExecution,
   optionsReady,
   optionsLoading,
   busy,
   retryRequestId,
   optionsError,
   executionError,
-  launchInProgress,
   onSelectionChange,
   onLaunch,
   onRevive,
@@ -207,21 +207,19 @@ function RoleLauncher({
   onRefreshCatalog,
   onRefreshResult,
 }: {
-  navigationOpen: boolean;
-  onToggleNavigation: () => void;
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
   roleDefaults: RoleDefaults;
   agents: RoleAgentChoice[];
   selection: RoleLaunchSelection;
   currentScopedExecution?: RoleScopedExecution;
+  failureExecution?: RoleScopedExecution;
   optionsReady: boolean;
   optionsLoading: boolean;
   busy: boolean;
   retryRequestId?: string;
   optionsError: string | null;
   executionError: string | null;
-  launchInProgress: boolean;
   onSelectionChange: (selection: RoleLaunchSelection) => void;
   onLaunch: (selection: RoleLaunchSelection) => Promise<void>;
   onRevive: (selection: RoleLaunchSelection) => Promise<void>;
@@ -313,15 +311,6 @@ function RoleLauncher({
 
   return (
     <div className={roleLauncherGrid} data-testid="role-launcher">
-      <button
-        className={roleLauncherButton({ tone: "quiet" })}
-        type="button"
-        aria-expanded={navigationOpen}
-        aria-label={navigationOpen ? "Hide chat navigation" : "Show chat navigation"}
-        onClick={onToggleNavigation}
-      >
-        {navigationOpen ? "Hide navigation" : "Show navigation"}
-      </button>
       <label className={`${roleLauncherField} ${roleLauncherRoleField}`}>
         Role
         <select
@@ -504,37 +493,15 @@ function RoleLauncher({
         ) : null}
         <RoleReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={roleLauncherButton({ tone: "secondary" })} onRevive={() => void onRevive(launchSelection)} />
         {canRefreshResult ? <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role result" title="Refresh role result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
+        {optionsError ? <button className={roleLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button> : null}
         <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
       </div>
-      {selection.agentOverride && selectedAgent ? (
-        <div className={roleLauncherMeta} role="status" data-testid="role-capability-summary">
-          {"Using " + selectedAgent.label +
-            (selectedModel ? " · " + selectedModel.label : roleDefaults.model ? " · role model " + roleDefaults.model : "") +
-            (selectedModel
-              ? selectedModel.efforts?.length
-                ? " · " + (defaultEffort?.label ?? selectedModel.efforts.length + " effort choices")
-                : " · no effort choices"
-              : "")}
-        </div>
-      ) : null}
-      {choiceProblem || selectedAgent?.listingError ? (
-        <div className={roleLauncherMeta} role="alert" data-testid="role-choice-problem" style={{ color: "var(--alarm)" }}>
-          {[choiceProblem, selectedAgent?.listingError ? "Models of " + selectedAgent.label + " could not be listed: " + selectedAgent.listingError : null].filter(Boolean).join(" ")}
-        </div>
-      ) : null}
-      {currentScopedExecution ? <RoleExecutionStatus execution={currentScopedExecution} className={roleLauncherMeta} /> : null}
-      {optionsError ? (
-        <div className={roleLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>
-          {optionsError} <button className={roleLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button>
-        </div>
-      ) : null}
-      {executionError ? (
-        <div className={roleLauncherMeta} role="alert" style={{ color: "var(--alarm)" }}>{executionError}</div>
-      ) : null}
-      {optionsLoading ? <div className={roleLauncherMeta} role="status">Loading role launch options…</div> : null}
-      {launchInProgress && !optionsLoading ? (
-        <div className={roleLauncherMeta} role="status" data-testid="role-launch-in-progress">A launch is in progress in this dashboard; this is read again when it has answered.</div>
-      ) : null}
+      <RoleExecutionStatus
+        execution={failureExecution}
+        failure={[choiceProblem, selectedAgent?.listingError ? "Models of " + selectedAgent.label + " could not be listed: " + selectedAgent.listingError : null, optionsError, executionError].filter(Boolean).join(" ")}
+        failureTestId={choiceProblem || selectedAgent?.listingError ? "role-choice-problem" : "role-launch-error"}
+        className={roleLauncherMeta}
+      />
     </div>
   );
 
@@ -552,7 +519,7 @@ export function RoleChatsPane({
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
 }) {
-  const [navigationOpen, setNavigationOpen] = useState(true);
+  const [report, setReport] = useState<RoleReportContent | null>(null);
   const [selection, setSelection] = useState<RoleLaunchSelection>({ role: "architect" });
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
@@ -564,10 +531,11 @@ export function RoleChatsPane({
   const [executionState, setExecutionState] = useState<{ scope: RoleDocumentScope; value: RoleExecutionReceipt } | null>(null);
   const [executionErrorState, setExecutionErrorState] = useState<{ scope: RoleDocumentScope; message: string; sticky?: boolean } | null>(null);
   const [busyScope, setBusyScope] = useState<RoleLaunchSelection | null>(null);
-  const [launchWaitScope, setLaunchWaitScope] = useState<RoleDocumentScope | null>(null);
   const rereadTimer = useRef<number | undefined>(undefined);
+  const failureExecutionRef = useRef<{ scope: RoleDocumentScope; value: RoleExecutionReceipt } | null>(null);
   const [tasklessActiveRequests, setTasklessActiveRequests] = useState(readTasklessActiveRequests);
   const sentCatalogRefresh = useRef(0);
+  const explicitOptionsRefresh = useRef(false);
   const currentSelectionRef = useRef(selection);
   currentSelectionRef.current = selection;
   const tasklessActiveRequestsRef = useRef(tasklessActiveRequests);
@@ -621,12 +589,10 @@ export function RoleChatsPane({
     : null;
   const optionsLoading = Boolean(optionsLoadingScope && sameRoleOptionsScope(optionsLoadingScope, currentOptionsScope));
   const busy = Boolean(busyScope && sameRoleDocumentScope(roleDocumentScope(busyScope), currentDocumentScope));
-  const launchInProgress = Boolean(launchWaitScope && sameRoleDocumentScope(launchWaitScope, currentDocumentScope));
   // A launch holds the backend's launch lock for as long as it runs, and the options and result
   // routes answer that with a mark of their own. That is no error of the selection shown: the
-  // launcher says so and reads again shortly, until the launch has answered.
-  const waitForLaunch = useCallback((scope: RoleDocumentScope) => {
-    setLaunchWaitScope(scope);
+  // launcher reads again shortly, until the launch has answered.
+  const waitForLaunch = useCallback(() => {
     window.clearTimeout(rereadTimer.current);
     rereadTimer.current = window.setTimeout(() => setOptionsRefresh((current) => current + 1), LAUNCH_REREAD_MS);
   }, []);
@@ -668,16 +634,17 @@ export function RoleChatsPane({
             : {}),
         }
       : pendingTasklessExecution
-    : !optionsLoading && executionReceipt
-    ? executionReceipt
-    : !optionsLoading ? options?.execution ?? undefined : undefined;
+    : !optionsLoading ? executionReceipt ?? options?.execution ?? undefined : undefined;
+  const lastFailureExecution = failureExecutionRef.current;
+  const failureExecution = lastFailureExecution && isCurrentExecutionTarget(lastFailureExecution.scope, lastFailureExecution.value.requestId)
+    ? lastFailureExecution.value : currentScopedExecution;
   const retryRequestId = currentScopedExecution?.canRetry &&
     (!isTasklessRole(selection.role) || Boolean(currentScopedExecution.retryPayload))
     ? currentScopedExecution.requestId
     : undefined;
   const selectionComplete = launchSelectionComplete(selection);
 
-  // The frame follows the execution the launcher bar displays status for. Its host fields are
+  // The frame follows the launcher's selected execution. Its host fields are
   // read from the receipt itself (for a taskless role the options answer puts the saved
   // execution of the active request there), else from the options answer of a task-bound role.
   const frameScope = useMemo(() => JSON.stringify(currentDocumentScope), [currentDocumentScope]);
@@ -686,6 +653,8 @@ export function RoleChatsPane({
   useEffect(() => {
     if (!active || !selectionComplete) return;
     const requestScope = currentOptionsScope;
+    const retryOptions = explicitOptionsRefresh.current;
+    explicitOptionsRefresh.current = false;
     const refreshAgentCatalog = catalogRefresh > sentCatalogRefresh.current;
     if (refreshAgentCatalog) sentCatalogRefresh.current = catalogRefresh;
     const controller = new AbortController();
@@ -694,7 +663,6 @@ export function RoleChatsPane({
       ...(requestScope.agentId ? { agentId: requestScope.agentId } : {}),
       ...(refreshAgentCatalog ? { refreshCatalog: true } : {}),
     };
-    setOptionsErrorState(null);
     setOptionsLoadingScope(requestScope);
     setExecutionState((current) =>
       current && sameRoleDocumentScope(current.scope, currentDocumentScope) ? null : current,
@@ -708,7 +676,7 @@ export function RoleChatsPane({
       if (!response.ok) {
         const value = (await response.json().catch(() => ({}))) as { detail?: unknown; launchInProgress?: unknown };
         if (isCurrentOptionsScope(requestScope) && value.launchInProgress === true) {
-          waitForLaunch(currentDocumentScope);
+          waitForLaunch();
         } else if (isCurrentOptionsScope(requestScope)) {
           setOptionsErrorState({
             scope: requestScope,
@@ -721,8 +689,12 @@ export function RoleChatsPane({
       }
       const value = (await response.json()) as RoleLauncherOptions;
       if (!isCurrentOptionsScope(requestScope)) return;
-      setLaunchWaitScope(null);
+      setOptionsErrorState(null);
+      if (value.execution) failureExecutionRef.current = { scope: currentDocumentScope, value: value.execution };
       setOptionsState({ scope: requestScope, value });
+      setExecutionErrorState((current) =>
+        refreshAgentCatalog || retryOptions || !current?.sticky ? null : current,
+      );
       setRoleDefaultsCache((current) => ({
         ...current,
         [roleDefaultsCacheKey(currentDocumentScope)]: value.roleDefaults,
@@ -751,7 +723,7 @@ export function RoleChatsPane({
                   : {}),
               }
             : { requestId: savedExecution.requestId });
-          setExecutionState({ scope: requestScope, value: savedExecution });
+          rememberExecution(requestScope, savedExecution);
         }
         const activeRequestId = tasklessActiveRequestsRef.current[role]?.requestId;
         if (activeRequestId) void fetchExecutionResult({ role }, false, activeRequestId);
@@ -770,11 +742,17 @@ export function RoleChatsPane({
     return () => controller.abort();
   }, [active, selectionComplete, currentDocumentScope, currentOptionsScope, optionsRefresh, catalogRefresh, isCurrentOptionsScope, waitForLaunch]);
 
+  function rememberExecution(scope: RoleDocumentScope, value: RoleExecutionReceipt): void {
+    // Controls may clear their receipt on refresh; failure rendering keeps the last scoped answer.
+    failureExecutionRef.current = { scope, value };
+    setExecutionState({ scope, value });
+  }
+
   async function fetchExecutionResult(
     requestScope: RoleDocumentScope,
     reportNotFound: boolean,
     requestId?: string,
-  ): Promise<void> {
+  ): Promise<RoleExecutionReceipt | undefined> {
     if (isTasklessRole(requestScope.role) && !requestId) return;
     try {
       const response = await fetch("/api/role-launch/result", {
@@ -789,9 +767,7 @@ export function RoleChatsPane({
           : undefined;
         if (activeRequest?.pending && activeRequest.requestId === requestId) {
           const retryPayload = activeRequest.retryPayload;
-          setExecutionState({
-            scope: requestScope,
-            value: {
+          rememberExecution(requestScope, {
               status: "unknown",
               detail: "No saved role execution receipt was found for this request yet.",
               requestId,
@@ -799,7 +775,6 @@ export function RoleChatsPane({
               canStart: false,
               canRevive: false,
               canRetry: Boolean(retryPayload),
-            },
           });
         }
         if (reportNotFound) {
@@ -815,7 +790,11 @@ export function RoleChatsPane({
       const value = (await response.json()) as RoleExecutionReceipt | { detail?: unknown; launchInProgress?: unknown };
       if (!isCurrentExecutionTarget(requestScope, requestId)) return;
       if (!response.ok && "launchInProgress" in value && value.launchInProgress === true) {
-        waitForLaunch(requestScope);
+        if (reportNotFound) setExecutionErrorState({
+          scope: requestScope,
+          message: "The report could not be opened while a role launch or result check is in progress. Wait for it to finish, then press Result again.",
+        });
+        waitForLaunch();
         return;
       }
       if (!response.ok) {
@@ -836,7 +815,7 @@ export function RoleChatsPane({
         setExecutionErrorState({ scope: requestScope, message: "The role result did not match the selected request." });
         return;
       }
-      setExecutionState({ scope: requestScope, value: receipt });
+      rememberExecution(requestScope, receipt);
       if (isTasklessRole(requestScope.role) && receipt.requestId) {
         const current = tasklessActiveRequestsRef.current[requestScope.role];
         const pending = isUncertainRoleExecution(receipt);
@@ -850,8 +829,9 @@ export function RoleChatsPane({
             }
           : { requestId: receipt.requestId });
       }
-      // A refused dispatch stays on screen next to the execution it was refused for.
+      // Automatic reads retain a refused dispatch; a successful explicit action clears it.
       setExecutionErrorState((current) => (current?.sticky ? current : null));
+      return receipt;
     } catch {
       if (isCurrentExecutionTarget(requestScope, requestId)) {
         setExecutionErrorState({
@@ -863,11 +843,30 @@ export function RoleChatsPane({
   }
 
   function refreshOptions(): void {
+    explicitOptionsRefresh.current = true;
     setOptionsRefresh((current) => current + 1);
   }
 
   function refreshCatalog(): void {
     setCatalogRefresh((current) => current + 1);
+  }
+
+  async function openExecutionReport(requestScope: RoleDocumentScope, requestId: string | undefined, receipt: RoleExecutionReceipt | undefined): Promise<void> {
+    if (!receipt || !isCurrentExecutionTarget(requestScope, requestId)) return;
+    try {
+      if (!receipt.requestId) throw new Error("The execution has no recorded request ID for its report. Refresh and retry.");
+      const content = await readRoleReport(requestScope, receipt.requestId);
+      if (isCurrentExecutionTarget(requestScope, receipt.requestId)) {
+        setExecutionErrorState(null);
+        setReport(content);
+      }
+    } catch (error) {
+      if (isCurrentExecutionTarget(requestScope, requestId)) setExecutionErrorState({
+        scope: requestScope,
+        sticky: true,
+        message: error instanceof Error ? error.message : "The report could not be opened. Refresh and retry.",
+      });
+    }
   }
 
   async function refreshResult(): Promise<void> {
@@ -879,9 +878,8 @@ export function RoleChatsPane({
       : currentScopedExecution?.requestId;
     if (isTasklessRole(selected.role) && !requestId) return;
     setBusyScope(selected);
-    setExecutionErrorState(null);
     try {
-      await fetchExecutionResult(requestScope, true, requestId);
+      await openExecutionReport(requestScope, requestId, await fetchExecutionResult(requestScope, true, requestId));
     } finally {
       if (sameRoleLaunchSelection(currentSelectionRef.current, selected)) setBusyScope(null);
     }
@@ -952,7 +950,7 @@ export function RoleChatsPane({
           setExecutionErrorState({ scope: requestScope, message: "The role execution receipt did not match this request." });
           return;
         }
-        setExecutionState({ scope: requestScope, value: receipt });
+        rememberExecution(requestScope, receipt);
         if (tasklessRole && receipt.requestId) {
           const pending = isUncertainRoleExecution(receipt);
           updateTasklessActiveRequest(selected.role, pending
@@ -970,6 +968,7 @@ export function RoleChatsPane({
             ? null
             : {
                 scope: requestScope,
+                sticky: true,
                 message: typeof value.detail === "string"
                   ? "The role handover was not accepted (HTTP " + response.status + "): " + value.detail
                   : "The role handover was not accepted (HTTP " + response.status + ").",
@@ -977,9 +976,7 @@ export function RoleChatsPane({
         );
       } else {
         const status = response.status >= 500 ? "unknown" : "rejected";
-        setExecutionState({
-          scope: requestScope,
-          value: {
+        rememberExecution(requestScope, {
             status,
             detail: "HTTP " + response.status,
             ...(tasklessRole
@@ -991,7 +988,6 @@ export function RoleChatsPane({
               : {}),
             canStart: false,
             canRevive: false,
-          },
         });
         setExecutionErrorState({
           scope: requestScope,
@@ -1003,9 +999,7 @@ export function RoleChatsPane({
       await fetchExecutionResult(requestScope, false, tasklessRole ? requestId : undefined);
     } catch {
       if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) return;
-      setExecutionState({
-        scope: requestScope,
-        value: {
+      rememberExecution(requestScope, {
           status: "unknown",
           detail: "No dispatch receipt was returned.",
           requestId,
@@ -1013,7 +1007,6 @@ export function RoleChatsPane({
           canStart: false,
           canRevive: false,
           canRetry: true,
-        },
       });
       setExecutionErrorState({
         scope: requestScope,
@@ -1046,23 +1039,22 @@ export function RoleChatsPane({
     dispatch("start", launchSelection, requestId);
 
   return (
-    <section aria-label="Role chats" className={rolePane} data-testid="role-chats-pane">
+    <>
+    <section aria-label="Role chats" className={rolePane} data-testid="role-chats-pane" style={report ? { display: "none" } : undefined}>
       <RoleLauncher
-        navigationOpen={navigationOpen}
-        onToggleNavigation={() => setNavigationOpen((current) => !current)}
         taskDocuments={taskDocuments}
         series={series}
         roleDefaults={roleDefaults}
         agents={agents}
         selection={selection}
         currentScopedExecution={currentScopedExecution}
+        failureExecution={failureExecution}
         optionsReady={optionsReady}
         optionsLoading={optionsLoading}
         busy={busy}
         retryRequestId={retryRequestId}
         optionsError={optionsError}
         executionError={executionError}
-        launchInProgress={launchInProgress}
         onSelectionChange={onSelectionChange}
         onLaunch={onLaunch}
         onRevive={onRevive}
@@ -1071,7 +1063,9 @@ export function RoleChatsPane({
         onRefreshCatalog={refreshCatalog}
         onRefreshResult={refreshResult}
       />
-      <PaseoChatFrame active={active} scope={frameScope} target={frameTarget} taskDocuments={taskDocuments} series={series} navigationOpen={navigationOpen} />
+      <PaseoChatFrame active={active} scope={frameScope} target={frameTarget} />
     </section>
+    {report ? <NotesReaderViewer kind="role-report" report={report} onBack={() => setReport(null)} /> : null}
+    </>
   );
 }

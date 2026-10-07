@@ -6,7 +6,6 @@ import {
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoPluginMessage,
-  type PaseoHierarchySnapshot,
 } from "./paseoFrameModel";
 
 /** How long the embedded application has to report ready, or to answer a request to show an agent. */
@@ -26,9 +25,6 @@ export interface PaseoFramePane {
   setControl(state: PaseoControlState): void;
   setFrame(update: (current: PaseoFrameView | null) => PaseoFrameView | null): void;
   setAgentProblem(text: string | null): void;
-  setHierarchy(snapshot: PaseoHierarchySnapshot | null): void;
-  setHierarchyProblem(text: string | null): void;
-  setSelection(agentIds: string[]): void;
 }
 
 /**
@@ -69,9 +65,6 @@ export class PaseoFrameControl {
     this.pending = null;
     this.settled = null;
     this.selectedAgentIds.clear();
-    this.pane.setHierarchy(null);
-    this.pane.setHierarchyProblem(null);
-    this.pane.setSelection([]);
     this.setControl("waiting");
     this.load(afterRetry ? this.wanted : null);
     this.arm();
@@ -83,9 +76,6 @@ export class PaseoFrameControl {
     this.available = null;
     this.pending = null;
     this.selectedAgentIds.clear();
-    this.pane.setHierarchy(null);
-    this.pane.setHierarchyProblem(null);
-    this.pane.setSelection([]);
   }
 
   /**
@@ -109,15 +99,6 @@ export class PaseoFrameControl {
     this.sync();
   }
 
-  /** A deliberate chat-navigation click, independent of the launcher's unchanged selection. */
-  navigate(target: PaseoAgentTarget): void {
-    this.wanted = target;
-    this.settled = null;
-    this.loaded = null;
-    this.pane.setAgentProblem(null);
-    this.sync();
-  }
-
   /** A message event of the dashboard window; everything but the embedded application is ignored. */
   receive(event: MessageEvent): void {
     const frameWindow = this.pane.frameWindow();
@@ -130,16 +111,8 @@ export class PaseoFrameControl {
 
   private onMessage(message: PaseoPluginMessage): void {
     switch (message.type) {
-      case "hierarchy":
-        this.pane.setHierarchy(message);
-        this.pane.setHierarchyProblem(null);
-        break;
-      case "hierarchy-error":
-        this.pane.setHierarchyProblem("Chat catalog unavailable: " + message.message);
-        break;
       case "selection":
         this.selectedAgentIds = new Set(message.agentIds);
-        this.pane.setSelection(message.agentIds);
         break;
       case "navigation-error":
         if (this.selectedAgentIds.has(message.sourceAgentId))

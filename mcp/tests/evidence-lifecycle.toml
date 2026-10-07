@@ -1108,6 +1108,7 @@ consumers = [
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_report.py",
   "mcp/tests/test_serving.py",
   "mcp/tests/test_serving_files.py",
   "mcp/tests/test_serving_notifier_handoff.py",

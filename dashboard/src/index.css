@@ -100,12 +100,6 @@
   }
 }
 
-@keyframes paseoAgentSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Engine Room pod-stage CANVAS motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas), never CSS
    (05f §8) — the former canvas @keyframes (chargeSweep, conduitDraw, pktRun, attnBreath, stopFlash,
    closeoutSweep, warpSurgeUp/Down, landingIn) are removed. The indexing→nominal engine "powerup" is a

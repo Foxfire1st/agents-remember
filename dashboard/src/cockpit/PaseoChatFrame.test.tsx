@@ -96,121 +96,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("grouped chat navigation channel", () => {
-  const agent = (agentId: string, name: string, workspaceId: string) => ({
-    agentId,
-    name,
-    provider: "pi",
-    status: "idle",
-    pendingPermissionCount: 0,
-    requiresAttention: false,
-    attentionReason: null,
-    providerUnavailable: false,
-    workspaceId,
-    parentAgentId: null,
-    archivedAt: null,
-    labels: {},
-  });
-  const hierarchyAgents = [
-    agent(ARCHITECT.agentId, "Architect chat", ARCHITECT.workspaceId),
-    agent(WORKER.agentId, "Worker chat", WORKER.workspaceId),
-  ];
-  const hierarchy = plugin({
-    type: "hierarchy",
-    agents: hierarchyAgents,
-    projects: [],
-    workspaces: [],
-  });
-
-  it("navigates explicit sidebar clicks without iframe reload or changing launcher intent, and highlights only native selection sets", async () => {
-    stubBackend([AVAILABLE]);
-    const { container, getByRole, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
-    );
-    await settle();
-    const frame = frameElement(container);
-    const posts = watchPosts(frame);
-    deliver(frame, plugin({ type: "ready" }));
-    deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
-    deliver(frame, hierarchy);
-    deliver(frame, plugin({ type: "selection", agentIds: [ARCHITECT.agentId] }));
-    const root = getByRole("button", { name: /Architect chat/ });
-    const worker = getByRole("button", { name: /Worker chat/ });
-    expect(root.getAttribute("aria-current")).toBe("true");
-    fireEvent.click(worker);
-    expect(posts).toHaveBeenLastCalledWith(
-      { type: "ar.open", agentId: WORKER.agentId },
-      FRAME_ORIGIN,
-    );
-    deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
-    expect(worker.getAttribute("aria-current")).toBeNull();
-    expect(root.getAttribute("aria-current")).toBe("true");
-    deliver(frame, plugin({ type: "selection", agentIds: [WORKER.agentId, ARCHITECT.agentId] }));
-    expect(worker.getAttribute("aria-current")).toBe("true");
-    expect(root.getAttribute("aria-current")).toBe("true");
-    const count = posts.mock.calls.length;
-    rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
-    );
-    expect(posts).toHaveBeenCalledTimes(count);
-    rerender(
-      <PaseoChatFrame navigationOpen={false} taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
-    );
-    expect(container.querySelector('nav[aria-label="AR chat navigation"]')).toBeNull();
-    expect(frameElement(container)).toBe(frame);
-    rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
-    );
-    expect(getByRole("button", { name: /Worker chat/ }).getAttribute("aria-current")).toBe("true");
-    expect(frameElement(container)).toBe(frame);
-    expect(frame.getAttribute("src")).toBe(PROJECTS_URL);
-  });
-
-  it("rejects untrusted catalogs/selection and malformed snapshots, and distinguishes catalog failure from empty data", async () => {
-    stubBackend([AVAILABLE]);
-    const { container, queryByRole, getByRole, queryByText, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
-    );
-    await settle();
-    const frame = frameElement(container);
-    deliver(frame, plugin({ type: "ready" }));
-    deliver(frame, hierarchy, { origin: "https://elsewhere.test" });
-    expect(queryByRole("button", { name: /Worker chat/ })).toBeNull();
-    deliver(frame, hierarchy);
-    deliver(frame, plugin({ type: "selection", agentIds: [WORKER.agentId] }), { source: window });
-    const worker = getByRole("button", { name: /Worker chat/ });
-    expect(worker.getAttribute("aria-current")).toBeNull();
-    deliver(
-      frame,
-      plugin({
-        type: "hierarchy",
-        agents: [{ ...hierarchyAgents[0], labels: [] }],
-        projects: [],
-        workspaces: [],
-      }),
-    );
-    expect(getByRole("button", { name: /Worker chat/ })).toBe(worker);
-    deliver(frame, plugin({ type: "hierarchy-error", message: "SDK directory unavailable" }));
-    expect(getByTestId("paseo-frame-hierarchy-problem").textContent).toContain(
-      "SDK directory unavailable",
-    );
-    expect(worker.hasAttribute("disabled")).toBe(true);
-    expect(queryByText("No chats")).toBeNull();
-    deliver(frame, hierarchy);
-    expect(worker.hasAttribute("disabled")).toBe(false);
-  });
-
+describe("native parent navigation channel", () => {
   it("reports Parent failure only for a current visible native tab, including split panes, with no pending dashboard request", async () => {
     stubBackend([AVAILABLE]);
-    const { container, getByRole, getByTestId, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+    const { container, getByTestId, queryByTestId } = render(
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
     const frame = frameElement(container);
     watchPosts(frame);
     deliver(frame, plugin({ type: "ready" }));
     deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
-    deliver(frame, hierarchy);
     deliver(frame, plugin({ type: "selection", agentIds: [WORKER.agentId] }));
     const error = plugin({
       type: "navigation-error",
@@ -233,24 +129,12 @@ describe("grouped chat navigation channel", () => {
     expect(getByTestId("paseo-frame-agent-problem").textContent).toContain(
       "parent chat is archived",
     );
-    expect(getByRole("button", { name: /Worker chat/ }).getAttribute("aria-current")).toBe("true");
     expect(frameElement(container)).toBe(frame);
   });
 
-  it("accepts only the exact normalized hierarchy and selection-set protocol", () => {
-    expect(parsePluginMessage(hierarchy)?.type).toBe("hierarchy");
-    for (const invalid of [
-      { provider: "" }, { provider: 42 }, { status: "completed" }, { status: null },
-      { pendingPermissionCount: -1 }, { pendingPermissionCount: 0.5 },
-      { pendingPermissionCount: Infinity }, { requiresAttention: "true" },
-      { attentionReason: "unknown" }, { providerUnavailable: null },
-      { status: undefined },
-    ]) {
-      expect(parsePluginMessage(plugin({
-        ...hierarchy,
-        agents: [{ ...hierarchyAgents[0], ...invalid }],
-      }))).toBeNull();
-    }
+  it("accepts the selection-set protocol and ignores dashboard-only catalog messages", () => {
+    expect(parsePluginMessage(plugin({ type: "hierarchy", agents: [], projects: [], workspaces: [] }))).toBeNull();
+    expect(parsePluginMessage(plugin({ type: "hierarchy-error", message: "unavailable" }))).toBeNull();
     expect(parsePluginMessage(plugin({ type: "selection", agentIds: ["a", "a", "b"] }))).toEqual({
       type: "selection",
       agentIds: ["a", "b"],
@@ -258,11 +142,6 @@ describe("grouped chat navigation channel", () => {
     for (const agentIds of [null, "a", [42], [""]]) {
       expect(parsePluginMessage(plugin({ type: "selection", agentIds }))).toBeNull();
     }
-    expect(
-      parsePluginMessage(
-        plugin({ ...hierarchy, agents: [hierarchyAgents[0], hierarchyAgents[0]] }),
-      ),
-    ).toBeNull();
     expect(
       parsePluginMessage(
         plugin({
@@ -287,7 +166,7 @@ describe("frame route answers without a frame", () => {
       AVAILABLE,
     ]);
     const { container, getByRole, getByTestId, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
 
@@ -319,7 +198,7 @@ describe("frame route answers without a frame", () => {
       },
     ]);
     const { container, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
     expect(getByTestId("paseo-frame-unavailable").getAttribute("data-reason")).toBe(
@@ -333,12 +212,12 @@ describe("frame route answers without a frame", () => {
       { available: true, frameBaseUrl: "javascript:alert(1)", serverId: "srv" },
     ]);
     const { container, getByTestId, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active={false} scope="s" target={null} />,
+      <PaseoChatFrame active={false} scope="s" target={null} />,
     );
     await settle();
     expect(fetchMock).not.toHaveBeenCalled();
 
-    rerender(<PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />);
+    rerender(<PaseoChatFrame active scope="s" target={null} />);
     await settle();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(getByTestId("paseo-frame-unavailable").getAttribute("data-reason")).toBe("backend");
@@ -350,7 +229,7 @@ describe("embedded frame and its control channel", () => {
   it("frames the Projects workspace with clipboard access for the embedded origin only", async () => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
 
@@ -377,7 +256,7 @@ describe("embedded frame and its control channel", () => {
       },
     ]);
     const { container, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
 
@@ -391,7 +270,7 @@ describe("embedded frame and its control channel", () => {
     expect(PASEO_CONTROL_TIMEOUT_MS).toBe(10_000);
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
     await settle(9_000);
@@ -405,7 +284,7 @@ describe("embedded frame and its control channel", () => {
   it("shows the displayed execution's agent by message, without reloading the frame", async () => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -424,7 +303,7 @@ describe("embedded frame and its control channel", () => {
 
     // Another execution is selected: one message, the same frame element, the same document.
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     expect(posts).toHaveBeenLastCalledWith(
       { type: "ar.open", agentId: WORKER.agentId },
@@ -442,7 +321,7 @@ describe("embedded frame and its control channel", () => {
   it("follows the selection, not the reloading of launch options", async () => {
     stubBackend([AVAILABLE]);
     const { container, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -453,20 +332,20 @@ describe("embedded frame and its control channel", () => {
 
     // The execution is briefly absent while options reload: no second request for the same agent.
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={null} />,
+      <PaseoChatFrame active scope="architect" target={null} />,
     );
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     expect(posts).toHaveBeenCalledTimes(1);
 
     // Another selection without an execution leaves the frame alone; choosing the first again asks again.
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="curator" target={null} />,
+      <PaseoChatFrame active scope="curator" target={null} />,
     );
     expect(posts).toHaveBeenCalledTimes(1);
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     expect(posts).toHaveBeenCalledTimes(2);
     expect(posts).toHaveBeenLastCalledWith(
@@ -485,7 +364,7 @@ describe("embedded frame and its control channel", () => {
   it("ignores messages from another origin or another window", async () => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -517,7 +396,7 @@ describe("embedded frame and its control channel", () => {
   it("takes an answer only for the request that is pending", async () => {
     stubBackend([AVAILABLE]);
     const { container, queryByTestId, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -537,7 +416,7 @@ describe("embedded frame and its control channel", () => {
   it("ignores an error when no request is pending", async () => {
     stubBackend([AVAILABLE]);
     const { container, queryByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -556,7 +435,7 @@ describe("embedded frame and its control channel", () => {
   ])("says the agent is %s and leaves the frame where it is", async (code, word) => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="architect" target={ARCHITECT} />,
+      <PaseoChatFrame active scope="architect" target={ARCHITECT} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -573,7 +452,7 @@ describe("embedded frame and its control channel", () => {
 
     // The notice belongs to that execution: selecting a live one clears it.
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
   });
@@ -583,7 +462,7 @@ describe("control channel unavailable", () => {
   it("keeps the frame, shows the banner after 10 seconds, and shows executions by URL", async () => {
     const fetchMock = stubBackend([AVAILABLE]);
     const { container, getByTestId, queryByTestId, rerender } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="s" target={null} />,
+      <PaseoChatFrame active scope="s" target={null} />,
     );
     await settle();
     await settle(PASEO_CONTROL_TIMEOUT_MS - 1);
@@ -600,7 +479,7 @@ describe("control channel unavailable", () => {
     const before = frameElement(container);
     const posts = watchPosts(before);
     rerender(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     expect(posts).not.toHaveBeenCalled();
     expect(frameElement(container).getAttribute("src")).toBe(WORKER_URL);
@@ -633,7 +512,7 @@ describe("control channel unavailable", () => {
   it("falls back to the agent's URL when a request is never answered, and Retry reloads the frame", async () => {
     const fetchMock = stubBackend([AVAILABLE]);
     const { container, getByRole, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
     const frame = frameElement(container);
@@ -670,7 +549,7 @@ describe("control channel unavailable", () => {
   it("after Retry without the channel, the frame that names the agent is not loaded a second time", async () => {
     stubBackend([AVAILABLE]);
     const { container, getByRole, getByTestId } = render(
-      <PaseoChatFrame navigationOpen taskDocuments={[]} series={[]} active scope="worker" target={WORKER} />,
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     await settle();
     await settle(PASEO_CONTROL_TIMEOUT_MS);
@@ -714,7 +593,7 @@ describe("Chats pane wiring", () => {
     catalogOrigin: "test",
   };
 
-  it("steers the mounted frame and keeps it across the launcher's controlled navigation toggle", async () => {
+  it("steers the mounted frame and keeps it across launcher selections without dashboard navigation", async () => {
     sessionStorage.setItem(
       tasklessRequestStorageKey("architect"),
       JSON.stringify({ requestId: execution.requestId }),
@@ -727,7 +606,7 @@ describe("Chats pane wiring", () => {
       // No result is served: the taskless execution is known from the options answer alone.
       "/api/role-launch/result": { httpStatus: 404, detail: "no result" },
     });
-    const { container, getByLabelText, getByRole } = render(
+    const { container, getByLabelText } = render(
       <RoleChatsPane active taskDocuments={[sprint]} series={[]} />,
     );
     await settle();
@@ -744,17 +623,15 @@ describe("Chats pane wiring", () => {
     deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
 
     const launcher = container.querySelector('[data-testid="role-launcher"]')!;
-    const toggle = getByRole("button", { name: "Hide chat navigation" });
-    expect(launcher.querySelector("button,select,input")).toBe(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(launcher.querySelector("button,select,input")).toBe(getByLabelText("Role"));
     expect(container.querySelector('[role="tablist"]')).toBeNull();
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(container.querySelector('nav[aria-label="AR chat navigation"]')).toBeNull();
-    expect(frameElement(container)).toBe(frame);
-    fireEvent.click(getByRole("button", { name: "Show chat navigation" }));
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    await settle();
+    expect(container.querySelector('[aria-label="Show chat navigation"],[aria-label="Hide chat navigation"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/Show navigation|Hide navigation/);
+    // Catalog messages have no dashboard presentation or navigation consequence.
+    deliver(frame, plugin({ type: "hierarchy", agents: [], projects: [], workspaces: [] }));
+    deliver(frame, plugin({ type: "hierarchy-error", message: "SDK directory unavailable" }));
+    expect(container.textContent).not.toContain("SDK directory unavailable");
     expect(frameElement(container)).toBe(frame);
     expect(posts).toHaveBeenCalledTimes(1);
 
@@ -796,6 +673,7 @@ describe("Chats pane wiring", () => {
         request.role === "orchestrator"
           ? { ...catalog, execution: sprintExecution }
           : { ...catalog, executions: [] },
+      "/api/role-launch/report": { path: "role.md", language: "markdown", content: "Report", size: 6, truncated: false },
       "/api/role-launch/result": {
         ...sprintExecution,
         execution: { kind: "paseo-agent", serverId: "srv_test", ...revived },
@@ -827,6 +705,13 @@ describe("Chats pane wiring", () => {
       FRAME_ORIGIN,
     );
     expect(frameElement(container)).toBe(frame);
+    const back = container.querySelector('[data-testid="notes-reader-back"]')!;
+    expect(back).not.toBeNull();
+    expect(frameElement(container)).toBe(frame);
+    fireEvent.click(back);
+    await settle();
+    expect(frameElement(container)).toBe(frame);
+    expect(posts).toHaveBeenCalledTimes(2);
   });
 });
 

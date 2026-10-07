@@ -75,7 +75,7 @@ describe("the look stored for the frame and the look remembered for a standalone
       expect(memoryOf(tab)).toEqual(remembered);
       expect(applyEmbedLook(tab.local)).toEqual([]);
       expect(memoryOf(tab)).toEqual(remembered);
-      // The native initial collapse does not overwrite the standalone choice.
+      // A native toggle in a frame does not overwrite the standalone choice.
       recordedSidebar(tab, false, false);
       expect(restoreStandaloneLook(tab.local).changed).toBe(true);
       expect(sidebarOf(tab)).toBe(open);

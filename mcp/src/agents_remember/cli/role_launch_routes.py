@@ -74,6 +74,7 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
+from agents_remember.cli.role_report import register_role_report_route
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
@@ -116,6 +117,7 @@ def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         "/api/role-launch/dispatch", _bind_dispatch_endpoint(config), methods=["POST"]
     )
     app.add_api_route("/api/role-launch/result", _bind_result_endpoint(config), methods=["POST"])
+    register_role_report_route(app, config)
 
 
 def role_launch_frame(config: McpRuntimeConfig, request: Request) -> JSONResponse:

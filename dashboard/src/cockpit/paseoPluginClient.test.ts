@@ -25,6 +25,7 @@ import {
   EMBED_LOOK,
   PANEL_STATE_KEY,
   STANDALONE_LOOK_KEY,
+  SIDEBAR_OPENED_KEY,
   applyEmbedLook,
   restoreStandaloneLook,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/look";
@@ -132,7 +133,7 @@ describe("one reload per page load", () => {
     expect(load.replace).not.toHaveBeenCalled();
   });
 
-  it("repairs a first-visit deep link with the same single reload, and collapses the native sidebar once otherwise", () => {
+  it("repairs a first-visit deep link with the same single reload", () => {
     const deepLink = WORKSPACE_URL + "?open=agent:a1";
     const tab = newTab(DEFAULT_LOOK);
     // First visit: the app bounced the deep link to its project picker; the look is not stored yet.
@@ -162,43 +163,85 @@ describe("one reload per page load", () => {
     }
     vi.advanceTimersByTime(10_000); // (their wait for the app's sidebar toggle ends)
 
-    // Both saved states become initially collapsed; the grouped AR sidebar owns navigation.
-    for (const initiallyOpen of [false, true]) {
-      document.body.innerHTML = `<button data-testid="menu-button" aria-expanded="${initiallyOpen}"></button>`;
-      const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
-      const settledTab = newTab(DEFAULT_LOOK, initiallyOpen);
-      applyEmbedLook(settledTab.local);
-      const warm = pageLoad(settledTab);
-      const stop = watchAppWrites(warm.page);
-      const toggled = vi.fn(() => {
-        const open = toggle.getAttribute("aria-expanded") !== "true";
-        toggle.setAttribute("aria-expanded", String(open));
-        warm.appWrites(PANEL_STATE_KEY, panelState(open));
-      });
-      toggle.addEventListener("click", toggled);
-      expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
-      expect(warm.replace).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(300);
-      expect(toggle.getAttribute("aria-expanded")).toBe("false");
-      expect(toggled).toHaveBeenCalledTimes(initiallyOpen ? 1 : 0);
-      // The user's mouse click opens it, and another plugin evaluation does not close it.
+  });
+
+  it.each([false, true, null])("opens only an old closed sidebar once, then honors user changes across reloads (stored %s)", (initiallyOpen) => {
+    const tab = newTab(EMBED_LOOK, initiallyOpen ?? true);
+    if (initiallyOpen === null) tab.local.removeItem(PANEL_STATE_KEY);
+    document.body.innerHTML = `<button data-testid="menu-button" aria-expanded="${initiallyOpen ?? true}"></button>`;
+    const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
+    let load = pageLoad(tab);
+    let stop = watchAppWrites(load.page);
+    const writes = vi.spyOn(tab.local, "setItem");
+    const toggled = vi.fn(() => {
+      const open = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", String(open));
+      load.appWrites(PANEL_STATE_KEY, panelState(open));
+    });
+    toggle.addEventListener("click", toggled);
+    const nativeBefore = tab.local.getItem(PANEL_STATE_KEY);
+    expect(bootstrapEmbed(load.page, DASHBOARD)).toBe(false);
+    vi.advanceTimersByTime(10_000);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggled).toHaveBeenCalledTimes(initiallyOpen === false ? 1 : 0);
+    expect(writes.mock.calls.filter(([key]) => key === PANEL_STATE_KEY)).toHaveLength(initiallyOpen === false ? 1 : 0);
+    expect(writes.mock.calls.filter(([key]) => key === APP_SETTINGS_KEY)).toHaveLength(0);
+    if (initiallyOpen !== false) expect(tab.local.getItem(PANEL_STATE_KEY)).toBe(nativeBefore);
+    expect(tab.local.getItem(SIDEBAR_OPENED_KEY)).toBe("done");
+    stop();
+
+    // The native toggle owns both choices. Separate page globals model actual reloads.
+    for (const open of [false, true, false]) {
       toggle.click();
-      expect(toggle.getAttribute("aria-expanded")).toBe("true");
-      expect(bootstrapEmbed(warm.page, DASHBOARD)).toBe(false);
+      expect(toggle.getAttribute("aria-expanded")).toBe(String(open));
+      const chosen = tab.local.getItem(PANEL_STATE_KEY);
+      toggled.mockClear();
+      writes.mockClear();
+      load = pageLoad(tab);
+      stop = watchAppWrites(load.page);
+      expect(bootstrapEmbed(load.page, DASHBOARD)).toBe(false);
       vi.advanceTimersByTime(10_000);
-      expect(toggle.getAttribute("aria-expanded")).toBe("true");
-      toggle.click();
-      expect(toggle.getAttribute("aria-expanded")).toBe("false");
-      expect(toggled).toHaveBeenCalledTimes(initiallyOpen ? 3 : 2);
+      expect(toggle.getAttribute("aria-expanded")).toBe(String(open));
+      expect(toggled).not.toHaveBeenCalled();
+      expect(tab.local.getItem(PANEL_STATE_KEY)).toBe(chosen);
+      expect(writes.mock.calls.filter(([key]) => key === PANEL_STATE_KEY)).toHaveLength(0);
       stop();
     }
+  });
+
+  it("leaves a missing host panel state untouched after migration and refuses an automatic click without durable storage", () => {
+    const tab = newTab(EMBED_LOOK, false);
+    tab.local.setItem(SIDEBAR_OPENED_KEY, "done");
+    tab.local.removeItem(PANEL_STATE_KEY);
+    const missing = pageLoad(tab);
+    const writes = vi.spyOn(tab.local, "setItem");
+    expect(bootstrapEmbed(missing.page, DASHBOARD)).toBe(false);
+    vi.advanceTimersByTime(10_000);
+    expect(tab.local.getItem(PANEL_STATE_KEY)).toBeNull();
+    expect(writes.mock.calls.filter(([key]) => key === PANEL_STATE_KEY)).toHaveLength(0);
+
+    document.body.innerHTML = '<button data-testid="menu-button" aria-expanded="false"></button>';
+    const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
+    const clicks = vi.fn();
+    toggle.addEventListener("click", clicks);
+    const blocked = newTab(EMBED_LOOK, false);
+    const set = blocked.local.setItem.bind(blocked.local);
+    blocked.local.setItem = (key, value) => {
+      if (key === SIDEBAR_OPENED_KEY) throw new Error("storage disabled");
+      set(key, value);
+    };
+    expect(bootstrapEmbed(pageLoad(blocked).page, DASHBOARD)).toBe(false);
+    vi.advanceTimersByTime(10_000);
+    expect(clicks).not.toHaveBeenCalled();
+    expect(blocked.local.getItem(SIDEBAR_OPENED_KEY)).toBeNull();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("keeps a user's native menu click before the first startup poll, including a descendant icon", () => {
     document.body.innerHTML = '<button data-testid="menu-button" aria-expanded="false"><span data-testid="menu-icon"></span></button>';
     const toggle = document.querySelector('[data-testid="menu-button"]') as HTMLElement;
     const icon = document.querySelector('[data-testid="menu-icon"]') as HTMLElement;
-    const tab = newTab(DEFAULT_LOOK);
+    const tab = newTab(DEFAULT_LOOK, false);
     applyEmbedLook(tab.local);
     const load = pageLoad(tab);
     const toggled = vi.fn(() => {

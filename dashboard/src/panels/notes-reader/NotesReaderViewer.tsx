@@ -9,7 +9,8 @@
 // There is no second bespoke reader: the layout is the ChangeSetViewer rail+pane+back idiom and the
 // content is `DualPane`. The view is CONTROLLED — the open `path` and rail `onSelectNote` are lifted
 // to CockpitShell (like the File Viewer's persisted state) so selection survives back/forward.
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
+import type { RoleReportContent } from "../../data/roleReport";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import { css } from "../../../styled-system/css";
@@ -115,7 +116,7 @@ const truncBanner = css({
 
 // A fetched note mapped to DualPane's props: markdown renders full-pane as a partnerless markdown doc
 // (the File Viewer's overview treatment); other text / binary render through CodeSide.
-type ArtifactContent = NoteContent | (RequirementContent & { language: "markdown"; truncated: false });
+type ArtifactContent = RoleReportContent | NoteContent | (RequirementContent & { language: "markdown"; truncated: false });
 
 function noteAsFileContent(note: ArtifactContent): FileContent {
   // CodeSide reads only language/size/truncated/content; scope/onboarding are inert for a note.
@@ -177,7 +178,7 @@ function NotesRail({
 function NotePane({ failed, note, kind }: {
   failed: boolean;
   note: ArtifactContent | null;
-  kind: TaskArtifactReaderTarget["kind"];
+  kind: TaskArtifactReaderTarget["kind"] | "role-report";
 }) {
   if (failed) {
     return (
@@ -275,35 +276,44 @@ function NotesReaderViewerImpl(
 
   const notes = listing?.notes ?? [];
 
+  return <ReaderLayout kind={kind} heading={master} path={path} onBack={onBack} failed={failed} content={content}
+    rail={<NotesRail notes={notes} truncated={listing?.truncated === true} activePath={path} onSelectNote={onSelectNote} kind={kind} />} />;
+}
+
+function ReaderLayout({ kind, heading, path, onBack, failed, content, rail }: {
+  kind: TaskArtifactReaderTarget["kind"] | "role-report";
+  heading: string;
+  path: string;
+  onBack: () => void;
+  failed: boolean;
+  content: ArtifactContent | null;
+  rail?: ReactNode;
+}) {
   return (
     <div className={screen} data-testid="notes-reader-viewer" data-artifact-kind={kind}>
       <header className={header}>
-        <button type="button" className={back} onClick={onBack} data-testid="notes-reader-back">
-          ← back
-        </button>
-        <span className={title}>{kind} · {master}</span>
-        <span className={openPath} data-testid="notes-reader-open">{kind}/{path}</span>
+        <button type="button" className={back} onClick={onBack} data-testid="notes-reader-back">← back</button>
+        <span className={title}>{kind === "role-report" ? "Report" : kind + " · " + heading}</span>
+        <span className={openPath} data-testid="notes-reader-open">{kind === "role-report" ? path : kind + "/" + path}</span>
       </header>
       <PanelGroup direction="horizontal" autoSaveId="notesreader.outer" className={css({ flex: "1", minHeight: "0" })}>
-        <Panel defaultSize={26} minSize={16}>
-          <NotesRail
-            notes={notes}
-            truncated={listing?.truncated === true}
-            activePath={path}
-            onSelectNote={onSelectNote}
-            kind={kind}
-          />
-        </Panel>
-        <PanelResizeHandle className={handle} />
-        <Panel minSize={30}>
-          <NotePane failed={failed} note={content} kind={kind} />
-        </Panel>
+        {rail ? <><Panel defaultSize={26} minSize={16}>{rail}</Panel><PanelResizeHandle className={handle} /></> : null}
+        <Panel minSize={30}><NotePane failed={failed} note={content} kind={kind} /></Panel>
       </PanelGroup>
     </div>
   );
 }
 
+type ReaderProps = (TaskArtifactReaderTarget & { onSelectNote: (path: string) => void; onBack: () => void }) |
+  { kind: "role-report"; report: RoleReportContent; onBack: () => void };
+
+function Reader(props: ReaderProps) {
+  return props.kind === "role-report"
+    ? <ReaderLayout kind="role-report" heading="Report" path={props.report.path} onBack={props.onBack} failed={false} content={props.report} />
+    : <NotesReaderViewerImpl {...props} />;
+}
+
 // Memoized (tab-switch CPU): kept mounted (hidden) once opened — the shell re-renders on
 // every view switch with unchanged props, and the memo gate skips this subtree then; the reader's
 // own state still drives its updates.
-export const NotesReaderViewer = memo(NotesReaderViewerImpl);
+export const NotesReaderViewer = memo(Reader);

@@ -2,8 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installBridge, type BridgeClient } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/bridge";
 import { startClientPart } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/start";
 import type { NativeAgent, NativeProject } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/hierarchy";
-import type { PaseoHierarchySnapshot } from "./paseoFrameModel";
 import { DASHBOARD, EMBED, newTab, pageLoad } from "../test/paseoPluginPage";
+
+// The plugin's posted shape stays local to its tests; the dashboard no longer consumes catalogs.
+type HierarchySnapshot = {
+  agents: Array<Omit<NativeAgent, "id" | "pendingPermissions"> & {
+    agentId: string; name: string; pendingPermissionCount: number; parentAgentId: string | null;
+  }>;
+  projects: { projectId: string; name: string }[];
+  workspaces: { workspaceId: string; projectId: string | null; name: string }[];
+};
 
 const stops: Array<() => void> = [];
 afterEach(() => { for (const stop of stops.splice(0)) stop(); document.body.innerHTML = ""; });
@@ -85,7 +93,7 @@ function connect(fixture: ReturnType<typeof host>) {
   stops.push(installBridge(fixture.client, load.page, DASHBOARD));
   return load;
 }
-const hierarchy = (load: ReturnType<typeof pageLoad>) => load.posted.filter((p) => p.data.type === "hierarchy").at(-1)?.data as unknown as PaseoHierarchySnapshot;
+const hierarchy = (load: ReturnType<typeof pageLoad>) => load.posted.filter((p) => p.data.type === "hierarchy").at(-1)?.data as unknown as HierarchySnapshot;
 
 function visibleChats(ids: string[], selected: string[]) {
   document.body.innerHTML = ids.map((id) => `<button data-testid="workspace-tab-agent_${id}" aria-selected="${selected.includes(id)}"></button>`).join("");
@@ -93,6 +101,42 @@ function visibleChats(ids: string[], selected: string[]) {
 }
 
 describe("trusted host hierarchy and agent-specific parent actions", () => {
+  it("offers no parent button when the narrow host has no known visible agent", async () => {
+    document.body.innerHTML = '<button data-testid="workspace-tab-switcher-trigger">Worker</button><button data-testid="workspace-tab-agent_child" aria-selected="true" hidden></button>';
+    Object.assign(document.querySelector('[data-testid="workspace-tab-agent_child"]')!, {
+      checkVisibility: () => false, getBoundingClientRect: () => ({ width: 0, height: 0 }),
+    });
+    const fixture = host(), load = connect(fixture);
+    await flush();
+    expect(hierarchy(load).agents.map((agent) => agent.agentId)).toEqual(["child", "parent"]);
+    expect(load.posted.filter((p) => p.data.type === "selection").at(-1)?.data.agentIds).toEqual([]);
+    expect(fixture.client.addComposerPill).not.toHaveBeenCalled();
+    expect(fixture.pills.size).toBe(0);
+  });
+
+  it("removes and restores the wide parent button with the bridge's known unknown known selection", async () => {
+    visibleChats(["child"], ["child"]);
+    const fixture = host(), load = connect(fixture);
+    await flush();
+    const stale = fixture.pills.get("child")!.button.behavior.onPress;
+    const selected = () => load.posted.filter((p) => p.data.type === "selection").at(-1)?.data.agentIds;
+    expect(selected()).toEqual(["child"]);
+    expect(fixture.pills.get("child")!.button.label).toBe("Back to parent");
+    document.querySelector('[data-testid="workspace-tab-agent_child"]')!.setAttribute("aria-selected", "false");
+    await flush();
+    expect(selected()).toEqual([]);
+    expect(fixture.pills.has("child")).toBe(false);
+    expect(fixture.removed).toContain("child");
+    await stale();
+    expect(fixture.opened).toEqual([]);
+    document.querySelector('[data-testid="workspace-tab-agent_child"]')!.setAttribute("aria-selected", "true");
+    await flush();
+    expect(selected()).toEqual(["child"]);
+    expect(fixture.pills.get("child")!.button.label).toBe("Back to parent");
+    await fixture.pills.get("child")!.button.behavior.onPress();
+    expect(fixture.opened.at(-1)!.params!.agentId).toBe("parent");
+  });
+
   it("includes every SDK page, canonical labels and actual host membership, then applies live metadata changes", async () => {
     const fixture = host();
     const first = { ...fixture.initialAgents, pageInfo: { hasMore: true, nextCursor: "page-2" }, subscription: fixture.agentStream.subscription };
@@ -189,6 +233,7 @@ describe("trusted host hierarchy and agent-specific parent actions", () => {
   });
 
   it("replaces directory snapshots on reconnect and releases subscriptions and buttons on teardown", async () => {
+    visibleChats(["child", "newer"], ["child", "newer"]);
     const fixture = host();
     fixture.agentStream.snapshot(page([{ agent: { ...fixture.root, title: "Latest snapshot" } }, { agent: fixture.child }]));
     const load = connect(fixture);
