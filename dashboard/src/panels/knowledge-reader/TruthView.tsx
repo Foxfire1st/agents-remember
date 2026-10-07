@@ -1,6 +1,7 @@
 // The reader's truth view (MIK-R29 rules 3 and 4): one record with every field, its states, its
 // links both ways and its timeline, newest first, from the record file's log (meaning diffs), the
 // history rows about it and the log of the entries that realize or prove it.
+import type { ReactNode } from 'react';
 import { css } from '../../../styled-system/css';
 import type {
   LinkTarget,
@@ -36,9 +37,38 @@ const fields = css({
 });
 const diff = css({ fontSize: '0.8rem', display: 'grid', gap: '0.15rem' });
 
-// Fields the kind-specific sections below already show; everything else is listed as recorded.
-const SHOWN_ELSEWHERE = new Set([
+const LEAD: Record<string, string> = {
+  invariant: 'statement',
+  family: 'guarantee',
+  decision: 'context',
+  incident: 'occurrence',
+  assumption: 'proposition',
+  limitation: 'limited',
+  failure_mode: 'failure',
+  scenario: 'situation',
+  diagnostic: 'condition',
+  term: 'definition',
+};
+const ORDER: Record<string, string[]> = {
+  invariant: ['applicability', 'conditions', 'exclusions'],
+  family: ['title'],
+  decision: ['consequences', 'decider'],
+  incident: ['cause', 'cause_uncertainty', 'recovery', 'corrective_actions'],
+  assumption: ['basis', 'scope', 'validation', 'invalidated_when'],
+  limitation: ['scope', 'reason', 'impact', 'workaround'],
+  failure_mode: ['trigger', 'consequences', 'detection', 'mitigation'],
+  scenario: ['given', 'when', 'then'],
+  diagnostic: ['signals', 'interpretation', 'action'],
+  term: ['term', 'scope'],
+};
+const FRAME = new Set([
   'schema',
+  'id',
+  'kind',
+  'status',
+  'revision',
+  'admission',
+  'origin',
   'links',
   'alternatives',
   'members',
@@ -49,23 +79,74 @@ const SHOWN_ELSEWHERE = new Set([
 function show(value: unknown): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'string') return value;
-  if (Array.isArray(value) && value.every((one) => typeof one === 'string')) {
-    return value.length === 0 ? '(none)' : value.join('\n');
-  }
-  return JSON.stringify(value, null, 1);
+  if (Array.isArray(value)) return value.map(show).join('; ');
+  if (typeof value === 'object')
+    return Object.entries(value)
+      .map(([key, item]) => `${key.replace(/_/g, ' ')}: ${show(item)}`)
+      .join('; ');
+  return String(value);
 }
-
-function RecordFields({ document }: { document: Record<string, unknown> }) {
-  return (
-    <dl className={fields} data-testid="record-fields">
-      {Object.entries(document)
-        .filter(([name]) => !SHOWN_ELSEWHERE.has(name))
-        .map(([name, value]) => (
-          <div key={name} style={{ display: 'contents' }} data-field={name}>
-            <dt>{name.replace(/_/g, ' ')}</dt>
-            <dd>{show(value)}</dd>
+function Value({ value }: { value: unknown }): ReactNode {
+  if (Array.isArray(value) && value.length === 0) return <span className={muted}>(none)</span>;
+  if (Array.isArray(value))
+    return (
+      <ul className={list}>
+        {value.map((item, index) => (
+          <li key={index}>
+            <Value value={item} />
+          </li>
+        ))}
+      </ul>
+    );
+  if (value && typeof value === 'object')
+    return (
+      <dl className={fields}>
+        {Object.entries(value).map(([key, item]) => (
+          <div key={key} style={{ display: 'contents' }}>
+            <dt>{key.replace(/_/g, ' ')}</dt>
+            <dd>
+              <Value value={item} />
+            </dd>
           </div>
         ))}
+      </dl>
+    );
+  return show(value);
+}
+function RecordFields({ document, kind }: { document: Record<string, unknown>; kind: string }) {
+  const order = [...(ORDER[kind] ?? []), ...Object.keys(document).sort()];
+  const names = [...new Set(order)].filter(
+    (name) => name in document && !FRAME.has(name) && name !== LEAD[kind],
+  );
+  return (
+    <div data-testid="record-fields">
+      {names.map((name) => (
+        <div key={name} data-field={name}>
+          <h3 className={css({ color: 'muted', fontSize: '0.8rem', margin: '0.8rem 0 0.25rem' })}>
+            {name.replace(/_/g, ' ')}
+          </h3>
+          <Value value={document[name]} />
+        </div>
+      ))}
+    </div>
+  );
+}
+function RecordOrigin({ answer }: { answer: RecordViewAnswer }) {
+  const document = answer.record.document;
+  return (
+    <dl className={fields} data-testid="record-origin">
+      <dt>file</dt>
+      <dd>{answer.record.path}</dd>
+      {['admission', 'origin'].map((name) =>
+        document[name] ? (
+          <div key={name} style={{ display: 'contents' }} data-field={name}>
+            <dt>{name}</dt>
+            <dd>
+              <Value value={document[name]} />
+            </dd>
+          </div>
+        ) : null,
+      )}
     </dl>
   );
 }
@@ -100,8 +181,19 @@ function TruthHeader({ answer }: { answer: RecordViewAnswer }) {
 
 function OutgoingSection({ answer }: { answer: RecordViewAnswer }) {
   const unreadable = answer.outgoingState;
+  if (!unreadable && !answer.outgoing.length)
+    return (
+      <p className={muted} data-testid="record-outgoing">
+        This record records no outgoing link.
+      </p>
+    );
   return (
-    <Section title="Outgoing links" testid="record-outgoing">
+    <Section
+      title={
+        unreadable ? 'Outgoing links (unavailable)' : `Outgoing links (${answer.outgoing.length})`
+      }
+      testid="record-outgoing"
+    >
       {unreadable ? (
         <p className={muted} data-testid="record-outgoing-unavailable">
           the record&apos;s links could not be read: {unreadable.detail}
@@ -144,8 +236,14 @@ function IncomingSource({ link }: { link: RecordViewAnswer['incoming'][number] }
 }
 
 function IncomingSection({ answer }: { answer: RecordViewAnswer }) {
+  if (!answer.incoming.length)
+    return (
+      <p className={muted} data-testid="record-incoming">
+        Nothing in this tree links to this record.
+      </p>
+    );
   return (
-    <Section title="Incoming links" testid="record-incoming">
+    <Section title={`Incoming links (${answer.incoming.length})`} testid="record-incoming">
       {answer.incoming.length === 0 ? (
         <p className={muted}>Nothing in this tree links to this record.</p>
       ) : (
@@ -169,8 +267,13 @@ export function TruthView({ answer }: { answer: RecordViewAnswer }) {
   return (
     <div data-testid="reader-truth-view" data-kind={record.kind} data-record={record.id}>
       <TruthHeader answer={answer} />
-      <p className={muted}>{record.path}</p>
-      <RecordFields document={record.document} />
+      <p
+        data-testid="record-lead"
+        className={css({ fontSize: '1.05rem', lineHeight: '1.6', margin: '0.6rem 0' })}
+      >
+        {show(record.document[LEAD[record.kind ?? '']] ?? record.title)}
+      </p>
+      <RecordFields document={record.document} kind={record.kind ?? ''} />
       {answer.prose.state === 'present' ? (
         <Section title="Explanation" testid="record-prose">
           <ProseWithReferences read={answer.prose} references={[]} />
@@ -180,12 +283,13 @@ export function TruthView({ answer }: { answer: RecordViewAnswer }) {
       {answer.family ? <FamilyPart part={answer.family} /> : null}
       {answer.decision ? (
         <Section title="Decision" testid="record-decision">
-          <DecisionCard decision={answer.decision} />
+          <DecisionCard decision={answer.decision} detailsOnly />
         </Section>
       ) : null}
       <OutgoingSection answer={answer} />
       <IncomingSection answer={answer} />
       <TimelineSection timeline={answer.timeline} />
+      <RecordOrigin answer={answer} />
     </div>
   );
 }
@@ -193,60 +297,74 @@ export function TruthView({ answer }: { answer: RecordViewAnswer }) {
 function InvariantPart({ part }: { part: NonNullable<RecordViewAnswer['invariant']> }) {
   return (
     <>
-      <Section title="Realizations" testid="invariant-realizations">
-        <States header={part.currentness} />
-        {part.realizations.length === 0 ? (
-          <p className={muted}>No realization entry names this invariant.</p>
-        ) : (
-          <ul className={list}>
-            {part.realizations.map((entry) => (
-              <EntryRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <Section title="Proofs" testid="invariant-proofs">
-        {part.proofs.length === 0 ? (
-          <p className={muted}>No proof entry names this invariant.</p>
-        ) : (
-          <ul className={list}>
-            {part.proofs.map((entry) => (
-              <EntryRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <Section title="Families" testid="invariant-families">
-        {part.families.length === 0 ? (
-          <p className={muted}>No family contains this invariant.</p>
-        ) : (
-          <ul className={list}>
-            {part.families.map((family) => (
-              <li key={family.id}>
-                <RecordLink summary={family} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-      <Section title="Decisions, incidents and other records" testid="invariant-linked">
-        {part.linked.length === 0 ? (
-          <p className={muted}>No record links to this invariant.</p>
-        ) : (
-          <ul className={list}>
-            {part.linked.map((row) => (
-              <li key={row.record.id} data-record={row.record.id}>
-                {row.decision ? (
-                  <DecisionCard decision={row.decision} />
-                ) : (
-                  <RecordLink summary={row.record} />
-                )}
-                <div className={muted}>{row.links.map((link) => link.relation).join(' · ')}</div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+      {part.realizations.length ? (
+        <Section
+          title={`Realizations (${part.realizations.length})`}
+          testid="invariant-realizations"
+        >
+          <States header={part.currentness} />
+          {part.realizations.length === 0 ? (
+            <p className={muted}>No realization entry names this invariant.</p>
+          ) : (
+            <ul className={list}>
+              {part.realizations.map((entry) => (
+                <EntryRow key={entry.id} entry={entry} />
+              ))}
+            </ul>
+          )}
+        </Section>
+      ) : null}
+      {part.proofs.length ? (
+        <Section title={`Proofs (${part.proofs.length})`} testid="invariant-proofs">
+          {part.proofs.length === 0 ? (
+            <p className={muted}>No proof entry names this invariant.</p>
+          ) : (
+            <ul className={list}>
+              {part.proofs.map((entry) => (
+                <EntryRow key={entry.id} entry={entry} />
+              ))}
+            </ul>
+          )}
+        </Section>
+      ) : null}
+      {part.families.length ? (
+        <Section title={`Families (${part.families.length})`} testid="invariant-families">
+          {part.families.length === 0 ? (
+            <p className={muted}>No family contains this invariant.</p>
+          ) : (
+            <ul className={list}>
+              {part.families.map((family) => (
+                <li key={family.id}>
+                  <RecordLink summary={family} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      ) : null}
+      {part.linked.length ? (
+        <Section
+          title={`Decisions, incidents and other records (${part.linked.length})`}
+          testid="invariant-linked"
+        >
+          {part.linked.length === 0 ? (
+            <p className={muted}>No record links to this invariant.</p>
+          ) : (
+            <ul className={list}>
+              {part.linked.map((row) => (
+                <li key={row.record.id} data-record={row.record.id}>
+                  {row.decision ? (
+                    <DecisionCard decision={row.decision} />
+                  ) : (
+                    <RecordLink summary={row.record} />
+                  )}
+                  <div className={muted}>{row.links.map((link) => link.relation).join(' · ')}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      ) : null}
     </>
   );
 }
@@ -254,50 +372,56 @@ function InvariantPart({ part }: { part: NonNullable<RecordViewAnswer['invariant
 function FamilyPart({ part }: { part: NonNullable<RecordViewAnswer['family']> }) {
   return (
     <>
-      <Section title="Members" testid="family-members">
-        <States header={part.currentness} />
-        <ul className={list}>
-          {part.members.map((member) => (
-            <li key={member.id} className={card} data-member={member.id}>
-              <div>
-                <RecordLink summary={member} />
-                <StateBadge state={member.state} />
-              </div>
-              {member.statement ? <div className={muted}>{member.statement}</div> : null}
-            </li>
-          ))}
-        </ul>
-        {part.staleMembers.length > 0 ? (
-          <p className={muted}>{part.staleMembers.length} stale member(s)</p>
-        ) : null}
-      </Section>
-      <Section title="Routes" testid="family-routes">
-        {part.routes.length === 0 ? (
-          <p className={muted}>This family records no route yet.</p>
-        ) : (
+      {part.members.length ? (
+        <Section title={`Members (${part.members.length})`} testid="family-members">
+          <States header={part.currentness} />
           <ul className={list}>
-            {part.routes.map((route) => (
-              <li key={route}>
-                <PathLink path={route} />
+            {part.members.map((member) => (
+              <li key={member.id} className={card} data-member={member.id}>
+                <div>
+                  <RecordLink summary={member} />
+                  <StateBadge state={member.state} />
+                </div>
+                {member.statement ? <div className={muted}>{member.statement}</div> : null}
               </li>
             ))}
           </ul>
-        )}
-      </Section>
-      <Section title="Member locations" testid="family-locations">
-        <ul className={list}>
-          {part.locations.map((location) => (
-            <li key={location.path}>
-              <PathLink path={location.path} />
-              <ul className={list}>
-                {location.entries.map((entry) => (
-                  <EntryRow key={entry.id} entry={entry} showInvariant />
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      </Section>
+          {part.staleMembers.length > 0 ? (
+            <p className={muted}>{part.staleMembers.length} stale member(s)</p>
+          ) : null}
+        </Section>
+      ) : null}
+      {part.routes.length ? (
+        <Section title={`Routes (${part.routes.length})`} testid="family-routes">
+          {part.routes.length === 0 ? (
+            <p className={muted}>This family records no route yet.</p>
+          ) : (
+            <ul className={list}>
+              {part.routes.map((route) => (
+                <li key={route}>
+                  <PathLink path={route} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      ) : null}
+      {part.locations.length ? (
+        <Section title={`Member locations (${part.locations.length})`} testid="family-locations">
+          <ul className={list}>
+            {part.locations.map((location) => (
+              <li key={location.path}>
+                <PathLink path={location.path} />
+                <ul className={list}>
+                  {location.entries.map((entry) => (
+                    <EntryRow key={entry.id} entry={entry} showInvariant />
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
     </>
   );
 }
@@ -363,7 +487,7 @@ function RecordLine({ event }: { event: TimelineEvent }) {
   return (
     <>
       record {event.change}
-      {meaning.length > 0 ? (
+      {!added && meaning.length > 0 ? (
         <div className={diff} data-testid="meaning-diff">
           {meaning.map((change) => (
             <div key={change.field} data-field={change.field}>

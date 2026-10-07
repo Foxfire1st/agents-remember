@@ -741,6 +741,7 @@ def test_the_explorer_lists_code_and_onboarding_children_with_entry_counts(world
         "onboarding": True,
         "entries": 1,
         "path": MOVED_PATH,
+        "hasKnowledge": True,
     }
     # The retired invariant's entry is not counted.
     listing = world.read("tree", commit=world.second, path="dashboard/src/data")

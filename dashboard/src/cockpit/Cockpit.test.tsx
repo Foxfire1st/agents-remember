@@ -23,7 +23,7 @@ import type {
   TaskDocNode,
   WorkspaceProjection,
 } from "../types/projection";
-import { CockpitShell } from "./Cockpit";
+import { CockpitShell, type CockpitView } from "./Cockpit";
 
 function seed(stateName: string) {
   const fixture = GALLERY.find((entry) => entry.name === stateName);
@@ -348,7 +348,7 @@ describe("Operations click-to-detail body hydration", () => {
     );
     const fetchMock = stubTaskReaderFetch(projection, gates, completeObjective);
 
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
     const assertClickHydratesOnce = async (label: string, path: string) => {
       fireEvent.click(view.getByText(label));
       await waitFor(() =>
@@ -409,7 +409,7 @@ describe("Operations click-to-detail body hydration", () => {
       ]),
     );
     const fetchMock = stubTaskReaderFetch(projection, gates, completeObjective);
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
     const taskAPath = "/tasks/repo-a/ops/01_direct-leaf.json";
     const taskBPath = "/tasks/repo-a/ops/03_lifecycle-bound.json";
     const requestsFor = (path: string) =>
@@ -461,13 +461,13 @@ describe("workspace rollup — the handoff reaches the header", () => {
     dashboardStore
       .getState()
       .applySnapshot(withStates("awaiting-developer", "awaiting-developer", "running"));
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
     expect(getByTestId("task-metrics").textContent).toContain("2 awaiting you");
   });
 
   it("says nothing when nothing is handed back (no reassurance zero)", () => {
     dashboardStore.getState().applySnapshot(withStates("running", "blocked"));
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
     const text = getByTestId("task-metrics").textContent ?? "";
     expect(text).not.toContain("awaiting");
     // the standing rhythm is unchanged — the segment is appended, it does not displace anything
@@ -484,7 +484,7 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
       ...fixture.projection,
       servingBuild: { version: "9.9.9", commit: "abc1234", bootedAt: "2026-07-07T05:00:00Z" },
     });
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
     expect(getByTestId("serving-build").textContent).toContain("abc1234");
     expect(getByTestId("serving-build").textContent).toContain("up ");
   });
@@ -501,7 +501,7 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
         dirty: true,
       },
     });
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
     expect(getByTestId("serving-build").textContent).toContain("38c3fd8*");
     expect(getByTestId("serving-build").textContent).not.toContain("dirty");
     expect(getByTestId("serving-build").title).toContain("@ 38c3fd8*");
@@ -515,13 +515,13 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
       ...fixture.projection,
       servingBuild: { version: "9.9.9", bootedAt: "2026-07-07T05:00:00Z" },
     });
-    const first = render(<CockpitShell />);
+    const first = render(<CockpitShell initialView="operations" />);
     expect(first.getByTestId("serving-build").textContent).toContain("v9.9.9");
     first.unmount();
 
     dashboardStore.getState().reset();
     seed("engine-fleet"); // no servingBuild on the wire (a legacy server)
-    const second = render(<CockpitShell />);
+    const second = render(<CockpitShell initialView="operations" />);
     expect(second.queryByTestId("serving-build")).toBeNull(); // absent stamp: nothing, never faked
   });
 
@@ -536,7 +536,7 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
         dashboardBuild: "different-dashboard-build", // ≠ test CLIENT_DASHBOARD_BUILD ("test-dashboard-build")
       },
     });
-    const stale = render(<CockpitShell />);
+    const stale = render(<CockpitShell initialView="operations" />);
     expect(stale.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("false");
     // A proven client/serving mismatch must be visible to the operator, not silently swallowed
     // into the invisible data attribute — the hoverable stamp tooltip carries the reload cue.
@@ -555,7 +555,7 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
         dashboardBuild: "test-dashboard-build",
       },
     });
-    const current = render(<CockpitShell />);
+    const current = render(<CockpitShell initialView="operations" />);
     expect(current.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("true");
     // A real match renders no mismatch cue — never fabricate a discrepancy that is not there.
     expect(current.getByTestId("serving-build").title).not.toContain("client bundle differs");
@@ -571,24 +571,24 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
       ...fixture.projection,
       servingBuild: { version: "9.9.9", bootedAt: "2026-07-07T05:00:00Z" },
     });
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
     expect(getByTestId("serving-build").dataset.clientBuildCurrent).toBe("unknown");
     expect(getByTestId("serving-build").title).not.toContain("client bundle differs");
   });
 });
 
 describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
-  it("rails the Operations view but goes full-bleed (no rails) for the Engine Room", () => {
+  it("rails Operations and gives File Viewer the full width", () => {
     seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole } = render(<CockpitShell initialView="operations" />);
 
-    // Operations (default): the railed 3-column shell.
+    // Explicit Operations view: the railed 3-column shell.
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
     expect(container.querySelector(".rail--left")).not.toBeNull();
     expect(container.querySelector(".rail--right")).not.toBeNull();
 
-    // Switch to the Engine Room machine-map view via the mode bar.
-    fireEvent.click(getByRole("radio", { name:"Engine Room" }));
+    // Switch to File Viewer via the mode bar.
+    fireEvent.click(getByRole("radio", { name:"File Viewer" }));
 
     // Full-bleed: both rails stay mounted but hidden (display:none + aria-hidden), the grid drops
     // to a single full-width column, and the room's own 3-zone layout (header + boot/diagnostics
@@ -602,25 +602,32 @@ describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
     expect(railRight.style.display).toBe("none");
     expect(railLeft.getAttribute("aria-hidden")).toBe("true");
     expect(railRight.getAttribute("aria-hidden")).toBe("true");
-    expect(container.querySelector('[data-testid="engine-room-header"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="engine-room-diagnostics"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="file-viewer"]')).not.toBeNull();
   });
 
-  it("keeps the rails for the Operations and Memory views", () => {
+  it.each<[CockpitView, string, boolean]>([
+    ['memory', 'memory-mirror', false],
+    ['hangar', 'hangar', false],
+    ['engine', 'engine-room', true],
+    ['topology', 'topology', true],
+  ])("preserves the %s layout through initialView", (initialView, testid, fullBleed) => {
     seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
-
-    fireEvent.click(getByRole("radio", { name:"Memory" }));
-    expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
-    expect(container.querySelector(".rail--left")).not.toBeNull();
-    expect(container.querySelector(".rail--right")).not.toBeNull();
+    const { container, getByTestId } = render(<CockpitShell initialView={initialView} />);
+    expect(getByTestId(testid)).toBeTruthy();
+    expect(container.querySelector('main')?.dataset.view).toBe(initialView);
+    expect(container.querySelector('.shell__body')?.getAttribute('data-fullbleed')).toBe(String(fullBleed));
+    for (const selector of ['.rail--left', '.rail--right']) {
+      const rail = container.querySelector<HTMLElement>(selector)!;
+      expect(rail.style.display).toBe(fullBleed ? 'none' : 'flex');
+      expect(rail.getAttribute('aria-hidden')).toBe(String(fullBleed));
+    }
   });
 });
 
 describe("rail keep-alive across view switches (260721 F1)", () => {
   it("keeps both rail asides mounted (hidden, never unmounted) on a full-bleed view", () => {
     seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole } = render(<CockpitShell initialView="operations" />);
 
     // Railed Operations view: the two aside nodes (and the river inside the right one) that we
     // watch across the switch.
@@ -631,9 +638,9 @@ describe("rail keep-alive across view switches (260721 F1)", () => {
     expect(railLeft.getAttribute("aria-hidden")).toBe("false");
     expect(river).not.toBeNull();
 
-    // Switch to the full-bleed Engine Room: the asides are hidden, NOT unmounted (same nodes, so
+    // Switch to the full-width File Viewer: the asides are hidden, NOT unmounted (same nodes, so
     // rail scroll/collapsed state survives); the grid still drops to the single full-width column.
-    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
+    fireEvent.click(getByRole("radio", { name: "File Viewer" }));
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
     expect(container.querySelector(".rail--left")).toBe(railLeft);
     expect(container.querySelector(".rail--right")).toBe(railRight);
@@ -658,7 +665,7 @@ describe("rail keep-alive across view switches (260721 F1)", () => {
 describe("right-rail River⇄Chat toggle (L5 S2)", () => {
   it("swaps the rail--right content between the Event River and the single-instance chat", () => {
     seed("engine-fleet");
-    const { container, getByTestId } = render(<CockpitShell />);
+    const { container, getByTestId } = render(<CockpitShell initialView="operations" />);
 
     const railRight = container.querySelector(".rail--right");
     expect(railRight).not.toBeNull();
@@ -679,7 +686,7 @@ describe("right-rail River⇄Chat toggle (L5 S2)", () => {
 
   it("remembers the rail choice across a window refresh (localStorage)", () => {
     seed("engine-fleet");
-    const first = render(<CockpitShell />);
+    const first = render(<CockpitShell initialView="operations" />);
     // Default = River, then switch to Chat.
     expect(first.container.querySelector('.rail--right [data-testid="event-river"]')).not.toBeNull();
     fireEvent.click(first.getByTestId("rail-toggle-chat"));
@@ -687,7 +694,7 @@ describe("right-rail River⇄Chat toggle (L5 S2)", () => {
     first.unmount();
 
     // A fresh mount (the window refresh) restores Chat from localStorage — the river is not shown.
-    const second = render(<CockpitShell />);
+    const second = render(<CockpitShell initialView="operations" />);
     const railRight = second.container.querySelector(".rail--right");
     expect(railRight?.querySelector('[data-testid="rail-chat"]')).not.toBeNull();
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
@@ -699,7 +706,7 @@ describe("Operations rails are resizable + persisted", () => {
     window.localStorage.setItem("cockpit.rail-left-w", "430");
     window.localStorage.setItem("cockpit.rail-right-w", "250");
     seed("engine-fleet");
-    const { container, getByTestId } = render(<CockpitShell />);
+    const { container, getByTestId } = render(<CockpitShell initialView="operations" />);
 
     // Each rail owns a drag gutter, and the railed grid uses the stored widths (centre takes the rest).
     expect(getByTestId("rail-resize-left")).not.toBeNull();
@@ -710,7 +717,7 @@ describe("Operations rails are resizable + persisted", () => {
 
   it("nudges a rail width with the keyboard and persists the new width", () => {
     seed("engine-fleet"); // no stored width -> default 340
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
 
     fireEvent.keyDown(getByTestId("rail-resize-left"), { key: "ArrowRight" });
     expect(window.localStorage.getItem("cockpit.rail-left-w")).toBe("364"); // 340 + 24
@@ -724,7 +731,7 @@ describe("Operations rails are resizable + persisted", () => {
 describe("rail chat keys by the drilled leaf, not the master (L5 fix 1)", () => {
   it("keys the rail chat by the leaf once a master's sub-task is drilled open", () => {
     seedDrillableMaster();
-    const { getByText, getByTestId } = render(<CockpitShell />);
+    const { getByText, getByTestId } = render(<CockpitShell initialView="operations" />);
 
     // Select the master, then toggle the rail to the chat surface.
     fireEvent.click(getByText("Ops Master"));
@@ -746,7 +753,7 @@ describe("rail chat keys by the drilled leaf, not the master (L5 fix 1)", () => 
 describe("Operations drill survives a view switch (DetailPanel mount preservation)", () => {
   it("keeps the drilled sub-task open after switching to another tab and back", () => {
     seedDrillableMaster();
-    const { getByText, getByRole, getByTestId, queryByTestId } = render(<CockpitShell />);
+    const { getByText, getByRole, getByTestId, queryByTestId } = render(<CockpitShell initialView="operations" />);
 
     // Select the master, then drill into its sub-task → the leaf reader (a breadcrumb back to the
     // master) replaces the sub-task index.
@@ -757,7 +764,7 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
 
     // Leave Operations for another tab, then come back: the drill is preserved (the panel was hidden,
     // not unmounted), so it does NOT reset to the master overview.
-    fireEvent.click(getByRole("radio", { name: "Memory" }));
+    fireEvent.click(getByRole("radio", { name: "File Viewer" }));
     fireEvent.click(getByRole("radio", { name: "Operations" }));
     expect(getByTestId("series-breadcrumb")).not.toBeNull();
     expect(queryByTestId("subtask-open-1")).toBeNull();
@@ -767,7 +774,7 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
 describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
   it("directly shows one persistent Role chats pane without an old-chat selector", () => {
     seed("engine-fleet");
-    const { container, getByRole, queryByRole } = render(<CockpitShell />);
+    const { container, getByRole, queryByRole } = render(<CockpitShell initialView="operations" />);
 
     expect(getByRole("radio", { name: "Operations" }).getAttribute("aria-checked")).toBe("true");
     expect(queryByRole("radio", { name: "Sessions" })).toBeNull();
@@ -794,32 +801,23 @@ describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
   });
 });
 
-describe("Engine Room keep-alive cockpit layer (260721 C2)", () => {
-  it("keeps the Engine Room mounted (hidden, never unmounted) across a tab switch", () => {
-    seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
-
-    // Mounted at boot like the other persistent layers, but hidden while Operations is up.
-    const room = container.querySelector('[data-testid="engine-room"]') as HTMLElement;
-    expect(room).not.toBeNull();
-    const layer = room.parentElement as HTMLElement;
-    expect(layer.style.display).toBe("none");
-    expect(layer.getAttribute("aria-hidden")).toBe("true");
-
-    // Switch to the Engine Room: the same DOM node shows — no remount, exactly one room in the tree.
-    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
-    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
-    expect(container.querySelectorAll('[data-testid="engine-room"]').length).toBe(1);
-    expect(layer.style.display).toBe("flex");
-    expect(layer.getAttribute("aria-hidden")).toBe("false");
-
-    // Away to Chats and back: still the same node — the room's SVG + GSAP substrate was never rebuilt.
-    fireEvent.click(getByRole("radio", { name: "Chats" }));
-    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
-    expect(layer.style.display).toBe("none");
-    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
-    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
-    expect(layer.style.display).toBe("flex");
+describe('visible tab contract (MIK-R79)', () => {
+  it('opens Chats, orders four tabs, and mounts hidden pages only through injected initialView', () => {
+    seed('engine-fleet');
+    const view = render(<CockpitShell />);
+    expect(
+      [...view.getByRole('radiogroup', { name: 'Views' }).querySelectorAll('[role=radio]')].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual(['Chats', 'Operations', 'Knowledge', 'File Viewer']);
+    expect(view.container.querySelector('main')?.dataset.view).toBe('chats');
+    for (const id of ['engine-room', 'memory-mirror', 'topology', 'hangar'])
+      expect(view.queryByTestId(id)).toBeNull();
+    cleanup();
+    const hidden = render(<CockpitShell initialView="engine" />);
+    expect(hidden.getByTestId('engine-room')).toBeTruthy();
+    fireEvent.click(hidden.getByRole('radio', { name: 'Chats' }));
+    expect(hidden.queryByTestId('engine-room')).toBeNull();
   });
 });
 
@@ -919,7 +917,7 @@ describe("the left rail shows lifecycle states and attention severities at the s
 
   it("keeps a handoff state and a queue warning apart in the one rail that shows both", () => {
     dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
-    const { getByTestId } = render(<CockpitShell />);
+    const { getByTestId } = render(<CockpitShell initialView="operations" />);
 
     const stateDot = getByTestId("task-state").firstElementChild;
     const severityDot = getByTestId("attn-severity").firstElementChild;
@@ -936,7 +934,7 @@ describe("the left rail shows lifecycle states and attention severities at the s
     // reader user got nothing. Queried BY ROLE AND NAME here, which is the computed tree, and
     // backed by axe, which fails the prohibited attribute outright.
     dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
-    const { getByRole, container } = render(<CockpitShell />);
+    const { getByRole, container } = render(<CockpitShell initialView="operations" />);
     expect(getByRole("img", { name: "Severity: warn" })).toBe(
       container.querySelector('[data-testid="attn-severity"]'),
     );

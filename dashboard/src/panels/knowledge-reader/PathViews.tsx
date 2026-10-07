@@ -8,7 +8,6 @@ import {
   locatorLabel,
   readSubtree,
   type CensusAnswer,
-  type CodeAnswer,
   type FamilyAtPath,
   type InvariantGroup,
   type LinkingRecord,
@@ -22,6 +21,7 @@ import {
   EntryRow,
   PathLink,
   ProseWithReferences,
+  ReferenceList,
   RecordLink,
   Section,
   StateBadge,
@@ -32,16 +32,6 @@ import {
 } from './readerParts';
 
 const heading = css({ margin: '0 0 0.3rem', fontSize: '0.95rem', overflowWrap: 'anywhere' });
-const codeBlock = css({
-  margin: '0',
-  padding: '0.5rem',
-  background: 'bg',
-  overflow: 'auto',
-  fontSize: '0.78rem',
-  lineHeight: '1.45',
-});
-const located = css({ background: 'bgPanel', color: 'ink', display: 'block' });
-
 function InvariantItem({ group }: { group: InvariantGroup }) {
   return (
     <li className={card} data-testid="reader-invariant" data-invariant={group.id}>
@@ -68,7 +58,10 @@ function invariantsTitle(answer: PathViewAnswer): string {
 function InvariantsSection({ answer }: { answer: PathViewAnswer }) {
   const reason = answer.currentness.unverifiableReason;
   return (
-    <Section title={invariantsTitle(answer)} testid="reader-invariants">
+    <Section
+      title={`${invariantsTitle(answer)} (${answer.invariants.length})`}
+      testid="reader-invariants"
+    >
       {reason ? (
         <p className={muted} data-testid="reader-unverifiable">
           states unverifiable: {reason}
@@ -139,28 +132,70 @@ function pathLabel(answer: PathViewAnswer): string {
   return answer.testFile ? 'Test file' : 'File';
 }
 
-/** A directory's children that hold knowledge, and the way to its full, paged entry list. */
-function DirectorySummary({ answer }: { answer: PathViewAnswer }) {
-  const nav = useReaderNav();
-  const children = answer.children ?? [];
-  const subtree = answer.subtree;
+function Breadcrumbs({ path }: { path: string }) {
+  const parts = path === '.' ? [] : path.split('/');
   return (
-    <Section title="Knowledge below this directory" testid="reader-directory-children">
-      {children.length === 0 ? (
-        <p className={muted}>No entry is recorded below this directory.</p>
-      ) : (
-        <ul className={list}>
-          {children.map((child) => (
-            <li key={child.path} data-testid="directory-child" data-path={child.path}>
-              <PathLink path={child.path} />{' '}
-              <span className={muted}>
-                {child.entries} entr{child.entries === 1 ? 'y' : 'ies'}
-              </span>
-            </li>
-          ))}
-        </ul>
+    <nav
+      aria-label="Document path"
+      className={css({
+        position: 'sticky',
+        top: '0',
+        background: 'bgPanel',
+        zIndex: '1',
+        paddingBlock: '0.35rem',
+        fontSize: '0.72rem',
+      })}
+    >
+      <PathLink path="." label="repository" />
+      {parts.map((part, index) => (
+        <span key={index}>
+          {' '}
+          / <PathLink path={parts.slice(0, index + 1).join('/')} label={part} />
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function DocumentFacts({ answer }: { answer: PathViewAnswer }) {
+  const nav = useReaderNav();
+  const facts = [
+    ['reader-invariants', 'invariants', answer.invariants.length],
+    ['reader-families', 'families', answer.families.length],
+    ['reader-linked-records', 'records', answer.records.length],
+    ['reader-references-section', 'references', answer.references.items.length],
+  ] as const;
+  return (
+    <div
+      data-testid="reader-facts"
+      className={css({
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '0.7rem',
+        color: 'muted',
+        fontSize: '0.75rem',
+        marginBottom: '0.8rem',
+      })}
+    >
+      {facts.map(([id, label, count]) =>
+        id === 'reader-references-section' && answer.references.state === 'unavailable' ? (
+          <span key={id}>references unavailable</span>
+        ) : count ? (
+          <a
+            key={id}
+            href={`#${id}`}
+            onClick={(event) => {
+              event.preventDefault();
+              document.getElementById(id)?.scrollIntoView({ block: 'start' });
+            }}
+          >
+            {count} {label}
+          </a>
+        ) : (
+          <span key={id}>0 {label}</span>
+        ),
       )}
-      {subtree && subtree.entries > 0 ? (
+      {answer.subtree?.entries ? (
         <button
           type="button"
           data-testid="open-subtree"
@@ -168,51 +203,37 @@ function DirectorySummary({ answer }: { answer: PathViewAnswer }) {
             nav.go({ repo: nav.repo, commit: nav.commit, view: 'subtree', path: answer.path })
           }
         >
-          list all {subtree.entries} entries under{' '}
-          {answer.path === '.' ? 'the repository' : answer.path}
+          all {answer.subtree.entries} entries
         </button>
       ) : null}
-    </Section>
+    </div>
   );
 }
 
 export function PathView({ answer }: { answer: PathViewAnswer }) {
+  const text = answer.prose.text ?? '';
+  const first = /^#\s+(.+)$/m.exec(text);
+  const title = first?.[1] ?? `${pathLabel(answer)} ${answer.path === '.' ? '' : answer.path}`;
+  const body = first
+    ? text.slice(0, first.index) + text.slice(first.index + first[0].length)
+    : text;
   return (
-    <div data-testid="reader-path-view" data-kind={answer.kind}>
-      <h2 className={heading}>
-        {pathLabel(answer)} {answer.path === '.' ? '' : answer.path}
-      </h2>
-      {/* A directory leads with its knowledge summary; its overview prose follows. */}
-      {answer.kind === 'directory' ? <DirectorySummary answer={answer} /> : null}
+    <article data-testid="reader-path-view" data-kind={answer.kind}>
+      <Breadcrumbs path={answer.path} />
+      <h1 className={css({ fontSize: '1.35rem', color: 'amber', margin: '0.5rem 0' })}>{title}</h1>
+      <DocumentFacts answer={answer} />
       <ProseWithReferences
-        read={answer.prose}
+        read={{ ...answer.prose, text: body }}
         references={answer.references.items}
         referencesState={answer.references}
       />
-      <InvariantsSection answer={answer} />
-      <Section title="Families" testid="reader-families">
-        {answer.families.length === 0 ? (
-          <p className={muted}>No family contains these invariants or routes over this path.</p>
-        ) : (
-          <ul className={list}>
-            {answer.families.map((family) => (
-              <FamilyItem key={family.id} family={family} />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <Section title="Decisions, incidents and other records" testid="reader-linked-records">
-        {answer.records.length === 0 ? (
-          <p className={muted}>No record links to this path or its invariants.</p>
-        ) : (
-          <ul className={list}>
-            {answer.records.map((row) => (
-              <LinkedRecordItem key={row.record.id} row={row} />
-            ))}
-          </ul>
-        )}
-      </Section>
-    </div>
+      {answer.currentness.unverifiableReason && !answer.invariants.length ? (
+        <p className={muted} data-testid="reader-unverifiable">
+          states unverifiable: {answer.currentness.unverifiableReason}
+        </p>
+      ) : null}
+      <DocumentSections answer={answer} text={text} />
+    </article>
   );
 }
 
@@ -228,15 +249,29 @@ export function WithoutProofView({ answer }: { answer: WithoutProofAnswer }) {
       </p>
       <ul className={list}>
         {answer.invariants.map((row) => (
-          <li key={row.id} className={card} data-testid="without-proof-row">
+          <li
+            key={row.id}
+            data-testid="without-proof-row"
+            title={`${row.title ?? row.id} · ${row.realizationPaths.join(' · ')}`}
+            className={css({
+              display: 'flex',
+              gap: '0.5rem',
+              whiteSpace: 'nowrap',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              scrollbarWidth: 'none',
+              '& > *': { flexShrink: 0 },
+              '& button': { whiteSpace: 'nowrap' },
+            })}
+          >
             <RecordLink summary={row} />
-            <div className={muted}>
+            <span className={muted}>
               {row.realizationPaths.map((path) => (
                 <span key={path}>
                   <PathLink path={path} />{' '}
                 </span>
               ))}
-            </div>
+            </span>
           </li>
         ))}
       </ul>
@@ -320,72 +355,15 @@ export function CensusView({ answer }: { answer: CensusAnswer }) {
   );
 }
 
-function shownLines(answer: CodeAnswer, total: number) {
-  const span = answer.locator?.state === 'resolved' ? answer.locator.lines : undefined;
-  const [first, last] = span ?? [1, Math.min(total, 80)];
-  return { span, first, last, from: Math.max(1, first - 3), to: Math.min(total, last + 3) };
-}
-
-function CodeLines({ answer }: { answer: CodeAnswer }) {
-  const lines = (answer.text ?? '').split('\n');
-  const { span, first, last, from, to } = shownLines(answer, lines.length);
-  return (
-    <>
-      {span ? (
-        <p className={muted}>
-          lines {first}–{last}
-        </p>
-      ) : null}
-      <pre className={codeBlock} data-testid="reader-code-lines">
-        {lines.slice(from - 1, to).map((text, offset) => {
-          const number = from + offset;
-          const inside = span !== undefined && number >= first && number <= last;
-          return (
-            <span
-              key={number}
-              className={inside ? located : undefined}
-              data-line={number}
-              data-located={inside ? 'true' : undefined}
-            >
-              {String(number).padStart(5, ' ')} {text}
-              {'\n'}
-            </span>
-          );
-        })}
-      </pre>
-    </>
-  );
-}
-
-export function CodeView({ answer }: { answer: CodeAnswer }) {
-  if (answer.state !== 'present') {
-    return (
-      <p className={muted} data-testid="reader-code">
-        {answer.path}: {answer.state} {answer.detail ? `— ${answer.detail}` : ''}
-      </p>
-    );
-  }
-  return (
-    <div data-testid="reader-code" data-locator={answer.locator?.state ?? 'none'}>
-      <h2 className={heading}>
-        <PathLink path={answer.path} />{' '}
-        <span className={muted}>at blob {answer.blob?.slice(0, 12)}</span>
-      </h2>
-      {answer.locator?.state === 'unresolved' ? (
-        <p className={muted} data-testid="locator-unresolved">
-          The locator does not resolve here: {answer.locator.detail}
-        </p>
-      ) : null}
-      <CodeLines answer={answer} />
-    </div>
-  );
-}
-
 // --- a directory's subtree, page by page -----------------------------------------------------------
 
 function SubtreeRowItem({ row, state }: { row: SubtreeRow; state?: string | null }) {
   return (
-    <li data-testid="subtree-row" data-entry={row.id}>
+    <li
+      data-testid="subtree-row"
+      data-entry={row.id}
+      className={css({ whiteSpace: 'nowrap', overflowX: 'auto' })}
+    >
       <PathLink path={row.path} />{' '}
       <span className={muted}>{locatorLabel({ locator: row.locator ?? { kind: 'file' } })}</span>{' '}
       <strong>{row.id}</strong> <span className={muted}>{row.kind}</span>{' '}
@@ -476,5 +454,42 @@ export function SubtreeView({ answer }: { answer: SubtreeAnswer }) {
         </button>
       ) : null}
     </div>
+  );
+}
+
+function DocumentSections({ answer, text }: { answer: PathViewAnswer; text: string }) {
+  return (
+    <>
+      {answer.invariants.length ? <InvariantsSection answer={answer} /> : null}
+      {answer.families.length ? (
+        <Section title={`Families (${answer.families.length})`} testid="reader-families">
+          <ul className={list}>
+            {answer.families.map((family) => (
+              <FamilyItem key={family.id} family={family} />
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {answer.records.length ? (
+        <Section
+          title={`Decisions, incidents and other records (${answer.records.length})`}
+          testid="reader-linked-records"
+        >
+          <ul className={list}>
+            {answer.records.map((row) => (
+              <LinkedRecordItem key={row.record.id} row={row} />
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {answer.references.items.length ? (
+        <Section
+          title={`References (${answer.references.items.length})`}
+          testid="reader-references-section"
+        >
+          <ReferenceList references={answer.references.items} text={text} />
+        </Section>
+      ) : null}
+    </>
   );
 }

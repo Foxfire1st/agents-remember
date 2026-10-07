@@ -2,9 +2,9 @@
 // full, and onboarding prose whose `[n]` markers link to their resolved references.
 //
 // Every link is a navigation: it changes the reader's address (and so the URL), never local state.
-import { createContext, useContext, useState, type ReactNode } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import type { Components } from 'react-markdown';
+import { Markdown } from '../../grammar/Markdown';
 
 import { css, cx } from '../../../styled-system/css';
 import {
@@ -25,6 +25,8 @@ export interface ReaderNav {
   repo: string;
   commit: string;
   go: (address: ReaderAddress) => void;
+  openCode: (address: ReaderAddress) => void;
+  openReference: (reference: ReferenceItem) => void;
 }
 
 export const ReaderNavContext = createContext<ReaderNav | null>(null);
@@ -98,33 +100,6 @@ const BADGE_TONE: Record<string, string> = {
   under_reconsideration: css({ color: 'amber', borderColor: 'amber' }),
   deferred: css({ color: 'amber', borderColor: 'amber' }),
 };
-const prose = css({
-  fontSize: '0.86rem',
-  lineHeight: '1.55',
-  '& p': { margin: '0 0 0.5rem', maxWidth: '82ch' },
-  '& h1, & h2, & h3, & h4': {
-    fontSize: '0.8rem',
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-    color: 'amber',
-    margin: '0.7rem 0 0.3rem',
-  },
-  '& code': { fontSize: '0.86em', background: 'bg', paddingInline: '0.25rem' },
-  '& pre': { background: 'bg', padding: '0.5rem', overflow: 'auto' },
-  '& ul, & ol': { paddingLeft: '1.2rem' },
-  '& table': {
-    borderCollapse: 'collapse',
-    fontSize: '0.8rem',
-    display: 'block',
-    overflowX: 'auto',
-  },
-  '& th, & td': {
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'grid',
-    padding: '0.2rem 0.4rem',
-  },
-});
 const marker = css({
   font: 'inherit',
   fontSize: '0.78em',
@@ -135,7 +110,6 @@ const marker = css({
   padding: '0 0.1rem',
   cursor: 'pointer',
 });
-const highlighted = css({ outline: '1px solid', outlineColor: 'cyan' });
 
 // --- small parts ------------------------------------------------------------------------------------
 
@@ -158,8 +132,10 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section data-testid={testid}>
-      <h3 className={sectionTitle}>{title}</h3>
+    <section data-testid={testid} id={testid}>
+      <h3 className={sectionTitle} data-page-section>
+        {title}
+      </h3>
       {children}
     </section>
   );
@@ -222,7 +198,7 @@ export function CodeLink({ path, anchor }: { path: string; anchor: EntryView['an
       className={linkButton}
       data-testid="code-link"
       data-path={path}
-      onClick={() => nav.go(codeAddress(nav, anchor, path))}
+      onClick={() => nav.openCode(codeAddress(nav, anchor, path))}
     >
       {path} · {locatorLabel(anchor)}
     </button>
@@ -358,15 +334,21 @@ function DecisionHeader({ decision }: { decision: DecisionView }) {
 }
 
 /** A decision in full, wherever it appears (MIK-R13 rule 6). */
-export function DecisionCard({ decision }: { decision: DecisionView }) {
+export function DecisionCard({
+  decision,
+  detailsOnly = false,
+}: {
+  decision: DecisionView;
+  detailsOnly?: boolean;
+}) {
   if (decision.unreadable) {
     return <Unavailable what={`decision ${decision.id}`} detail={decision.unreadable} />;
   }
   const governs = decision.governs ?? [];
   return (
     <div className={card} data-testid="decision-card" data-decision={decision.id}>
-      <DecisionHeader decision={decision} />
-      {decision.context ? <div>{decision.context}</div> : null}
+      {!detailsOnly ? <DecisionHeader decision={decision} /> : null}
+      {!detailsOnly && decision.context ? <div>{decision.context}</div> : null}
       <ol className={list} data-testid="decision-alternatives">
         {(decision.alternatives ?? []).map((alternative) => (
           <AlternativeItem key={alternative.index} alternative={alternative} />
@@ -390,61 +372,12 @@ export function DecisionCard({ decision }: { decision: DecisionView }) {
 
 // --- prose with references ------------------------------------------------------------------------------
 
-// A `[n]` marker in the prose's text. It is linked only in text nodes of the parsed Markdown, so a
-// `reports[0]` inside a code span or a fenced block is never rewritten (review F4); a real link or a
-// link definition that happens to be numbered is left as authored.
-const MARKER = /\[(\d+)\]/g;
-const HAS_MARKER = /\[\d+\]/;
-// Code spans and fences hold their text in `value`, never in text children, so only an existing
-// link's text needs skipping (a marker is never linked inside a link).
-const IN_LINK = new Set(['link', 'linkReference']);
-
-interface MdNode {
-  type: string;
-  value?: string;
-  url?: string;
-  children?: MdNode[];
-}
-
-function splitMarkers(value: string): MdNode[] {
-  const nodes: MdNode[] = [];
-  let last = 0;
-  for (const match of value.matchAll(MARKER)) {
-    const at = match.index ?? 0;
-    if (at > last) nodes.push({ type: 'text', value: value.slice(last, at) });
-    nodes.push({
-      type: 'link',
-      url: `#reference-${match[1]}`,
-      children: [{ type: 'text', value: match[0] }],
-    });
-    last = at + match[0].length;
-  }
-  if (last < value.length) nodes.push({ type: 'text', value: value.slice(last) });
-  return nodes;
-}
-
-function linkMarkers(node: MdNode): void {
-  if (!node.children) return;
-  node.children = node.children.flatMap((child) => {
-    if (child.type === 'text' && child.value && HAS_MARKER.test(child.value)) {
-      return splitMarkers(child.value);
-    }
-    if (!IN_LINK.has(child.type)) linkMarkers(child);
-    return [child];
-  });
-}
-
-/** The remark plugin that turns the prose's `[n]` markers into reference links. */
-export function remarkReferenceMarkers() {
-  return (tree: unknown) => linkMarkers(tree as MdNode);
-}
-
-function ReferenceList({
+export function ReferenceList({
   references,
-  focused,
+  text = '',
 }: {
   references: ReferenceItem[];
-  focused: string | null;
+  text?: string;
 }) {
   if (references.length === 0) return null;
   return (
@@ -453,13 +386,13 @@ function ReferenceList({
         <li
           key={item.number}
           id={`knowledge-reference-${item.number}`}
-          className={cx(card, focused === item.number ? highlighted : '')}
+
           data-testid="reader-reference"
           data-reference={item.number}
         >
           <div>
             <strong>[{item.number}]</strong>
-            {item.note ? <span className={muted}> {item.note}</span> : null}
+            {item.note ? <span className={muted} style={{ whiteSpace: 'pre-wrap' }}> {referenceNote(item.note, text)}</span> : null}
           </div>
           {item.targets.map((target, index) => (
             <div key={index} data-testid="reference-target" data-kind={target.kind}>
@@ -474,6 +407,13 @@ function ReferenceList({
 }
 
 /** Onboarding Markdown whose `[n]` markers link to their numbered references, listed below it. */
+function referenceNote(note: string, text: string): string {
+  const [sentence, ...anchors] = note.split('\n\nAnchor:');
+  return [text.includes(sentence.trim()) ? '' : sentence, ...anchors.map((anchor) => `Anchor:${anchor}`)]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function ProseWithReferences({
   read,
   references,
@@ -483,52 +423,100 @@ export function ProseWithReferences({
   references: ReferenceItem[];
   referencesState?: { state: string; detail?: string };
 }) {
-  const [focused, setFocused] = useState<string | null>(null);
-  const known = new Set(references.map((item) => item.number));
-  const components: Components = {
-    a: ({ href, children }) => {
-      const number = href?.startsWith('#reference-') ? href.slice('#reference-'.length) : null;
-      if (number && known.has(number)) {
-        return (
+  const nav = useReaderNav();
+  const known = useMemo(() => new Map(references.map((item) => [item.number, item])), [references]);
+  const components = useMemo<Components>(
+    () => ({
+      a: ({ href = '', children }) =>
+        href.startsWith('#reference-') && known.has(href.slice(11)) ? (
           <button
             type="button"
             className={marker}
             data-testid="reference-marker"
-            data-reference={number}
-            onClick={() => {
-              setFocused(number);
-              document
-                .getElementById(`knowledge-reference-${number}`)
-                ?.scrollIntoView?.({ block: 'nearest' });
-            }}
+            data-reference={href.slice(11)}
+            onClick={() => nav.openReference(known.get(href.slice(11))!)}
           >
-            [{number}]
+            {children}
           </button>
-        );
-      }
-      return <span>{children}</span>;
-    },
-  };
+        ) : href.startsWith('#reference-') ? (
+          <span>{children}</span>
+        ) : (
+          <ProseLink href={href} source={read.path}>
+            {children}
+          </ProseLink>
+        ),
+    }),
+    [known, nav, read.path],
+  );
   return (
     <div data-testid="reader-prose">
       {read.state === 'present' ? (
-        <div className={prose}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkReferenceMarkers]}
-            components={components}
-          >
-            {read.text ?? ''}
-          </ReactMarkdown>
-        </div>
+        <Markdown referenceMarkers headingIds components={components}>
+          {read.text ?? ''}
+        </Markdown>
       ) : read.state === 'absent' ? (
         <p className={muted}>No onboarding prose is recorded at {read.path}.</p>
       ) : (
         <Unavailable what={`prose ${read.path}`} detail={read.detail} />
       )}
-      {referencesState && referencesState.state === 'unavailable' ? (
+      {referencesState?.state === 'unavailable' ? (
         <Unavailable what="references" detail={referencesState.detail} />
       ) : null}
-      <ReferenceList references={references} focused={focused} />
     </div>
+  );
+}
+
+// Resolve an authored relative link against the memory prose, then reverse its
+// one-to-one onboarding mapping. External links open separately; unsupported memory
+// links remain readable without unloading the dashboard or losing its reading position.
+export function proseLinkPath(source: string, href: string): string | null {
+  if (!href || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//'))
+    return null;
+  const url = new URL(href, `https://memory.invalid/${source}`);
+  let path = decodeURIComponent(url.pathname).slice(1);
+  if (!path.startsWith('onboarding/') || !path.endsWith('.md')) return null;
+  path = path.slice('onboarding/'.length);
+  if (path === 'overview.md') return '.';
+  if (path.endsWith('/overview.md')) return path.slice(0, -'/overview.md'.length);
+  return path.slice(0, -'.md'.length);
+}
+
+function ProseLink({
+  href,
+  source,
+  children,
+}: {
+  href: string;
+  source: string;
+  children: ReactNode;
+}) {
+  const nav = useReaderNav();
+  const path = proseLinkPath(source, href);
+  return path !== null ? (
+    <button
+      type="button"
+      className={linkButton}
+      onClick={() => nav.go({ repo: nav.repo, commit: nav.commit, view: 'path', path })}
+    >
+      {children}
+    </button>
+  ) : href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//') ? (
+    <a
+      href={href}
+      target={href.startsWith('#') ? undefined : '_blank'}
+      rel={href.startsWith('#') ? undefined : 'noopener noreferrer'}
+      onClick={(event) => {
+        if (href.startsWith('#')) {
+          event.preventDefault();
+          document.getElementById(href.slice(1))?.scrollIntoView({ block: 'start' });
+        }
+      }}
+    >
+      {children}
+    </a>
+  ) : (
+    <span data-testid="prose-unresolved-link" title={`${href} (not an onboarding card or overview)`}>
+      {children}
+    </span>
   );
 }

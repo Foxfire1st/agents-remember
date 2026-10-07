@@ -491,7 +491,7 @@ describe("Cockpit change-set takeover wiring", () => {
   it("does not show the takeover initially and keeps the Operations rails", () => {
     stubChangeset();
     dashboardStore.getState().applySnapshot(GALLERY.find((g) => g.name === "full")!.projection);
-    const { container } = render(<CockpitShell />);
+    const { container } = render(<CockpitShell initialView="operations" />);
     expect(container.querySelector('[data-testid="changeset-viewer"]')).toBeNull();
     expect(container.querySelector(".rail--left")).not.toBeNull();
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");

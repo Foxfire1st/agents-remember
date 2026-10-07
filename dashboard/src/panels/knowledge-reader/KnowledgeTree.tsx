@@ -1,202 +1,257 @@
-// The reader's explorer (MIK-R29 rule 1): the repository's directories and files at the selected
-// memory tree, one level per read, each child with its knowledge entry count. A path known only to
-// the onboarding mirror (a card whose code is gone) is listed and marked; a code tree that cannot
-// be listed is named, and the onboarding mirror is still shown.
-import { useEffect, useRef, useState } from 'react';
+// Knowledge API adapter for the same async explorer the File Viewer uses.
+import { useEffect, useState } from 'react';
+import {
+  readerGet,
+  type ReaderAddress,
+  type TreeAnswer,
+  type TreeChild,
+  type RecordListAnswer,
+  type CensusAnswer,
+  type WithoutProofAnswer,
+} from '../../data/knowledgeReader';
+import { ExplorerTree, type ExplorerRow } from '../../grammar/ExplorerTree';
 
-import { css, cx } from '../../../styled-system/css';
-import { readerGet, type TreeAnswer, type TreeChild } from '../../data/knowledgeReader';
-import { muted } from './readerParts';
-
-const tree = css({ listStyle: 'none', margin: '0', paddingLeft: '0.8rem', fontSize: '0.8rem' });
-const row = css({ display: 'flex', alignItems: 'baseline', gap: '0.25rem', minWidth: '0' });
-const toggle = css({
-  font: 'inherit',
-  width: '1rem',
-  flexShrink: 0,
-  background: 'transparent',
-  border: '0',
-  color: 'muted',
-  cursor: 'pointer',
-  padding: '0',
-});
-const name = css({
-  font: 'inherit',
-  background: 'transparent',
-  border: '0',
-  padding: '0',
-  color: 'ink',
-  cursor: 'pointer',
-  textAlign: 'left',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-});
-const selected = css({ color: 'amber' });
-const count = css({ color: 'cyan', fontSize: '0.72rem' });
-
-type Level = TreeAnswer | { state: 'loading' } | { state: 'failed'; detail: string };
-
-function ancestors(path: string | undefined): string[] {
-  if (!path || path === '.') return [];
-  const parts = path.split('/');
-  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'));
+interface Row extends ExplorerRow {
+  address?: ReaderAddress;
+  child?: TreeChild;
+  count?: number | string;
 }
-
-function useTreeLevels(repo: string, commit: string, open: Set<string>) {
-  const [levels, setLevels] = useState<Record<string, Level>>({});
-  // The tree the levels belong to. An answer that arrives after the repository or the memory tree
-  // changed is another tree's listing and is dropped (review F13).
-  const tree = `${repo}\u0000${commit}`;
-  const current = useRef(tree);
-  useEffect(() => {
-    current.current = tree;
-    setLevels({});
-  }, [tree]);
-  useEffect(() => {
-    for (const directory of open) {
-      if (levels[directory] !== undefined || !repo) continue;
-      const asked = current.current;
-      const settle = (level: Level) => {
-        if (current.current === asked) setLevels((known) => ({ ...known, [directory]: level }));
-      };
-      settle({ state: 'loading' });
-      readerGet<TreeAnswer>('tree', { repo, commit, path: directory }).then(
-        settle,
-        (error: unknown) => settle({ state: 'failed', detail: String(error) }),
-      );
-    }
-  }, [open, levels, repo, commit]);
-  return levels;
+type At = Pick<ReaderAddress, 'repo' | 'commit'>;
+const KIND_NAMES: Record<string, string> = {
+  family: 'Families',
+  decision: 'Decisions',
+  assumption: 'Assumptions',
+  incident: 'Incidents',
+  limitation: 'Limitations',
+  failure_mode: 'Failure modes',
+  scenario: 'Scenarios',
+  diagnostic: 'Diagnostics',
+  term: 'Terms',
+};
+function ancestors(address: ReaderAddress): string[] {
+  if (address.view === 'record')
+    return ['path:.', 'records', `kind:${recordKind(address.id ?? '')}`];
+  const parts = address.path && address.path !== '.' ? address.path.split('/') : [];
+  return [
+    'path:.',
+    ...parts.slice(0, -1).map((_, index) => `path:${parts.slice(0, index + 1).join('/')}`),
+  ];
 }
-
-interface LevelProps {
-  directory: string;
-  levels: Record<string, Level>;
-  open: Set<string>;
-  current?: string;
-  flip: (directory: string) => void;
-  onOpen: (path: string) => void;
-}
-
-function Toggle({
-  child,
-  expanded,
-  flip,
-}: {
-  child: TreeChild;
-  expanded: boolean;
-  flip: (directory: string) => void;
-}) {
-  if (child.kind !== 'dir') return <span className={toggle} />;
+function recordKind(id: string) {
   return (
-    <button
-      type="button"
-      className={toggle}
-      aria-label={`${expanded ? 'Collapse' : 'Expand'} ${child.name}`}
-      aria-expanded={expanded}
-      onClick={() => flip(child.path)}
-    >
-      {expanded ? '▾' : '▸'}
-    </button>
+    {
+      FAM: 'family',
+      DEC: 'decision',
+      ASM: 'assumption',
+      INC: 'incident',
+      LIM: 'limitation',
+      FLM: 'failure_mode',
+      SCN: 'scenario',
+      DGN: 'diagnostic',
+      TRM: 'term',
+    }[id.slice(0, 3)] ?? ''
   );
 }
-
-function TreeNode({ child, ...props }: LevelProps & { child: TreeChild }) {
-  const { open, current, flip, onOpen } = props;
-  // A child lies below its directory; a listing that says otherwise is never descended into.
-  const below = props.directory === '' || child.path.startsWith(`${props.directory}/`);
-  const expanded = below && child.kind === 'dir' && open.has(child.path);
-  return (
-    <li data-testid="tree-node" data-path={child.path} data-kind={child.kind}>
-      <div className={row}>
-        <Toggle child={child} expanded={expanded} flip={flip} />
-        <button
-          type="button"
-          className={cx(name, current === child.path ? selected : '')}
-          title={child.path}
-          onClick={() => onOpen(child.path)}
-        >
-          {child.name}
-        </button>
-        {child.entries > 0 ? <span className={count}>{child.entries}</span> : null}
-        {!child.inCode ? <span className={muted}>(onboarding only)</span> : null}
-      </div>
-      {expanded ? (
-        <ul className={tree}>
-          <TreeLevel {...props} directory={child.path} />
-        </ul>
-      ) : null}
-    </li>
-  );
+function rootRows(at: At): Row[] {
+  return [
+    {
+      name: 'Invariants without proof',
+      path: 'without-proof',
+      kind: 'file',
+      address: { ...at, view: 'without-proof' },
+    },
+    {
+      name: 'Census',
+      path: 'census',
+      kind: 'file',
+      address: { ...at, view: 'census' },
+    },
+    {
+      name: `${at.repo} /`,
+      path: 'path:.',
+      kind: 'dir',
+      address: { ...at, view: 'path', path: '.' },
+    },
+    { name: 'Records', path: 'records', kind: 'dir' },
+  ];
 }
 
-function TreeLevel(props: LevelProps) {
-  const level = props.levels[props.directory];
-  if (level === undefined || level.state === 'loading') return <li className={muted}>loading…</li>;
-  if (!('children' in level)) {
-    return (
-      <li className={muted} data-testid="tree-unavailable">
-        {'detail' in level ? level.detail : level.state}
-      </li>
+function useRootCounts(at: At) {
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const key = JSON.stringify(at);
+  useEffect(() => {
+    let live = true;
+    const params = JSON.parse(key) as At;
+    const update = (view: string, value: string) => {
+      if (live) setCounts((known) => ({ ...known, [view]: value }));
+    };
+    const fail = (view: string) => (error: unknown) => update(view, `unavailable: ${String(error)}`);
+    void readerGet<WithoutProofAnswer>('without-proof', params).then(
+      (answer) => update('without-proof', answer.state === 'view' ? String(answer.total) : `${answer.state}: ${answer.detail ?? ''}`),
+      fail('without-proof'),
     );
-  }
+    void readerGet<CensusAnswer>('census', params).then(
+      (answer) => update('census', answer.state === 'census' ? String(answer.censuses.length) : `${answer.state}: ${answer.detail ?? ''}`),
+      fail('census'),
+    );
+    return () => { live = false; };
+  }, [key]);
+  return counts;
+}
+function recordRows(answer: RecordListAnswer, directory: string, at: At): Row[] {
+  if (directory === 'records')
+    return Object.entries(answer.kinds)
+      .filter(([kind, rows]) => kind !== 'invariant' && rows.length)
+      .map(([kind, rows]) => ({
+        name: KIND_NAMES[kind] ?? kind,
+        path: `kind:${kind}`,
+        kind: 'dir',
+        count: rows.length,
+      }));
+  return (answer.kinds[directory.slice(5)] ?? []).map((record) => ({
+    name: record.title ?? record.id,
+    path: `record:${record.id}`,
+    kind: 'file',
+    address: { ...at, view: 'record', id: record.id },
+  }));
+}
+function useKnowledgeLoader(at: At, allPaths: boolean, loadRecords: () => Promise<RecordListAnswer>, currentPath?: string) {
+  const [notice, setNotice] = useState('');
+  const load = async (directory: string): Promise<Row[]> => {
+    if (directory === 'root') return rootRows(at);
+    if (directory === 'records' || directory.startsWith('kind:')) {
+      const answer = await loadRecords();
+      if (answer.state !== 'view')
+        throw new Error(`record list ${answer.state}: ${answer.detail ?? ''}`);
+      return recordRows(answer, directory, at);
+    }
+    return pathRows(directory, at, allPaths, setNotice, currentPath);
+  };
+  return { load, notice };
+}
+function RootSuffix({ row, counts }: { row: Row; counts: Record<string, string> }) {
+  return row.path === 'census' || row.path === 'without-proof'
+    ? <span title={counts[row.path]}>{counts[row.path] ?? 'reading…'}</span>
+    : row.count;
+}
+function RowSuffix({ row, counts }: { row: Row; counts: Record<string, string> }) {
+  const child = row.child;
+  if (!child) return <RootSuffix row={row} counts={counts} />;
+  const coverage = child.coverage;
   return (
     <>
-      {level.code.state !== 'listed' ? (
-        <li className={muted} data-testid="tree-code-unavailable">
-          code tree {level.code.state}: {level.code.detail}
-        </li>
+      {child.kind === 'dir' ? (
+        child.hasOverview ? (
+          <span title="has overview">◖ </span>
+        ) : null
+      ) : child.onboarding ? (
+        <span title="has card">◖ </span>
       ) : null}
-      {level.children.map((child) => (
-        <TreeNode key={child.path} {...props} child={child} />
-      ))}
+      {child.entries}
+      {child.kind === 'dir' ? (
+        <span title={coverage?.detail}>
+          {' '}
+          ·{' '}
+          {coverage?.state === 'counted'
+            ? `${coverage.cards}/${coverage.files} cards`
+            : 'coverage unavailable'}
+        </span>
+      ) : null}
+      {!child.inCode ? <span> · onboarding only</span> : null}
     </>
   );
 }
-
+function currentRow(address: ReaderAddress) {
+  if (address.view === 'path' || address.view === 'code') return `path:${address.path ?? '.'}`;
+  return address.view === 'record' ? `record:${address.id}` : address.view;
+}
 export function KnowledgeTree({
-  repo,
-  commit,
-  current,
+  address,
   onOpen,
+  loadRecords,
 }: {
-  repo: string;
-  commit: string;
-  current?: string;
-  onOpen: (path: string) => void;
+  address: ReaderAddress;
+  onOpen: (address: ReaderAddress) => void;
+  loadRecords: () => Promise<RecordListAnswer>;
 }) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set(['', ...ancestors(current)]));
-  const levels = useTreeLevels(repo, commit, open);
-  useEffect(() => {
-    setOpen((known) => new Set([...known, ...ancestors(current)]));
-  }, [current]);
-  const flip = (directory: string) =>
-    setOpen((known) => {
-      const next = new Set(known);
-      if (next.has(directory)) next.delete(directory);
-      else next.add(directory);
-      return next;
-    });
+  const [allPaths, setAllPaths] = useState(false);
+  const counts = useRootCounts({ repo: address.repo, commit: address.commit });
+  const { load, notice } = useKnowledgeLoader(
+    { repo: address.repo, commit: address.commit },
+    allPaths,
+    loadRecords,
+    address.path,
+  );
   return (
-    <nav aria-label="Repository paths" data-testid="knowledge-tree">
-      <button
-        type="button"
-        className={cx(name, current === '.' || current === '' ? selected : '')}
-        onClick={() => onOpen('.')}
-      >
-        {repo || 'repository'} /
-      </button>
-      <ul className={tree} style={{ paddingLeft: 0 }}>
-        <TreeLevel
-          directory=""
-          levels={levels}
-          open={open}
-          current={current}
-          flip={flip}
-          onOpen={onOpen}
-        />
-      </ul>
+    <nav
+      aria-label="Repository paths"
+      data-testid="knowledge-tree"
+      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+    >
+      <label style={{ fontSize: '0.75rem', padding: '0.3rem' }}>
+        <input
+          type="checkbox"
+          checked={allPaths}
+          onChange={(event) => setAllPaths(event.target.checked)}
+        />{' '}
+        Show every path
+      </label>
+      {notice ? <p data-testid="tree-code-unavailable">{notice}</p> : null}
+      <ExplorerTree<Row>
+        revision={String(allPaths)}
+        label="Knowledge paths and records"
+        testid="knowledge-explorer"
+        root={{ name: 'Knowledge', path: 'root', kind: 'dir' }}
+        loadChildren={load}
+        current={currentRow(address)}
+        ancestors={ancestors(address)}
+        openFolders
+        onOpen={(row) => {
+          if (row.address) onOpen(row.address);
+        }}
+        rowAttributes={(row) =>
+          row.child
+            ? { 'data-testid': 'tree-node', 'data-path': row.child.path, 'data-kind': row.kind }
+            : { 'data-record-row': row.path }
+        }
+        renderSuffix={(row) => <RowSuffix row={row} counts={counts} />}
+      />
     </nav>
+  );
+}
+
+async function pathRows(
+  directory: string,
+  at: At,
+  allPaths: boolean,
+  setNotice: (notice: string) => void,
+  currentPath?: string,
+): Promise<Row[]> {
+  const path = directory.slice(5);
+  const answer = await readerGet<TreeAnswer>('tree', { ...at, path: path === '.' ? '' : path });
+  if (answer.state !== 'view') throw new Error(`tree ${answer.state}: ${answer.detail ?? ''}`);
+  setNotice(
+    answer.code.state === 'listed'
+      ? ''
+      : `code tree ${answer.code.state}: ${answer.code.detail ?? ''}`,
+  );
+  return answer.children
+    .filter((child) => showPath(child, allPaths, currentPath))
+    .map((child) => ({
+      name: child.name,
+      path: `path:${child.path}`,
+      kind: child.kind,
+      child,
+      address: { ...at, view: 'path', path: child.path },
+    }));
+}
+
+// Keep the open path and its ancestors visible even when a cited code file has no card.
+function showPath(child: TreeChild, allPaths: boolean, current?: string) {
+  return (
+    allPaths ||
+    child.hasKnowledge !== false ||
+    current === child.path ||
+    current?.startsWith(`${child.path}/`) === true
   );
 }

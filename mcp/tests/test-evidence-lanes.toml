@@ -141,6 +141,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_reader.py",
+  "mcp/tests/test_knowledge_reader_tree_coverage.py",
   "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_relation_rules.py",
   "mcp/tests/test_knowledge_reopen.py",

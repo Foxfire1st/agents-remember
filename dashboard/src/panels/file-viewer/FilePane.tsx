@@ -3,8 +3,8 @@
 // same HighlightStyle => identical tokens across plain + diff). The EditorView is created
 // imperatively in an effect and torn down on unmount / content change.
 import { useEffect, useRef } from "react";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorState, type Extension, type Text } from "@codemirror/state";
+import { Decoration, EditorView } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
 import { codeTheme } from "./codemirrorTheme";
@@ -28,6 +28,7 @@ export function FilePane({
   firstLine = 1,
   fit = false,
   marks,
+  highlightedLines,
 }: {
   content: string;
   language: string;
@@ -35,6 +36,7 @@ export function FilePane({
   fit?: boolean;
   // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
   marks?: PaneMarks;
+  highlightedLines?: readonly [number, number];
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
@@ -57,7 +59,16 @@ export function FilePane({
         codeTheme,
       ];
       if (lang) extensions.push(lang);
+      const doc = EditorState.create({ doc: content }).doc;
+      if (highlightedLines) extensions.push(citationHighlight(doc, highlightedLines, firstLine));
       view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions }) });
+      if (highlightedLines)
+        view.dispatch({
+          effects: EditorView.scrollIntoView(
+            doc.line(Math.max(1, Math.min(doc.lines, highlightedLines[0] - firstLine + 1))).from,
+            { y: "start" },
+          ),
+        });
       drawn({ after: { view, first: firstLine } });
     });
 
@@ -67,7 +78,7 @@ export function FilePane({
       view?.destroy();
     };
     // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
-  }, [content, language, firstLine, placement, gutterFor, drawn]);
+  }, [content, language, firstLine, placement, gutterFor, drawn, highlightedLines]);
 
   return (
     <>
@@ -75,4 +86,32 @@ export function FilePane({
       {portals}
     </>
   );
+}
+
+function citationHighlight(
+  doc: Text,
+  [first, last]: readonly [number, number],
+  firstLine: number,
+): Extension {
+  const lines = [];
+  for (
+    let line = Math.max(1, first - firstLine + 1);
+    line <= Math.min(doc.lines, last - firstLine + 1);
+    line++
+  )
+    lines.push(
+      Decoration.line({
+        attributes: {
+          class: "cm-citedLine",
+          "data-located": "true",
+          "data-line": String(line + firstLine - 1),
+        },
+      }).range(doc.line(line).from),
+    );
+  return [
+    EditorView.decorations.of(Decoration.set(lines)),
+    EditorView.theme({
+      ".cm-citedLine": { background: "color-mix(in oklab, var(--cyan) 15%, transparent)" },
+    }),
+  ];
 }

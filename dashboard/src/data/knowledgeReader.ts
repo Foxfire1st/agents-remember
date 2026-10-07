@@ -221,6 +221,10 @@ export interface TreeChild {
   kind: 'file' | 'dir';
   inCode: boolean;
   onboarding: boolean;
+  // Omitted when the memory pathname enumeration failed: unknown is not false.
+  hasKnowledge?: boolean;
+  hasOverview?: boolean;
+  coverage?: { state: 'counted' | 'unavailable'; files?: number; cards?: number; detail?: string };
   entries: number;
 }
 

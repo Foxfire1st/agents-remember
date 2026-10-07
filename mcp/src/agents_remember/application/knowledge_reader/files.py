@@ -29,19 +29,16 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel
-from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT
 from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
 __all__ = [
     "CODE_TEXT_LIMIT",
     "FileRead",
-    "ListedChild",
     "ReaderRequestError",
     "census_files",
     "code_kind",
     "code_text",
-    "list_code_directory",
-    "list_onboarding_directory",
     "normal_path",
     "read_memory_file",
 ]
@@ -75,12 +72,6 @@ class FileRead:
         if self.detail is not None:
             document["detail"] = self.detail
         return document
-
-
-@dataclass(frozen=True)
-class ListedChild:
-    name: str
-    kind: Literal["file", "dir"]
 
 
 def normal_path(path: str) -> str:
@@ -127,40 +118,6 @@ def read_memory_file(selection: ReaderSelection, path: str) -> FileRead:
         return FileRead(path, "present", text.stdout)
     except (*READ_FAILURES, UnicodeDecodeError) as error:
         return FileRead(path, "unavailable", detail=f"{type(error).__name__}: {error}")
-
-
-def list_onboarding_directory(selection: ReaderSelection, directory: str) -> list[ListedChild]:
-    """The children of ``onboarding/<directory>`` in the selected memory tree (none when absent)."""
-
-    base = ONBOARDING_ROOT if directory == ROOT_ROUTE_PATH else f"{ONBOARDING_ROOT}/{directory}"
-    if selection.memory_root is not None:
-        root = selection.memory_root / confine_rel(selection.memory_root, base)
-        if not root.is_dir():
-            return []
-        return sorted(
-            (
-                ListedChild(child.name, "dir" if child.is_dir() else "file")
-                for child in root.iterdir()
-                if not child.name.startswith(".")
-            ),
-            key=lambda one: one.name,
-        )
-    return _ls_tree(selection.memory_repository, str(selection.revision), base)
-
-
-def list_code_directory(selection: ReaderSelection, directory: str) -> list[ListedChild] | FileRead:
-    """The children of ``directory`` in the selection's code tree, or why it cannot be listed."""
-
-    if selection.code_tree is None:
-        return FileRead(directory, "unavailable", detail=selection.code_note)
-    try:
-        return _ls_tree(
-            selection.code_tree.repository,
-            selection.code_tree.tree,
-            None if directory == ROOT_ROUTE_PATH else directory,
-        )
-    except READ_FAILURES as error:
-        return FileRead(directory, "unavailable", detail=f"{type(error).__name__}: {error}")
 
 
 def code_kind(selection: ReaderSelection, path: str) -> Literal["file", "dir"] | None:
@@ -263,23 +220,6 @@ def _census_directory(memory_root: Path) -> dict[str, bytes]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
-
-
-def _ls_tree(repository: Path, treeish: str, directory: str | None) -> list[ListedChild]:
-    pathspec = [] if directory is None else ["--", f"{directory}/"]
-    result = run_git(repository, ["ls-tree", "-z", treeish, *pathspec], _OPTIONS)
-    if result.returncode != 0:
-        raise ReaderReadError(result.stderr.strip() or f"git ls-tree {treeish} failed")
-    children = []
-    for entry in result.stdout.split("\0"):
-        if not entry:
-            continue
-        kind, _obj, path = _row(entry)
-        if kind in ("blob", "tree"):
-            children.append(
-                ListedChild(PurePosixPath(path).name, "file" if kind == "blob" else "dir")
-            )
-    return sorted(children, key=lambda one: one.name)
 
 
 def _row(entry: str) -> tuple[str, str, str]:

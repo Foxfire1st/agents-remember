@@ -212,10 +212,10 @@ async function openStaleEntry(view: ReturnType<typeof render>, routes: ReturnTyp
 
 it("(a) re-validates when the task detail is shown again, once per showing, with no catalogue read", async () => {
   const routes = serve(seedTwoLiveLeaves());
-  const view = render(<CockpitShell />);
+  const view = render(<CockpitShell initialView="operations" />);
   await openStaleEntry(view, routes);
 
-  fireEvent.click(view.getByRole("radio", { name: "Memory" }));
+  fireEvent.click(view.getByRole("radio", { name: "File Viewer" }));
   fireEvent.click(view.getByRole("radio", { name: "Operations" }));
   await waitFor(() => expect(view.getByTestId("open-intent-review").textContent).toContain("+2 −0"));
   expect(routes.summaryReads()).toBe(2);
@@ -233,8 +233,8 @@ it("(a) re-validates when the task detail is shown again, once per showing, with
 
 it("(a) opening a task from another view reads its entry exactly once", async () => {
   const routes = serve(seedTwoLiveLeaves());
-  const view = render(<CockpitShell />);
-  fireEvent.click(view.getByRole("radio", { name: "Memory" }));
+  const view = render(<CockpitShell initialView="operations" />);
+  fireEvent.click(view.getByRole("radio", { name: "File Viewer" }));
   // The rails stay on Memory; selecting a task changes the task and shows the detail in one step.
   fireEvent.click(view.getByText("Direct Leaf Reader"));
   const entry = await view.findByTestId("open-intent-review");
@@ -246,7 +246,7 @@ it("(a) opening a task from another view reads its entry exactly once", async ()
 
 it("(b) re-validates when the developer leaves the reviewer back to the entry", async () => {
   const routes = serve(seedTwoLiveLeaves());
-  const view = render(<CockpitShell />);
+  const view = render(<CockpitShell initialView="operations" />);
   await openStaleEntry(view, routes);
   expect(routes.catalogueReads()).toBe(0);
 
@@ -265,7 +265,7 @@ it("(b) re-validates when the developer leaves the reviewer back to the entry", 
 
 it("(c) re-validates when the reviewer's own refresh runs", async () => {
   const routes = serve(seedTwoLiveLeaves());
-  const view = render(<CockpitShell />);
+  const view = render(<CockpitShell initialView="operations" />);
   const entry = await openStaleEntry(view, routes);
 
   fireEvent.click(entry);

@@ -206,10 +206,10 @@ afterEach(() => {
 describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)", () => {
   it("keeps unchanged layers still and sends rail visibility only across bleed boundaries", () => {
     seed("engine-fleet");
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
 
-    // Every persistent layer mounted exactly once (all are keep-alive, hidden via display).
-    expect(counts.engineRoom).toBe(1);
+    // Accessible persistent layers mount once; Engine Room is outside the bar and unmounted.
+    expect(counts.engineRoom).toBe(0);
     expect(counts.detailPanel).toBe(1);
     expect(counts.fileViewer).toBe(1);
     expect(counts.attentionQueue).toBe(1);
@@ -219,28 +219,28 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // A full mode-bar sweep — railed↔full-bleed grid flips in both directions. Before the fix
     // EVERY layer reconciled on each of these clicks; now the memo gate holds wherever the
     // layer's props are unchanged, so a switch costs only the shell's style/layout flip.
-    for (const name of ["Engine Room", "Chats", "Memory", "Topology", "Hangar", "Operations"]) {
+    for (const name of ["Chats", "File Viewer", "Operations"]) {
       fireEvent.click(view.getByRole("radio", { name }));
     }
 
     // No props at all / unchanged props: never re-rendered by the sweep.
-    expect(counts.engineRoom).toBe(1);
+    expect(counts.engineRoom).toBe(0);
     expect(counts.detailPanel).toBe(1); // no selection; stable callbacks
     expect(counts.eventRiver).toBe(1);
-    expect(counts.fileViewer).toBe(1); // File Viewer never visited — `active` stayed false
-    // The two left-rail panels receive only the railed↔full-bleed visibility edges: engine
-    // (hide), memory (show), topology (hide), hangar (show). LifecycleList's rendered React Aria
+    expect(counts.fileViewer).toBe(3); // File Viewer is visited once
+    // The left-rail panels receive only the visibility edges: Chats hides them,
+    // then Operations shows them again. LifecycleList's rendered React Aria
     // collection has its own memo gate, so these controller renders do not rebuild it while hidden.
-    expect(counts.attentionQueue).toBe(5);
-    expect(counts.lifecycleList).toBe(5);
+    expect(counts.attentionQueue).toBe(3);
+    expect(counts.lifecycleList).toBe(3);
   });
 
   it("keeps the visibility/aria contract and DOM identity across switches (keep-alive intact)", () => {
     seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole } = render(<CockpitShell initialView="operations" />);
     const railLeft = container.querySelector(".rail--left") as HTMLElement;
     const railRight = container.querySelector(".rail--right") as HTMLElement;
-    const room = container.querySelector('[data-testid="engine-room"]') as HTMLElement;
+    const room = container.querySelector('[data-testid="file-viewer"]') as HTMLElement;
     const roomLayer = room.parentElement as HTMLElement;
     const chats = container.querySelector('[data-testid="role-chats-pane"]') as HTMLElement;
     const chatsLayerEl = chats.parentElement as HTMLElement;
@@ -251,7 +251,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(roomLayer.getAttribute("aria-hidden")).toBe("true");
     expect(chatsLayerEl.style.display).toBe("none");
 
-    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
+    fireEvent.click(getByRole("radio", { name: "File Viewer" }));
     expect(railLeft.style.display).toBe("none");
     expect(railRight.style.display).toBe("none");
     expect(railLeft.getAttribute("aria-hidden")).toBe("true");
@@ -269,7 +269,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // Same DOM nodes throughout — hidden-not-unmounted survived the memo change.
     expect(container.querySelector(".rail--left")).toBe(railLeft);
     expect(container.querySelector(".rail--right")).toBe(railRight);
-    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
+    expect(container.querySelector('[data-testid="file-viewer"]')).toBe(room);
     expect(container.querySelector('[data-testid="role-chats-pane"]')).toBe(chats);
     expect(railLeft.style.display).toBe("flex");
     expect(roomLayer.style.display).toBe("none");
@@ -278,7 +278,7 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
 
   it("still re-renders a layer when its real props change (the memo gate passes selection)", () => {
     seedDrillableMaster();
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
     expect(counts.detailPanel).toBe(1);
     expect(counts.lifecycleList).toBe(1);
 
@@ -288,13 +288,13 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(counts.lifecycleList).toBe(2);
     // …while layers whose props genuinely didn't change still skip.
     expect(counts.attentionQueue).toBe(1);
-    expect(counts.engineRoom).toBe(1);
+    expect(counts.engineRoom).toBe(0);
     expect(counts.eventRiver).toBe(1);
   });
 
   it("swaps the right rail between River and Chat (memoized RailToggle still updates)", () => {
     seed("engine-fleet");
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
     const railRight = view.container.querySelector(".rail--right");
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
 

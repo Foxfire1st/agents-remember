@@ -1,6 +1,7 @@
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkReferenceMarkers, remarkHeadingIds } from "./referenceMarkers";
 
 import { css } from "../../styled-system/css";
 import { isRequirementAddress, resolveRequirementAddress } from "../data/requirements";
@@ -54,6 +55,20 @@ const box = css({
     color: "amber",
     margin: "0.6rem 0 0.3rem",
   },
+  "&[data-document-headings=true] h1": {
+    fontSize: "1.35rem",
+    textTransform: "none",
+    letterSpacing: "0",
+    margin: "0 0 0.6rem",
+  },
+  "&[data-document-headings=true] h2": {
+    fontSize: "1.05rem",
+    textTransform: "none",
+    marginTop: "1.1rem",
+  },
+  "&[data-document-headings=true] h3": { fontSize: "0.9rem", marginTop: "0.8rem" },
+  "&[data-document-headings=true] h4, &[data-document-headings=true] h5, &[data-document-headings=true] h6":
+    { fontSize: "0.8rem" },
   "& table": { borderCollapse: "collapse", fontSize: "0.8rem" },
   "& th, & td": {
     borderWidth: "1px",
@@ -109,12 +124,23 @@ const inlineComponents: Components = {
 export const Markdown = memo(function Markdown({
   children,
   inline = false,
+  referenceMarkers = false,
+  headingIds = false,
+  components: overrides,
 }: {
   children: string;
   inline?: boolean;
+  referenceMarkers?: boolean;
+  headingIds?: boolean;
+  components?: Components;
 }) {
   const requirementLinks = useTaskRequirementLinks();
-  const requirementAnchor: Components["a"] = ({ node, href = "", children: linkChildren, ...props }) => {
+  const requirementAnchor: Components["a"] = ({
+    node,
+    href = "",
+    children: linkChildren,
+    ...props
+  }) => {
     void node;
     const target = requirementLinks
       ? resolveRequirementAddress(href, requirementLinks.requirements)
@@ -135,23 +161,31 @@ export const Markdown = memo(function Markdown({
     if (isRequirementAddress(href)) {
       return <span data-testid="requirement-link-refused">{linkChildren}</span>;
     }
-    return <a href={href} {...props}>{linkChildren}</a>;
+    return (
+      <a href={href} {...props}>
+        {linkChildren}
+      </a>
+    );
   };
   const components = inline
-    ? { ...inlineComponents, a: requirementAnchor }
-    : { ...blockComponents, a: requirementAnchor };
-  if (inline) {
+    ? { ...inlineComponents, a: requirementAnchor, ...overrides }
+    : { ...blockComponents, a: requirementAnchor, ...overrides };
+  const plugins = [
+    remarkGfm,
+    ...(referenceMarkers ? [remarkReferenceMarkers] : []),
+    ...(headingIds ? [remarkHeadingIds] : []),
+  ];
+  if (inline)
     return (
       <span className={inlineBox}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        <ReactMarkdown remarkPlugins={plugins} components={components}>
           {children}
         </ReactMarkdown>
       </span>
     );
-  }
   return (
-    <div className={box}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <div className={box} data-document-headings={headingIds ? true : undefined}>
+      <ReactMarkdown remarkPlugins={plugins} components={components}>
         {children}
       </ReactMarkdown>
     </div>

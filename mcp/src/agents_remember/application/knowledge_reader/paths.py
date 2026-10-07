@@ -47,10 +47,7 @@ from agents_remember.application.knowledge_currentness.surface import (
 )
 from agents_remember.application.knowledge_leaf.chain import select_chain
 from agents_remember.application.knowledge_reader.files import (
-    FileRead,
     code_kind,
-    list_code_directory,
-    list_onboarding_directory,
     normal_path,
     read_memory_file,
 )
@@ -62,6 +59,7 @@ from agents_remember.application.knowledge_reader.records import (
     reference_items,
 )
 from agents_remember.application.knowledge_reader.selection import ReaderSelection
+from agents_remember.application.knowledge_reader.tree_coverage import read_tree_listing
 from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, Link
 from agents_remember.models.knowledge_files.documents import (
     ONBOARDING_ROOT,
@@ -73,8 +71,6 @@ from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 __all__ = ["entry_document", "path_view", "states_at", "tree_listing", "without_proof"]
 
 _RETIRED: Final = "retired"
-_SKIPPED_SUFFIXES: Final = (".index.json",)
-_OVERVIEW_NAMES: Final = frozenset({"overview.md", "overview.json"})
 
 
 # --------------------------------------------------------------------------------------------------
@@ -86,40 +82,7 @@ def tree_listing(selection: ReaderSelection, directory: str) -> dict[str, Any]:
     """One directory level: code and onboarding children, with their entry counts."""
 
     directory = normal_path(directory)
-    children: dict[str, dict[str, Any]] = {}
-    code = list_code_directory(selection, directory)
-    code_state: dict[str, Any] = {"state": "listed"}
-    if isinstance(code, FileRead):
-        code_state = {"state": code.state, "detail": code.detail}
-    else:
-        for child in code:
-            children[child.name] = {"name": child.name, "kind": child.kind, "inCode": True}
-    for child in list_onboarding_directory(selection, directory):
-        name, kind = _code_name(child.name, child.kind)
-        if name is None:
-            continue
-        row = children.setdefault(name, {"name": name, "kind": kind, "inCode": False})
-        row["onboarding"] = True
-    counts = _entry_counts(selection.index, directory)
-    for name, count in counts.items():
-        children.setdefault(name, {"name": name, "kind": "dir", "inCode": False})["entries"] = count
-    rows = sorted(children.values(), key=lambda row: (row["kind"] != "dir", row["name"].lower()))
-    for row in rows:
-        row["path"] = row["name"] if directory == ROOT_ROUTE_PATH else f"{directory}/{row['name']}"
-        row.setdefault("onboarding", False)
-        row.setdefault("entries", 0)
-    return {"directory": directory, "code": code_state, "children": rows}
-
-
-def _code_name(name: str, kind: str) -> tuple[str | None, str]:
-    if kind == "dir":
-        return name, "dir"
-    if name in _OVERVIEW_NAMES or name.endswith(_SKIPPED_SUFFIXES):
-        return None, "file"
-    for suffix in (".md", ".json"):
-        if name.endswith(suffix):
-            return name[: -len(suffix)], "file"
-    return None, "file"
+    return read_tree_listing(selection, directory, _entry_counts(selection.index, directory))
 
 
 def _entry_counts(index: KnowledgeIndex, directory: str) -> dict[str, int]:

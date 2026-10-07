@@ -304,7 +304,7 @@ describe("Cockpit notes reader takeover", () => {
   it("does not show the notes reader initially and keeps the Operations rails", () => {
     stubNotesApi([entry("a.md")]);
     seedMaster();
-    const { container } = render(<CockpitShell />);
+    const { container } = render(<CockpitShell initialView="operations" />);
     expect(container.querySelector('[data-testid="notes-reader-viewer"]')).toBeNull();
     expect(container.querySelector(".rail--left")).not.toBeNull();
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
@@ -313,7 +313,7 @@ describe("Cockpit notes reader takeover", () => {
   it("opens the reader from the notes list and keeps it MOUNTED across back (state survives back/forward, like the File Viewer)", async () => {
     stubNotesApi([entry("a.md"), entry("b.md")], { "a.md": content("a.md"), "b.md": content("b.md") });
     seedMaster();
-    const view = render(<CockpitShell />);
+    const view = render(<CockpitShell initialView="operations" />);
 
     // Select the master in the sidebar, then open a note from its compact Series-notes list.
     fireEvent.click(view.getByText("Agent Orchestration"));

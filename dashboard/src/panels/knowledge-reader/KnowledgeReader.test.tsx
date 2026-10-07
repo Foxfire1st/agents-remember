@@ -6,8 +6,9 @@
 // `KnowledgeReader` is the real component; only `fetch` is stubbed.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { EditorView } from '@codemirror/view';
 
 import { parseReaderHash, readerHash, type ReaderAddress } from '../../data/knowledgeReader';
 import { KnowledgeReader } from './KnowledgeReader';
@@ -80,7 +81,7 @@ beforeEach(() => {
           json: async () => ({ repos: [{ repo: REPO }] }),
         } as Response;
       }
-      const body =
+      let body =
         bodyFor(url) ??
         (url.pathname.endsWith('/tree')
           ? {
@@ -90,6 +91,14 @@ beforeEach(() => {
               children: [],
             }
           : null);
+      if (body && url.pathname.endsWith('/tree') && Array.isArray(body.children))
+        body = {
+          ...body,
+          children: (body.children as Record<string, unknown>[]).map((child) => ({
+            ...child,
+            hasKnowledge: Boolean(child.onboarding || child.entries),
+          })),
+        };
       if (body === null) throw new Error(`unexpected reader request: ${address}`);
       if (
         heldTree &&
@@ -127,7 +136,11 @@ it('opens a file with its prose, resolved references, entries, families and link
     .find((one) => one.dataset.reference === '2')!;
   expect(within(second).getAllByTestId('reference-target')).toHaveLength(3);
   fireEvent.click(markers[1]);
-  await waitFor(() => expect(second.className).not.toBe(''));
+  expect(
+    (await view.findByTestId('reader-citation-pane')).querySelectorAll(
+      '[data-testid=reference-target]',
+    ),
+  ).toHaveLength(3);
 
   const invariant = within(pathView).getByTestId('reader-invariant');
   expect(invariant.dataset.invariant).toBe('INV-N213W04A');
@@ -177,12 +190,7 @@ it('opens a directory with its overview, routed families elsewhere and the route
   expect(within(decisions[0]).getByTestId('superseded-by').textContent).toContain('DEC-R29DEC');
 
   // Bounded (review F2): the children holding knowledge, and the paged list of every entry.
-  const children = within(pathView).getAllByTestId('directory-child');
-  expect(children.map((one) => one.dataset.path)).toEqual([
-    `${WORKTREES}/integration`,
-    `${WORKTREES}/ledger_projection.py`,
-    `${WORKTREES}/modules`,
-  ]);
+  expect(within(pathView).queryByTestId('reader-directory-children')).toBeNull();
   fireEvent.click(within(pathView).getByTestId('open-subtree'));
   await waitFor(() => expect(window.location.hash).toContain('view=subtree'));
   const subtree = await view.findByTestId('reader-subtree');
@@ -193,12 +201,8 @@ it('opens a directory with its overview, routed families elsewhere and the route
 it('lands on the bounded root summary and follows a subtree page to the next', async () => {
   const view = open({ view: 'path', path: '.' });
   const root = await view.findByTestId('reader-path-view');
-  expect(root.textContent).toContain('Repository summary');
-  expect(
-    within(root)
-      .getAllByTestId('directory-child')
-      .map((one) => one.dataset.path),
-  ).toEqual(['dashboard', 'mcp', 'scripts', 'skills']);
+  expect(root.querySelector('h1')?.textContent).toBeTruthy();
+  expect(within(root).queryByTestId('reader-directory-children')).toBeNull();
   cleanup();
 
   const first = captured['subtree-worktrees'] as Body & { rows: unknown[]; page: object };
@@ -226,7 +230,7 @@ it('lands on the bounded root summary and follows a subtree page to the next', a
 it('shows a test file its proofs by invariant with their facets', async () => {
   const view = open({ view: 'path', path: LEDGER_TEST });
   const pathView = await view.findByTestId('reader-path-view');
-  expect(within(pathView).getByText('Proofs by invariant')).toBeTruthy();
+  expect(within(pathView).getByText(/Proofs by invariant/)).toBeTruthy();
   expect(within(pathView).getByTestId('reader-facet').textContent).toContain(
     'the ledger read answers from committed trailers',
   );
@@ -238,14 +242,8 @@ it('opens an invariant truth view with its states, links and a three-source time
 
   expect(within(truth).getByTestId('record-state').dataset.state).toBe('current');
   const fields = within(truth).getByTestId('record-fields');
-  for (const name of [
-    'statement',
-    'applicability',
-    'conditions',
-    'exclusions',
-    'status',
-    'admission',
-  ]) {
+  expect(within(truth).getByTestId('record-lead').textContent).toBeTruthy();
+  for (const name of ['applicability', 'conditions', 'exclusions']) {
     expect(fields.querySelector(`[data-field="${name}"]`)).not.toBeNull();
   }
   expect(
@@ -332,9 +330,15 @@ it('shows the census, the without-proof list and code opened at its symbol', asy
   const pane = await code.findByTestId('reader-code');
   expect(pane.dataset.locator).toBe('resolved');
   const lines = within(pane).getByTestId('reader-code-lines');
-  expect(lines.querySelector('[data-line="193"]')?.textContent).toContain(
-    'def validate_integrate_memory_contract',
-  );
+  expect(
+    (
+      await waitFor(() => {
+        const line = lines.querySelector('[data-line="193"]');
+        expect(line).not.toBeNull();
+        return line;
+      })
+    )?.textContent,
+  ).toContain('def validate_integrate_memory_contract');
 });
 
 it('navigates by URL: explorer and links change the shareable hash, and the hash round-trips', async () => {
@@ -422,10 +426,22 @@ it('marks the located code lines, and names a timeline source that could not be 
     locator: JSON.stringify({ kind: 'symbol', name: 'validate_integrate_memory_contract' }),
   });
   const lines = await code.findByTestId('reader-code-lines');
-  const located = [...lines.querySelectorAll('[data-located="true"]')].map((one) =>
-    Number((one as HTMLElement).dataset.line),
+  await waitFor(() =>
+    expect(lines.querySelectorAll('[data-located="true"]').length).toBeGreaterThan(0),
   );
-  expect([located[0], located[located.length - 1], located.length]).toEqual([193, 213, 21]);
+  const editor = EditorView.findFromDOM(lines.querySelector<HTMLElement>('.cm-editor')!)!;
+  const located: number[] = [];
+  for (const decorations of editor.state.facet(EditorView.decorations)) {
+    if (typeof decorations === 'function') continue;
+    decorations.between(0, editor.state.doc.length, (from, _to, decoration) => {
+      if (decoration.spec.attributes?.['data-located'] === 'true') {
+        const line = editor.state.doc.lineAt(from).number;
+        expect(Number(decoration.spec.attributes['data-line'])).toBe(line);
+        located.push(line);
+      }
+    });
+  }
+  expect(located).toEqual(Array.from({ length: 21 }, (_, index) => 193 + index));
   cleanup();
 
   const invariant = captured['record-invariant'] as Body & { timeline: Record<string, unknown> };
@@ -584,4 +600,342 @@ it('names record links that could not be read instead of claiming there are none
   expect(
     within(view.getByTestId('record-outgoing')).queryByText(/records no outgoing link/),
   ).toBeNull();
+});
+
+it('reads prose before records and references, skips empty sections, and leads a record with its meaning', async () => {
+  const view = open({ view: 'path', path: INTEGRATE });
+  const article = await view.findByTestId('reader-path-view');
+  const order = [
+    'reader-prose',
+    'reader-invariants',
+    'reader-families',
+    'reader-linked-records',
+    'reader-references-section',
+  ];
+  for (let index = 1; index < order.length; index++)
+    expect(
+      within(article)
+        .getByTestId(order[index - 1])
+        .compareDocumentPosition(within(article).getByTestId(order[index])) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  expect(within(article).queryByTestId('reader-directory-children')).toBeNull();
+  cleanup();
+  overrides[`path:${INTEGRATE}`] = {
+    ...captured['path-integrate-file'],
+    invariants: [],
+    families: [],
+    records: [],
+    references: { state: 'present', items: [] },
+  };
+  const empty = open({ view: 'path', path: INTEGRATE });
+  await empty.findByTestId('reader-path-view');
+  for (const section of [
+    'reader-invariants',
+    'reader-families',
+    'reader-linked-records',
+    'reader-references-section',
+  ])
+    expect(empty.queryByTestId(section)).toBeNull();
+  cleanup();
+  const truth = open({ view: 'record', id: 'INV-N213W04A' });
+  const lead = await truth.findByTestId('record-lead');
+  expect(
+    lead.compareDocumentPosition(truth.getByTestId('record-fields')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    truth
+      .getByTestId('record-timeline')
+      .compareDocumentPosition(truth.getByTestId('record-origin')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  const added = truth
+    .getAllByTestId('timeline-event')
+    .find((row) => row.dataset.source === 'record' && row.dataset.change === 'added');
+  expect(added).toBeDefined();
+  expect(added!.textContent).toContain('record added');
+  expect(added!.querySelector('[data-testid=meaning-diff]')).toBeNull();
+});
+
+it('opens links at the top and restores the visit on browser Back', async () => {
+  const view = open({ view: 'path', path: INTEGRATE });
+  await view.findByTestId('reader-path-view');
+  const pane = view.getByTestId('knowledge-view');
+  pane.scrollTop = 1200;
+  fireEvent.scroll(pane);
+  fireEvent.click(within(view.getByTestId('reader-family')).getByTestId('record-link'));
+  await view.findByTestId('reader-truth-view');
+  expect(pane.scrollTop).toBe(0);
+  fireEvent.click(view.getByRole('button', { name: 'Back' }));
+  await view.findByTestId('reader-path-view');
+  expect(pane.scrollTop).toBe(1200);
+});
+
+it('opens wide citations beside unchanged prose, and phone citations as a page with Browse navigation', async () => {
+  const view = open({ view: 'path', path: INTEGRATE });
+  const article = await view.findByTestId('reader-path-view');
+  const pane = view.getByTestId('knowledge-view');
+  const marker = within(article)
+    .getAllByTestId('reference-marker')
+    .find((row) => row.dataset.reference === '1')!;
+  pane.scrollTop = 180;
+  fireEvent.scroll(pane);
+  fireEvent.click(marker);
+  await view.findByTestId('reader-citation-pane');
+  expect(pane.scrollTop).toBe(180);
+  expect(parseReaderHash(window.location.hash)?.view).toBe('path');
+  expect(view.getByTestId('reader-path-view')).toBe(article);
+  cleanup();
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const phone = open({ view: 'path', path: INTEGRATE });
+  await phone.findByTestId('reader-path-view');
+  fireEvent.click(phone.getByRole('button', { name: 'Browse' }));
+  expect(phone.getByTestId('knowledge-reader').querySelector('[data-browsing=true]')).toBeTruthy();
+  fireEvent.click(phone.getByRole('button', { name: 'Document' }));
+  expect(phone.getByTestId('knowledge-reader').querySelector('[data-browsing=true]')).toBeNull();
+  fireEvent.click(
+    phone.getAllByTestId('reference-marker').find((row) => row.dataset.reference === '1')!,
+  );
+  const targets = await phone.findByTestId('reader-citation-pane');
+  fireEvent.click(within(targets).getAllByTestId('code-link')[0]);
+  await phone.findByTestId('reader-code');
+  expect(parseReaderHash(window.location.hash)?.view).toBe('code');
+});
+
+it('retains the last visible position when a phone chooser reports a hidden-pane zero', async () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const view = open({ view: 'path', path: INTEGRATE });
+  await view.findByTestId('reader-path-view');
+  const pane = view.getByTestId('knowledge-view');
+  pane.scrollTop = 690;
+  fireEvent.scroll(pane);
+  fireEvent.click(view.getAllByTestId('reference-marker')[0]);
+  const picker = await view.findByTestId('reader-citation-pane');
+  const panel = pane.closest<HTMLElement>('[data-reader-document]')!;
+  panel.style.display = 'none'; // Chromium reads zero from this CSS-hidden panel.
+  pane.scrollTop = 0;
+  fireEvent.scroll(pane);
+  fireEvent.click(within(picker).getAllByTestId('code-link')[0]);
+  await view.findByTestId('reader-code');
+  panel.style.display = '';
+  fireEvent.click(view.getByRole('button', { name: 'Back' }));
+  await view.findByTestId('reader-path-view');
+  expect(pane.scrollTop).toBe(690);
+});
+
+it('names an unreadable reference list instead of presenting its empty result as zero', async () => {
+  overrides[`path:${INTEGRATE}`] = {
+    ...captured['path-integrate-file'],
+    references: { state: 'unavailable', detail: 'references denied', items: [] },
+  };
+  const view = open({ view: 'path', path: INTEGRATE });
+  const facts = await view.findByTestId('reader-facts');
+  expect(facts.textContent).toContain('references unavailable');
+  expect(facts.textContent).not.toContain('0 references');
+  expect(view.getByTestId('reader-unavailable').textContent).toContain('references denied');
+  expect(view.queryAllByTestId('reference-marker')).toHaveLength(0);
+});
+
+it('keeps unsupported text links in place, opens external links separately, and navigates mapped cards', async () => {
+  const original = captured['path-integrate-file'];
+  overrides[`path:${INTEGRATE}`] = {
+    ...original,
+    prose: { path: `onboarding/${INTEGRATE}.md`, state: 'present', text: `# Links\n\n[unmapped directory](../../../../agents-remember/mcp) [external page](https://example.com/) [mapped card](/onboarding/${LEDGER_TEST}.md)` },
+  };
+  const view = open({ view: 'path', path: INTEGRATE });
+  const prose = await view.findByTestId('reader-prose');
+  const pane = view.getByTestId('knowledge-view');
+  pane.scrollTop = 1250;
+  fireEvent.scroll(pane);
+  const hash = window.location.hash;
+  fireEvent.click(within(prose).getByTestId('prose-unresolved-link'));
+  expect(window.location.hash).toBe(hash);
+  expect(pane.scrollTop).toBe(1250);
+  expect(within(prose).getByTestId('prose-unresolved-link').title).toContain('not an onboarding card or overview');
+  const external = within(prose).getByRole('link', { name: 'external page' });
+  expect(external.getAttribute('target')).toBe('_blank');
+  expect(external.getAttribute('rel')).toContain('noopener');
+  fireEvent.click(within(prose).getByRole('button', { name: 'mapped card' }));
+  await waitFor(() => expect(parseReaderHash(window.location.hash)?.path).toBe(LEDGER_TEST));
+});
+
+it('preserves a reference Anchor note when its introductory sentence is already in prose', async () => {
+  const original = captured['path-integrate-file'];
+  overrides[`path:${INTEGRATE}`] = {
+    ...original,
+    prose: { path: `onboarding/${INTEGRATE}.md`, state: 'present', text: '# Reference\n\nShared sentence. [1]' },
+    references: { state: 'present', items: [{ number: '1', note: 'Shared sentence.\n\nAnchor: exact retained anchor text', targets: [] }] },
+  };
+  const view = open({ view: 'path', path: INTEGRATE });
+  const reference = await view.findByTestId('reader-reference');
+  expect(reference.textContent).toContain('Anchor: exact retained anchor text');
+  expect(reference.textContent).not.toContain('Shared sentence.');
+});
+
+it('shows the selected leaf code-source note and names empty record lists', async () => {
+  const original = captured['path-integrate-file'];
+  overrides[`path:${INTEGRATE}`] = {
+    ...original,
+    selection: { ...(original.selection as Record<string, unknown>), kind: 'leaf', codeNote: 'HEAD of the leaf code checkout; uncommitted code is not included.' },
+  };
+  const path = open({ view: 'path', path: INTEGRATE });
+  expect((await path.findByTestId('reader-code-note')).textContent).toContain('uncommitted code is not included');
+  cleanup();
+  const record = open({ view: 'record', id: 'INV-N213W04A' });
+  const fields = await record.findByTestId('record-fields');
+  expect(fields.querySelector('[data-field=conditions]')?.textContent).toContain('(none)');
+});
+
+it('keeps paths and Records usable when a side count is unavailable', async () => {
+  overrides['census:'] = { state: 'unavailable', detail: 'census denied' };
+  overrides['without-proof:'] = { state: 'unavailable', detail: 'proof list denied' };
+  const view = open({ view: 'path', path: '.' });
+  const tree = await view.findByTestId('knowledge-tree');
+  await waitFor(() => {
+    expect(tree.querySelector('[data-record-row=census]')?.textContent).toContain('census denied');
+    expect(tree.querySelector('[data-record-row=without-proof]')?.textContent).toContain('proof list denied');
+  });
+  expect(within(tree).getByRole('treeitem', { name: /Records/ })).toBeTruthy();
+  await waitFor(() => expect(tree.querySelectorAll('[data-testid=tree-node]').length).toBeGreaterThan(0));
+});
+
+it('refreshes an already loaded collapsed branch when Show every path changes', async () => {
+  overrides['tree:'] = { state: 'view', code: { state: 'listed' }, children: [{ name: 'dashboard', path: 'dashboard', kind: 'dir', inCode: true, onboarding: true, entries: 1 }] };
+  overrides['tree:dashboard'] = { state: 'view', code: { state: 'listed' }, children: Array.from({ length: 7 }, (_, index) => ({ name: `file-${index}.ts`, path: `dashboard/file-${index}.ts`, kind: 'file', inCode: true, onboarding: index < 6, entries: 0 })) };
+  overrides['path:dashboard'] = captured['path-root'];
+  const view = open({ view: 'path', path: '.' });
+  const tree = await view.findByTestId('knowledge-tree');
+  const branch = await within(tree).findByRole('treeitem', { name: /dashboard/ });
+  const count = () => tree.querySelectorAll('[data-path^="dashboard/file-"]').length;
+  fireEvent.click(branch);
+  await waitFor(() => expect(count()).toBe(6));
+  fireEvent.click(branch);
+  await waitFor(() => expect(count()).toBe(0));
+  fireEvent.click(within(tree).getByRole('checkbox', { name: 'Show every path' }));
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /dashboard/ }));
+  await waitFor(() => expect(count()).toBe(7));
+  const reads = requests.filter((url) => url.pathname.endsWith('/tree') && url.searchParams.get('path') === 'dashboard');
+  expect(reads).toHaveLength(2);
+});
+
+it('shares one record-list acquisition through delay, known branches, rerenders and Back', async () => {
+  const original = fetch;
+  const pending: (() => void)[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (address: string) => {
+    const url = new URL(address, 'http://localhost');
+    if (!url.pathname.endsWith('/records')) return original(address);
+    requests.push(url);
+    await new Promise<void>((resolve) => pending.push(resolve));
+    return { ok: true, status: 200, json: async () => captured.records } as Response;
+  }));
+  const view = open({ view: 'path', path: '.' });
+  await view.findByTestId('reader-path-view');
+  await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+  const tree = view.getByTestId('knowledge-tree');
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /Records/ }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect((view.getByLabelText('Record ID') as HTMLInputElement).disabled).toBe(false);
+  expect(view.getByTestId('reader-path-view')).toBeTruthy();
+  await waitFor(() => expect(tree.querySelectorAll('[data-testid=tree-node]').length).toBeGreaterThan(0));
+  await act(async () => { pending.forEach((release) => release()); });
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /Families/ }));
+  expect(await within(tree).findByRole('treeitem', { name: /attribution-and-landing-pairing/ })).toBeTruthy();
+  expect(within(tree).queryByRole('treeitem', { name: /^INV-/ })).toBeNull();
+  const settledCalls = [...requests];
+  view.rerender(<KnowledgeReader active={false} />);
+  view.rerender(<KnowledgeReader active />);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(requests).toEqual(settledCalls);
+  const pane = view.getByTestId('knowledge-view');
+  pane.scrollTop = 2100;
+  fireEvent.scroll(pane);
+  fireEvent.change(view.getByLabelText('Record ID'), { target: { value: 'FAM-QWVGDSYX' } });
+  fireEvent.click(view.getByRole('button', { name: /^open$/ }));
+  await view.findByTestId('reader-truth-view');
+  fireEvent.click(view.getByRole('button', { name: /^Back$/ }));
+  await view.findByTestId('reader-path-view');
+  expect(pane.scrollTop).toBe(2100);
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /Records/ }));
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /Records/ }));
+  await within(tree).findByRole('treeitem', { name: /Families/ });
+  expect(requests.filter((url) => url.pathname.endsWith('/records'))).toHaveLength(1);
+});
+
+it('keeps a failed shared record list named without retrying it or gating paths and header', async () => {
+  const original = fetch;
+  vi.stubGlobal('fetch', vi.fn(async (address: string) => {
+    const url = new URL(address, 'http://localhost');
+    if (!url.pathname.endsWith('/records')) return original(address);
+    requests.push(url);
+    return { ok: false, status: 503, json: async () => ({ state: 'unavailable', detail: 'records denied', kinds: {} }) } as Response;
+  }));
+  const view = open({ view: 'path', path: '.' });
+  expect((await view.findByTestId('reader-side-failure')).textContent).toContain('record list unavailable');
+  expect((view.getByLabelText('Record ID') as HTMLInputElement).disabled).toBe(false);
+  await view.findByTestId('reader-path-view');
+  const tree = view.getByTestId('knowledge-tree');
+  await waitFor(() => expect(tree.querySelectorAll('[data-testid=tree-node]').length).toBeGreaterThan(0));
+  fireEvent.click(await within(tree).findByRole('treeitem', { name: /Records/ }));
+  await waitFor(() => expect(within(tree).getByRole('alert').textContent).toContain('records denied'));
+  expect(within(tree).queryByRole('treeitem', { name: /Families/ })).toBeNull();
+  expect(view.getByTestId('reader-path-view')).toBeTruthy();
+  view.rerender(<KnowledgeReader />);
+  expect(requests.filter((url) => url.pathname.endsWith('/records'))).toHaveLength(1);
+});
+
+it('clears old record answers on commit and repository changes and ignores late selections', async () => {
+  const original = fetch;
+  const pending: { repo: string; commit: string; answer: (title: string) => void }[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (address: string) => {
+    const url = new URL(address, 'http://localhost');
+    if (url.pathname.endsWith('/repos')) {
+      requests.push(url);
+      return { ok: true, status: 200, json: async () => ({ repos: [{ repo: REPO }, { repo: 'other-repo' }] }) } as Response;
+    }
+    if (!url.pathname.endsWith('/records')) return original(address);
+    requests.push(url);
+    return new Promise<Response>((resolve) => pending.push({
+      repo: url.searchParams.get('repo')!,
+      commit: url.searchParams.get('commit')!,
+      answer: (title) => resolve({ ok: true, status: 200, json: async () => ({
+        ...captured.records, kinds: { family: [{ kind: 'family', id: 'FAM-QWVGDSYX', title }] },
+      }) } as Response),
+    }));
+  }));
+  const view = open({ view: 'path', path: '.' });
+  await view.findByTestId('reader-path-view');
+  await waitFor(() => expect(pending).toHaveLength(1));
+  const first = pending[0];
+  const commits = captured.selections.commits as { commit: string }[];
+  fireEvent.change(view.getByTestId('reader-commit'), { target: { value: commits[0].commit } });
+  await waitFor(() => expect(pending).toHaveLength(2));
+  pending[1].answer('selection B');
+  const lookup = () => view.container.querySelector<HTMLDataListElement>('#knowledge-record-ids')!;
+  await waitFor(() => expect(lookup().textContent).toContain('selection B'));
+  fireEvent.change(view.getByTestId('reader-commit'), { target: { value: commits[1].commit } });
+  await waitFor(() => expect(pending).toHaveLength(3));
+  expect(lookup().querySelectorAll('option')).toHaveLength(0);
+  expect(view.queryByTestId('reader-side-failure')).toBeNull();
+  await act(async () => { first.answer('late selection A'); });
+  expect(lookup().querySelectorAll('option')).toHaveLength(0);
+  fireEvent.change(view.getByLabelText('Repository'), { target: { value: 'other-repo' } });
+  await waitFor(() => expect(pending).toHaveLength(4));
+  pending[3].answer('selection D in other repository');
+  await waitFor(() => expect(lookup().textContent).toContain('selection D'));
+  await act(async () => { pending[2].answer('late selection C'); });
+  expect(lookup().textContent).toContain('selection D');
+  expect(lookup().textContent).not.toContain('late selection');
+  expect(pending.map(({ repo, commit }) => [repo, commit])).toEqual([
+    [REPO, 'published'], [REPO, commits[0].commit], [REPO, commits[1].commit],
+    ['other-repo', 'published'],
+  ]);
 });

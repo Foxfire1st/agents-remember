@@ -12,6 +12,10 @@ const bar = css({
   display: "flex",
   flexShrink: 0,
   gap: "0.3rem",
+  "@media (max-width: 40rem)": {
+    gap: "0.2rem",
+    "& button": { paddingInline: "0.35rem", letterSpacing: "0" },
+  },
   borderTopWidth: "1px",
   borderTopStyle: "solid",
   borderTopColor: "grid",

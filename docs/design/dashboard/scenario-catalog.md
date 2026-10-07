@@ -25,11 +25,11 @@ Persistent shell (never hides the alarms): top status bar (master-caution `⚠ N
 | View | Purpose | Primary persona | Status |
 |---|---|---|---|
 | **Operations** (`DetailPanel`) | inspect the selected lifecycle; phase stepper; Gate Review drawer; task-document reader | reviewer/approver | built (gate write = 6c) |
-| **Engine Room** | full-bleed bird's-eye podracer map of a worktree's git-lifecycle; engines, conduits, coupler, boot timeline, diagnostics, failure overlays | diagnoser | built (most-iterated) |
-| **Memory** (`MemoryMirror`) | onboarding-vs-code health; coverage/drift/ledger/stalest-sidecar | drift auditor | built |
-| **Topology** | full-bleed radial constellation; at-a-glance workspace overview; click node → Operations | overview | built — ⚠ rendered an **empty canvas** in the 2026-06-23 dogfood (0 painted pixels, no nodes, no empty-state) — verify |
-| **Hangar** | persistent (never-reaped) worktree debt; review/closeout/integration/cleanup badges | cleanup | built |
-| **Chats** | sole product-facing full-bleed fleet cockpit: native hosted-chat and raw-terminal launch, focus/PTY, reliable text submit/pop-back, interactions, lifecycle/leaf routing, requested/effective controls, and Evidence/Capabilities/Bus inspection | operator | built — keep-alive cockpit; Operations remains the application default |
+| **Engine Room** (retained code; no dashboard entry) | full-bleed bird's-eye podracer map of a worktree's git-lifecycle; engines, conduits, coupler, boot timeline, diagnostics, failure overlays | diagnoser | built (most-iterated) |
+| **Memory** (`MemoryMirror`, outside the tab bar) | onboarding-vs-code health; coverage/drift/ledger/stalest-sidecar | drift auditor | built |
+| **Topology** (outside the tab bar) | full-bleed radial constellation; at-a-glance workspace overview; click node → Operations | overview | built — ⚠ rendered an **empty canvas** in the 2026-06-23 dogfood (0 painted pixels, no nodes, no empty-state) — verify |
+| **Hangar** (outside the tab bar) | persistent (never-reaped) worktree debt; review/closeout/integration/cleanup badges | cleanup | built |
+| **Chats** | sole product-facing full-bleed fleet cockpit: native hosted-chat and raw-terminal launch, focus/PTY, reliable text submit/pop-back, interactions, lifecycle/leaf routing, requested/effective controls, and Evidence/Capabilities/Bus inspection | operator | built — keep-alive cockpit; application default |
 
 Persistent side panels: **AttentionQueue** (server-ranked "what needs the human"; `Open` jumps to the
 lifecycle), **LifecycleList** (all lifecycles; BY REPO / BY PHASE pivot), **EventRiver** (raw event
@@ -164,3 +164,5 @@ Operations `RailChat` remains separate. Detailed candidate evidence and serving-
 When Stage 1 discovers a reachable entity state or a new view not represented above, add a scenario or
 step rather than dropping it. When a "GAP"/missing-view is later built, update its step from **GAP** to
 the serving view and note the landing.
+
+The product tab bar is Chats, Operations, Knowledge, File Viewer (MIK-R79). It opens on Chats. Knowledge uses the full-width retained reader shell, shared tree, Markdown and CodeMirror pane. The four pages outside the bar have no dashboard or development-bench entry and are not built at page load. Their folder code and layout behaviour remain tested through injected initialView values.

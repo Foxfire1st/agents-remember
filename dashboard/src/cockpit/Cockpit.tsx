@@ -62,7 +62,7 @@ const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell: persistent command chrome that never hides the alarms —
 // a top status bar, a left rail (attention queue + lifecycle list = the master-caution, always
-// visible), a switchable centre viewport (Operations / Engine Room / Memory / Topology / Hangar),
+// visible), a switchable centre viewport (Chats / Operations / Knowledge / File Viewer),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
 // The "machine map" views (Engine Room / Topology) and the Chats terminal
@@ -79,14 +79,10 @@ export type CockpitView =
   | "chats";
 
 const VIEWS: { id: CockpitView; label: string }[] = [
-  { id: "operations", label: "Operations" },
-  { id: "files", label: "File Viewer" },
-  { id: "engine", label: "Engine Room" },
-  { id: "memory", label: "Memory" },
-  { id: "topology", label: "Topology" },
-  { id: "hangar", label: "Hangar" },
-  { id: "knowledge", label: "Knowledge" },
   { id: "chats", label: "Chats" },
+  { id: "operations", label: "Operations" },
+  { id: "knowledge", label: "Knowledge" },
+  { id: "files", label: "File Viewer" },
 ];
 
 // Shell layout (co-located Panda css). The shell pins to the viewport so the top + mode
@@ -348,11 +344,8 @@ const filesLayer = chatsLayer;
 // view back to the master overview on return. Hidden-not-unmounted preserves the drilled leaf (and the
 // rail's reported leaf key with it). Same layout as the other persistent layers, so it reuses it.
 const operationsLayer = chatsLayer;
-// The Engine Room is kept mounted too (CPU diagnosis): it was the ONLY view that fully
-// unmounted per tab entry, and it is the most expensive one — each entry measured a ~230–275 ms long
-// task rebuilding 578 DOM nodes + a GSAP context + the backdrop video. Hidden-not-unmounted makes
-// re-entry instant; the room's off-screen gates (useElementVisible: GSAP context paused, backdrop
-// video paused, header pulse stilled) keep the hidden cost at ~0. Same layout, so it reuses it.
+// The Engine Room layout is retained for injected initialView tests. It has no dashboard entry,
+// outside the product bar and is not mounted or fetching while another view is open.
 const engineLayer = chatsLayer;
 // Hoisted rail-enter tween props: spread onto the two motion.aside rails. Module-level constants so
 // the asides' props hold a stable identity across shell re-renders — fresh {initial/animate} +
@@ -456,6 +449,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   );
   const fullBleed =
     view === "files" ||
+    view === "knowledge" ||
     view === "engine" ||
     view === "topology" ||
     view === "chats";
@@ -777,18 +771,9 @@ function MainLayers({
 }) {
   return (
     <main className={cx(viewport, "viewport")} data-view={view}>
-      {/* Memory / Topology / Hangar render transiently; Operations, File Viewer, Engine Room,
-          and Chats are persistent hidden layers below so their in-panel state survives a switch
-          (and the Engine Room's 578-node SVG + GSAP substrate is not rebuilt per entry). */}
-      {view !== "chats" && view !== "files" && view !== "operations" && view !== "engine" && (
-        <ViewBody view={view} onOpen={onOpen} />
-      )}
-      {/* The Engine Room is never unmounted — only hidden — so a tab switch back is instant
-          instead of a full remount (see `engineLayer`). Its off-screen cost is gated to ~0 by
-          the room's own visibility gates (GSAP paused, backdrop video paused). */}
-      <ViewLayer visible={view === "engine"} className={engineLayer}>
-        <EngineRoom />
-      </ViewLayer>
+      {/* Retained pages have no dashboard entry; initialView tests can still mount their layouts. */}
+      {["memory", "topology", "hangar"].includes(view) && <ViewBody view={view} onOpen={onOpen} />}
+      {view === "engine" ? <div className={engineLayer}><EngineRoom /></div> : null}
       {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
           survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
       <ViewLayer visible={view === "operations"} className={operationsLayer}>
@@ -805,6 +790,9 @@ function MainLayers({
           boot catalog read is deferred to the first actual showing (`active`). */}
       <ViewLayer visible={view === "files"} className={filesLayer}>
         <FileViewer active={view === "files"} />
+      </ViewLayer>
+      <ViewLayer visible={view === "knowledge"} className={filesLayer}>
+        <KnowledgeReader active={view === "knowledge"} />
       </ViewLayer>
       {/* Role chats stay mounted across dashboard view switches. */}
       <ViewLayer visible={view === "chats"} className={chatsLayer}>
@@ -841,7 +829,7 @@ function RailedBody({
       {/* The rails are never unmounted on a full-bleed view — only hidden — so re-entering a
           railed view is instant instead of a fresh AttentionQueue + LifecycleList mount, and rail
           state (scroll, collapsed groups) survives the switch (same keep-alive pattern
-          as the engine/files/chats layers below). display:none drops them from the grid, so the
+          as the files/knowledge/chats layers below). display:none drops them from the grid, so the
           full-bleed single column is unaffected. */}
       <LeftRail
         fullBleed={state.fullBleed}
@@ -881,7 +869,7 @@ function RailedBody({
   );
 }
 
-export function CockpitShell({ initialView = "operations" }: { initialView?: CockpitView } = {}) {
+export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitView } = {}) {
   // Catalog ownership is shell-lifetime and view-independent. CockpitShell is also the exact dev
   // scenario surface, so keeping both drivers here preserves deterministic poll transitions there.
   useEffect(() => startCatalogPollDriver(), []);
@@ -947,9 +935,7 @@ function ViewBody({ view, onOpen }: { view: CockpitView; onOpen: (id: string) =>
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
-    case "knowledge":
-      return <KnowledgeReader />;
-    // "operations", "files", "engine", and "chats" are intentionally not here — all four are kept
+    // "operations", "files", "knowledge", and "chats" are intentionally not here — all four are kept
     // mounted in CockpitShell (hidden via CSS) so their in-panel state survives a view switch; routing
     // them through this transient switch would unmount them.
     default:
