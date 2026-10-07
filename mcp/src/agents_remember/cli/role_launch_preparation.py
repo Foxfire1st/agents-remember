@@ -580,11 +580,19 @@ def _compile_handover(
                 if started_by
                 else None
             ),
-            "ownerRelation": _owner_relation(started_by),
+            "ownerRelation": _owner_relation(started_by, role=context.role),
             "developerQuestions": (
-                "Put every question for the developer in your own chat: write it as your reply "
-                "in this session and end your turn. The developer reads this chat in the "
-                "dashboard and answers in it. Never send a developer question to another agent."
+                "Because another agent started this coordinating role, send what needs the "
+                "developer's decision to that parent with role_message on "
+                f"agents-remember-task, addressed to agent {started_by.agent_id}. "
+                "This rule takes precedence over generic own-chat guidance for this case. "
+                "Keep the work going; do not end your turn on the question."
+                if context.role in {"orchestrator", "manager"} and started_by is not None
+                else (
+                    "Put every question for the developer in your own chat: write it as your reply "
+                    "in this session and end your turn. The developer reads this chat in the "
+                    "dashboard and answers in it. Never send a developer question to another agent."
+                )
             ),
             "arToolServer": TOOL_SERVER_NAME,
             "arMcpUsage": _AR_TOOL_SERVER_USAGE,
@@ -692,7 +700,7 @@ def _started_from(started_by: StartingAgent | None) -> str:
     return f"agent {started_by.agent_id} ({started_by.role} · {started_by.subject})"
 
 
-def _owner_relation(started_by: StartingAgent | None) -> str:
+def _owner_relation(started_by: StartingAgent | None, *, role: LauncherRole) -> str:
     """Whom this role answers to: the agent that started it, or nobody but the developer."""
 
     if started_by is None:
@@ -700,6 +708,21 @@ def _owner_relation(started_by: StartingAgent | None) -> str:
             "This role was started from the dashboard launcher. It has no parent agent and needs "
             "none: the developer who reads this chat owns its decisions. The selected AR "
             "sprint/master/leaf is work scope, not a parent."
+        )
+    if role in {"orchestrator", "manager"}:
+        return (
+            f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
+            "role and is its parent in Paseo. Send that agent only what needs the developer's "
+            "decision: new or dropped scope or a change to a requirement's promise; "
+            "something only the developer can do or approve; an override of a role default; "
+            "or a blocker that none of your own decisions can remove. Send these with "
+            f"{ROLE_MESSAGE_TOOL}, addressed to its agent id. Send one further "
+            "message with the path of your report when the whole assignment is finished or "
+            "cannot be finished. Decide everything else yourself and record it in your "
+            "rulings record, list of requirement sentences to change, and status file; send "
+            "no other assignment questions, forwarded role messages or landing notices. "
+            "The selected AR sprint/master/leaf is work scope; the parent is the agent "
+            "named here and no other."
         )
     return (
         f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "

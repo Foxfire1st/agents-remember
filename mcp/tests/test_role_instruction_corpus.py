@@ -14,8 +14,8 @@ the properties a consumer depends on:
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
   reference;
 * a manifest that points at a missing source is reported rather than silently accepted; and
-* retired optional/narrow-curation sentences are gone from the canonical tree and all nine copies,
-  while the compact curator role and operation preserve the current scoped-check policy.
+* retired instruction sentences are gone from the canonical tree and all nine copies,
+  while the compact curator role and operation preserve the current complete-quality policy.
 """
 
 from __future__ import annotations
@@ -649,15 +649,14 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 
 
 # --------------------------------------------------------------------------------------
-# Current scoped-curation policy and retired optional-curation wording
+# Complete curation policy and retired instruction wording
 # --------------------------------------------------------------------------------------
 #
 # The registry of retired sentences, the registry of the retired loop-gate field pairing, and the
 # readers for both live in `agents_remember_test_support.testing.curation_doctrine`; these cases are
-# the assertions over the real tree. The defect they exist for is not a typo: a sentence that
-# presents the memory-quality operation as a developer-request-only diagnostic, or as something a
-# named scoped check may stand in for, is still rejected. Ordinary compact curation remains scoped
-# to task requirements; a full memory-quality run is required only when the task or owner asks for it.
+# the assertions over the real tree. Retired coordination defaults and curation deferrals are
+# rejected on the exact surfaces that shipped them. Complete curation always includes the full
+# memory-quality operation; a named diagnostic never substitutes for it.
 #
 # The loop-gate registry is the same shape of defect in a different material: the memory-quality
 # result publishes the raw checklist status as `qualityChecklistStatus` and the combined status as
@@ -691,12 +690,12 @@ from agents_remember_test_support.testing.curation_doctrine import (
 
 
 class CurationPolicyTests:
-    """Compact curator instructions carry the scoped policy and no retired deferral wording."""
+    """Current curation policy and retired instruction wording on their declared surfaces."""
 
     def test_no_shipped_surface_still_carries_a_retired_curation_statement(self) -> None:
         findings = retired_curation_findings(REPOSITORY_ROOT)
         assert findings == [], (
-            "a shipped instruction surface still presents curation as optional or narrow:\n  "
+            "a shipped instruction surface still carries retired wording:\n  "
             + "\n  ".join(findings)
         )
 
@@ -730,7 +729,7 @@ class CurationPolicyTests:
             + "\n  ".join(gate_documents)
         )
 
-    def test_each_compact_curation_source_states_its_scoped_check_policy(self) -> None:
+    def test_each_compact_curation_source_states_its_complete_quality_policy(self) -> None:
         missing: list[str] = []
         for relative, statements in CURATION_POLICY_STATEMENTS.items():
             path = REPOSITORY_ROOT / relative
@@ -742,7 +741,7 @@ class CurationPolicyTests:
                 if normalize_statement(statement) not in reading
             )
         assert missing == [], (
-            "a compact curation source is missing its current scoped-check policy:\n  "
+            "a compact curation source is missing its current complete-quality policy:\n  "
             + "\n  ".join(missing)
         )
 
@@ -755,7 +754,7 @@ class CurationPolicyTests:
             assert root.is_dir(), f"generated skill copy is missing: {copy_root}"
             missing.extend(missing_curation_policy_statements(root, copy_root))
         assert missing == [], (
-            "generated skill copies do not carry the scoped-curation policy:\n  "
+            "generated skill copies do not carry the complete-curation policy:\n  "
             + "\n  ".join(missing)
         )
 

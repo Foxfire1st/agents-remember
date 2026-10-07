@@ -1,4 +1,4 @@
-"""Curation instruction regressions and the current native-capsule policy.
+"""Retired instruction wording and the current native-capsule curation policy.
 
 This module guards exact retired wording and verifies the compact curation surfaces state their
 MIK normal-authoring contract: complete memory quality and required coherence. A report-only
@@ -65,7 +65,7 @@ def normalize_statement(text: str) -> str:
 
 @dataclass(frozen=True)
 class RetiredCurationStatement:
-    """One shipped sentence the complete-curation ruling retired, with where it lived.
+    """One shipped sentence an instruction ruling retired, with where it lived.
 
     ``sources`` is the exact set of files that shipped it, and it is also the set in which the
     sentence is a defect when it returns. ``probe`` is the fragment unique to the retired
@@ -81,57 +81,31 @@ class RetiredCurationStatement:
 
 RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
     RetiredCurationStatement(
-        statement=(
-            "An explicitly requested narrow `memory_quality_check` or `curator_coherence` "
-            'diagnostic, always with `contract_path="<enclosure-contract-path>"`; these are '
-            "never routine closeout/integration prerequisites."
-        ),
+        statement='An explicitly requested narrow `memory_quality_check` or `curator_coherence` diagnostic, always with `contract_path="<enclosure-contract-path>"`; these are never routine closeout/integration prerequisites.',
         sources=("skills/l-01-agent-lifecycles/templates/curator-brief.md",),
         probe="An explicitly requested narrow",
-        reason=(
-            "fragment 1: the curator's own brief called the complete operation a narrow optional "
-            "diagnostic that is never a routine prerequisite"
-        ),
+        reason="fragment 1: the curator's own brief called the complete operation a narrow optional diagnostic that is never a routine prerequisite",
     ),
     RetiredCurationStatement(
-        statement=(
-            "Do not run a full memory suite or create a curator certification for routine "
-            "curation. Full memory quality is a separate operation only on explicit developer "
-            "request."
-        ),
+        statement="Do not run a full memory suite or create a curator certification for routine curation. Full memory quality is a separate operation only on explicit developer request.",
         sources=("skills/l-01-agent-lifecycles/templates/curator-brief.md",),
         probe="is a separate operation only on",
         reason="fragment 2: it forbade the complete operation for routine curation",
     ),
     RetiredCurationStatement(
-        statement=(
-            "a narrow `memory_quality_check` or `curator_coherence` only on an explicit "
-            "developer request for a named affected check or curator certification"
-        ),
+        statement="a narrow `memory_quality_check` or `curator_coherence` only on an explicit developer request for a named affected check or curator certification",
         sources=("skills/l-01-agent-lifecycles/roles/curator.md",),
         probe="only on an explicit developer request",
-        reason=(
-            "fragment 3: the curator role's write surface made completeness a developer decision"
-        ),
+        reason="fragment 3: the curator role's write surface made completeness a developer decision",
     ),
     RetiredCurationStatement(
-        statement=(
-            "A finding count implausible for this change set is a measurement problem to "
-            "investigate and escalate, not permission to pass incomplete onboarding."
-        ),
+        statement="A finding count implausible for this change set is a measurement problem to investigate and escalate, not permission to pass incomplete onboarding.",
         sources=("skills/l-01-agent-lifecycles/templates/curator-brief.md",),
         probe="not permission to pass incomplete onboarding",
-        reason=(
-            "fragment 4: the right teeth in a hedge's frame, so it read as permission to hand off "
-            "onboarding that was never completed"
-        ),
+        reason="fragment 4: the right teeth in a hedge's frame, so it read as permission to hand off onboarding that was never completed",
     ),
     RetiredCurationStatement(
-        statement=(
-            "memory-quality suites, curator certification, or independent review; full code "
-            "quality, full tests, and full memory quality run only after an explicit developer "
-            "request"
-        ),
+        statement="memory-quality suites, curator certification, or independent review; full code quality, full tests, and full memory quality run only after an explicit developer request",
         sources=(
             "skills/l-01-agent-lifecycles/roles/manager.md",
             "skills/l-01-agent-lifecycles/templates/manager-brief.md",
@@ -139,60 +113,34 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
             "skills/l-01-agent-lifecycles/core/authority.md",
         ),
         probe="full memory quality run only after",
-        reason=(
-            "the transaction boundary was stated over curation too, so a seat reading it deferred "
-            "curation"
-        ),
+        reason="the transaction boundary was stated over curation too, so a seat reading it deferred curation",
     ),
     RetiredCurationStatement(
-        statement=(
-            "curator_coherence, full memory quality, and certification are separate explicit "
-            "operations"
-        ),
+        statement="curator_coherence, full memory quality, and certification are separate explicit operations",
         sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
         probe="separate explicit operations",
-        reason=(
-            "the manager's curator dispatch described the complete operation as separate and "
-            "explicit"
-        ),
+        reason="the manager's curator dispatch described the complete operation as separate and explicit",
     ),
     RetiredCurationStatement(
-        statement=(
-            "Do not run or claim a full suite / full quality result unless the developer or the "
-            "task brief explicitly requests that operation."
-        ),
+        statement="Do not run or claim a full suite / full quality result unless the developer or the task brief explicitly requests that operation.",
         sources=("skills/l-01-agent-lifecycles/operations/closeout.md",),
         probe="explicitly requests that operation.",
-        reason=(
-            "the targeted-check contract stated the full-suite rule without the curation exception"
-        ),
+        reason="the targeted-check contract stated the full-suite rule without the curation exception",
     ),
     RetiredCurationStatement(
-        statement=(
-            "Full memory-quality or drift suites are separate developer-requested operations and "
-            "are not routine closeout or integration gates."
-        ),
+        statement="Full memory-quality or drift suites are separate developer-requested operations and are not routine closeout or integration gates.",
         sources=("skills/l-01-agent-lifecycles/templates/onboarding-coherency.md",),
         probe="separate developer-requested operations",
-        reason=(
-            "the curator's own report template declared the complete operation separate and not a "
-            "gate"
-        ),
+        reason="the curator's own report template declared the complete operation separate and not a gate",
     ),
     RetiredCurationStatement(
-        statement=(
-            "Full memory quality is an explicit developer-requested operation through "
-            "`c-02-memory-quality-control`, not a closeout precondition."
-        ),
+        statement="Full memory quality is an explicit developer-requested operation through `c-02-memory-quality-control`, not a closeout precondition.",
         sources=("skills/c-12-closeout/SKILL.md",),
         probe="is not a closeout precondition",
         reason="closeout was told curation's completed result is not its precondition",
     ),
     RetiredCurationStatement(
-        statement=(
-            "curator_coherence runs only when the developer explicitly requests that separate "
-            "diagnostic."
-        ),
+        statement="curator_coherence runs only when the developer explicitly requests that separate diagnostic.",
         sources=("skills/l-01-agent-lifecycles/operations/curation.md",),
         probe="runs only when the developer explicitly requests",
         reason="the curation procedure made the coherence authority an explicit-request diagnostic",
@@ -201,23 +149,154 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         statement="Full branch quality evidence is a separate explicit developer request.",
         sources=("skills/l-01-agent-lifecycles/roles/reviewer.md",),
         probe="Full branch quality evidence is a separate explicit developer request",
-        reason=(
-            "the reviewer's onboarding lens read the complete operation as a separate request "
-            "rather than the pass it verifies"
-        ),
+        reason="the reviewer's onboarding lens read the complete operation as a separate request rather than the pass it verifies",
     ),
     RetiredCurationStatement(
-        statement=(
-            "Run the scoped checks required by the task. Run the full `memory_quality_check` "
-            "operation only when the task or owner explicitly requests it; when requested, "
-            "do not substitute a narrower check."
-        ),
+        statement="Run the scoped checks required by the task. Run the full `memory_quality_check` operation only when the task or owner explicitly requests it; when requested, do not substitute a narrower check.",
         sources=(
             "skills/l-01-agent-lifecycles/operations/curation.md",
             "skills/l-01-agent-lifecycles/roles/curator.md",
         ),
         probe="operation only when the task or owner explicitly requests it",
         reason="the prototype made the normal MIK authoring pass's complete operation optional",
+    ),
+    RetiredCurationStatement(
+        statement="If the work is small, directly coordinate distinct Worker, Reviewer, and Curator agents.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="If the work is small",
+        reason="MIK-R72@v2: If the work is small — small scope no longer selects direct Architect coordination",
+    ),
+    RetiredCurationStatement(
+        statement="Do not insert an Orchestrator or Manager by default.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="Do not insert an Orchestrator",
+        reason="MIK-R72@v2: Do not insert an Orchestrator — one Manager is required for the single-master default",
+    ),
+    RetiredCurationStatement(
+        statement="For larger work, assign an Orchestrator or Manager only when it improves coordination.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="only when it improves coordination",
+        reason="MIK-R72@v2: only when it improves coordination — the number of concurrent masters, not a benefit judgment, selects the coordinator",
+    ),
+    RetiredCurationStatement(
+        statement="Flat work is first-class: the Architect may directly coordinate distinct Workers, Reviewers, and Curators.",
+        sources=("skills/l-01-agent-lifecycles/operations/planning.md",),
+        probe="Flat work is first-class",
+        reason="MIK-R72@v2: Flat work is first-class — direct Architect coordination requires the developer to choose it",
+    ),
+    RetiredCurationStatement(
+        statement="Add an Orchestrator or Manager for genuinely larger coordination, not as a required rung.",
+        sources=("skills/l-01-agent-lifecycles/operations/planning.md",),
+        probe="not as a required rung",
+        reason="MIK-R72@v2: not as a required rung — one Manager or one sprint Orchestrator is the required first delegation",
+    ),
+    RetiredCurationStatement(
+        statement="Choose a flat graph for small work: Architect directly assigns distinct Workers, Reviewers, and Curators.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="Choose a flat graph for small work",
+        reason="MIK-R72@v2: Choose a flat graph for small work — small work no longer selects a flat graph",
+    ),
+    RetiredCurationStatement(
+        statement="For a larger sprint, an Orchestrator may coordinate; a Manager may own one selected master.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="For a larger sprint",
+        reason="MIK-R72@v2: For a larger sprint — each concurrent master has a Manager under the sprint Orchestrator",
+    ),
+    RetiredCurationStatement(
+        statement="These roles are optional according to scale.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="optional according to scale",
+        reason="MIK-R72@v2: optional according to scale — coordination roles are not optional by scale",
+    ),
+    RetiredCurationStatement(
+        statement="You coordinate one selected sprint when the work benefits from a portfolio owner.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="when the work benefits from a portfolio owner",
+        reason="MIK-R72@v2: when the work benefits from a portfolio owner — two simultaneous masters or a developer override select the Orchestrator",
+    ),
+    RetiredCurationStatement(
+        statement="A Manager is optional for a sufficiently large master; simple work can stay flat under the Architect.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="simple work can stay flat under the Architect",
+        reason="MIK-R72@v2: simple work can stay flat under the Architect — one Manager owns each master rather than being optional for large work",
+    ),
+    RetiredCurationStatement(
+        statement="A simple project may be run directly by the Architect without a Manager; do not require extra hierarchy for its own sake.",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe="A simple project may be run directly",
+        reason="MIK-R72@v2: A simple project may be run directly — the developer must choose direct Architect coordination",
+    ),
+    RetiredCurationStatement(
+        statement="Choose the smallest owner graph that can deliver independent evidence.",
+        sources=("skills/l-01-agent-lifecycles/operations/planning.md",),
+        probe="Choose the smallest owner graph",
+        reason="MIK-R72@v2: Choose the smallest owner graph — the coordinator default precedes optional graph minimization",
+    ),
+    RetiredCurationStatement(
+        statement="Return peer questions to the agent that started you with `role_message` to the agent ID in your handover; an Orchestrator started from the dashboard has no parent, needs none, and must not invent one.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="Return peer questions to the agent that started you",
+        reason="MIK-R72@v2: Return peer questions to the agent that started you — ordinary peer questions are decided by the Orchestrator, not relayed",
+    ),
+    RetiredCurationStatement(
+        statement="Flat ownership is valid.",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="Flat ownership is valid",
+        reason="MIK-R72@v2: Flat ownership is valid — flat ownership requires an explicit developer choice",
+    ),
+    RetiredCurationStatement(
+        statement="An Architect may coordinate distinct Worker, Reviewer, and Curator roles directly; add an Orchestrator or Manager only when the scope benefits from that coordination.",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="add an Orchestrator or Manager only when the scope benefits",
+        reason="MIK-R72@v2: add an Orchestrator or Manager only when the scope benefits — the concurrent-master count selects the default, not scope benefit",
+    ),
+    RetiredCurationStatement(
+        statement="Do not require every hierarchy rung.",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="Do not require every hierarchy rung",
+        reason="MIK-R72@v2: Do not require every hierarchy rung — one coordinating agent is required unless the developer chooses otherwise",
+    ),
+    RetiredCurationStatement(
+        statement="A plan delta or missing authority returns to the agent that started you, with `role_message` on `agents-remember-task` to the agent ID in your handover",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe="A plan delta or missing authority returns",
+        reason="MIK-R72@v2: A plan delta or missing authority returns — only developer-needed plan or authority decisions go upward",
+    ),
+    RetiredCurationStatement(
+        statement="For the accepted objective, assign distinct tasks to distinct Workers, Reviewers, and Curators: start each with `role_start` on the `agents-remember-task` tool server, on a selection under your own sprint.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="For the accepted objective, assign distinct tasks",
+        reason="MIK-R72@v2: For the accepted objective, assign distinct tasks — Managers own the inner Worker, Reviewer and Curator loops",
+    ),
+    RetiredCurationStatement(
+        statement="Follow your assignments until the work is complete, blocked, or a true developer decision is needed; do not start a role and stop.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="Follow your assignments until",
+        reason="MIK-R72@v2: Follow your assignments until — the follow-through rule now distinguishes the delegated and developer-direct Architect duties",
+    ),
+    RetiredCurationStatement(
+        statement="Shape a bounded plan and requirement set; preserve flat ownership when it fits.",
+        sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
+        probe="Shape a bounded plan and requirement set; preserve flat ownership when it fits.",
+        reason="MIK-R72@v2: operations.planning.purpose — the description must state one Manager for one master, the concurrent-master Orchestrator and the developer exception",
+    ),
+    RetiredCurationStatement(
+        statement="Projects-level semantic owner; may be launched taskless and may coordinate flat work.",
+        sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
+        probe="Projects-level semantic owner; may be launched taskless and may coordinate flat work.",
+        reason="MIK-R72@v2: roles.architect.seat — the description must state one Manager for one master, the concurrent-master Orchestrator and the developer exception",
+    ),
+    RetiredCurationStatement(
+        statement="Optional sprint portfolio coordinator of role agents.",
+        sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
+        probe="Optional sprint portfolio coordinator of role agents.",
+        reason="MIK-R72@v2: roles.orchestrator.seat — the description must state one Manager for one master, the concurrent-master Orchestrator and the developer exception",
+    ),
+    RetiredCurationStatement(
+        statement="Optional selected-master coordinator; coordinates leaf owners and evidence.",
+        sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
+        probe="Optional selected-master coordinator; coordinates leaf owners and evidence.",
+        reason="MIK-R72@v2: roles.manager.seat — the description must state one Manager for one master, the concurrent-master Orchestrator and the developer exception",
     ),
 )
 
@@ -295,9 +374,14 @@ def retired_statement_findings(reading: str, surface_relative_path: str) -> list
 
 
 def doctrine_files(root: Path, surface: str) -> list[Path]:
-    """Every markdown file of one surface under ``root``, canonical tree or generated copy."""
+    """Every instruction document and lifecycle manifest on one canonical or generated surface."""
 
-    return sorted((root / surface).rglob("*.md"))
+    return sorted(
+        (
+            *((root / surface).rglob("*.md")),
+            *((root / surface).glob("l-01-agent-lifecycles/composition-manifest.json")),
+        )
+    )
 
 
 def retired_curation_findings(root: Path) -> list[str]:

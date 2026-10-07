@@ -54,7 +54,7 @@
     },
     "planning": {
       "source": "operations/planning.md",
-      "purpose": "Shape a bounded plan and requirement set; preserve flat ownership when it fits.",
+      "purpose": "Shape a bounded plan and requirement set; Architect delegation starts with one Manager for one master, one Orchestrator for concurrent masters, unless the developer chooses otherwise.",
       "applies_to_roles": [
         "architect",
         "designer",
@@ -177,7 +177,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Projects-level semantic owner; may be launched taskless and may coordinate flat work.",
+      "seat": "Projects-level semantic owner; may be launched taskless; delegates one master to one Manager and concurrent masters to one Orchestrator, unless the developer chooses otherwise.",
       "core": [
         "authority",
         "invariants",
@@ -223,7 +223,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Optional sprint portfolio coordinator of role agents.",
+      "seat": "Sprint coordinator above one Manager per concurrently worked master; also available above a single master when the developer explicitly asks.",
       "core": [
         "authority",
         "invariants",
@@ -330,7 +330,7 @@
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Optional selected-master coordinator; coordinates leaf owners and evidence.",
+      "seat": "Selected-master coordinator and decision owner under the Architect for one master or the Orchestrator for concurrent masters.",
       "core": [
         "authority",
         "invariants",
