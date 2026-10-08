@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from .environment import child_environment, removed_names, sandbox_environment
 from .layout import LOOPBACK, SandboxLayout, SandboxRefusal
@@ -35,6 +36,7 @@ PNT_BUILD_FILES = (
     "mcp/src/agents_remember/package_data/paseo_plugin/paseo-plugin.json",
     "dashboard/package.json",
     "scripts/sync-dashboard.py",
+    "scripts/harness/render_starter.py",
 )
 _ERROR_TAIL = 1500
 
@@ -158,6 +160,35 @@ class Operations:
             raise StepFailed("safety check", "the build's root resolver returned no object")
         return report
 
+    def render_settings(self, checkout: Path) -> dict[str, Any]:
+        """The tooling's one renderer consumes native setup; the checkout supplies the SDK."""
+        done = self.helper(
+            checkout,
+            "render_starter_settings.py",
+            [
+                "--settings",
+                str(self.layout.settings_file),
+                "--workspace",
+                str(self.layout.projects),
+                "--coordination",
+                str(self.layout.coordination),
+                "--host-port",
+                str(self.layout.paseo_port),
+                "--dashboard-port",
+                str(self.layout.dashboard_port),
+                "--repo",
+                "sandbox-app",
+            ],
+            120,
+        )
+        if done.returncode != 0:
+            raise StepFailed("starter render", done.tail)
+        report = json.loads(done.stdout)
+        (self.layout.run_dir / "starter-render-receipt.json").write_text(
+            json.dumps(report, indent=2) + "\n"
+        )
+        return report
+
     def tool_calls(self, checkout: Path, request: Path) -> dict[str, Any]:
         done = self.helper(checkout, "build_tool_calls.py", ["--request", request.as_posix()], 600)
         try:
@@ -169,6 +200,109 @@ class Operations:
                 "sandbox corpus", f"the build's tool server did not answer: {done.tail}"
             )
         return report
+
+    def runtime_install(self, checkout: Path) -> dict[str, Any]:
+        """Run the build's public runtime_install tool after exact sandbox/source admission."""
+        self.layout.run_dir.mkdir(parents=True, exist_ok=True)
+        log = self.layout.run_dir / "host-install-command.log"
+        self._archive_install_receipts()
+        request = self.layout.run_dir / "host-install-request.json"
+        request.write_text(
+            json.dumps(
+                {
+                    "config": self.layout.settings_file.as_posix(),
+                    "cwd": self.layout.root.as_posix(),
+                    "serverLog": (self.layout.run_dir / "host-install-server.log").as_posix(),
+                    "expect": {
+                        "coordinationRoot": self.layout.coordination.as_posix(),
+                        "workspaceRoot": self.layout.projects.as_posix(),
+                        "allowedRepoIds": ["sandbox-app"],
+                        "packageRoot": (checkout / "mcp/src/agents_remember").as_posix(),
+                    },
+                    "calls": [
+                        {
+                            "name": "host install",
+                            "tool": "runtime_install",
+                            "arguments": {"dry_run": False, "install_provider_deps": False},
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        argv = self.runtime_install_argv(checkout, request)
+        done = (
+            self._run_sharing_lock(argv, self.held_lock, "runtime_install", 1800)
+            if self.held_lock
+            else self.run(argv, cwd=self.layout.root, timeout=1800)
+        )
+        log.write_text(done.stdout + "\n" + done.stderr, encoding="utf-8")
+        try:
+            report = json.loads(done.stdout)
+        except ValueError:
+            self._refuse_install(f"unreadable host install receipt: {done.tail}", log)
+        results = report.get("results", []) if isinstance(report, dict) else []
+        if not (
+            isinstance(results, list)
+            and results
+            and isinstance(results[-1], dict)
+            and isinstance(results[-1].get("payload"), dict)
+        ):
+            detail = report.get("error") if isinstance(report, dict) else None
+            self._refuse_install(f"no host install receipt: {detail or done.tail}", log)
+        payload = results[-1]["payload"]
+        if done.returncode != 0 and payload.get("ok") is not False:
+            self._refuse_install(
+                f"runtime_install child failed ({done.returncode}): {done.tail}", log
+            )
+        (self.layout.run_dir / "host-install-receipt.json").write_text(
+            json.dumps(payload, indent=2) + "\n"
+        )
+        return payload
+
+    def _refuse_install(self, message: str, log: Path) -> NoReturn:
+        receipt = self.layout.run_dir / "host-install-receipt.json"
+        receipt.write_text(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": {"message": message},
+                    "log": log.as_posix(),
+                    "receipt": receipt.as_posix(),
+                    "serverLog": (self.layout.run_dir / "host-install-server.log").as_posix(),
+                }
+            )
+            + "\n"
+        )
+        raise StepFailed("runtime_install", message, log)
+
+    def runtime_install_argv(self, checkout: Path, request: Path) -> list[str]:
+        return [
+            self.build_python(checkout).as_posix(),
+            (HELPERS / "build_tool_calls.py").as_posix(),
+            "--request",
+            request.as_posix(),
+        ]
+
+    def _archive_install_receipts(self) -> None:
+        """A cut cannot expose old success as current; public reset retires this run history."""
+        paths = [
+            self.layout.run_dir / name
+            for name in (
+                "host-install-receipt.json",
+                "host-install-request.json",
+                "host-install-server.log",
+                "host-install-command.log",
+            )
+        ]
+        present = [path for path in paths if path.exists()]
+        if present:
+            previous = self.layout.run_dir / "host-install-history" / str(time.time_ns())
+            previous.mkdir(parents=True)
+            for path in present:
+                path.rename(previous / path.name)
 
     # --- the Paseo runtime, through the commands of PNT-R01 ---------------------------------
 
@@ -186,10 +320,7 @@ class Operations:
     def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
         """``agents-remember paseo <command>`` of the checkout, on the sandbox settings."""
         argv = self.paseo_argv(checkout, command)
-        if command == "provision" and self.held_lock is not None:
-            done = self._run_sharing_lock(argv, self.held_lock, f"paseo {command}", timeout)
-        else:
-            done = self.run(argv, cwd=self.layout.root, timeout=timeout)
+        done = self.run(argv, cwd=self.layout.root, timeout=timeout)
         try:
             report = json.loads(done.stdout)
         except ValueError:

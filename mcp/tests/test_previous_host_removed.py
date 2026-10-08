@@ -35,6 +35,7 @@ from agents_remember.serving.app import create_app
 from agents_remember.serving.projector import ProjectionCadence
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from paseo_runtime_test_support import runtime_settings, write_shared_runtime
 from starlette.routing import Match, Mount
 from test_paseo_launch import ROLE_REFS, PaseoLaunchTestCase
 
@@ -346,19 +347,14 @@ class NoTrackedFileNamesThePreviousHostTests(unittest.TestCase):
 
 
 def settings_document(root: Path) -> dict[str, Any]:
+    write_shared_runtime(
+        root, runtime_settings(root / "paseo", listen="127.0.0.1:6862", providers={}, embed=[])
+    )
     return {
         "version": 1,
         "coordinationRoot": (root / "coordination").as_posix(),
         "workspaceRoot": (root / "projects").as_posix(),
         "repositories": {},
-        "paseoRuntime": {
-            "installPrefix": (root / "paseo" / "prefix").as_posix(),
-            "home": (root / "paseo" / "home").as_posix(),
-            "listen": "127.0.0.1:6862",
-            "version": "0.11.0-beta.2",
-            "providers": {},
-            "embed": [],
-        },
     }
 
 

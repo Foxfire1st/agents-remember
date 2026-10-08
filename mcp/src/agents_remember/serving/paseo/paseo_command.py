@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.errors import AgentsRememberError
+from agents_remember.errors import PaseoRuntimeFailure
+from agents_remember.kernel.primitives.host_environment import host_environment
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 
-PASEO_PACKAGE = "@getpaseo/cli"
 COMMAND_NOT_FOUND = 127
 COMMAND_TIMED_OUT = 124
 DEFAULT_TIMEOUT_SECONDS = 60.0
@@ -41,22 +42,11 @@ class CommandResult:
 CommandRunner = Callable[[Sequence[str], float], CommandResult]
 
 
-class PaseoRuntimeFailure(AgentsRememberError):
-    """One named provisioning, status or stop step failed; ``detail`` carries Paseo's text."""
-
-    def __init__(self, code: str, step: str, message: str, detail: str | None = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.step = step
-        self.detail = detail
-
-    def as_payload(self) -> dict[str, Any]:
-        return {"code": self.code, "step": self.step, "message": str(self), "detail": self.detail}
-
-
 def run_command(argv: Sequence[str], timeout_seconds: float) -> CommandResult:
     """Run one npm or Paseo command and capture its output."""
-    env = {name: value for name, value in os.environ.items() if not name.startswith("PASEO_")}
+    env = host_environment(os.environ)
+    if len(argv) > 1 and str(argv[1]).endswith("/npm/bin/npm-cli.js"):
+        env["PATH"] = str(Path(argv[0]).parent) + os.pathsep + env.get("PATH", "")
     try:
         completed = subprocess.run(
             list(argv),
@@ -88,14 +78,41 @@ class PaseoCli:
     def executable(self) -> Path:
         return (self.root or self.settings.install_prefix) / "node_modules" / ".bin" / "paseo"
 
+    @property
+    def node(self) -> Path:
+        return product_node().node
+
     def installed_version(self) -> str | None:
         """The version this install root's CLI reports; ``None`` when missing or broken."""
-        result = self.runner([self.executable.as_posix(), "--version"], DEFAULT_TIMEOUT_SECONDS)
+        if not self.node.is_file() or not self.executable.is_file():
+            return None
+        result = self.runner(
+            [
+                self.node.as_posix(),
+                self.executable.as_posix(),
+                "--version",
+                "--home",
+                self.settings.home.as_posix(),
+            ],
+            DEFAULT_TIMEOUT_SECONDS,
+        )
         version = result.stdout.strip()
         return version if result.returncode == 0 and version else None
 
     def call(self, *args: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> CommandResult:
-        argv = [self.executable.as_posix(), *args, "--home", self.settings.home.as_posix()]
+        if not self.node.is_file():
+            raise PaseoRuntimeFailure(
+                "node_not_installed",
+                "node",
+                f"The product Node at {self.node} is not installed; run runtime_install.",
+            )
+        argv = [
+            self.node.as_posix(),
+            self.executable.as_posix(),
+            *args,
+            "--home",
+            self.settings.home.as_posix(),
+        ]
         return self.runner(argv, timeout)
 
     def json(

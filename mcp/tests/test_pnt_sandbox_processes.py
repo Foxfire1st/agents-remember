@@ -32,6 +32,7 @@ from pnt_sandbox_test_support import (
     builder,
     clear_stale_paseo_record,
     commands,
+    host_settings_document,
     inspect_paseo_record,
     is_running,
     lock,
@@ -40,6 +41,7 @@ from pnt_sandbox_test_support import (
     read_record,
     record,
     sandbox_lock,
+    settings_document,
     verified_supervisor,
     write_record,
 )
@@ -110,7 +112,7 @@ class StartAndStopTests(SandboxCase):
             ops.before_resolving = take_the_port
             with self.assertRaisesRegex(SandboxRefusal, f"port {self.layout.dashboard_port} "):
                 self.start(ops)
-            self.assertNotIn("paseo provision", ops.calls)
+            self.assertNotIn("runtime_install", ops.calls)
 
     def test_start_reports_already_running_and_changes_nothing(self) -> None:
         self.mark_built()
@@ -134,18 +136,31 @@ class StartAndStopTests(SandboxCase):
         write_record(self.layout, {"dashboard": self.dashboard(listening=False).as_record()})
         self.assertEqual(self.start(idle), 0)
         self.assertEqual(self.lines[-1], self.layout.dashboard_url)
-        self.assertIn("paseo provision", idle.calls)
+        self.assertIn("runtime_install", idle.calls)
 
     def test_start_builds_a_missing_sandbox_first(self) -> None:
         ops = FakeOperations(self)
         # A sandbox of an earlier layout counts as missing: the build adds what is new.
         self.mark_built(layout=builder.LAYOUT_VERSION - 1)
         self.assertFalse(builder.is_built(self.layout))
+        old_settings = settings_document(self.layout)
+        old_settings["paseoRuntime"] = host_settings_document(self.layout, None)["paseoRuntime"]
+        old_settings["paseoRuntime"]["version"] = self.good_roots()["values"][
+            "paseoRuntime.version"
+        ]
+        self.layout.settings_file.parent.mkdir(parents=True)
+        self.layout.settings_file.write_text(json.dumps(old_settings))
+        keep = self.layout.task_root / "keep-user-task.txt"
+        keep.parent.mkdir(parents=True)
+        keep.write_text("user task survives the normal rebuild")
 
         self.assertEqual(self.start(ops), 0)
 
         self.assertTrue(builder.is_built(self.layout))
-        self.assertLess(ops.calls.index("tool calls"), ops.calls.index("paseo provision"))
+        self.assertLess(ops.calls.index("tool calls"), ops.calls.index("runtime_install"))
+        self.assertEqual(keep.read_text(), "user task survives the normal rebuild")
+        self.assertNotIn("paseoRuntime", json.loads(self.layout.settings_file.read_text()))
+        self.assertIn("public starter render", ops.calls)
         self.assertTrue((self.layout.repository / "textkit" / "case.py").is_file())
         self.assertEqual(self.stop(ops), 0)
 
@@ -157,9 +172,53 @@ class StartAndStopTests(SandboxCase):
         with self.assertRaisesRegex(SandboxRefusal, "safety check failed"):
             self.start(ops)
 
-        self.assertNotIn("paseo provision", ops.calls)
+        self.assertNotIn("runtime_install", ops.calls)
         self.assertNotIn("spawn dashboard", ops.calls)
         self.assertTrue(any("FAIL coordinationRoot" in line for line in self.lines))
+
+    def test_deferred_install_cannot_qualify_an_older_live_host(self) -> None:
+        self.mark_built()
+        ops = FakeOperations(self)
+        ops.supervisor = original = self.supervisor()
+        reasons = [
+            "version",
+            "node",
+            "packages",
+            "listen",
+            "setting:daemon.listen",
+            "setting:features.webUi.enabled",
+            "setting:features.dictation.enabled",
+            "setting:features.voiceMode.enabled",
+            "setting:daemon.relay.enabled",
+            "setting:daemon.mcp.injectIntoAgents",
+            "setting:pluginsEnabled",
+            "setting:agents.providers",
+        ]
+        for selected in [[reason] for reason in reasons] + [reasons]:
+            self.lines.clear()
+            ops.calls.clear()
+            ops.provision_report = {
+                "ok": True,
+                "restartRequired": selected,
+                "daemon": {"action": "untouched"},
+                "message": "explicit terminal provision outside the host",
+            }
+            self.assertEqual(self.start(ops), 1)
+            self.assertTrue(is_running(original))
+            self.assertNotIn("paseo stop", ops.calls)
+            self.assertNotIn("spawn dashboard", ops.calls)
+            self.assertIn(
+                f"host transition deferred ({', '.join(selected)})", "\n".join(self.lines)
+            )
+            self.assertIn(f"observed own supervisor pid {original.pid}", "\n".join(self.lines))
+            self.assertNotIn(self.layout.dashboard_url, self.lines)
+        self.assertEqual(self.stop(ops), 0)
+        self.lines.clear()
+        ops.calls.clear()
+        self.assertEqual(self.start(ops), 1)
+        self.assertIn("no owned supervisor observed", "\n".join(self.lines))
+        self.assertNotIn("paseo stop", ops.calls)
+        self.assertNotIn("spawn dashboard", ops.calls)
 
     def test_two_starts_at_once_leave_one_sandbox_that_stop_ends(self) -> None:
         self.mark_built()
@@ -217,7 +276,7 @@ class StartAndStopTests(SandboxCase):
 
         assert ops.dashboard is not None
         self.assertFalse(is_running(ops.dashboard))
-        self.assertEqual(ops.calls[-3:], ["paseo provision", "spawn dashboard", "paseo stop"])
+        self.assertEqual(ops.calls[-3:], ["runtime_install", "spawn dashboard", "paseo stop"])
         self.assertIn("start failed at step 'dashboard'", "\n".join(self.lines))
         self.assertIn("did not answer", "\n".join(self.lines))
         self.assertIn(f"log file: {self.layout.dashboard_log}", self.lines)
@@ -296,26 +355,24 @@ class StartAndStopTests(SandboxCase):
         class Silent(FakeOperations):
             starts_one = False
 
-            def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
-                if command != "provision":
-                    return super().paseo(checkout, command, timeout)
-                self.note("paseo provision", checkout)
+            def runtime_install(self, checkout: Path) -> dict[str, Any]:
+                self.note("runtime_install", checkout)
                 if self.starts_one:
                     self.supervisor = self.case.supervisor()
-                raise StepFailed("paseo provision", "no report from the command: timed out")
+                raise StepFailed("runtime_install", "no report from the command: timed out")
 
         before = Silent(self)
         before.supervisor = ran_before = self.supervisor()
         self.assertEqual(self.start(before), 1)
-        self.assertEqual(before.calls[-1], "paseo provision")
+        self.assertEqual(before.calls[-1], "runtime_install")
         self.assertTrue(is_running(ran_before))
-        self.assertIn("start failed at step 'paseo provision': no report", "\n".join(self.lines))
+        self.assertIn("start failed at step 'runtime_install': no report", "\n".join(self.lines))
         self.assertEqual(self.stop(before), 0)
 
         started = Silent(self)
         started.starts_one = True
         self.assertEqual(self.start(started), 1)
-        self.assertEqual(started.calls[-2:], ["paseo provision", "paseo stop"])
+        self.assertEqual(started.calls[-2:], ["runtime_install", "paseo stop"])
         self.assertIsNone(started.supervisor)
 
     def test_a_failed_start_names_the_step_that_failed(self) -> None:
@@ -328,7 +385,7 @@ class StartAndStopTests(SandboxCase):
         }
         self.assertEqual(self.start(refused), 1)
         self.assertIn(
-            "start failed at step 'paseo provision': the install step failed npm ETARGET",
+            "start failed at step 'runtime_install': the install step failed npm ETARGET",
             self.lines,
         )
         self.assertNotIn("spawn dashboard", refused.calls)
@@ -553,7 +610,7 @@ class StartAndStopTests(SandboxCase):
         # A holder that has not written its record yet is still named, and so is the run that
         # keeps the lock of a command that has ended (no process has that id).
         ended = {"command": "start", "pid": 2**22 + 1, "since": "now"}
-        holder = json.dumps({**ended, "child": {"name": "paseo provision", "pid": 4242}})
+        holder = json.dumps({**ended, "child": {"name": "runtime_install", "pid": 4242}})
         with open(path, "a+", encoding="utf-8") as early:
             real(early, lock.fcntl.LOCK_EX)
             late = threading.Timer(0.3, lambda: (early.write(holder), early.flush()))
@@ -562,7 +619,7 @@ class StartAndStopTests(SandboxCase):
                 self.fail("a second command took a lock that is held")
             late.join()
         self.assertIn(
-            "its 'paseo provision' run (pid 4242) is still at work; 'start' "
+            "its 'runtime_install' run (pid 4242) is still at work; 'start' "
             f"(pid {ended['pid']}, since now) itself has ended",
             str(refused.exception),
         )
@@ -574,12 +631,16 @@ class StartAndStopTests(SandboxCase):
         program = (
             "import json, os, sys, time\n"
             "while not os.path.exists(sys.argv[1]):\n    time.sleep(0.05)\n"
-            "print(json.dumps({'ok': True, 'names': sorted(os.environ)}))\n"
+            "print(json.dumps({'results': [{'payload': {'ok': True, 'names': sorted(os.environ), "
+            "'values': {k: v for k, v in os.environ.items() if k in "
+            "['XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','PWD',"
+            "'GIT_OPTIONAL_LOCKS','PYTHONPYCACHEPREFIX','TMUX_TMPDIR',"
+            "'AR_DAGGER_AUTHORITY_ROOT']}}}]}))\n"
         )
 
         class Slow(Operations):
-            def paseo_argv(self, checkout: Path, command: str) -> list[str]:
-                return [sys.executable, "-c", program, release.as_posix(), checkout.name, command]
+            def runtime_install_argv(self, checkout: Path, _request: Path) -> list[str]:
+                return [sys.executable, "-c", program, release.as_posix(), checkout.name]
 
         ops = Slow(self.layout, {})
         reports: list[dict[str, Any]] = []
@@ -588,7 +649,7 @@ class StartAndStopTests(SandboxCase):
         def provision() -> None:
             with sandbox_lock(self.layout, "start") as held:
                 ops.held_lock = held
-                reports.append(ops.paseo(self.checkout, "provision", 60))
+                reports.append(ops.runtime_install(self.checkout))
                 afterwards.append(path.read_text(encoding="utf-8"))
 
         thread = threading.Thread(target=provision)
@@ -603,11 +664,10 @@ class StartAndStopTests(SandboxCase):
             self.fail("a second command ran beside a provision run")
         self.assertRegex(
             str(refused.exception),
-            rf"'start' \(pid {os.getpid()}, since [^)]+\), with its 'paseo provision' run "
+            rf"'start' \(pid {os.getpid()}, since [^)]+\), with its 'runtime_install' run "
             rf"\(pid {child}\);",
         )
-        held_by_child = open_files(child)
-        self.assertIn(path.as_posix(), held_by_child)
+        self.assertIn(path.as_posix(), open_files(child))
         release.touch()
         thread.join()
         self.assertEqual([report["ok"] for report in reports], [True])
@@ -616,6 +676,19 @@ class StartAndStopTests(SandboxCase):
         )
         self.assertLessEqual(
             {"AR_DAGGER_AUTHORITY_ROOT", "TMUX_TMPDIR", "PWD"}, set(reports[0]["names"])
+        )
+        self.assertEqual(
+            reports[0]["values"],
+            {
+                "XDG_DATA_HOME": str(self.layout.root / "data"),
+                "XDG_STATE_HOME": str(self.layout.root / "state"),
+                "XDG_CACHE_HOME": str(self.layout.root / "cache"),
+                "PWD": str(self.layout.root),
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONPYCACHEPREFIX": str(self.layout.pycache),
+                "TMUX_TMPDIR": str(self.layout.tmux_dir),
+                "AR_DAGGER_AUTHORITY_ROOT": str(self.layout.dagger_authority),
+            },
         )
 
     def test_the_paseo_home_record_is_trusted_only_for_this_homes_supervisor(self) -> None:
@@ -652,7 +725,7 @@ class StartAndStopTests(SandboxCase):
             with self.assertRaisesRegex(SandboxRefusal, "cannot be read"):
                 self.start(ops)
         self.assertTrue(path.is_file())
-        self.assertNotIn("paseo provision", ops.calls)
+        self.assertNotIn("runtime_install", ops.calls)
         self.assertNotIn("paseo stop", ops.calls)
         self.end(own)
 

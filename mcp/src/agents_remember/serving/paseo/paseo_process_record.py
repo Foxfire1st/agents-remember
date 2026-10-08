@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from agents_remember.cli.paseo_command import PaseoRuntimeFailure
+from agents_remember.kernel.primitives.host_environment import carried_session_variables
+from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
 
 PROCESS_RECORD = "paseo.pid"
 # ``process.title`` of Paseo's supervisor entry point (0.10 and 0.11).
@@ -33,6 +34,8 @@ class ProcessFacts:
 
     command_line: str
     paseo_home: str | None
+    session_variables: tuple[str, ...] = ()
+    node_executable: str | None = None
 
 
 class ProcessUnreadable(Exception):
@@ -67,6 +70,7 @@ def read_process(pid: int) -> ProcessFacts | None:
     try:
         command_line = (base / "cmdline").read_bytes()
         environment = (base / "environ").read_bytes()
+        executable = (base / "exe").readlink().as_posix()
     except FileNotFoundError:
         if Path("/proc/self").exists():
             return None
@@ -78,6 +82,8 @@ def read_process(pid: int) -> ProcessFacts | None:
     return ProcessFacts(
         command_line=command_line.replace(b"\0", b" ").decode("utf-8", "replace").strip(),
         paseo_home=None if home is None else os.fsdecode(home),
+        session_variables=carried_session_variables(os.fsdecode(name) for name in variables),
+        node_executable=executable,
     )
 
 

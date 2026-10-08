@@ -17,6 +17,23 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 - [ ] `mcp/src/agents_remember/mcp/__init__.py` `SERVER_VERSION` fallback
 - [ ] `README.md` Status section line
 
+## Shipped host contract and whole lock
+
+- [ ] An intentional host release updates paseo_host/contract.json, the exact
+      dependency in paseo_host/package.json and the plugin development SDK pin
+      together. The plugin's unsupported host adapters require separate release
+      qualification; do not move only the top package.
+- [ ] In an isolated release staging directory, copy the updated host manifest
+      and use the contract's checked product Node/npm to regenerate the complete
+      package-lock.json with npm install --package-lock-only --ignore-scripts
+      --prefix <staging>. Copy that whole artifact into paseo_host/; production
+      installs use npm ci and never resolve the release's ranges again.
+- [ ] For an intentional Node change, update its exact version, matching official
+      Linux-x64 archive URL and SHA-256 together; no other platform is claimed.
+- [ ] Run python scripts/check-host-contract.py and the focused host-release
+      contract tests. The check binds the installed host lock entry, manifest,
+      plugin SDK, every locked integrity/resolution, and Node version/platform URL.
+
 ## Install & first-run smoke
 
 - [ ] Fresh `uvx agents-remember-mcp==<version>` starts and serves the tool list.

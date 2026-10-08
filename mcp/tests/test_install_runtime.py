@@ -162,7 +162,7 @@ class InstallRuntimeTests(unittest.TestCase):
 
 
 class AgenticSettingsSeedTests(unittest.TestCase):
-    """runtime_install seeds the GLOBAL agentic settings file copy-if-missing (260703-L13)."""
+    """Shared settings belong to setup; runtime_install never overwrites developer settings."""
 
     def test_existing_settings_file_is_never_clobbered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -184,7 +184,7 @@ class AgenticSettingsSeedTests(unittest.TestCase):
 
             self.assertEqual(settings_path.read_text(encoding="utf-8"), developer_content)
 
-    def test_dry_run_counts_the_seed_without_writing(self) -> None:
+    def test_dry_run_installs_assets_without_writing_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             source_root = create_runtime_source(root)

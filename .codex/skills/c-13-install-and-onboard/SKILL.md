@@ -53,7 +53,7 @@ Run this sequence in order:
    continue.
 1. Runtime scaffold: run or verify `runtime_install()`.
 2. Agentic settings: walk the developer through the orchestration defaults in
-   the seeded global settings file.
+   the global settings file with built-in defaults for absent knobs.
 3. Repository certification profile: author, validate, and register one repository-owned Gate 1-4
    profile for the requested repository when the developer asks for repository certification or the
    full code-quality operation. This profile is not curation, so the curator's complete
@@ -93,8 +93,36 @@ Check, in order:
    `coordinationRoot`, `workspaceRoot`, allowed repositories, and providers.
    Surface the resolved absolute paths because wrong paths are the common cause
    of resolver failures. Also report whether the global agentic settings file
-   (`<coordinationRoot>/system/settings.json`) exists yet; Stage 1 seeds it
-   when missing and Stage 2 configures it.
+   (`<coordinationRoot>/system/settings.json`) exists and carries `paseoRuntime`.
+   Starter setup supplies one block; runtime_install never writes this authority.
+   If missing, calculate the complete five-key block below using the installation's
+   actual absolute data/state folders. Empty or unset XDG values use the home
+   defaults; refuse relative overrides. Show the resolved block and its destination
+   before asking to add it. Preserve other families and any explicit existing
+   home/installPrefix/listen. For a legacy per-harness block, offer to move that
+   complete block to this one shared file and remove its old copy after approval.
+   Do not duplicate it or use a fallback. After the approved setup, retry
+   runtime_install; configured=false is an incomplete host setup, not a failed
+   scaffold. Stage 2 configures the agentic posture.
+
+   The fresh block is the following, with <data> and <state> replaced by the
+   actual absolute XDG_DATA_HOME/XDG_STATE_HOME or $HOME/.local/share and
+   $HOME/.local/state paths. Existing explicit ports and paths take precedence.
+
+   ```json
+   {
+     "paseoRuntime": {
+       "installPrefix": "<data>/agents-remember/paseo/prefix",
+       "home": "<state>/agents-remember/paseo",
+       "listen": "127.0.0.1:8766",
+       "providers": {},
+       "embed": [
+         {"dashboardOrigin": "http://127.0.0.1:8765", "frameBaseUrl": "http://127.0.0.1:8766"},
+         {"dashboardOrigin": "http://localhost:8765", "frameBaseUrl": "http://127.0.0.1:8766"}
+       ]
+     }
+   }
+   ```
 4. **Runtime state.** Check whether the coordinator scaffold already exists under
    `coordinationRoot` (`AGENTS.md`, `skills/`, `tasks/`, `memory-repos/`,
    `system/` as applicable). If it is missing or stale, Stage 1 will run
@@ -127,6 +155,16 @@ Use `runtime_install(dry_run=true)` only when the developer asks for a preview o
 when local workflow policy requires one. Otherwise apply the runtime scaffold so
 setup can proceed.
 
+The result's `host` part reports the build-pinned host, whole dependency lock and
+checked product Node. Report `ok`, `changed`, version/home/listen, Node and errors.
+A failed host part sets the whole result's ok=false while earlier scaffold
+results stand. Report its code/step/message/detail and repair that host step.
+`restartRequired` means the running host was preserved before a required
+transition; the developer chooses a terminal outside the host for explicit
+`paseo provision`. It can end sessions, running turns and permission prompts.
+A dry run downloads nothing, runs no npm, writes no host settings and starts
+nothing. No separate host provision is an install step.
+
 After it runs, verify the coordinator root exists and contains the expected
 package-owned runtime files. `runtime_install()` may also prepare provider
 runtime assets when providers are enabled, but it does not create memory repos,
@@ -138,9 +176,9 @@ manual maintenance or non-package setups, but it is not the default path.
 
 ## Stage 2 - Agentic Settings: Interview The Developer
 
-`runtime_install()` seeds the GLOBAL agentic settings file at
-`<coordinationRoot>/system/settings.json` copy-if-missing, with every knob at
-its documented default: all-human gate delegation, the standard three-party-loop
+Starter/setup supplies the GLOBAL settings file at
+`<coordinationRoot>/system/settings.json`; `runtime_install()` never writes it.
+Absent agentic knobs retain their documented defaults: all-human gate delegation, the standard three-party-loop
 defaults, no concurrency caps, no spawn harness preference. This stage turns
 those defaults into the developer's actual posture so the intended workflows
 run on ANY harness. The schema reference is `docs/reference/settings-json.md`
@@ -148,7 +186,7 @@ run on ANY harness. The schema reference is `docs/reference/settings-json.md`
 documented keys.
 
 Walk the developer through the four knob families and edit the global file with
-their answers (leave a family at its seeded default when they have no
+their answers (leave a family at its built-in default when they have no
 preference):
 
 1. **Gate delegation posture** (`orchestration.gateDelegation`; GLOBAL file only - the
@@ -202,7 +240,7 @@ settings-owned harness/model/effort, internal readiness, exact brief pinning, ro
 canonical seat publication. A plane refusal remains a refusal and never falls back to ambient.
 The internal session-creation primitive is not installed caller guidance.
 
-If the developer wants to skip the interview, confirm the seeded defaults
+If the developer wants to skip the interview, confirm the built-in defaults
 apply and continue; tell them the file can be edited any time (picked up
 per-use, except the gateDelegation restart note above).
 
@@ -365,7 +403,7 @@ Summarize:
    step the developer must perform;
 2. runtime scaffold: `runtime_install()` run or already current, with the
    resolved coordination root;
-3. agentic settings: interviewed and written, or left at the seeded defaults,
+3. agentic settings: interviewed and written, or left at the built-in defaults,
    with the global file path;
 4. repository certification: exact profile path and digest for each explicitly requested code
    repository, validation result, and whether an authority-settings restart remains; routine
@@ -379,7 +417,24 @@ Summarize:
    identity, or the exact reason it was not run;
 8. first baseline: `memory_baseline_status` before and after adoption, the adoption
    result at its memory-content commit, or the exact reason it was not run;
-9. providers: indexing status and any deferred/degraded state.
+9. providers: indexing status and any deferred/degraded state;
+10. host: shared settings path, pinned host/product Node, provision result,
+    no-change repeat or deferred restart, and any incomplete migration.
+
+End with one executable start using the actual active MCP --config path and
+exact package/source installation used by the registered tool server. For a uvx
+registration, use `uvx --from "agents-remember-mcp==<served-version>" agents-remember
+dashboard --daemon --config "<absolute active MCP settings file>"`, replacing both
+values in the reported command; a local-wheel registration uses that exact wheel
+as --from instead. A uv tool-installed command can use `agents-remember dashboard
+--daemon --config "<absolute active MCP settings file>"`. A source registration
+uses its registered interpreter and environment with `-m agents_remember.cli`.
+Do not assume uvx placed a bare executable on PATH or discovery found a
+non-Claude starter. The one start ensures the installed host and dashboard. `dashboard --status` reports
+both (host query limited to 5 seconds): exit0 both up or host unconfigured, exit1
+dashboard down, exit3 configured host down. A start never installs/upgrades;
+dashboard stop/restart never stops the host. A host start drops the caller's
+session/seat identities by exact name and preserves harness logins.
 
 End by telling the developer whether the project is ready for normal work — and say the
 knowledge foundation's state in that same sentence. A repository whose knowledge

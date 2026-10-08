@@ -46,8 +46,10 @@ from agents_remember.cli.role_launch_receipts import (
     digest,
 )
 from agents_remember.cli.role_launch_workspace import _ensure_leaf_enclosure
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -620,7 +622,6 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 write_task_doc(folder, TaskDocument.model_validate({**document, **shared}))
             write_task_doc(contract.task_root, TaskDocument.model_validate({**leaf, **shared}))
             settings_path = root / "settings" / "ar.json"
-            settings_path.parent.mkdir(parents=True)
             settings = {
                 "coordinationRoot": contract.coordination_root.as_posix(),
                 "workspaceRoot": root.as_posix(),
@@ -629,12 +630,16 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                     "installPrefix": (root / "paseo" / "prefix").as_posix(),
                     "home": (root / "paseo" / "home").as_posix(),
                     "listen": "127.0.0.1:6835",
-                    "version": "0.11.0-beta.2",
+                    "version": PASEO_VERSION,
                     "providers": {},
                     "embed": [],
                 },
             }
-            settings_path.write_text(json.dumps(settings), encoding="utf-8")
+            atomic_write_text(
+                contract.coordination_root / "system/settings.json",
+                json.dumps({"paseoRuntime": settings.pop("paseoRuntime")}),
+            )
+            atomic_write_text(settings_path, json.dumps(settings))
             request = RoleDispatchRequest.model_validate(
                 {
                     "role": "worker",

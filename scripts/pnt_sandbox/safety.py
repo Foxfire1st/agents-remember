@@ -31,6 +31,8 @@ REQUIRED_ROOTS = (
     "daggerAuthorityRoot",
     "paseoRuntime.home",
     "paseoRuntime.installPrefix",
+    "productNode.root",
+    "productNode.cache",
 )
 REQUIRED_REPOSITORY_ROOTS = (
     "path",

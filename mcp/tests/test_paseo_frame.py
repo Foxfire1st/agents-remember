@@ -17,6 +17,7 @@ from agents_remember.cli.paseo_frame import (
     host_frame_facts,
     normalise_origin,
 )
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoEmbedEntry,
     PaseoRuntimeSettings,
@@ -24,12 +25,13 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from paseo_runtime_test_support import write_shared_runtime
 
 SERVER_ID = "srv_frameTest"
 LOCAL = PaseoEmbedEntry("http://127.0.0.1:9797", "http://127.0.0.1:6820")
 REMOTE = PaseoEmbedEntry("https://box.tailnet.ts.net", "https://box.tailnet.ts.net:8443/")
 # Written the way a person may write it: the lookup compares origins, not their spelling.
-SPELLED = PaseoEmbedEntry("HTTPS://Desk.Example:443", "https://frames.example")
+SPELLED = PaseoEmbedEntry("https://desk.example", "https://frames.example")
 
 
 def runtime_settings(root: Path) -> PaseoRuntimeSettings:
@@ -37,19 +39,18 @@ def runtime_settings(root: Path) -> PaseoRuntimeSettings:
         install_prefix=root / "prefix",
         home=root / "home",
         listen="127.0.0.1:6820",
-        version="0.11.0-beta.2",
         providers={},
         embed=(LOCAL, REMOTE, SPELLED),
     )
 
 
 def runtime_config(root: Path, settings: PaseoRuntimeSettings | None) -> McpRuntimeConfig:
+    write_shared_runtime(root, settings)
     return McpRuntimeConfig(
         config_path=root / "settings" / "ar.json",
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
-        paseo_runtime=settings,
     )
 
 
@@ -104,9 +105,9 @@ export class DaemonClient {
   }
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return this.state }
-  getLastServerInfoMessage() { return { serverId: scenario.serverId, version: '0.11.0-beta.2' } }
+  getLastServerInfoMessage() { return { serverId: scenario.serverId, version: '__HOST_VERSION__' } }
 }
-""",
+""".replace("__HOST_VERSION__", PASEO_VERSION),
 }
 
 
@@ -182,7 +183,7 @@ class PaseoFrameTests(unittest.TestCase):
             {
                 "available": False,
                 "reason": "not-configured",
-                "detail": f"{self.root / 'settings' / 'ar.json'} has no paseoRuntime block",
+                "detail": f"{self.root / 'coordination/system/settings.json'} has no paseoRuntime block",
             },
         )
 
@@ -356,7 +357,7 @@ class WiredHostFactsTests(unittest.TestCase):
 
     def test_no_runtime_and_an_unlisted_origin_never_reach_the_bridge(self) -> None:
         bridge = FakeBridge()
-        unconfigured = self.ask(bridge, runtime_config(self.root, None))
+        unconfigured = self.ask(bridge, runtime_config(self.root / "unconfigured", None))
         self.assertEqual(unconfigured["reason"], "not-configured")
         self.assertIn("has no paseoRuntime block", unconfigured["detail"])
 
@@ -402,6 +403,15 @@ class RuntimeInfoCommandTests(unittest.TestCase):
         settings = runtime_settings(self.root)
         settings.home.mkdir(parents=True)
         (settings.home / "server-id").write_text(SERVER_ID + "\n", encoding="utf-8")
+        executable = shutil.which("node")
+        assert executable is not None
+        node = Path(executable)
+        node_patch = patch(
+            "agents_remember.cli.paseo_bridge.product_node",
+            return_value=type("FixtureNode", (), {"node": node})(),
+        )
+        node_patch.start()
+        self.addCleanup(node_patch.stop)
         package = self.root / "prefix" / "node_modules" / "@getpaseo" / "client"
         for name, content in FAKE_CLIENT.items():
             (package / name).parent.mkdir(parents=True, exist_ok=True)
@@ -444,3 +454,20 @@ class RuntimeInfoCommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_unreachable_remedy_survives_long_detail_once(tmp_path):
+    config = runtime_config(tmp_path, runtime_settings(tmp_path))
+    for detail in (
+        "short failure",
+        "x" * 500,
+        "old failure; Run runtime_install, then agents-remember dashboard --daemon",
+    ):
+        result = frame_descriptor(
+            config,
+            "http://127.0.0.1:9797",
+            host=lambda _actual, value=detail: HostFrameFacts(reachable=False, detail=value),
+        )
+        assert result["available"] is False and len(result["detail"]) <= 300
+        assert result["detail"].count("runtime_install") == 1
+        assert result["detail"].count("agents-remember dashboard --daemon") == 1

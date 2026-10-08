@@ -16,7 +16,12 @@ SANDBOX_SCHEMA = "pnt-sandbox/v1"
 MARKER_NAME = ".pnt-sandbox.json"
 REPOSITORY_ID = "sandbox-app"
 INTEGRATION_BRANCH = "sandbox-sprint"
-PASEO_VERSION = "0.11.0-beta.2"
+PASEO_VERSION = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "mcp/src/agents_remember/package_data/paseo_host/contract.json"
+    ).read_text(encoding="utf-8")
+)["version"]
 LOOPBACK = "127.0.0.1"
 PASEO_PORT = 6820
 DASHBOARD_PORT = 9797
@@ -260,7 +265,7 @@ def embed_entries(layout: SandboxLayout) -> list[dict[str, str]]:
     ]
 
 
-def settings_document(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
+def settings_document(layout: SandboxLayout) -> dict[str, Any]:
     """The settings of the sandbox's dashboard, tool server and Paseo runtime."""
     return {
         "version": 1,
@@ -274,11 +279,16 @@ def settings_document(layout: SandboxLayout, eve_env_file: Path | None) -> dict[
         # Named explicitly: left out, the port would default to 8765, the developer's own
         # dashboard service.
         "dashboard": {"autoStart": False, "port": layout.dashboard_port},
+    }
+
+
+def host_settings_document(layout: SandboxLayout, eve_env_file: Path | None) -> dict[str, Any]:
+    """The sandbox setup supplies its single shared host block, after asset bootstrap."""
+    return {
         "paseoRuntime": {
             "installPrefix": layout.paseo_prefix.as_posix(),
             "home": layout.paseo_home.as_posix(),
             "listen": layout.paseo_listen,
-            "version": PASEO_VERSION,
             "providers": provider_entries(layout, eve_env_file),
             "embed": embed_entries(layout),
         },

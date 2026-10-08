@@ -18,8 +18,10 @@ from unittest.mock import patch
 
 from agents_remember.cli import paseo_bridge
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from paseo_runtime_test_support import write_shared_runtime
 
 SERVER_ID = "srv_configured"
 AGENT_ID = "f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607"
@@ -238,7 +240,7 @@ class AgentCommandScriptTests(unittest.TestCase):
                 "installPrefix": (self.root / "prefix").as_posix(),
                 "home": (self.root / "home").as_posix(),
                 "listen": "127.0.0.1:6835",
-                "version": "0.11.0-beta.2",
+                "version": PASEO_VERSION,
                 "providers": {},
                 "embed": [],
             }
@@ -246,13 +248,24 @@ class AgentCommandScriptTests(unittest.TestCase):
         assert settings is not None
         settings.home.mkdir(parents=True)
         (settings.home / "server-id").write_text(SERVER_ID + "\n", encoding="utf-8")
+        write_shared_runtime(self.root, settings)
         self.config = McpRuntimeConfig(
             config_path=self.root / "settings" / "mcp.json",
             coordination_root=self.root / "coordination",
             workspace_root=self.root / "projects",
             transcript_root=self.root / "coordination" / "logs" / "mcp",
-            paseo_runtime=settings,
         )
+        fixture_node = self.root / "fixture-node" / "bin" / "node"
+        fixture_node.parent.mkdir(parents=True, exist_ok=True)
+        executable = shutil.which("node")
+        assert executable is not None
+        fixture_node.symlink_to(executable)
+        node_patch = patch(
+            "agents_remember.cli.paseo_bridge.product_node",
+            return_value=type("FixtureNode", (), {"node": fixture_node})(),
+        )
+        node_patch.start()
+        self.addCleanup(node_patch.stop)
         package = self.root / "prefix" / "node_modules" / "@getpaseo" / "client"
         (package / "dist").mkdir(parents=True)
         exports = {

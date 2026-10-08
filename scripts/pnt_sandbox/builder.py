@@ -22,6 +22,7 @@ from .layout import (
     SANDBOX_SCHEMA,
     SandboxLayout,
     SandboxRefusal,
+    host_settings_document,
     location_refusal,
     read_marker,
     settings_document,
@@ -32,7 +33,7 @@ from .operations import HELPERS, Operations, StepFailed
 # Raised when a rebuild has something to add to sandboxes built earlier: 2 added the Dagger
 # authority directory and the Eve launcher's list of variables an env file may not set; 3 added
 # the Pi provider entry to the settings file, which a rebuild writes anew.
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 EVE_LAUNCHER_SOURCE = HELPERS / "eve-acp-launcher.mjs"
 EVE_SCRUB_NAME = "removed-variables.json"
 # The marker's state while a reset deletes the directory: neither built nor to be built on.
@@ -303,7 +304,7 @@ def build_unlocked(
         out(f"Eve: no usable Eve project at {eve_project}; the Eve provider entry is omitted")
     else:
         out(f"Eve application {layout.eve_app}: from {eve_project}")
-    settings = json.dumps(settings_document(layout, eve_env_file), indent=2) + "\n"
+    settings = json.dumps(settings_document(layout), indent=2) + "\n"
     out(
         f"settings {layout.settings_file}: "
         f"{'written' if _put(layout.settings_file, settings) else 'unchanged'}"
@@ -314,5 +315,11 @@ def build_unlocked(
         "coordination root, memory repository and task documents (through the build's tool server):"
     )
     _seed_corpus(layout, checkout, ops, out)
+    shared = layout.coordination / "system/settings.json"
+    document = json.loads(shared.read_text(encoding="utf-8")) if shared.exists() else {}
+    document.update(host_settings_document(layout, eve_env_file))
+    _put(shared, json.dumps(document, indent=2) + "\n")
+    rendered = ops.render_settings(checkout)
+    out(f"settings rendered once from shared setup: {rendered['renderedSettingsPath']}")
     _write_marker(layout, "built", recorded_eve)
     out(f"sandbox built at {layout.root}")

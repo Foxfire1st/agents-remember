@@ -18,14 +18,16 @@ from agents_remember.cli.paseo_catalog import (
     launcher_options,
     resolve_agent_selection,
 )
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleAgentOverride, RoleLauncherOptionsRequest
 from fastapi import HTTPException
+from paseo_runtime_test_support import write_shared_runtime
 
 HARNESS_ORDER = ("claude", "codex", "pi", "eve")
 CATALOG: dict[str, Any] = {
-    "runtime": {"serverId": "srv_configured", "version": "0.11.0-beta.2"},
+    "runtime": {"serverId": "srv_configured", "version": PASEO_VERSION},
     "providers": [
         {
             "id": "codex",
@@ -58,7 +60,7 @@ def runtime_config(
                 "installPrefix": (root / "prefix").as_posix(),
                 "home": (root / "home").as_posix(),
                 "listen": listen,
-                "version": "0.11.0-beta.2",
+                "version": PASEO_VERSION,
                 "providers": {},
                 "embed": [],
                 **overrides,
@@ -67,12 +69,12 @@ def runtime_config(
         if listen
         else None
     )
+    write_shared_runtime(root, settings)
     return McpRuntimeConfig(
         config_path=root / "settings" / "mcp.json",
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
-        paseo_runtime=settings,
     )
 
 
@@ -106,7 +108,7 @@ class PaseoCatalogTestCase(unittest.TestCase):
         self.root = Path(temporary.name)
         self.config = runtime_config(self.root)
         self.config.workspace_root.mkdir()
-        self.config.coordination_root.mkdir()
+        self.config.coordination_root.mkdir(exist_ok=True)
         forget_launcher_catalogs()
         self.addCleanup(forget_launcher_catalogs)
 
@@ -198,12 +200,13 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
 
         other_runtimes = {
-            "listen": runtime_config(self.root, listen="127.0.0.1:6834"),
-            "home": runtime_config(self.root, home=(self.root / "other-home").as_posix()),
-            "installPrefix": runtime_config(
-                self.root, installPrefix=(self.root / "other-prefix").as_posix()
+            "listen": runtime_config(self.root / "listen-runtime", listen="127.0.0.1:6834"),
+            "home": runtime_config(
+                self.root / "home-runtime", home=(self.root / "other-home").as_posix()
             ),
-            "version": runtime_config(self.root, version="0.11.0-beta.3"),
+            "installPrefix": runtime_config(
+                self.root / "prefix-runtime", installPrefix=(self.root / "other-prefix").as_posix()
+            ),
         }
         origins = {refreshed["catalogOrigin"]}
         for calls, (differs, other_runtime) in enumerate(other_runtimes.items(), start=3):
@@ -213,12 +216,12 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
                 self.assertNotIn(elsewhere["catalogOrigin"], origins)
                 origins.add(elsewhere["catalogOrigin"])
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
-        self.assertEqual(len(bridge.calls), 6)
+        self.assertEqual(len(bridge.calls), 5)
 
         forget_launcher_catalogs()
         resolve_agent_selection(self.config, defaults(), HARNESS_ORDER, None)
         self.assertEqual(
-            bridge.calls[6:],
+            bridge.calls[5:],
             [("catalog", {"cwd": self.config.workspace_root.as_posix()})],
             "a launch must load an empty cache",
         )
@@ -334,7 +337,7 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
 
         with self.subTest("no Paseo runtime configured"):
             bridge = self.bridge()
-            unconfigured = runtime_config(self.root, listen=None)
+            unconfigured = runtime_config(self.root / "unconfigured", listen=None)
             with self.assertRaises(HTTPException) as raised:
                 self.options(defaults(), config=unconfigured)
             self.assertEqual(raised.exception.status_code, 503)

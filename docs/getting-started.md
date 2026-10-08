@@ -55,7 +55,7 @@ projects/
 Different tools discover instructions, hooks, MCP settings, and skills in
 different native locations. Use the install page for your harness, copy its
 starter package into the workspace, and render that copied package by running
-its local `render-starter` script or by replacing the placeholders manually:
+its local `render-starter` script:
 
 | Harness | Setup guide |
 | --- | --- |
@@ -78,11 +78,13 @@ folder. Pass every repository folder the MCP server should cover after one
 python .codex/render-starter.py --repo my-app shared-lib
 ```
 
-The renderer is only a convenience for the edits you would otherwise make by
-hand: workspace paths, repository names, and harness-specific hook or context
-commands. If you prefer manual setup, replace those placeholders yourself and
-verify that no `<PATH/TO/YOUR/PROJECTS_FOLDER>`,
-`<YOUR_REPOSITORY_FOLDER_NAME>`, or hook-command placeholder remains.
+The renderer fills workspace paths, repository names and harness-specific hook
+or context commands. It also creates or consumes the one shared `paseoRuntime`
+block in `<coordinationRoot>/system/settings.json`, with absolute data/state
+paths and the configured host/dashboard origins. Run it for host setup; manual
+placeholder edits alone do not supply that block. The [settings reference](reference/settings-json.md#paseo-runtime)
+and [install guide](install/README.md) describe the complete block and the
+approved add/move-and-retry procedure for existing installations.
 
 ## Manual Wire Of The MCP Server
 

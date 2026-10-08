@@ -332,10 +332,10 @@ def agentic_settings_path(root: Path) -> Path:
 
 
 def default_agentic_settings_seed() -> dict[str, Any]:
-    """The seeded global-file content: every agentic knob at its documented default.
+    """Reference representation of built-in agentic defaults for inspection and fixtures.
 
-    ``runtime_install`` writes this copy-if-missing; the c-13 install interview
-    then edits it with the developer. No spawn harness preference is seeded --
+    No installer or setup writer consumes this helper; absent knobs use the
+    dataclass/parser defaults. The c-13 interview writes chosen preferences. No spawn harness preference is seeded --
     the spawn seam stays detection-gated until a preference is configured.
     """
     return {

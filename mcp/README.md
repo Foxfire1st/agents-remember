@@ -116,8 +116,18 @@ wheel (run `npm --prefix dashboard run build`, then `python3 scripts/sync-dashbo
 
 ```text
 uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
-agents-remember dashboard
+agents-remember dashboard --daemon --config /absolute/path/to/active-harness-settings.json
 ```
+
+The install brings the build-pinned Paseo host and its whole locked tree on the
+product's checked Node (Linux x86_64). One shared paseoRuntime block in
+<coordinationRoot>/system/settings.json supplies its facts. Each dashboard start
+ensures the installed host without installing/upgrading; dashboard stop/restart
+keeps host sessions running. Explicit paseo stop ends running turns and pending
+prompts, with sessions resumable after a new start. --status prints both states
+with a five-second host limit. Both --status and --daemon exit 0 when the
+dashboard and host are up (or host unconfigured), 1 when the dashboard is down,
+and 3 when a configured host is down.
 
 `dashboard` finds its `--config` on its own: it walks up from the current
 directory to the nearest `.claude/mcp/agents-remember-settings.json`, or the
@@ -339,3 +349,4 @@ required Docker services are available. Full tool list:
 - [Project README](https://github.com/Foxfire1st/agents-remember/blob/main/README.md)
 - [Getting Started](https://github.com/Foxfire1st/agents-remember/blob/main/docs/getting-started.md)
 - [Settings Reference](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/settings-json.md)
+

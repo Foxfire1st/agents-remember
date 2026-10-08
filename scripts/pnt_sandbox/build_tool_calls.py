@@ -58,6 +58,10 @@ def _admission_error(info: Any, expect: dict[str, Any]) -> str | None:
         return f"the tool server admits repositories {info.get('allowedRepoIds')!r}"
     if info.get("allowedProviderIds"):
         return f"the tool server has providers configured: {info.get('allowedProviderIds')!r}"
+    expected_package = expect.get("packageRoot")
+    actual_package = (info.get("servingBuild") or {}).get("packageRoot")
+    if expected_package is not None and actual_package != expected_package:
+        return f"the tool server package is {actual_package!r}, expected {expected_package!r}"
     return None
 
 
@@ -108,6 +112,8 @@ async def _call_all(
                     continue
             ok, payload = _payload(await session.call_tool(call["tool"], call["arguments"]))
             result = {"name": call["name"], "tool": call["tool"], "action": "called", "ok": ok}
+            if call["tool"] == "runtime_install":
+                result["payload"] = payload
             if not ok:
                 result["detail"] = json.dumps(payload)[:_DETAIL_LIMIT]
             results.append(result)

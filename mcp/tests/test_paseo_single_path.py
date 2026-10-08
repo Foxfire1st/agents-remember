@@ -9,6 +9,7 @@ daemon needs first. A legitimate use of one of those names outside the boundary 
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -16,8 +17,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI = "mcp/src/agents_remember/cli/"
+RUNTIME = "mcp/src/agents_remember/serving/paseo/"
 SANDBOX = "scripts/pnt_sandbox/"  # PNT-R11's tooling, merged from another leaf
 
 # The boundary itself: no rule applies inside these files. They are the two paths: the bridge
@@ -26,7 +30,7 @@ SANDBOX = "scripts/pnt_sandbox/"  # PNT-R11's tooling, merged from another leaf
 BOUNDARY_FILES: dict[str, str] = {
     CLI + "paseo_bridge.py": "the bridge: the one caller of the bridge script",
     CLI + "paseo_bridge.mjs": "the bridge script: the one importer of Paseo's client package",
-    CLI + "paseo_command.py": "PNT-R01: the one runner of Paseo's own command line",
+    RUNTIME + "paseo_command.py": "PNT-R01: the one runner of Paseo's own command line",
 }
 BOUNDARY_DIRECTORIES: dict[str, str] = {
     "mcp/src/agents_remember/package_data/paseo_plugin/": "the AR plugin: Paseo's plugin interface",
@@ -88,6 +92,54 @@ RULES: dict[str, re.Pattern[str]] = {
 # often, is stale. Both fail the scan of the checkout.
 RUNTIME_COMMANDS = "PNT-R01: "
 ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
+    PACKAGE: {
+        "scripts/check-host-contract.py": (
+            1,
+            "checks the shipped plugin SDK pin against the build host",
+        ),
+        "mcp/src/agents_remember/package_data/paseo_host/package.json": (
+            1,
+            "the exact host dependency of the shipped whole-tree lock",
+        ),
+    },
+    PROGRAM: {
+        ".claude/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".codex/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".cursor/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".github-vscode/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".hermes/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".openclaw/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".pi/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        ".agents/render-starter.py": (
+            1,
+            "generated renderer names the host home directory; starts no host",
+        ),
+        "scripts/harness/render_starter.py": (
+            1,
+            "renders the host home directory; starts no program",
+        ),
+    },
     LITERAL: {
         CLI + "__main__.py": (1, "the `paseo` sub-command of AR's own command line (PNT-R01)"),
         SANDBOX + "operations.py": (
@@ -101,54 +153,97 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
     },
     COMMAND_LINE: {
-        CLI + "paseo_daemon.py": (
-            2,
+        RUNTIME + "paseo_daemon.py": (
+            3,
             RUNTIME_COMMANDS + "its docstring quotes the command line the runner builds, and "
             "one failure text of stop begins with the command's name",
         ),
-        CLI + "paseo_daemon_config.py": (
+        RUNTIME + "paseo_daemon_config.py": (
             1,
             RUNTIME_COMMANDS + "its docstring quotes the command it does not use for a provider "
             "entry",
         ),
-        CLI + "paseo_provision.py": (
-            1,
-            RUNTIME_COMMANDS + "one failure text of provision begins with the command's name",
+        RUNTIME + "paseo_provision.py": (
+            2,
+            RUNTIME_COMMANDS + "provision and outstanding-stop failure texts name the command",
         ),
         SANDBOX + "commands.py": (
-            12,
+            10,
             "step names and output lines about AR's own `paseo` sub-commands",
         ),
-        SANDBOX + "operations.py": (2, "the step name of AR's own `paseo <command>` sub-command"),
+        SANDBOX + "operations.py": (
+            1,
+            "the step name of AR's remaining `paseo <command>` status/stop path; install is public",
+        ),
     },
     RUNNER: {
-        CLI + "paseo_daemon.py": (
-            7,
+        RUNTIME + "paseo_install.py": (3, "install and preview use the single runtime runner"),
+        RUNTIME + "paseo_node.py": (1, "Node/npm validation uses the same process runner"),
+        RUNTIME + "paseo_run.py": (3, "run context and read-only install admission"),
+        RUNTIME + "paseo_start.py": (
+            6,
+            "start/status and their typed locked helper use the same runner without install/reload",
+        ),
+        RUNTIME + "paseo_daemon.py": (
+            8,
             RUNTIME_COMMANDS + "status and stop build the runner and pass it to their helpers",
         ),
-        CLI + "paseo_daemon_config.py": (
+        RUNTIME + "paseo_daemon_config.py": (
             1,
             RUNTIME_COMMANDS + "imports the failure class from the runner's module",
         ),
-        CLI + "paseo_provision.py": (
+        RUNTIME + "paseo_provision.py": (
             7,
-            RUNTIME_COMMANDS + "provision builds the runner and passes it to its steps",
+            RUNTIME_COMMANDS
+            + "explicit provision and install build the same runner for their steps",
+        ),
+        RUNTIME + "paseo_settings.py": (
+            3,
+            RUNTIME_COMMANDS + "reads pending settings through the one runtime runner",
         ),
         CLI + "paseo_runtime.py": (
             5,
             RUNTIME_COMMANDS + "imports the failure class from the runner's module; "
             "`paseo_command` is also the name under which it parses its own sub-command",
         ),
-        CLI + "paseo_process_record.py": (
+        RUNTIME + "paseo_process_record.py": (
             1,
             RUNTIME_COMMANDS + "imports the failure class from the runner's module; it starts "
             "nothing",
         ),
     },
     ADDRESS: {
-        CLI + "paseo_provision.py": (
-            16,
+        ".claude/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".codex/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".cursor/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".github-vscode/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".hermes/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".openclaw/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".pi/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        ".agents/render-starter.py": (1, "generated rendering of the shared host prefix"),
+        "mcp/src/agents_remember/kernel/primitives/paseo_authority.py": (
+            1,
+            "migration notice names the shared prefix key",
+        ),
+        "scripts/harness/render_starter.py": (1, "renders the single shared host prefix"),
+        RUNTIME + "paseo_install.py": (4, "install result and read-only preview of selected host"),
+        RUNTIME + "paseo_run.py": (1, "checks the selected prefix before replacement"),
+        RUNTIME + "paseo_start.py": (3, "reports/comparisons for the configured listen address"),
+        RUNTIME + "paseo_start_outcome.py": (
+            2,
+            "hashes prefix/listen to match an in-flight start outcome; executes no host command",
+        ),
+        SANDBOX + "render_starter_settings.py": (
+            2,
+            "compares native shared prefix/listen with inert starter defaults; starts no host",
+        ),
+        RUNTIME + "paseo_provision.py": (
+            12,
             RUNTIME_COMMANDS + "provision installs into the prefix and binds the listen address",
+        ),
+        RUNTIME + "paseo_settings.py": (
+            4,
+            RUNTIME_COMMANDS + "owns the listen setting and its restart comparison",
         ),
         CLI + "paseo_catalog.py": (2, "the catalog cache is keyed by the runtime it was read from"),
         "mcp/src/agents_remember/kernel/primitives/paseo_runtime_settings.py": (
@@ -157,8 +252,8 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         ),
         SANDBOX + "layout.py": (1, "writes the `paseoRuntime` settings block of the sandbox"),
         SANDBOX + "build_roots.py": (
-            3,
-            "reports the configured values so the sandbox check can compare",
+            5,
+            "reports current shared host paths and values for the sandbox check",
         ),
         SANDBOX + "safety.py": (
             2,
@@ -306,13 +401,13 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "P07 os.execvp": (PY, 'os.execvp("paseo", ["paseo", "attach", agent_id])', (LITERAL,)),
     "P08 the runner through importlib": (
         PY,
-        'runner = importlib.import_module("agents_remember.cli.paseo_command")',
+        'runner = importlib.import_module("agents_remember.serving.paseo.paseo_command")',
         (RUNNER,),
     ),
     "P09 the runner by a relative import": (PY, "from .paseo_command import PaseoCli", (RUNNER,)),
     "P10 the runner through an allowed module": (
         PY,
-        "from agents_remember.cli.paseo_provision import PaseoCli",
+        "from agents_remember.serving.paseo.paseo_provision import PaseoCli",
         (RUNNER,),
     ),
     "P11 the runner module in a parenthesised import": (
@@ -402,7 +497,7 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "a program handed in from outside": (PY, "subprocess.run([program, *arguments])", ()),
     "a manifest that depends on the client": (
         "dashboard/package.json",
-        '"dependencies": { "@getpaseo/client": "0.11.0-beta.2" }',
+        json.dumps({"dependencies": {"@getpaseo/client": PASEO_VERSION}}),
         (PACKAGE,),
     ),
     # Review R2, plants Q04 to Q08, Q10, Q11, Q14, Q31 to Q35 and Q38.
@@ -535,8 +630,8 @@ PLANTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
         (LITERAL,),
     ),
     "a file allowed for the runner's failure class names the program": (
-        CLI + "paseo_process_record.py",
-        'from agents_remember.cli.paseo_command import PaseoRuntimeFailure\nPROGRAM = "paseo"',
+        RUNTIME + "paseo_process_record.py",
+        'from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure\nPROGRAM = "paseo"',
         (LITERAL,),
     ),
     "a boundary file's name in another directory": (
@@ -614,8 +709,8 @@ OWN_USES: dict[str, tuple[str, str]] = {
     ),
     "the PNT-R01 commands as functions": (
         PY,
-        "from agents_remember.cli.paseo_provision import provision_runtime\n"
-        "from agents_remember.cli.paseo_daemon import runtime_status, stop_runtime",
+        "from agents_remember.serving.paseo.paseo_provision import provision_runtime\n"
+        "from agents_remember.serving.paseo.paseo_daemon import runtime_status, stop_runtime",
     ),
     "AR's own sub-command, where it is defined": (
         CLI + "__main__.py",
@@ -644,6 +739,26 @@ OWN_USES: dict[str, tuple[str, str]] = {
 
 
 class SinglePathTests(unittest.TestCase):
+    def test_new_support_admissions_still_reject_an_extra_use_and_a_second_path(self) -> None:
+        for path, rule, extra in (
+            (RUNTIME + "paseo_start.py", RUNNER, "\nother = PaseoCli(settings)\n"),
+            (RUNTIME + "paseo_provision.py", COMMAND_LINE, '\nother = "paseo provider ls"\n'),
+            (RUNTIME + "paseo_start_outcome.py", ADDRESS, "\nother = settings.listen\n"),
+            (
+                SANDBOX + "render_starter_settings.py",
+                ADDRESS,
+                "\nother = settings.install_prefix\n",
+            ),
+        ):
+            with self.subTest(path=path):
+                original = (REPO_ROOT / path).read_text(encoding="utf-8")
+                self.assertEqual(second_paths_to_paseo(path, original), [])
+                self.assertIn(rule, second_paths_to_paseo(path, original + extra))
+                self.assertIn(
+                    PROGRAM,
+                    second_paths_to_paseo(path, original + '\nrun("npx paseo provider ls")\n'),
+                )
+
     def test_only_the_bridge_and_the_runtime_commands_reach_paseo(self) -> None:
         scanned, offenders = scan_tree(REPO_ROOT)
 
@@ -748,7 +863,7 @@ class SinglePathTests(unittest.TestCase):
             CLI + "__main__.py": 'paseo = sub.add_parser("paseo")\n',
         }
         unread = {
-            CLI + "paseo_command.py": 'class PaseoCli:\n    program = "paseo"\n',
+            RUNTIME + "paseo_command.py": 'class PaseoCli:\n    program = "paseo"\n',
             "mcp/src/agents_remember/package_data/paseo_plugin/index.server.ts": (
                 'import { definePlugin } from "@getpaseo/plugin";\n'
             ),

@@ -13,6 +13,8 @@ from pathlib import Path
 
 from . import builder, commands
 from .layout import (
+    DASHBOARD_PORT,
+    PASEO_PORT,
     SandboxLayout,
     SandboxRefusal,
     default_eve_project,
@@ -20,6 +22,15 @@ from .layout import (
     read_marker,
 )
 from .operations import TOOLING_CHECKOUT, Operations, StepFailed, require_checkout
+
+
+def _port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65535 or port in {9785, 9786}:
+        raise argparse.ArgumentTypeError(
+            "use a port from 1 to 65535 other than live ports 9785/9786"
+        )
+    return port
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
             default=default_sandbox_root(),
             help="The sandbox directory (default: %(default)s).",
         )
+        added.set_defaults(host_port=PASEO_PORT, dashboard_port=DASHBOARD_PORT)
+        if name in {"build", "check", "start", "stop"}:
+            added.add_argument("--host-port", type=_port, default=PASEO_PORT)
+            added.add_argument("--dashboard-port", type=_port, default=DASHBOARD_PORT)
         return added
 
     def with_build_inputs(added: argparse.ArgumentParser) -> None:
@@ -70,7 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace) -> int:
-    layout = SandboxLayout(args.sandbox)
+    if args.host_port == args.dashboard_port:
+        raise SandboxRefusal("host and dashboard ports must differ; nothing was started")
+    layout = SandboxLayout(args.sandbox, args.host_port, args.dashboard_port)
     ops = Operations(layout)
     if args.command == "build":
         builder.build(layout, require_checkout(args.checkout), ops, print, args.eve_project)

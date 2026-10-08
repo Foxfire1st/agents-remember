@@ -9,11 +9,31 @@ from __future__ import annotations
 
 import fcntl
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from agents_remember.errors import LockCapabilityError
+
+
+class LockAcquisitionTimeout(LockCapabilityError):
+    """The caller's finite exclusion budget expired; the resource was not entered."""
+
+
+def _acquire_flock(descriptor: int, deadline: float | None) -> None:
+    while True:
+        try:
+            flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if deadline is not None else 0)
+            fcntl.flock(descriptor, flags)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic() if deadline is not None else 0
+            if remaining <= 0:
+                raise LockAcquisitionTimeout(
+                    "the resource lock is busy; retry after its owner finishes"
+                ) from None
+            time.sleep(min(0.05, remaining))
 
 
 class _LockDepth(threading.local):
@@ -55,7 +75,7 @@ def thread_mutex_for(log_path: Path) -> threading.RLock:
         return _thread_mutexes.setdefault(path, threading.RLock())
 
 
-def _verify_lock_capability(path: Path, resource: str) -> None:
+def _verify_lock_capability(path: Path, resource: str, deadline: float | None) -> None:
     """Refuse a filesystem whose ``flock`` does not actually exclude.
 
     Taken twice from two file descriptions in this one process: POSIX says the second must be
@@ -66,7 +86,7 @@ def _verify_lock_capability(path: Path, resource: str) -> None:
     if path in _verified_lock_paths:
         return
     with path.open("a+b") as first:
-        fcntl.flock(first.fileno(), fcntl.LOCK_EX)
+        _acquire_flock(first.fileno(), deadline)
         try:
             with path.open("a+b") as second:
                 try:
@@ -85,7 +105,9 @@ def _verify_lock_capability(path: Path, resource: str) -> None:
 
 
 @contextmanager
-def exclusive_file_lock(resource_path: Path, resource: str) -> Iterator[None]:
+def exclusive_file_lock(
+    resource_path: Path, resource: str, *, deadline: float | None = None
+) -> Iterator[None]:
     """Hold one mutex and flock across the caller's complete transaction.
 
     Same-thread nesting shares the outer hold, including exception release. Other
@@ -102,16 +124,28 @@ def exclusive_file_lock(resource_path: Path, resource: str) -> Iterator[None]:
         finally:
             _lock_depth.depth[path] = depth
         return
-    with thread_mutex_for(resource_path):
-        _verify_lock_capability(path, resource)
+    mutex = thread_mutex_for(resource_path)
+    acquired = (
+        mutex.acquire()
+        if deadline is None
+        else mutex.acquire(timeout=max(0, deadline - time.monotonic()))
+    )
+    if not acquired:
+        raise LockAcquisitionTimeout(
+            f"the {resource} lock ({path}) is busy; retry after its owner finishes"
+        )
+    try:
+        _verify_lock_capability(path, resource, deadline)
         with path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            _acquire_flock(handle.fileno(), deadline)
             _lock_depth.depth[path] = 1
             try:
                 yield
             finally:
                 _lock_depth.depth.pop(path, None)
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        mutex.release()
 
 
 def lock_held(resource_path: Path) -> bool:

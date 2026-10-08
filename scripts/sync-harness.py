@@ -60,6 +60,8 @@ BLANK_LINES_BEFORE_TOP_LEVEL = ("", "", "")
 # Emission order for starter fragments. Declaring it once here keeps every generated
 # file in the same order no matter what order a target lists its fragments in.
 STARTER_FRAGMENT_ORDER = (
+    "RenderOptions",
+    "DEFAULT_RENDER_OPTIONS",
     "Renderer",
     "command_string",
     "toml_basic_string_content",
@@ -67,6 +69,9 @@ STARTER_FRAGMENT_ORDER = (
     "repository_ids",
     "replace_text",
     "write_context_file",
+    "_xdg_home",
+    "settings_payload",
+    "fresh_host_block",
     "render_settings",
     "hook_script_path",
     "vscode_root",
@@ -99,6 +104,7 @@ KNOWN_IMPORTS = ("argparse", "json", "os", "platform", "shlex", "subprocess", "s
 KNOWN_FROM_IMPORTS = (
     ("collections.abc", "Callable"),
     ("pathlib", "Path"),
+    ("typing", "NamedTuple"),
 )
 
 
@@ -187,9 +193,14 @@ SHARED_STARTER_FRAGMENTS = (
     "infer_workspace_root",
     "repository_ids",
     "replace_text",
+    "_xdg_home",
+    "settings_payload",
+    "fresh_host_block",
     "render_settings",
     "validate",
     "main",
+    "RenderOptions",
+    "DEFAULT_RENDER_OPTIONS",
     "Renderer",
 )
 

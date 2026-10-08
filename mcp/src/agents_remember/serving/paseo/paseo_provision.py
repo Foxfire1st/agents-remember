@@ -20,13 +20,15 @@ import hashlib
 import json
 import shutil
 import socket
-from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+import time
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from agents_remember.cli.paseo_command import (
-    PASEO_PACKAGE,
+from agents_remember.kernel.primitives.paseo_host_contract import HOST_DATA, PASEO_PACKAGE
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
+from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
+from agents_remember.serving.paseo.paseo_command import (
     CommandResult,
     CommandRunner,
     PaseoCli,
@@ -36,17 +38,18 @@ from agents_remember.cli.paseo_command import (
     paseo_error_text,
     run_command,
 )
-from agents_remember.cli.paseo_daemon import is_running, plugin_entry
-from agents_remember.cli.paseo_daemon_config import (
-    AGENT_TOOLS_SETTING,
-    AGENT_TOOLS_VALUE,
+from agents_remember.serving.paseo.paseo_daemon import is_running, plugin_entry
+from agents_remember.serving.paseo.paseo_daemon_config import (
     PROVIDER_ENTRIES,
     accept_provider_entries,
     remove_stale_temporaries,
     restore_previous_config,
     write_provider_entries,
 )
-from agents_remember.cli.paseo_plugin_files import (
+from agents_remember.serving.paseo.paseo_lock import runtime_lock
+from agents_remember.serving.paseo.paseo_node import ensure_node
+from agents_remember.serving.paseo.paseo_packages import installed_lock_matches
+from agents_remember.serving.paseo.paseo_plugin_files import (
     PLUGIN_ID,
     installed_plugin_path,
     plugin_source_root,
@@ -56,13 +59,24 @@ from agents_remember.cli.paseo_plugin_files import (
     write_embed,
     write_loaded_stamp,
 )
-from agents_remember.cli.paseo_process_record import (
+from agents_remember.serving.paseo.paseo_process_record import (
     ProcessReader,
     inspect_record,
     read_process,
     remove_stale_record,
 )
-from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
+from agents_remember.serving.paseo.paseo_run import (
+    BindProbe,
+    ProvisionIntent,
+    _check_install_restart,
+    _Run,
+    preserve_live_install,
+)
+from agents_remember.serving.paseo.paseo_settings import (
+    DaemonSetting,
+    pending_settings,
+    restart_reasons,
+)
 
 INSTALL_TIMEOUT_SECONDS = 900.0
 START_TIMEOUT_SECONDS = 120
@@ -71,40 +85,7 @@ _INVALID_CONFIGURATION = "Invalid config"
 STAGING_DIRECTORY = ".ar-staging"
 PREVIOUS_DIRECTORY = ".ar-previous"
 INSTALL_ENTRIES = ("node_modules", "package.json", "package-lock.json")
-
-BindProbe = Callable[[str, int], OSError | None]
 _WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
-
-
-@dataclass(frozen=True)
-class DaemonSetting:
-    """One daemon configuration path provision writes, and when Paseo applies a change to it."""
-
-    path: str
-    value: Any
-    applies: Literal["start", "live"]
-
-
-def daemon_settings(settings: PaseoRuntimeSettings) -> tuple[DaemonSetting, ...]:
-    """The complete list of daemon settings provision writes; every other key is left alone.
-
-    ``start`` settings are read only when the daemon starts; ``live`` ones are applied by Paseo's
-    configuration reload. The split follows Paseo's configuration reference and was confirmed by
-    run on 0.11.0-beta.2 for every path except relay enablement, which is never switched on here.
-    Dictation and voice mode are off before the first start, so no speech model is downloaded.
-    Paseo's own agent tools are written off, not left to Paseo's default (PNT-R06): Paseo lists
-    that path among the ones it applies on a reload.
-    """
-    return (
-        DaemonSetting("daemon.listen", settings.listen, "start"),
-        DaemonSetting("daemon.relay.enabled", False, "live"),
-        DaemonSetting(AGENT_TOOLS_SETTING, AGENT_TOOLS_VALUE, "live"),
-        DaemonSetting("features.webUi.enabled", True, "start"),
-        DaemonSetting("features.dictation.enabled", False, "start"),
-        DaemonSetting("features.voiceMode.enabled", False, "start"),
-        DaemonSetting("pluginsEnabled", True, "live"),
-        DaemonSetting(PROVIDER_ENTRIES, settings.providers, "live"),
-    )
 
 
 def bind_error(host: str, port: int) -> OSError | None:
@@ -121,25 +102,6 @@ def bind_error(host: str, port: int) -> OSError | None:
     return None
 
 
-@dataclass
-class _Run:
-    settings: PaseoRuntimeSettings
-    cli: PaseoCli
-    plugin_source: Path
-    probe: BindProbe
-    reader: ProcessReader
-    step: str = "install"
-    changes: list[dict[str, Any]] = field(default_factory=list)
-    restart_reasons: list[str] = field(default_factory=list)
-    # Index of the first change applied to a daemon that this pass kept running.
-    live_from: int | None = None
-    # An undone provider write: a running daemon may have loaded the file that was undone.
-    reload_owed: bool = False
-
-    def change(self, step: str, action: str, **facts: Any) -> None:
-        self.changes.append({"step": step, "action": action, **facts})
-
-
 def provision_runtime(
     settings: PaseoRuntimeSettings,
     *,
@@ -149,14 +111,61 @@ def provision_runtime(
     reader: ProcessReader = read_process,
 ) -> dict[str, Any]:
     """Move the runtime to the configured state; the report lists every change made."""
-    cli = PaseoCli(settings, runner)
-    run = _Run(settings, cli, plugin_source or plugin_source_root(), probe, reader)
+    return _provision(
+        _Run(
+            settings,
+            PaseoCli(settings, runner),
+            plugin_source or plugin_source_root(),
+            probe,
+            reader,
+        )
+    )
+
+
+def provision_for_install(
+    settings: PaseoRuntimeSettings,
+    *,
+    runner: CommandRunner = run_command,
+    plugin_source: Path | None = None,
+    probe: BindProbe = bind_error,
+    reader: ProcessReader = read_process,
+) -> dict[str, Any]:
+    """Apply installation changes while keeping an existing host's sessions alive."""
+    return _provision(
+        _Run(
+            settings,
+            PaseoCli(settings, runner),
+            plugin_source or plugin_source_root(),
+            probe,
+            reader,
+            ProvisionIntent.INSTALL,
+        )
+    )
+
+
+def _provision(run: _Run) -> dict[str, Any]:
+    settings, intent = run.settings, run.intent
     failure: PaseoRuntimeFailure | None = None
+    node = None
     try:
-        _restore_unfinished_provider_write(run)
-        _own_daemon_recorded(run)
-        _ensure_install(run)
-        _converge_daemon(run)
+        inspect_record(settings.home, "install", run.reader)
+        node = {**product_node().payload(), "changed": False}
+        if intent is ProvisionIntent.INSTALL:
+            _check_install_restart(run)
+        if not run.restart_reasons:
+            with runtime_lock(settings.home, time.monotonic() + INSTALL_TIMEOUT_SECONDS):
+                if intent is ProvisionIntent.INSTALL:
+                    _check_install_restart(run)
+                if not run.restart_reasons:
+                    node = ensure_node(run.cli.runner)
+                    if node["changed"]:
+                        run.change("node", "installed", version=node["version"], path=node["path"])
+                    for leftover in node.get("removed", []):
+                        run.change("node", "removed-leftover", path=leftover)
+                    _restore_unfinished_provider_write(run)
+                    _own_daemon_recorded(run)
+                    _ensure_install(run)
+                    _converge_daemon(run)
     except PaseoRuntimeFailure as error:
         failure = error
     except OSError as error:
@@ -169,8 +178,10 @@ def provision_runtime(
         "home": settings.home.as_posix(),
         "installPrefix": settings.install_prefix.as_posix(),
         "version": settings.version,
+        "node": node,
         "listen": settings.listen,
         "daemon": {"action": _daemon_action(run), "reasons": run.restart_reasons},
+        **({"restartRequired": run.restart_reasons} if intent is ProvisionIntent.INSTALL else {}),
         "changes": run.changes,
         "error": None if failure is None else failure.as_payload(),
     }
@@ -208,6 +219,7 @@ def _own_daemon_recorded(run: _Run) -> bool:
 def _stop_daemon(run: _Run, cli: PaseoCli, step: str) -> None:
     """Stop this home's daemon through Paseo, and only a process proven to be it."""
     if _own_daemon_recorded(run):
+        preserve_live_install(run, "stop")
         cli.json(step, "daemon", "stop", "--json")
 
 
@@ -227,13 +239,14 @@ def _ensure_install(run: _Run) -> None:
     prefix = run.settings.install_prefix
     staging = prefix / STAGING_DIRECTORY
     installed = run.cli.installed_version()
-    if installed == run.settings.version:
+    if installed == run.settings.version and installed_lock_matches(prefix):
         for leftover in (staging, prefix / PREVIOUS_DIRECTORY):
             if leftover.exists():
                 shutil.rmtree(leftover)
                 run.change("install", "removed-leftover", path=leftover.as_posix())
         return
     replacing = (prefix / "node_modules").exists()
+    preserve_live_install(run, "replace")
     staged = _stage_install(run, staging)
     try:
         _stop_for_replacement(run, staged if installed is None else run.cli)
@@ -253,15 +266,18 @@ def _stage_install(run: _Run, staging: Path) -> PaseoCli:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     spec = f"{PASEO_PACKAGE}@{run.settings.version}"
-    argv = ["npm", "install", "--prefix", staging.as_posix(), "--save-exact"]
-    result = run.cli.runner([*argv, "--no-audit", "--no-fund", spec], INSTALL_TIMEOUT_SECONDS)
+    for name in ("package.json", "package-lock.json"):
+        shutil.copyfile(HOST_DATA / name, staging / name)
+    node = product_node()
+    argv = [node.node.as_posix(), node.npm.as_posix(), "ci", "--prefix", staging.as_posix()]
+    result = run.cli.runner([*argv, "--no-audit", "--no-fund"], INSTALL_TIMEOUT_SECONDS)
     staged = replace(run.cli, root=staging)
     if result.returncode != 0 or staged.installed_version() != run.settings.version:
         shutil.rmtree(staging, ignore_errors=True)
         raise PaseoRuntimeFailure(
             "install_failed",
             "install",
-            f"npm install of {spec} failed; the previous install is untouched",
+            f"npm ci of locked {spec} failed; the previous install is untouched",
             paseo_error_text(result),
         )
     return staged
@@ -279,6 +295,7 @@ def _stop_for_replacement(run: _Run, cli: PaseoCli) -> None:
 
 
 def _activate(run: _Run, prefix: Path, staging: Path) -> None:
+    preserve_live_install(run, "activate an install over")
     previous = prefix / PREVIOUS_DIRECTORY
     shutil.rmtree(previous, ignore_errors=True)
     previous.mkdir()
@@ -312,16 +329,30 @@ def _converge_daemon(run: _Run) -> None:
         )
     status = run.cli.json("daemon", "daemon", "status", "--json")
     running = is_running(status)
-    pending = _pending_settings(run)
+    if not running:
+        preserve_live_install(run, "start another daemon for")
+    pending = pending_settings(run.cli)
     _require_listen_address(run, status if running else None)
     first_change = len(run.changes)
-    reasons = _restart_reasons(run.settings, status, pending) if running else []
+    reasons = restart_reasons(run.settings, status, pending) if running else []
+    if running:
+        record = inspect_record(run.settings.home, "daemon", run.reader)
+        facts = run.reader(record.pid) if record.pid is not None else None
+        if (
+            facts is not None
+            and facts.node_executable is not None
+            and facts.node_executable != product_node().node.as_posix()
+        ):
+            reasons.append("node")
+    if running and reasons and run.intent is ProvisionIntent.INSTALL:
+        run.restart_reasons += reasons
+        return
     reasons += _apply_settings(run, [item for item in pending if item.applies == "live"], running)
-    if running and reasons:
+    if running and reasons and run.intent is ProvisionIntent.EXPLICIT:
         _stop_daemon(run, run.cli, "daemon")
         run.change("daemon", "stopped", reasons=reasons)
     run.restart_reasons += reasons
-    kept_running = running and not reasons
+    kept_running = running and (not reasons or run.intent is ProvisionIntent.INSTALL)
     run.live_from = first_change if kept_running else None
     if kept_running and run.reload_owed:
         run.cli.json("config", "daemon", "reload", "--json")
@@ -331,25 +362,6 @@ def _converge_daemon(run: _Run) -> None:
     if not kept_running:
         _start_daemon(run)
     _ensure_plugin(run, kept_running)
-
-
-def _pending_settings(run: _Run) -> list[DaemonSetting]:
-    run.step = "config"
-    document = run.cli.json("config", "daemon", "config", "get", "--json")
-    current = document.get("value")
-    return [
-        setting
-        for setting in daemon_settings(run.settings)
-        if _configured_value(current, setting) != setting.value
-    ]
-
-
-def _configured_value(current: object, setting: DaemonSetting) -> Any:
-    value = current
-    for key in setting.path.split("."):
-        value = value.get(key) if isinstance(value, dict) else None
-    # A configuration without provider entries and an empty provider object are the same state.
-    return {} if value is None and setting.value == {} else value
 
 
 def _require_listen_address(run: _Run, running: dict[str, Any] | None) -> None:
@@ -405,19 +417,6 @@ def _port_in_use(settings: PaseoRuntimeSettings, detail: str) -> PaseoRuntimeFai
         "no other port is chosen and no daemon is left running",
         detail,
     )
-
-
-def _restart_reasons(
-    settings: PaseoRuntimeSettings, status: dict[str, Any], pending: list[DaemonSetting]
-) -> list[str]:
-    """Why a running daemon must be restarted: its version, or a setting applied only at start."""
-    reasons = [f"setting:{item.path}" for item in pending if item.applies == "start"]
-    version = status.get("daemonVersion")
-    if version and version != settings.version:
-        reasons.append("version")
-    if status.get("listen") != settings.listen and "setting:daemon.listen" not in reasons:
-        reasons.append("listen")
-    return reasons
 
 
 def _apply_settings(run: _Run, pending: list[DaemonSetting], running: bool) -> list[str]:
@@ -499,6 +498,7 @@ def _sync_home_files(run: _Run) -> None:
 
 def _start_daemon(run: _Run) -> None:
     run.step = "daemon"
+    preserve_live_install(run, "start another daemon for")
     result = run.cli.call(
         "daemon",
         "start",
@@ -508,15 +508,21 @@ def _start_daemon(run: _Run) -> None:
         timeout=START_TIMEOUT_SECONDS + 30,
     )
     if result.returncode != 0:
-        # Paseo's supervisor exits with a worker that never became ready; stop is the guarantee.
+        # Explicit provision may clean up its failed start; INSTALL preserves any live host
+        # observed after the start-site admission, including an ambiguous failed reply.
         if _own_daemon_recorded(run):
+            preserve_live_install(run, "stop after a failed start of")
             run.cli.call("daemon", "stop", "--json")
-        if "EADDRINUSE" in result.stderr:
+        still_alive = _own_daemon_recorded(run)
+        if "EADDRINUSE" in result.stderr and not still_alive:
             raise _port_in_use(run.settings, paseo_error_text(result))
         raise PaseoRuntimeFailure(
             "daemon_start_failed",
             "daemon",
-            "paseo daemon start failed; no daemon is left running",
+            "paseo daemon start failed; the supervisor is still alive/not answering and "
+            "cleanup is outstanding; no second daemon was started"
+            if still_alive
+            else "paseo daemon start failed; no daemon is left running",
             paseo_error_text(result),
         )
     run.change("daemon", "started", listen=run.settings.listen)

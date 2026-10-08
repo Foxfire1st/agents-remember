@@ -38,6 +38,8 @@ CONFIGURATION_ROOTS = (
 )
 # Roots the build derives; each has one resolver below.
 DERIVED_ROOTS = (
+    "productNode.root",
+    "productNode.cache",
     "agenticSettings",
     "observerRoot",
     "dashboardDaemonDir",
@@ -142,10 +144,21 @@ def resolve_roots(config_path: str) -> dict[str, Any]:
     for key, path in _configuration_paths(config, ""):
         found.add(key, lambda path=path: path)
     _coordination_roots(found, config)
+
+    def product_node():
+        from agents_remember.kernel.primitives.paseo_node_paths import product_node  # noqa: PLC0415
+
+        return product_node()
+
+    found.add("productNode.root", lambda: product_node().root)
+    found.add("productNode.cache", lambda: product_node().cache)
     _launch_roots(found, config)
     for repo_id in sorted(config.repositories):
         _repository_roots(found, config, repo_id)
     paseo = config.paseo_runtime
+    if paseo is not None:
+        found.add("paseoRuntime.home", lambda: paseo.home)
+        found.add("paseoRuntime.installPrefix", lambda: paseo.install_prefix)
     report["expected"] = expected_roots(sorted(config.repositories), sorted(config.providers))
     report["values"] = {
         "dashboard.port": config.dashboard.port,

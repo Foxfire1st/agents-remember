@@ -18,6 +18,33 @@ the system Python (3.10 or newer) or with a checkout's `mcp/.venv`. Two modules 
 `build_roots.py` and `build_tool_calls.py` run inside the Python environment of the PNT build
 under test and import that build's own code.
 
+`build`, `check`, `start` and `stop` accept `--host-port` and `--dashboard-port`.
+Defaults remain 6820 and 9797. Supply the same chosen pair to each command on that
+sandbox; the renderer, settings, safety check and listener ownership use that pair.
+The ports must differ and cannot be 9785 or 9786. A foreign holder refuses the start;
+the tooling never selects another port. `reset` still identifies owned processes by
+their exact configuration/home records and needs no port arguments.
+
+For example, with an independent recorded pair:
+
+```text
+python3 scripts/pnt-sandbox.py build --sandbox /path/to/sandbox --host-port 6871 --dashboard-port 9871
+python3 scripts/pnt-sandbox.py check --sandbox /path/to/sandbox --checkout /path/to/product --host-port 6871 --dashboard-port 9871
+python3 scripts/pnt-sandbox.py start /path/to/product --sandbox /path/to/sandbox --host-port 6871 --dashboard-port 9871
+python3 scripts/pnt-sandbox.py stop --sandbox /path/to/sandbox --host-port 6871 --dashboard-port 9871
+```
+
+A different product checkout may use one named frozen tooling checkout: invoke that
+tooling's `scripts/pnt-sandbox.py`, with the product's own SDK and `--checkout` (or
+the `start` positional checkout). The single public renderer belongs to the tooling;
+the root resolver, tool server, install and dashboard run the actual product. Record
+both checkouts' HEAD/patch identities and the tooling freeze, then qualify safety and
+public `server_info` with zero model turns. A missing product API or wrong package/root
+refuses; do not substitute the tooling's runtime, copy a legacy settings block or
+reinterpret that refusal. After the tooling lands, sync and use the landed version.
+Borrowed evidence requires unchanged tooling files; changed inputs repeat only their
+dependent qualification.
+
 The directory has no `__init__.py`, on purpose. `scripts/pnt-sandbox.py` puts `scripts/` on the
 import path and imports `pnt_sandbox` as a namespace package. A package there would make
 `scripts/` an import root in the repository's dependency facts, under which the script-local
@@ -33,9 +60,9 @@ Rules for using it:
   to the directory and a path with `..` in it name the same lock, settings file and process record.
 - Start and stop the Paseo runtime through `start` and `stop` only. Do not run
   `agents-remember paseo provision` directly on the sandbox settings: a daemon started that way
-  carries the caller's environment, the calling harness session's variables among them, and
-  hands it to every agent. `start` refuses such a daemon and names the variables; `stop`, then
-  `start`, replaces it. `agents-remember paseo status` is safe.
+  does not receive the sandbox's complete root, Python and Git selector isolation. Product
+  host starts remove the shared session list; the sandbox adds its own isolation. `start`
+  refuses a daemon with foreign selectors and names them; `stop`, then `start`, replaces it. `agents-remember paseo status` is safe.
 - The sandbox directory must not lie under a folder that holds per-project harness configuration,
   nor inside a harness configuration directory (`.claude`, `.codex`, `.pi`, `.hermes`, `.dsh`).
 
@@ -46,7 +73,8 @@ Rules for using it:
 | `projects/` | the Projects folder; `projects/sandbox-app` is a small Git repository with one test |
 | `remotes/sandbox-app.git` | the repository's origin, so leaf enclosures can be opened |
 | `coordination/` | the coordination root: one sprint, one master, two leaves with approved requirement packets, and the memory repository `memory-repos/ar-sandbox-app` |
-| `settings/agents-remember-settings.json` | the settings of the dashboard and tool server, with the `paseoRuntime` block |
+| `settings/agents-remember-settings.json` | dashboard/tool server settings; coordinationRoot links the shared host authority |
+| `coordination/system/settings.json` | the one `paseoRuntime` block for this sandbox |
 | `paseo/home`, `paseo/prefix` | the Paseo runtime's home and install prefix |
 | `eve/` | the Eve application, its launcher and the list of variables an env file may not set |
 | `dagger-authority/` | the registry of the build's quality tools, which the build otherwise keeps in the user's home |
@@ -86,7 +114,7 @@ nothing is built or started there, and `reset` can be run again once the obstacl
    are ignored build products; nothing else in the checkout is written.
 6. Runs the safety check and refuses when it fails, then looks at the two ports again.
 7. Deletes a stale Paseo process record (see Processes), provisions the Paseo runtime through
-   `agents-remember paseo provision` and starts the dashboard from the checkout's source. When
+   the candidate's public `runtime_install` tool and starts the dashboard from the checkout's source. When
    the dashboard does not answer in time, what this start itself started is stopped and the
    failing step and its log file are named. A Paseo runtime that ran before this start is left
    running.
@@ -101,7 +129,8 @@ root the dashboard and the tool server would use for the sandbox settings:
   folder `workspaceRoot`, transcript and skill roots, repository and memory roots, provider
   roots, the Paseo home and prefix);
 - the roots the build derives: task root, leaf enclosures, receipts, reports, observer and
-  dashboard directories, the agentic settings file, the Dagger authority root, and what the
+  dashboard directories, product Node and its archive cache, the agentic settings
+  file, the Dagger authority root, and what the
   build's context resolver answers for each repository.
 
 The check passes only when each of them resolves inside the sandbox directory, every root the
@@ -145,15 +174,17 @@ select another AR runtime, coordination root, repository or Paseo home, and with
 that tie a process to the harness session the command was run from; `environment.py` lists each
 with its reason. Session variables are removed by exact name, never by the `CLAUDE_`,
 `CLAUDE_CODE_` or `CODEX_` prefix: harness logins, credentials and home selectors are kept. Each
-child's `PWD` is the directory it is started in. Four variables are set: `TMUX_TMPDIR` (the
+child's `PWD` is the directory it is started in. Seven variables are set: `TMUX_TMPDIR` (the
 sandbox's own tmux server), `PYTHONPYCACHEPREFIX` and `GIT_OPTIONAL_LOCKS=0` (nothing is written
 into the checkout) and `AR_DAGGER_AUTHORITY_ROOT` (the registry of the quality tools lies in the
-sandbox).
+sandbox), plus XDG_DATA_HOME, XDG_STATE_HOME and XDG_CACHE_HOME for this
+sandbox's product data, state and cache.
 
 A tool server that an agent's harness starts gets these variables only if the harness forwards
 its environment or the launch puts them into the tool server's definition. The launch code of the
-PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all four: it carries
-`GIT_OPTIONAL_LOCKS`, `PYTHONPYCACHEPREFIX`, `TMUX_TMPDIR` and `AR_DAGGER_AUTHORITY_ROOT` into the
+PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all seven: it carries
+`GIT_OPTIONAL_LOCKS`, `PYTHONPYCACHEPREFIX`, `TMUX_TMPDIR`, `AR_DAGGER_AUTHORITY_ROOT`,
+`XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` into the
 definition whenever the launching process has them.
 
 ## Pi
@@ -172,7 +203,7 @@ The cost: a Pi agent of the sandbox runs without every extension and package of 
 Pi, not only the gateway. Nothing under `~/.pi` is read differently or written: the developer's
 Pi configuration, logins and models stay as they are, and a Pi started outside the sandbox loads
 its extensions as before. Outside the sandbox the entry is the developer's choice
-(`paseoRuntime.providers` of the settings file); without it only the instructions apply.
+(`paseoRuntime.providers` of the shared coordinator settings file); without it only the instructions apply.
 
 ## Eve
 
@@ -209,12 +240,25 @@ The live roots are not among them. These are writes of other programs, in their 
   whatever Eve writes below `node_modules` lands there.
 - **The citation source-index cache.** The build's memory-quality tools keep it at
   `$XDG_CACHE_HOME/agents-remember/citation-source-index`, or under `/tmp/ar-cache-<uid>` when
-  that variable is unset, shared with the installed runtime. The sandbox does not set
-  `XDG_CACHE_HOME`, because every harness program would inherit it. The cache has four slots; a
-  slot is chosen by a SHA-256 over the pair of code root and memory root paths, and its manifest
-  records those two roots, the candidate tree and a content hash per indexed file. A slot whose
-  manifest names other roots is rebuilt, so a sandbox closeout can at most cost the installed
-  runtime a rebuild of one slot.
+  that variable is unset. This sandbox sets XDG_CACHE_HOME to its own cache/
+  directory, and the task-specific tool-server definition carries that value even
+  when its harness does not forward the parent environment. Its four index slots
+  are therefore sandbox-owned rather than shared with the installed runtime.
 - **The provider container listing.** The dashboard runs
   `docker ps --all --filter label=agents-remember.provider` on every projection. It reads the
   containers of the installed runtime's providers and shows none of them.
+
+The host install phase uses the candidate's public `runtime_install` tool after
+server_info proves the exact sandbox roots and package root. Coordination asset
+bootstrap happens before the sandbox setup supplies its one shared
+`coordination/system/settings.json` paseoRuntime block; no per-harness fallback.
+Node data/state/cache variables are confined to this sandbox, and install receipts
+are kept under run/. Dashboard starts then ensure the already installed host and
+never run npm or rewrite daemon/plugin configuration. One host home lock covers
+install/start. The operator serializes runs, checks the current source and
+free/owned ports, and retires this disposable tree with the public reset after
+needed proof is saved. A surviving tree is not proof of a surviving process after
+a machine restart. Each public install archives its prior request/receipt/logs
+under run/host-install-history; a cut leaves no stale success at the current
+receipt path. Reset owns that history's retirement. A deferred restart is a named
+start refusal, so an old host cannot qualify the requested build silently.

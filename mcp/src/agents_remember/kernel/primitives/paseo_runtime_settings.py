@@ -1,7 +1,7 @@
 """Settings for the one dedicated Paseo runtime Agents Remember provisions.
 
-The ``paseoRuntime`` authority block holds exactly six facts: where the pinned Paseo CLI is
-installed, which daemon home it owns, where that daemon listens, the exact Paseo version, the
+The ``paseoRuntime`` authority block holds five required facts and an optional retired version key: where the build-pinned Paseo CLI is
+installed, which daemon home it owns, where that daemon listens, the
 provider entries handed to the daemon unchanged, and the embed list. The block is optional as a
 whole; when it is present every fact is required. Absence is the named state
 :data:`NO_PASEO_RUNTIME_CONFIGURED`, which each consumer refuses in its own words.
@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 
 KNOWN_PASEO_RUNTIME_FIELDS = frozenset(
     {"installPrefix", "home", "listen", "version", "providers", "embed"}
@@ -24,9 +25,6 @@ KNOWN_PASEO_RUNTIME_FIELDS = frozenset(
 KNOWN_PASEO_EMBED_FIELDS = frozenset({"dashboardOrigin", "frameBaseUrl"})
 NO_PASEO_RUNTIME_CONFIGURED = "no Paseo runtime configured"
 
-# One exact release: MAJOR.MINOR.PATCH with an optional prerelease. A range, a tag ("beta",
-# "latest"), a partial version or build metadata is not a pin and is refused.
-_EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
 _LISTEN_ADDRESS = re.compile(r"(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<port>\d{1,5})")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _HOST_NAME = re.compile(r"[a-z0-9.-]+")
@@ -59,9 +57,15 @@ class PaseoRuntimeSettings:
     install_prefix: Path
     home: Path
     listen: str
-    version: str
     providers: dict[str, dict[str, Any]]
     embed: tuple[PaseoEmbedEntry, ...]
+    source_path: Path | None = None
+    version_notice: str | None = None
+    command_config_path: Path | None = None
+
+    @property
+    def version(self) -> str:
+        return PASEO_VERSION
 
     @property
     def listen_host(self) -> str:
@@ -93,16 +97,20 @@ def parse_paseo_runtime_settings(raw: object) -> PaseoRuntimeSettings | None:
         raise PaseoRuntimeSettingsError(
             f"unsupported paseoRuntime setting(s): {unknown_text}; allowed: {allowed}"
         )
-    missing = sorted(KNOWN_PASEO_RUNTIME_FIELDS - set(raw))
+    missing = sorted((KNOWN_PASEO_RUNTIME_FIELDS - {"version"}) - set(raw))
     if missing:
         raise PaseoRuntimeSettingsError("paseoRuntime must define " + ", ".join(missing))
     return PaseoRuntimeSettings(
         install_prefix=_absolute_path(raw["installPrefix"], "installPrefix"),
         home=_absolute_path(raw["home"], "home"),
         listen=_listen_address(raw["listen"]),
-        version=_exact_version(raw["version"]),
         providers=_provider_entries(raw["providers"]),
         embed=_embed_list(raw["embed"]),
+        version_notice=(
+            f"paseoRuntime.version {raw['version']!r} is ignored; this build uses {PASEO_VERSION}"
+            if "version" in raw and raw["version"] != PASEO_VERSION
+            else None
+        ),
     )
 
 
@@ -134,15 +142,6 @@ def _listen_address(value: object) -> str:
             "paseoRuntime.listen must be host:port with a port in 1..65535"
         )
     return match[0]
-
-
-def _exact_version(value: object) -> str:
-    if not isinstance(value, str) or _EXACT_VERSION.fullmatch(value) is None:
-        raise PaseoRuntimeSettingsError(
-            "paseoRuntime.version must be one exact Paseo version such as 0.11.0-beta.2; "
-            "a range, a tag or a partial version is not a pin"
-        )
-    return value
 
 
 def _provider_entries(value: object) -> dict[str, dict[str, Any]]:

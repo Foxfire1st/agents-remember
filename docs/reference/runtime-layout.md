@@ -66,7 +66,7 @@ ar-coordination/
 
 ## Runtime Install Contract
 
-`runtime_install` owns package runtime assets only:
+`runtime_install` reconciles these package runtime assets:
 
 - installed coordinator `AGENTS.md` templates
 - installed skills
@@ -74,7 +74,11 @@ ar-coordination/
   assets
 - optional benchmark fixtures when `--include-benchmarks` is passed
 
-It does not own live settings, notes, tasks, worktrees, normal memory repo content, temp files, onboarding content, or provider databases.
+After those steps it provisions the configured build-pinned host and product
+Node from the packaged contract and whole npm lock, preserving a running host
+when a transition requires a stop. It reads the shared host authority per call
+and never writes live settings. It does not own notes, tasks, worktrees, normal
+memory repo content, onboarding content or provider databases.
 
 `ar-coordination/providers/` is provider runtime state. The source installer
 reconciles package-owned defaults from

@@ -17,21 +17,30 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 from agents_remember.cli.__main__ import main
-from agents_remember.cli.paseo_command import CommandResult, PaseoRuntimeFailure, run_command
-from agents_remember.cli.paseo_daemon import runtime_status, stop_runtime
-from agents_remember.cli.paseo_daemon_config import previous_config_path, write_provider_entries
-from agents_remember.cli.paseo_plugin_files import (
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
+from agents_remember.serving.paseo.paseo_command import (
+    CommandResult,
+    PaseoRuntimeFailure,
+    run_command,
+)
+from agents_remember.serving.paseo.paseo_daemon import runtime_status, stop_runtime
+from agents_remember.serving.paseo.paseo_daemon_config import (
+    previous_config_path,
+    write_provider_entries,
+)
+from agents_remember.serving.paseo.paseo_plugin_files import (
     PLUGIN_ID,
     installed_plugin_path,
     plugin_source_root,
     tree_digest,
 )
-from agents_remember.cli.paseo_process_record import (
+from agents_remember.serving.paseo.paseo_process_record import (
     ProcessFacts,
     inspect_record,
     read_process,
 )
-from agents_remember.cli.paseo_provision import daemon_settings, provision_runtime
+from agents_remember.serving.paseo.paseo_provision import provision_runtime
+from agents_remember.serving.paseo.paseo_settings import daemon_settings
 from paseo_runtime_test_support import (
     OTHER_SECRET,
     PINNED,
@@ -78,8 +87,9 @@ class PaseoRuntimeTests(unittest.TestCase):
             json.loads((settings.install_prefix / "package.json").read_text())["dependencies"],
             {"@getpaseo/cli": PINNED},
         )
-        self.assertIn("--save-exact", fake.calls[1])
-        self.assertEqual(fake.calls[1][-1], f"@getpaseo/cli@{PINNED}")
+        npm_call = next(call for call in fake.calls if "--prefix" in call)
+        self.assertIn("ci", npm_call)
+        self.assertNotIn("install", npm_call)
         # Every setting provision owns, with when Paseo applies it, was written before the first
         # start; nothing else was.
         written = {s.path: (s.value, s.applies) for s in daemon_settings(settings)}
@@ -169,7 +179,7 @@ class PaseoRuntimeTests(unittest.TestCase):
         self.assertEqual(failed["changes"], [])
         self.assertEqual(fake.version_at(settings.install_prefix), "0.10.2")
         self.assertEqual(fake.running()["version"], "0.10.2")
-        self.assertEqual(fake.mutations(before), [("npm", "install")])
+        self.assertEqual(fake.mutations(before), [("npm", "ci")])
         self.assertEqual(list(settings.install_prefix.glob(".ar-*")), [])
 
         # npm succeeds but what it staged does not report the pinned version: same outcome.
@@ -680,7 +690,13 @@ class PaseoRuntimeTests(unittest.TestCase):
             write_provider_entries(home, provider_entries(OTHER_SECRET))
             paseo = (fake.settings.install_prefix / "node_modules/.bin/paseo").as_posix()
             hand_set = ["daemon", "config", "set", "daemon.hostnames", '["newer.example.ts.net"]']
-            self.assertEqual(fake([paseo, *hand_set, "--home", home.as_posix()], 1.0).returncode, 0)
+            self.assertEqual(
+                fake(
+                    [product_node().node.as_posix(), paseo, *hand_set, "--home", home.as_posix()],
+                    1.0,
+                ).returncode,
+                0,
+            )
             self.assertEqual(
                 fake.running()["live"]["agents.providers"], provider_entries(OTHER_SECRET)
             )
@@ -826,7 +842,9 @@ class PaseoRuntimeTests(unittest.TestCase):
                 except PaseoRuntimeFailure as failure:
                     report = {"error": failure.as_payload()}
                 self.assertEqual(report["error"]["code"], "process_record_unverifiable")
-                self.assertIn("999", report["error"]["message"])
+                message = report["error"]["message"]
+                assert isinstance(message, str)
+                self.assertIn("999", message)
             self.assertEqual((fake.signalled, len(fake.calls)), ([], before))
             self.assertTrue(fake.record_file.is_file())
 
@@ -842,6 +860,8 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "ok": True,
                 "home": settings.home.as_posix(),
                 "running": False,
+                "sessionVariables": [],
+                "sessionRemedy": None,
                 "version": None,
                 "serverId": None,
                 "listen": None,
@@ -862,7 +882,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 "staleRecord": None,
             },
         )
-        self.assertEqual(len(fake.calls), 2)
+        self.assertEqual(len(fake.calls), 0)
 
         self.assertTrue(self.provision(fake)["ok"])
         status = runtime_status(settings, runner=fake, reader=fake.reader)
@@ -936,7 +956,9 @@ class PaseoRuntimeTests(unittest.TestCase):
 
     def test_commands_refuse_without_a_runtime_block_and_drop_paseo_environment(self) -> None:
         settings_path = self.root / "mcp-settings.json"
-        settings_path.write_text(json.dumps({"version": 1}), encoding="utf-8")
+        settings_path.write_text(
+            json.dumps({"version": 1, "coordinationRoot": self.root.as_posix()}), encoding="utf-8"
+        )
 
         def command(name: str) -> tuple[int, dict[str, Any]]:
             output = io.StringIO()
@@ -944,7 +966,7 @@ class PaseoRuntimeTests(unittest.TestCase):
                 code = main(["paseo", name, "--config", settings_path.as_posix()])
             return code, json.loads(output.getvalue())
 
-        with patch("agents_remember.cli.paseo_command.subprocess.run") as run:
+        with patch("agents_remember.serving.paseo.paseo_command.subprocess.run") as run:
             for name in ("provision", "status", "stop"):
                 with self.subTest(name):
                     code, document = command(name)
@@ -952,7 +974,9 @@ class PaseoRuntimeTests(unittest.TestCase):
                     self.assertEqual(document["error"]["code"], "paseo_runtime_not_configured")
                     self.assertIn("no Paseo runtime configured", document["error"]["message"])
             block = {"installPrefix": (self.root / "prefix").as_posix()}
-            settings_path.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
+            shared = self.root / "system/settings.json"
+            shared.parent.mkdir(exist_ok=True)
+            shared.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
             code, document = command("provision")
             self.assertEqual((code, document["error"]["code"]), (2, "settings_invalid"))
             # A file that is not UTF-8 text is refused the same way, by all three commands.
@@ -971,7 +995,12 @@ class PaseoRuntimeTests(unittest.TestCase):
             "providers": {},
             "embed": [],
         }
-        settings_path.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
+        settings_path.write_text(
+            json.dumps({"coordinationRoot": self.root.as_posix()}), encoding="utf-8"
+        )
+        (self.root / "system/settings.json").write_text(
+            json.dumps({"paseoRuntime": block}), encoding="utf-8"
+        )
         code, document = command("stop")
         self.assertEqual((code, document["action"]), (0, "not running"))
         code, document = command("status")

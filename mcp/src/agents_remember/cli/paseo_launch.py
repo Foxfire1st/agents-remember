@@ -67,6 +67,9 @@ _CARRIED_VARIABLES = (
     "PYTHONPYCACHEPREFIX",
     "TMUX_TMPDIR",
     HOST_REGISTRY_ROOT_ENV,
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
 )
 TOOL_SERVER_APPLIED = "tool server applied"
 TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"

@@ -222,7 +222,14 @@ def _provision(
                 "this home's; nothing was signalled, deleted or started"
             )
     try:
-        provision = ops.paseo(checkout, "provision")
+        install = ops.runtime_install(checkout)
+        provision = install.get("host")
+        if not isinstance(provision, dict):
+            raise StepFailed(
+                "runtime_install",
+                f"{_error_text(install)}; the public install returned no host part",
+                layout.run_dir / "host-install-receipt.json",
+            )
     except StepFailed:
         # No report: the command did not say what it did. It counts as started by this run only
         # when a supervisor is there now that was not there before.
@@ -232,14 +239,30 @@ def _provision(
     daemon = provision.get("daemon")
     action = daemon.get("action") if isinstance(daemon, dict) else None
     started.paseo = action in STARTED_ACTIONS
-    log = layout.paseo_home / "daemon.log"
+    log = layout.run_dir / "host-install-server.log"
     if provision.get("ok") is not True:
-        raise StepFailed("paseo provision", _error_text(provision), log)
+        raise StepFailed("runtime_install", _error_text(provision), log)
+    if install.get("ok") is not True:
+        raise StepFailed("runtime_install", _error_text(install), log)
+    if provision.get("restartRequired"):
+        reasons = ", ".join(provision["restartRequired"])
+        observed = ops.paseo_supervisor()
+        state = (
+            f"observed own supervisor pid {observed.pid}; left running"
+            if observed is not None
+            else "no owned supervisor observed"
+        )
+        raise StepFailed(
+            "runtime_install",
+            f"host transition deferred ({reasons}); {state}; "
+            f"{provision.get('message') or 'use explicit terminal provision outside the host when its sessions can end'}",
+            layout.run_dir / "host-install-receipt.json",
+        )
     supervisor = ops.paseo_supervisor()
     if supervisor is None:
         raise StepFailed(
-            "paseo provision",
-            "provision reported success but the Paseo home names no running daemon",
+            "runtime_install",
+            "host provision reported success but the Paseo home names no running daemon",
             log,
         )
     out(f"paseo runtime: {action} (pid {supervisor.pid}) on {layout.paseo_listen}")

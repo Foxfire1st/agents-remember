@@ -158,7 +158,10 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         FalkorDB graph). REPLACES managed scaffold: skills/, AGENTS.md templates, provider
         compose/docker/requirements ("shape"), and with install_provider_deps=true may refresh
         providers/runners/ after stopping watchers so containers rebind cleanly. Removes the
-        legacy scripts/ dir.
+        legacy scripts/ dir. The final host part reads the one shared paseoRuntime block at
+        each call and provisions the build-pinned host/plugin on checked product Node. It never
+        writes shared settings or stops a running host; needed transitions return restartRequired.
+        A preview downloads/writes/starts nothing; absent block reports no host configured.
 
         With install_provider_deps=true (default) it also builds provider images, but SKIPS any
         image whose tag already exists, then starts/rechecks watchers without rebuilding indexes.

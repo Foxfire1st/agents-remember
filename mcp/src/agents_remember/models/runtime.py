@@ -16,6 +16,7 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     includeBenchmarks: bool | None = None
     installProviderDeps: bool | None = None
     summary: dict[str, Any] | None = None
+    host: dict[str, Any] | None = None
     messages: list[str] = Field(default_factory=list)
     reportPath: str | None = Field(
         default=None,

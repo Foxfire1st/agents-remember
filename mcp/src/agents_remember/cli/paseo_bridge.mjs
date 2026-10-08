@@ -1138,7 +1138,7 @@ async function loadClientPackage() {
   } catch (error) {
     throw failure(
       'paseo_client_unavailable',
-      `The Paseo client package cannot be loaded from ${prefix}; provision the Paseo runtime first. ` +
+      `The Paseo client package cannot be loaded from ${prefix}; run runtime_install, then agents-remember dashboard --daemon. ` +
         text(error?.message ?? error)
     )
   }

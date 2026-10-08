@@ -15,11 +15,13 @@ from unittest.mock import patch
 
 from agents_remember.cli import paseo_bridge
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
     parse_paseo_runtime_settings,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from paseo_runtime_test_support import write_shared_runtime
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_SCRIPT = REPO_ROOT / "mcp/src/agents_remember/cli/paseo_bridge.mjs"
@@ -31,7 +33,7 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
         "installPrefix": (root / "prefix").as_posix(),
         "home": (root / "home").as_posix(),
         "listen": "127.0.0.1:6833",
-        "version": "0.11.0-beta.2",
+        "version": PASEO_VERSION,
         "providers": {},
         "embed": [],
     }
@@ -42,12 +44,12 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
 
 
 def runtime_config(root: Path, settings: PaseoRuntimeSettings | None) -> McpRuntimeConfig:
+    write_shared_runtime(root, settings)
     return McpRuntimeConfig(
         config_path=root / "settings" / "mcp.json",
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
-        paseo_runtime=settings,
     )
 
 
@@ -101,13 +103,21 @@ class BridgeProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             cases = {
-                "paseo_runtime_not_configured": runtime_config(root, None),
+                "paseo_runtime_not_configured": runtime_config(root / "unconfigured", None),
                 "paseo_daemon_unreachable": runtime_config(root, runtime_settings(root)),
             }
             for code, config in cases.items():
                 with (
                     self.subTest(code=code),
-                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge,
+                        "product_node",
+                        return_value=SimpleNamespace(
+                            node=SimpleNamespace(
+                                is_file=lambda: True, as_posix=lambda: "/usr/bin/node"
+                            )
+                        ),
+                    ),
                     patch.object(paseo_bridge.subprocess, "run") as run,
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
@@ -133,7 +143,13 @@ class BridgeProcessTests(unittest.TestCase):
             completed = SimpleNamespace(returncode=0, stdout=json.dumps({"providers": []}))
             with (
                 patch.dict(os.environ, inherited, clear=True),
-                patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                patch.object(
+                    paseo_bridge,
+                    "product_node",
+                    return_value=SimpleNamespace(
+                        node=SimpleNamespace(is_file=lambda: True, as_posix=lambda: "/usr/bin/node")
+                    ),
+                ),
                 patch.object(paseo_bridge.subprocess, "run", return_value=completed) as run,
             ):
                 reply = bridge_call(config, "catalog", {"cwd": "/work/folder", "refresh": True})
@@ -154,7 +170,7 @@ class BridgeProcessTests(unittest.TestCase):
                 "AR_PASEO_INSTALL_PREFIX": (root / "prefix").resolve().as_posix(),
                 "AR_PASEO_URL": "ws://127.0.0.1:6833/ws",
                 "AR_PASEO_SERVER_ID": SERVER_ID,
-                "AR_PASEO_VERSION": "0.11.0-beta.2",
+                "AR_PASEO_VERSION": PASEO_VERSION,
                 "AR_PASEO_DEADLINE_MS": "55000",
             },
         )
@@ -178,7 +194,15 @@ class BridgeProcessTests(unittest.TestCase):
             for label, (outcome, code) in outcomes.items():
                 with (
                     self.subTest(label),
-                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge,
+                        "product_node",
+                        return_value=SimpleNamespace(
+                            node=SimpleNamespace(
+                                is_file=lambda: True, as_posix=lambda: "/usr/bin/node"
+                            )
+                        ),
+                    ),
                     patch.object(paseo_bridge.subprocess, "run", side_effect=[outcome]),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
@@ -186,7 +210,15 @@ class BridgeProcessTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, code)
                 self.assertLessEqual(len(str(raised.exception)), 800)
             with (
-                patch.object(paseo_bridge.shutil, "which", return_value=None),
+                patch.object(
+                    paseo_bridge,
+                    "product_node",
+                    return_value=SimpleNamespace(
+                        node=SimpleNamespace(
+                            is_file=lambda: False, as_posix=lambda: "/product/node"
+                        )
+                    ),
+                ),
                 patch.object(paseo_bridge.subprocess, "run") as run,
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
@@ -226,7 +258,15 @@ class BridgeProcessTests(unittest.TestCase):
             for label, (stderr, cause) in reports.items():
                 with (
                     self.subTest(label),
-                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge,
+                        "product_node",
+                        return_value=SimpleNamespace(
+                            node=SimpleNamespace(
+                                is_file=lambda: True, as_posix=lambda: "/usr/bin/node"
+                            )
+                        ),
+                    ),
                     patch.object(
                         paseo_bridge.subprocess, "run", return_value=reply(1, "", stderr=stderr)
                     ),
@@ -246,7 +286,15 @@ class BridgeProcessTests(unittest.TestCase):
             }.items():
                 with (
                     self.subTest("no cause is appended", stderr=label),
-                    patch.object(paseo_bridge.shutil, "which", return_value="/usr/bin/node"),
+                    patch.object(
+                        paseo_bridge,
+                        "product_node",
+                        return_value=SimpleNamespace(
+                            node=SimpleNamespace(
+                                is_file=lambda: True, as_posix=lambda: "/usr/bin/node"
+                            )
+                        ),
+                    ),
                     patch.object(
                         paseo_bridge.subprocess, "run", return_value=reply(1, "", stderr=stderr)
                     ),
@@ -271,7 +319,11 @@ class BridgeProcessTests(unittest.TestCase):
                 writer.chmod(0o755)
                 with (
                     self.subTest(stream),
-                    patch.object(paseo_bridge.shutil, "which", return_value=writer.as_posix()),
+                    patch.object(
+                        paseo_bridge,
+                        "product_node",
+                        return_value=SimpleNamespace(node=Path(writer.as_posix())),
+                    ),
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
                     bridge_call(config, "catalog", {"cwd": "/work/folder"})
@@ -293,7 +345,11 @@ class BridgeProcessTests(unittest.TestCase):
             stuck.chmod(0o755)
             started = time.monotonic()
             with (
-                patch.object(paseo_bridge.shutil, "which", return_value=stuck.as_posix()),
+                patch.object(
+                    paseo_bridge,
+                    "product_node",
+                    return_value=SimpleNamespace(node=Path(stuck.as_posix())),
+                ),
                 patch.object(paseo_bridge, "PASEO_BRIDGE_TIMEOUT_SECONDS", 0.5),
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
@@ -372,6 +428,17 @@ class BridgeScriptTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.config = started_runtime(self.root)
+        fixture_node = self.root / "fixture-node" / "bin" / "node"
+        fixture_node.parent.mkdir(parents=True, exist_ok=True)
+        executable = shutil.which("node")
+        assert executable is not None
+        fixture_node.symlink_to(executable)
+        node_patch = patch(
+            "agents_remember.cli.paseo_bridge.product_node",
+            return_value=type("FixtureNode", (), {"node": fixture_node})(),
+        )
+        node_patch.start()
+        self.addCleanup(node_patch.stop)
         package = self.root / "prefix" / "node_modules" / "@getpaseo" / "client"
         (package / "dist").mkdir(parents=True)
         exports = {
@@ -446,7 +513,7 @@ class BridgeScriptTests(unittest.TestCase):
             models=models,
         )
 
-        self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": "0.11.0-beta.2"})
+        self.assertEqual(reply["runtime"], {"serverId": SERVER_ID, "version": PASEO_VERSION})
         providers = {row["id"]: row for row in reply["providers"]}
         self.assertEqual(list(providers), ["codex", "eve", "pi", "hermes", "claude", "slow"])
         self.assertEqual(

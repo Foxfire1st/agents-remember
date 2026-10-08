@@ -360,7 +360,7 @@ def _host_unreachable(detail: str) -> _Refused:
         "host-unreachable",
         f"The Paseo runtime cannot be reached. {detail}",
         "Tell the developer in your own chat that the Paseo runtime cannot be reached; repeat "
-        "the call once it runs again.",
+        "the call after runtime_install (if not installed) and agents-remember dashboard --daemon.",
     )
 
 

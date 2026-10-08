@@ -151,10 +151,14 @@ def frame_descriptor(
     host: HostFrameFactsCall | None = None,
 ) -> dict[str, Any]:
     """The frame route's answer for one dashboard origin."""
-    settings = config.paseo_runtime
+    try:
+        settings = config.paseo_runtime
+    except ValueError as error:
+        return _unavailable(REASON_UNREACHABLE, str(error))
     if settings is None:
         return _unavailable(
-            REASON_NOT_CONFIGURED, f"{config.config_path} has no paseoRuntime block"
+            REASON_NOT_CONFIGURED,
+            f"{config.coordination_root / 'system/settings.json'} has no paseoRuntime block",
         )
     frame_base_url = frame_base_url_for(settings, dashboard_origin)
     if frame_base_url is None:
@@ -169,8 +173,13 @@ def frame_descriptor(
     except (OSError, RuntimeError, ValueError) as error:
         facts = HostFrameFacts(reachable=False, detail=str(error))
     if not facts.reachable:
+        remedy = "run runtime_install if not installed, then agents-remember dashboard --daemon"
+        detail = facts.detail or "the daemon gave no answer"
+        marker = detail.casefold().find("run runtime_install")
+        detail = (detail[:marker] if marker >= 0 else detail).rstrip(" ;,.")
         return _unavailable(
-            REASON_UNREACHABLE, (facts.detail or "the daemon gave no answer")[:_DETAIL_LIMIT]
+            REASON_UNREACHABLE,
+            remedy + "; " + detail[: max(0, _DETAIL_LIMIT - len(remedy) - 2)],
         )
     if not facts.server_id:
         return _unavailable(REASON_UNREACHABLE, "the daemon answered without naming its server id")

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.role_launch_context import RoleLaunchContext, selection_binding
 from agents_remember.cli import (
     leaf_enclosure_start,
@@ -32,7 +33,8 @@ from agents_remember.cli.paseo_launch import agent_title
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
 from agents_remember.cli.role_launch_workspace import _start_leaf_enclosure
-from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
@@ -45,7 +47,7 @@ from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from fastapi import HTTPException
-from paseo_launch_test_support import GivenToAgentExpectations
+from paseo_launch_test_support import GivenToAgentExpectations, prepare_host
 
 REPO = "agents-remember"
 SERVER_ID = "srv_configured"
@@ -68,7 +70,7 @@ ROLE_REFS: dict[str, dict[str, TaskDocumentRef]] = {
 }
 ROLE_DEFAULTS = ({"agent": "codex", "model": "gpt-a", "effort": "low"}, ("codex", "eve"))
 CATALOG: dict[str, Any] = {
-    "runtime": {"serverId": SERVER_ID, "version": "0.11.0-beta.2"},
+    "runtime": {"serverId": SERVER_ID, "version": PASEO_VERSION},
     "providers": [
         {
             "id": "codex",
@@ -87,6 +89,35 @@ CATALOG: dict[str, Any] = {
     ],
 }
 LAUNCH_COMMANDS = {"agent-archive", "workspace-open", "agent-create"}
+
+
+def test_role_tool_definition_carries_product_xdg_homes_without_starting(tmp_path, monkeypatch):
+    expected = {
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+    }
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+    binding = AgentBinding("agent", "worker", "request", str(tmp_path / "report.md"))
+    before = dict(os.environ)
+    parent_node = product_node()
+    with patch("subprocess.run") as run:
+        definition = paseo_launch.tool_server_definition(tmp_path / "settings.json", binding)
+        assert {name: definition["env"][name] for name in expected} == expected
+        assert dict(os.environ) == before
+        with patch.dict(os.environ, definition["env"], clear=True):
+            child_node = product_node()
+        assert (child_node.root, child_node.cache) == (parent_node.root, parent_node.cache)
+        monkeypatch.delenv("XDG_DATA_HOME")
+        monkeypatch.setenv("XDG_STATE_HOME", "")
+        definition = paseo_launch.tool_server_definition(tmp_path / "settings.json", binding)
+        assert "XDG_DATA_HOME" not in definition["env"]
+        assert "XDG_STATE_HOME" not in definition["env"]
+        assert definition["env"]["XDG_CACHE_HOME"] == expected["XDG_CACHE_HOME"]
+        run.assert_not_called()
+
+
 # What an agent reports when a refresh closes its execution with the given status (PNT-R07).
 CLOSING_STATES: dict[str, dict[str, Any]] = {
     "completed": {"status": "idle", "lastTurn": {"state": "replied", "text": "Done."}},
@@ -276,22 +307,12 @@ class FakeEnclosures:
 
 
 def runtime_config(root: Path, *, configured: bool = True) -> McpRuntimeConfig:
-    settings = parse_paseo_runtime_settings(
-        {
-            "installPrefix": (root / "prefix").as_posix(),
-            "home": (root / "home").as_posix(),
-            "listen": "127.0.0.1:6835",
-            "version": "0.11.0-beta.2",
-            "providers": {},
-            "embed": [],
-        }
-    )
+    prepare_host(root, configured=configured)
     return McpRuntimeConfig(
         config_path=root / "settings" / "mcp.json",
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
-        paseo_runtime=settings if configured else None,
         repositories={
             REPO: RepositoryScope(
                 repo_id=REPO, path=root / "projects" / REPO, memory_root=root / "memory" / REPO
@@ -327,7 +348,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.config = runtime_config(self.root)
-        self.config.coordination_root.mkdir()
+        self.config.coordination_root.mkdir(exist_ok=True)
         self.runtime = FakeRuntime()
         self.enclosures = FakeEnclosures(self.root)
         self.prompt = "Compiled capsule and handover."
@@ -633,7 +654,9 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             sorted(
                 path.relative_to(self.root).as_posix()
                 for path in self.root.rglob("*")
-                if path.is_file() and "-native-executions" not in path.as_posix()
+                if path.is_file()
+                and "-native-executions" not in path.as_posix()
+                and path != self.config.coordination_root / "system/settings.json"
             ),
             sorted({f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}),
         )
@@ -687,7 +710,8 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
     def test_a_launch_that_cannot_start_refuses_before_any_runtime_call_or_receipt(self) -> None:
         with self.subTest("no Paseo runtime configured"):
             error = self.refused(
-                self.request("architect"), config=runtime_config(self.root, configured=False)
+                self.request("architect"),
+                config=runtime_config(self.root / "unconfigured", configured=False),
             )
             self.assertEqual(error.status_code, 409)
             self.assertTrue(str(error.detail).startswith("no Paseo runtime configured: "))

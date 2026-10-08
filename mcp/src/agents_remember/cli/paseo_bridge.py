@@ -15,17 +15,21 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import PaseoRuntimeFailure
+from agents_remember.kernel.primitives.paseo_authority import paseo_runtime_path
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     NO_PASEO_RUNTIME_CONFIGURED,
     PaseoRuntimeNotConfigured,
     PaseoRuntimeSettings,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import ConfigError, McpRuntimeConfig
+from agents_remember.serving.paseo.paseo_process_record import inspect_record, read_process
+from agents_remember.serving.paseo.paseo_remedy import terminal_provision_remedy
 
 # Every bridge call ends within this limit; a call that does not is stopped and reported as a
 # timeout. An operation that has to wait longer is a sequence of calls.
@@ -68,15 +72,24 @@ def bridge_call(
     """Run one bridge command against the configured Paseo runtime and return its result."""
 
     settings = require_bridge_runtime(config)
-    node = shutil.which("node")
+    try:
+        node = product_node().node
+    except PaseoRuntimeFailure as error:
+        raise PaseoBridgeFailure(BRIDGE_UNAVAILABLE, str(error)) from error
     script = Path(__file__).with_name("paseo_bridge.mjs")
-    if not node or not script.is_file():
+    if not node.is_file() or not script.is_file():
+        remedy = (
+            terminal_provision_remedy(settings)
+            if inspect_record(settings.home, "bridge", read_process).kind == "own"
+            else "Run runtime_install, then the one dashboard start."
+        )
         raise PaseoBridgeFailure(
-            BRIDGE_UNAVAILABLE, "The Paseo bridge needs Node.js on PATH and its packaged script."
+            BRIDGE_UNAVAILABLE,
+            f"The Paseo bridge needs this build's product Node and packaged script. {remedy}",
         )
     try:
         completed = subprocess.run(
-            [node, script.as_posix(), command],
+            [node.as_posix(), script.as_posix(), command],
             input=json.dumps(payload, ensure_ascii=False),
             encoding="utf-8",
             # Output that is not UTF-8 is read with replacement characters: it then fails as an
@@ -103,11 +116,14 @@ def bridge_call(
 def require_bridge_runtime(config: McpRuntimeConfig) -> PaseoRuntimeSettings:
     """Return the configured Paseo runtime or refuse naming the unconfigured state."""
 
-    settings = config.paseo_runtime
+    try:
+        settings = config.paseo_runtime
+    except ConfigError as error:
+        raise PaseoBridgeFailure(RUNTIME_NOT_CONFIGURED, str(error)) from error
     if settings is None:
         raise PaseoBridgeFailure(
             RUNTIME_NOT_CONFIGURED,
-            f"{NO_PASEO_RUNTIME_CONFIGURED}: {config.config_path} has no paseoRuntime block",
+            f"{NO_PASEO_RUNTIME_CONFIGURED}: {paseo_runtime_path(config.coordination_root)} has no paseoRuntime block",
         )
     return settings
 
@@ -144,7 +160,7 @@ def _configured_server_id(settings: PaseoRuntimeSettings) -> str:
         raise PaseoBridgeFailure(
             DAEMON_UNREACHABLE,
             f"The Paseo daemon of {settings.home} cannot be reached: that home has no daemon "
-            "identity yet; provision the Paseo runtime first.",
+            "identity yet; run runtime_install, then agents-remember dashboard --daemon.",
         )
     return server_id
 

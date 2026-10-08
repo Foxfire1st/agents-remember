@@ -9,6 +9,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeNotConfigured,
     require_paseo_runtime,
@@ -65,7 +66,7 @@ class McpConfigTests(unittest.TestCase):
                 "installPrefix": (root / "paseo").as_posix(),
                 "home": (root / "paseo-home").as_posix(),
                 "listen": "127.0.0.1:6820",
-                "version": "0.11.0-beta.2",
+                "version": PASEO_VERSION,
                 "providers": {"hermes": {"extends": "acp", "command": ["hermes", "acp"]}},
                 "embed": [
                     {
@@ -78,15 +79,15 @@ class McpConfigTests(unittest.TestCase):
                     },
                 ],
             }
-            payload["paseoRuntime"] = block
-            write_json(path, payload)
+            shared = root / "ar-coordination/system/settings.json"
+            write_json(shared, {"paseoRuntime": block})
             configured = load_config(path).paseo_runtime
             assert configured is not None
             self.assertEqual(configured, load_paseo_runtime_settings(path))
             self.assertEqual(configured.install_prefix, root / "paseo")
             self.assertEqual(configured.home, root / "paseo-home")
             self.assertEqual((configured.listen_host, configured.listen_port), ("127.0.0.1", 6820))
-            self.assertEqual(configured.version, "0.11.0-beta.2")
+            self.assertEqual(configured.version, PASEO_VERSION)
             self.assertEqual(configured.providers, block["providers"])
             self.assertEqual(configured.embed_payload(), block["embed"])
             self.assertEqual(require_paseo_runtime(configured, source=path), configured)
@@ -103,13 +104,11 @@ class McpConfigTests(unittest.TestCase):
                     "https://xn--bcher-kva.example",
                 )
             ]
-            payload["paseoRuntime"] = {**block, "embed": canonical}
-            write_json(path, payload)
+            write_json(shared, {"paseoRuntime": {**block, "embed": canonical}})
             kept = require_paseo_runtime(load_config(path).paseo_runtime, source=path)
             self.assertEqual(kept.embed_payload(), canonical)
 
-            payload["paseoRuntime"] = {**block, "providers": {}, "embed": []}
-            write_json(path, payload)
+            write_json(shared, {"paseoRuntime": {**block, "providers": {}, "embed": []}})
             self.assertEqual(load_paseo_runtime_settings(path), load_config(path).paseo_runtime)
             self.assertEqual(
                 require_paseo_runtime(load_config(path).paseo_runtime, source=path).embed, ()
@@ -119,6 +118,7 @@ class McpConfigTests(unittest.TestCase):
             invalid: list[tuple[dict, str]] = [
                 ({key: value for key, value in block.items() if key != fact}, f"must define {fact}")
                 for fact in block
+                if fact != "version"
             ] + [
                 ({**block, "password": "x"}, "unsupported paseoRuntime setting"),
                 ({**block, "home": "relative/home"}, "must be an absolute path"),
@@ -144,22 +144,6 @@ class McpConfigTests(unittest.TestCase):
                     "dashboardOrigin must be",
                 ),
                 ({**block, "embed": [block["embed"][0]] * 2}, "more than once"),
-            ]
-            invalid += [
-                ({**block, "version": version}, "one exact Paseo version")
-                for version in (
-                    "^0.11.0-beta.2",
-                    "~0.11.0",
-                    ">=0.11.0",
-                    "0.11",
-                    "0.11.x",
-                    "beta",
-                    "0.11.0 || 0.12.0",
-                    "0.11.0 - 0.12.0",
-                    "0.11.0-beta.2+build",
-                    "v0.11.0-beta.2",
-                    " 0.11.0-beta.2 ",
-                )
             ]
             # A dashboard origin must be spelled the way a browser reports it.
             invalid += [
@@ -187,10 +171,9 @@ class McpConfigTests(unittest.TestCase):
                 )
             ]
             for candidate, message in invalid:
-                payload["paseoRuntime"] = candidate
-                write_json(path, payload)
+                write_json(shared, {"paseoRuntime": candidate})
                 with self.subTest(message=message), self.assertRaisesRegex(ConfigError, message):
-                    load_config(path)
+                    _ = load_config(path).paseo_runtime
 
     def test_two_repository_ids_cannot_share_one_git_common_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

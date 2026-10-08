@@ -146,8 +146,18 @@ with uv, then start the cockpit from your workspace:
 
 ```text
 uv tool install --python 3.14 /absolute/path/to/built-wheel.whl
-agents-remember dashboard
+agents-remember dashboard --daemon --config /absolute/path/to/active-harness-settings.json
 ```
+
+The install brings the build-pinned Paseo host and its whole locked tree on the
+product's checked Node (Linux x86_64). One shared paseoRuntime block in
+<coordinationRoot>/system/settings.json supplies its facts. Each dashboard start
+ensures the installed host without installing/upgrading; dashboard stop/restart
+keeps host sessions running. Explicit paseo stop ends running turns and pending
+prompts, with sessions resumable after a new start. --status prints both states
+with a five-second host limit. Both --status and --daemon exit 0 when the
+dashboard and host are up (or host unconfigured), 1 when the dashboard is down,
+and 3 when a configured host is down.
 
 `--config` is optional: the CLI walks up from the current directory and uses
 the nearest `.claude/mcp/agents-remember-settings.json`, or the `--config`
@@ -158,7 +168,7 @@ For a dashboard that survives closing the terminal, use daemon mode:
 
 ```text
 agents-remember dashboard --daemon    # detach; state + log under <coordinationRoot>/logs/dashboard/
-agents-remember dashboard --status    # exit 0 when running, 1 when not
+agents-remember dashboard --status    # exit 0 both up/unconfigured, 1 dashboard down, 3 configured host down
 agents-remember dashboard --stop
 ```
 
@@ -329,3 +339,4 @@ Following semantic versioning from `1.0.0`, these public contracts will not chan
 Contributions should make the memory layer clearer, safer, and easier to apply consistently. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and keep the core rules intact: drift check before planning, approval before implementation, and onboarding updates only after approved changes.
 
 Agents Remember runs on itself, so the best way to contribute is with the memory layer active. Download or clone this project's own memory at [Foxfire1st/ar-agents-remember](https://github.com/Foxfire1st/ar-agents-remember) and use it as the Agents Remember memory for your checkout: you get the project's by-path onboarding at the moment you edit, and your onboarding updates land alongside your code changes — the same loop this repo asks of every contribution.
+

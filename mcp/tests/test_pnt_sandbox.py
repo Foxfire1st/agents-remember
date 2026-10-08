@@ -7,6 +7,9 @@ shipped check does. Starting, stopping and the process records are in
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import importlib.util
 import json
 import os
 import signal
@@ -14,9 +17,11 @@ import sys
 import unittest
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+import pytest
 from pnt_sandbox_test_support import (
     MARKER_NAME,
     PASEO_PROCESS_RECORD,
@@ -32,10 +37,12 @@ from pnt_sandbox_test_support import (
     SandboxCase,
     SandboxLayout,
     SandboxRefusal,
+    StepFailed,
     builder,
     commands,
     embed_entries,
     foreign_variables,
+    host_settings_document,
     launcher_scrub,
     location_refusal,
     pi_provider_entry,
@@ -78,6 +85,7 @@ RESOLVED_ROOTS = (
     "agenticSettings", "observerRoot", "dashboardDaemonDir", "daggerAuthorityRoot",
     "receipts.taskless", "receipts.messageBindings", "reports.taskless",
     "paseoRuntime.home",
+    "productNode.root", "productNode.cache",
     "paseoRuntime.installPrefix", "providers.grepai-memory.runtimeRoot",
     "providers.grepai-memory.logRoot",
     TASK_ROOT,
@@ -229,7 +237,10 @@ class SafetyCheckTests(SandboxCase):
         """Resolved by the build's own loader: no settings key names these roots."""
         settings = self.layout.settings_file
         settings.parent.mkdir(parents=True)
-        document = settings_document(self.layout, None)
+        shared = self.layout.coordination / "system/settings.json"
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        shared.write_text(json.dumps(host_settings_document(self.layout, None)))
+        document = settings_document(self.layout)
         del document["transcriptRoot"]
         document["providers"] = {"grepai-memory": {}}
         # A path relative to the repository names a file in it, not a root.
@@ -238,7 +249,11 @@ class SafetyCheckTests(SandboxCase):
         # unknown top-level key, so the build uses none of them and the resolver reports none.
         document["laterBlock"] = {"dataPath": (self.root / "later-block").as_posix()}
         memory = f"{REPOSITORY}.memoryRoot"
-        authority = {"AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix()}
+        authority = {
+            "AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix(),
+            "XDG_DATA_HOME": str(self.layout.root / "data"),
+            "XDG_CACHE_HOME": str(self.layout.root / "cache"),
+        }
 
         def judged() -> tuple[dict[str, Any], dict[str, str]]:
             settings.write_text(json.dumps(document), encoding="utf-8")
@@ -271,10 +286,57 @@ class SafetyCheckTests(SandboxCase):
         self.assertNotIn(f"{REPOSITORY}.path", outside)
         self.assertIn("cannot be resolved", outside["harnessSkillRoot"])
 
-        del document["paseoRuntime"], document["dashboard"]
+        del document["dashboard"]
+        shared.unlink(missing_ok=True)
         _resolved, unconfigured = judged()
         self.assertIn("cannot be resolved", unconfigured["paseoRuntime.home"])
         self.assertIn("8765", unconfigured["dashboard.port"])
+
+    def test_product_node_and_cache_roots_are_required_and_cannot_escape(self) -> None:
+        self.mark_built()
+        roots = self.good_roots()
+        for key in ("productNode.root", "productNode.cache"):
+            with self.subTest(key):
+                missing = {
+                    **roots,
+                    "roots": {name: value for name, value in roots["roots"].items() if name != key},
+                }
+                self.assertIn(
+                    key,
+                    {
+                        item.key
+                        for item in safety.evaluate(self.layout, self.checkout, missing).findings
+                    },
+                )
+                outside = {**roots, "roots": {**roots["roots"], key: str(self.root / "outside")}}
+                self.assertIn(
+                    key,
+                    {
+                        item.key
+                        for item in safety.evaluate(self.layout, self.checkout, outside).findings
+                    },
+                )
+                link = self.layout.root / "escaped-link"
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(self.root / "outside", target_is_directory=True)
+                escaped = {**roots, "roots": {**roots["roots"], key: str(link)}}
+                self.assertIn(
+                    key,
+                    {
+                        item.key
+                        for item in safety.evaluate(self.layout, self.checkout, escaped).findings
+                    },
+                )
+                for report in (missing, outside, escaped):
+                    ops = FakeOperations(self)
+                    ops.roots = report
+                    with self.assertRaisesRegex(SandboxRefusal, "safety check failed"):
+                        commands.start(
+                            self.layout, self.checkout, ops, self.lines.append, self.root / "no-eve"
+                        )
+                    self.assertNotIn("runtime_install", ops.calls)
+                    self.assertNotIn("spawn dashboard", ops.calls)
+                link.unlink()
 
 
 class BuildInputTests(SandboxCase):
@@ -416,13 +478,11 @@ class BuildInputTests(SandboxCase):
     def test_the_settings_name_only_sandbox_paths_and_the_reserved_ports(self) -> None:
         layout = SandboxLayout(self.layout.root)
         env_file = self.root / "eve-project" / ".env.local"
-        settings = settings_document(layout, env_file)
-        runtime = settings["paseoRuntime"]
+        settings = settings_document(layout)
+        runtime = host_settings_document(layout, env_file)["paseoRuntime"]
 
         self.assertEqual(settings["dashboard"], {"autoStart": False, "port": 9797})
-        self.assertEqual(
-            (runtime["listen"], runtime["version"]), ("127.0.0.1:6820", "0.11.0-beta.2")
-        )
+        self.assertEqual(runtime["listen"], "127.0.0.1:6820")
         self.assertEqual(
             runtime["embed"],
             [
@@ -451,7 +511,8 @@ class BuildInputTests(SandboxCase):
             },
         )
         self.assertEqual(
-            list(settings_document(layout, None)["paseoRuntime"]["providers"]), ["hermes", "pi"]
+            list(host_settings_document(layout, None)["paseoRuntime"]["providers"]),
+            ["hermes", "pi"],
         )
         paths = [
             settings[key]
@@ -478,6 +539,9 @@ class BuildInputTests(SandboxCase):
             "PYTHONPYCACHEPREFIX": self.layout.pycache.as_posix(),
             "GIT_OPTIONAL_LOCKS": "0",
             "AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix(),
+            "XDG_DATA_HOME": (self.layout.root / "data").as_posix(),
+            "XDG_STATE_HOME": (self.layout.root / "state").as_posix(),
+            "XDG_CACHE_HOME": (self.layout.root / "cache").as_posix(),
         }
 
         environment = sandbox_environment(base, self.layout)
@@ -562,3 +626,137 @@ class BuildInputTests(SandboxCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_public_host_install_receipts_keep_payloads_and_name_admission_failures(
+    tmp_path, monkeypatch
+):
+    layout = SandboxLayout(tmp_path / "sandbox")
+    layout.run_dir.mkdir(parents=True)
+    ops = Operations(layout, {})
+    payload = {"ok": False, "host": {"ok": False, "error": {"code": "install_failed"}}}
+    answer = SimpleNamespace(
+        returncode=1, stdout=json.dumps({"results": [{"payload": payload}]}), stderr="", tail=""
+    )
+    monkeypatch.setattr(ops, "run", lambda *a, **k: answer)
+    checkout = tmp_path / "candidate"
+    assert ops.runtime_install(checkout) == payload
+    assert json.loads((layout.run_dir / "host-install-receipt.json").read_text()) == payload
+    request = json.loads((layout.run_dir / "host-install-request.json").read_text())
+    assert request["expect"]["packageRoot"] == str(checkout / "mcp/src/agents_remember")
+    assert request["calls"][0]["tool"] == "runtime_install"
+    answer.stdout = json.dumps({"error": "wrong packageRoot", "results": []})
+    with pytest.raises(StepFailed, match="wrong packageRoot"):
+        ops.runtime_install(checkout)
+    answer.stdout = "interrupted"
+    answer.tail = "interrupted"
+    with pytest.raises(StepFailed, match="unreadable host install receipt: interrupted"):
+        ops.runtime_install(checkout)
+    current = json.loads((layout.run_dir / "host-install-receipt.json").read_text())
+    assert current["ok"] is False and "interrupted" in str(current["error"])
+    history = list((layout.run_dir / "host-install-history").glob("*/host-install-receipt.json"))
+    assert any(json.loads(path.read_text()) == payload for path in history)
+    assert (layout.run_dir / "host-install-command.log").is_file()
+
+
+def test_foreign_package_admission_prevents_public_install_calls(tmp_path, monkeypatch):
+
+    spec = importlib.util.spec_from_file_location(
+        "public_build_calls",
+        Path(__file__).resolve().parents[2] / "scripts/pnt_sandbox/build_tool_calls.py",
+    )
+    assert spec is not None and spec.loader is not None
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+    calls = []
+    info = {
+        "ok": True,
+        "coordinationRoot": str(tmp_path / "coordination"),
+        "workspaceRoot": str(tmp_path / "projects"),
+        "allowedRepoIds": ["sandbox-app"],
+        "allowedProviderIds": [],
+        "servingBuild": {"packageRoot": "/other/build/mcp/src/agents_remember"},
+    }
+
+    class Session:
+        def __init__(self, reader, writer):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def initialize(self):
+            pass
+
+        async def call_tool(self, name, _arguments):
+            calls.append(name)
+            assert name == "server_info", "foreign source reached a mutating tool"
+            return SimpleNamespace(model_dump=lambda **kwargs: {"structuredContent": info})
+
+    @contextlib.asynccontextmanager
+    async def stream(*args, **kwargs):
+        yield None, None
+
+    monkeypatch.setattr(client, "ClientSession", Session)
+    monkeypatch.setattr(client, "stdio_client", stream)
+    request = {
+        "config": str(tmp_path / "settings.json"),
+        "cwd": str(tmp_path),
+        "serverLog": str(tmp_path / "server.log"),
+        "expect": {
+            "coordinationRoot": info["coordinationRoot"],
+            "workspaceRoot": info["workspaceRoot"],
+            "allowedRepoIds": ["sandbox-app"],
+            "packageRoot": str(tmp_path / "candidate/mcp/src/agents_remember"),
+        },
+        "calls": [{"name": "install", "tool": "runtime_install", "arguments": {}}],
+    }
+    result = asyncio.run(client._run(request))
+    assert result["ok"] is False and "package" in result["error"]
+    assert calls == ["server_info"] and result["results"] == []
+
+
+@pytest.mark.parametrize("fault", ["cut", "timeout", "malformed-json", "malformed-shape"])
+def test_public_install_retires_success_for_cut_timeout_and_malformed(tmp_path, monkeypatch, fault):
+    layout = SandboxLayout(tmp_path / "sandbox")
+    ops = Operations(layout, {})
+    prior = {"ok": True, "host": {"ok": True, "changed": False}}
+    success = json.dumps({"results": [{"payload": prior}]})
+    answer = SimpleNamespace(returncode=0, stdout=success, stderr="", tail="")
+    seen = []
+
+    def child_run(*args, **kwargs):
+        receipt = layout.run_dir / "host-install-receipt.json"
+        seen.append(receipt.exists())
+        (layout.run_dir / "host-install-server.log").write_text("current controlled server log")
+        return answer
+
+    monkeypatch.setattr(ops, "run", child_run)
+    checkout = tmp_path / "product"
+    assert ops.runtime_install(checkout) == prior
+    if fault in {"cut", "timeout"}:
+        answer.returncode = 137 if fault == "cut" else 124
+        answer.stderr = answer.tail = f"controlled {fault}; a success body is untrusted"
+    else:
+        answer.stdout = "cut JSON" if fault == "malformed-json" else '{"results": [7]}'
+        answer.tail = answer.stdout
+    with pytest.raises(StepFailed) as failure:
+        ops.runtime_install(checkout)
+    assert seen == [False, False]
+    current = json.loads((layout.run_dir / "host-install-receipt.json").read_text())
+    assert current["ok"] is False
+    assert failure.value.log is not None and failure.value.log.is_file()
+    assert (layout.run_dir / "host-install-server.log").is_file()
+    assert current["receipt"] == str(layout.run_dir / "host-install-receipt.json")
+    assert current["log"] == str(failure.value.log)
+    assert current["serverLog"] == str(layout.run_dir / "host-install-server.log")
+    if fault in {"cut", "timeout"}:
+        assert f"controlled {fault}" in current["error"]["message"]
+        assert str(answer.returncode) in current["error"]["message"]
+    else:
+        assert answer.stdout in current["error"]["message"]
+    history = list((layout.run_dir / "host-install-history").glob("*/host-install-receipt.json"))
+    assert len(history) == 1 and json.loads(history[0].read_text()) == prior

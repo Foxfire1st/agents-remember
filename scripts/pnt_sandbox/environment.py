@@ -10,11 +10,19 @@ removed by exact name, never by the ``CLAUDE_``, ``CLAUDE_CODE_`` or ``CODEX_`` 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .layout import SandboxLayout
+
+SESSION_VARIABLES = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "mcp/src/agents_remember/package_data/host-session-environment.json"
+    ).read_text(encoding="utf-8")
+)
 
 # Prefix -> why every variable carrying it is removed.
 REMOVED_PREFIXES: dict[str, str] = {
@@ -52,25 +60,7 @@ REMOVED_VARIABLES: dict[str, str] = {
     "TMUX": "names the terminal multiplexer server of the session that ran the command",
     "TMUX_PANE": "names a pane of the session that ran the command",
     "OLDPWD": "names the directory the caller came from; a child is given a PWD of its own",
-    # The calling harness session. An agent started in the sandbox must not join the session the
-    # command was run from, nor inherit its effort setting.
-    "AI_AGENT": "names the harness of the calling session as the agent every child runs under",
-    "CLAUDECODE": "marks a process as running inside the calling Claude Code session",
-    "CLAUDE_CODE_CHILD_SESSION": "makes an agent a child of the calling session",
-    "CLAUDE_CODE_ENTRYPOINT": "names how the calling session was entered, not how an agent is",
-    "CLAUDE_CODE_EXECPATH": "names the Claude Code program of the calling session",
-    "CLAUDE_CODE_MESSAGING_SOCKET": "is the calling session's message channel, which an agent must not join",
-    "CLAUDE_CODE_MESSAGING_TOKEN": "admits its holder to the calling session's message channel",
-    "CLAUDE_CODE_REMOTE_SESSION_ID": "is the remote identity of the calling session",
-    "CLAUDE_CODE_SESSION_ATTENDED": "says a person attends the calling session",
-    "CLAUDE_CODE_SESSION_ID": "is the calling session's identity, which an agent must not take over",
-    "CLAUDE_CODE_SSE_PORT": "is the port of the calling session's own editor connection",
-    "CLAUDE_DOC_FOCUS_PATHS": "is the document focus of the calling session (the build removes it too)",
-    "CLAUDE_EFFORT": "is the calling session's effort setting; an agent takes the one its launch sets",
-    "CLAUDE_JOB_DIR": "is the job directory of the calling session",
-    "CLAUDE_PID": "is the process id of the calling session",
-    "CODEX_CI": "marks the calling Codex session (the build removes it too)",
-    "CODEX_THREAD_ID": "is the thread of the calling Codex session, which an agent must not continue",
+    **SESSION_VARIABLES,
 }
 
 # What Paseo itself puts into the environment of a supervisor it starts.
@@ -93,6 +83,9 @@ def sandbox_variables(layout: SandboxLayout) -> dict[str, str]:
     """
     return {
         "TMUX_TMPDIR": layout.tmux_dir.as_posix(),
+        "XDG_DATA_HOME": (layout.root / "data").as_posix(),
+        "XDG_STATE_HOME": (layout.root / "state").as_posix(),
+        "XDG_CACHE_HOME": (layout.root / "cache").as_posix(),
         "PYTHONPYCACHEPREFIX": layout.pycache.as_posix(),
         "GIT_OPTIONAL_LOCKS": "0",
         "AR_DAGGER_AUTHORITY_ROOT": layout.dagger_authority.as_posix(),

@@ -49,6 +49,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.primitives.version import SERVER_VERSION
 from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
+from agents_remember.serving.paseo.paseo_start import ensure_host
 
 STATE_FILE_NAME = "daemon.json"
 LOG_FILE_NAME = "dashboard.log"
@@ -214,7 +215,7 @@ def spawn(
     ]
     if cadence.heartbeat is not None:
         command += ["--heartbeat", str(cadence.heartbeat)]
-    command.append("--no-access-log")
+    command += ["--no-access-log", "--host-start-owner", str(os.getpid())]
     with log_path.open("ab") as log:
         process = subprocess.Popen(
             command,
@@ -362,6 +363,10 @@ def _autostart(config: McpRuntimeConfig) -> None:
     try:
         result = ensure(config, DaemonEndpoint(host="127.0.0.1", port=config.dashboard.port))
         print(f"dashboard autostart: {result.action}: {result.detail}", file=sys.stderr)
+        host = ensure_host(config)
+        print(host.line, file=sys.stderr)
+        if result.action == "adopted":
+            record_host_outcome(config, host.line)
     except Exception as error:  # boot must survive any autostart failure
         print(f"dashboard autostart: failed: {error}", file=sys.stderr)
 
@@ -429,3 +434,19 @@ def _log_tail(log_path: Path, *, lines: int = 15) -> str:
 def _url(state: DaemonState) -> str:
     display_host = state.host if state.host not in ("0.0.0.0", "::") else "127.0.0.1"
     return f"http://{display_host}:{state.port}/"
+
+
+def record_host_outcome(config: McpRuntimeConfig, line: str) -> None:
+    """Bound the diagnostic log in place; an adopted dashboard keeps its open append handle."""
+    path = daemon_dir(config) / LOG_FILE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("a+b") as log:
+            if log.seek(0, os.SEEK_END) > 1024 * 1024:
+                log.seek(-512 * 1024, os.SEEK_END)
+                tail = log.read(512 * 1024)
+                log.truncate(0)
+                log.write(tail)
+            log.write((line + "\n").encode("utf-8"))
+    except OSError as error:
+        print(f"host outcome log unavailable: {error}", file=sys.stderr)

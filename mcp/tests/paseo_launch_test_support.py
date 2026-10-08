@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
+from paseo_runtime_test_support import runtime_settings, write_shared_runtime
 
 # Label of a task reference -> the variable its tool server receives it in, and its name in the
 # recovery note. The label's value is the reference as `<repository>/<document path>`.
@@ -104,10 +106,15 @@ class GivenToAgentExpectations(unittest.TestCase):
             ],
             "env": {
                 "PYTHONPATH": self.source.parent.as_posix(),
-                # Carried from the launching process, which in the fixture has these two of the
-                # four variables that say where a process of this build may write.
+                # The fixture's Git/bytecode settings and its provided XDG homes survive the
+                # role tool-server hop; absent XDG variables are not invented here.
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
+                **{
+                    name: os.environ[name]
+                    for name in ("XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
+                    if os.environ.get(name)
+                },
                 # No seat identity reaches the tool server from the harness that starts it.
                 "AR_SPAWN_ROLE": "",
                 "AR_HOSTED_SESSION_ID": "",
@@ -152,3 +159,9 @@ class GivenToAgentExpectations(unittest.TestCase):
         self.assertEqual(receipt["recoveryNote"], note)
         self.assertEqual(receipt["handoverArtifact"], artifact)
         self.assertEqual(Path(artifact["path"]).read_text(encoding="utf-8"), self.prompt)
+
+
+def prepare_host(root: Path, *, configured: bool) -> None:
+    """One shared host authority for the installation a launch fixture represents."""
+    settings = runtime_settings(root, listen="127.0.0.1:6835", providers={}, embed=[])
+    write_shared_runtime(root, settings if configured else None)

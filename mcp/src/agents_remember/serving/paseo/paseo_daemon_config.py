@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from agents_remember.cli.paseo_command import PaseoRuntimeFailure
-from agents_remember.cli.paseo_plugin_files import AR_HOME_DIRECTORY
+from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
+from agents_remember.serving.paseo.paseo_plugin_files import AR_HOME_DIRECTORY
 
 CONFIG_FILE = "config.json"
 PROVIDER_ENTRIES = "agents.providers"

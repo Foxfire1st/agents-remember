@@ -691,3 +691,16 @@ class RolePreparationError(AgentsRememberError):
         self.detail = detail
         self.next_action = next_action
         super().__init__(f"{detail} ({status}). Next: {next_action}")
+
+
+class PaseoRuntimeFailure(AgentsRememberError):
+    """One named provisioning, status or stop step failed; ``detail`` carries Paseo's text."""
+
+    def __init__(self, code: str, step: str, message: str, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.step = step
+        self.detail = detail
+
+    def as_payload(self) -> dict[str, object]:
+        return {"code": self.code, "step": self.step, "message": str(self), "detail": self.detail}

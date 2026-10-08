@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import threading
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -36,6 +37,11 @@ from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving._app_common import ServingCollaborators
 from agents_remember.serving.app import create_app
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS
+from agents_remember.serving.paseo.paseo_start import (
+    STATUS_TIMEOUT_SECONDS,
+    ensure_host,
+    observe_host,
+)
 from agents_remember.serving.projector import ProjectionCadence, ProjectionReplay
 from agents_remember.serving.sim import SimError, SimSetup, build_sim, parse_sim_speed
 from agents_remember.worktrees.services import bind_worktree_services
@@ -266,12 +272,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Detach: ensure a background dashboard daemon (state and log under "
         "<coordinationRoot>/logs/dashboard/) and return. Adopts a healthy matching daemon; "
-        "restarts one whose version, host, or port differs.",
+        "restarts one whose version, host, or port differs. Also starts the installed host; never installs or upgrades it. Exit 0 dashboard and host up/unconfigured, 1 dashboard down, 3 configured host down. Dashboard stop/restart leaves host sessions running.",
     )
     control.add_argument(
         "--status",
         action="store_true",
-        help="Report the dashboard daemon's state and exit (exit 0 running, 1 not).",
+        help=f"Report dashboard and host state; host queries have a {STATUS_TIMEOUT_SECONDS:g}s limit. Exit 0 both up (or host unconfigured), 1 dashboard down, 3 configured host down.",
     )
     control.add_argument(
         "--stop",
@@ -284,6 +290,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Serve without per-request access logs (the daemon child uses this to keep "
         "its log file bounded).",
     )
+    parser.add_argument("--host-start-owner", type=int, default=None, help=argparse.SUPPRESS)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -302,12 +309,16 @@ def run(args: argparse.Namespace) -> int:
     if args.daemon or args.status or args.stop:
         return _run_daemon_command(args, config, port)
     if args.reload:
+        if not args.sim and args.host_start_owner is None:
+            _start_host_background(config)
         return _run_reload_server(args, config_path, port)
     # ``built`` keeps the sim (and its temp coordination root) referenced until this call
     # returns, i.e. for the whole server lifetime, so the sim root is not reclaimed early.
     built = _build_app(args, config)
     if built is None:
         return 1
+    if not args.sim and args.host_start_owner is None:
+        _start_host_background(config)
     try:
         uvicorn.run(
             built.app,
@@ -412,9 +423,11 @@ def _run_daemon_command(
                 f"dashboard daemon running: pid {state.pid}, http://{state.host}:{state.port}/ "
                 f"(v{state.version}); log: {state.log_path}"
             )
-            return 0
-        print("dashboard daemon not running")
-        return 1
+        else:
+            print("dashboard daemon not running")
+        host = observe_host(config)
+        print(host.line)
+        return 1 if not alive else (0 if host.ready else 3)
     if args.stop:
         print(f"dashboard daemon: {serving_daemon.stop(directory)}")
         return 0
@@ -424,4 +437,23 @@ def _run_daemon_command(
         cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
     )
     print(f"dashboard daemon {result.action}: {result.detail}")
-    return 0 if result.action in ("adopted", "started", "restarted") else 1
+    host = ensure_host(config)
+    print(host.line)
+    if result.action == "adopted":
+        serving_daemon.record_host_outcome(config, host.line)
+    if result.action not in ("adopted", "started", "restarted"):
+        return 1
+    return 0 if host.ready else 3
+
+
+def _start_host_background(config: McpRuntimeConfig) -> None:
+    """Serving starts immediately; host readiness has its own bounded worker."""
+
+    def start():
+        host = ensure_host(config)
+        print(host.line, flush=True)
+        state = serving_daemon.read_state(serving_daemon.daemon_dir(config))
+        if state is None or state.pid != os.getpid():
+            serving_daemon.record_host_outcome(config, host.line)
+
+    threading.Thread(target=start, name="ar-host-start", daemon=True).start()

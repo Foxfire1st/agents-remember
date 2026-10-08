@@ -23,7 +23,7 @@ _SKIPPED_DIRECTORIES = frozenset({"node_modules", "__pycache__"})
 
 def plugin_source_root() -> Path:
     """The AR plugin source directory that ships inside the package."""
-    return Path(__file__).resolve().parent.parent / "package_data" / "paseo_plugin"
+    return Path(__file__).resolve().parents[2] / "package_data" / "paseo_plugin"
 
 
 def installed_plugin_path(home: Path) -> Path:

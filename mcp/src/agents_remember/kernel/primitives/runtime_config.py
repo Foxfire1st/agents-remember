@@ -30,10 +30,13 @@ from agents_remember.kernel.primitives.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
 )
+from agents_remember.kernel.primitives.paseo_authority import (
+    load_shared_paseo_runtime,
+    warn_per_harness_paseo,
+)
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
     PaseoRuntimeSettingsError,
-    parse_paseo_runtime_settings,
 )
 from agents_remember.kernel.primitives.provider_degradation_settings import (
     ProviderDegradationSettings,
@@ -151,8 +154,12 @@ class McpRuntimeConfig:
         default_factory=ProviderDegradationSettings
     )
     retirement: RetirementSettings = field(default_factory=RetirementSettings)
-    # ``None`` is the named state "no Paseo runtime configured" (paseo_runtime_settings.py).
-    paseo_runtime: PaseoRuntimeSettings | None = None
+
+    @property
+    def paseo_runtime(self) -> PaseoRuntimeSettings | None:
+        """Host authority is per-use, so adding its block never requires a server restart."""
+        settings = _paseo_runtime_block(self.coordination_root)
+        return None if settings is None else replace(settings, command_config_path=self.config_path)
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -302,7 +309,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         config_path=config_path,
     )
     retirement = parse_retirement_settings(data.get("retirement"))
-    paseo_runtime = _paseo_runtime_block(data)
+    warn_per_harness_paseo(data, config_path, coordination_root)
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -319,23 +326,22 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         orchestration=orchestration,
         provider_degradation=provider_degradation,
         retirement=retirement,
-        paseo_runtime=paseo_runtime,
     )
 
 
 def load_paseo_runtime_settings(config_path: str | Path) -> PaseoRuntimeSettings | None:
-    """Read only the ``paseoRuntime`` block of an MCP settings file.
+    """Use the named harness file's coordinationRoot to read the one shared host block."""
+    path = require_config_path(config_path)
+    data = _read_config_mapping(path)
+    root = required_absolute_path(data, "coordinationRoot")
+    warn_per_harness_paseo(data, path, root)
+    settings = _paseo_runtime_block(root)
+    return None if settings is None else replace(settings, command_config_path=path)
 
-    The Paseo runtime commands own no coordination state, so they read this one block from the
-    named file instead of going through ``load_config``, whose checkout selection replaces or
-    refuses the authority file for undeclared processes loaded from a source checkout.
-    """
-    return _paseo_runtime_block(_read_config_mapping(require_config_path(config_path)))
 
-
-def _paseo_runtime_block(data: dict[str, Any]) -> PaseoRuntimeSettings | None:
+def _paseo_runtime_block(coordination_root: Path) -> PaseoRuntimeSettings | None:
     try:
-        return parse_paseo_runtime_settings(data.get("paseoRuntime"))
+        return load_shared_paseo_runtime(coordination_root)
     except PaseoRuntimeSettingsError as error:
         raise ConfigError(str(error)) from error
 

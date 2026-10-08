@@ -12,25 +12,32 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from agents_remember.cli.paseo_command import CommandResult
-from agents_remember.cli.paseo_plugin_files import PLUGIN_ID, embed_path, tree_digest
-from agents_remember.cli.paseo_process_record import (
+from agents_remember.kernel.primitives.paseo_host_contract import (
+    HOST_DATA,
+    NODE_VERSION,
+    PASEO_VERSION,
+)
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
+from agents_remember.kernel.primitives.paseo_runtime_settings import (
+    PaseoRuntimeSettings,
+    parse_paseo_runtime_settings,
+)
+from agents_remember.serving.paseo.paseo_command import CommandResult
+from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, embed_path, tree_digest
+from agents_remember.serving.paseo.paseo_process_record import (
     PROCESS_RECORD,
     SUPERVISOR_TITLE,
     ProcessFacts,
     ProcessUnreadable,
 )
-from agents_remember.cli.paseo_provision import DaemonSetting
-from agents_remember.kernel.primitives.paseo_runtime_settings import (
-    PaseoRuntimeSettings,
-    parse_paseo_runtime_settings,
-)
+from agents_remember.serving.paseo.paseo_settings import DaemonSetting
 
-PINNED = "0.11.0-beta.2"
+PINNED = PASEO_VERSION
 # Stands for a harness key in a provider entry: it must reach the daemon's file and nothing else.
 SECRET = "pnt-provider-value-7f3a"
 OTHER_SECRET = "pnt-provider-value-91c2"
@@ -43,7 +50,7 @@ LIVE = (
     "agents.providers",
 )
 MUTATING = {
-    ("npm", "install"),
+    ("npm", "ci"),
     ("daemon", "start"),
     ("daemon", "stop"),
     ("daemon", "restart"),
@@ -79,6 +86,29 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
     settings = parse_paseo_runtime_settings(block)
     assert settings is not None
     return settings
+
+
+def write_shared_runtime(root: Path, settings: PaseoRuntimeSettings | None) -> None:
+    """One fixture authority per installation, with the same layout the product reads."""
+    path = root / "coordination/system/settings.json"
+    if settings is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "paseoRuntime": {
+                    "installPrefix": settings.install_prefix.as_posix(),
+                    "home": settings.home.as_posix(),
+                    "listen": settings.listen,
+                    "providers": settings.providers,
+                    "embed": settings.embed_payload(),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def write_plugin(root: Path, marker: str) -> Path:
@@ -121,6 +151,10 @@ class FakePaseo:
 
     def __init__(self, settings: PaseoRuntimeSettings) -> None:
         self.settings = settings
+        node = product_node()
+        for path in (node.node, node.npm):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
         self.calls: list[list[str]] = []
         self.daemon: dict[str, Any] | None = None
         # The process table: what each live process id is. ``None`` stands for a process of
@@ -150,12 +184,14 @@ class FakePaseo:
         self.calls.append(argv)
         # A provider value on a command line is readable in the process list.
         assert not any(secret in word for word in argv for secret in (SECRET, OTHER_SECRET)), argv
-        if argv[0] == "npm":
-            return self._npm_install(Path(argv[argv.index("--prefix") + 1]), argv[-1])
+        node_result = self._node_command(argv)
+        if node_result is not None:
+            return node_result
+        argv = argv[1:]
         version = self.version_at(Path(argv[0]).parents[2])
         if version is None:
-            return CommandResult(127, "", "No such file or directory")
-        if argv[1:] == ["--version"]:
+            return CommandResult(1, "", "Cannot find module: missing Paseo CLI script")
+        if argv[1:] == ["--version", "--home", self.settings.home.as_posix()]:
             return ok(version + "\n")
         assert argv[-2:] == ["--home", self.settings.home.as_posix()], argv
         assert "--host" not in argv, argv
@@ -168,6 +204,20 @@ class FakePaseo:
             return self.answers[kind]
         handler = getattr(self, "_" + "_".join(kind).replace("-", "_"))
         return handler(argv[3:-2])
+
+    def _node_command(self, argv: list[str]) -> CommandResult | None:
+        node = product_node()
+        assert argv[0] == node.node.as_posix(), argv
+        if argv[1:] == ["--version"]:
+            return ok(f"v{NODE_VERSION}\n")
+        if argv[1] == node.npm.as_posix():
+            if argv[2:] == ["--version"]:
+                return ok("10.9.4")
+            assert argv[2] == "ci", argv
+            return self._npm_install(
+                Path(argv[argv.index("--prefix") + 1]), f"@getpaseo/cli@{PINNED}"
+            )
+        return None
 
     def reader(self, pid: int) -> ProcessFacts | None:
         """What ``/proc`` says about a process id of the fake's process table."""
@@ -191,7 +241,11 @@ class FakePaseo:
             self.processes[pid] = alive_as[0]
 
     def supervisor(self, home: Path | None = None) -> ProcessFacts:
-        return ProcessFacts(SUPERVISOR_TITLE, (home or self.settings.home).as_posix())
+        return ProcessFacts(
+            SUPERVISOR_TITLE,
+            (home or self.settings.home).as_posix(),
+            node_executable=product_node().node.as_posix(),
+        )
 
     def recorded_pid(self) -> int | None:
         """The live process Paseo would act on: any live id the record names."""
@@ -210,7 +264,7 @@ class FakePaseo:
         """(group, verb) of every call from ``start``: ``("plugin", "reload")`` and so on."""
         found = []
         for argv in self.calls[start:]:
-            words = argv if argv[0] == "npm" else argv[1:]
+            words = ["npm", argv[2]] if argv[1] == product_node().npm.as_posix() else argv[2:]
             found.append(("config", words[2]) if words[:2] == ["daemon", "config"] else words[:2])
         return [(kind[0], kind[1]) for kind in found if len(kind) == 2]
 
@@ -225,13 +279,19 @@ class FakePaseo:
         return json.loads(manifest.read_text(encoding="utf-8"))["version"]
 
     def install(self, root: Path, version: str) -> None:
-        manifest = root / "node_modules" / "@getpaseo" / "cli" / "package.json"
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"version": version}), encoding="utf-8")
+        self._install_packages(root, version)
         (root / "package.json").write_text(
             json.dumps({"dependencies": {"@getpaseo/cli": version}}), encoding="utf-8"
         )
-        (root / "package-lock.json").write_text("{}", encoding="utf-8")
+        shutil.copyfile(HOST_DATA / "package-lock.json", root / "package-lock.json")
+
+    def _install_packages(self, root: Path, version: str) -> None:
+        manifest = root / "node_modules" / "@getpaseo" / "cli" / "package.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps({"version": version}), encoding="utf-8")
+        executable = root / "node_modules/.bin/paseo"
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.touch()
 
     # -- the daemon configuration file ------------------------------------------------------
     @property
@@ -337,10 +397,16 @@ class FakePaseo:
 
     # -- commands ---------------------------------------------------------------------------
     def _npm_install(self, root: Path, spec: str) -> CommandResult:
+        for name in ("package.json", "package-lock.json"):
+            if (
+                not (root / name).is_file()
+                or (root / name).read_bytes() != (HOST_DATA / name).read_bytes()
+            ):
+                return CommandResult(1, "", f"npm ci requires the supplied build {name}")
         if self.npm_fails:
             (root / "node_modules").mkdir(parents=True, exist_ok=True)
             return CommandResult(1, "", "npm error network request failed")
-        self.install(root, self.npm_installs or spec.rsplit("@", 1)[1])
+        self._install_packages(root, self.npm_installs or spec.rsplit("@", 1)[1])
         return ok("added 297 packages")
 
     def _daemon_status(self, _args: list[str]) -> CommandResult:

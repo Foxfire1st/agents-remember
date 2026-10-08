@@ -21,6 +21,7 @@ from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
 )
 from agents_remember.cli.role_launch_receipts import _bind_task_report_access
+from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
@@ -28,24 +29,26 @@ from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from paseo_runtime_test_support import write_shared_runtime
 
 
 def _runtime_config(root: Path) -> McpRuntimeConfig:
+    settings = parse_paseo_runtime_settings(
+        {
+            "installPrefix": (root / "paseo" / "prefix").as_posix(),
+            "home": (root / "paseo" / "home").as_posix(),
+            "listen": "127.0.0.1:6835",
+            "version": PASEO_VERSION,
+            "providers": {},
+            "embed": [],
+        }
+    )
+    write_shared_runtime(root, settings)
     return McpRuntimeConfig(
         config_path=root / "settings" / "ar.json",
         coordination_root=root / "coordination",
         workspace_root=root / "projects",
         transcript_root=root / "coordination" / "logs" / "mcp",
-        paseo_runtime=parse_paseo_runtime_settings(
-            {
-                "installPrefix": (root / "paseo" / "prefix").as_posix(),
-                "home": (root / "paseo" / "home").as_posix(),
-                "listen": "127.0.0.1:6835",
-                "version": "0.11.0-beta.2",
-                "providers": {},
-                "embed": [],
-            }
-        ),
     )
 
 
@@ -426,7 +429,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = _runtime_config(root)
-            config.coordination_root.mkdir()
+            config.coordination_root.mkdir(exist_ok=True)
             first_id = uuid.uuid4()
             second_id = uuid.uuid4()
             first = RoleDispatchRequest(role="architect", requestId=first_id)
@@ -490,7 +493,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
     def test_one_time_migration_moves_only_matching_taskless_history_ids(self) -> None:
         with TemporaryDirectory() as temporary:
             config = _runtime_config(Path(temporary))
-            config.coordination_root.mkdir()
+            config.coordination_root.mkdir(exist_ok=True)
             current_id, archived_id, foreign_id = (uuid.uuid4() for _ in range(3))
             selection = RoleDispatchRequest(role="architect", requestId=current_id)
             legacy = role_launch_receipts._legacy_receipt_path(config, selection)

@@ -9,6 +9,7 @@ exercised against the real ``/proc``.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 import random
@@ -22,6 +23,8 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from agents_remember.kernel.primitives.paseo_host_contract import NODE_VERSION
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = (REPOSITORY_ROOT / "scripts").as_posix()
@@ -43,11 +46,13 @@ try:
     )
     from pnt_sandbox.layout import (
         MARKER_NAME,
+        PASEO_VERSION,
         REPOSITORY_ID,
         SANDBOX_SCHEMA,
         SandboxLayout,
         SandboxRefusal,
         embed_entries,
+        host_settings_document,
         location_refusal,
         pi_provider_entry,
         settings_document,
@@ -104,6 +109,7 @@ __all__ = [
     "embed_entries",
     "foreign_variables",
     "free_port",
+    "host_settings_document",
     "inspect_paseo_record",
     "is_running",
     "launcher_scrub",
@@ -349,12 +355,16 @@ class SandboxCase(unittest.TestCase):
                 f"{REPOSITORY}.leafEnclosures": (layout.coordination / "worktrees").as_posix(),
                 "paseoRuntime.home": layout.paseo_home.as_posix(),
                 "paseoRuntime.installPrefix": layout.paseo_prefix.as_posix(),
+                "productNode.root": (
+                    layout.root / f"data/agents-remember/node/node-v{NODE_VERSION}-linux-x64"
+                ).as_posix(),
+                "productNode.cache": (layout.root / "cache/agents-remember/node").as_posix(),
             },
             "values": {
                 "dashboard.port": layout.dashboard_port,
                 "dashboard.autoStart": False,
                 "paseoRuntime.listen": layout.paseo_listen,
-                "paseoRuntime.version": "0.11.0-beta.2",
+                "paseoRuntime.version": PASEO_VERSION,
                 "paseoRuntime.embed": embed_entries(layout),
                 "paseoRuntime.providers.pi": pi_provider_entry(),
                 "repositories": [REPOSITORY_ID],
@@ -399,6 +409,24 @@ class FakeOperations(Operations):
         self.note("prepare bundle", checkout)
         return []
 
+    def render_settings(self, checkout: Path) -> dict[str, Any]:
+        self.note("public starter render", checkout)
+        spec = importlib.util.spec_from_file_location(
+            "fake_case_renderer", REPOSITORY_ROOT / "scripts/harness/render_starter.py"
+        )
+        assert spec is not None and spec.loader is not None
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        renderer.render_settings(
+            self.layout.settings_file,
+            self.layout.projects,
+            [REPOSITORY_ID],
+            renderer.RenderOptions(
+                self.layout.coordination, self.layout.paseo_port, self.layout.dashboard_port
+            ),
+        )
+        return {"renderedSettingsPath": self.layout.settings_file.as_posix(), "invocations": 1}
+
     def resolve_roots(self, checkout: Path, mode: str) -> dict[str, Any]:
         self.note(f"resolve roots as {mode}", checkout)
         self.before_resolving()
@@ -418,17 +446,23 @@ class FakeOperations(Operations):
             subprocess.run(["git", *args], cwd=memory, check=True, capture_output=True)
         return {"ok": True, "results": []}
 
+    def runtime_install(self, checkout: Path) -> dict[str, Any]:
+        self.note("runtime_install", checkout)
+        self.before_provision()
+        if self.provision_report is not None:
+            return {"ok": True, "host": self.provision_report}
+        if self.supervisor is not None:
+            return {"ok": True, "host": {"ok": True, "daemon": {"action": "untouched"}}}
+        self.supervisor = self.case.supervisor()
+        return {"ok": True, "host": {"ok": True, "daemon": {"action": "started"}}}
+
     def paseo(self, checkout: Path, command: str, timeout: float = 1800) -> dict[str, Any]:
         self.case.assertGreater(timeout, 0)
         self.note(f"paseo {command}", checkout)
         if command == "provision":
-            self.before_provision()
-            if self.provision_report is not None:
-                return self.provision_report
-            if self.supervisor is not None:
-                return {"ok": True, "daemon": {"action": "untouched"}}
-            self.supervisor = self.case.supervisor()
-            return {"ok": True, "daemon": {"action": "started"}}
+            raise AssertionError(
+                "sandbox start must use public runtime_install, not direct provision"
+            )
         stopped, self.supervisor = self.supervisor, None
         if stopped is None:
             return {"ok": True, "action": "not running", "pid": None}

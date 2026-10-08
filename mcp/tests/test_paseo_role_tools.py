@@ -409,7 +409,7 @@ class RoleStartTests(RoleToolsTestCase):
             ),
             "no Paseo runtime configured": (
                 lambda: start_role(
-                    runtime_config(self.root, configured=False),
+                    runtime_config(self.root / "unconfigured", configured=False),
                     RoleStartCall(role="worker", request_id=uuid.uuid4(), **selection_of("worker")),
                     environment=self.architect.environment(),
                 ),

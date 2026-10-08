@@ -10,10 +10,12 @@ stale record is reported, and stop removes it, without anything being signalled.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Any
 
-from agents_remember.cli.paseo_command import (
+from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
+from agents_remember.serving.paseo.paseo_command import (
     CommandRunner,
     PaseoCli,
     PaseoRuntimeFailure,
@@ -21,9 +23,10 @@ from agents_remember.cli.paseo_command import (
     parse_json_output,
     run_command,
 )
-from agents_remember.cli.paseo_daemon_config import agent_tools_setting
-from agents_remember.cli.paseo_plugin_files import PLUGIN_ID, read_embed
-from agents_remember.cli.paseo_process_record import (
+from agents_remember.serving.paseo.paseo_daemon_config import agent_tools_setting
+from agents_remember.serving.paseo.paseo_lock import runtime_lock
+from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, read_embed
+from agents_remember.serving.paseo.paseo_process_record import (
     PROCESS_RECORD,
     ProcessReader,
     RecordState,
@@ -31,7 +34,7 @@ from agents_remember.cli.paseo_process_record import (
     read_process,
     remove_stale_record,
 )
-from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
+from agents_remember.serving.paseo.paseo_remedy import terminal_provision_remedy
 
 
 def is_running(status: dict[str, Any]) -> bool:
@@ -61,13 +64,18 @@ def runtime_status(
     record = inspect_record(settings.home, "status", reader)
     status = None
     if record.kind != "stale":
-        status = _home_record(cli, "status", ("daemon", "status", "--json"))
+        status = _home_record(cli, "status", ("daemon", "status", "--json"), reader)
     if status is None or not is_running(status):
         return _not_running(settings, record)
+    facts = reader(record.pid) if record.pid is not None and record.kind == "own" else None
     return {
         "ok": True,
         "home": settings.home.as_posix(),
         "running": True,
+        "sessionVariables": list(facts.session_variables) if facts else [],
+        "sessionRemedy": "paseo stop, then a new start at a time you choose"
+        if facts and facts.session_variables
+        else None,
         "version": status.get("daemonVersion"),
         "serverId": status.get("serverId"),
         "listen": status.get("listen"),
@@ -89,6 +97,8 @@ def _not_running(settings: PaseoRuntimeSettings, record: RecordState) -> dict[st
         "ok": True,
         "home": settings.home.as_posix(),
         "running": False,
+        "sessionVariables": [],
+        "sessionRemedy": None,
         "version": None,
         "serverId": None,
         "listen": None,
@@ -122,13 +132,24 @@ def stop_runtime(
     A process record that does not name this home's supervisor is removed and nothing is
     signalled: the process it names belongs to someone else.
     """
+    inspect_record(settings.home, "stop", reader)
+    cli = PaseoCli(settings, runner)
+    if not cli.executable.is_file() and not settings.home.exists():
+        return _stop_locked(settings, runner, reader)
+    with runtime_lock(settings.home, time.monotonic() + 60):
+        return _stop_locked(settings, runner, reader)
+
+
+def _stop_locked(
+    settings: PaseoRuntimeSettings, runner: CommandRunner, reader: ProcessReader
+) -> dict[str, Any]:
     cli = PaseoCli(settings, runner)
     stale = inspect_record(settings.home, "stop", reader)
     record = None
     if stale.kind == "stale":
         remove_stale_record(settings.home)
     else:
-        record = _home_record(cli, "stop", ("daemon", "stop", "--json"))
+        record = _home_record(cli, "stop", ("daemon", "stop", "--json"), reader)
     action = "not_running" if record is None else record.get("action")
     if action not in {"stopped", "not_running"}:
         raise PaseoRuntimeFailure(
@@ -144,8 +165,23 @@ def stop_runtime(
     }
 
 
-def _home_record(cli: PaseoCli, step: str, args: Sequence[str]) -> dict[str, Any] | None:
+def _home_record(
+    cli: PaseoCli, step: str, args: Sequence[str], reader: ProcessReader
+) -> dict[str, Any] | None:
     """Run one home-addressed command; ``None`` when nothing was ever installed or started."""
+    if not cli.node.is_file() or not cli.executable.is_file():
+        if (cli.settings.home / PROCESS_RECORD).exists():
+            remedy = (
+                terminal_provision_remedy(cli.settings)
+                if inspect_record(cli.settings.home, step, reader).kind == "own"
+                else "Run runtime_install, then the one dashboard start."
+            )
+            raise PaseoRuntimeFailure(
+                "node_not_installed" if not cli.node.is_file() else "paseo_cli_unavailable",
+                step,
+                f"The configured host needs the product Node and Paseo CLI. {remedy}",
+            )
+        return None
     result = cli.call(*args)
     if result.missing:
         if (cli.settings.home / PROCESS_RECORD).exists():
@@ -153,7 +189,7 @@ def _home_record(cli: PaseoCli, step: str, args: Sequence[str]) -> dict[str, Any
                 "paseo_cli_unavailable",
                 step,
                 "the daemon home has a process record but the install prefix has no Paseo CLI "
-                "to address it; run provision first",
+                "to address it; run runtime_install",
             )
         return None
     if result.returncode != 0:

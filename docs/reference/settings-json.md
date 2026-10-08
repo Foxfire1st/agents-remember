@@ -1,10 +1,11 @@
 # settings.json Reference
 
-Agents Remember has FOUR settings families, each with exactly one home:
+Agents Remember has five settings families with stated authorities:
 
 | Family | Home | Read cadence |
 | --- | --- | --- |
-| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard, Paseo runtime) | MCP authority settings file (outside the coordinator root) | boot |
+| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
+| Host runtime (`paseoRuntime`) | coordinator `system/settings.json`, linked by each harness coordinationRoot | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
@@ -115,11 +116,14 @@ Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pa
 
 ### Paseo runtime
 
-`paseoRuntime` is an optional block that describes the one dedicated Paseo
-runtime Agents Remember provisions: a pinned Paseo install, one daemon home and
-one listen address. When the block is absent the settings are in the named state
+`paseoRuntime` lives once in `<coordinationRoot>/system/settings.json`, linked
+by each harness MCP file's `coordinationRoot`. It is optional and describes one
+build-pinned Paseo install, one daemon home and one listen address. The shared
+block is read per use; `runtime_install` reads it at each call and never writes
+it. Starter/setup creates it, preserving an existing file. Old per-harness
+blocks are ignored with a migration notice; there is no fallback to them. When the block is absent the settings are in the named state
 "no Paseo runtime configured" and each consumer refuses in its own words. When
-the block is present every key is required and an unknown key fails at start-up.
+the block is present its five operational keys are required and an unknown key fails on the next host read.
 The dashboard's role launcher and the tools `role_start` and `role_message` use
 this block and no other to reach the host.
 
@@ -128,15 +132,14 @@ this block and no other to reach the host.
   "paseoRuntime": {
     "installPrefix": "/absolute/path/to/paseo-prefix",
     "home": "/absolute/path/to/paseo-home",
-    "listen": "127.0.0.1:6820",
-    "version": "0.11.0-beta.2",
+    "listen": "127.0.0.1:8766",
     "providers": {
       "hermes": { "extends": "acp", "label": "Hermes", "command": ["hermes", "acp"] }
     },
     "embed": [
       {
         "dashboardOrigin": "http://127.0.0.1:9797",
-        "frameBaseUrl": "http://127.0.0.1:6820"
+        "frameBaseUrl": "http://127.0.0.1:8766"
       }
     ]
   }
@@ -148,7 +151,7 @@ this block and no other to reach the host.
 | `installPrefix` | Absolute directory that holds the Paseo CLI as a private npm install (`<installPrefix>/node_modules/.bin/paseo`). Nothing is installed globally. |
 | `home` | Absolute directory of the daemon home (`PASEO_HOME`). Every Paseo call names it with `--home`; no other home is read, changed or stopped. |
 | `listen` | The daemon's listen address as `host:port`. Provision binds exactly this address and never chooses another port. |
-| `version` | One exact Paseo version (`MAJOR.MINOR.PATCH` with an optional prerelease). A range, a tag such as `beta`, or a partial version is refused. A prefix that holds any other version is replaced. |
+| `version` | Retired optional selector. The packaged host contract supplies the pin; any other selector loads and is ignored with a notice naming the key, file, requested value and build version. |
 | `providers` | Provider entries for harnesses Paseo drives through ACP, keyed by provider id. The object is written unchanged to the daemon's `agents.providers`; Paseo validates it. May be `{}`. |
 | `embed` | The embed list: pairs of `dashboardOrigin` and `frameBaseUrl`. `dashboardOrigin` is the origin a browser opens the dashboard on, written exactly as a browser reports it: lower-case scheme; a host of `a-z`, `0-9`, dot and hyphen only (an international name in its `xn--` form); an IPv4 address as four decimal numbers; an IPv6 address in brackets, in hexadecimal groups with the longest run of zero groups collapsed (`[::1]`, not `[0:0:0:0:0:0:0:1]` and not `[::ffff:127.0.0.1]`); an optional port, no default port (`:80` for http, `:443` for https); no path. Any other spelling is refused, because the value is compared with a browser's origin as text. `frameBaseUrl` is the URL a browser on that origin uses to reach the daemon; no credentials, query or fragment. Each origin appears once. May be `[]`. |
 
@@ -169,11 +172,22 @@ unexpected shape is never echoed into a report. The settings file itself is the
 place that holds a private value, so protect it accordingly. The other five
 facts carry no secret.
 
-The daemon inherits the environment of the process that runs `provision`. Agents
-Remember writes no harness configuration and handles no harness credential.
-Installing uses `npm` as the user has configured it, including the user's npm
-cache and logs under `~/.npm`; that cache is what makes a repeated install fast.
-Everything else provision writes lies under `installPrefix` and `home`.
+The install brings the whole build-locked host tree with `npm ci` and the
+product's own Node22.23.2, checked against the official archive SHA before
+unpacking. Supported host platform: Linux x86_64 with `/proc` only. Node lives
+under `<data>/agents-remember/node/node-v<version>-linux-x64`; download staging
+lives under `<cache>/agents-remember/node` and is removed on success/failure,
+with interrupted staging reclaimed on the next pass. A foreign target folder
+is refused and never overwritten. Old versioned Node folders are developer
+maintenance: remove one only after no host process uses it.
+
+Every CLI/npm/bridge call starts that Node by its absolute path. Only the npm
+child receives its bin first on PATH; the host's agent PATH stays the starter's.
+No shell file, global bin link or user npm configuration changes. npm keeps its
+user cache/logs. A host start strips PASEO selectors, hosted-seat/role bindings
+and exact harness session names, retaining logins. A running host carrying
+session names is reported without values; the developer chooses `paseo stop`
+and a new start to remove them. Node/prefix/home/cache are the managed locations.
 
 Three commands act on the block and print one JSON document each:
 
@@ -183,7 +197,14 @@ agents-remember paseo status    --config <MCP settings file>
 agents-remember paseo stop      --config <MCP settings file>
 ```
 
-`--config` is required and only the `paseoRuntime` block of that file is read.
+`--config` is required: its coordinationRoot links the shared host settings.
+`runtime_install` already provisions the host during product install; no host
+command is an extra install step. A repeat with no changes is read-only. A dry
+run reports Node/version/start/restart disposition and performs no mutation.
+When a running host needs a Node/version/locked-tree/listen/start-only transition,
+install reports restartRequired before changing it. Live settings can still
+apply; a late restart-required response is reported while the host keeps running.
+Explicit terminal `provision` is the separate transition mechanism.
 Exit status is `0` on success, `1` when a step failed (`error.step` names it and
 `error.detail` carries Paseo's text) and `2` when the command refused before
 doing anything (unusable settings, or `paseo_runtime_not_configured`). A
@@ -339,7 +360,19 @@ server. With `dashboard.autoStart` set to `true` (default `false`), every
 server boot ensures a detached dashboard daemon on `dashboard.port` (default
 `8765`): a healthy same-version daemon is adopted, a missing one is spawned,
 and a version or port mismatch restarts it, so an upgrade is picked up by the
-next session's boot. Daemon state and logs live under
+next session's boot. Every dashboard start, including adoption, foreground,
+reload and autoStart, ensures the installed host without installing/upgrading
+or rewriting configuration/plugin files. Sim touches no host. A matching running
+host is left alone; mismatches and an unanswering supervisor are reported without
+a second start. Serving does not wait for host readiness. Dashboard stop/restart
+and TERM/KILL/Ctrl-C leave the detached host and sessions running.
+
+Status prints both processes, names stale records without removing them and
+limits host observation to5s. Exit0 means dashboard up plus running/unconfigured
+host;1 means dashboard down;3 means dashboard up but configured host down.
+`paseo stop` alone stops the host, losing running turns and permission prompts;
+sessions can resume later. Fresh setup uses8766; preserve an existing explicit
+listen, including9786, and home/prefix. Daemon state and logs live under
 `<coordinationRoot>/logs/dashboard/`; `agents-remember dashboard --status` /
 `--stop` manage the same daemon from the CLI. Unknown `dashboard` keys are
 rejected.
@@ -388,10 +421,10 @@ global file.
 The agentic settings family — everything under the top-level `orchestration`
 key — lives in TWO JSON files merged on every read (260703-L13):
 
-- **Global:** `<coordinationRoot>/system/settings.json`. Seeded by
-  `runtime_install()` copy-if-missing with every knob at its documented
-  default; the c-13 install skill interviews the developer and writes it.
-  User-owned: an install never overwrites an existing file.
+- **Global:** `<coordinationRoot>/system/settings.json`. Starter/setup owns the
+  host block; the c-13 interview adds the developer's agentic preferences after
+  approval. Absent knobs retain built-in defaults without a seeded copy.
+  User-owned: runtime_install never writes this file.
 - **Repo-local override:** `<code-repo>/system/settings.json` (optional). The
   same `orchestration.*` shape; repo-local values supersede global ones.
 

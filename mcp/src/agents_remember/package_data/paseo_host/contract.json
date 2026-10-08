@@ -1,0 +1,13 @@
+{
+  "package": "@getpaseo/cli",
+  "version": "0.11.0-beta.2",
+  "node": {
+    "version": "22.23.2",
+    "archives": {
+      "linux-x64": {
+        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz",
+        "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+      }
+    }
+  }
+}
