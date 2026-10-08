@@ -13,6 +13,7 @@ import pytest
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.primitives.paseo_host_contract import HOST_DATA
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.paseo import paseo_provision
 from agents_remember.serving.paseo.paseo_command import CommandResult, CommandRunner, PaseoCli
@@ -269,10 +270,28 @@ def test_running_host_on_another_node_is_deferred_before_node_or_home_changes(tm
     fake.install(settings.install_prefix, settings.version)
     fake.write_settings(daemon_settings(settings))
     fake.start()
-    fake.processes[4242] = replace(fake.supervisor(), node_executable="/user/node")
+    earlier = product_node().root.with_name("node-v0.0.0-linux-x64")
+    earlier.mkdir(parents=True)
+    marker = earlier / "keep"
+    marker.write_text("earlier Node")
+    fake.processes[4242] = replace(
+        fake.supervisor(), node_executable=(earlier / "bin/node").as_posix()
+    )
     before = file_states(tmp_path)
     report = provision_for_install(settings, runner=fake, reader=fake.reader, probe=free)
     assert report["ok"] and report["restartRequired"] == ["node"]
     assert not report["changed"] and fake.calls == []
-    assert report["node"]["path"] != "/user/node"
+    assert report["node"]["path"] == product_node().node.as_posix()
     assert file_states(tmp_path) == before and fake.signalled == []
+
+    report = provision_runtime(settings, runner=fake, reader=fake.reader, probe=free)
+    assert report["ok"] and report["daemon"] == {"action": "restarted", "reasons": ["node"]}
+    assert {"step": "node", "action": "no-longer-used", "path": earlier.as_posix()} in report[
+        "changes"
+    ]
+    assert marker.read_text() == "earlier Node"
+    supervisor = fake.reader(4242)
+    assert supervisor is not None and supervisor.node_executable == product_node().node.as_posix()
+    repeated = provision_runtime(settings, runner=fake, reader=fake.reader, probe=free)
+    assert repeated["ok"] and not repeated["changed"] and repeated["changes"] == []
+    assert marker.read_text() == "earlier Node"

@@ -173,7 +173,7 @@ place that holds a private value, so protect it accordingly. The other five
 facts carry no secret.
 
 The install brings the whole build-locked host tree with `npm ci` and the
-product's own Node22.23.2, checked against the official archive SHA before
+product's own Node26.11.1, checked against the official archive SHA before
 unpacking. Supported host platform: Linux x86_64 with `/proc` only. Node lives
 under `<data>/agents-remember/node/node-v<version>-linux-x64`; download staging
 lives under `<cache>/agents-remember/node` and is removed on success/failure,

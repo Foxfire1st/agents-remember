@@ -25,6 +25,7 @@ from agents_remember.serving.paseo.paseo_command import (
 )
 from agents_remember.serving.paseo.paseo_daemon_config import agent_tools_setting
 from agents_remember.serving.paseo.paseo_lock import runtime_lock
+from agents_remember.serving.paseo.paseo_node import node_status
 from agents_remember.serving.paseo.paseo_plugin_files import PLUGIN_ID, read_embed
 from agents_remember.serving.paseo.paseo_process_record import (
     PROCESS_RECORD,
@@ -68,10 +69,13 @@ def runtime_status(
     if status is None or not is_running(status):
         return _not_running(settings, record)
     facts = reader(record.pid) if record.pid is not None and record.kind == "own" else None
+    node = node_status(facts.node_executable if facts else None)
     return {
         "ok": True,
         "home": settings.home.as_posix(),
         "running": True,
+        **node,
+        "restartRemedy": terminal_provision_remedy(settings) if node["restartRequired"] else None,
         "sessionVariables": list(facts.session_variables) if facts else [],
         "sessionRemedy": "paseo stop, then a new start at a time you choose"
         if facts and facts.session_variables

@@ -26,7 +26,7 @@ from agents_remember.serving.paseo.paseo_command import (
 )
 from agents_remember.serving.paseo.paseo_daemon import is_running
 from agents_remember.serving.paseo.paseo_lock import runtime_lock
-from agents_remember.serving.paseo.paseo_node import node_executable_valid
+from agents_remember.serving.paseo.paseo_node import node_executable_valid, node_status
 from agents_remember.serving.paseo.paseo_process_record import (
     ProcessReader,
     inspect_record,
@@ -117,7 +117,11 @@ def _observe(
             status = cli.json("status", "daemon", "status", "--json")
             if not is_running(status) or not status.get("daemonVersion"):
                 return _line("not answering", settings, base)
-            base.update(version=status.get("daemonVersion"), listen=status.get("listen"))
+            base.update(
+                node_status(base["nodeExecutable"]),
+                version=status.get("daemonVersion"),
+                listen=status.get("listen"),
+            )
             return _line("running", settings, base)
         node = product_node()
         installed = cli.installed_version()
@@ -168,6 +172,11 @@ def _remedy_line(state: str, settings: PaseoRuntimeSettings, facts: dict[str, An
         return "; this build does not support a host here; no host install or start is available"
     if code == "node_not_installed" and facts.get("supervisorAlive"):
         return "; " + terminal_provision_remedy(settings)
+    if facts.get("restartRequired"):
+        return (
+            f"; Node restart required: observed {facts['nodeExecutable']}, "
+            f"build {facts['node']['path']}; {terminal_provision_remedy(settings)}"
+        )
     if state == "not installed":
         return "; run runtime_install to install this build's Node and host"
     if state == "running" and (

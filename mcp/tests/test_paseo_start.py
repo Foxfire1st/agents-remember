@@ -6,8 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
+from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.paseo import paseo_start
+from agents_remember.serving.paseo.paseo_daemon import runtime_status
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
 from agents_remember.serving.paseo.paseo_start import ensure_host, observe_host
 from paseo_runtime_test_support import (
@@ -51,6 +53,30 @@ def test_running_host_is_read_only_including_mismatches_and_session_names(tmp_pa
         assert "CODEX_THREAD_ID" in result.line
         assert fake.mutations(index) == []
         assert file_states(fake.settings.home, fake.settings.install_prefix) == before
+
+    # The current target exists, while the owned supervisor may still use the earlier Node.
+    for executable, expected in ((product_node().node.as_posix(), []), ("/old/bin/node", ["node"])):
+        fake.running()["version"] = PINNED
+        fake.running()["started_with"]["daemon.listen"] = fake.settings.listen
+        fake.processes[4242] = replace(fake.supervisor(), node_executable=executable)
+        before = file_states(tmp_path)
+        index = len(fake.calls)
+        observed = observe_host(config, runner=fake, reader=fake.reader)
+        status = runtime_status(fake.settings, runner=fake, reader=fake.reader)
+        assert observed.state == "running" and status["running"]
+        for facts in (observed.facts, status):
+            assert facts["nodeExecutable"] == executable
+            assert facts["node"]["path"] == product_node().node.as_posix()
+            assert facts["restartRequired"] == expected
+        assert ("Node restart required" in observed.line) is bool(expected)
+        assert bool(status["restartRemedy"]) is bool(expected)
+        if expected:
+            assert executable in observed.line and product_node().node.as_posix() in observed.line
+            assert (
+                "paseo provision" in observed.line and "paseo provision" in status["restartRemedy"]
+            )
+        assert fake.mutations(index) == [] and fake.signalled == []
+        assert file_states(tmp_path) == before
 
 
 def test_a_live_unanswering_supervisor_never_gets_a_second_start(tmp_path):

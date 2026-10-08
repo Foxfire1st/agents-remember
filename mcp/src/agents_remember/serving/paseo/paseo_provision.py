@@ -335,6 +335,7 @@ def _converge_daemon(run: _Run) -> None:
     _require_listen_address(run, status if running else None)
     first_change = len(run.changes)
     reasons = restart_reasons(run.settings, status, pending) if running else []
+    previous_node: Path | None = None
     if running:
         record = inspect_record(run.settings.home, "daemon", run.reader)
         facts = run.reader(record.pid) if record.pid is not None else None
@@ -344,6 +345,7 @@ def _converge_daemon(run: _Run) -> None:
             and facts.node_executable != product_node().node.as_posix()
         ):
             reasons.append("node")
+            previous_node = Path(facts.node_executable).parent.parent
     if running and reasons and run.intent is ProvisionIntent.INSTALL:
         run.restart_reasons += reasons
         return
@@ -361,7 +363,14 @@ def _converge_daemon(run: _Run) -> None:
     _sync_home_files(run)
     if not kept_running:
         _start_daemon(run)
+        _report_unused_node(run, previous_node)
     _ensure_plugin(run, kept_running)
+
+
+def _report_unused_node(run: _Run, previous: Path | None) -> None:
+    """Name the earlier product Node folder after a successful host start; keep its files."""
+    if previous is not None and previous.parent == product_node().root.parent:
+        run.change("node", "no-longer-used", path=previous.as_posix())
 
 
 def _require_listen_address(run: _Run, running: dict[str, Any] | None) -> None:

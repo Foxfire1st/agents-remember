@@ -33,6 +33,18 @@ def node_executable_valid(runtime: NodeRuntime, runner: CommandRunner = run_comm
     return version.returncode == 0 and version.stdout.strip() == f"v{runtime.version}"
 
 
+def node_status(executable: str | None) -> dict:
+    """Compare an observed host executable with the build's Node without acquiring it."""
+    runtime = product_node()
+    return {
+        "node": runtime.payload(),
+        "nodeExecutable": executable,
+        "restartRequired": ["node"]
+        if executable is not None and executable != runtime.node.as_posix()
+        else [],
+    }
+
+
 def node_valid(runtime: NodeRuntime, runner: CommandRunner = run_command) -> bool:
     if not runtime.npm.is_file() or not node_executable_valid(runtime, runner):
         return False

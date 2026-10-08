@@ -55,7 +55,7 @@ The renderer creates one shared `<coordinationRoot>/system/settings.json`
 `paseoRuntime` block for all harnesses, with absolute data/state paths and fresh
 listen `127.0.0.1:8766`; it never overwrites an existing file. The host currently
 supports Linux x86_64 with `/proc` only. The build carries one exact host, a whole
-npm lock, and Node 22.23.2 plus its official archive digest. A missing shared block
+npm lock, and Node 26.11.1 plus its official archive digest. A missing shared block
 is reported as configured=false by install. During approved setup, add the
 complete five-key block from c-13 to that one shared file, preserving other
 families; retry runtime_install afterwards. Existing per-harness blocks
