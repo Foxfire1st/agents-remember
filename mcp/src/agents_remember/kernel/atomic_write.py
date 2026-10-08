@@ -3,7 +3,9 @@
 ``atomic_write_text`` and ``atomic_write_bytes`` create a per-call temporary file in the
 destination directory, flush and fsync its content, replace the destination, then fsync
 the directory. ``atomic_replace`` applies the same replace-and-directory-fsync contract to
-an existing temporary path. Failed publishes remove their temporary file.
+an existing temporary path. Failed publishes remove their temporary file. A writer that is killed
+before it can do so leaves its temporary file behind; the next publish of the same destination
+removes it.
 
 An empty payload replaces the destination with an empty file; it never unlinks the
 destination. These functions do not lock. Callers that require serialization must hold
@@ -13,7 +15,11 @@ their store's lock before publishing.
 from __future__ import annotations
 
 import os
+import re
 import sys
+import threading
+from contextlib import suppress
+from glob import escape
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,6 +35,55 @@ def _temp_path_for(path: Path) -> Path:
     call sites used -- is shared by every concurrent writer of the same destination.
     """
     return path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+
+
+# What ``_temp_path_for`` appends to ``.<name>``: the writer's process id and its per-call id.
+_TEMP_WRITER = re.compile(r"\.(\d+)\.[0-9a-f]{32}\.tmp")
+# The temps that writes of this process hold right now, in any thread.
+_temps_in_flight: set[Path] = set()
+_temps_in_flight_guard = threading.Lock()
+
+
+def _writer_is_gone(temp: Path, process_id: int) -> bool:
+    """Whether the write that created ``temp`` can no longer finish or remove it."""
+    if process_id == os.getpid():
+        # This process's own number: a write in flight in another thread, or a leftover of an
+        # earlier process that had the same number.
+        with _temps_in_flight_guard:
+            return temp not in _temps_in_flight
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, OverflowError, ValueError):
+        # an impossible pid must not fail a publish already replaced.
+        return False
+    return False
+
+
+def _remove_abandoned_temps(path: Path) -> None:
+    """Remove the temps that interrupted publishes of ``path`` left beside it.
+
+    A writer that is killed between creating its temp and the replace cannot clean up after
+    itself. Its temp is hidden and nothing reads it, but it holds a whole copy of what was about
+    to be published, and it travels with its directory. The next publish of the same destination
+    removes it.
+
+    Only a temp whose writer is gone is removed. A writer that is alive keeps its temp, because
+    these functions do not lock and two writers of one destination may overlap. Never raises: a
+    leftover that cannot be removed stays one, and the publish before it has already succeeded.
+
+    Skipped on Windows, which offers no probe for another process that cannot also signal it.
+    """
+    if sys.platform == "win32":
+        return
+    prefix = f".{path.name}"
+    with suppress(OSError):
+        for temp in path.parent.glob(f"{escape(prefix)}.*.tmp"):
+            writer = _TEMP_WRITER.fullmatch(temp.name[len(prefix) :])
+            if writer is not None and _writer_is_gone(temp, int(writer.group(1))):
+                with suppress(OSError):
+                    temp.unlink(missing_ok=True)
 
 
 def _fsync_directory(directory: Path) -> None:
@@ -56,10 +111,13 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
     Creates ``path``'s parent, writes and fsyncs a private temp, replaces the
     destination, then fsyncs the directory. The temp is removed on any failure --
     ``BaseException``, so a ``KeyboardInterrupt`` or a cancellation between the write and
-    the replace does not leave an orphan either.
+    the replace does not leave an orphan either. A process that is killed leaves one; the next
+    publish of ``path`` removes it (:func:`_remove_abandoned_temps`).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _temp_path_for(path)
+    with _temps_in_flight_guard:
+        _temps_in_flight.add(tmp)
     try:
         with tmp.open("wb") as handle:
             handle.write(payload)
@@ -69,6 +127,10 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+    finally:
+        with _temps_in_flight_guard:
+            _temps_in_flight.discard(tmp)
+    _remove_abandoned_temps(path)
     _fsync_directory(path.parent)
 
 

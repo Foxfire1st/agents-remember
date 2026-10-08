@@ -69,6 +69,7 @@ from .modules.guidance import (
     status_payload,
 )
 from .modules.models import WorktreeCommandResult
+from .reopen_row_guard import require_reopenable_row
 from .scheduling_mode import TERMINAL_SERIES_CLEANUP
 from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
 from .task_fact_publication import (
@@ -622,26 +623,10 @@ def _plan_master_index_reset(
         raise ReopenTaskDocumentError(
             f"parent master must contain exactly one row {doc.id!r}; found {len(rows)}"
         )
-    _validate_reopen_row_path(master_path, leaf_path, doc.id, rows[0])
+    require_reopenable_row(master, master_path, leaf_path, rows[0], ReopenTaskDocumentError)
     rows[0]["status"] = "planning"
     updated = master_sync.demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
     return updated, "reset"
-
-
-def _validate_reopen_row_path(
-    master_path: Path,
-    leaf_path: Path,
-    leaf_id: str,
-    row: dict,
-) -> None:
-    file_name = str(row.get("file") or "")
-    if not file_name:
-        return
-    row_path = (master_path.parent / Path(file_name).with_suffix(".json")).resolve(strict=False)
-    if row_path != leaf_path.resolve(strict=False):
-        raise ReopenTaskDocumentError(
-            f"parent row {leaf_id!r} points at {row_path}, not leaf {leaf_path}"
-        )
 
 
 def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:

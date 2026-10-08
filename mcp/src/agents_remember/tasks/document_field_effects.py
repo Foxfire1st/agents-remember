@@ -21,6 +21,7 @@ from agents_remember.models.task_intent import (
     MissingTaskIntent,
     TaskIntentIdentity,
 )
+from agents_remember.models.task_retirement import MasterRetirementProof, RetirementEdgeSelection
 
 from .document import (
     CodeExample,
@@ -288,6 +289,21 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "judgmentId": EVIDENCE,
     },
     SprintExecutionGraph: {"nodes": STRUCTURAL, "edges": STRUCTURAL},
+    MasterRetirementProof: {
+        "version": AUDIT,
+        "masterRef": AUDIT,
+        "archiveRef": AUDIT,
+        "reason": AUDIT,
+        "retiredAt": AUDIT,
+        "removedOrchestrates": AUDIT,
+        "removedGraphNodes": AUDIT,
+        "removedEdges": AUDIT,
+        "affirmedEdges": AUDIT,
+        "masterJsonSha256": AUDIT,
+        "masterMarkdownSha256": AUDIT,
+        "readinessFacts": AUDIT,
+    },
+    RetirementEdgeSelection: {"predecessor": AUDIT, "successor": AUDIT},
     SubTaskRef: {
         "number": STRUCTURAL,
         "name": NORMATIVE,
@@ -295,6 +311,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "status": PROGRESS_AND_READINESS,
         "scope": STRUCTURAL,
         "masterRef": STRUCTURAL,
+        "retirement": AUDIT,
     },
     DiscardSourceProof: {"state": AUDIT, "sha256": AUDIT, "size": AUDIT},
     DiscardUnstartedProof: {

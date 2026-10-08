@@ -53,6 +53,7 @@ import {
 } from "../ChatActivityIndicator";
 import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
 import { useCollapsedTaskGroups } from "../useCollapsedTaskGroups";
+import { progressHint, seriesProgress, subTaskProgress, taskStepProgress } from "./progress";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -816,10 +817,7 @@ function seriesRow(
     secondary: "master",
     variant,
     meta: rowMetaText(
-      progressHint(
-        { done: series.doneCount, total: series.totalCount },
-        series.discardedCount,
-      ),
+      progressHint(seriesProgress(series), series.discardedCount),
       series.status,
       servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
@@ -1134,26 +1132,6 @@ function lifecycleForEnclosure(
         !latest || lifecycle.lastEventTs > latest.lastEventTs ? lifecycle : latest,
       undefined,
     );
-}
-
-function taskStepProgress(doc: TaskDocNode): { done: number; total: number } {
-  return {
-    done: doc.stepsDone,
-    total: doc.stepsTotal,
-  };
-}
-
-function subTaskProgress(items: TaskDocNode["subTasks"]): { done: number; total: number } {
-  return {
-    done: items.filter((item) => item.status.toLowerCase() === "completed").length,
-    total: items.length,
-  };
-}
-
-function progressHint(progress: { done: number; total: number }, discardedCount = 0): string {
-  const completed = progress.total > 0 ? `${progress.done}/${progress.total}` : "";
-  const discarded = discardedCount > 0 ? `${discardedCount} discarded` : "";
-  return [completed, discarded].filter(Boolean).join(" · ");
 }
 
 function rowMetaText(progress: string, status: string, staleSeconds: number | undefined): string {

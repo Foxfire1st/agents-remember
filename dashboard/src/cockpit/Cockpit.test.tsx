@@ -256,6 +256,7 @@ function taskReaderProjection(): WorkspaceProjection {
           discardedSubTasks: [],
           doneCount: 0,
           totalCount: 1,
+          abandonedCount: 0,
           seriesTokenTotal: 0,
           sections: [],
           decisions: [],

@@ -52,6 +52,58 @@ describe("LifecycleList task labels — hierarchy and phase grouping", () => {
     expect(row?.textContent).not.toContain("1/1");
   });
 
+  it("leaves abandoned rows out of the series figure and names them beside it", () => {
+    const leaf = (number: string, status: string) => ({
+      number,
+      name: `Leaf ${number}`,
+      file: "",
+      status,
+      scope: "",
+    });
+    seed(
+      projection({
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "COMPLETE",
+              kind: "master",
+              title: "Master with an abandoned leaf",
+              docPath: "/tasks/complete/task.json",
+              subTasks: [leaf("1", "Completed"), leaf("2", "Completed"), leaf("3", "abandoned")],
+            }),
+            taskDoc({
+              id: "DROPPED",
+              kind: "master",
+              title: "Master whose leaves were all abandoned",
+              docPath: "/tasks/dropped/task.json",
+              subTasks: [leaf("1", "abandoned"), leaf("2", "abandoned")],
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "folder-series",
+              title: "Series without a master document",
+              docPath: "/tasks/folder-series/task.json",
+              doneCount: 5,
+              totalCount: 5,
+              abandonedCount: 1,
+              discardedCount: 1,
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    const meta = (title: string) => getByText(title).closest("[role='option']")?.textContent;
+    // Every row that will run is Completed, so the master reads complete beside its abandoned leaf.
+    expect(meta("Master with an abandoned leaf")).toContain("2/2, 1 abandoned");
+    expect(meta("Master whose leaves were all abandoned")).toContain("2 abandoned");
+    expect(meta("Master whose leaves were all abandoned")).not.toContain("0/");
+    expect(meta("Series without a master document")).toContain("5/5, 1 abandoned · 1 discarded");
+  });
+
   it("renders the orchestration tier above its commanded masters with the V4 treatment (L14)", () => {
     // An orchestration task is a master doc carrying `orchestrates`.
     // It renders gold-tier at depth 0; a master it names nests one step with the purple tier; that

@@ -247,6 +247,66 @@ task plus immediate parent row.
 branch-addressed counterpart for a **leaf delivered without its own worktree enclosure**, where a
 code commit already exists at the exact series branch HEAD. A series contract is necessary address
 authority for this route; it is not by itself evidence that an operation is direct execution.
+An atomic master's closeout needs a landed enclosure for each row other than `abandoned`.
+An abandoned row is outside every walk of a master's rows. It needs no enclosure, no landing, no
+contract and no document: a row with status `abandoned` and an empty file cell blocks nothing, and
+a row that has a document keeps it. A label never removes a landed leaf: a row labelled abandoned
+whose enclosure records completed integration refuses by name until that contradiction is
+reconciled. For an atomic master that is the closeout; for an organizational master, which has no
+closeout, it is the moment its status is set to `Completed` through `task_doc`.
+Finalization decides the abandoned-but-landed rule again and refuses such a row by name, for
+both atomic and organizational masters. Every row must be
+`Completed` or `abandoned`. Progress figures leave abandoned rows out of the total and name them
+separately, for example "5/5, 1 abandoned".
+
+Finalizing a master never archives it, whether or not a sprint commands it. When a sprint
+commands the master, finalization completes its row on the sprint, keeps its task folder, and the
+result says the archive was skipped because that sprint commands it, naming the sprint. A sprint
+that commands the master without a typed row does not refuse: the one legacy seat row that
+correlates with the master is completed, and otherwise the result reports the sprint row as
+skipped with the linkage fact. When no sprint commands the master, the folder also stays, and the
+result says a master is archived only by `task_doc(operation="retire_master")`.
+
+`retire_master` is the one operation that archives a master. It has one route and writes one
+record, and it finds out itself whether a sprint commands the master or has recorded its
+retirement. A request sent to the wrong document is refused and names the right one.
+- A master that a sprint commands is retired on that sprint: `task_doc(operation="retire_master",
+  task_name="<sprint>", fields={"masterRef": {"repository": "<repo>", "path":
+  "<master>/task.json"}, "reason": "<reason>"}, dry_run=true)` first. The preview lists the
+  membership entry, the graph nodes, every touching edge, the retained retirement row, the archive
+  destination and what the cleanup hook would delete. An outgoing edge to a successor that is not
+  Completed must be affirmed with its exact predecessor and successor in `fields.removeEdges`. The
+  record is one plain row on the sprint; it takes the place of the master's typed row, or of the
+  one legacy seat row that correlates with it (and keeps that row's `file` cell, so the seat's
+  documents stay reachable), and is added at the end when the sprint holds no row for the master.
+- A master that no sprint commands is retired on its own document (`task_name="<master>"`,
+  `masterRef` its own `task.json`, no `removeEdges`). No sprint is edited, and the record is
+  `notes/reports/master-retirement.json` in the master's folder, which moves with it.
+A sprint is not a master: the operation refuses a sprint document, also one whose last master was
+retired. Readiness refuses open work of the master's leaves, and an unfinished or unreadable
+operation of the master's own enclosure: a leaf worktree directory that exists, a leaf branch
+that holds commits its landing line does not reach, and an operation record
+that is unfinished or cannot be read. The refusal names each open resource and the action that
+removes it: the lifecycle tools, or, where those tools cannot act on the enclosure because it has no
+live operation locator, what is done by hand (the Git command that removes a worktree or a branch,
+the move that takes an operation record out of the directory it is read from). Carry the named
+actions out and repeat the request. The layout or age of a contract, a leaf branch
+with nothing unlanded, and the master's own branch and worktree never refuse; the dry run lists
+them as `readinessFacts`, and the retirement record keeps them. While any `task.json` of the
+repository cannot be opened or parsed, the request is refused and names that file. A sprint's only
+graphed master cannot be retired, because a graph cannot be empty, and a master nested inside
+another task's folder is refused, because only root task folders can be archived. The dry run also
+lists every file a real run writes (`wouldWrite`). Apply the same request with `dry_run=false`. A repeated request with the same reason and
+edges resumes from the record wherever an earlier attempt stopped; a request that differs from the
+record is refused. A retired row cannot be changed or dropped by any other task-document
+operation. Hook failures after the folder is archived are reported as
+`retired-with-hook-failures` (`ok=false`); repeat the same request to retry the cleanup only. Every
+attempt that deleted something, failed, or found something newly absent keeps its own numbered
+receipt (`notes/reports/review-artifact-cleanup.json` and its `.attempt-<n>.json` predecessors),
+written before anything is deleted. A dry run after a completed retirement says that nothing would
+change. Every answer names the restart that a server started before this build needs before it
+reads a sprint that holds a retired row.
+
 Ordinary master/series closeout and the later master-to-parent `worktree_integrate` edge are not
 branch-direct leaf delivery and must work while `directExecutionEnabled` is false.
 The tool verifies that code commit and gated candidate tree, requires an explicit nonblank memory

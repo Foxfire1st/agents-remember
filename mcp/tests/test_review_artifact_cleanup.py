@@ -27,7 +27,7 @@ from unittest import mock
 
 import apsw
 import pytest
-from agents_remember.application import review_artifact_cleanup
+from agents_remember.application import review_artifact_cleanup, review_artifact_receipts
 from agents_remember.application.review_artifact_cleanup import (
     CLEANUP_REPORT_NAME,
     ReviewArtifactCleanup,
@@ -330,6 +330,20 @@ def test_a_task_document_naming_another_task_touches_none_of_its_refs(task: Task
     assert report["reportPath"] == str(task.task_root / "notes/reports" / CLEANUP_REPORT_NAME)
 
 
+def test_an_unconfirmed_task_id_is_a_failure_only_while_a_pin_carries_it(task: Task) -> None:
+    """A task that never had a leaf enclosure: its id names no pin, so nothing stays untouched."""
+    (task.task_root / "task.json").write_text(json.dumps({"id": "OTHER-1"}), encoding="utf-8")
+    for enclosure in (task.task_root / "enclosures").iterdir():
+        (enclosure / "series-contract.md").unlink()
+    clean = task.archive()
+    assert clean["failures"] == [] and clean["state"] == "deleted"
+    task.pin("refs/ar/retained-code/other-1-l1/g1", memory=False)
+    held = task.archive()
+    assert [one["target"] for one in held["failures"]] == ["task.json"]
+    assert held["state"] == "partial" and held["retainedCodeRefs"] == []
+    assert _refs(task.code) == {"refs/ar/retained-code/other-1-l1/g1": task.head}
+
+
 def test_a_planted_leaf_contract_never_reaches_another_tasks_review_refs(task: Task) -> None:
     """R5 V10: a planted contract confirms the id only along the ruled trust line (legacy pins)."""
 
@@ -476,3 +490,152 @@ def test_a_symlinked_generation_directory_releases_nothing(task: Task) -> None:
     assert _refs(task.code) == {OWN_PIN: task.head}
     held = next(one for one in report["failures"] if one.get("ref") == OWN_PIN)
     assert "is a symlink" in held["detail"]
+
+
+def test_a_repeated_attempt_keeps_receipts_never_leaves_the_name_empty_and_reports_absence(
+    task: Task,
+) -> None:
+    reports = task.task_root / "notes/reports"
+    task.pin(f"refs/ar/review/{MASTER}/{LEAF}/1")
+    first = task.archive()
+    assert first["attempt"] == 1 and first["alreadyAbsent"] == []
+    canonical = reports / CLEANUP_REPORT_NAME
+    kept = canonical.read_bytes()
+    # A repeated request that finds nothing to delete or fail writes no new receipt.
+    again = task.archive()
+    assert again["receipt"] == "unchanged" and again["attempt"] == 1
+    assert canonical.read_bytes() == kept and not list(reports.glob("*.attempt-*"))
+    assert [e["artifact"] for e in again["alreadyAbsent"]] == [f"refs/ar/review/{MASTER}/{LEAF}/1"]
+    # A later attempt with real work keeps the first receipt and replaces the canonical name
+    # atomically, twice: with what it is about to delete, then with the outcome.
+    task.pin(f"refs/ar/review/{MASTER}/{LEAF}/2")
+    seen: list[tuple[bool, str]] = []
+    write = review_artifact_receipts.atomic_write_text
+
+    def watching(path: Path, text: str, **kwargs: Any) -> None:
+        seen.append((canonical.exists(), json.loads(text)["state"]))
+        write(path, text, **kwargs)
+
+    with mock.patch.object(review_artifact_receipts, "atomic_write_text", watching):
+        second = task.archive()
+    assert second["attempt"] == 2 and seen == [(True, "in-progress"), (True, "deleted")]
+    assert (reports / "review-artifact-cleanup.attempt-1.json").read_bytes() == kept
+    assert json.loads(canonical.read_text())["attempt"] == 2
+
+
+def _receipts(task: Task) -> dict[str, dict[str, Any]]:
+    reports = task.task_root / "notes/reports"
+    return {
+        path.name: json.loads(path.read_text())
+        for path in sorted(reports.glob("review-artifact-cleanup*.json"))
+    }
+
+
+def test_an_attempt_that_dies_after_deleting_has_left_its_receipt_before_it_deleted(
+    task: Task,
+) -> None:
+    """The receipt is written ahead of the deletions, so a death in between loses no record."""
+    first, second = (f"refs/ar/review/{MASTER}/{LEAF}/{n}" for n in (1, 2))
+    task.pin(first)
+    task.archive()
+    task.pin(second)
+    copy = task.task_root / "notes" / "left.sqlite"
+    _knowledge_dataset(copy)
+    with (
+        mock.patch.object(
+            review_artifact_receipts.ReceiptLedger, "finish", side_effect=KeyboardInterrupt
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        task.archive()
+    assert _refs(task.code) == {} and not copy.exists()
+    interrupted = _receipts(task)[CLEANUP_REPORT_NAME]
+    assert interrupted["state"] == "in-progress" and interrupted["attempt"] == 2
+    assert [entry["ref"] for entry in interrupted["planned"]["reviewRefs"]] == [second, second]
+    assert [entry["path"] for entry in interrupted["planned"]["datasetCopies"]] == [str(copy)]
+    # The next attempt deletes nothing, reports what the dead attempt deleted, and numbers on.
+    after = task.archive()
+    assert after["attempt"] == 3 and after["reviewRefs"] == [] and after["datasetCopies"] == []
+    assert {
+        (entry["artifact"], entry["deletedInAttempt"], entry.get("interrupted", False))
+        for entry in after["alreadyAbsent"]
+    } == {(first, 1, False), (second, 2, True), (str(copy), 2, True)}
+    kept = _receipts(task)
+    assert sorted(kept) == [
+        "review-artifact-cleanup.attempt-1.json",
+        "review-artifact-cleanup.attempt-2.json",
+        CLEANUP_REPORT_NAME,
+    ]
+    assert [receipt["attempt"] for receipt in kept.values()] == [1, 2, 3]
+    assert kept["review-artifact-cleanup.attempt-2.json"] == interrupted
+    # A further repeat has nothing to record.
+    assert task.archive()["receipt"] == "unchanged" and _receipts(task) == kept
+
+
+def test_a_death_between_setting_a_receipt_aside_and_writing_the_next_numbers_no_copy_twice(
+    task: Task,
+) -> None:
+    task.pin(f"refs/ar/review/{MASTER}/{LEAF}/1")
+    task.archive()
+    task.pin(f"refs/ar/review/{MASTER}/{LEAF}/2")
+    with (
+        mock.patch.object(
+            review_artifact_receipts, "atomic_write_text", side_effect=KeyboardInterrupt
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        task.archive()
+    # Receipt 1 was set aside and nothing was deleted, because receipt 2 was never written.
+    assert list(_refs(task.code)) == [f"refs/ar/review/{MASTER}/{LEAF}/2"]
+    names = ["review-artifact-cleanup.attempt-1.json", CLEANUP_REPORT_NAME]
+    assert {name: r["attempt"] for name, r in _receipts(task).items()} == dict.fromkeys(names, 1)
+    assert task.archive()["attempt"] == 2
+    assert {name: r["attempt"] for name, r in _receipts(task).items()} == dict(
+        zip(names, (1, 2), strict=True)
+    )
+
+
+def test_nothing_is_deleted_when_the_receipt_cannot_be_written(task: Task) -> None:
+    pin = f"refs/ar/review/{MASTER}/{LEAF}/1"
+    task.pin(pin)
+    reports = task.task_root / "notes/reports"
+    reports.mkdir(parents=True)
+    reports.chmod(0o500)
+    try:
+        refused = task.archive()
+    finally:
+        reports.chmod(0o700)
+    assert refused["state"] == "partial" and refused["reportPath"] is None
+    assert refused["reviewRefs"] == [] and list(_refs(task.code)) == [pin]
+    assert "nothing was deleted" in refused["failures"][-1]["detail"]
+    assert refused["failures"][-1]["target"] == str(reports / CLEANUP_REPORT_NAME)
+    done = task.archive()
+    assert done["attempt"] == 1 and done["state"] == "deleted" and _refs(task.code) == {}
+    assert [entry["ref"] for entry in done["reviewRefs"]] == [pin, pin]
+
+
+def test_an_artifact_that_failed_and_is_gone_since_gets_a_receipt_once(task: Task) -> None:
+    copy = task.task_root / "notes" / "busy.sqlite"
+    _knowledge_dataset(copy)
+    unlink = Path.unlink
+
+    def busy(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path == copy:
+            raise OSError("dataset is busy")
+        unlink(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "unlink", autospec=True, side_effect=busy):
+        failed = task.archive()
+    assert failed["state"] == "partial" and failed["attempt"] == 1
+    assert failed["failures"] == [{"target": str(copy), "detail": "dataset is busy"}]
+    copy.unlink()  # removed by hand between the attempts
+    gone = task.archive()
+    assert gone["state"] == "deleted" and gone["failures"] == [] and gone["attempt"] == 2
+    assert gone["alreadyAbsent"] == [
+        {"artifact": str(copy), "kind": "failures", "failedInAttempt": 1}
+    ]
+    assert "receipt" not in gone and [r["attempt"] for r in _receipts(task).values()] == [1, 2]
+    assert _receipts(task)[CLEANUP_REPORT_NAME]["alreadyAbsent"] == gone["alreadyAbsent"]
+    again = task.archive()
+    assert again["receipt"] == "unchanged" and again["attempt"] == 2
+    assert [r["attempt"] for r in _receipts(task).values()] == [1, 2]

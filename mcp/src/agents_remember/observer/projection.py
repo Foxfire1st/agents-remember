@@ -834,10 +834,11 @@ class SeriesNode(BaseModel):
 
     The master is also projected as a :class:`TaskDocNode` for direct document selection.
     ``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master
-    checklist where each subtask is one checkbox and ``doneCount`` counts the *declared*
-    ``Completed`` subtasks, authoritative over a slice's own internal steps. Carries the
-    full master render (subTasks + sections + decisions) so older clients can still render
-    the series reader.
+    checklist where each subtask that will run is one checkbox and ``doneCount`` counts the
+    *declared* ``Completed`` subtasks, authoritative over a slice's own internal steps.
+    Abandoned rows are neither done nor part of ``totalCount``; ``abandonedCount`` names them
+    beside the figure ("5/5, 1 abandoned"). Carries the full master render (subTasks +
+    sections + decisions) so older clients can still render the series reader.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -853,6 +854,7 @@ class SeriesNode(BaseModel):
     discardedSubTasks: list[DiscardedSubTaskNode] = Field(default_factory=list, max_length=256)
     doneCount: int = 0
     totalCount: int = 0
+    abandonedCount: int = 0
     seriesTokenTotal: int = 0
     sections: list[SeriesSectionNode] = Field(default_factory=list)
     decisions: list[TaskDecisionNode] = Field(default_factory=list)

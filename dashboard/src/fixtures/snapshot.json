@@ -618,6 +618,7 @@
     ],
     "series": [
       {
+        "abandonedCount": 0,
         "ageSeconds": 960.0,
         "createdAt": "2026-06-14T08:45:00+00:00",
         "decisions": [

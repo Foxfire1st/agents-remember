@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from agents_remember.observer.projection import TaskDocNode
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
+    read_series_documents,
     read_task_documents,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -341,3 +343,53 @@ class SubTaskIndexReachabilityTests(unittest.TestCase):
             (completed.id, completed.status, completed.stepsDone, completed.stepsTotal),
             ("01_DONE", "Completed", 1, 1),
         )
+
+
+class SeriesProgressProjectionTests(unittest.TestCase):
+    """The series figure counts the rows that will run; abandoned rows are named beside it."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.coord = Path(self._dir.name)
+
+    def _progress(self, name: str, rows: Sequence[Mapping[str, object]]) -> tuple[int, int, int]:
+        write_task_doc(
+            self.coord / "tasks" / REPO / name,
+            _doc(
+                id=name.upper(), slug=name, kind="master", status="inProgress", subTasks=list(rows)
+            ),
+        )
+        series = next(
+            node for node in read_series_documents(self.coord, now=FRESH) if node.seriesId == name
+        )
+        return series.doneCount, series.totalCount, series.abandonedCount
+
+    def test_abandoned_and_retired_rows_are_left_out_of_the_figure_and_named(self) -> None:
+        landed = [
+            {"number": str(index), "name": f"Landed {index}", "status": "Completed"}
+            for index in range(2)
+        ]
+        retired = {
+            "number": "R",
+            "name": "Retired master",
+            "status": "abandoned",
+            "retirement": {
+                "masterRef": {"repository": REPO, "path": "old/task.json"},
+                "archiveRef": {"repository": REPO, "path": "0_archive/old/task.json"},
+                "reason": "Deliberately retired.",
+                "retiredAt": "2026-10-04T00:00:00+00:00",
+                "removedOrchestrates": ["old"],
+                "removedGraphNodes": 0,
+                "removedEdges": [],
+                "affirmedEdges": [],
+                "masterJsonSha256": "0" * 64,
+            },
+        }
+        abandoned = {"number": "A", "name": "Not taken", "status": "abandoned"}
+        open_row = {"number": "O", "name": "Open", "status": "inProgress"}
+
+        # Every row that will run is Completed: the master reads complete, "2/2, 2 abandoned".
+        self.assertEqual(self._progress("complete", [*landed, abandoned, retired]), (2, 2, 2))
+        self.assertEqual(self._progress("open", [*landed, abandoned, open_row]), (2, 3, 1))
+        self.assertEqual(self._progress("plain", landed), (2, 2, 0))

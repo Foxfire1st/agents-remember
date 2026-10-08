@@ -642,9 +642,12 @@ def _integration_surfaces(
         ) from exc
     commanded_refs: set[TaskDocumentRef] = set()
     for sprint in masters:
-        if not sprint.document.orchestrates:
+        if not sprint.document.is_sprint:
             continue
         branch = sprint.document.integrationBranch
+        if not branch and not sprint.document.orchestrates:
+            # A sprint that lost its last master and declares no branch has no line to keep.
+            continue
         if not branch:
             raise RuntimeError(
                 f"integration-branch authority requires {sprint.ref.key} to declare "
@@ -678,7 +681,7 @@ def _integration_surfaces(
     for master in masters:
         if (
             master.ref in commanded_refs
-            or master.document.orchestrates
+            or master.document.is_sprint
             or effective_execution_nature(master.document, None) != "atomic"
         ):
             continue

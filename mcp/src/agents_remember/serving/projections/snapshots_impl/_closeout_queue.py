@@ -16,6 +16,7 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _iter_task_document_payloads,
 )
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument
+from agents_remember.tasks.retired_rows import payload_is_sprint
 from agents_remember.worktrees.queue.closeout_projection import capture_projection_source
 
 
@@ -26,9 +27,7 @@ def read_closeout_queues(coordination_root: Path, *, now: datetime) -> list[Clos
         return []
     queues: list[CloseoutQueueNode] = []
     for path, payload in _iter_task_document_payloads(tasks_root, now=now):
-        if payload.get("kind") != "master":
-            continue
-        if not payload.get("orchestrates") or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+        if not payload_is_sprint(payload) or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
             continue
         try:
             doc = TaskDocument.model_validate(payload)

@@ -23,6 +23,7 @@ function series(
     discardedSubTasks: [],
     doneCount: 0,
     totalCount: overrides.subTasks.length,
+    abandonedCount: 0,
     seriesTokenTotal: 0,
     sections: [],
     decisions: [],

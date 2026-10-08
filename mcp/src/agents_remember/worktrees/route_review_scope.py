@@ -26,6 +26,7 @@ from agents_remember.tasks.document import (
     RouteReviewChildIntent,
     RouteReviewRecord,
     RouteReviewScope,
+    SubTaskRef,
 )
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -296,35 +297,67 @@ def _resolve_children(
     topology: TaskDocumentTopology,
     master: ResolvedTaskDocument,
 ) -> tuple[ResolvedTaskDocument, ...]:
-    children: list[ResolvedTaskDocument] = []
+    """The master's reviewed leaf documents, in row order.
+
+    An abandoned row is a finished record of a leaf that will not run, so it is asked for
+    nothing: its document joins the population when it is there, and the row is left out when
+    its file cell is empty or its document is gone. Rows that are not abandoned are resolved
+    first, so an abandoned row can never take a document from one of them. A master whose rows
+    are all abandoned and without documents therefore has a scope with no child; a master
+    without any row has none.
+    """
+
+    rows = list(enumerate(master.document.subTasks))
+    members: dict[int, ResolvedTaskDocument] = {}
     seen: set[TaskDocumentRef] = set()
-    for row in master.document.subTasks:
-        if not row.file:
-            raise TaskDocumentRefError(
-                "route-review-master-membership-invalid",
-                f"atomic master child {row.number!r} has no canonical file",
-            )
-        child_path = (master.path.parent / row.file).with_suffix(".json")
-        child_ref = topology.canonical_ref(master.ref.repository, child_path)
-        if child_ref in seen:
-            raise TaskDocumentRefError(
-                "route-review-master-membership-invalid",
-                f"atomic master child membership repeats {child_ref.key}",
-            )
-        child = topology.resolve(child_ref)
-        if child.document.kind == "master":
-            raise TaskDocumentRefError(
-                "route-review-master-membership-invalid",
-                f"atomic master child must be a leaf document: {child_ref.key}",
-            )
-        seen.add(child_ref)
-        children.append(child)
-    if not children:
+    for abandoned in (False, True):
+        for index, row in rows:
+            if (row.status == "abandoned") is not abandoned:
+                continue
+            try:
+                child = _resolve_child(topology, master, row, seen)
+            except TaskDocumentRefError:
+                if abandoned:
+                    continue
+                raise
+            seen.add(child.ref)
+            members[index] = child
+    if not members and not (rows and all(row.status == "abandoned" for _index, row in rows)):
         raise TaskDocumentRefError(
             "route-review-master-membership-invalid",
             f"atomic master has no canonical child documents: {master.ref.key}",
         )
-    return tuple(children)
+    return tuple(members[index] for index in sorted(members))
+
+
+def _resolve_child(
+    topology: TaskDocumentTopology,
+    master: ResolvedTaskDocument,
+    row: SubTaskRef,
+    seen: set[TaskDocumentRef],
+) -> ResolvedTaskDocument:
+    if not row.file:
+        raise TaskDocumentRefError(
+            "route-review-master-membership-invalid",
+            f"atomic master {master.ref.key} row {row.number!r} has no task-document file; "
+            f"create the row's leaf document with task_doc create (kind subTask, id "
+            f"{row.number!r}), or set a Completed row's file cell with task_doc set_subtask on "
+            "the master",
+        )
+    child_path = (master.path.parent / row.file).with_suffix(".json")
+    child_ref = topology.canonical_ref(master.ref.repository, child_path)
+    if child_ref in seen:
+        raise TaskDocumentRefError(
+            "route-review-master-membership-invalid",
+            f"atomic master child membership repeats {child_ref.key}",
+        )
+    child = topology.resolve(child_ref)
+    if child.document.kind == "master":
+        raise TaskDocumentRefError(
+            "route-review-master-membership-invalid",
+            f"atomic master child must be a leaf document: {child_ref.key}",
+        )
+    return child
 
 
 def _require_leaf_member(

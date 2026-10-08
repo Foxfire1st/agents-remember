@@ -2920,8 +2920,13 @@
     },
     "SeriesNode": {
       "additionalProperties": false,
-      "description": "A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).\n\nThe master is also projected as a :class:`TaskDocNode` for direct document selection.\n``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master\nchecklist where each subtask is one checkbox and ``doneCount`` counts the *declared*\n``Completed`` subtasks, authoritative over a slice's own internal steps. Carries the\nfull master render (subTasks + sections + decisions) so older clients can still render\nthe series reader.",
+      "description": "A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).\n\nThe master is also projected as a :class:`TaskDocNode` for direct document selection.\n``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master\nchecklist where each subtask that will run is one checkbox and ``doneCount`` counts the\n*declared* ``Completed`` subtasks, authoritative over a slice's own internal steps.\nAbandoned rows are neither done nor part of ``totalCount``; ``abandonedCount`` names them\nbeside the figure (\"5/5, 1 abandoned\"). Carries the full master render (subTasks +\nsections + decisions) so older clients can still render the series reader.",
       "properties": {
+        "abandonedCount": {
+          "default": 0,
+          "title": "Abandonedcount",
+          "type": "integer"
+        },
         "ageSeconds": {
           "anyOf": [
             {

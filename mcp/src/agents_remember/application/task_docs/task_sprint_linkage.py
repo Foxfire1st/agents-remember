@@ -25,33 +25,23 @@ errors (L14-R7 backward tolerance), and it never raises.
 
 from __future__ import annotations
 
-import difflib
-import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import field_validator
 
-from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
-    SprintExecutionEndpoint,
     SprintExecutionGraph,
     SprintExecutionNode,
     SubTaskRef,
     TaskDocSourceSnapshot,
     TaskDocument,
-    json_path_for,
-    markdown_path_for,
     missing_task_doc_source,
-    read_graph_titles,
-    read_task_doc,
     read_task_doc_with_source,
-    render_markdown,
     write_task_doc_batch,
 )
 from agents_remember.tasks.document_refs import (
@@ -60,54 +50,36 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
     repository_master_documents,
 )
-from agents_remember.tasks.serving_preflight import (
-    TopologyServingBuildError,
-    require_serving_topology_schema,
+from agents_remember.tasks.sprint_membership_refusal import (
+    archived_master_paths,
+    missing_master_detail,
 )
+from agents_remember.tasks.sprint_rows import SEAT_DOC_FILE, correlate_seat_row
 
 from .task_doc_graph_titles import build_publication_batch_graph_titles
 from .task_doc_publication import (
-    TaskDocPublicationTransaction,
     preview_task_doc_transaction_projection_effects,
     publish_task_doc_transaction_and_refresh,
-    task_doc_scope_changes,
     validate_task_doc_transaction,
 )
 from .task_execution_topology import (
     ExecutionTopologyError,
     verify_sprint_judgment_ids,
 )
+from .task_master_retirement import retire_master
+from .task_sprint_candidates import SprintLinkageError, _detach_candidate
+from .task_sprint_context import (
+    SprintLinkageRequest,
+    _document_preview,
+    _parse_payload,
+    _Payload,
+    _publication_transaction,
+    _require_serving_topology_schema,
+    _sprint_context,
+    _validate_candidate,
+)
 
-SPRINT_LINKAGE_OPERATIONS = ("attach_master", "detach_master", "linkage_report")
-
-
-def _require_serving_topology_schema() -> None:
-    """Wrap the served-build preflight in the linkage error family (L15-R4)."""
-
-    try:
-        require_serving_topology_schema()
-    except TopologyServingBuildError as exc:
-        raise SprintLinkageError(str(exc)) from exc
-
-
-_SEAT_DOC_FILE = re.compile(r"^(\d+_manage-|00_.*-seat)")
-_SEAT_MASTER_REFERENCE = re.compile(r"\.\./([^/]+)/task\.json$")
-
-
-class SprintLinkageError(AgentsRememberError):
-    """A sprint linkage edit is structurally invalid or unverifiable."""
-
-
-@dataclass(frozen=True)
-class SprintLinkageRequest:
-    coordination_root: Path
-    repo_id: str
-    code_repository: Path
-    memory_repository: Path | None
-    task_root: Path
-    slug: str | None
-    fields: dict[str, Any]
-    dry_run: bool
+SPRINT_LINKAGE_OPERATIONS = ("attach_master", "detach_master", "retire_master", "linkage_report")
 
 
 @dataclass(frozen=True)
@@ -117,22 +89,6 @@ class _LinkagePublication:
     overrides: dict[TaskDocumentRef, TaskDocument]
     documents: list[tuple[TaskDocumentRef, Path, TaskDocument]]
     source_snapshots: tuple[TaskDocSourceSnapshot, ...]
-
-
-class _Payload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    masterRef: TaskDocumentRef
-
-    @field_validator("judgmentId", check_fields=False)
-    @classmethod
-    def _trim_judgment_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("judgmentId must not be blank")
-        return trimmed
 
 
 class _AttachMasterPayload(_Payload):
@@ -192,6 +148,8 @@ def sprint_linkage_operation(operation: str, call: SprintLinkageCall) -> dict[st
         fields=call.fields,
         dry_run=call.dry_run,
     )
+    if operation == "retire_master":
+        return retire_master(request)
     if operation == "attach_master":
         return attach_master(request)
     if operation == "detach_master":
@@ -355,7 +313,7 @@ def linkage_facts_for_get(
 ) -> list[dict[str, Any]] | None:
     """The ``linkageFacts`` surface for ``task_doc.get``; None for non-sprint targets."""
 
-    if doc.kind != "master" or not doc.orchestrates:
+    if not doc.is_sprint:
         return None
     topology = TaskDocumentTopology(coordination_root)
     try:
@@ -375,13 +333,13 @@ def collect_linkage_facts(
         masters = [
             master
             for master in repository_master_documents(topology, sprint_ref.repository)
-            if master.ref != sprint_ref and not master.document.orchestrates
+            if master.ref != sprint_ref and not master.document.is_sprint
         ]
     except (TaskDocumentRefError, OSError, ValueError) as exc:
         return [{"kind": "sprint-scan-failed", "detail": str(exc)}]
     membership = _commanded_membership(sprint, masters)
     facts = [
-        {"kind": "orchestrates-entry-unresolved", "entry": entry, "matches": matches}
+        _unresolved_entry_fact(topology, sprint_ref, entry, matches)
         for entry, (master, matches) in membership.items()
         if master is None
     ]
@@ -391,33 +349,25 @@ def collect_linkage_facts(
     return facts
 
 
-# --- payload + sprint context -------------------------------------------------
+def _unresolved_entry_fact(
+    topology: TaskDocumentTopology, sprint_ref: TaskDocumentRef, entry: str, matches: int
+) -> dict[str, Any]:
+    """An ``orchestrates`` entry that names no single live master, with its repair when it is gone."""
 
-
-def _parse_payload[PayloadT: _Payload](
-    model: type[PayloadT], fields: dict[str, Any], operation: str
-) -> PayloadT:
-    try:
-        return model.model_validate(fields)
-    except ValidationError as exc:
-        raise SprintLinkageError(f"invalid {operation} payload: {exc}") from exc
-
-
-def _sprint_context(
-    request: SprintLinkageRequest, operation: str
-) -> tuple[TaskDocumentTopology, TaskDocumentRef, TaskDocument, TaskDocSourceSnapshot]:
-    json_path = request.task_root / f"{request.slug or 'task'}.json"
-    if not json_path.exists():
-        raise SprintLinkageError(f"task document not found: {json_path} (create it first)")
-    sprint, source = read_task_doc_with_source(json_path)
-    if sprint.kind != "master" or not sprint.orchestrates:
-        raise SprintLinkageError(f"task_doc.{operation} requires an orchestration sprint document")
-    topology = TaskDocumentTopology(request.coordination_root)
-    try:
-        sprint_ref = topology.canonical_ref(request.repo_id, json_path)
-    except TaskDocumentRefError as exc:
-        raise SprintLinkageError(f"{exc.status}: {exc}") from exc
-    return topology, sprint_ref, sprint, source
+    fact: dict[str, Any] = {
+        "kind": "orchestrates-entry-unresolved",
+        "entry": entry,
+        "matches": matches,
+    }
+    if matches == 0:
+        # The same text every topology consumer refuses with: the master, where it was archived,
+        # and the operation that removes it from the sprint.
+        fact["archivePaths"] = [
+            path.as_posix()
+            for path in archived_master_paths(topology.coordination_root, sprint_ref, entry)
+        ]
+        fact["detail"] = missing_master_detail(topology.coordination_root, sprint_ref, entry)
+    return fact
 
 
 # --- attach -------------------------------------------------------------------
@@ -448,7 +398,7 @@ def _resolve_attach_target(
             f"task-sprint-linkage-target-not-a-master: {master_ref.key} is a "
             f"{master.document.kind} document"
         )
-    if master.document.orchestrates:
+    if master.document.is_sprint:
         raise SprintLinkageError(
             f"task-sprint-linkage-target-is-sprint: {master_ref.key} itself orchestrates; "
             "a sprint cannot be commanded as a master"
@@ -567,80 +517,7 @@ def _resolve_tolerantly(
     return ResolvedTaskDocument(master_ref, resolved.path, document), source
 
 
-def _detach_candidate(
-    sprint: TaskDocument, master_ref: TaskDocumentRef, master: ResolvedTaskDocument | None
-) -> tuple[TaskDocument, list[str], int]:
-    graph = sprint.executionGraph
-    removed_nodes = 0
-    if graph is not None:
-        _require_no_touching_edges(graph, master_ref)
-        remaining = [node for node in graph.nodes if node.ref != master_ref]
-        removed_nodes = len(graph.nodes) - len(remaining)
-        if not remaining:
-            raise SprintLinkageError(
-                "task-sprint-linkage-graph-empty: detaching the last master would empty the "
-                "executionGraph; the graph has no retire operation"
-            )
-        # The graph was valid at read; dropping whole nodes cannot invalidate it
-        # (touching edges were refused above), so construction cannot fail.
-        data_graph: Any = SprintExecutionGraph(nodes=remaining, edges=list(graph.edges)).model_dump(
-            mode="json"
-        )
-    names = {Path(master_ref.path).parent.name}
-    if master is not None:
-        names |= {master.document.id, master.document.title}
-    removed_entries = [entry for entry in sprint.orchestrates if entry in names]
-    kept_rows = [
-        row.model_dump(mode="json", by_alias=True, exclude_none=True)
-        for row in sprint.subTasks
-        if row.masterRef != master_ref
-    ]
-    data = sprint.model_dump(by_alias=True)
-    data["subTasks"] = kept_rows
-    data["orchestrates"] = [entry for entry in sprint.orchestrates if entry not in names]
-    if graph is not None:
-        data["executionGraph"] = data_graph
-    # Valid at read; the batch only removes pieces, so re-validation cannot fail.
-    candidate = TaskDocument.model_validate(data)
-    return candidate, removed_entries, removed_nodes
-
-
-def _require_no_touching_edges(graph: SprintExecutionGraph, master_ref: TaskDocumentRef) -> None:
-    def touches(endpoint: TaskDocumentRef | SprintExecutionEndpoint) -> bool:
-        ref = endpoint.ref if isinstance(endpoint, SprintExecutionEndpoint) else endpoint
-        return ref == master_ref
-
-    touching = [
-        edge for edge in graph.edges if touches(edge.predecessor) or touches(edge.successor)
-    ]
-    if touching:
-        raise SprintLinkageError(
-            f"task-sprint-linkage-node-in-use: {len(touching)} edge(s) still touch "
-            f"{master_ref.key}; remove them with task_doc.author_execution_graph first"
-        )
-
-
 # --- shared validation + publication ------------------------------------------
-
-
-def _validate_candidate(
-    topology: TaskDocumentTopology,
-    sprint_ref: TaskDocumentRef,
-    overrides: dict[TaskDocumentRef, TaskDocument],
-) -> None:
-    """Full topology validation on a graphed sprint; the linkage cross-check otherwise."""
-
-    sprint = topology.resolve(sprint_ref, overrides)
-    try:
-        if sprint.document.executionGraph is not None:
-            topology.validate_execution_topology(sprint_ref, overrides=overrides)
-        else:
-            # The L13 atomic-sequential default governs a graph-less sprint; only the
-            # typed linkage cross-check applies (L14-R5).
-            topology.commanded_masters(sprint, overrides=overrides)
-            topology.validate_sprint_linkage(sprint_ref, overrides=overrides)
-    except TaskDocumentRefError as exc:
-        raise SprintLinkageError(f"{exc.status}: {exc}") from exc
 
 
 def _publish(
@@ -673,60 +550,6 @@ def _publish(
     return documents, effects
 
 
-def _publication_transaction(
-    request: SprintLinkageRequest,
-    overrides: dict[TaskDocumentRef, TaskDocument],
-    source_snapshots: tuple[TaskDocSourceSnapshot, ...],
-    publisher: Callable[[], list[tuple[Path, Path]]],
-) -> TaskDocPublicationTransaction:
-    return TaskDocPublicationTransaction(
-        coordination_root=request.coordination_root,
-        target_repo_id=request.repo_id,
-        source_snapshots=source_snapshots,
-        scope_changes=task_doc_scope_changes(
-            request.coordination_root,
-            request.repo_id,
-            overrides,
-            source_snapshots,
-        ),
-        publisher=publisher,
-    )
-
-
-def _document_preview(
-    ref: TaskDocumentRef, task_root: Path, document: TaskDocument
-) -> dict[str, Any]:
-    rendered = render_markdown(
-        document,
-        graph_titles=(
-            read_graph_titles(task_root.parents[1], document.executionGraph)
-            if document.executionGraph is not None
-            else None
-        ),
-    )
-    markdown_path = markdown_path_for(task_root, document)
-    existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
-    diff = "".join(
-        difflib.unified_diff(
-            existing.splitlines(keepends=True),
-            rendered.splitlines(keepends=True),
-            fromfile=f"{markdown_path.name} (on disk)",
-            tofile=f"{markdown_path.name} (rendered)",
-        )
-    )
-    rendered_lines = set(rendered.splitlines())
-    return {
-        "taskDocumentRef": ref.model_dump(mode="json"),
-        "docPath": json_path_for(task_root, document).as_posix(),
-        "renderedPath": markdown_path.as_posix(),
-        "rendered": rendered,
-        "diff": diff,
-        "wouldLose": any(
-            line.strip() and line not in rendered_lines for line in existing.splitlines()
-        ),
-    }
-
-
 # --- linkage facts ------------------------------------------------------------
 
 
@@ -756,9 +579,13 @@ def _row_facts(
     commanded = {master.ref for master, _matches in membership.values() if master is not None}
     referenced: dict[TaskDocumentRef, SubTaskRef] = {}
     for row in sprint.document.subTasks:
+        if row.retirement is not None:
+            if row.file:
+                facts.append(_retired_seat_fact(sprint, row))
+            continue
         master_ref = row.masterRef
-        if master_ref is None and _SEAT_DOC_FILE.match(row.file or ""):
-            master_ref = _correlate_seat_row(sprint, row)
+        if master_ref is None and SEAT_DOC_FILE.match(row.file or ""):
+            master_ref = correlate_seat_row(sprint.path.parent, sprint.ref.repository, row)
             if master_ref is None:
                 # The seat doc exists but carries no ../<master>/task.json
                 # reference: report the correlation miss so a later
@@ -794,21 +621,27 @@ def _row_facts(
     return referenced
 
 
-def _correlate_seat_row(sprint: ResolvedTaskDocument, row: SubTaskRef) -> TaskDocumentRef | None:
-    """The master a legacy seat-doc row coordinates, via the seat doc's references."""
+def _retired_seat_fact(sprint: ResolvedTaskDocument, row: SubTaskRef) -> dict[str, Any]:
+    """The seat documents a retired master left in the sprint's folder, reachable from its row.
 
-    seat_json = (sprint.path.parent / (row.file or "")).with_suffix(".json")
-    try:
-        seat = read_task_doc(seat_json)
-    except (OSError, ValueError):
-        return None
-    for reference in seat.references:
-        match = _SEAT_MASTER_REFERENCE.search(reference.strip())
-        if match:
-            return TaskDocumentRef(
-                repository=sprint.ref.repository, path=f"{match.group(1)}/task.json"
-            )
-    return None
+    A retirement that takes the place of a legacy seat row keeps that row's ``file`` cell. The
+    seat coordinated a master that is retired, so it is no linkage drift; the fact says whose seat
+    documents these are and which of them are there.
+    """
+
+    assert row.retirement is not None
+    seat = sprint.path.parent / row.file
+    return {
+        "kind": "retired-master-seat-documents",
+        "number": row.number,
+        "file": row.file,
+        "master": row.retirement.masterRef.key,
+        "documents": [
+            document.name
+            for document in (seat.with_suffix(".json"), seat.with_suffix(".md"))
+            if document.is_file()
+        ],
+    }
 
 
 def _membership_facts(

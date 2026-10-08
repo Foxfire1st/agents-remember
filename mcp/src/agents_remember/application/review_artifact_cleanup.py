@@ -16,8 +16,11 @@ A generation's pin and snapshots are released through their own deletion owners
 unavailable-history record first, so a later reopen of the archived generation says the history was
 deleted and why. Whatever those owners did not cover is deleted directly. Every deletion, and every
 failure, is recorded in the task's archive report (``notes/reports/review-artifact-cleanup.json``),
-which the finalizer also returns under ``taskArchive.reviewArtifacts``. Nothing else creates review
-copies, so nothing else needs cleaning.
+which the finalizer also returns under ``taskArchive.reviewArtifacts``. The receipts are kept per
+attempt and written before anything is deleted
+(:mod:`agents_remember.application.review_artifact_receipts`); a retry lists what an earlier attempt
+already dealt with as ``alreadyAbsent``. Nothing else creates review copies, so nothing else needs
+cleaning.
 
 **Where every target's identity comes from (R3-R5 rulings).**
 
@@ -42,12 +45,17 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
 import apsw
 
+from agents_remember.application.review_artifact_receipts import (
+    CLEANUP_REPORT_NAME,
+    DELETION_KEYS,
+    ReceiptLedger,
+)
 from agents_remember.application.review_comparison_generation import (
     COMPARISON_DELETIONS_DIRECTORY,
     COMPARISON_GENERATIONS_DIRECTORY,
@@ -61,7 +69,6 @@ from agents_remember.application.review_comparison_reclamation import (
     release_comparison_code_object,
 )
 from agents_remember.errors import CodeObjectRetentionError, ComparisonReclamationError
-from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
@@ -78,7 +85,6 @@ __all__ = [
     "cleanup_review_artifacts",
 ]
 
-CLEANUP_REPORT_NAME: Final = "review-artifact-cleanup.json"
 _REASON: Final = "the task was archived (MIK-R25 rule 5, D17)"
 _SQLITE_HEADER: Final = b"SQLite format 3\x00"
 # The tables every generation of the knowledge store has had: a file holding both is a dataset.
@@ -124,6 +130,7 @@ class _Report:
             "releasedGenerations": self.released_generations,
             "datasetCopies": self.dataset_copies,
             "failures": self.failures,
+            "alreadyAbsent": [],
         }
 
 
@@ -139,15 +146,41 @@ def cleanup_review_artifacts(request: ReviewArtifactCleanupRequest) -> dict[str,
     """Delete (or, on a dry run, list) every review artifact of one archived task, and record it.
 
     It never raises for an artifact or a repository it cannot reach: that is a ``failures`` entry,
-    because the task has already been archived when this runs.
+    because the task has already been archived when this runs. A real run first lists what it is
+    about to delete and writes that into this attempt's receipt; it deletes nothing when that
+    receipt cannot be written.
     """
 
     confined = _Confinement(request.task_root)
+    ledger = ReceiptLedger.open(
+        durable_reports_root(confined.task_root),
+        confined.problem,
+        lambda name: _still_there(request, confined, name),
+    )
+    if request.dry_run:
+        document = _sweep(request, confined).document()
+        document["alreadyAbsent"] = ledger.already_absent(document)
+        ledger.preview(document)
+        return document
+    planned = _sweep(replace(request, dry_run=True), confined).document()
+    if any(planned[key] for key in DELETION_KEYS):
+        refused = ledger.begin(planned)
+        if refused is not None:
+            return _nothing_deleted(planned, ledger, refused)
+    document = _sweep(request, confined).document()
+    document["alreadyAbsent"] = ledger.already_absent(document)
+    ledger.finish(document)
+    return document
+
+
+def _sweep(request: ReviewArtifactCleanupRequest, confined: _Confinement) -> _Report:
+    """One pass over the task's review artifacts: list them on a dry run, delete them otherwise."""
+
     # The legacy identity (retained-code pins, manifest own-leaf check) follows the trust line; the
     # review-ref namespace is the directory name, whatever any file says.
     task_id, identity_problem = _confirmed_task_id(request, confined)
     report = _Report(dry_run=request.dry_run, task_id=task_id)
-    if identity_problem is not None:
+    if identity_problem is not None and _pins_under_unconfirmed_id(request, confined):
         report.failures.append({"target": "task.json", "detail": identity_problem})
     _release_generations(request, report, confined)
     for repository in dict.fromkeys((request.code_repository, request.memory_repository)):
@@ -166,27 +199,41 @@ def cleanup_review_artifacts(request: ReviewArtifactCleanupRequest) -> dict[str,
                 _delete_ref(repository, ref, report.retained_code_refs, report)
     report.confinement = confined
     _delete_dataset_copies(confined, report)
-    document = report.document()
-    if not request.dry_run:
-        _write_report(confined, document)
+    return report
+
+
+def _nothing_deleted(
+    planned: dict[str, Any], ledger: ReceiptLedger, refused: str
+) -> dict[str, Any]:
+    """The outcome of an attempt that could not write its receipt, and so deleted nothing."""
+
+    document = _Report(dry_run=False, task_id=planned["taskId"]).document()
+    document["state"] = "partial"
+    document["reportPath"] = None
+    document["failures"] = [
+        *planned["failures"],
+        {
+            "target": ledger.path.as_posix(),
+            "detail": "nothing was deleted, because this attempt's receipt cannot be written: "
+            f"{refused}",
+        },
+    ]
+    document["alreadyAbsent"] = ledger.already_absent(document)
     return document
 
 
-def _write_report(confined: _Confinement, document: dict[str, Any]) -> None:
-    """Write the report inside the task only; anywhere else it stays in the returned payload."""
+def _still_there(request: ReviewArtifactCleanupRequest, confined: _Confinement, name: str) -> bool:
+    """Whether a named artifact of this task still exists; yes for a name that is not one."""
 
-    path = durable_reports_root(confined.task_root) / CLEANUP_REPORT_NAME
-    outside = confined.problem(path)
-    if outside is not None:
-        document["reportPath"] = None
-        document["failures"].append({"target": path.as_posix(), "detail": outside})
-        return
-    try:
-        atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
-        document["reportPath"] = path.as_posix()
-    except OSError as error:
-        document["reportPath"] = None
-        document["failures"].append({"target": path.as_posix(), "detail": str(error)})
+    if name.startswith("refs/"):
+        return any(
+            repository is not None and repository.is_dir() and _ref_exists(repository, name)
+            for repository in (request.code_repository, request.memory_repository)
+        )
+    path = Path(name)
+    if not path.is_absolute() or confined.problem(path) is not None:
+        return True
+    return path.exists() or path.is_symlink()
 
 
 # -- physical confinement --------------------------------------------------------------------------
@@ -239,7 +286,8 @@ def _confirmed_task_id(
     The contract's own identity is the task directory name (``request.task_name``). A ``task.json``
     ``id`` is taken only when it is that name, or when a leaf enclosure contract of this task (one
     naming it as parent, physically inside the task) has a leaf id ``<id>-L<n>`` -- the id every pin
-    of that leaf was named under. Otherwise the directory name is used and the id is reported.
+    of that leaf was named under. Otherwise the directory name is used and the id is reported, as a
+    failure while a legacy pin exists under it (:func:`_pins_under_unconfirmed_id`).
     """
 
     named = _task_document_id(confined) or request.task_name
@@ -259,6 +307,24 @@ def _confirmed_task_id(
         f"task.json names the task id {named!r}, which no leaf contract of task "
         f"{request.task_name!r} carries; the legacy pins and manifests of {named!r} are not "
         "touched"
+    )
+
+
+def _pins_under_unconfirmed_id(
+    request: ReviewArtifactCleanupRequest, confined: _Confinement
+) -> bool:
+    """Whether a legacy pin exists that only the unconfirmed ``task.json`` id would select.
+
+    An id that no leaf contract confirms is a failure because pins named under it are left
+    untouched. A task that never had a leaf enclosure has no such pin: nothing is left untouched,
+    so there is nothing to report and nothing a repeated attempt could ever clear.
+    """
+
+    named = _task_document_id(confined)
+    return named is not None and any(
+        _retained_code_refs(repository, named)
+        for repository in (request.code_repository, request.memory_repository)
+        if repository is not None and repository.is_dir()
     )
 
 

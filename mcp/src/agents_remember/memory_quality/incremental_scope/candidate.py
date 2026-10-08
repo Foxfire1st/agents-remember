@@ -24,6 +24,7 @@ from agents_remember.worktrees.modules.memory_candidate_pair import (
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,
 )
+from agents_remember.worktrees.queue.closeout_queue_errors import missing_commanded_master_text
 from agents_remember.worktrees.queue.closeout_queue_graph import graph_context
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -147,7 +148,13 @@ def observe_contract_task(contract: WorktreeContract) -> CanonicalTaskObservatio
         )
         intent = task_intent_identity(contract.task_root, candidate)
     except (TaskDocumentRefError, ValueError) as exc:
-        _refuse("task-owner-unavailable", f"canonical task owner refused: {type(exc).__name__}")
+        # A sprint that commands a missing master is refused in the product's own words, which
+        # name the repair; every other refusal stays bounded to its type.
+        named = missing_commanded_master_text(exc) or missing_commanded_master_text(exc.__cause__)
+        _refuse(
+            "task-owner-unavailable",
+            named or f"canonical task owner refused: {type(exc).__name__}",
+        )
     if not isinstance(intent, TaskIntentIdentity):
         _refuse("task-intent-unavailable", "canonical R02 task intent is unavailable")
     if any(current_task_doc_source(source) != source for source in accepted_sources):

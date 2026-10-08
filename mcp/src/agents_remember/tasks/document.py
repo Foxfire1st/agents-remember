@@ -39,10 +39,15 @@ from agents_remember.models.knowledge_files.planned import (
 )
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_execution_edges import (
+    SprintExecutionEdge,
+    SprintExecutionEndpoint,
+)
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
 )
+from agents_remember.models.task_retirement import MasterRetirementProof
 
 from .execution_graph_validation import (
     ExecutionGraphAnalysis,
@@ -179,28 +184,6 @@ class TaskExecutionRegistration(_Doc):
         return trimmed
 
 
-class SprintExecutionEndpoint(_Doc):
-    """One edge endpoint: a bare master ref, or a leaf id sampling the target segment.
-
-    A bare ``ref`` addresses the master's only node (a lump, or its single segment);
-    ``ref`` + ``leafId`` addresses the segment node containing that leaf. Resolution
-    to a node happens in graph validation, never at parse time.
-    """
-
-    ref: TaskDocumentRef
-    leafId: str | None = None
-
-    @field_validator("leafId")
-    @classmethod
-    def _trim_nonblank_leaf_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph endpoint leafId must not be blank")
-        return trimmed
-
-
 class SprintExecutionNode(_Doc):
     """One graph node: a whole-master lump or a leaf-segment of one master.
 
@@ -257,39 +240,6 @@ class SprintExecutionNode(_Doc):
         if self.kind == "master":
             return ref
         return {"kind": "segment", "ref": ref, "leafIds": list(self.leafIds)}
-
-
-class SprintExecutionEdge(_Doc):
-    """One reasoned predecessor edge in the sprint's activity-on-node graph."""
-
-    predecessor: TaskDocumentRef | SprintExecutionEndpoint
-    successor: TaskDocumentRef | SprintExecutionEndpoint
-    reason: str
-    judgmentId: str | None = None
-
-    @field_validator("reason")
-    @classmethod
-    def _trim_nonblank_reason(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph edge reason must not be blank")
-        return trimmed
-
-    @field_validator("judgmentId")
-    @classmethod
-    def _trim_nonblank_judgment_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("execution-graph edge judgmentId must not be blank")
-        return trimmed
-
-    @model_validator(mode="after")
-    def _check_distinct_endpoints(self) -> Self:
-        if self.predecessor == self.successor:
-            raise ValueError("execution-graph edge cannot point a node to itself")
-        return self
 
 
 def resolve_graph_endpoint(
@@ -535,6 +485,17 @@ class SubTaskRef(_Doc):
     status: DocStatus = "planning"
     scope: str = ""
     masterRef: TaskDocumentRef | None = None
+    retirement: MasterRetirementProof | None = None
+
+    @model_validator(mode="after")
+    def _retired_row_is_plain(self) -> Self:
+        # A retired row may keep a ``file`` cell: the seat document of the legacy row it took the
+        # place of, so that the seat's documents stay reachable from the sprint.
+        if self.retirement is not None and (
+            self.masterRef is not None or self.status != "abandoned"
+        ):
+            raise ValueError("a retired master row is abandoned and carries no live masterRef")
+        return self
 
 
 class DiscardSourceProof(_Doc):
@@ -831,10 +792,23 @@ class TaskDocument(_Doc):
                     "discardedSubTasks proof identity must match the parent repository and file"
                 )
 
+    @property
+    def is_sprint(self) -> bool:
+        """Whether this is an orchestration sprint, for every reader that asks.
+
+        A sprint commands masters. One that lost its last master to a retirement commands
+        nothing any more and is a sprint still: it holds the retirement rows, and a master can be
+        attached to it again.
+        """
+
+        return self.kind == "master" and (
+            bool(self.orchestrates) or any(row.retirement is not None for row in self.subTasks)
+        )
+
     def _check_execution_fields(self) -> None:
         if self.kind != "master":
             return
-        if self.orchestrates and self.executionNature is not None:
+        if self.is_sprint and self.executionNature is not None:
             raise ValueError("an orchestration sprint has no executionNature")
         if not self.orchestrates and self.executionGraph is not None:
             raise ValueError("executionGraph belongs only to an orchestration sprint")
@@ -849,7 +823,7 @@ class TaskDocument(_Doc):
             )
         if not self.seats:
             return
-        if self.kind != "master" or not self.orchestrates:
+        if not self.is_sprint:
             raise ValueError("seats belong only to an orchestration sprint")
         live_roles = [seat.role for seat in self.seats if seat.state != "retired"]
         if len(set(live_roles)) != len(live_roles):
@@ -861,7 +835,7 @@ class TaskDocument(_Doc):
         branch = self.integrationBranch.strip()
         if self.kind != "master":
             raise ValueError("integrationBranch is master-only")
-        if not self.orchestrates:
+        if not self.is_sprint:
             raise ValueError(
                 "integrationBranch belongs only to an orchestration sprint with orchestrates"
             )
@@ -905,8 +879,13 @@ def current_step(doc: TaskDocument) -> str | None:
 
 
 def series_total(doc: TaskDocument) -> int:
-    """A master's checkboxes are its subtasks: each ``SubTaskRef`` is one box."""
-    return len(doc.subTasks)
+    """A master's checkboxes are its subtasks that will run: each such ``SubTaskRef`` is one box.
+
+    An abandoned row is left out. It is neither done nor still to do, so counting it would keep
+    a master whose remaining rows are all ``Completed`` from reading complete;
+    :func:`series_abandoned` names those rows beside the figure instead.
+    """
+    return len(doc.subTasks) - series_abandoned(doc)
 
 
 def series_done(doc: TaskDocument) -> int:
@@ -914,6 +893,11 @@ def series_done(doc: TaskDocument) -> int:
 
     The declared subtask status is the lever and is authoritative: a slice marked
     ``Completed`` in the master counts as done even if its own leaf doc still has open
-    boxes. Never derived from a slice's internal steps.
+    boxes. Never derived from a slice's internal steps. An abandoned row is not done.
     """
     return sum(1 for sub in doc.subTasks if sub.status == "Completed")
+
+
+def series_abandoned(doc: TaskDocument) -> int:
+    """Rows that will not run, a retired master's row among them; named beside done/total."""
+    return sum(1 for sub in doc.subTasks if sub.status == "abandoned")

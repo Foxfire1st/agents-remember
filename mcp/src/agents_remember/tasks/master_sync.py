@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from .document import DocStatus, SubTaskRef, TaskDocument
 from .readiness import completion_blockers
+from .retired_rows import refuse_retired_row
 from .store import TaskDocSourceSnapshot, capture_task_doc_source, markdown_path_for
 
 MasterSyncStatus = Literal["none", "created", "updated", "unchanged"]
@@ -57,6 +58,12 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
             f"parent master must contain at most one row {leaf.id!r}; found {len(matches)}"
         )
     existing = matches[0] if matches else None
+    refuse_retired_row(
+        master,
+        leaf.id,
+        "the master is retired; the master sync of this task document",
+        MasterSyncError,
+    )
     _validate_existing_row_path(master_json_path, task_root, leaf, existing)
     ref = subtask_ref_from_leaf(task_root, leaf, existing=existing)
     if existing == ref:

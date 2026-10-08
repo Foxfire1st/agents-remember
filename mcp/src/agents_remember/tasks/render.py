@@ -144,7 +144,11 @@ def _subtask_lines(subtasks: list[SubTaskRef]) -> list[str]:
         # without one keeps the plain bold name + file code span.
         name = f"[**{ref.name}**]({_master_ref_link(ref)})" if ref.masterRef else f"**{ref.name}**"
         file_suffix = f" · `{ref.file}`" if ref.file else ""
-        scope_suffix = f" — {ref.scope}" if ref.scope else ""
+        scope = ref.scope
+        if ref.retirement is not None:
+            retirement = ref.retirement
+            scope = f"{scope + '; ' if scope else ''}Retired {retirement.masterRef.key} at {retirement.retiredAt}: {retirement.reason}"
+        scope_suffix = f" — {scope}" if scope else ""
         marker = _MARKER[ref.status]
         lines.append(f"{ref.number}. {marker} {name}{file_suffix}{scope_suffix}")
     return lines

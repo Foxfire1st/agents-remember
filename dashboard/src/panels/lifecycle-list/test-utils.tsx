@@ -104,6 +104,7 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     discardedSubTasks: [],
     doneCount: 0,
     totalCount: 0,
+    abandonedCount: 0,
     seriesTokenTotal: 0,
     sections: [],
     decisions: [],

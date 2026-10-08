@@ -85,8 +85,14 @@ from .task_execution_topology import (
     author_execution_graph,
     enforce_execution_topology_edit,
 )
+from .task_master_completion import require_master_completion
 from .task_reopen import (
     task_reopen_tool,  # noqa: F401  # facade re-export (moved to task_reopen.py)
+)
+from .task_retirement_authority import (
+    require_retirement_proofs_unchanged,
+    require_row_not_retired,
+    retirement_only_refusal,
 )
 
 VALID_OPERATIONS = (
@@ -285,11 +291,13 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     task_root = context.task_root
     original = context.original
     doc = context.candidate
+    require_retirement_proofs_unchanged(original, doc, f"task_doc {operation}")
     _enforce_disposition_authority(operation, original, doc)
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
     _enforce_terminal_status(operation, doc, context.edit)
+    require_master_completion(config.coordination_root, target.repo_id, task_root, original, doc)
     _enforce_register_section_shapes(doc)
     try:
         enforce_execution_topology_edit(
@@ -423,7 +431,9 @@ def _read_steps(context: _TaskDocSpecialContext) -> dict[str, Any]:
     return result
 
 
-def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
+def _sprint_doc_identity(
+    context: _TaskDocSpecialContext, result: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """The sprint document's identity surface, merged into special-op results.
 
     The sprint-linkage and execution-graph authoring ops publish inside their own
@@ -433,7 +443,12 @@ def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
     op succeeded, so the sprint doc exists at task_root/slug.
     """
 
-    json_path = _existing_json(context.task_root, context.target.slug)
+    task_root = context.task_root
+    archive = ((result or {}).get("taskArchive") or {}).get("archivePath")
+    if archive and not (task_root / f"{context.target.slug or 'task'}.json").exists():
+        # A master retired on its own has moved under 0_archive/ by the time it answers.
+        task_root = Path(archive)
+    json_path = _existing_json(task_root, context.target.slug)
     doc = read_task_doc(json_path)
     return {
         "taskId": doc.id,
@@ -442,7 +457,7 @@ def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
         "status": doc.status,
         "lifecycleId": doc.lifecycleId,
         "docPath": json_path.as_posix(),
-        "renderedPath": markdown_path_for(context.task_root, doc).as_posix(),
+        "renderedPath": markdown_path_for(task_root, doc).as_posix(),
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
     }
@@ -482,7 +497,7 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             )
         except task_sprint_linkage.SprintLinkageError as exc:
             raise TaskDocError(str(exc)) from exc
-        return {**_sprint_doc_identity(context), **result}
+        return {**_sprint_doc_identity(context, result), **result}
     if context.operation == "author_execution_graph":
         repository = context.config.repositories[context.target.repo_id]
         try:
@@ -715,6 +730,12 @@ def _apply_set_subtask(data: dict[str, Any], edit: _Edit) -> None:
         raise TaskDocError("set_subtask is only valid for a master document")
     if not edit.subtask:
         raise TaskDocError("set_subtask requires a subtask object")
+    number = str(edit.subtask.get("number") or "")
+    if any(
+        ref.get("number") == number and ref.get("retirement") for ref in data.get("subTasks", [])
+    ):
+        # Refused here, by the row's number, before the schema would reject the edited row.
+        raise retirement_only_refusal(str(data.get("id")), [number], "task_doc set_subtask")
     _upsert_subtask(data, edit.subtask)
 
 
@@ -955,6 +976,7 @@ def _remove_subtask(
     doc, selected_snapshot = read_task_doc_with_source(
         _existing_json(context.task_root, context.target.slug)
     )
+    require_row_not_retired(doc, number, "task_doc remove_subtask")
     if doc.kind != "master":
         raise TaskDocError("remove_subtask is only valid for a master document")
     data = doc.model_dump(by_alias=True)
@@ -1037,6 +1059,11 @@ def _remove_subtask_with_disposition(
                 "remove_subtask.reason is valid only with disposition='discard-unstarted'"
             )
         raise TaskDocError("remove_subtask disposition must be 'discard-unstarted' when supplied")
+    require_row_not_retired(
+        read_task_doc(_existing_json(context.task_root, context.target.slug)),
+        str(subtask["number"]),
+        "task_doc remove_subtask (discard-unstarted)",
+    )
     return discard_unstarted_subtask(
         DiscardUnstartedRequest(
             config=context.config,

@@ -48,7 +48,14 @@ def require_series_children_retired(series: WorktreeContract) -> None:
         series.coordination_root, series.repo_name, series.task_name
     )
     if series.worktree_group.resolve() != expected_group.resolve():
-        raise RuntimeError("atomic series worktree group does not match its task authority")
+        raise RuntimeError(
+            f"master {series.task_id!r}: the coordination.worktree_group cell of "
+            f"{series.contract_path} records {series.worktree_group}, but the coordination.root, "
+            f"repo_name and task_name cells of the same contract place this master's worktree "
+            f"group at {expected_group}. Set coordination.worktree_group to that path (first move "
+            "the master's own .lifecycle and reports folders there if they still sit under the "
+            "recorded path), then retry"
+        )
     if not enclosure_root.exists():
         return
     blockers: list[str] = []

@@ -59,6 +59,7 @@ from agents_remember.tasks import (
     TaskDocument,
     build_graph_titles,
     current_step,
+    series_abandoned,
     series_done,
     series_total,
     step_done,
@@ -291,9 +292,11 @@ def read_series_documents(
     Reads each ``ar-task-document/v1`` JSON with ``kind == "master"`` under
     ``tasks/<repo>/<task>/``. Masters are also projected by :func:`read_task_documents`
     so direct task-document selection can render them; this companion surface keeps the
-    folder-keyed series checklist where each subtask is one checkbox and ``doneCount``
-    counts the *declared* ``Completed`` subtasks, authoritative over a slice's own internal
-    steps.
+    folder-keyed series checklist where each subtask that will run is one checkbox and
+    ``doneCount`` counts the *declared* ``Completed`` subtasks, authoritative over a slice's own
+    internal steps. Abandoned rows are neither done nor part of ``totalCount``;
+    ``abandonedCount`` names them, so a master whose remaining rows are all ``Completed`` reads
+    complete.
     """
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
@@ -318,6 +321,7 @@ def read_series_documents(
                 discardedSubTasks=_discarded_subtask_nodes(doc),
                 doneCount=series_done(doc),
                 totalCount=series_total(doc),
+                abandonedCount=series_abandoned(doc),
                 sections=[],
                 decisions=[],
                 docPath=path.as_posix(),

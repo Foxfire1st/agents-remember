@@ -61,6 +61,7 @@ from .closeout_queue_errors import (
     CAPACITY_REFUSAL_CODES,
     SOURCE_PROBLEM_CAP_EXCEEDED,
     CloseoutQueueError,
+    missing_commanded_master_text,
 )
 from .closeout_queue_evidence import GradeAuthority, planning_authorities
 from .closeout_queue_graph import QueueGraphContext, graph_context
@@ -211,7 +212,8 @@ def capture_projection_source(
                     "task",
                     sprint_ref.key,
                     exc.status,
-                    "repair the canonical planning registers before rebuilding",
+                    missing_commanded_master_text(exc.__cause__)
+                    or "repair the canonical planning registers before rebuilding",
                 )
             ) from exc
         members, member_source_facts = _projection_members(
@@ -254,10 +256,11 @@ def _task_census(
         sprint = topology.resolve(sprint_ref, overrides)
         masters = commanded_sprint_masters(topology, sprint, overrides=overrides)
     except TaskDocumentRefError as exc:
+        repair = missing_commanded_master_text(exc) or "repair canonical task topology"
         raise _ProjectionSourceRefusal(
-            _problem("task", sprint_ref.key, exc.status, "repair canonical task topology")
+            _problem("task", sprint_ref.key, exc.status, repair)
         ) from exc
-    if sprint.document.kind != "master" or not sprint.document.orchestrates:
+    if not sprint.document.is_sprint:
         raise _ProjectionSourceRefusal(
             _problem(
                 "task",
@@ -568,7 +571,8 @@ def _master_leafs(
 ) -> list[tuple[ResolvedTaskDocument, ResolvedTaskDocument, int]]:
     leafs: list[tuple[ResolvedTaskDocument, ResolvedTaskDocument, int]] = []
     for leaf_index, row in enumerate(master.document.subTasks):
-        if not row.file:
+        # An abandoned row never closes out: its document, present or gone, is no queue source.
+        if not row.file or row.status == "abandoned":
             continue
         path = (master.path.parent / row.file).with_suffix(".json")
         try:

@@ -39,6 +39,7 @@ from .closeout_queue_errors import (
     MASTER_CAPACITY_EXCEEDED,
     CloseoutQueueError,
     bounded_queue_failure_detail,
+    queue_topology_failure_detail,
 )
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
 
@@ -177,10 +178,9 @@ def _validated_graph_documents(
     except TaskDocumentRefError as exc:
         raise CloseoutQueueError(
             exc.status,
-            bounded_queue_failure_detail(
+            queue_topology_failure_detail(
                 exc,
                 stage="queue-topology-validation",
-                side="task-document",
                 name="execution-graph",
             ),
         ) from exc
@@ -191,10 +191,15 @@ def _validated_graph_documents(
 def _candidate_leaf_ids(
     masters: Mapping[TaskDocumentRef, ResolvedTaskDocument],
 ) -> dict[TaskDocumentRef, tuple[str, ...]]:
-    """Return every live child row that can become a closeout candidate."""
+    """Return every live child row that can become a closeout candidate.
+
+    An abandoned row never closes out, so it is not part of the candidate population.
+    """
 
     return {
-        ref: tuple(row.number for row in master.document.subTasks if row.file)
+        ref: tuple(
+            row.number for row in master.document.subTasks if row.file and row.status != "abandoned"
+        )
         for ref, master in masters.items()
     }
 

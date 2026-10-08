@@ -63,7 +63,8 @@ class RouteReviewScope(_RouteReviewDoc):
     kind: Literal["atomic-master"] = "atomic-master"
     masterRef: TaskDocumentRef
     masterIntent: TaskIntentIdentity
-    childIntents: list[RouteReviewChildIntent] = Field(min_length=1)
+    # Empty for a master whose rows are all abandoned and without documents.
+    childIntents: list[RouteReviewChildIntent]
 
     @model_validator(mode="after")
     def _check_child_identity_uniqueness(self) -> Self:

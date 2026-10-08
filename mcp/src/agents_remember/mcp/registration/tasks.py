@@ -121,7 +121,7 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'add_step' | 'remove_step' |
         'skip_step' | 'read_steps' | 'set_subtask' | 'remove_subtask' |
         'set_section' | 'append_decision' | 'begin_review' | 'record_review' | 'record_route_review' |
-        'author_execution_graph' | 'attach_master' | 'detach_master' | 'linkage_report' |
+        'author_execution_graph' | 'attach_master' | 'detach_master' | 'retire_master' | 'linkage_report' |
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
@@ -199,8 +199,43 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         Validation precedes the one batch write, so a partial attach is structurally impossible.
         'detach_master' takes fields={masterRef} and removes the typed row, the membership slug,
         and the graph node; it refuses while any edge touches the node and never deletes files.
+        'retire_master' is the ONE operation that archives a master; finalizing a master never
+        archives it. fields={masterRef, reason, removeEdges?:[{predecessor, successor}]}. It has
+        one route and writes one retirement record, and it finds out itself whether a sprint
+        commands the master or has recorded its retirement; a request sent to the wrong document
+        is refused and names the right one. A master that a sprint commands is retired on that
+        sprint: the operation removes its membership, graph nodes and touching edges, leaves one
+        plain abandoned row with the reason, time and recovery proof (in place of the master's
+        typed row or its one correlated legacy seat row, else at the end), then archives the folder
+        and runs the review-artifact archive hook. Outgoing edges to successors not Completed
+        require their exact endpoints in removeEdges. A master that no sprint commands is retired
+        on its own document (masterRef is that master itself, no removeEdges): no sprint is edited
+        and the record is notes/reports/master-retirement.json in its folder. A sprint document is
+        refused (a sprint is not a master, also after its last master was retired). Readiness
+        refuses open work of the master's leaves, and an unfinished or unreadable operation of
+        the master's own enclosure: a leaf worktree directory that exists, a leaf branch with
+        commits its landing line does not reach, an operation record that is unfinished or cannot
+        be read. The refusal names each one and the action that removes it: the lifecycle tools,
+        or, where they cannot act on the enclosure (no live operation locator), what is done by
+        hand (the Git command for a worktree or branch, the move for an operation record). The
+        layout or age of a contract, a leaf branch with nothing unlanded, and the master's own
+        branch and worktree never refuse; they are readinessFacts in the answer and in the
+        record. While any task.json of the repository cannot be read, the request is refused and
+        names that file. A sprint's only graphed master cannot be retired (a graph cannot be
+        empty), and a master nested inside another task's
+        folder is refused (only root task folders have a 0_archive/<name> location). dry_run
+        reports exactly what would change (wouldChange) and every file a real run writes
+        (wouldWrite), and that nothing would change after a completed retirement.
+        Repeating the same request resumes from the record wherever an attempt stopped; a request
+        that differs from the record is refused; when the hook failed in part (ok=false, state
+        retired-with-hook-failures) the repeat retries the cleanup only, and every attempt keeps a
+        numbered receipt. A retired row cannot be changed or dropped by any other operation.
+        An abandoned row never blocks a master: it needs no enclosure, no landing and no document.
+        A master that a sprint commands stays in place when it is finalized, with its sprint row
+        Completed.
         'linkage_report' (sprint) is the read-only drift report: seat-doc rows, slug-only
-        membership, row/membership mismatches, and uncommanded masters named in sprint decisions
+        membership, row/membership mismatches, the seat documents a retired master left
+        (retired-master-seat-documents), and uncommanded masters named in sprint decisions
         surface as facts, never as hard errors; 'get' on a sprint carries the same facts as
         linkageFacts.
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with

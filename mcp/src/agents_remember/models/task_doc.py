@@ -200,6 +200,18 @@ class TaskDocResponse(ToolResponse):
     removedOrchestrates: list[str] | None = None
     removedGraphNodes: int | None = None
     masterResolved: bool | None = None
+    # retire_master: the one retirement record (a sprint row, or the proof in the master's own
+    # folder), the state the request found or reached, and what a dry run would still change.
+    retirementRow: dict[str, Any] | None = None
+    retirementProof: dict[str, Any] | None = None
+    retirementResumed: bool | None = None
+    retirementState: str | None = None
+    readinessFacts: list[str] | None = Field(default=None, max_length=1024)
+    replacedLegacyRow: dict[str, Any] | None = None
+    wouldChange: list[str] | None = Field(default=None, max_length=16)
+    wouldWrite: list[str] | None = Field(default=None, max_length=16)
+    removedEdges: list[dict[str, Any]] | None = None
+    taskArchive: dict[str, Any] | None = None
     # linkage_report + get on a sprint: the read-only drift facts.
     linkageFacts: list[dict[str, Any]] | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.

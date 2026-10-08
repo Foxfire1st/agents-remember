@@ -16,7 +16,7 @@ edit never consults the installed distribution version.
 from __future__ import annotations
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.tasks.document import TaskDocument
+from agents_remember.tasks.document import SubTaskRef, TaskDocument
 
 # The topology schema version the graph authoring/migration operations emit.
 TOPOLOGY_SCHEMA_VERSION = "ar-execution-topology/v1"
@@ -39,4 +39,18 @@ def require_serving_topology_schema() -> None:
             f"TaskDocument model lacks topology field(s) {missing!r}; upgrade the served "
             "build before authoring an execution graph -- see "
             f"{_MIGRATION_GUIDE} (served-build preflight)"
+        )
+
+
+def require_serving_retirement_schema() -> None:
+    """Refuse a retirement write whose serving runtime cannot parse a retired sprint row.
+
+    A build that predates master retirement cannot read a sprint holding a retired row, and it
+    has no such preflight to say so: processes started before the install must be restarted.
+    """
+
+    if "retirement" not in SubTaskRef.model_fields:
+        raise TopologyServingBuildError(
+            "task-master-retirement-serving-build-unsupported: restart required: this build "
+            "predates master retirement and cannot parse a sprint that holds a retired row"
         )

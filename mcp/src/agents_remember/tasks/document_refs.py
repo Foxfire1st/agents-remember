@@ -24,6 +24,7 @@ from agents_remember.tasks.document import (
     derived_leaf_placement,
 )
 from agents_remember.tasks.readiness import master_is_terminal
+from agents_remember.tasks.sprint_membership_refusal import missing_master_detail
 from agents_remember.tasks.store import (
     TaskDocSourceSnapshot,
     read_task_doc_with_source,
@@ -42,6 +43,18 @@ class TaskDocumentRefError(ValueError):
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
         super().__init__(detail)
+
+
+class CommandedMasterMissingError(TaskDocumentRefError):
+    """A sprint commands a master that resolves to no live master.
+
+    The detail is product-authored: it names the sprint, the master, where the master was found
+    under ``0_archive/`` and the operation that repairs the sprint. A caller that otherwise bounds
+    a topology failure to its status may therefore show this detail as it is.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("task-execution-graph-membership-invalid", detail)
 
 
 def refuse_segment_nodes_on_atomic_masters(
@@ -207,7 +220,7 @@ class TaskDocumentTopology:
             self.parent(ref)
             return "leaf"
         parents = self._sprint_parents(resolved)
-        if resolved.document.orchestrates:
+        if resolved.document.is_sprint:
             if parents:
                 raise TaskDocumentRefError(
                     "task-document-altitude-ambiguous",
@@ -237,7 +250,7 @@ class TaskDocumentTopology:
             return self._leaf_parent(resolved).ref
         parents = self._sprint_parents(resolved)
         if (
-            resolved.document.orchestrates or resolved.document.executionNature != "organizational"
+            resolved.document.is_sprint or resolved.document.executionNature != "organizational"
         ) and not parents:
             # Standalone sprint, or a standalone master: an explicit atomic nature
             # or the atomic-sequential default (L13-R5e) — either way no parent edge.
@@ -318,12 +331,16 @@ class TaskDocumentTopology:
 
         candidates = overrides or {}
         sprint = self.resolve(sprint_ref, candidates)
-        if sprint.document.kind != "master" or not sprint.document.orchestrates:
+        if not sprint.document.is_sprint:
             raise TaskDocumentRefError(
                 "task-execution-graph-sprint-required",
                 f"execution graph requires an orchestration sprint: {sprint_ref.key}",
             )
         graph = sprint.document.executionGraph
+        if graph is None and not sprint.document.orchestrates:
+            # A sprint that lost its last master commands nothing: there is no membership to
+            # validate and no graph to migrate to until a master is attached again.
+            return ()
         if graph is None:
             raise TaskDocumentRefError(
                 "task-execution-topology-migration-required",
@@ -388,7 +405,7 @@ class TaskDocumentTopology:
                     f"row {row.number!r} links outside the sprint repository: {ref.key}",
                 )
             resolved = self.resolve(ref, candidates)
-            if resolved.document.kind != "master" or resolved.document.orchestrates:
+            if resolved.document.kind != "master" or resolved.document.is_sprint:
                 raise TaskDocumentRefError(
                     "task-sprint-linkage-target-not-a-master",
                     f"row {row.number!r} masterRef must name a commanded master document, "
@@ -619,10 +636,20 @@ class TaskDocumentTopology:
                     candidate.document.title,
                 }
             ]
+            if not matches:
+                raise CommandedMasterMissingError(
+                    missing_master_detail(self.coordination_root, sprint.ref, commanded_name)
+                )
             if len(matches) != 1:
+                found = ", ".join(sorted(candidate.ref.key for candidate in matches))
                 raise TaskDocumentRefError(
                     "task-execution-graph-membership-invalid",
-                    f"orchestrates entry {commanded_name!r} resolves to {len(matches)} masters",
+                    f"orchestrates entry {commanded_name!r} of sprint {sprint.ref.key} resolves "
+                    f"to {len(matches)} masters ({found}); an entry names exactly one. Give the "
+                    "master that is not meant an id and a title of its own (task_doc.set_field "
+                    "on that master), or replace the entry by the folder name of the master that "
+                    "is meant (task_doc.set_field with fields={orchestrates:[...]} on the "
+                    "sprint), before topology use",
                 )
             resolved.append(matches[0])
         refs = [master.ref for master in resolved]

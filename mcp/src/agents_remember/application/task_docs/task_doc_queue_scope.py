@@ -64,7 +64,7 @@ def resolve_projection_scope_union(
         )
         if any(_is_sprint(document) for document in versions):
             scopes.add(change.ref)
-        if any(document.kind == "master" and not document.orchestrates for document in versions):
+        if any(document.kind == "master" and not document.is_sprint for document in versions):
             scopes.update(
                 sprint.ref
                 for sprint in topology.projection_sprints_affected_by_master(
@@ -87,7 +87,7 @@ def resolve_projection_scope_union(
 
 
 def _is_sprint(document: TaskDocument) -> bool:
-    return document.kind == "master" and bool(document.orchestrates)
+    return document.is_sprint
 
 
 def _leaf_projection_scopes(

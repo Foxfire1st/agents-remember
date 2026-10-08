@@ -55,6 +55,7 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     discardedSubTasks: [],
     doneCount: 0,
     totalCount: 0,
+    abandonedCount: 0,
     seriesTokenTotal: 0,
     createdAt: "2026-06-20T09:00:00+00:00",
     sections: [],

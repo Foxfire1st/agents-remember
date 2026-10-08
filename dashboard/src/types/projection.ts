@@ -532,6 +532,7 @@ export interface RouteCoverageNode {
 }
 
 export interface SeriesNode {
+  abandonedCount: number;
   ageSeconds?: number;
   createdAt: string;
   decisions: TaskDecisionNode[];

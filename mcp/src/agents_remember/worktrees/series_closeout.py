@@ -26,6 +26,7 @@ from agents_remember.worktrees.modules.git import (
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
+from agents_remember.worktrees.series_leaf_contracts import exact_atomic_leaf_contracts
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -83,7 +84,7 @@ def publish_series_integration_under_authority[T](
     _require_atomic_master_complete(topology, master_ref)
     current = load_contract(contract.contract_path)
     if current != contract:
-        raise RuntimeError("atomic series contract changed before protected landing")
+        raise RuntimeError(_contract_changed_detail(contract, "re-run the integration preview"))
     _require_atomic_master_complete(topology, master_ref)
     _require_every_atomic_leaf_landed(current)
     return publication()
@@ -106,12 +107,11 @@ def capture_series_checkpoint_refs(contract: WorktreeContract) -> SeriesCheckpoi
 
     if contract.kind != "series":
         raise RuntimeError("atomic series checkpoint capture requires a series contract")
-    code_commit = branch_commit(contract.code_repo_path, contract.code_work_branch)
+    code_commit = _series_branch_tip(contract.code_repo_path, contract.code_work_branch)
     if not code_commit:
         raise CloseoutQueueError(
             "atomic-series-checkpoint-no-code-ref",
-            f"the atomic series code work branch {contract.code_work_branch!r} does not resolve, so "
-            "there is no accumulated line to checkpoint",
+            _unresolved_series_branch_detail(contract, "code", "worktree_checkpoint_landing"),
         )
     if contract.memory_mode != "external":
         return SeriesCheckpointRefs(code_commit=code_commit)
@@ -119,6 +119,54 @@ def capture_series_checkpoint_refs(contract: WorktreeContract) -> SeriesCheckpoi
     return SeriesCheckpointRefs(
         code_commit=code_commit,
         memory_content_commit=memory.memory_commit,
+    )
+
+
+def _contract_changed_detail(contract: WorktreeContract, action: str) -> str:
+    return (
+        f"master {contract.task_id!r}: its contract {contract.contract_path} changed after the "
+        f"landing was prepared, so nothing was landed; {action} against the current contract"
+    )
+
+
+def _memory_repository(series: WorktreeContract) -> Path:
+    """The external memory repository the contract names; its absence is a contract-cell error."""
+
+    if series.memory_repo_path is None:
+        raise RuntimeError(
+            f"master {series.task_id!r} uses external memory but its contract "
+            f"{series.contract_path} has no memory repo_path; set memory.repo_path there and retry"
+        )
+    return series.memory_repo_path
+
+
+def _series_branch_tip(repository: Path, branch: str) -> str:
+    """The commit a series work branch names, or ``""`` when the branch does not resolve.
+
+    Git reports an unresolved ref in its own words, which name neither the master nor the contract
+    cell that holds the branch; every caller refuses in the product's words instead.
+    """
+
+    try:
+        return branch_commit(repository, branch)
+    except RuntimeError:
+        return ""
+
+
+def _unresolved_series_branch_detail(series: WorktreeContract, side: str, retry: str) -> str:
+    """Name the master, the branch that does not resolve, the cell that names it, and the repair."""
+
+    repository, branch = (
+        (series.code_repo_path, series.code_work_branch)
+        if side == "code"
+        else (series.memory_repo_path, series.memory_work_branch)
+    )
+    return (
+        f"master {series.task_id!r}: its series {side} branch {branch!r} does not resolve to a "
+        f"commit in {repository}, so the master's {side} line cannot be read. The branch is named "
+        f"by the {side}.work_branch cell of {series.contract_path}; restore that branch at the "
+        f"master's last {side} commit, or correct the cell if it misnames the branch, then retry "
+        f"{retry}"
     )
 
 
@@ -139,8 +187,8 @@ def require_series_checkpoint_authority(contract: WorktreeContract) -> None:
     if topology.resolve(master_ref).document.status == "Completed":
         raise CloseoutQueueError(
             "atomic-series-checkpoint-master-complete",
-            "this atomic master is already Completed; land it with worktree_integrate, whose route "
-            "records a completed integration, rather than with the checkpoint route",
+            f"master {master_ref.key} is already Completed; land it with worktree_integrate, whose "
+            "route records a completed integration, rather than with the checkpoint route",
         )
 
 
@@ -173,7 +221,7 @@ def publish_series_checkpoint_under_authority[T](
     require_series_checkpoint_authority(contract)
     current = load_contract(contract.contract_path)
     if current != contract:
-        raise RuntimeError("atomic series contract changed before protected landing")
+        raise RuntimeError(_contract_changed_detail(contract, "re-run worktree_checkpoint_landing"))
     _require_checkpoint_candidate_unchanged(current, expected)
     return publication()
 
@@ -187,7 +235,8 @@ def _require_checkpoint_candidate_unchanged(
     if live != expected:
         raise CloseoutQueueError(
             "atomic-series-checkpoint-candidate-moved",
-            "the atomic series candidate refs moved after this checkpoint captured them: captured "
+            f"master {contract.task_id!r}: the atomic series candidate refs moved after this "
+            "checkpoint captured them: captured "
             f"code={expected.code_commit} memory={expected.memory_content_commit}, live "
             f"code={live.code_commit} memory={live.memory_content_commit}. Re-run "
             "worktree_checkpoint_landing so the new refs are captured before they land",
@@ -199,28 +248,7 @@ def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
 
 
 def _exact_atomic_landing_chain(series: WorktreeContract) -> list[WorktreeContract]:
-    expected, _sprint_ref = _atomic_leaf_documents(series)
-    contracts: dict[str, WorktreeContract] = {}
-    for path in sorted((series.task_root / "enclosures").glob("*/series-contract.md")):
-        leaf = load_contract(path)
-        if (
-            leaf.kind != "leaf"
-            or not leaf.leaf_id
-            or leaf.leaf_id in contracts
-            or leaf.contract_path.resolve() != path.resolve()
-        ):
-            raise CloseoutQueueError(
-                "atomic-series-leaf-contract-set-invalid",
-                f"atomic series has an invalid or duplicate leaf enclosure: {path}",
-            )
-        contracts[leaf.leaf_id] = leaf
-    if set(contracts) != set(expected):
-        raise CloseoutQueueError(
-            "atomic-series-leaf-contract-set-incomplete",
-            "atomic series closeout requires one exact enclosure for every canonical leaf: "
-            f"expected={sorted(expected)!r}, found={sorted(contracts)!r}",
-        )
-    return _require_exact_atomic_landing_chain(series, contracts)
+    return _require_exact_atomic_landing_chain(series, exact_atomic_leaf_contracts(series))
 
 
 def _require_exact_atomic_landing_chain(
@@ -275,10 +303,32 @@ def _ordered_atomic_landing_chain(
         if len(next_ids) != 1:
             raise CloseoutQueueError(
                 "atomic-series-leaf-chain-invalid",
-                "atomic series leaves do not form one exact code-and-memory landing chain",
+                _unordered_leaves_detail(series, remaining),
             )
         ordered.append(remaining.pop(next_ids[0]))
     return ordered
+
+
+def _unordered_leaves_detail(
+    series: WorktreeContract, remaining: dict[str, WorktreeContract]
+) -> str:
+    """Name the leaves whose landings cannot be ordered, and what clears it."""
+
+    unordered = [
+        f"{first_id!r} and {second_id!r}"
+        for index, (first_id, first) in enumerate(remaining.items())
+        for second_id, second in list(remaining.items())[index + 1 :]
+        if not _leaf_landing_precedes(series, first, second)
+        and not _leaf_landing_precedes(series, second, first)
+    ]
+    named = "; ".join(unordered) if unordered else f"leaves {sorted(remaining)!r}"
+    return (
+        f"master {series.task_id!r}: the landings of {named} are not ordered on the master's "
+        "code-and-memory line (one pair recorded by two enclosures, or landings on different "
+        "lines), so the leaves do not form one exact landing chain. Give each of those enclosures "
+        "its own landing pair in the integrated_code_commit and integrated_memory_content_commit "
+        "cells of its series-contract.md, then retry closeout"
+    )
 
 
 def _leaf_landing_precedes(
@@ -307,11 +357,11 @@ def _leaf_landing_precedes(
         return False
     if series.memory_mode != "external":
         return True
-    assert series.memory_repo_path is not None
+    memory_repo = _memory_repository(series)
     if same_memory:
         return True
     return is_ancestor(
-        series.memory_repo_path,
+        memory_repo,
         earlier.integrated_memory_content_commit,
         later.integrated_memory_content_commit,
     )
@@ -330,22 +380,35 @@ def _require_chain_origin(
     to start at or after the chain's own origin.
     """
 
+    if not ordered:
+        return
     root = ordered[0]
     if series.sync_log:
         origin_code, origin_memory = _series_pre_sync_base(series)
-        _require_same_line(series.code_repo_path, root.code_base_commit, origin_code, side="code")
+        _require_same_line(
+            series.code_repo_path,
+            root.code_base_commit,
+            origin_code,
+            _Leg(side="code", leaf_id=root.leaf_id),
+        )
         if series.memory_mode == "external":
-            assert series.memory_repo_path is not None
             _require_same_line(
-                series.memory_repo_path, root.memory_base_commit, origin_memory, side="memory"
+                _memory_repository(series),
+                root.memory_base_commit,
+                origin_memory,
+                _Leg(side="memory", leaf_id=root.leaf_id),
             )
     elif root.code_base_commit != series.code_base_commit or (
         series.memory_mode == "external" and root.memory_base_commit != series.memory_base_commit
     ):
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
-            "atomic series leaves do not form one exact code-and-memory landing chain: the oldest "
-            "leaf does not start at the recorded base",
+            f"master {series.task_id!r}: the oldest landed leaf {root.leaf_id!r} starts at code "
+            f"{root.code_base_commit} / memory {root.memory_base_commit}, not at the master's "
+            f"recorded base code {series.code_base_commit} / memory {series.memory_base_commit}. "
+            "Correct the code_base_commit and memory_base_commit cells of that leaf's "
+            "series-contract.md or of the master's, or run worktree_sync on the master, then "
+            "retry closeout",
         )
     for leaf in ordered:
         _require_leaf_starts_on_the_chain(series, root, leaf)
@@ -361,7 +424,15 @@ def _series_pre_sync_base(series: WorktreeContract) -> tuple[str, str]:
     )
 
 
-def _require_same_line(repository: Path, left: str, right: str, *, side: str) -> None:
+@dataclass(frozen=True)
+class _Leg:
+    """One side of the pair, and the oldest landed leaf whose base is being proved on it."""
+
+    side: str
+    leaf_id: str
+
+
+def _require_same_line(repository: Path, left: str, right: str, leg: _Leg) -> None:
     """Refuse two positions that are not on one line, in either direction."""
 
     if (
@@ -372,7 +443,9 @@ def _require_same_line(repository: Path, left: str, right: str, *, side: str) ->
         return
     raise CloseoutQueueError(
         "atomic-series-leaf-chain-invalid",
-        f"atomic series {side} position {left} is not on the master's own line at {right}",
+        f"atomic leaf {leg.leaf_id!r} {leg.side} base {left} is not on the master's own line at "
+        f"{right}, the position its first sync advanced from. Correct that leaf's recorded base "
+        "in its series-contract.md, or run worktree_sync on the master, then retry closeout",
     )
 
 
@@ -388,17 +461,21 @@ def _require_leaf_starts_on_the_chain(
             "atomic-series-leaf-chain-invalid",
             f"atomic leaf {leaf.leaf_id!r} does not start on the series code line: its recorded "
             f"base {leaf.code_base_commit} is not descended from the chain origin "
-            f"{root.code_base_commit}",
+            f"{root.code_base_commit} (leaf {root.leaf_id!r}). Correct code_base_commit in that "
+            "leaf's series-contract.md, or sync the leaf onto the master line, then retry closeout",
         )
     if series.memory_mode != "external":
         return
-    assert series.memory_repo_path is not None
-    if not is_ancestor(series.memory_repo_path, root.memory_base_commit, leaf.memory_base_commit):
+    if not is_ancestor(
+        _memory_repository(series), root.memory_base_commit, leaf.memory_base_commit
+    ):
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
             f"atomic leaf {leaf.leaf_id!r} does not start on the series memory line: its recorded "
             f"base {leaf.memory_base_commit} is not descended from the chain origin "
-            f"{root.memory_base_commit}",
+            f"{root.memory_base_commit} (leaf {root.leaf_id!r}). Correct memory_base_commit in "
+            "that leaf's series-contract.md, or sync the leaf onto the master line, then retry "
+            "closeout",
         )
 
 
@@ -418,13 +495,30 @@ def _require_landing_spine_side(
 
     landings, bases, recorded_base, repository, branch = _spine_facts(series, ordered, side=side)
     positions = _landing_source_positions(series, ordered, side=side)
-    tip = branch_commit(repository, branch)
+    tip = _series_branch_tip(repository, branch)
+    if not tip:
+        raise CloseoutQueueError(
+            "atomic-series-ref-unresolved",
+            _unresolved_series_branch_detail(series, side, "closeout"),
+        )
+    if not ordered:
+        origin = (
+            _series_pre_sync_base(series)[0 if side == "code" else 1]
+            if series.sync_log
+            else recorded_base
+        )
+        _require_admitted_step(
+            repository, origin, tip, positions, _SpineStep(side, "the series ref")
+        )
+        return
     previous = landings[0]
     for index, leaf in enumerate(ordered):
         if not is_ancestor(repository, landings[index], tip):
             raise CloseoutQueueError(
                 "atomic-series-leaf-not-landed",
-                f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series {side} ref",
+                f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series {side} ref; "
+                f"land its enclosure on the master's {side} line with worktree_integrate, or "
+                "correct its recorded integration in its series-contract.md, then retry closeout",
             )
         if index:
             _require_admitted_step(
@@ -439,7 +533,9 @@ def _require_landing_spine_side(
         if not recorded_base or not is_ancestor(repository, recorded_base, tip):
             raise CloseoutQueueError(
                 "atomic-series-leaf-chain-invalid",
-                f"atomic series {side} ref does not descend from the recorded base {recorded_base}",
+                f"master {series.task_id!r}: the series {side} ref {branch} does not descend from "
+                f"the recorded base {recorded_base}; restore the ref or correct the master's "
+                f"recorded {side} base in its series-contract.md, then retry closeout",
             )
         _require_admitted_step(
             repository, landings[-1], tip, positions, _SpineStep(side, "the series ref")
@@ -462,12 +558,11 @@ def _spine_facts(
             series.code_repo_path,
             series.code_work_branch,
         )
-    assert series.memory_repo_path is not None
     return (
         [leaf.integrated_memory_content_commit for leaf in ordered],
         [leaf.memory_base_commit for leaf in ordered],
         series.memory_base_commit,
-        series.memory_repo_path,
+        _memory_repository(series),
         series.memory_work_branch,
     )
 
@@ -515,7 +610,9 @@ def _require_admitted_step(
     if not is_ancestor(repository, earlier, later):
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
-            f"atomic series {step.side} ref does not carry {step.step} in the leaf landing order",
+            f"atomic series {step.side} ref does not carry {step.step} in the leaf landing order "
+            f"({earlier} is not an ancestor of {later}); repair that landing record in the "
+            "enclosure's series-contract.md or the ref, then retry closeout",
         )
     revision_args = [
         "rev-list",
@@ -539,7 +636,9 @@ def _require_admitted_step(
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
             f"atomic series {step.side} ref adds history beyond the exact leaf landing chain and the "
-            f"reconciled source line at {step.step}: {', '.join(foreign[:5])}",
+            f"reconciled source line at {step.step}: {', '.join(foreign[:5])}. Move those "
+            "commits off the master line (or land them through a leaf), or record the official "
+            "position they came from with worktree_sync, then retry closeout",
         )
 
 
@@ -602,47 +701,6 @@ def _landing_source_positions(
     return tuple(sorted(position for position in positions if position))
 
 
-def _atomic_leaf_documents(
-    series: WorktreeContract,
-) -> tuple[dict[str, TaskDocumentRef], TaskDocumentRef | None]:
-    topology = TaskDocumentTopology(series.coordination_root)
-    master_ref = topology.canonical_ref(series.repo_name, series.task_root / "task.json")
-    master = topology.resolve(master_ref)
-    expected: dict[str, TaskDocumentRef] = {}
-    paths: set[str] = set()
-    for row in master.document.subTasks:
-        if not row.file or row.number in expected:
-            raise CloseoutQueueError(
-                "atomic-series-leaf-task-set-invalid",
-                "atomic series requires unique subtask rows with exact task-document files",
-            )
-        leaf_path = (master.path.parent / row.file).with_suffix(".json")
-        leaf_ref = topology.canonical_ref(series.repo_name, leaf_path)
-        if leaf_ref.path in paths:
-            raise CloseoutQueueError(
-                "atomic-series-leaf-task-set-invalid",
-                "atomic series subtask rows resolve to a duplicate task document",
-            )
-        leaf = topology.resolve(leaf_ref)
-        if (
-            leaf.document.kind == "master"
-            or leaf.document.id != row.number
-            or topology.parent(leaf_ref) != master_ref
-        ):
-            raise CloseoutQueueError(
-                "atomic-series-leaf-task-set-invalid",
-                f"atomic series row {row.number!r} does not bind one exact owned leaf",
-            )
-        expected[row.number] = leaf_ref
-        paths.add(leaf_ref.path)
-    if not expected:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-task-set-invalid",
-            "atomic series closeout requires at least one exact owned leaf",
-        )
-    return expected, topology.parent(master_ref)
-
-
 def _require_atomic_leaf_landed(
     series: WorktreeContract,
     leaf: WorktreeContract,
@@ -650,14 +708,18 @@ def _require_atomic_leaf_landed(
     if not _atomic_leaf_code_matches(series, leaf):
         raise CloseoutQueueError(
             "atomic-series-leaf-not-landed",
-            f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series code ref",
+            f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series code ref; land its "
+            "enclosure with worktree_integrate or correct its recorded integration in its "
+            "series-contract.md, then retry closeout",
         )
     if series.memory_mode != "external":
         return
     if not _atomic_leaf_memory_matches(series, leaf):
         raise CloseoutQueueError(
             "atomic-series-leaf-memory-not-landed",
-            f"atomic leaf {leaf.leaf_id!r} has not landed its exact external-memory pair",
+            f"atomic leaf {leaf.leaf_id!r} has not landed its exact external-memory pair; land its "
+            "enclosure with worktree_integrate or correct its recorded memory integration in its "
+            "series-contract.md, then retry closeout",
         )
 
 
@@ -740,7 +802,9 @@ def _require_atomic_master_complete(
     if nature != "atomic":
         raise CloseoutQueueError(
             "atomic-series-closeout-task-invalid",
-            "series closeout requires the canonical atomic master task",
+            f"master {master_ref.key} has execution nature {nature!r}, but series closeout "
+            "requires the canonical atomic master task; set that master's executionNature to "
+            "atomic with task_doc, then retry closeout",
         )
     blockers = completion_blockers(master.document)
     # ``!= "Completed"`` is deliberate here and must stay: closeout proves a *completion* fact.
@@ -750,12 +814,12 @@ def _require_atomic_master_complete(
         if master.document.status == "abandoned":
             raise CloseoutQueueError(
                 "atomic-series-closeout-master-abandoned",
-                "this atomic master is abandoned, not completed; an abandoned master is reclaimed "
+                f"atomic master {master_ref.key} is abandoned, not completed; an abandoned master is reclaimed "
                 "with worktree_abandon and is never closed out",
             )
         raise CloseoutQueueError(
             "atomic-series-closeout-master-incomplete",
-            f"atomic master closeout requires exact completion facts: {blockers!r}",
+            f"atomic master {master_ref.key} status={master.document.status!r} requires exact completion facts: {blockers!r}; finish the named rows and set its status Completed with task_doc before closeout",
         )
     return master
 
@@ -769,26 +833,39 @@ def refuse_series_workbench_commit(contract: WorktreeContract) -> None:
         (contract.code_repo_path, contract.code_work_branch, ())
     ]
     if contract.memory_mode == "external":
-        if contract.memory_repo_path is None:
-            raise RuntimeError("external-memory series closeout requires a memory repository")
-        branches.append((contract.memory_repo_path, contract.memory_work_branch, ("memory.md",)))
+        branches.append((_memory_repository(contract), contract.memory_work_branch, ("memory.md",)))
     for repository, branch, exclude_paths in branches:
         for checkout in branch_worktree_owners(repository, branch):
             if worktree_dirty(checkout, exclude_paths=exclude_paths):
                 raise RuntimeError(
-                    "series/master closeout cannot create code or memory commits on "
-                    "its integration worktree; land all content through closed leaves first"
+                    f"master {contract.task_id!r}: closeout cannot create code or memory commits "
+                    f"on its integration worktree {checkout} (branch {branch}), which has "
+                    "uncommitted changes; deliver them through a closed leaf and its Owner's "
+                    "publication, or discard them, then retry closeout"
                 )
 
 
 def series_memory_closeout(contract: WorktreeContract, code_commit: str) -> MemoryCloseoutOutcome:
     """Capture the actual memory output ref beside the exact series code candidate."""
 
-    if contract.memory_repo_path is None:
-        raise RuntimeError("external-memory series closeout requires a memory repository")
-    if branch_commit(contract.code_repo_path, contract.code_work_branch) != code_commit:
-        raise RuntimeError("atomic code ref moved before its memory candidate was captured")
-    memory_commit = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-    if not is_ancestor(contract.memory_repo_path, contract.memory_base_commit, memory_commit):
-        raise RuntimeError("atomic memory ref does not descend from its recorded source base")
+    memory_repo = _memory_repository(contract)
+    if _series_branch_tip(contract.code_repo_path, contract.code_work_branch) != code_commit:
+        raise RuntimeError(
+            f"master {contract.task_id!r}: its code branch {contract.code_work_branch} moved "
+            "before the memory candidate was captured; retry closeout so both refs are captured "
+            "together"
+        )
+    memory_commit = _series_branch_tip(memory_repo, contract.memory_work_branch)
+    if not memory_commit:
+        raise RuntimeError(
+            _unresolved_series_branch_detail(
+                contract, "memory", "the closeout or checkpoint landing"
+            )
+        )
+    if not is_ancestor(memory_repo, contract.memory_base_commit, memory_commit):
+        raise RuntimeError(
+            f"master {contract.task_id!r}: its memory branch {contract.memory_work_branch} does "
+            f"not descend from the recorded memory base {contract.memory_base_commit}; restore the "
+            "branch or correct memory base_commit in its series-contract.md, then retry closeout"
+        )
     return MemoryCloseoutOutcome(memory_commit=memory_commit)

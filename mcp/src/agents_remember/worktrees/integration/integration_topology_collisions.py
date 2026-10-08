@@ -190,7 +190,7 @@ def _is_standalone_atomic_master(
 ) -> bool:
     observed = (
         master.ref in commanded,
-        bool(master.document.orchestrates),
+        master.document.is_sprint,
         effective_execution_nature(master.document, None),
     )
     return observed == (False, False, "atomic")
