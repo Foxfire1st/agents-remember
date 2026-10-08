@@ -63,6 +63,7 @@ unit-regression = [
   "mcp/tests/test_curator_realization_authoring.py",
   "mcp/tests/test_curator_scope.py",
   "mcp/tests/test_dashboard_host.py",
+  "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_dispatch_agent_ambient.py",
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_environment_reconstruction.py",

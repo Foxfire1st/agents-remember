@@ -559,7 +559,7 @@ class RoleMessageTests(RoleToolsTestCase):
         self.runtime.calls.clear()
         self.refusal(self.message(None, agent_id=worker), "caller-has-no-binding")
         unconfigured = send_role_message(
-            runtime_config(self.root, configured=False),
+            runtime_config(self.root / "unconfigured", configured=False),
             RoleMessageCall(text="report your plan", agent_id=worker),
             environment=self.architect.environment(),
         )

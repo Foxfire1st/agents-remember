@@ -399,5 +399,4 @@ only the sealed outstanding IDs and their worker fixes, records a fixed/unfixed 
 every preceding ID, and retains earlier accepted adjudications rather than opening a new full
 review. Outside-list observations, changed deliveries, new routes, and newly discovered criteria
 return to the developer rather than becoming successor findings. A successor never adds, reopens,
-or resets an issue. At three rounds, ask the developer directly, wait for explicit authorization,
-and record the instruction before any extra review.
+or resets an issue. At three rounds, request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent. Wait for explicit authorization and record the developer's quoted words before any extra review.

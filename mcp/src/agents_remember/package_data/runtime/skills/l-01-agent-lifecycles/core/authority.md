@@ -143,7 +143,7 @@ the developer is effectively steering the work already in hand.
 - **Future queue** — it names a later release, a separate subsystem, a large scope jump, work whose
   correctness depends on another unfinished master, or a change that would reorder already-running
   leaves. Record it in the right durable queue or ask the owning seat to plan it later.
-- If the intent is genuinely ambiguous after reading the queue, ask the developer directly. Do not
+- If the intent is genuinely ambiguous after reading the queue, send the question to your parent with `role_message` on `agents-remember-task`; without a parent, ask in your own chat. Do not
   silently downgrade a close/current/small change into future speak, and do not silently expand the
   active leaf when the fit is unclear.
 

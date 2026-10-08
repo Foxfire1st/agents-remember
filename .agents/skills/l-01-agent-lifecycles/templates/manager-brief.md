@@ -41,9 +41,10 @@ master's leaf loop to the master-exit seam, then hand over.
 - Structural admission has created or validated the applicable edge from the canonical sprint
   document's `integrationBranch`. Branch names and commit ids stay in the task/contract plane;
   they are not inputs this manager retains or reconciles from its prompt.
-- Before dispatching a leaf, use the task-bound `worktree_status` / `worktree_start` route. If the
-  source moved, follow its contract-addressed `worktree_sync` recovery and re-read status; never
-  infer a source branch from the checkout and never carry a prior super tip forward yourself.
+- Start each leaf role through `role_start`; that operation prepares its admitted task environment.
+  No separate worktree preparation precedes it. If a start reports moved source, follow the
+  contract-addressed `worktree_sync` recovery it names and re-read status; never infer a source
+  branch from the checkout or carry a prior super tip forward yourself.
 
 ## Optional review phase packet
 - Review mode: `<baseline | fix-verification | none>` for the current review purpose.
@@ -196,8 +197,7 @@ to the developer.
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document,
   carry the exact requested review mode, and preserve the three-round monotonic rule: review 1
-  seals the fixed finding list; reviews 2 and 3 verify only that list and shrink it to zero; after
-  round 3 ask the developer directly. The verdict is evidence, not a routine transaction gate.
+  seals the fixed finding list; reviews 2 and 3 verify only that list and shrink it to zero; after round 3 request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent, and record the developer's quoted answer before acting. The verdict is evidence, not a routine transaction gate.
   Raise `master-handover-approval` only as required by the active gate policy; the orchestrator
   decides the matching open gate structurally.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:

@@ -52,9 +52,7 @@ requested.**
 - Reviews 2 and 3 verify **only** the original listed issues. Any outside-list matter goes to the
   developer and is not a successor finding.
 - **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
-  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, ask
-  the developer directly and wait for explicit authorization; record that instruction before any
-  authorized extra work. **Do not spin an unapproved round, split the scope, or create a new finding
+  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent; wait for explicit authorization and record the developer's quoted words before any authorized extra work. **Do not spin an unapproved round, split the scope, or create a new finding
   list.** No agent may self-authorize an extra round, and no code path needs to prove human
   authorship or build a separate authentication mechanism.
 

@@ -457,12 +457,16 @@ def _compile_handover(
             ),
             "ownerRelation": _owner_relation(started_by, role=context.role),
             "developerQuestions": (
-                "Because another agent started this coordinating role, send what needs the "
+                "Because another agent started this role, send what needs the "
                 "developer's decision to that parent with role_message on "
                 f"agents-remember-task, addressed to agent {started_by.agent_id}. "
                 "This rule takes precedence over generic own-chat guidance for this case. "
-                "Keep the work going; do not end your turn on the question."
-                if context.role in {"orchestrator", "manager"} and started_by is not None
+                "Say what you hold back, and what you recommend and why. "
+                "Keep working on everything independent of the answer; do not end your turn "
+                "on the question or hold a wait for the developer. When no independent work "
+                "remains, record your state in your report and say you await your parent's "
+                "message; put no question to the developer in your own chat."
+                if started_by is not None
                 else (
                     "Put every question for the developer in your own chat: write it as your reply "
                     "in this session and end your turn. The developer reads this chat in the "
@@ -613,10 +617,24 @@ def _owner_relation(started_by: StartingAgent | None, *, role: LauncherRole) -> 
             "The selected AR sprint/master/leaf is work scope; the parent is the agent "
             "named here and no other."
         )
+    if role in LEAF_ROLES:
+        return (
+            f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
+            "role and is its parent in Paseo. Send that agent only questions requiring the "
+            "developer's decision or a decision above the leaf, and the start, authority, "
+            "recovery, limit, disagreement, sync and closeout-readiness occasions assigned "
+            f"by your role, with {ROLE_MESSAGE_TOOL}, addressed to its agent id. Hand-overs, "
+            "results and questions about another leaf seat's work go directly to the seat "
+            "concerned, using the exact sibling role and task references in "
+            "leafSeats.roleMessageArguments. Send no routine result to the parent. "
+            "The selected AR sprint/master/leaf is work scope; the parent is the agent "
+            "named here and no other."
+        )
     return (
         f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
-        "role and is its parent in Paseo. Send that agent your questions about the assignment "
-        f"and your result with {ROLE_MESSAGE_TOOL}, addressed to its agent id. The selected AR "
+        "role and is its parent in Paseo. Send that agent your questions about the assignment, "
+        f"questions requiring the developer's decision, and your result with {ROLE_MESSAGE_TOOL}, "
+        "addressed to its agent id. The selected AR "
         "sprint/master/leaf is work scope; the parent is the agent named here and no other."
     )
 

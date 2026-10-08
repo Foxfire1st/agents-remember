@@ -197,8 +197,7 @@ to the developer.
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document,
   carry the exact requested review mode, and preserve the three-round monotonic rule: review 1
-  seals the fixed finding list; reviews 2 and 3 verify only that list and shrink it to zero; after
-  round 3 ask the developer directly. The verdict is evidence, not a routine transaction gate.
+  seals the fixed finding list; reviews 2 and 3 verify only that list and shrink it to zero; after round 3 request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent, and record the developer's quoted answer before acting. The verdict is evidence, not a routine transaction gate.
   Raise `master-handover-approval` only as required by the active gate policy; the orchestrator
   decides the matching open gate structurally.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:

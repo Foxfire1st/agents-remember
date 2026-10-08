@@ -309,6 +309,105 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         )
         for path, statement in RETIRED_LEAF_HANDOVER_WORDING
     ),
+    RetiredCurationStatement(
+        statement="Put questions for the developer in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/worker.md",),
+        probe="Put questions for the developer in your own chat.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Put questions requiring the developer's decision in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/worker.md",),
+        probe="Put questions requiring the developer's decision in your own chat.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Questions requiring the developer's decision stay in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/reviewer.md",),
+        probe="Questions requiring the developer's decision stay in your own chat.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="At that limit ask the developer directly, wait for explicit authorization,",
+        sources=("skills/l-01-agent-lifecycles/roles/reviewer.md",),
+        probe="At that limit ask the developer directly, wait for explicit authorization,",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Developer questions stay in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/curator.md",),
+        probe="Developer questions stay in your own chat.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Return the report and ask questions in your own chat; when a parent agent started you, also tell it",
+        sources=("skills/l-01-agent-lifecycles/roles/system-specialist.md",),
+        probe="Return the report and ask questions in your own chat; when a parent agent started you, also tell it",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Put questions requiring the developer's decision in your own chat",
+        sources=("skills/l-01-agent-lifecycles/operations/review.md",),
+        probe="Put questions requiring the developer's decision in your own chat",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Developer decisions stay in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/operations/curation.md",),
+        probe="Developer decisions stay in your own chat.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Put questions for the developer in your own chat; peer questions and results go through `role_message` on `agents-remember-task`.",
+        sources=("skills/l-01-agent-lifecycles/operations/orientation.md",),
+        probe="Put questions for the developer in your own chat; peer questions and results go through `role_message` on `agents-remember-task`.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="ask the developer directly and wait for explicit authorization; record that instruction before any authorized extra work.",
+        sources=("skills/l-01-agent-lifecycles/core/loop.md",),
+        probe="ask the developer directly and wait for explicit authorization; record that instruction before any authorized extra work.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="ask the developer directly.",
+        sources=("skills/l-01-agent-lifecycles/core/authority.md",),
+        probe="ask the developer directly.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="At three rounds, ask the developer directly, wait for explicit authorization, and record the instruction before any extra review.",
+        sources=("skills/l-01-agent-lifecycles/templates/verdict.md",),
+        probe="At three rounds, ask the developer directly, wait for explicit authorization, and record the instruction before any extra review.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="after round 3 ask the developer directly.",
+        sources=("skills/l-01-agent-lifecycles/templates/manager-brief.md",),
+        probe="after round 3 ask the developer directly.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="Put every question for the developer in your own chat, as your reply in this session; the developer reads it there and answers there.",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="Put every question for the developer in your own chat, as your reply in this session; the developer reads it there and answers there.",
+        reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
+    ),
+    RetiredCurationStatement(
+        statement="As the exception, an Orchestrator or Manager started by another agent sends what needs the developer's decision to that parent with `role_message` on `agents-remember-task`, following its handover's developerQuestions rule, keeps working and does not end its turn on the question; this exception takes precedence over the own-chat sentence for those two roles with a parent.",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="As the exception, an Orchestrator or Manager started by another agent sends what needs the developer's decision to that parent with `role_message` on `agents-remember-task`, following its handover's developerQuestions rule, keeps working and does not end its turn on the question; this exception takes precedence over the own-chat sentence for those two roles with a parent.",
+        reason="MIK-R93@v1: parent routing applies to every parented role, not only coordinators",
+    ),
+    RetiredCurationStatement(
+        statement="Do not forward role agents' messages or send a notice of a landing.",
+        sources=(
+            "skills/l-01-agent-lifecycles/roles/manager.md",
+            "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+        ),
+        probe="Do not forward role agents' messages",
+        reason="MIK-R93@v1: developer questions and permission notices must be forwarded through the parent chain",
+    ),
 )
 
 #: The loop-gate field pairing the shipped tool retired from its own instruction prose. The

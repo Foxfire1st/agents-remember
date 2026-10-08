@@ -514,6 +514,7 @@ def _archived(agent_id: str) -> _Refused:
         "recipient-archived",
         f"Agent {agent_id} is archived. A message never un-archives an agent.",
         f"Start the role again with {ROLE_START_TOOL} if the work continues, or ask the "
+        "parent with role_message on agents-remember-task; without a parent, ask the "
         "developer in your own chat.",
         recipientAgentId=agent_id,
     )
@@ -783,7 +784,9 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
                 "scope-check-failed",
                 str(error),
                 f"The recipient's task scope changed since its launch. Start the role again "
-                f"with {ROLE_START_TOOL} for the current scope, or ask the developer.",
+                f"with {ROLE_START_TOOL} for the current scope, or ask your parent with "
+                "role_message on agents-remember-task; without a parent, ask the developer "
+                "in your own chat.",
                 recipientAgentId=recipient.agent_id,
             ) from error
     outcome = resume_agent(config, recipient.agent_id)
@@ -800,7 +803,8 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
         raise _Refused(
             "recipient-cannot-be-resumed",
             outcome.refusal or "The host left the recipient's session closed.",
-            "Nothing was relaunched. Tell the developer in your own chat; a new agent comes "
+            "Nothing was relaunched. Tell your parent with role_message on agents-remember-task; "
+            "without a parent, tell the developer in your own chat. A new agent comes "
             f"only from a new {ROLE_START_TOOL}.",
             recipientAgentId=recipient.agent_id,
         )
@@ -835,7 +839,8 @@ def _undelivered(agent_id: str, delivery: dict[str, Any]) -> _Refused:
         return _Refused(
             "recipient-cannot-be-resumed",
             f"The session of agent {agent_id} closed again before the message was delivered.",
-            "Send the message again; if it repeats, tell the developer in your own chat.",
+            "Send the message again; if it repeats, tell your parent with role_message on "
+            "agents-remember-task; without a parent, tell the developer in your own chat.",
             recipientAgentId=agent_id,
         )
     return _not_found(f"The host has no agent {agent_id}.", recipientAgentId=agent_id)

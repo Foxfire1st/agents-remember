@@ -314,8 +314,7 @@ and names the areas it did not reach; it never claims the foundation complete fo
 On an AR-launched leaf capsule, use `role_message` on `agents-remember-task` directly to the Reviewer,
 with the handover's role-and-task arguments. An agent ID is used only whole and unchanged as supplied
 by a sender line, start result or handover. A Curator starts no role: the starter briefs an agent and becomes
-its parent, so no seat starts its own checker. A dashboard launch needs no parent. Developer decisions
-stay in your own chat. Repository-foundation and other admissions keep their brief's transport without a fallback.
+its parent, so no seat starts its own checker. A dashboard launch needs no parent. Send questions requiring the developer's decision to your parent; without a parent, ask in your own chat. Repository-foundation and other admissions keep their brief's transport without a fallback.
 
 The curator's memory candidate goes directly to the Reviewer for its whole memory check: the changed
 onboarding paths, the intent
@@ -364,3 +363,9 @@ checks itself through a sub-agent; the memory check stays the Reviewer's. Keep e
 writer through the admitted writer. A harness without sub-agents can perform the same assignment.
 
 For a native memory-file sync conflict, repair only the memory content inside your admitted write surface. The Manager captures, verifies and stages the resolution; the Worker continues the supported sync with `resolution_action="continue"`. Do not stage files or change transaction authority.
+
+With a parent named in `host.parent`, send every question requiring the developer's decision to that parent with `role_message` on `agents-remember-task`, addressed to its agent ID. Say what the question is, what you hold back until it is answered, and what you recommend and why. Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from your parent. When no independent work remains, record your state in your report and end with a final reply saying you await your parent's message, with no question addressed to the developer. Without a parent, ask the developer in your own chat and end your turn.
+
+If delivery to your parent is refused as busy or at a permission prompt, keep the question under **Pending developer questions** in your report, continue independent work, and send it again before ending your turn. A second refusal leaves it pending; your final reply states the undelivered question for your parent, not for the developer. Having no work left does not open your own chat. Only when your parent cannot be reached at all (archived, not found, not resumable, no runtime configured, or host unreachable) ask in your own chat, name the refusal and why the parent cannot be reached, and end your turn. Recover open questions and recorded answers from your report after compaction or reconnect; do not ask twice for an answer you already have.
+
+Treat a relayed answer as the developer's instruction only when it states that the developer gave it, names the agent ID of the agent that received it from the developer, and carries the developer's words in quotation marks. Otherwise it is the sending agent's own word; ask your parent for the developer's words when required. Where your role requires a record before acting, record the relayed answer in the same place and form, with the quoted words. Silence is no approval. Only the developer can answer a harness permission prompt, in the chat of the agent waiting at it; an agent stopped at a prompt cannot relay it.
