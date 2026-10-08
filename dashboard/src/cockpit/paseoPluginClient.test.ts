@@ -30,6 +30,7 @@ import {
   restoreStandaloneLook,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/look";
 import { currentPage } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
+import { clearEmbedPageMode, setEmbedPageMode } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/sidebar";
 import { startClientPart } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/start";
 import {
   CYCLED_IN_FRAME,
@@ -427,15 +428,18 @@ describe("the control channel inside the frame", () => {
     expect(answers(load.posted)).toEqual([{ source: "ar-plugin", type: "shown", agentId: "live", workspaceId: "wks_leaf" }]);
 
     load.posted.length = 0;
-    for (const agentId of ["archived", "gone", "broken"]) load.receive({ type: "ar.open", agentId });
+    for (const agentId of ["archived", "gone", "broken"]) {
+      load.receive({ type: "ar.open", agentId });
+      await flush();
+    }
     load.receive({ type: "ar.open" });
     await flush();
     expect(opened).toHaveLength(1);
     expect(answers(load.posted).map((answer) => [answer.type, answer.code, answer.agentId])).toEqual([
-      ["error", "open-failed", undefined],
       ["error", "agent-archived", "archived"],
       ["error", "agent-not-found", "gone"],
       ["error", "open-failed", "broken"],
+      ["error", "open-failed", undefined],
     ]);
   });
 
@@ -453,6 +457,7 @@ describe("the control channel inside the frame", () => {
 
     load.posted.length = 0;
     load.receive({ type: "ar.open", workspaceId: "wks_doesnotexist0000" });
+    await flush();
     load.receive({ type: "ar.open", workspaceId: "wks_broken" });
     await flush();
     expect(opened).toHaveLength(1);
@@ -460,6 +465,38 @@ describe("the control channel inside the frame", () => {
       ["error", "workspace-not-found", "wks_doesnotexist0000", "the runtime has no such workspace"],
       ["error", "workspace-not-found", "wks_broken", "socket closed"],
     ]);
+  });
+
+  it("only the newest native open can navigate or answer after refresh, including teardown", async () => {
+    const load = pageLoad(newTab());
+    const { client, opened } = fakeClient();
+    const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+    const refresh = (id: string) => new Promise<unknown>((resolve, reject) => pending.set(id, { resolve, reject }));
+    client.paseo.agents.ref = (id) => ({ archivedAt: null, workspaceId: "workspace-" + id, refresh: () => refresh(id) });
+    client.paseo.workspaces.ref = (id) => ({ refresh: () => refresh(id) });
+    const stop = installBridge(client, load.page, DASHBOARD);
+    load.posted.length = 0;
+    load.receive({ type: "ar.open", agentId: "A" });
+    load.receive({ type: "ar.open", agentId: "B" });
+    pending.get("B")!.resolve({});
+    await flush();
+    pending.get("A")!.resolve({});
+    await flush();
+    expect(opened.map((params) => params?.agentId)).toEqual(["B"]);
+    expect(answers(load.posted)).toEqual([{ source: "ar-plugin", type: "shown", agentId: "B", workspaceId: "workspace-B" }]);
+    load.receive({ type: "ar.open", agentId: "stale-error" });
+    load.receive({ type: "ar.open", workspaceId: "workspace-C" });
+    pending.get("workspace-C")!.resolve({});
+    pending.get("stale-error")!.reject(new Error("not found"));
+    await flush();
+    expect(answers(load.posted).map((entry) => entry.type)).toEqual(["shown", "shown"]);
+    expect(opened.at(-1)?.workspaceId).toBe("workspace-C");
+    load.receive({ type: "ar.open", agentId: "after-stop" });
+    stop();
+    pending.get("after-stop")!.resolve({});
+    await flush();
+    expect(opened).toHaveLength(2);
+    expect(answers(load.posted)).toHaveLength(2);
   });
 });
 
@@ -755,6 +792,45 @@ describe("seeing the app's own storage writes (the real page)", () => {
     expect(localStorage.getItem("ar-number")).toBe("7");
     expect(seen).toEqual(["ar-number"]);
     stop();
+  });
+
+  it("the production watcher preserves native arity, receiver and coercion with its transform installed", () => {
+    const page = currentPage();
+    if (!page) throw new Error("the test environment has no page");
+    localStorage.setItem(PANEL_STATE_KEY, '{"state":{"desktop":{"agentListOpen":true}},"version":16}');
+    const stop = watchAppWrites(page);
+    const refused = () => {
+      for (const [receiver, args] of [[localStorage, ["ar-one-argument"]], [localStorage, ["ar-symbol", Symbol("x")]], [{}, ["ar-foreign", "1"]]] as const) {
+        let error: unknown;
+        try { Reflect.apply(Storage.prototype.setItem, receiver, args); } catch (reason) { error = reason; }
+        expect(error).toMatchObject({ name: "TypeError" });
+      }
+      expect(localStorage.getItem("ar-one-argument")).toBeNull();
+      expect(localStorage.getItem("ar-symbol")).toBeNull();
+    };
+    try {
+      refused();
+      let conversions = 0;
+      const value = { toString: () => { conversions++; return "stored"; } };
+      Reflect.apply(localStorage.setItem, localStorage, ["ar-coercion", value]);
+      expect(conversions).toBe(1);
+      expect(localStorage.getItem("ar-coercion")).toBe("stored");
+      sessionStorage.setItem("ar-session", "unchanged");
+      expect(sessionStorage.getItem("ar-session")).toBe("unchanged");
+      setEmbedPageMode(page, "document");
+      refused();
+      localStorage.setItem(PANEL_STATE_KEY, '{"state":{"desktop":{"agentListOpen":false}},"version":16}');
+      expect(JSON.parse(localStorage.getItem(PANEL_STATE_KEY)!).state.desktop.agentListOpen).toBe(true);
+      page.localStorage.setItem("ar-quiet", "bypassed");
+      expect(localStorage.getItem("ar-quiet")).toBe("bypassed");
+      clearEmbedPageMode(page);
+      localStorage.setItem(PANEL_STATE_KEY, '{"state":{"desktop":{"agentListOpen":false}},"version":16}');
+      expect(JSON.parse(localStorage.getItem(PANEL_STATE_KEY)!).state.desktop.agentListOpen).toBe(false);
+    } finally {
+      clearEmbedPageMode(page);
+      stop();
+    }
+    expect(Storage.prototype.setItem).toBe(original);
   });
 
   it("leaves the function alone on stopping when something else has wrapped it since", () => {

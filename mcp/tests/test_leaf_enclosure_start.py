@@ -14,17 +14,20 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
-from agents_remember.cli import leaf_enclosure_start
+from agents_remember.cli import leaf_enclosure_start, role_launch_workspace
 from agents_remember.cli.__main__ import build_parser, main
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.worktrees.modules import start as worktree_start
+from agents_remember.worktrees.modules.args import WorktreeArgs
 
 IDENTITY = TaskIdentity(
     repo_id="sandbox-app",
@@ -139,6 +142,37 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
             with self.subTest(label):
                 status, output, _order = self.run_command(sent, start)
                 self.assertEqual((status, json.loads(output)), (1, {"ok": False, "error": error}))
+
+    def test_native_stale_recovery_survives_the_child_and_both_entry_points(self) -> None:
+        with patch.object(
+            worktree_start, "_branch_freshness_findings", return_value=[{"state": "behind"}]
+        ):
+            native = worktree_start._stale_base_preflight(
+                SimpleNamespace(code_repository_name="sandbox-app"),
+                None,
+                WorktreeArgs(task_name="sbx-text-helpers", worktree_name="leaf"),
+            )
+        assert native is not None
+        status, output, _order = self.run_command(request_of(self.loaded), native)
+        reply = json.loads(output)
+        self.assertEqual((status, reply["error"]["code"]), (1, "blocked"))
+        self.assertEqual(reply["recovery"]["nextRequiredArgs"], ["stale_base_choice"])
+        with patch.object(
+            leaf_enclosure_start,
+            "_run_child",
+            return_value=SimpleNamespace(returncode=1, stdout=output.encode(), stderr=b""),
+        ):
+            projected = leaf_enclosure_start.start_leaf_enclosure_in_child(self.loaded, IDENTITY)
+        for result in (native, projected):
+            error = role_launch_workspace._preparation_refusal(
+                result, self.root / "series-contract.md", "sandbox-app"
+            )
+            self.assertEqual(error.status, "blocked")
+            self.assertIn("landing route", error.next_action)
+            self.assertIn("explicit stale_base_choice", error.next_action)
+            self.assertNotIn("worktree_status(", error.next_action)
+        self.assertEqual(projected["nextOperation"], native["nextOperation"])
+        self.assertEqual(projected["nextArgs"], native["nextArgs"])
 
     def test_the_command_starts_nothing_when_its_settings_name_other_roots(self) -> None:
         asked = request_of(self.loaded)

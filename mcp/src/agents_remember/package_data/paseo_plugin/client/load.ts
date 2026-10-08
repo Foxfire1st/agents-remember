@@ -1,3 +1,4 @@
+import { clearEmbedPageMode, isDocumentPage, preserveSidebarChoice } from "./sidebar";
 import { applyEmbedLook, openNativeSidebarOnce, recordAppWrite, restoreStandaloneLook } from "./look";
 import type { PluginPage } from "./page";
 
@@ -118,12 +119,13 @@ export function bootstrapEmbed(page: PluginPage, parentOrigin: string): boolean 
   const requested = requestedUrl(page);
   const bounced = requested !== page.location.href && BOUNCE_PATHS.includes(page.location.pathname);
   if ((changed.length > 0 || bounced) && reloadOnce(page, requested, parentOrigin)) return true;
-  openNativeSidebarOnce(page);
+  if (!isDocumentPage(page)) openNativeSidebarOnce(page);
   return false;
 }
 
 /** At top level, or under a parent that is not listed: give the page the user's own look back. */
 export function takeOwnLookBack(page: PluginPage): void {
+  clearEmbedPageMode(page);
   const state = loadState(page);
   const first = state.usersLook === null;
   const restored = restoreStandaloneLook(page.localStorage);
@@ -165,7 +167,7 @@ export function watchAppWrites(page: PluginPage): () => void {
     return page.watchWrites((key, value) => {
       const usersLook = loadState(page).usersLook;
       if (usersLook !== null) recordAppWrite(page.localStorage, usersLook, key, value);
-    });
+    }, (key, value) => preserveSidebarChoice(page, key, value));
   } catch {
     // A browser that does not let the write be wrapped: the content rule remains.
     return () => {};

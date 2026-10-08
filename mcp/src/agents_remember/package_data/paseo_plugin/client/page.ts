@@ -19,6 +19,7 @@ export interface StorageLike {
 }
 
 /** Told the key and the new value after the app stored it. */
+export type WriteTransform = (key: string, value: string) => string;
 export type WriteListener = (key: string, value: string) => void;
 
 export interface PluginPage {
@@ -41,7 +42,7 @@ export interface PluginPage {
    * Report every write the app makes to this page's localStorage from now on. One listener at a
    * time: a later call replaces it. Returns the function that stops this listener.
    */
-  watchWrites(listener: WriteListener): () => void;
+  watchWrites(listener: WriteListener, transform?: WriteTransform): () => void;
 }
 
 // On the page global: the wrapped `setItem` and who listens, shared by every evaluation.
@@ -52,9 +53,10 @@ interface WriteWatch {
   setItem: (this: unknown, ...args: unknown[]) => unknown;
   wrapper: (this: unknown, ...args: unknown[]) => unknown;
   listener: WriteListener | null;
+  transform?: WriteTransform;
 }
 
-function watchWrites(web: any, listener: WriteListener): () => void {
+function watchWrites(web: any, listener: WriteListener, transform?: WriteTransform): () => void {
   const proto = Object.getPrototypeOf(web.localStorage);
   let watch = web[WRITE_WATCH] as WriteWatch | undefined;
   if (!watch) {
@@ -64,9 +66,15 @@ function watchWrites(web: any, listener: WriteListener): () => void {
       wrapper(this: unknown, ...args: unknown[]): unknown {
         // The call goes on exactly as it came (receiver and arguments), so whatever the original
         // does with it, a refusal included, is what the caller gets.
+        if (this === web.localStorage && created.transform && typeof args[0] === "string" && typeof args[1] === "string") {
+          args[1] = created.transform(args[0], args[1]);
+        }
         const result = Reflect.apply(created.setItem, this, args);
         try {
-          if (this === web.localStorage && created.listener) created.listener(String(args[0]), String(args[1]));
+          // Native conversion of object arguments can have effects. Do not convert them a
+          // second time to observe a write; the app's supported string writes are observable.
+          const textArguments = args.slice(0, 2).every((value) => value === null || !["object", "function"].includes(typeof value));
+          if (this === web.localStorage && created.listener && textArguments) created.listener(String(args[0]), String(args[1]));
         } catch {
           // Observing must never break the app's own write.
         }
@@ -78,9 +86,11 @@ function watchWrites(web: any, listener: WriteListener): () => void {
   }
   const active = watch;
   active.listener = listener;
+  active.transform = transform;
   return () => {
     if (active.listener !== listener) return;
     active.listener = null;
+    active.transform = undefined;
     // Put the original back unless something else wrapped the function in the meantime.
     if (proto.setItem === active.wrapper) {
       proto.setItem = active.setItem;
@@ -115,7 +125,7 @@ export function currentPage(): PluginPage | null {
       localStorage: quietStorage(web),
       sessionStorage: web.sessionStorage,
       state: web,
-      watchWrites: (listener) => watchWrites(web, listener),
+      watchWrites: (listener, transform) => watchWrites(web, listener, transform),
     };
   } catch {
     // A browser that refuses storage to this page: the client part then does nothing.

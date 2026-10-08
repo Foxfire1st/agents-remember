@@ -7,7 +7,6 @@ agents start and message each other.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -31,21 +30,16 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
-from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
-from agents_remember.application.worktree_tools import worktree_start_tool, worktree_status_tool
-from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
 from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.role_launch_receipts import (
-    _bind_task_report_access,
     _message_binding_projection_reference,
 )
 from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
-from agents_remember.controlplane.durable_store import declared_process_role
+from agents_remember.cli.role_launch_workspace import _leaf_contract_path, _resolve_workspace
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
@@ -58,7 +52,6 @@ from agents_remember.models.role_launcher import (
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
-from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 
 ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
@@ -340,124 +333,6 @@ def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
     reader_context = receipt.get("arMcpContext")
     scope = reader_context.get("taskContext") if isinstance(reader_context, dict) else None
     return scope if isinstance(scope, dict) else None
-
-
-def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
-    """The contract path of a leaf's enclosure, derived from the leaf document alone.
-
-    Nothing is created here: a launch goes on to open the enclosure, a revive only compares.
-    """
-
-    if leaf.document.kind != "subTask":
-        raise ValueError("Only a canonical leaf can open a leaf enclosure.")
-    expected = leaf_enclosure_path(leaf.path.parent, leaf.document.id).resolve()
-    if not leaf.document.enclosures:
-        return expected
-    enclosure = leaf.document.enclosures[0]
-    if len(leaf.document.enclosures) != 1 or enclosure.leafId != leaf.document.id:
-        raise ValueError("The selected leaf has conflicting enclosure bindings.")
-    contract_path = Path(enclosure.enclosurePath).resolve()
-    if contract_path != expected:
-        raise ValueError("The selected leaf enclosure does not match its canonical task binding.")
-    return contract_path
-
-
-def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> dict[str, str]:
-    """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
-
-    Only the folder is resolved here. The Paseo workspace of that folder is obtained from the
-    runtime when the saved launch call runs; master/task placement is separate from this cwd.
-    """
-
-    if context.role not in LEAF_ROLES:
-        return workspace_folder(config.workspace_root)
-    assert context.task is not None and context.sprint is not None
-    contract_path, status = _ensure_leaf_enclosure(
-        config,
-        context.task,
-        parent_task=context.sprint.path.parent.name,
-    )
-    group = _require_directory(status, "worktree_group")
-    code = _require_directory(status, "code_worktree")
-    memory = _require_directory(status, "memory_worktree")
-    workspace = workspace_folder(group)
-    task_reports = context.task.path.parent / "notes" / "reports"
-    task_reports.mkdir(parents=True, exist_ok=True)
-    report_access = _bind_task_report_access(group, task_reports)
-    workspace.update(
-        contractPath=contract_path.as_posix(),
-        codeRoot=code.as_posix(),
-        memoryRoot=memory.as_posix(),
-        taskReportRoot=task_reports.resolve().as_posix(),
-        taskReportAccessRoot=report_access.as_posix(),
-    )
-    return workspace
-
-
-def _ensure_leaf_enclosure(
-    config: McpRuntimeConfig,
-    leaf: ResolvedTaskDocument,
-    *,
-    parent_task: str,
-) -> tuple[Path, dict[str, Any]]:
-    contract_path = _leaf_contract_path(leaf)
-    task_root = leaf.path.parent
-
-    status = worktree_status_tool(
-        config,
-        TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
-    )
-    if status.get("ok") is not True and not contract_path.exists():
-        created = _start_leaf_enclosure(
-            config,
-            TaskIdentity(
-                repo_id=leaf.ref.repository,
-                task_name=task_root.name,
-                worktree_name=(
-                    f"{slugify(leaf.document.slug)[:40]}-"
-                    f"{hashlib.sha256(leaf.ref.key.encode('utf-8')).hexdigest()[:10]}"
-                ),
-                leaf_id=leaf.document.id,
-                parent_task=parent_task,
-            ),
-        )
-        if created.get("ok") is not True:
-            raise ValueError(
-                str(
-                    created.get("summary")
-                    or created.get("state")
-                    or "AR refused to create the leaf enclosure."
-                )
-            )
-        status = worktree_status_tool(
-            config,
-            TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
-        )
-    if status.get("ok") is not True:
-        raise ValueError(
-            str(status.get("detail") or "AR could not resolve the selected leaf enclosure.")
-        )
-    return contract_path, status
-
-
-def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> dict[str, Any]:
-    """Create the enclosure with AR's worktree start, in the process entitled to run it.
-
-    The dashboard backend is not a writer of the worktree stores, so from there the start runs in
-    a short-lived child process of this build. Every other process calls the worktree owner
-    directly.
-    """
-
-    if declared_process_role() == "dashboard":
-        return start_leaf_enclosure_in_child(config, identity)
-    return worktree_start_tool(config, identity, execution=StartExecution(skip_provider_setup=True))
-
-
-def workspace_folder(path: Path) -> dict[str, str]:
-    # Directory placement and native membership both use this resolved execution folder.
-    root = path.resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return {"path": root.as_posix()}
 
 
 def _compile_handover(
@@ -852,13 +727,3 @@ def _role_report_path(
     report = report_root / report_name
     report.parent.mkdir(parents=True, exist_ok=True)
     return report.as_posix()
-
-
-def _require_directory(payload: dict[str, Any], key: str) -> Path:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"AR worktree status did not return {key}.")
-    path = Path(value).resolve()
-    if not path.is_dir():
-        raise ValueError(f"The selected AR enclosure {key} directory is unavailable.")
-    return path

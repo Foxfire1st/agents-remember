@@ -10,7 +10,7 @@ import {
   STANDALONE_LOOK_KEY,
   recordAppWrite,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/look";
-import type { PluginPage, StorageLike, WriteListener } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
+import type { PluginPage, StorageLike, WriteListener, WriteTransform } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/page";
 import type { HierarchyClient } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/hierarchy";
 
 /** A healthy empty host for cases concerned with the existing look/navigation channel. */
@@ -101,6 +101,7 @@ export function pageLoad(
   const url = new URL(href);
   const beganAt = options.beganAt ?? Date.now();
   let watching: WriteListener | null = null;
+  let transform: WriteTransform | undefined;
   const page: PluginPage = {
     window: pageWindow,
     document: {
@@ -129,10 +130,11 @@ export function pageLoad(
     localStorage: tab.local,
     sessionStorage: tab.session,
     state: {},
-    watchWrites: (listener) => {
+    watchWrites: (listener, filtering) => {
+      transform = filtering;
       watching = listener;
       return () => {
-        if (watching === listener) watching = null;
+        if (watching === listener) { watching = null; transform = undefined; }
       };
     },
   };
@@ -143,8 +145,9 @@ export function pageLoad(
     parent,
     /** The app of THIS page stores a value: the page's plugin, if it watches, is told. */
     appWrites(key: string, value: unknown) {
-      tab.local.put(key, value);
-      watching?.(key, JSON.stringify(value));
+      const stored = transform?.(key, JSON.stringify(value)) ?? JSON.stringify(value);
+      tab.local.setItem(key, stored);
+      watching?.(key, stored);
     },
     watched: () => watching !== null,
     /** Deliver a message event to the page, by default from the parent window and origin. */

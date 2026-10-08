@@ -86,6 +86,8 @@ def _execute_prepared_launch(
     if outcome.kind == "created":
         receipt["execution"] = outcome.execution
         receipt["agent"] = outcome.applied
+        if outcome.workspace_preparation in {"created", "found", "opened"}:
+            receipt.setdefault("preparation", {})["workspace"] = outcome.workspace_preparation
         if outcome.warning:
             receipt["warning"] = outcome.warning
         receipt.update(
@@ -569,6 +571,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             "capsuleOperation",
             "arMcpContext",
             "sessionOptions",
+            "preparation",
             "canRevive",
         )
         if key in receipt

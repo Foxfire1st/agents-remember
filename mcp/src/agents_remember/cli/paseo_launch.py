@@ -25,13 +25,14 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
 import agents_remember
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
 from agents_remember.application.role_launch_context import RoleLaunchContext
+from agents_remember.cli import role_launch_progress
 from agents_remember.cli.paseo_bridge import (
     AGENT_WITHOUT_MESSAGE_LOST,
     BRIDGE_INVALID_REPLY,
@@ -91,6 +92,7 @@ class LaunchOutcome:
     predecessor_settled: bool = True
     # The agent of a refused launch that exists in the runtime and is still to be archived.
     lost_agent_id: str | None = None
+    workspace_preparation: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,8 +459,12 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
         # Persisted v1 calls contain only cwd; their original replay semantics stay exact.
         opened = bridge_call(config, "workspace-open", workspace)
         workspace_id = opened_workspace_id(opened, folder)
+        role_launch_progress.starting()
         created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
-        return _created_outcome(created, agent_id, workspace_id)
+        return replace(
+            _created_outcome(created, agent_id, workspace_id),
+            workspace_preparation=opened.get("preparation"),
+        )
     except PaseoBridgeFailure as error:
         lost = error.code == AGENT_WITHOUT_MESSAGE_LOST
         return LaunchOutcome(

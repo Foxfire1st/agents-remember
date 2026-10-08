@@ -25,6 +25,7 @@ export interface PaseoFramePane {
   setControl(state: PaseoControlState): void;
   setFrame(update: (current: PaseoFrameView | null) => PaseoFrameView | null): void;
   setAgentProblem(text: string | null): void;
+  page?: "chats" | "document";
 }
 
 /**
@@ -66,7 +67,7 @@ export class PaseoFrameControl {
     this.settled = null;
     this.selectedAgentIds.clear();
     this.setControl("waiting");
-    this.load(afterRetry ? this.wanted : null);
+    this.load(afterRetry || this.pane.page === "document" ? this.wanted : null);
     this.arm();
   }
 
@@ -135,6 +136,7 @@ export class PaseoFrameControl {
     this.clearDeadline();
     this.pending = null;
     this.setControl("ready");
+    if (this.pane.page === "document") this.pane.frameWindow()?.postMessage({ type: "ar.page", page: "document" }, this.available!.frameOrigin);
     this.sync();
   }
 
@@ -168,7 +170,7 @@ export class PaseoFrameControl {
       if (!frameWindow) return;
       this.pending = wanted.agentId;
       this.arm();
-      frameWindow.postMessage({ type: "ar.open", agentId: wanted.agentId }, available.frameOrigin);
+      frameWindow.postMessage({ type: "ar.open", agentId: wanted.agentId, ...(this.pane.page === "document" && wanted.workspaceId ? { workspaceId: wanted.workspaceId } : {}) }, available.frameOrigin);
     } else if (this.control === "unavailable" && this.loaded !== wanted.agentId) {
       this.load(wanted);
     }
@@ -179,7 +181,7 @@ export class PaseoFrameControl {
     if (!available) return;
     this.loaded = wanted?.agentId ?? null;
     this.pane.setFrame((current) => ({
-      src: paseoFrameUrl(available, wanted),
+      src: paseoFrameUrl(available, wanted) + (this.pane.page === "document" ? (paseoFrameUrl(available, wanted).includes("?") ? "&" : "?") + "arPage=document" : ""),
       generation: (current?.generation ?? 0) + 1,
     }));
   }

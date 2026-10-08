@@ -683,3 +683,11 @@ class MemoryModeUnsupportedError(AgentsRememberError):
         if self.artifact is not None:
             fields["artifact"] = self.artifact
         return fields
+
+
+class RolePreparationError(AgentsRememberError):
+    def __init__(self, status: str, detail: str, next_action: str) -> None:
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        super().__init__(f"{detail} ({status}). Next: {next_action}")

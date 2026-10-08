@@ -93,12 +93,16 @@ def start_leaf_enclosure_in_child(
     if isinstance(reply, dict) and reply.get("ok") is True and completed.returncode == 0:
         return {"ok": True}
     error = reply.get("error") if isinstance(reply, dict) else None
-    if isinstance(error, dict):
-        return _refused(
+    if isinstance(reply, dict) and isinstance(error, dict):
+        refused = _refused(
             str(error.get("code") or "leaf_enclosure_start_refused"),
             str(error.get("message") or "AR refused to create the leaf enclosure."),
             completed.stderr,
         )
+        recovery = reply.get("recovery")
+        if isinstance(recovery, dict):
+            refused.update(recovery)
+        return refused
     return _refused(
         "leaf_enclosure_start_unreadable",
         f"the worktree start ended with status {completed.returncode} and no readable reply.",
@@ -215,6 +219,11 @@ def run(args: argparse.Namespace) -> int:
     return _reply(
         str(created.get("state") or "worktree_start_refused"),
         str(created.get("summary") or created.get("detail") or "AR refused the worktree start."),
+        {
+            key: created[key]
+            for key in ("nextOperation", "nextTool", "nextArgs", "nextRequiredArgs", "nextStep")
+            if key in created
+        },
     )
 
 
@@ -253,6 +262,9 @@ def _differing_roots(request: dict[str, Any], loaded: dict[str, str | None] | No
     return "; ".join(differing)
 
 
-def _reply(code: str, message: str) -> int:
-    print(json.dumps({"ok": False, "error": {"code": code, "message": message[:_TEXT_LIMIT]}}))
+def _reply(code: str, message: str, recovery: dict[str, Any] | None = None) -> int:
+    reply = {"ok": False, "error": {"code": code, "message": message[:_TEXT_LIMIT]}}
+    if recovery:
+        reply["recovery"] = recovery
+    print(json.dumps(reply))
     return 1

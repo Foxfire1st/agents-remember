@@ -45,7 +45,6 @@ const SELECTION = {
   rect: { left: 10, top: 10, width: 40, height: 14 } as DOMRect,
 };
 const clear = vi.fn();
-const LEAF_TASK = { repository: "repo", path: "master/L8.json" };
 const HARNESSES = [
   { id: "claude", name: "Claude Code", detected: true },
   { id: "codex", name: "Codex", detected: true },
@@ -405,85 +404,6 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
       expect(clear).not.toHaveBeenCalled();
     },
   );
-
-  it("direct leaf pill click submits through /submit; selection alone never acts", async () => {
-    const leafKey = "repo/master/L8";
-    vi.mocked(useSelectionCapture).mockReturnValue({
-      selection: { ...SELECTION, leafKey },
-      clear,
-    });
-    sessionStore.getState().hydrate([
-      {
-        id: "leaf-chat",
-        label: "Claude Code 1",
-        kind: "harness",
-        taskDocumentRef: LEAF_TASK,
-        status: "running",
-        controlState: "ready",
-      },
-    ]);
-    const onSent = vi.fn();
-    const { findByTestId, queryByTestId } = render(
-      <HighlightComposer
-        viewedLeafKey={leafKey}
-        leafChatActive
-        onSent={onSent}
-      />,
-    );
-    const pill = await findByTestId("highlight-add-to-chat");
-    expect(submitSessionText).not.toHaveBeenCalled();
-    fireEvent.click(pill);
-    await waitFor(() =>
-      expect(submitSessionText).toHaveBeenCalledWith(
-        "leaf-chat",
-        expect.any(String),
-        {
-          source: "highlight",
-          clearDraftOnAccept: false,
-        },
-      ),
-    );
-    expect(queryByTestId("highlight-send")).toBeNull();
-    expect(clear).toHaveBeenCalled();
-    expect(onSent).toHaveBeenCalledWith("leaf-chat");
-  });
-
-  it("keeps a rejected direct submit visible with the verbatim detail", async () => {
-    const leafKey = "repo/master/L8";
-    vi.mocked(useSelectionCapture).mockReturnValue({
-      selection: { ...SELECTION, leafKey },
-      clear,
-    });
-    sessionStore.getState().hydrate([
-      {
-        id: "leaf-chat",
-        label: "Claude Code 1",
-        kind: "harness",
-        taskDocumentRef: LEAF_TASK,
-        status: "running",
-        controlState: "ready",
-      },
-    ]);
-    vi.mocked(submitSessionText).mockImplementationOnce(async (_id, text) => ({
-      status: "started",
-      record: record(text, "rejected", "direct-rejected", "queue full: 8/8"),
-    }));
-    const onSent = vi.fn();
-    const { findByTestId } = render(
-      <HighlightComposer
-        viewedLeafKey={leafKey}
-        leafChatActive
-        onSent={onSent}
-      />,
-    );
-    fireEvent.click(await findByTestId("highlight-add-to-chat"));
-    expect((await findByTestId("highlight-status")).textContent).toContain(
-      "queue full: 8/8",
-    );
-    expect(await findByTestId("highlight-send")).not.toBeNull();
-    expect(clear).not.toHaveBeenCalled();
-    expect(onSent).not.toHaveBeenCalled();
-  });
 
   it("retries a route failure with the same requestId and reuses the created session", async () => {
     vi.mocked(submitSessionText).mockImplementationOnce(async (_id, text) => ({

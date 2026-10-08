@@ -49,7 +49,7 @@ import { KnowledgeReader } from "../panels/knowledge-reader/KnowledgeReader";
 import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
-import { RailChat } from "../panels/RailChat";
+import { DocumentChat } from "./document-chat/DocumentChat";
 import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
 import { Topology } from "../panels/Topology";
 import type { EngineProcessNode, SeriesNode, TaskDocNode } from "../types/projection";
@@ -355,7 +355,7 @@ const RAIL_ENTER = { initial: { opacity: 0 }, animate: { opacity: 1 } };
 const RAIL_ENTER_STILL = {};
 const RAIL_TRANSITION = { duration: 0.18 };
 // Memoization contract (tab-switch CPU): every persistent layer below
-// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, RailChat,
+// — TopBar, both rail asides' panels, EngineRoom, DetailPanel, FileViewer, DocumentChat,
 // the notes reader — is a React.memo component whose props are either state/store slices or
 // useCallback-stable. A view switch then re-renders ONLY the shell's own chrome (grid/display
 // flips + ModeBar) instead of reconciling the whole tree; the layers keep updating from their own
@@ -680,12 +680,9 @@ function RightRail({
   railView,
   rightRailWidth,
   setRailView,
-  viewedLeafKey,
   viewedTask,
-  selectedLifecycleId,
   taskDocuments,
-  engineProcesses,
-  contextMaster,
+  series,
   onResize,
 }: {
   fullBleed: boolean;
@@ -693,12 +690,9 @@ function RightRail({
   railView: "river" | "chat";
   rightRailWidth: number;
   setRailView: (next: "river" | "chat") => void;
-  viewedLeafKey: string | undefined;
   viewedTask: ViewedTaskContext | undefined;
-  selectedLifecycleId: string | undefined;
   taskDocuments: TaskDocNode[];
-  engineProcesses: EngineProcessNode[];
-  contextMaster: string | undefined;
+  series: SeriesNode[];
   onResize: (width: number) => void;
 }) {
   return (
@@ -715,13 +709,11 @@ function RightRail({
       {railView === "river" ? (
         <EventRiver />
       ) : (
-        <RailChat
-          leafKey={viewedLeafKey}
+        <DocumentChat
+          active={!fullBleed}
           taskDocumentRef={viewedTask?.taskDocumentRef}
-          selectedLifecycleId={selectedLifecycleId}
           taskDocuments={taskDocuments}
-          engineProcesses={engineProcesses}
-          contextMaster={contextMaster}
+          series={series}
         />
       )}
     </motion.aside>
@@ -857,12 +849,9 @@ function RailedBody({
         railView={state.railView}
         rightRailWidth={state.rightRailWidth}
         setRailView={actions.setRailView}
-        viewedLeafKey={state.viewedLeafKey}
         viewedTask={state.viewedTask}
-        selectedLifecycleId={state.selectedLifecycleId}
         taskDocuments={state.taskDocuments}
-        engineProcesses={state.engineProcesses}
-        contextMaster={state.contextMaster}
+        series={state.taskSeries}
         onResize={state.setRightRailWidth}
       />
     </div>
@@ -918,8 +907,6 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
             renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
         <HighlightComposer
           selectedLifecycleId={state.selectedLifecycleId}
-          viewedLeafKey={state.viewedLeafKey}
-          leafChatActive={!state.fullBleed && state.railView === "chat"}
           onSent={actions.showSentSession}
         />
       </div>

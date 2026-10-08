@@ -30,8 +30,8 @@ interrupt.
 
 There is now one product-facing `Chats` route backed by the keep-alive fleet cockpit. The old Chats
 component, session-list grouping implementation and separate `Sessions` navigation entry are
-retired. **Chats is the application default** (MIK-R79), and `RailChat` remains the separate
-contextual chat inside the Operations right rail.
+retired. **Chats is the application default** (MIK-R79). After L95, the Operations right rail shows
+the selected task's native Paseo workspace and agents; the older contextual session panel is removed.
 
 ### Duty transfer
 

@@ -140,6 +140,7 @@ export function createPaseoApi(daemon) {
           projectKind: 'non_git', archivingAt: scenario.archivingAt ?? null,
           name: 'previous title'
         }
+        options.onEvent?.(scenario.workspaceFound ? { phase: 'completed', workspace } : { phase: 'accepted' })
         return {
           refresh: async () => {
             record({ via: 'workspace.refresh', id: workspace.id })
@@ -335,6 +336,7 @@ class AgentCommandScriptTests(unittest.TestCase):
             reply,
             {
                 "serverId": SERVER_ID,
+                "preparation": "opened",
                 "workspace": {
                     "id": "wks_fake",
                     "directory": "/work/folder",
@@ -392,10 +394,12 @@ class AgentCommandScriptTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(expected_key), 85)
+        self.assertEqual(first["preparation"], "created")
         self.assertEqual(first["workspace"]["projectId"], "prj_mapped")
         self.assertEqual(calls[-1]["via"], "workspace.setTitle")
         payload["task"]["title"] = "M · Edited"
-        changed = self.call("workspace-open", payload)
+        changed = self.call("workspace-open", payload, workspaceFound=True)
+        self.assertEqual(changed["preparation"], "found")
         self.assertEqual(changed["workspace"]["id"], first["workspace"]["id"])
         self.assertEqual(changed["workspace"]["name"], "M · Edited")
         payload["masterProject"].update(directory="/tasks/other", key="repo/other/task.json")

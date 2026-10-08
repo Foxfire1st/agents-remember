@@ -13,7 +13,7 @@ import { FileViewer } from "../panels/file-viewer/FileViewer";
 import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
-import { RailChat } from "../panels/RailChat";
+import { DocumentChat } from "./document-chat/DocumentChat";
 import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
 import { metricsFor } from "../types/projection";
 import type {
@@ -671,17 +671,17 @@ describe("right-rail River⇄Chat toggle (L5 S2)", () => {
     expect(railRight).not.toBeNull();
     // Default = the Event River; the chat surface is not mounted.
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
 
     // Toggle to Chat: the river is gone, the single-instance chat is mounted in its place.
     fireEvent.click(getByTestId("rail-toggle-chat"));
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).not.toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).not.toBeNull();
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
 
     // Toggle back to River restores it.
     fireEvent.click(getByTestId("rail-toggle-river"));
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
   });
 
   it("remembers the rail choice across a window refresh (localStorage)", () => {
@@ -696,7 +696,7 @@ describe("right-rail River⇄Chat toggle (L5 S2)", () => {
     // A fresh mount (the window refresh) restores Chat from localStorage — the river is not shown.
     const second = render(<CockpitShell initialView="operations" />);
     const railRight = second.container.querySelector(".rail--right");
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).not.toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).not.toBeNull();
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
   });
 });
@@ -739,14 +739,14 @@ describe("rail chat keys by the drilled leaf, not the master (L5 fix 1)", () => 
 
     // Master overview shown (no leaf drilled): the rail is NOT blocked — it offers the
     // create-from-anywhere empty state, and the heading carries no leaf id yet (not the master's).
-    expect(getByTestId("rail-chat-empty")).not.toBeNull();
-    expect(getByTestId("rail-chat-heading").textContent).not.toContain("master-x");
+    expect(getByTestId("document-chat")).not.toBeNull();
+    expect(getByTestId("document-chat").getAttribute("data-document")).not.toContain("master-x");
 
     // Drill into the master's sub-task → the rail keys by THAT leaf id, not the master.
     fireEvent.click(getByTestId("subtask-open-1"));
-    const heading = getByTestId("rail-chat-heading");
-    expect(heading.textContent).toContain("leaf-one");
-    expect(heading.textContent).not.toContain("master-x");
+    const heading = getByTestId("document-chat");
+    expect(heading.getAttribute("data-document")).toContain("ops/01_leaf.json");
+    expect(heading.getAttribute("data-document")).not.toContain("master-x");
   });
 });
 
@@ -833,7 +833,7 @@ describe("persistent layers are exported memoized (260721 tab-switch CPU)", () =
       ["AttentionQueue", AttentionQueue],
       ["LifecycleList", LifecycleList],
       ["EventRiver", EventRiver],
-      ["RailChat", RailChat],
+      ["DocumentChat", DocumentChat],
       ["HighlightComposer", HighlightComposer],
       ["NotesReaderViewer", NotesReaderViewer],
     ];

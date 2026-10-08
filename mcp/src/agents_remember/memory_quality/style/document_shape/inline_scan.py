@@ -60,8 +60,8 @@ def code_span_ranges(line: str) -> list[tuple[int, int]]:
     """Half-open ``(start, end)`` ranges covering each code span, delimiters included.
 
     An opening run is matched to the next run of EQUAL length, per CommonMark, which is
-    what makes a multi-backtick span such as ```` ``ariaLabel={`x`}`` ```` -- present in
-    ``onboarding/dashboard/src/panels/RailChat.tsx.md`` -- one span rather than three. A run with no
+    what makes a multi-backtick span such as ```` ``ariaLabel={`x`}`` ```` one span
+    rather than three. A run with no
     equal-length partner later in the line is literal text and opens nothing.
     """
     runs = backtick_runs(line)

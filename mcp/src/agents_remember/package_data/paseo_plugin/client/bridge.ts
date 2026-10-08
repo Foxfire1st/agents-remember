@@ -1,3 +1,4 @@
+import { documentSidebar, isDocumentPage, setEmbedPageMode } from "./sidebar";
 import { PLUGIN_ID } from "./look";
 import { startHierarchy, type HierarchyClient } from "./hierarchy";
 import { watchSelectedChats } from "./selection";
@@ -107,6 +108,14 @@ export function installBridge(
   parentOrigin: string,
 ): () => void {
   let live = true;
+  let openGeneration = 0;
+  let stopSidebar: (() => void) | undefined;
+  const pageMode = (mode: "document" | "chats") => {
+    setEmbedPageMode(page, mode);
+    if (mode === "document" && !stopSidebar) stopSidebar = documentSidebar(page);
+    else if (mode === "chats" && stopSidebar) { stopSidebar(); stopSidebar = undefined; }
+  };
+  if (isDocumentPage(page)) pageMode("document");
   let knownAgents = new Map<string, { parentAgentId: string | null }>();
   let selectedCandidates: string[] = [];
   let lastSelection = "";
@@ -135,7 +144,8 @@ export function installBridge(
   };
 
   const openAgent = async (agentId: string, sourceAgentId?: string) => {
-    const currentParent = () => !sourceAgentId || (selectedCandidates.includes(sourceAgentId) && knownAgents.get(sourceAgentId)?.parentAgentId === agentId);
+    const generation = ++openGeneration;
+    const currentParent = () => live && generation === openGeneration && (!sourceAgentId || (selectedCandidates.includes(sourceAgentId) && knownAgents.get(sourceAgentId)?.parentAgentId === agentId));
     const failure = (code: string, message: string) => {
       if (!live || !currentParent()) return;
       post(sourceAgentId
@@ -159,6 +169,7 @@ export function installBridge(
   };
 
   const openWorkspace = async (workspaceId: string) => {
+    const generation = ++openGeneration;
     let workspace: unknown = null;
     let failure = "the runtime has no such workspace";
     try {
@@ -166,6 +177,7 @@ export function installBridge(
     } catch (error) {
       failure = errorText(error);
     }
+    if (!live || generation !== openGeneration) return;
     if (!workspace) {
       post({ type: "error", code: "workspace-not-found", workspaceId, message: failure });
       return;
@@ -178,13 +190,16 @@ export function installBridge(
     if (!isParentMessage(event, parentOrigin, page.window.parent)) return;
     const message = event.data;
     if (!message || typeof message !== "object") return;
-    if (message.type === "ar.ping") {
+    if (message.type === "ar.page" && (message.page === "document" || message.page === "chats")) {
+      pageMode(message.page);
+    } else if (message.type === "ar.ping") {
       post({ type: "pong" });
     } else if (message.type === "ar.open" && typeof message.agentId === "string") {
       void openAgent(message.agentId);
     } else if (message.type === "ar.open" && typeof message.workspaceId === "string") {
       void openWorkspace(message.workspaceId);
     } else if (message.type === "ar.open") {
+      openGeneration++;
       post({ type: "error", code: "open-failed", message: "ar.open names no agent or workspace" });
     }
   };
@@ -199,6 +214,7 @@ export function installBridge(
 
   return () => {
     live = false;
+    stopSidebar?.();
     stopSelection();
     stopHierarchy();
     page.window.removeEventListener("message", onMessage);

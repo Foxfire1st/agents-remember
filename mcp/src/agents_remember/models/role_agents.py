@@ -12,6 +12,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict
+
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
@@ -79,6 +81,14 @@ RoleMessageRefusal = Literal[
 ]
 
 
+class RoleEnvironmentPreparation(BaseModel):
+    """What the shared start established; opened names no host-reported creation outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+    enclosure: Literal["created", "found", "not-applicable"]
+    workspace: Literal["created", "found", "opened"] | None = None
+
+
 class RoleStartResponse(ToolResponse):
     """One role agent started for a canonical selection, or why it was not.
 
@@ -100,6 +110,8 @@ class RoleStartResponse(ToolResponse):
     reportPath: str | None = None
     handoverArtifactPath: str | None = None
     executionStatus: str | None = None
+    preparation: RoleEnvironmentPreparation | None = None
+    preparationStatus: str | None = None
 
 
 class RoleMessageResponse(ToolResponse):

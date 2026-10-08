@@ -30,10 +30,13 @@
 //            daemon is reachable and is the configured one; no runtime function is called.
 //
 //   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
-//            -> {serverId, workspace: {id, directory, name, projectId, projectKind}}
+//            -> {serverId, preparation?: "created" | "found" | "opened",
+//                workspace: {id, directory, name, projectId, projectKind}}
 //            Master/task placement creates or replays one directory workspace under the explicit
 //            project, keyed by canonical master/task refs. Names follow the saved payload; an old
-//            replay may restore older display names. Cwd-only controller and persisted v1 calls
+//            replay may restore older display names. Preparation comes from the public creation
+//            observer; cwd-only Projects opens report "opened", without a creation outcome.
+//            Cwd-only controller and persisted v1 calls
 //            retain directory-open semantics. Explicit placement never falls back to that path.
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
@@ -395,8 +398,10 @@ async function readRuntimeInfo({ daemon }) {
 async function openWorkspace({ api, daemon }, input) {
   const cwd = requiredText(input, 'cwd')
   let workspace
+  let preparation = null
   if (!('masterProject' in input) && !('task' in input)) {
     workspace = (await api.workspaces.open(cwd)).current()
+    preparation = 'opened'
   } else {
     const { masterProject, task } = input
     if (!masterProject || typeof masterProject !== 'object' || Array.isArray(masterProject) ||
@@ -416,7 +421,10 @@ async function openWorkspace({ api, daemon }, input) {
     const idempotencyKey = 'ar-task-workspace:v2:' + createHash('sha256')
       .update(JSON.stringify([masterKey, taskKey])).digest('hex')
     const handle = await api.workspaces.create({
-      source: { kind: 'directory', path: cwd, projectId: project.projectId }, idempotencyKey
+      source: { kind: 'directory', path: cwd, projectId: project.projectId }, idempotencyKey,
+      onEvent(snapshot) {
+        if (preparation === null) preparation = snapshot.workspace ? 'found' : 'created'
+      }
     })
     // Creation replay holds an old descriptor; refresh before trusting membership or liveness.
     workspace = await handle.refresh()
@@ -436,6 +444,7 @@ async function openWorkspace({ api, daemon }, input) {
   }
   return {
     serverId: serverIdOf(daemon),
+    ...(preparation ? { preparation } : {}),
     workspace: {
       id: workspace.id,
       directory: workspace.workspaceDirectory,

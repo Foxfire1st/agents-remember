@@ -23,6 +23,7 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
+from agents_remember.cli import role_launch_progress
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_TIMEOUT,
     RUNTIME_NOT_CONFIGURED,
@@ -38,6 +39,7 @@ from agents_remember.cli.paseo_launch import (
     build_launch_call,
     mint_agent_id,
 )
+from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
@@ -117,6 +119,10 @@ def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         "/api/role-launch/dispatch", _bind_dispatch_endpoint(config), methods=["POST"]
     )
     app.add_api_route("/api/role-launch/result", _bind_result_endpoint(config), methods=["POST"])
+    app.add_api_route(
+        "/api/role-launch/progress/{request_id}", role_launch_progress.read, methods=["GET"]
+    )
+    register_document_chat_route(app, config)
     register_role_report_route(app, config)
 
 
@@ -203,6 +209,7 @@ def _role_launch_dispatch_endpoint(
 
     _require_paseo_runtime(config)
     _acquire_dispatch_lock(lock_wait_seconds)
+    role_launch_progress.begin(request.request_id)
     try:
         if request.action == "revive":
             return _revive_execution(config, request)
@@ -215,6 +222,7 @@ def _role_launch_dispatch_endpoint(
         # only while the selection is validated, before a receipt.
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
+        role_launch_progress.finish()
         _DISPATCH_LOCK.release()
 
 
@@ -509,6 +517,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             else None
         ),
         "execution": {},
+        "preparation": {"enclosure": workspace.get("enclosurePreparation", "not-applicable")},
         "handoverArtifact": artifact,
         # What the launch call gives the agent: its tool server, or why none, and the note.
         **applied_to_agent(launch_call),

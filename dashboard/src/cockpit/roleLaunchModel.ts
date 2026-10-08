@@ -138,6 +138,19 @@ export function isUncertainRoleExecution(execution: RoleScopedExecution): boolea
   return execution.canRetry === true || ["starting", "unknown"].includes(execution.status.toLowerCase());
 }
 
+/** A bound Projects row follows a saved open request, while uncertain requests keep their identity. */
+export function boundTasklessRequest(
+  executions: RoleExecutionReceipt[], current: RoleTasklessActiveRequest | undefined,
+): RoleTasklessActiveRequest | undefined {
+  if (current?.pending) return current;
+  const execution = executions.find((row) => ["accepted", "running", "starting", "unknown"].includes(row.status.toLowerCase()));
+  if (!execution?.requestId) return current;
+  return { requestId: execution.requestId,
+    ...(isUncertainRoleExecution(execution) ? { pending: true } : {}),
+    ...(execution.retryPayload ? { retryPayload: execution.retryPayload } : {}),
+  };
+}
+
 export function taskOptionsForDocs(docs: TaskDocNode[]): RoleTaskOption[] {
   return docs.flatMap((doc) => {
     const ref = taskDocumentRefForDoc(doc);

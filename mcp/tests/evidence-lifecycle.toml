@@ -1109,6 +1109,7 @@ consumers = [
   "mcp/tests/test_review_unchanged_knowledge.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",
@@ -1585,6 +1586,7 @@ consumers = [
   "mcp/tests/test_paseo_role_tools.py",
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_role_document_chats.py",
 ]
 
 [[artifact]]

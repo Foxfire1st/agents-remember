@@ -24,12 +24,14 @@ from agents_remember.cli import (
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
+    role_launch_workspace,
 )
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import agent_title
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
+from agents_remember.cli.role_launch_workspace import _start_leaf_enclosure
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.role_launcher import (
@@ -146,9 +148,15 @@ class FakeRuntime:
     def _workspace_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         cwd = payload["cwd"]
         key = self.workspace_key(payload)
+        preparation = (
+            ("found" if key in self.workspaces else "created")
+            if "masterProject" in payload
+            else "opened"
+        )
         workspace_id = self.workspaces.setdefault(key, f"wks_{len(self.workspaces) + 1}")
         return {
             "serverId": SERVER_ID,
+            "preparation": preparation,
             "workspace": {"id": workspace_id, "directory": self.opened_directory or cwd},
         }
 
@@ -338,8 +346,8 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.replace(paseo_catalog, "bridge_call", self.runtime)
         self.replace(paseo_launch, "bridge_call", self.runtime)
         self.replace(paseo_status, "bridge_call", self.runtime)
-        self.replace(role_launch_preparation, "worktree_status_tool", self.enclosures.status)
-        self.replace(role_launch_preparation, "worktree_start_tool", self.enclosures.start)
+        self.replace(role_launch_workspace, "worktree_status_tool", self.enclosures.status)
+        self.replace(role_launch_workspace, "_start_leaf_enclosure", self.enclosures.start)
         self.replace(role_launch_preparation, "_compile_handover", self.compile_handover)
         self.replace(
             role_launch_preparation, "_ar_mcp_context", lambda *_args: {"scopeKind": "test"}
@@ -699,14 +707,20 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
         with self.subTest("the leaf enclosure cannot be created"):
             self.enclosures.start_result = {"ok": False, "summary": "base branch is missing"}
             error = self.refused(self.request("worker"))
-            self.assertEqual((error.status_code, error.detail), (409, "base branch is missing"))
+            self.assertEqual(error.status_code, 409)
+            self.assertIn("base branch is missing", str(error.detail))
+            self.assertIn("Next:", str(error.detail))
             self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(list(self.root.rglob("*-native-executions")), [])
 
 
-class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
-    """The worktree start runs in a child process when, and only when, the backend is the dashboard."""
+class RolePreparationChildTests(PaseoLaunchTestCase):
+    """Both entry points prepare in the same child without adopting the caller lifecycle."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.replace(role_launch_workspace, "_start_leaf_enclosure", _start_leaf_enclosure)
 
     def child_process(self, outcome: Any = None) -> list[tuple[list[str], dict[str, Any]]]:
         """Replace the child process; without an outcome it creates the enclosure and says ok."""
@@ -725,11 +739,8 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
         self.replace(leaf_enclosure_start, "_run_child", run)
         return calls
 
-    def test_only_the_dashboard_process_starts_the_enclosure_in_a_child_process(self) -> None:
-        with self.subTest("the dashboard process"):
-            role = self.replace(
-                role_launch_preparation, "declared_process_role", return_value="dashboard"
-            )
+    def test_both_entry_points_prepare_in_the_existing_child(self) -> None:
+        with self.subTest("the shared dispatch owner"):
             calls = self.child_process()
             request = self.request("worker")
 
@@ -780,30 +791,39 @@ class DashboardProcessEnclosureTests(PaseoLaunchTestCase):
             )
             self.assertEqual(self.dispatch(self.request("reviewer"))[0], 200)
             self.assertEqual(len(calls), 1, "an existing enclosure is found, not started again")
-            role.return_value = None
-        for role_name in (None, "mcp"):
-            with self.subTest("another process", role=role_name):
-                self.enclosures = FakeEnclosures(self.root / f"other-{role_name}")
-                self.replace(
-                    role_launch_preparation, "worktree_status_tool", self.enclosures.status
+
+    def test_sequential_fresh_leaves_preserve_the_callers_persistent_lifecycle(self) -> None:
+        persistent = SimpleNamespace(current=SimpleNamespace(fleeting=False, id="caller-owned"))
+        with (
+            patch("agents_remember.application.worktree_tools.ambient", return_value=persistent),
+            patch(
+                "agents_remember.application.worktree_tools.worktree_start_tool",
+                side_effect=AssertionError("must run in child"),
+            ),
+        ):
+            for number in (1, 2):
+                self.enclosures = FakeEnclosures(self.root / str(number))
+                self.replace(role_launch_workspace, "worktree_status_tool", self.enclosures.status)
+                leaf = ResolvedTaskDocument(
+                    ref=TaskDocumentRef(repository=REPO, path=f"master/{number}_leaf.json"),
+                    path=self.leaf.path.with_name(f"{number}_leaf.json"),
+                    document=self.leaf.document.model_copy(
+                        update={"id": f"LEAF-{number}", "slug": f"{number}_leaf", "enclosures": []}
+                    ),
                 )
-                self.replace(role_launch_preparation, "worktree_start_tool", self.enclosures.start)
-                self.replace(
-                    role_launch_preparation, "declared_process_role", return_value=role_name
+                calls = self.child_process()
+                role_launch_workspace._ensure_leaf_enclosure(
+                    self.config, leaf, parent_task="sprint"
                 )
-                calls = self.child_process(AssertionError("no child process is started here"))
-                (identity,) = (
-                    self.enclosures.start_calls
-                    if role_launch_preparation._ensure_leaf_enclosure(
-                        self.config, self.leaf, parent_task="sprint"
-                    )
-                    else []
+                role_launch_workspace._ensure_leaf_enclosure(
+                    self.config, leaf, parent_task="sprint"
                 )
-                self.assertEqual((identity.leaf_id, identity.parent_task), ("01_LEAF", "sprint"))
-                self.assertEqual(calls, [])
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][1]["leafId"], f"LEAF-{number}")
+                self.assertEqual(persistent.current.id, "caller-owned")
+                self.assertFalse(persistent.current.fleeting)
 
     def test_a_child_that_refuses_fails_or_does_not_end_refuses_the_launch(self) -> None:
-        self.replace(role_launch_preparation, "declared_process_role", return_value="dashboard")
         refusal = json.dumps(
             {
                 "ok": False,

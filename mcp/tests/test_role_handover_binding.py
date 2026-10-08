@@ -34,15 +34,18 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
     RoleHandoverRequest,
-    _bind_task_report_access,
     _compile_handover,
-    _ensure_leaf_enclosure,
     _resolve_workspace,
     _role_report_path,
     prepare_role_handover,
     role_start_operation,
 )
-from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
+from agents_remember.cli.role_launch_receipts import (
+    _bind_task_report_access,
+    _message_binding_projection_reference,
+    digest,
+)
+from agents_remember.cli.role_launch_workspace import _ensure_leaf_enclosure
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
@@ -793,11 +796,11 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "agents_remember.cli.role_launch_preparation.worktree_status_tool",
+                    "agents_remember.cli.role_launch_workspace.worktree_status_tool",
                     side_effect=lambda *_args: next(statuses),
                 ),
                 patch(
-                    "agents_remember.cli.role_launch_preparation.worktree_start_tool",
+                    "agents_remember.cli.role_launch_workspace._start_leaf_enclosure",
                     return_value={"ok": True},
                 ) as start,
             ):
@@ -833,18 +836,19 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "agents_remember.cli.role_launch_preparation.worktree_status_tool",
+                    "agents_remember.cli.role_launch_workspace.worktree_status_tool",
                     return_value=status,
                 ),
                 patch(
-                    "agents_remember.cli.role_launch_preparation.worktree_start_tool"
+                    "agents_remember.cli.role_launch_workspace._start_leaf_enclosure"
                 ) as reuse_start,
             ):
                 contract_path, reused_status = _ensure_leaf_enclosure(
                     config, existing_leaf, parent_task="260713_improved-agentic-system"
                 )
             self.assertEqual(contract_path, existing_path.resolve())
-            self.assertIs(reused_status, status)
+            self.assertEqual(reused_status, {**status, "enclosurePreparation": "found"})
+            self.assertNotIn("enclosurePreparation", status)
             reuse_start.assert_not_called()
 
 

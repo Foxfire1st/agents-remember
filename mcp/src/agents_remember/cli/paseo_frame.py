@@ -29,7 +29,7 @@ from fastapi import Request
 
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_launch import opened_workspace_id
-from agents_remember.cli.role_launch_preparation import workspace_folder
+from agents_remember.cli.role_launch_workspace import workspace_folder
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 

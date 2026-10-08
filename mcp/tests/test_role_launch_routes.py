@@ -19,8 +19,8 @@ from agents_remember.cli import (
 )
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
-    _bind_task_report_access,
 )
+from agents_remember.cli.role_launch_receipts import _bind_task_report_access
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest

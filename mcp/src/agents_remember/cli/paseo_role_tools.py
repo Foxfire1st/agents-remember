@@ -60,6 +60,7 @@ from agents_remember.cli.role_launch_receipts import (
     _taskless_execution_receipts,
 )
 from agents_remember.cli.role_launch_routes import LaunchLockBusy, _role_launch_dispatch_endpoint
+from agents_remember.errors import RolePreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import (
     MAX_WAIT_SECONDS,
@@ -336,6 +337,10 @@ def _start_refusal(error: HTTPException) -> _Refused:
 
     detail = str(error.detail)
     cause = error.__cause__
+    if isinstance(cause, RolePreparationError):
+        return _Refused(
+            "launch-refused", str(cause), cause.next_action, preparationStatus=cause.status
+        )
     if isinstance(cause, PaseoBridgeFailure):
         if cause.code == RUNTIME_NOT_CONFIGURED:
             return _Refused(
@@ -357,6 +362,13 @@ def _host_unreachable(detail: str) -> _Refused:
         "Tell the developer in your own chat that the Paseo runtime cannot be reached; repeat "
         "the call once it runs again.",
     )
+
+
+def _projects_preparation_note(receipt: dict[str, Any]) -> str:
+    preparation = receipt.get("preparation")
+    if isinstance(preparation, dict) and preparation.get("workspace") == "opened":
+        return " Projects workspace was opened; the host does not report whether it was created."
+    return ""
 
 
 def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str, Any]:
@@ -395,7 +407,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
     return {
         "ok": launch == "running",
         "status": launch,
-        "detail": str(receipt.get("detail") or ""),
+        "detail": str(receipt.get("detail") or "") + _projects_preparation_note(receipt),
         "requestId": str(request.request_id),
         "role": request.role,
         "agentId": agent_id,
@@ -403,6 +415,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "reportPath": report.get("path") if isinstance(report, dict) else None,
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,
         "executionStatus": execution,
+        **({"preparation": receipt["preparation"]} if "preparation" in receipt else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
 

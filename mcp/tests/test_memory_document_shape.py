@@ -41,7 +41,7 @@ ESCAPED_PIPE_INSIDE_SPAN_ROW = (
     '"defer-next-open" \\| "release-open"` - the steps a driver can drive a scenario '
     "through mid-test |"
 )
-# Verbatim from onboarding/dashboard/src/panels/RailChat.tsx.md line 89, wrapped into a
+# A historical onboarding example, wrapped into a
 # table cell: a double-backtick span quoting text that itself contains backticks.
 MULTI_BACKTICK_ROW = (
     "| `Pane` | pass ``ariaLabel={`terminal: ${session.label}`}`` so each pane's "

@@ -1099,8 +1099,7 @@ function enclosureForDoc(
 ): EnclosureNode | undefined {
   const dir = pathDir(doc.docPath);
   // Enclosure leaf ids are lowercase directory names while doc ids are
-  // uppercase: every leafId comparison here is case-insensitive, matching the
-  // normalization RailChat and the change-set bar already use. Exact joins only: since
+  // uppercase: every leafId comparison here is case-insensitive. Exact joins only: since
   // task_reopen, reopening a leaf reuses its EXACT leaf id, so the old `-rN`
   // suffix admission heuristic is gone.
   const stem = pathStem(doc.docPath).toLowerCase();

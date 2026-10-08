@@ -41,9 +41,10 @@ master's leaf loop to the master-exit seam, then hand over.
 - Structural admission has created or validated the applicable edge from the canonical sprint
   document's `integrationBranch`. Branch names and commit ids stay in the task/contract plane;
   they are not inputs this manager retains or reconciles from its prompt.
-- Before dispatching a leaf, use the task-bound `worktree_status` / `worktree_start` route. If the
-  source moved, follow its contract-addressed `worktree_sync` recovery and re-read status; never
-  infer a source branch from the checkout and never carry a prior super tip forward yourself.
+- Start each leaf role through `role_start`; that operation prepares its admitted task environment.
+  No separate worktree preparation precedes it. If a start reports moved source, follow the
+  contract-addressed `worktree_sync` recovery it names and re-read status; never infer a source
+  branch from the checkout or carry a prior super tip forward yourself.
 
 ## Optional review phase packet
 - Review mode: `<baseline | fix-verification | none>` for the current review purpose.

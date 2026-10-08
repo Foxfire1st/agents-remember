@@ -24,15 +24,11 @@ import {
 } from '../data/selection';
 import {
   createSession,
-  findSessionForTask,
   sessionStore,
   terminalOpenFailureMessage,
   useSessions,
   type OpenSession,
 } from '../data/sessions';
-import { useDashboard } from '../data/store';
-import { qualifiedLeafKey, taskDocumentRefForDoc } from '../data/taskIdentity';
-import type { TaskDocNode } from '../types/projection';
 import {
   keepWaitingForSubmit,
   releaseSubmitDraft,
@@ -52,7 +48,6 @@ import { fetchHarnesses, type HarnessInfo } from '../data/terminal';
 // Zustand's React adapter requires selector snapshots to retain identity while the store is
 // unchanged. Keep the pre-projection fallback stable so an empty dashboard cannot enter React's
 // useSyncExternalStore update loop during startup.
-const EMPTY_TASK_DOCUMENTS: TaskDocNode[] = [];
 
 const popover = css({ maxWidth: 'min(32rem, 94vw)' });
 const dialog = css({
@@ -341,9 +336,6 @@ function useHighlightTargets({
   harnesses,
   targetKey,
   selectedLifecycleId,
-  leafChatActive,
-  viewedLeafKey,
-  taskDocuments,
 }: {
   selection: HighlightSelection | null;
   sessions: OpenSession[];
@@ -351,45 +343,20 @@ function useHighlightTargets({
   harnesses: HarnessInfo[];
   targetKey: string | null;
   selectedLifecycleId: string | undefined;
-  leafChatActive: boolean;
-  viewedLeafKey: string | undefined;
-  taskDocuments: TaskDocNode[];
 }): {
-  directLeafChat: OpenSession | undefined;
   targets: Target[];
   selectedKey: string | null;
   selected: Target | null;
 } {
   if (!selection) {
-    return { directLeafChat: undefined, targets: [], selectedKey: null, selected: null };
+    return { targets: [], selectedKey: null, selected: null };
   }
-  const directLeafChat = directLeafChatFor(selection, leafChatActive, viewedLeafKey, taskDocuments);
   const routedSessions = routedSessionsFor(sessions, selectedLifecycleId);
   const targets: Target[] = [...sessionTargets(routedSessions), ...createTargets(harnesses)];
   const defaultKey = highlightDefaultKey(activeId, routedSessions, targets);
   const selectedKey = targets.find((target) => target.key === targetKey) ? targetKey : defaultKey;
   const selected = targets.find((target) => target.key === selectedKey) ?? null;
-  return { directLeafChat, targets, selectedKey, selected };
-}
-
-function directLeafChatFor(
-  selection: HighlightSelection | null,
-  leafChatActive: boolean,
-  viewedLeafKey: string | undefined,
-  taskDocuments: TaskDocNode[],
-): OpenSession | undefined {
-  if (!selection || !leafChatActive || !viewedLeafKey || selection.leafKey !== viewedLeafKey)
-    return undefined;
-  const doc = taskDocuments.find((candidate) => qualifiedLeafKey(candidate) === viewedLeafKey);
-  if (!doc) return undefined;
-  const taskDocumentRef = taskDocumentRefForDoc(doc);
-  if (!taskDocumentRef) return undefined;
-  return runningHarnessSession(findSessionForTask(taskDocumentRef, 'chat'));
-}
-
-function runningHarnessSession(session: OpenSession | undefined): OpenSession | undefined {
-  if (session?.kind !== 'harness') return undefined;
-  return (session.status ?? 'running') === 'running' ? session : undefined;
+  return { targets, selectedKey, selected };
 }
 
 function routedSessionsFor(
@@ -582,7 +549,6 @@ interface HighlightSubmitProps {
 }
 
 function useHighlightSubmit(props: HighlightSubmitProps): {
-  directSubmit: (targetId: string) => void;
   send: () => Promise<void>;
   keepWaiting: () => Promise<void>;
 } {
@@ -596,21 +562,10 @@ function useHighlightSubmit(props: HighlightSubmitProps): {
     sendingRef,
     status,
     setStatus,
-    setMode,
     showRecord,
   } = props;
   const submitTo = (id: string, payload: string) =>
     submitHighlightPayload(id, payload, showRecord, setStatus, lastRecordRef);
-  const directSubmit = (targetId: string) => {
-    if (!selection || sendingRef.current) return;
-    sendingRef.current = true;
-    deliveryRef.current = { id: targetId };
-    setStatus({ phase: 'sending', detail: 'Sending…' });
-    void submitTo(targetId, buildContextPackage(selection?.text ?? '')).then((sent) => {
-      sendingRef.current = false;
-      if (!sent) setMode('composer');
-    });
-  };
   const send = async () => {
     if (!selection) return;
     if ((!selected && !deliveryRef.current) || sendingRef.current || status?.phase === 'endgame') {
@@ -644,7 +599,7 @@ function useHighlightSubmit(props: HighlightSubmitProps): {
     setStatus,
     showRecord,
   });
-  return { directSubmit, send, keepWaiting };
+  return { send, keepWaiting };
 }
 
 function useHighlightFormHandlers({
@@ -714,30 +669,20 @@ async function openHighlightSession(
 
 function HighlightComposerImpl({
   selectedLifecycleId,
-  viewedLeafKey,
-  leafChatActive = false,
   onSent,
 }: {
   selectedLifecycleId?: string;
-  viewedLeafKey?: string;
-  leafChatActive?: boolean;
   onSent?: (sessionId: string) => void;
 }) {
   const state = useHighlightComposerState();
-  const taskDocuments = useDashboard(
-    (dashboard) => dashboard.analytics?.taskDocuments ?? EMPTY_TASK_DOCUMENTS,
-  );
-  const { directLeafChat, targets, selectedKey, selected } = useHighlightTargets({
+  const { targets, selectedKey, selected } = useHighlightTargets({
     selection: state.selection,
     sessions: state.sessions,
     activeId: state.activeId,
     harnesses: state.harnesses,
     targetKey: state.targetKey,
     selectedLifecycleId,
-    leafChatActive,
-    viewedLeafKey,
-    taskDocuments,
-  });
+        });
   const settle = useHighlightSettle({
     onSent,
     deliveryRef: state.deliveryRef,
@@ -775,7 +720,6 @@ function HighlightComposerImpl({
     <HighlightComposerView
       state={state}
       selection={selection}
-      directLeafChat={directLeafChat}
       targets={targets}
       selectedKey={selectedKey}
       selected={selected}
@@ -789,7 +733,6 @@ function HighlightComposerImpl({
 function HighlightComposerView({
   state,
   selection,
-  directLeafChat,
   targets,
   selectedKey,
   selected,
@@ -799,7 +742,6 @@ function HighlightComposerView({
 }: {
   state: ReturnType<typeof useHighlightComposerState>;
   selection: HighlightSelection;
-  directLeafChat: OpenSession | undefined;
   targets: Target[];
   selectedKey: string | null;
   selected: Target | null;
@@ -830,9 +772,7 @@ function HighlightComposerView({
         pill={
           <HighlightPill
             status={status}
-            directLeafChat={directLeafChat}
-            onDirectSubmit={actions.directSubmit}
-            onCompose={() => state.setMode('composer')}
+                  onCompose={() => state.setMode('composer')}
           />
         }
         form={
@@ -861,20 +801,16 @@ function HighlightComposerView({
 
 function HighlightPill({
   status,
-  directLeafChat,
-  onDirectSubmit,
   onCompose,
 }: {
   status: HighlightStatus;
-  directLeafChat: OpenSession | undefined;
-  onDirectSubmit: (targetId: string) => void;
   onCompose: () => void;
 }) {
   return (
     <Button
       className={addButton}
       isDisabled={status?.phase === 'sending'}
-      onPress={() => (directLeafChat ? onDirectSubmit(directLeafChat.id) : onCompose())}
+      onPress={onCompose}
       data-testid="highlight-add-to-chat"
     >
       <ChatIcon />

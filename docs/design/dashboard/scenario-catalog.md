@@ -153,7 +153,7 @@ attachments, whole-queue authority, usage/cost telemetry and interrupt; the xter
 not a replacement conversation UI. Existing-row lifecycle routing remains explicitly local and may
 be replaced by the next catalog hydrate because no attach-lifecycle endpoint exists. New launches
 inherit lifecycle context on the server, and leaf attach/move is server-authoritative. The contextual
-Operations `RailChat` remains separate. Detailed candidate evidence and serving-contract boundaries live in
+Operations rail now shows the selected task's native Paseo workspace and agents after L95; the older contextual session panel is removed. Detailed candidate evidence and serving-contract boundaries live in
 [`session-cockpit-closeout-evidence.md`](session-cockpit-closeout-evidence.md) and
 [`session-cockpit-upstream-register.md`](session-cockpit-upstream-register.md), respectively.
 

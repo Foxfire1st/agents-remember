@@ -252,14 +252,14 @@ describe("the guard has something to police", () => {
   });
 
   it("classifies the fixture surface the rules are strict on", () => {
-    expect(isFixtureSurface("src/panels/RailChat.test.tsx")).toBe(true);
+    expect(isFixtureSurface("src/panels/SessionComposer.test.tsx")).toBe(true);
     expect(isFixtureSurface("src/test/fixtures/wire.ts")).toBe(true);
     expect(isFixtureSurface("src/dev/fixtures.ts")).toBe(true);
     expect(isFixtureSurface("src/panels/engine-room/fixtures.ts")).toBe(true);
     expect(isFixtureSurface("e2e-production/cockpit.production.spec.ts")).toBe(true);
     expect(isFixtureSurface("perf/cockpit.perf.spec.ts")).toBe(true);
     expect(isFixtureSurface("src/data/store.ts")).toBe(false);
-    expect(isFixtureSurface("src/panels/RailChat.tsx")).toBe(false);
+    expect(isFixtureSurface("src/panels/SessionComposer.tsx")).toBe(false);
   });
 });
 

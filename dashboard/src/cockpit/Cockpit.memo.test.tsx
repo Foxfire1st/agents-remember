@@ -299,11 +299,11 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
 
     fireEvent.click(view.getByTestId("rail-toggle-chat"));
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).not.toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).not.toBeNull();
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
 
     fireEvent.click(view.getByTestId("rail-toggle-river"));
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="rail-chat"]')).toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
   });
 });

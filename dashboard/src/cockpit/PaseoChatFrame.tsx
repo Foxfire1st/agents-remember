@@ -96,7 +96,7 @@ function fetchFrameDescriptor(): Promise<PaseoFrameDescriptor> {
     .catch(() => parseFrameDescriptor(null));
 }
 
-function FrameUnavailable({
+export function FrameUnavailable({
   reason,
   detail,
   onRetry,
@@ -134,9 +134,11 @@ interface PaseoChatFrameProps {
   /** Identity of the launcher selection; a change means another execution is being displayed. */
   scope: string;
   target: PaseoAgentTarget | null;
+  page?: "chats" | "document";
+  onAvailability?: (available: boolean) => void;
 }
 
-function useFrameController(scope: string, target: PaseoAgentTarget | null) {
+function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
   const [frame, setFrame] = useState<PaseoFrameView | null>(null);
   const [control, setControl] = useState<PaseoControlState>("waiting");
   const [agentProblem, setAgentProblem] = useState<string | null>(null);
@@ -148,6 +150,7 @@ function useFrameController(scope: string, target: PaseoAgentTarget | null) {
         setControl,
         setFrame,
         setAgentProblem,
+        page,
       }),
   );
   const agentId = target?.agentId;
@@ -204,13 +207,11 @@ function useFrameDescriptor(active: boolean, controller: PaseoFrameControl) {
   return { started, descriptor, retry };
 }
 
-export function PaseoChatFrame({
-  active,
-  scope,
-  target,
-}: PaseoChatFrameProps) {
-  const state = useFrameController(scope, target);
+export function PaseoChatFrame(props: PaseoChatFrameProps) {
+  const { active, onAvailability } = props;
+  const state = useFrameController(props);
   const { started, descriptor, retry } = useFrameDescriptor(active, state.controller);
+  useEffect(() => { onAvailability?.(descriptor?.available === true); }, [descriptor, onAvailability]);
   if (!started) return <div className={frameShell} />;
   if (descriptor && !descriptor.available)
     return (

@@ -29,6 +29,7 @@ from agents_remember.cli import (
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
+    role_launch_workspace,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import (
@@ -276,6 +277,40 @@ class MayStartRuleTests(unittest.TestCase):
 
 
 class RoleStartTests(RoleToolsTestCase):
+    def test_terminal_enclosures_refuse_both_entry_points_before_roots_or_launch(self) -> None:
+        for state in ("terminal-cleanup-completed", "terminal-archive-ready"):
+            for roots in (
+                {},
+                {
+                    "worktree_group": "/reclaimed/group",
+                    "code_worktree": "/reclaimed/code",
+                    "memory_worktree": "/reclaimed/memory",
+                },
+            ):
+                with self.subTest(state=state, roots=bool(roots)):
+                    summary = "Terminal cleanup is complete and the external enclosure archive remains proven."
+                    self.replace(
+                        role_launch_workspace,
+                        "worktree_status_tool",
+                        return_value={
+                            "ok": True,
+                            "state": state,
+                            "status": state,
+                            "summary": summary,
+                            **roots,
+                        },
+                    )
+                    button = self.refused(self.request("worker"))
+                    tool = self.refusal(self.start(self.architect, "worker"), "launch-refused")
+                    self.assertIn(summary, str(button.detail))
+                    self.assertIn("reopen-required", str(button.detail))
+                    self.assertEqual(tool["preparationStatus"], "reopen-required")
+                    self.assertIn(summary, tool["detail"])
+                    self.assertIn("task_reopen", tool["nextAction"])
+                    self.assertEqual(self.enclosures.start_calls, [])
+                    self.assertEqual(self.runtime.launch_calls(), [])
+                    self.assertEqual(self.receipt_files(), [])
+
     def test_a_start_runs_the_launchers_path_with_the_caller_as_parent(self) -> None:
         request_id = uuid.uuid4()
         locked: list[bool] = []
@@ -308,6 +343,7 @@ class RoleStartTests(RoleToolsTestCase):
                 "reportPath": receipt["report"]["path"],
                 "handoverArtifactPath": receipt["handoverArtifact"]["path"],
                 "executionStatus": "running",
+                "preparation": {"enclosure": "created", "workspace": "created"},
             },
         )
         # The same preparation, launch, binding and receipt as a start from the launcher, plus

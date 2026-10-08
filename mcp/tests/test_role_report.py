@@ -15,9 +15,10 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.cli.role_launch_preparation import _bind_task_report_access, _role_report_path
+from agents_remember.cli.role_launch_preparation import _role_report_path
 from agents_remember.cli.role_launch_receipts import (
     RECEIPT_SCHEMA,
+    _bind_task_report_access,
     _legacy_receipt_path,
     _receipt_path,
 )
