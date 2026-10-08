@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .retired_leaf_handover_wording import RETIRED_LEAF_HANDOVER_WORDING
+
 #: The normal MIK curation pass remains complete on both canonical surfaces.
 COMPLETE_CURATION_RULE = (
     "Curation is always complete: a named scoped check never stands in for the full operation"
@@ -297,6 +299,15 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
         probe="Optional selected-master coordinator; coordinates leaf owners and evidence.",
         reason="MIK-R72@v2: roles.manager.seat — the description must state one Manager for one master, the concurrent-master Orchestrator and the developer exception",
+    ),
+    *(
+        RetiredCurationStatement(
+            statement=statement,
+            sources=(path,),
+            probe=normalize_statement(statement)[:80],
+            reason="leaf handover, review bookkeeping or harness autonomy instruction was replaced",
+        )
+        for path, statement in RETIRED_LEAF_HANDOVER_WORDING
     ),
 )
 

@@ -1065,6 +1065,8 @@ consumers = [
   "mcp/tests/test_layering.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_leaf_enclosure_start.py",
+  "mcp/tests/test_leaf_handover.py",
+  "mcp/tests/test_leaf_handover_review_rounds.py",
   "mcp/tests/test_legacy_expectation_kinds_parse_only.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_lifecycle_owned_completion_relay.py",

@@ -1,8 +1,8 @@
 # Template — Curator Hand-off List
 
 The **producer's output shape** for the requirement-shaped items a leaf's builder and reviewer already
-produce. The worker emits its list, the reviewer emits its own in the same shape, and the orchestrator
-hands the curator **that same list**, unparaphrased, as data. `roles/worker.md`, `roles/reviewer.md`,
+produce. The Worker and Reviewer each hand the Curator their own list directly, in the same shape,
+with their producer data unchanged. The Manager and Orchestrator read reports and relay no list. `roles/worker.md`, `roles/reviewer.md`,
 `roles/orchestrator.md` and `roles/curator.md` own the seats' sides of this contract.
 
 **The contract's authority is the owning seat's schema note, the increment's own

@@ -17,8 +17,9 @@ sections below are the fields a consumer reads; where wording differs, those fil
 
 1. **A verdict is evidence, not a decision.** State an explicit pass/block **recommendation**; the gate's
    decider decides. Never write the verdict as if it were the gate outcome.
-2. **A block must decompose into fix leaves** — concrete, leaf-shaped findings the owning
-   manager/orchestrator can dispatch. A block that cannot be named as fix leaves is not yet a block.
+2. **A leaf block goes directly to the Worker** with the sealed findings report for repair inside
+   the leaf; the repaired freeze returns directly to the Reviewer. Master/super scope findings
+   that require a new fix leaf remain with their owning Manager/Orchestrator.
 3. **Refute-or-confirm:** every finding must survive an attempt to refute it. Rank findings and cite
    the backing evidence file.
 4. Cover all three lenses (completion · scoped implementation evidence · onboarding-vs-code)
@@ -160,18 +161,29 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 | --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
 | <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
 
-## Owner Recording Packet
+## Reviewer Recording Packet — ordinary leaf CODE lane
 - begin: `task_doc(operation="begin_review")` before reviewer work
 - result: `task_doc(operation="record_review")` or the existing `task_doc(operation="record_route_review")`
 - verdict: `<pass | pass-with-notes | block>`
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-The owner calls `task_doc(operation="begin_review")` before dispatching hosted reviewers or
-beginning native reviewer work, then calls `task_doc(operation="record_review")` or the existing
-`task_doc(operation="record_route_review")` after every required report exists. The task document
-remains the authority; no admission/publication IDs, purpose fields, or proof-of-human-authorship
-mechanism are required.
+The Reviewer takes the Worker's exact frozen candidate and report, opens its own ordinary CODE
+round with `task_doc(operation="begin_review")`, and records its verdict as that round's result
+with `record_review` or the existing `record_route_review`. It records a preceding result when
+needed before a repair round. The Manager keeps gate acceptance and the developer's recorded
+approval beyond the ordinary limit. The task document remains the authority; no
+admission/publication IDs, purpose fields, or proof-of-human-authorship mechanism are required.
+
+Send the verdict directly to the Worker, including the sealed findings report on BLOCK; on PASS,
+send the passed freeze and verdict directly to the Curator. A Curator code concern goes to both
+Reviewer and Worker, also after code PASS: take it into findings and reopen that point, or explain
+why it does not hold. Keep the Curator's MEMORY review sealed and counted apart with its own report
+IDs and the same ordinary limit. It opens no CODE round, resets no code state and adds no memory
+ID to the code baseline. Return memory findings/pass directly to the Curator. Only when both
+lanes pass, send the Manager one ready-for-closeout notice naming the freeze and both verdicts.
+Each handover names the leaf, exact candidate identity, report/verdict path and whole next stretch,
+never an acknowledgement request; delivery acceptance alone proves no work.
 ```
 
 ## Atomic-Master Integration Route-Review Variant
@@ -293,9 +305,10 @@ under the protected mutation authority.
 | --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
 | <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
 
-## If BLOCK — Manager Fix Leaves
-1. <baseline: fix leaf under this master, including an owning/reopened/new scoped fix leaf · scope · target files/docs · evidence refs · done-when; fix-verification: the existing owner and sealed outstanding issue IDs only>
-   (A BLOCK with no fix leaves here is invalid — resolve to PASS-WITH-NOTES or name the leaves.)
+## If BLOCK — Worker Repair Or Owner Fix Leaf
+1. <inside a leaf: Worker, sealed finding IDs/report, exact blocked freeze and repair evidence; send directly to the Worker without a Manager relay>
+2. <master scope needing a fix leaf: owning Manager · authorized fix-leaf scope · target files/docs · evidence refs · done-when; fix-verification: existing owner and sealed outstanding IDs only>
+   (Name the concrete repair owner and action; a local leaf repair needs no new fix leaf.)
 
 ## Judge-Evidence Note
 This verdict attaches to the master-exit handover gate as judge evidence. The decider decides; this
@@ -376,7 +389,8 @@ A three-party-loop review (a full-loop leaf round, or the plan review over an or
 uses the **master-exit variant's shape minus the gate machinery**: drop the `gate evidence` header
 row and the Judge-Evidence Note (a loop review attaches to no gate), set `decider` to the **loop
 owner** (the leaf's owning seat, or the architect for the plan review), scope to the round's
-change set (or the orchestration-task draft), and keep everything else — recommendation, Criteria
+change set (or the orchestration-task draft), and for a leaf use the direct Worker repair section
+instead of a Manager fix-leaf request. Keep everything else — recommendation, Criteria
 Catalog Results (the loop's bound catalogs, e.g. `plan-review` + `report-verification` for a plan
 review), ranked refute-tested findings, and fix decomposition. The verdict remains **evidence to
 the loop owner, never a decision**. Keep the mandatory Requirement Adjudication section and one

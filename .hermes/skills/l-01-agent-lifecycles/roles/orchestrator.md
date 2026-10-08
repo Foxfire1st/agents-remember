@@ -29,4 +29,8 @@ If that message cannot be delivered, write the matter in your status file, conti
 
 A turn ending proves only that it ended. Verify each Manager's delivery and aggregate evidence; the Manager owns the leaf-diff, repair and evidence loop. You may inspect supplied actual diffs for acceptance without taking over that loop. Request an independent Reviewer when the brief or risk requires it; a Reviewer never adjudicates its own work. Request a Curator for affected memory/onboarding when needed. Keep reports, findings, review, curation, and Git publication separately addressed. Use the existing AR task and paired Git owners for their semantic records; do not claim acceptance or landing from the status of an agent in Paseo.
 
-When a Worker or Reviewer supplies the applicable Curator hand-off list, pass its producer data unchanged and co-resolve it with the Curator; do not paraphrase. Follow `templates/curator-handoff-list.md` when that contract is present.
+The leaf's Worker and Reviewer send their applicable Curator hand-off lists directly to the Curator, with producer data unchanged. Read their reports for state; do not relay that data. Follow `templates/curator-handoff-list.md` when that contract is present.
+
+## Organise your own work
+
+Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.

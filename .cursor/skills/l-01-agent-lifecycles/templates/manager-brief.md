@@ -90,9 +90,22 @@ to the developer.
   logical formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
   `non-attempt-correction`/void reference and consumes no attempt ID; a malformed handed-off row
   requires independent reviewer rejection before a successor handoff. The worker never self-rejects.
-- Leaf handoff: manager -> builder -> optional reviewer -> curator when memory changes. The manager
-  closes a leaf from builder code plus the curator's complete affected-onboarding/check report; a
-  reviewer verdict is included only when review was requested.
+- Start a leaf's Worker and Reviewer together. The Reviewer cold-reads the requirement before code
+  exists and waits for the Worker's freeze. Start its Curator when the first freeze exists. No
+  checked seat starts its checker: the starter briefs the agent and becomes its parent.
+- The Worker hands the frozen candidate and report directly to the Reviewer; verdicts and repairs
+  return directly to the Worker. After code PASS, the Reviewer sends its passed freeze/verdict and
+  the Worker sends its hand-off list directly to the Curator. The Curator hands the memory change
+  directly to the Reviewer and receives its findings/pass directly. Relay none of those contents.
+- Hear from the leaf only for readiness for closeout (Reviewer names the passed freeze and CODE
+  and MEMORY verdicts), a non-work reply, an empty/doubled seat or a second busy refusal, ownership
+  or authority, an extra round/pass, an unresolved Curator/Reviewer code disagreement, or a sync
+  step reserved to you. For a native memory-file conflict, capture, verify and stage the Curator's resolved content; the Worker continues the supported sync. Settle the occasion without relaying handover contents or seeking a
+  developer confirmation for it; extra review still needs the developer's recorded approval.
+  Give a pending sender one message when the recipient is free so that sender retries itself.
+- Read leaf reports and the task document for state; record which seat holds each next step and
+  since when. Keep closeout, integration, status and acceptance writes, and landing order. A
+  Reviewer verdict remains evidence for your gate decision.
 - Closeout-door publication: after that handoff and a current-lineage proof, call
   `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
   contract with complete current
@@ -110,19 +123,19 @@ to the developer.
   `closeout_door(request={action:"update-provenance", ...})` or change its door disposition before
   it is schedulable again.
 - Every requested `reviewMode=baseline` standalone or organizational code-change session receives
-  an independent route review before curator handoff. Partition the complete agreed surface into
-  material major routes from architectural ownership, governing route overviews, and the
-  import/call graph. The reviewer chair fans out one independent reviewer per route and returns a
-  verdict with a complete route-coverage table; direct/builder-verified tiers may reduce loop
-  machinery, and no tier creates a review that was not requested. The reviewer seat must be distinct from both the leaf's builder
+  an independent route review before curator handoff. Require complete coverage of the agreed
+  surface, including material major routes and their surrounding owners; the Reviewer organises
+  its own review and any harness sub-agents. The reviewer seat must be distinct from both the leaf's builder
   seat and the seat that authored the plan. Dispatch the exact same owned primary stable-ID + version
   and worker envelope to the reviewer. For `reviewMode=fix-verification`, carry the sealed
   baseline, preceding result, and exact outstanding IDs; verify listed fixes only, reuse prior
-  route/evidence reports, and do not recensus the diff or add a route reviewer.
-  Before hosted reviewer dispatch or native reviewer work, call
-  `task_doc(operation="begin_review")`. After all reports and the verdict exist, call
-  `task_doc(operation="record_review")` or the existing
-  `task_doc(operation="record_route_review")`.
+  route/evidence reports, and do not recensus the diff.
+  The Reviewer itself records `task_doc(operation="begin_review")` when taking an ordinary CODE
+  handover and records its own result with `record_review` or the existing `record_route_review`.
+  It records a preceding result before beginning a repair round when required. MEMORY checks keep
+  their own sealed reports, IDs and count, with the same ordinary limit; they open no CODE round,
+  reset no code state, and add no ID to its baseline. Keep acceptance for the gate and record the
+  developer's approval for a CODE round or MEMORY pass beyond the ordinary limit.
   The reviewer independently opens the
   artifacts and adjudicates that exact attempt and candidate `accepted | rejected` in a separately appended
   record with its own rationale. Missing rationale, an
@@ -154,8 +167,8 @@ to the developer.
   including failures and not-run checks.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
   document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch
-  only after builder code exists. When review was requested, include its verdict. The brief FEEDS
-  the landed change set (leaf contract's base-to-head range), existing
+  when the Worker's first freeze exists. The Worker and Reviewer feed the frozen change set,
+  hand-off list and code verdict directly. The start brief supplies existing
   onboarding/entity intent anchors, the leaf task doc, approved developer/design rulings, and
   notes/. The curator performs the conservative three-way intent reconciliation, routes accepted
   current truth to the right onboarding home (specific sidecar or governing overview;
@@ -195,7 +208,8 @@ to the developer.
 - The packet states execution nature, exact scope refs, readiness facts, and the prepared
   transaction; carry-over is named only when an actual divergence required it.
 - Leaf-review notes on the relevant leaf document; decision-log entries for every delegated gate
-  you decide and every reopen.
+  you decide and every reopen. Each leaf's status names its next seat and since when. Read the
+  reports for progress; request no acknowledgement-only handovers.
 ```
 
 ---

@@ -661,6 +661,20 @@ def _compile_handover(
             "or Git acceptance from a finished turn."
         ),
     }
+    if context.role in LEAF_ROLES and context.task is not None:
+        handover["leafSeats"] = {
+            "roles": ["worker", "reviewer", "curator"],
+            "roleMessageArguments": {
+                role: {
+                    "role": role,
+                    "sprint_document_ref": ar_binding["selection"]["sprintDocumentRef"],
+                    "master_document_ref": ar_binding["selection"]["masterDocumentRef"],
+                    "task_document_ref": context.task.ref.model_dump(mode="json"),
+                }
+                for role in ("worker", "reviewer", "curator")
+                if role != context.role
+            },
+        }
     prompt = (
         f"AR ROLE BRIEF: {_started_from(started_by)} started this role with the role and "
         "operation identified below. "

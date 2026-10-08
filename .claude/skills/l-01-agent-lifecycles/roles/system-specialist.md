@@ -18,3 +18,7 @@ Return the report and ask questions in your own chat; when a parent agent starte
 ## Boundaries
 
 No repository-wide redesign, code changes, onboarding writes, task status changes, closeout, or self-approval unless a separate explicit assignment grants that role. A finished turn is not semantic acceptance.
+
+## Organise your own work
+
+Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.

@@ -674,18 +674,12 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
             with self.subTest(surface=relative):
                 self._assert_owed(relative)
 
-    def test_a_worker_tells_only_a_parent_agent_and_only_once_that_its_report_is_written(
-        self,
-    ) -> None:
+    def test_a_worker_hands_its_frozen_report_directly_to_the_reviewer(self) -> None:
         worker = normalize(read_surface("skills/l-01-agent-lifecycles/roles/worker.md"))
-        self.assertRegex(
-            worker,
-            r"when a parent agent started you, tell it once that the report is written"
-            r".{0,40}one role_message on agents-remember-task to its agent id",
-            "only a Worker with a parent agent sends the completion message, and it sends one",
-        )
-        self.assertIn("a worker started from the dashboard has no parent", worker)
-        self.assertIn("sends no such message", worker)
+        self.assertIn("freeze the candidate and send it directly to the leaf's reviewer", worker)
+        self.assertIn("the manager receives no routine report notice", worker)
+        self.assertIn("reply or report names the exact object", worker)
+        self.assertIn("a worker started from the dashboard has none", worker)
         self.assertIn("a finished turn is not ar acceptance", worker)
 
     def test_delivered_coordinator_capsules_check_candidate_evidence_before_acceptance(
@@ -706,8 +700,8 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 "manager",
                 "coordination",
                 (
-                    "inspect each deliverable",
-                    "required evidence",
+                    "inspect the complete changed-file diff",
+                    "both verdicts before deciding the gate",
                     "never substitute shell commits or a finished turn for ar acceptance",
                 ),
             ),
@@ -715,8 +709,8 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
                 "orchestrator",
                 "coordination",
                 (
-                    "inspect the worker's actual diff",
-                    "targeted check results",
+                    "verify each manager's delivery and aggregate evidence",
+                    "inspect supplied actual diffs for acceptance",
                     "do not claim acceptance or landing from the status of an agent in paseo",
                 ),
             ),
@@ -740,15 +734,14 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
 
                 if role == "manager":
                     weakened = role_text.replace(
-                        "Inspect each deliverable, complete changed-file diff, required evidence, "
-                        "and report before handing it onward.",
-                        "Hand each deliverable onward.",
+                        "Inspect the complete changed-file diff and both verdicts before deciding the gate.",
+                        "Accept each deliverable onward.",
                         1,
                     )
                     self.assertNotEqual(weakened, role_text, "the mutation site must be present")
                     weakened_delivery = normalize(weakened + "\n" + operation_text)
                     self.assertIn(
-                        "inspect each deliverable",
+                        "inspect the complete changed-file diff",
                         [
                             marker
                             for marker in markers

@@ -53,6 +53,14 @@ from agents_remember.tasks import TaskDocument
 from agents_remember_test_support.testing.curation_doctrine import (
     RETIRED_CURATION_STATEMENTS,
 )
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    LEAF_CLAUSES,
+    ROLES,
+    autonomy_clauses,
+    forbidden_autonomy_clauses,
+    missing_clauses,
+    normalized,
+)
 from mcp.server.fastmcp import FastMCP
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -146,8 +154,8 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
             "roles/manager.md": [
                 "You coordinate one selected master at Projects altitude. You do not own the portfolio. For one master, the Architect delegates coordination to one Manager. An Orchestrator sits above the Managers when two or more masters are worked on at the same time, or when the developer asks for one above a single master. Direct coordination by the Architect is only the developer-chosen exception. When another agent started you, report to that agent using its parent agent ID in your handover, unless the Architect instructs the reporting-recipient change below.",
-                "Inspect each deliverable, complete changed-file diff, required evidence, and report before handing it onward. Preserve stable requirement/finding IDs and distinguish implementation, review, curation, and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID.",
-                "Decide the order of your leaves, which role agent starts when, every operational problem, ordinary requirement interpretation within the intended promise, repair rounds between a Worker and a Reviewer, checks before and after a landing, and paired closeout and integration of your leaves within delegated authority. Answer your role agents' questions yourself where the decision is yours; do not forward them. Assign a check or investigation that belongs to no leaf to the Worker or Reviewer of the nearest leaf.",
+                "Read each leaf's reports and task records yourself. Worker, Reviewer and Curator hand freezes, findings, verdicts and memory changes directly to each other; you relay none of those contents. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, task status and acceptance writes, and the order of landings. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID.",
+                "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. The Reviewer opens and records ordinary code review rounds itself; memory review keeps its own sealed reports, IDs and pass count and opens no code round. Keep the ordinary limits and sealed finding IDs. Only the developer grants an extra round or memory pass; record that approval in the leaf's decisions. Accepting a verdict for the gate stays yours. Assign a check or investigation that belongs to no leaf to the Worker or Reviewer of the nearest leaf.",
                 "Keep your rulings in one durable rulings record, a list of requirement sentences that should change, and one status file under the selected master's notes; name their paths in your report. The Architect reads these files on its own and aligns the requirement texts with the rulings. These records do not authorize new or dropped scope or a changed promise.",
                 "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Do not forward role agents' messages or send a notice of a landing. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.",
                 "If the Architect who started you names an Orchestrator's agent ID in a message when a second master starts, record that instruction and reporting-recipient ID in your durable report and send developer-needed matters to that Orchestrator from then on. This changes your reporting recipient, not your fixed launch parent; no other message changes whom you report to.",
@@ -158,9 +166,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "The Architect's first delegation for one master is one Manager on that canonical master. For two or more masters worked on at the same time, it is one Orchestrator on the canonical sprint, which starts one Manager per master. This delegation rule applies only to the Architect; Designers and Strategists do not start a coordinating role. Direct coordination by the Architect is only the developer-chosen exception; in that case, the Architect directly coordinates distinct Workers, Reviewers, and Curators. The developer may also ask for an Orchestrator above a single master. Keep one explicit owner per task and preserve the agent IDs of started roles. Do not fabricate a sprint/master for a taskless project role or an agent identity to satisfy an old hierarchy."
             ],
             "operations/coordination.md": [
-                "For the leaf repair loop below, the Manager acts under delegation; the Architect acts only under developer-chosen direct coordination.",
+                "The Manager starts a leaf's Worker and Reviewer together and its Curator at the first freeze. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
                 "The Architect delegates coordination first to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master; each Manager coordinates its distinct Workers, Reviewers, and Curators. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. If the Architect's coordinating-agent start is refused, the Architect tells the developer the refusal and its reason; it does not fall back to direct coordination.",
-                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A role that matches several live agents is refused with their IDs; choose one by ID. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled, or the call is refused as busy. A recipient that waits for a permission decision is refused as busy as well, because a message would answer the permission with a denial: the developer answers it in that agent's chat, then send again. So is a recipient whose start has not finished. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
+                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches the newest live agent; an empty or doubled-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled, or the call is refused as busy. A recipient that waits for a permission decision is refused as busy as well, because a message would answer the permission with a denial: the developer answers it in that agent's chat, then send again. So is a recipient whose start has not finished. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
             ],
             "SKILL.md": [
                 "Use the agent IDs these tools return and the sender line of each message you receive; never invent a sender, recipient, parent, or delivery result. A message another agent sent you begins with a line `From <role> · <task> · agent <agent ID>`: your reply in that turn, in your own chat, is what the sender receives, so answer the message there. Do not create or message role agents any other way: an agent created outside `role_start` on `agents-remember-task` has no capsule and no binding. Put every question for the developer in your own chat, as your reply in this session; the developer reads it there and answers there. As the exception, an Orchestrator or Manager started by another agent sends what needs the developer's decision to that parent with `role_message` on `agents-remember-task`, following its handover's developerQuestions rule, keeps working and does not end its turn on the question; this exception takes precedence over the own-chat sentence for those two roles with a parent. AR remains authoritative for canonical tasks, requirements, knowledge, curation, and paired Git operations.",
@@ -173,11 +181,11 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "two are the write plane's reachable entry points; the mounted `knowledge_change` tool refuses every kind and",
                 "exists only to name the route.",
                 "`../operations/curation.md` § Record the task comparison; it retains the comparison and authors no knowledge.",
-                "In your report, enumerate one full-intake worklist of distinct outstanding memory actions: actions from the full `memory_quality_check` worklist and findings, current source-candidate reconciliation requiring judgment, producer reconciliation requiring a memory action, and reference checks required by the change. Preserve returned IDs and evidence, count each underlying action once, and exclude already answered work, report-only baseline observations and duplicate summary counts. At 100 or more actionable entries in that list, you must fan out read/search/reference checks to sub-agents, one level deep, when your harness supports them. Below 100 actionable entries, fan-out is allowed but not required. Hand out, for each changed file, reading the file and its card and judging whether the card or changed piece needs an entry; for each document, hand out citation checks. Each sub-agent returns findings with the path and evidence and writes nothing durable. Keep invariant/family placement, admission and changes of meaning with the Curator; the main session owns the single write through `knowledge-ingest`, the full memory-quality operation and every check, and the handoff. Record the list's count, your actual host, its sub-agent support and which reads you handed out in your report. If the harness does not support sub-agents, work through the list alone and report that limitation truthfully.",
-                "ambiguous. On an AR-launched Paseo capsule, use `role_message` on `agents-remember-task` to the",
-                "actual parent named in the handover or a role agent of this task. A Curator started from the dashboard has no",
-                "parent and needs none. A Curator starts no role; developer decisions stay in your own chat. Other",
-                "admissions retain the brief's transport (as named in the brief), without a fallback.",
+                "Enumerate one full-intake worklist of distinct outstanding memory actions in your report:",
+                "Use `role_message` on `agents-remember-task`, addressed by role and this leaf's exact task references",
+                "A Curator started from the dashboard has no parent and needs none.",
+                "A Curator starts no role:",
+                "A harness without sub-agents can do all the same work.",
             ],
         }
         for source, clauses in required.items():
@@ -200,17 +208,59 @@ class InstructionFileWordingTests(unittest.TestCase):
         )
         self.assertNotIn(kept, [row.statement for row in RETIRED_CURATION_STATEMENTS])
 
-    def test_curator_fanout_wording_distinguishes_99_and_100(self) -> None:
-        curator = role_text("curator")
-        for actionable, sentence in (
-            (99, "Below 100 actionable entries, fan-out is allowed but not required."),
-            (
-                100,
-                "At 100 or more actionable entries in that list, you must fan out read/search/reference checks to sub-agents, one level deep, when your harness supports them.",
-            ),
-        ):
-            with self.subTest(actionable_entries=actionable):
-                self.assertIn(sentence, curator)
+    def test_every_role_organises_its_harness_work_with_seat_boundaries(self) -> None:
+        self.assertEqual(
+            sorted(path.stem for path in (CANONICAL / LIFECYCLE / "roles").glob("*.md")),
+            sorted(ROLES),
+        )
+        for role in ROLES:
+            reading = role_text(role)
+            with self.subTest(role=role):
+                self.assertEqual(missing_clauses(reading, autonomy_clauses(role)), [])
+                self.assertEqual(forbidden_autonomy_clauses(role, reading), [])
+                self.assertNotIn("one level deep", reading)
+                self.assertNotIn("must fan out", reading)
+                self.assertNotIn("Sub-agents for read/search only", reading)
+        self.assertIn("A Worker starts no role", role_text("worker"))
+        self.assertIn("Keep exactly one Curator writer", role_text("curator"))
+
+    def test_leaf_roles_and_operations_deliver_their_own_positive_obligations(self) -> None:
+        for source, clauses in LEAF_CLAUSES.items():
+            with self.subTest(source=source):
+                self.assertEqual(missing_clauses(read(LIFECYCLE / source), clauses), [])
+
+    def test_removing_each_affirmative_clause_is_detected_on_its_surface(self) -> None:
+        surfaces = dict(LEAF_CLAUSES)
+        surfaces.update(
+            {
+                f"roles/{role}.md": {
+                    **LEAF_CLAUSES.get(f"roles/{role}.md", {}),
+                    **autonomy_clauses(role),
+                }
+                for role in ROLES
+            }
+        )
+        for source, clauses in surfaces.items():
+            reading = normalized(read(LIFECYCLE / source))
+            self.assertEqual(missing_clauses(reading, clauses), [], source)
+            for name, alternatives in clauses.items():
+                with self.subTest(source=source, obligation=name):
+                    mutant = reading
+                    for clause in alternatives:
+                        mutant = mutant.replace(normalized(clause), "")
+                    self.assertNotEqual(mutant, reading, "control must remove real instructions")
+                    self.assertIn(name, missing_clauses(mutant, clauses))
+
+    def test_equivalent_preserved_identity_and_no_role_boundaries_are_allowed(self) -> None:
+        for role in ROLES:
+            reading = role_text(role).replace("starts no role", "does not start a role")
+            with self.subTest(role=role):
+                self.assertEqual(missing_clauses(reading, autonomy_clauses(role)), [])
+        worker = role_text("worker").replace(
+            "Use an agent ID only whole and unchanged as the product supplied it",
+            "Use only the whole, unchanged agent ID supplied by the product",
+        )
+        self.assertEqual(missing_clauses(worker, LEAF_CLAUSES["roles/worker.md"]), [])
 
     def test_manifest_descriptions_follow_the_coordination_default(self) -> None:
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))

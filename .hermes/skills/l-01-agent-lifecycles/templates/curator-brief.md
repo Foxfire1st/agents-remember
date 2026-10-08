@@ -1,13 +1,14 @@
 # Template — Curator Brief
 
-The dispatch packet the **manager** (or the architect in a flat series) compiles for a **curator**,
-spawned fresh per leaf after builder code exists and, when requested, the reviewer verdict is
-available. **The brief
+The dispatch packet the **manager** compiles for a leaf's **curator**, started when the Worker's
+first freeze exists. The Curator receives the passed freeze and hand-off list directly from the
+Reviewer and Worker before writing its curation. **The brief
 is the curator's entire session start** — it replaces the front half the spawner already ran. This
 is the change-set and intent feeding contract: the curator never infers either from transcript
-memory. It is FED the landed change set, existing intent anchors, the leaf task doc, approved
+memory. The Worker feeds the frozen change set and hand-off list, and the Reviewer feeds its code
+verdict. Existing intent anchors, the leaf task doc, approved
 developer/design rulings, the manager's immediately preceding current source-lineage projection,
-and notes/ as inputs. The control plane repeats that lineage proof before process creation.
+and notes/ complete the inputs. The control plane repeats that lineage proof before process creation.
 
 Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="curator",
 brief=<this complete brief>)`. The control plane claims the `(leaf document, curator)` seat and
@@ -29,7 +30,7 @@ ROLE BRIEF — curator
 You are the CURATOR for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/curator.md`; this brief is your session start. Perform the
 leaf's conservative three-way intent reconciliation and write its coherence pass from the inputs
-below, then stop.
+below, then hand the memory change and report directly to the Reviewer.
 
 ## Worktrees
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`) — read-only for you.
@@ -40,12 +41,12 @@ below, then stop.
   immediately before dispatch and `state=current` across every applicable super → master → leaf
   code and external-memory edge. This is evidence, never a caller-supplied commit-id authority.
 
-## The landed change set (fed, not inferred)
+## The frozen change set (fed by the Worker, not inferred)
 - Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree — <changed-path
   list, or the dashboard change-set view ref (`/api/changeset/task` scope, or the leaf's
-  `committed`/`working` change-set) the manager pulled it from>.
+  `committed`/`working` change-set) the Worker records for the exact freeze>.
 - Memory diff (if any pre-existing memory-worktree changes carry forward): `<memory-base>..<HEAD>`.
-- Counters: `<files changed / insertions / deletions>` from the change-set the manager attached —
+- Counters: `<files changed / insertions / deletions>` from the change-set the Worker handed over —
   do not re-derive this from your own guess at "what probably changed."
 
 ## Task inputs
@@ -64,7 +65,9 @@ below, then stop.
 - Sealed review baseline / predecessor: `<sealed baseline ref> / <immediately preceding result or
   N/A>` when review was requested.
 - Outstanding issue IDs: `<exact IDs and dispositions supplied by the reviewer | none>` — when
-  review exists, preserve these judgments and do not discover, add, reopen, or broaden findings.
+  review exists, preserve these judgments. A code concern discovered during curation is sent with
+  evidence to the Reviewer and Worker, including after code PASS; the Reviewer answers it by
+  taking it into its findings and reopening that point, or explaining why it does not hold.
 - notes/: `<series-notes-path>` — the builder turn report
   (`notes/reports/<leaf-id>-worker-report.md`), the optional route-review verdict, and
   any other task-local notes naming a factual current-state clarification.
@@ -124,8 +127,9 @@ forward learning into repository truth.
   manager brief names — all scoped with `contract_path="<enclosure-contract-path>"`.
 - `curator_coherence` whenever the checklist requires it, always with
   `contract_path="<enclosure-contract-path>"`.
-- Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
-  ambiguous — never invent a change set from memory.
+- Clarify missing or ambiguous code/change-set input directly with the Worker and memory-review
+  input with the Reviewer; never invent a change set from memory. Ownership or authority matters
+  go to the Manager.
 - No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits.
 
 ## Checks — curation is complete
@@ -160,13 +164,26 @@ permission to pass incomplete onboarding. Closeout and integration carry this fu
 handoff as a prerequisite; the closeout transaction owns the real code and memory commits and does
 not rerun the operation automatically.
 
-## Curator handoff (last act)
-Return the changed onboarding paths, current-intent reconciliation, exact full-operation
+## Curator handoff
+Name the leaf, exact freeze head/change hash, memory change identity and report path in a direct
+`role_message` to the Reviewer
+on `agents-remember-task`, asking for the whole memory review. Address its role and exact leaf task
+references from your handover; supplied agent IDs stay whole and unchanged. This MEMORY lane has
+its own sealed findings, report IDs and pass count, with the same ordinary limit as CODE; it opens
+no code-review round, resets no code state and adds no memory ID to the code baseline. An extra
+memory pass needs the developer's word recorded by the Manager.
+
+Report the changed onboarding paths, current-intent reconciliation, exact full-operation
 commands/results, and every finding with its repair or blocked-escalation code. Do not write a
 hand-versioned certification file: `curator_coherence` is the authority a curator produces when the
 checklist requires it. A healthy memory reports `checklistStatus=coherence-required` and a
 successful `prepare` with `candidateCount 0`; publish the coherence record then, and expect closeout
-and integration to carry it.
+and integration to carry it. State every code concern and the Reviewer's answer in your report; do
+not repair code or write knowledge for behaviour the code does not have. If you and the Reviewer
+disagree about a code finding, ask the Manager to settle that disagreement. Count a handover only
+when the reply/report identifies the exact change and shows the requested work or its start, never
+from `accepted`. Follow the Curator's pending, busy, seat-recovery and non-work rules. No Curator
+starts a role; the Manager gives a pending sender the occasion to retry and relays no content.
 ```
 
 ---
@@ -181,17 +198,16 @@ and integration to carry it.
 - `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
   `enclosures/<leaf-id>/`. Use it to scope every memory-quality and coherence call; an unscoped
   `route_index_refresh` writes into the official memory repo.
-- Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
-  recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
-  a stale or guessed diff.
-- Attach the builder turn report and, when review was requested, the candidate-bound route-review
-  verdict as the notes/ inputs; the curator does not re-request evidence that already exists in
+- Start the Curator when the Worker's first freeze exists. Supply task, intent and current-lineage
+  anchors; the Worker sends its exact frozen change-set counters/paths and hand-off list directly,
+  and the Reviewer sends the passed freeze and verdict directly. Relay neither handover.
+- Name the Worker report and candidate-bound Reviewer verdict paths as notes/ inputs supplied
+  directly by their producers; the Curator does not re-request evidence that already exists in
   `notes/reports/`. For an atomic child, attach the master-integration review scope only when the
   owning manager supplies it; the curator does not create a per-leaf route-review record.
 - Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.
-- This brief runs strictly AFTER builder code exists. When review was requested, the owner calls
-  `task_doc(operation="begin_review")` before reviewer work, then
-  `task_doc(operation="record_review")` or the existing
-  `task_doc(operation="record_route_review")` after the result for standalone/organizational
-  leaves. Atomic child leaves proceed without a per-leaf route-review record, and the canonical
-  master binds a requested review only at master-to-parent integration.
+- The Reviewer records the ordinary CODE round's `task_doc(operation="begin_review")` and its own
+  result through `record_review` or the existing `record_route_review` where that review record
+  applies. The Manager keeps gate acceptance and records approval beyond the ordinary limit. The
+  Curator's MEMORY review is sealed and counted separately and writes no code-review state. Atomic
+  child/master-integration topology remains governed by the canonical task and integration rules.

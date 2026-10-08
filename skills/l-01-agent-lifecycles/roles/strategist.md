@@ -108,8 +108,8 @@ state signal never evaluates the artifact.
 - **Native writes only** to your own draft artifact under the notes path the brief names.
 - **`task_doc`** for the adoption attachments your Process names — `attach_master` per commanded master, on the
   draft you own. Your manifest entry declares it; this file states it so the two agree.
-- **Sub-agents for read/search only**, drilling vertically inside this seat's portfolio analysis; each writes
-  durable notes and returns a compact summary. A harness without fan-out does those reads sequentially.
+- **Harness sub-agents**, within this seat's assigned portfolio and permissions; you check their work
+  and credit it in the report. Boundary records and messages remain your own act. A harness without fan-out does those reads sequentially.
 - **`message_parent`** for a clarification or an escalation to the architect.
 
 ## What you must not do
@@ -136,3 +136,7 @@ state signal never evaluates the artifact.
 - **A changed plan surface that cannot be checked against the sealed baseline** returns to the developer.
 - **A brief that hands you the orchestrator's or the architect's job** — adopt this plan, dispatch these
   masters, rule this verdict — is refused and reported: drafting is yours, ruling and adoption are not.
+
+## Organise your own work
+
+Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.

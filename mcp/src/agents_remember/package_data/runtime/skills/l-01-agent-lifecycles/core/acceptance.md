@@ -11,9 +11,9 @@ boundary; they do not restate the whole of it.
   derives that mechanical seat-state fact, and delivers it to the structurally current owner. It
   never opens, parses, or evaluates a report, verdict, coherence record, expectation row, or
   acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
-- **The owner alone validates.** On wake, the current owner opens the required artifact, candidate
+- **The gate owner validates before advancing state.** On wake, the current owner opens the required artifact, candidate
   identity, evidence, and acceptance envelope and validates them **before advancing lifecycle
-  state**. For a leaf handoff that owner is the manager.
+  state**. For a leaf gate that owner is the Manager. Peer hand-overs go directly between Worker, Reviewer and Curator; a recipient checks the exact object and requested stretch, while the Manager retains gate acceptance.
 - **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff
   defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing
   doctrine instead of waiting for an imaginary notifier artifact check. If terminal truth is
@@ -28,9 +28,9 @@ boundary; they do not restate the whole of it.
 
 | Seat | Durable handoff artifact | Validated by |
 | --- | --- | --- |
-| worker | the turn report + the leaf Requirement Attempt Journal records | the owning manager |
+| worker | the turn report + the leaf Requirement Attempt Journal records | Reviewer for code; Manager for the gate |
 | reviewer | the verdict artifact | the decider of the gate the verdict attaches to |
-| curator | the structured coherence record and its generated projection | the owning manager |
+| curator | the structured coherence record and its generated projection | Reviewer for memory; Manager for the gate |
 | strategist | the orchestration-task draft | the architect (who rules it) |
 | designer | the task_doc + the designer-limits note | the architect |
 | system-specialist | the investigation report | the orchestrator |

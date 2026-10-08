@@ -16,14 +16,16 @@ Planning stays in task artifacts. This package defines how onboarding itself is 
 
 Before maintaining onboarding, use `c-08-ar-coordination-context-resolver` to resolve the target repository's active coordination context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
-**Seat routing:** in the manager -> builder -> reviewer -> curator chain (`l-01-agent-lifecycles`
-`roles/curator.md`), onboarding create/update duty during leaf work belongs to the curator seat, not
-the builder — the builder produces code and a turn report only. The curator runs this skill's
-workflows from a change set (landed diff), the leaf task doc, and notes/ fed to it by the manager,
+**Seat routing:** the Worker, Reviewer and Curator hand a leaf's candidate, verdict and memory
+change directly to each other; the Manager starts the seats and retains closeout and gate
+acceptance. Onboarding create/update duty belongs to the Curator (`l-01-agent-lifecycles`
+`roles/curator.md`); the Worker produces code and a turn report. The Curator runs this skill's
+workflows from the frozen change set and hand-off list fed directly by the Worker, the passed
+freeze/verdict fed directly by the Reviewer, the leaf task doc and notes/,
 and routes each item to the right onboarding home (a concrete sidecar or the governing overview
 whose subject it is; the L3 Operational-Notes target is last-resort only, never a default). The
 strict 1-to-1 source mapping, governing-overview links, and metadata rules below are unchanged by
-this routing — only the writing seat moved. A solo flat session with no separate curator seat runs
+this routing. A solo flat session with no separate curator seat runs
 this skill itself, exactly as before.
 
 When onboarding maintenance is happening inside a `c-09-git-worktree-manager`

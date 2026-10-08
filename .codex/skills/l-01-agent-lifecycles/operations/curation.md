@@ -1,23 +1,27 @@
 # Operation — Curation
 
 **What it covers:** the leaf coherence pass — reconciling intended, current, and implemented meaning
-and writing the affected onboarding. One fresh seat per leaf, after builder code and (when
-requested) review evidence exist. It also carries the repository's **first or resumed knowledge
+and writing the affected onboarding. The Manager starts the Curator when the Worker's first freeze exists;
+the Worker and Reviewer supply the candidate-bound inputs directly. It also carries the repository's
+**first or resumed knowledge
 foundation**, which is the same curator's authoring work with a different admission and scope.
 
-**When it is selected:** a leaf has builder output, the owning manager has compiled the curator
-brief, and memory surfaces are affected. Its second, bounded entry — a repository's first or resumed
+**When it is selected:** a leaf has a Worker's freeze and affected memory surfaces. The Manager supplies the
+assignment; the Worker sends its hand-off list and the Reviewer sends the code freeze it passed.
+Its second, bounded entry — a repository's first or resumed
 knowledge foundation, before any leaf exists — is stated under *The repository-foundation entry* below.
 
 ## Who carries it, and their job
 
 | Role | Its job in this operation |
 | --- | --- |
-| curator | performs the three-way reconciliation and writes the affected onboarding |
-| manager | compiles the curator brief from the captured pre-closeout change set + task doc + notes and consumes the curator's paths and scoped-check report |
+| curator | performs the three-way reconciliation, writes through one admitted writer and hands the memory candidate directly to the Reviewer |
+| worker | supplies the exact freeze and hand-off list; answers code questions and receives evidenced code concerns directly |
+| reviewer | supplies the passed code freeze, checks the memory candidate and answers code findings, including after code PASS |
+| manager | starts the Curator, reads leaf state from reports and retains task acceptance and landing authority |
 
-These are two disjoint jobs: the curator reconciles and writes memory; the manager owns the
-transaction. The curator never runs the closeout preview, never repairs transaction conflicts, and
+Reconciliation and transaction ownership stay disjoint: the Curator reconciles and writes memory; the Manager owns the
+transaction. The curator never runs the closeout preview, never stages a sync resolution or repairs closeout transaction state, and
 never decides whether a leaf lands.
 
 The manager's half is a **leaf**-entry fact. On the repository-foundation entry there is no leaf, no
@@ -31,10 +35,11 @@ run by an instructed session whose admission is the writer's own (see below).
 
 ## Required inputs
 
-The brief **feeds** all three inputs; none is inferred from transcript memory:
+The brief binds the assignment; the Worker's and Reviewer's direct handovers supply the candidate-bound
+inputs. None is inferred from transcript memory:
 
 1. **The captured change set** — code diff from the leaf's base to its actual pre-closeout candidate with counters and paths,
-   pulled by the manager from the leaf contract's recorded range, not a guess.
+   identified by the Worker against the leaf contract's recorded range, not a guess.
 2. **The leaf task doc** — including the approved requirement corpus ruling and every exact stable-ID
    + version canonical packet the brief names.
 3. **`notes/`** — the builder turn report, plus the candidate-bound route-review verdict when review
@@ -75,7 +80,7 @@ normal authoring pass complete; that pass retains all the full-operation obligat
 ## Normal workflow
 
 1. **Reconcile three ways.** The pass succeeds only when these three bodies agree, or every material
-   divergence is surfaced to the owning manager:
+   divergence is surfaced directly to its answering seat under the handover rules below:
    - the existing system's **current intent** — source, tests, onboarding contracts, entity
      boundaries, durable incident lessons;
    - the **ruled change intent** — the task, developer decisions, approved design notes, builder
@@ -295,18 +300,25 @@ and names the areas it did not reach; it never claims the foundation complete fo
   publication reports `no_change`), while changed content under one entry id is refused by design and
   is corrected with a successor entry.
 - **If any side of the three-way comparison is missing or ambiguous enough that curation would become
-  guesswork**, ask the owning seat for one clarification row.
+  guesswork**, ask the Worker about code or the Reviewer about its verdict directly; ask the Manager only
+  when the missing row is a matter of ownership or authority.
+- **A code concern goes to the Reviewer and Worker, even after code PASS.** State the requirement or
+  report mismatch with its evidence; repair no code and write no knowledge claiming behaviour the code lacks.
+  The Reviewer answers by taking it into its findings and reopening that point, or explaining why it does not
+  hold. Name the finding and answer in the Curator report; an unresolved disagreement goes to the Manager.
 - Report **dirty-source drift**, missing onboarding, or other findings exactly as returned; never
   convert a subset result into a full-quality claim.
 
 ## Handoff / exit
 
-On an AR-launched Paseo capsule, return with bound `role_message` on `agents-remember-task` to the
-actual parent named in the handover or a role agent of this task; a dashboard launch may have no
-parent and needs none. A Curator starts no role. Developer decisions stay in your own chat. Other
-admissions keep their brief's transport, without a fallback between transports.
+On an AR-launched leaf capsule, use `role_message` on `agents-remember-task` directly to the Reviewer,
+with the handover's role-and-task arguments. An agent ID is used only whole and unchanged as supplied
+by a sender line, start result or handover. A Curator starts no role: the starter briefs an agent and becomes
+its parent, so no seat starts its own checker. A dashboard launch needs no parent. Developer decisions
+stay in your own chat. Repository-foundation and other admissions keep their brief's transport without a fallback.
 
-The curator's exit returns to the owning manager: the changed onboarding paths, the intent
+The curator's memory candidate goes directly to the Reviewer for its whole memory check: the changed
+onboarding paths, the intent
 reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.
 It also carries the knowledge hand-off result: every entry's outcome from the ingest report
 (`committed` / `rulings` / `refused`, each refusal named) and the **published dataset identity** the
@@ -316,5 +328,39 @@ the identity an independent read of the declared location confirmed, and the rem
 carried work — together with the source areas the run examined and the areas it did not.
 The structured coherence record and its generated projection are the durable output — not the
 transcript and not a parallel hand-authored report. Write the record before ending the turn;
-terminal/finalizer evidence then attests only that this turn ended and wakes the manager, who
-validates it. Do not hand-write a curator certification or write a parallel model completion post.
+terminal/finalizer evidence attests only that this turn ended. Do not hand-write a curator certification
+or write a parallel model completion post.
+
+Each handover names the leaf, the thing's exact identity (the Worker's code head and change hash, and
+the memory candidate's identity), its report or verdict path, and the whole next stretch requested.
+The memory check keeps separate sealed reports, finding IDs and its own pass count: it opens
+no code-review round, resets no code verdict and adds no IDs to the code baseline. Its ordinary limit is
+the same number of passes as the code review. A pass beyond its
+ordinary limit needs the developer's word recorded by the Manager. Receive memory findings or PASS
+directly from the Reviewer and repair within that lane; the Manager carries none of these handovers.
+
+The handover is taken only when the recipient's reply or report names the exact thing and shows the
+requested work or its start. `accepted` alone is not action. Quote a provider limit, error or non-action
+reply once to the Manager with the seat, and continue independent work. Report an empty or doubled
+seat refusal once with its exact text; choose no candidate yourself. A busy refusal is pending in your
+report: retry before ending the turn, and report a second busy refusal once to the Manager. You still
+owe the direct handover and send it yourself when the Manager tells you the seat is free.
+
+If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with `role_message` on `agents-remember-task`; do not turn this transport failure into a developer question in your own chat.
+
+The Manager hears from the Curator only for these delivery and seat problems, ownership or authority,
+a pass beyond the ordinary limit, a code finding disputed with the Reviewer, or a sync step assigned
+to the Manager. It reads ordinary state from reports and never relays the contents. Memory conflicts
+in the Worker's supported leaf sync come directly to the Curator; transaction steps stay with the
+Manager. Contact another leaf only for a dependency named by a requirement or the Manager; other
+cross-leaf matters go through the Manager.
+
+Inside the assignment the Curator organises its work with whatever its harness offers, including
+sub-agents at any size, without a prescribed number or depth. The seat checks and answers for their
+work, credits their parts in its report, and hands it over under its own name. Boundary messages,
+task records and product operations changing leaf state are the seat's own acts. A harness sub-agent
+holds no AR seat, starts no role and has the same working folder, permissions and assignment. Nobody
+checks itself through a sub-agent; the memory check stays the Reviewer's. Keep exactly one Curator
+writer through the admitted writer. A harness without sub-agents can perform the same assignment.
+
+For a native memory-file sync conflict, repair only the memory content inside your admitted write surface. The Manager captures, verifies and stages the resolution; the Worker continues the supported sync with `resolution_action="continue"`. Do not stage files or change transaction authority.

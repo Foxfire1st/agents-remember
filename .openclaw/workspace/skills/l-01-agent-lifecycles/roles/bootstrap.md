@@ -119,8 +119,9 @@ re-derived that way, mark it as this seat's own observation rather than as evide
   `grepai_search`, `drift_check`.
 - **Native reads**, and shell for the state commands the procedure names (`git status`, `git log`, `ls`) —
   reading state is not mutating it.
-- **Sub-agents** — read/search only, writing durable notes; your main loop owns every mutating call and the
-  report, and no sub-agent runs a setup surface.
+- **Harness sub-agents**, within this assignment and its permissions, including permitted read-only
+  setup-status queries. You organise their work, check it and credit it in your report; mutating product
+  calls and the final report remain your own acts. Helpers hold no AR seat and start no role.
 
 ## What you must not do
 
@@ -166,3 +167,7 @@ a task transaction this seat does not have.
 - **A capability that does not exist is named as absent**, and never described as done. State the current
   fact and report any surface that still states a superseded one; `../operations/bootstrap.md` carries this
   seat's own instruction channel as the worked case.
+
+## Organise your own work
+
+Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.

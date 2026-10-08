@@ -25,14 +25,14 @@ ROLE BRIEF — worker
 
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
-code completely, write your builder turn report, then stop. Leaf closeout consumes the
-builder code, worker report, and (when memory changed) the curator's complete onboarding/check handoff.
-Review is dispatched only when the developer or approved task brief requests it. After a stable
-code handoff, a `reviewMode=baseline` manager may dispatch an independent reviewer chair
-which fans out one reviewer per materially affected major route. An R27 successor uses
-`reviewMode=fix-verification` and verifies only the sealed outstanding issue IDs; it does not add
-routes or perform another whole-diff review. For a first review, be precise about changed routes,
-surrounding owners, and likely side effects in your report so the review partition is complete.
+code completely, freeze the candidate, write your worker turn report, and hand it directly to the
+Reviewer with `role_message` on `agents-remember-task`. The Manager starts the Worker and Reviewer
+together; the Reviewer first cold-reads the requirement, then waits for your candidate. You start
+no role: whoever starts an agent briefs it and becomes its parent. An R27 successor uses
+`reviewMode=fix-verification` and verifies only the sealed outstanding issue IDs. Your report records
+changed routes, surrounding owners, and likely side effects as facts; your handover gives no
+instruction on how or what to review and does not limit the review. The Reviewer does not read your
+chat. The Manager retains closeout and gate acceptance.
 
 ## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)
@@ -41,14 +41,17 @@ surrounding owners, and likely side effects in your report so the review partiti
   (one physical append-only journal; workers append delivery records and independent reviewers
   append separate adjudication records without changing earlier bytes)
 - Plus your turn report at the path below. Nothing else. NEVER `git commit` — the owning seat
-  closes out after reviewing your report and any requested review/curator handoff.
+  closes out after evaluating the candidate-bound reports and code/memory verdicts.
 
 ## Tool surface
 - Native file tools inside the two worktrees; shell for the checks below.
 - Read-only AR retrieval: `read_ar_files` (serves the OFFICIAL baseline, never your worktree —
   final verification uses native reads), `grepai_search` / `cgc_*` (provider stack key:
   `<stack-key-or-NONE>`), `context_packet`.
-- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_*`, or `route_index_refresh` —
+- When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
+  freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a
+  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
+  `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.
 - Interpreter: `<venv-python-path>` with `PYTHONPATH=<code-worktree>/mcp/src` — there is no
@@ -146,7 +149,7 @@ Name any guideline finding or plan conflict in your turn report; a contradiction
 verdict finding, not a style note.
 
 ## Targeted checks (before you report)
-- Before handing a code implementation or fix to the supervising owner, select and run
+- Before handing a code implementation or fix directly to the Reviewer, select and run
   the relevant targeted tests and targeted lint, formatting, typing, and structural checks using
   the resolved repository tools and environment. Record the exact commands,
   selected scope, and results in the turn report; explicitly list any relevant test or check not run
@@ -171,6 +174,9 @@ verdict finding, not a style note.
   hold point does not substitute for any requirement acceptance block.
 
 ## Curator handoff input
+After the Reviewer passes code, send the Curator this hand-off list directly for the exact passed
+freeze; the Reviewer sends its code verdict separately. The Manager starts the Curator when your
+first freeze exists; if that seat is absent, ask the Manager for its creation alone.
 - Changed paths and code-diff summary for the curator's affected-onboarding handoff.
 - Your curator hand-off list: every requirement-shaped item of this leaf, emitted in the shape of
   `skills/l-01-agent-lifecycles/templates/curator-handoff-list.md` — one entry per item, each with its
@@ -185,12 +191,21 @@ verdict finding, not a style note.
 - Pin idiom for any metadata note the curator needs: "Verification metadata pinned until closeout
   stamps the <leaf-id> commit."
 
-## Turn report (mandatory, last act)
+## Turn report and direct handover
 Write `<notes-reports-path>/<leaf-id>-worker-report.md` following
 `skills/l-01-agent-lifecycles/templates/turn-report.md` — including exact links to every newly
 appended journal attempt, a separate Checks section with exact commands + outcomes,
-changed paths for the curator, the retrieval-evidence tally, and the respawn state. If
-blocked: fill Escalations and stop — escalate to <owning-seat contact>, never to the developer.
+changed paths for the curator, the retrieval-evidence tally, and the respawn state. Your handover
+names the leaf, candidate head and change hash as recorded in the report, report path, and the
+recipient's whole next stretch of work, never an acknowledgement-only request. Address a sibling by
+role and the exact leaf task references from your handover; use a supplied agent ID only whole and
+unchanged. Count the handover as taken only when its reply or report identifies that exact candidate
+and shows the requested work or its start; `accepted` alone is no work. Follow the Worker's pending,
+busy, empty/doubled-seat, and non-work recovery rules. Send findings and repairs directly between
+Worker and Reviewer. The Manager receives only its named ownership, authority, seat-recovery,
+extra-round, and reserved-sync occasions; it relays none of the content. Record a pending handover
+and its exact refusal/reply in your report. If blocked, fill Escalations for the responsible seat;
+questions for the developer follow the applicable question rule.
 ```
 
 ---

@@ -43,8 +43,9 @@ When the dashboard owns a session, its role is fixed for the session lifetime.
 - Roles expand **horizontally** by dispatching new, individually addressable role seats
   (`dispatch_agent` with the target's canonical document and role). A role seat is never a
   harness-native sub-agent of another role seat.
-- Sub-agents drill **vertically** inside one seat's context for read/search/report work only — and
-  only where that role's own file permits it. Orchestration seats never use them at all.
+- Harness sub-agents work inside the seat's assignment with its permissions and working folder.
+  The seat organises their work, verifies and credits it, and performs all boundary acts itself.
+  Helpers hold no AR seat, start no role and cannot supply independent review of their author.
 - Sessions not owned by the dashboard follow their host harness's ordinary rules.
 
 ## Dispatch is one structural transaction

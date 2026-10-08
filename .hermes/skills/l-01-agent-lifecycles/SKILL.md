@@ -33,3 +33,7 @@ An Architect first delegates coordination to one Manager for one master, or to o
 ## Resume and report
 
 After compaction or reconnect, restore the same role, operation, task reference, agent IDs, and report path from the handover artifact and durable records. Reconcile an uncertain start by repeating `role_start` on `agents-remember-task` with the same request ID before anything else; do not create a second owner or ask the developer to repeat supplied details. A finished turn, review, curation, semantic acceptance, and paired Git publication are separate facts. Report each only from its owning evidence.
+
+## Inside an assignment
+
+The roles order work at the boundaries of tasks and their execution graph: assignment, hand-over, independent review, curation and landing. Inside an assignment the seat organises its own work with its harness, including sub-agents; the seat answers for their work and alone performs boundary acts. A sub-agent holds no AR seat, starts no role, shares the seat's working folder, permissions and assignment, and cannot supply independent review of its seat's own work. Curator authoring still uses one writer.
