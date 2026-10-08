@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
+from agents_remember.cli.role_launch_archive_recovery import LeafArchiveRecovery
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
@@ -118,12 +119,20 @@ async def _terminal_observation_loop(runtime: _ServingRuntime) -> None:
     ``TerminalCatalogLivenessSweeper.refresh``; this loop owns only the attempt cadence.
     """
 
-    while True:
-        try:
-            await _observe_terminal_catalog(runtime, "steady-state")
-        except Exception:
-            logger.exception("terminal catalog observation failed; retrying next interval")
-        await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+    archives = LeafArchiveRecovery(runtime.config)
+    try:
+        while True:
+            try:
+                await _observe_terminal_catalog(runtime, "steady-state")
+            except Exception:
+                logger.exception("terminal catalog observation failed; retrying next interval")
+            try:
+                await _to_thread_drained_on_cancel(archives.tick)
+            except Exception:
+                logger.exception("leaf agent archive observation failed; retrying next interval")
+            await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+    finally:
+        archives.close()
 
 
 async def _prime_terminal_observation(runtime: _ServingRuntime) -> None:

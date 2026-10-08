@@ -26,7 +26,6 @@ from agents_remember.worktrees.activation.atomic_series_activation_terminal impo
 )
 from agents_remember.worktrees.integration.atomic_series_terminal import (
     AtomicSeriesTerminalPermit,
-    publish_atomic_series_terminal_under_authority,
     require_atomic_series_terminal_release,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
@@ -36,6 +35,7 @@ from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
     terminal_contract_authority_if_present,
 )
+from agents_remember.worktrees.modules import terminal_abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
@@ -50,6 +50,7 @@ from agents_remember.worktrees.modules.cleanup import (
 )
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     TerminalResult,
@@ -96,10 +97,15 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ):
             return _terminal_archive_observation(contract, force=args.force)
         if terminal.state == "cleanup-completed":
-            return with_terminal_atomic_series_release(
+            result = with_terminal_atomic_series_release(
                 contract,
                 _already_abandoned(contract, force=args.force),
                 dry_run=args.dry_run,
+            )
+            agents = archive_terminal_agents(contract, dry_run=args.dry_run)
+            return WorktreeCommandResult(
+                result.returncode,
+                {**result.payload, **({"agentArchive": agents} if agents else {})},
             )
         contract = terminal.archived_contract
     else:
@@ -174,74 +180,9 @@ def _abandon_reserved(
             },
         )
     try:
-        return _abandon_with_guard(args, contract, preflight, guard)
+        return terminal_abandon._abandon_with_guard(args, contract, preflight, guard)
     finally:
         guard_context.__exit__(None, None, None)
-
-
-def _abandon_with_guard(
-    args: WorktreeArgs,
-    contract: WorktreeContract,
-    preflight: TerminalPreflight,
-    guard: TerminalGuard,
-) -> WorktreeCommandResult:
-    try:
-        terminal_archive = terminal_archive_required_result(
-            contract,
-            operation="worktree_abandon",
-            arguments=TerminalWorktreeAbandonArguments(force=args.force),
-            dry_run=args.dry_run,
-        )
-        if terminal_archive.returncode != 0:
-            return terminal_archive
-        terminal_authority = (
-            None
-            if args.dry_run
-            else terminal_contract_authority_if_present(load_contract(contract.contract_path))
-        )
-
-        def publish(
-            series_permit: AtomicSeriesTerminalPermit | None = None,
-        ) -> WorktreeCommandResult:
-            current = load_contract(contract.contract_path)
-            if args.dry_run:
-                if current != contract:
-                    raise RuntimeError("abandon contract changed before preview")
-            else:
-                terminal = terminal_contract_authority_if_present(current)
-                if terminal is None:
-                    raise RuntimeError("abandon lost terminal archive authority before mutation")
-                current = terminal.archived_contract
-            outputs = _abandon_terminal_outputs(
-                args,
-                current,
-                preflight,
-                series_permit=series_permit,
-            )
-            result = _abandon_outputs_result(args, current, preflight, guard, outputs)
-            return _with_terminal_archive(result, terminal_archive)
-
-        if contract.kind == "series":
-            return publish_atomic_series_terminal_under_authority(
-                contract,
-                "worktree_abandon",
-                publish,
-                terminal_authority=terminal_authority,
-            )
-        return publish()
-    except Exception as error:
-        return WorktreeCommandResult(
-            2,
-            {
-                "state": "abandon-blocked",
-                **status_payload(contract),
-                "summary": "Abandon terminal helper failed; cache and contract stayed live.",
-                "citation_source_index": _preserved_cache(
-                    guard.preview(), "terminal-helper-failed"
-                ),
-                "blockers": [{"terminal": "helper", "reason": str(error)}],
-            },
-        )
 
 
 def _terminal_archive_observation(

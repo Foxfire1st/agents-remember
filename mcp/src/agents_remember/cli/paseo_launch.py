@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -439,7 +440,12 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
     return {"toolServer": tool_server, "recoveryNote": agent["systemPrompt"]}
 
 
-def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOutcome:
+def run_launch_call(
+    config: McpRuntimeConfig,
+    call: dict[str, Any],
+    *,
+    before_create: Callable[[], bool] | None = None,
+) -> LaunchOutcome:
     """Run a stored launch call and classify what the runtime answered."""
 
     workspace = call.get("workspace")
@@ -462,6 +468,13 @@ def run_launch_call(config: McpRuntimeConfig, call: dict[str, Any]) -> LaunchOut
         # Persisted v1 calls contain only cwd; their original replay semantics stay exact.
         opened = bridge_call(config, "workspace-open", workspace)
         workspace_id = opened_workspace_id(opened, folder)
+        if before_create is not None and not before_create():
+            return LaunchOutcome(
+                kind="refused",
+                code="leaf_closing",
+                message="The leaf is closing; its prepared start cannot create an agent.",
+                predecessor_settled=predecessor_settled,
+            )
         role_launch_progress.starting()
         created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
         return replace(

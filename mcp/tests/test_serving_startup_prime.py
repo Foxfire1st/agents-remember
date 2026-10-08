@@ -338,8 +338,8 @@ class ServingStartupPrimeTests(unittest.IsolatedAsyncioTestCase):
                 # The recurring owner's later pass goes through that same bound entry point.
                 await _wait_until(lambda: probe.calls >= 2)
 
-        self.assertGreaterEqual(len(helper_calls), 2)
-        self.assertTrue(all(target == probe.refresh for target in helper_calls))
+        # Later passes also drain archive work; the prime and subsequent sweeper calls stay bound.
+        self.assertGreaterEqual(helper_calls.count(probe.refresh), 2)
 
         # One canonical pass over an identical seed at the same clock instant commits exactly the
         # truth the prime committed: no startup-only reader, cursor, or write path took part.

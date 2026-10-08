@@ -627,10 +627,8 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             async with fixture.running():
                 await _advance(fixture.clock, lambda: probe.calls >= 2)
 
-        self.assertEqual(
-            helper_calls, [fixture.runtime.liveness_sweeper.refresh] * len(helper_calls)
-        )
-        self.assertGreaterEqual(len(helper_calls), 2)
+        # Leaf archive recovery also uses this generic helper; count the sweeper's own calls.
+        self.assertGreaterEqual(helper_calls.count(fixture.runtime.liveness_sweeper.refresh), 2)
         self.assertTrue(all(thread is not threading.main_thread() for thread in probe.threads))
         # The premise that makes this an HTTP-free proof: the app whose lifespan is entered here
         # carries no route beyond the ones FastAPI mounts on every instance, so no request could

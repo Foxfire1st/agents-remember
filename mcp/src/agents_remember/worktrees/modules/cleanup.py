@@ -16,7 +16,6 @@ from agents_remember.worktrees.activation.atomic_series_activation_terminal impo
 )
 from agents_remember.worktrees.integration.atomic_series_terminal import (
     AtomicSeriesTerminalPermit,
-    publish_atomic_series_terminal_under_authority,
     require_atomic_series_terminal_permit,
     require_atomic_series_terminal_release,
 )
@@ -29,10 +28,12 @@ from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
     terminal_contract_authority_if_present,
 )
+from agents_remember.worktrees.modules import terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     TerminalResult,
@@ -661,13 +662,18 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 teardown_providers=args.teardown_providers,
             )
         if terminal.state == "cleanup-completed":
-            return with_terminal_atomic_series_release(
+            result = with_terminal_atomic_series_release(
                 contract,
                 _already_completed_cleanup(
                     contract,
                     teardown_providers=args.teardown_providers,
                 ),
                 dry_run=args.dry_run,
+            )
+            agents = archive_terminal_agents(contract, dry_run=args.dry_run)
+            return WorktreeCommandResult(
+                result.returncode,
+                {**result.payload, **({"agentArchive": agents} if agents else {})},
             )
         contract = terminal.archived_contract
     else:
@@ -749,75 +755,9 @@ def _cleanup_reserved(
             },
         )
     try:
-        return _cleanup_with_guard(args, contract, preflight, guard)
+        return terminal_cleanup._cleanup_with_guard(args, contract, preflight, guard)
     finally:
         guard_context.__exit__(None, None, None)
-
-
-def _cleanup_with_guard(
-    args: WorktreeArgs,
-    contract: WorktreeContract,
-    preflight: TerminalPreflight,
-    guard: TerminalGuard,
-) -> WorktreeCommandResult:
-    # The exact leaf fence remains held through every terminal output and publication.
-    try:
-        terminal_archive = terminal_archive_required_result(
-            contract,
-            operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(teardown_providers=args.teardown_providers),
-            dry_run=args.dry_run,
-        )
-        if terminal_archive.returncode != 0:
-            return terminal_archive
-        terminal_authority = (
-            None
-            if args.dry_run
-            else terminal_contract_authority_if_present(load_contract(contract.contract_path))
-        )
-
-        def publish(
-            series_permit: AtomicSeriesTerminalPermit | None = None,
-        ) -> WorktreeCommandResult:
-            current = load_contract(contract.contract_path)
-            if args.dry_run:
-                if current != contract:
-                    raise RuntimeError("cleanup contract changed before preview")
-            else:
-                terminal = terminal_contract_authority_if_present(current)
-                if terminal is None:
-                    raise RuntimeError("cleanup lost terminal archive authority before mutation")
-                current = terminal.archived_contract
-            outputs = _cleanup_terminal_outputs(
-                args,
-                current,
-                preflight,
-                series_permit=series_permit,
-            )
-            result = _cleanup_outputs_result(args, current, preflight, guard, outputs)
-            return _with_terminal_archive(result, terminal_archive)
-
-        if contract.kind == "series":
-            return publish_atomic_series_terminal_under_authority(
-                contract,
-                "worktree_cleanup",
-                publish,
-                terminal_authority=terminal_authority,
-            )
-        return publish()
-    except Exception as error:
-        return WorktreeCommandResult(
-            2,
-            {
-                "state": "blocked",
-                **status_payload(contract),
-                "summary": "Cleanup terminal helper failed; cache and contract stayed live.",
-                "citation_source_index": _preserved_cache(
-                    guard.preview(), "terminal-helper-failed"
-                ),
-                "blockers": [{"terminal": "helper", "reason": str(error)}],
-            },
-        )
 
 
 def _terminal_archive_observation(

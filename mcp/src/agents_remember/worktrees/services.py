@@ -336,6 +336,13 @@ class WorktreeServices:
     knowledge_worklist: KnowledgeWorklistPort | None = None
     review_artifact_cleanup: ReviewArtifactCleanupPort | None = None
     knowledge_gate: KnowledgeGatePort | None = None
+    leaf_agent_archive: LeafAgentArchivePort | None = None
+
+
+class LeafAgentArchivePort(Protocol):
+    """Archive recorded leaf agents after terminal admission, before removal."""
+
+    def archive(self, contract: WorktreeContract) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)

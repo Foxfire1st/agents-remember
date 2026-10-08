@@ -364,6 +364,7 @@ integration = [
   "mcp/tests/test_knowledge_projection_vault_safety.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_leaf_agent_archive.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",

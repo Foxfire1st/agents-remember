@@ -34,6 +34,7 @@ from agents_remember.worktrees.modules.cleanup_report import cleanup_report
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.services import (
     ReviewArtifactCleanupRequest,
     WorktreeServicesUnboundError,
@@ -210,6 +211,7 @@ def _finalized_result(
             "landedCommit": _landed_commit(contract),
             "targetBranch": contract.code_source_branch,
             "cleanup": cleanup,
+            **({"agentArchive": cleanup["agentArchive"]} if "agentArchive" in cleanup else {}),
             "taskUpdates": updates,
             "projectionEffects": projection_effects,
             "taskArchive": archive,
@@ -327,11 +329,13 @@ def _landed_commit(contract: WorktreeContract) -> str:
 
 def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> WorktreeCommandResult:
     if contract.cleanup == "completed":
+        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
         return WorktreeCommandResult(
             0,
             {
                 "state": "already-completed",
                 "summary": "Cleanup already completed.",
+                **({"agentArchive": agents} if agents else {}),
             },
         )
     try:
@@ -358,7 +362,14 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
         return result
     return WorktreeCommandResult(
         result.returncode,
-        cleanup_report(contract, result.payload),
+        {
+            **cleanup_report(contract, result.payload),
+            **(
+                {"agentArchive": result.payload["agentArchive"]}
+                if "agentArchive" in result.payload
+                else {}
+            ),
+        },
     )
 
 
@@ -554,35 +565,7 @@ def _reconcile_task_documents(
     *,
     dry_run: bool,
 ) -> tuple[dict[str, Any], list[dict[str, object]]]:
-    updates: dict[str, Any] = {}
-    documents: list[TaskDocument] = []
-    if targets.leaf_path is None or targets.leaf is None:
-        updates["leaf"] = {
-            "state": "skipped",
-            "reason": "no contract-bound leaf task document authored",
-        }
-    else:
-        if targets.completed_leaf is None:
-            raise FinalizeTaskDocumentError("preflighted leaf completion candidate is missing")
-        documents.append(targets.completed_leaf)
-        updates["leaf"] = _task_update_payload(
-            targets.leaf_path,
-            targets.completed_leaf,
-            dry_run=dry_run,
-        )
-
-    if targets.parent_path is None or targets.parent is None or targets.parent_row is None:
-        updates["parent"] = {"state": "skipped", "reason": "leaf has no immediate parent"}
-    else:
-        if targets.completed_parent is None:
-            raise FinalizeTaskDocumentError("preflighted parent completion candidate is missing")
-        documents.append(targets.completed_parent)
-        updates["parent"] = _task_update_payload(
-            targets.parent_path,
-            targets.completed_parent,
-            dry_run=dry_run,
-        )
-        updates["parent"]["subtaskNumber"] = targets.parent_row.number
+    updates, documents = _completion_updates(targets, dry_run=dry_run)
     projection_effects: list[dict[str, object]] = []
     if dry_run and documents:
         _require_finalize_sources_current(targets)
@@ -603,7 +586,51 @@ def _reconcile_task_documents(
         projection_effects = [
             effect.model_dump(by_alias=True) for effect in published.projection_effects
         ]
+    else:
+        _require_finalize_sources_current(targets)
     return updates, projection_effects
+
+
+def _completion_updates(
+    targets: FinalizeTaskTargets, *, dry_run: bool
+) -> tuple[dict[str, Any], list[TaskDocument]]:
+    """Prepare changed completion documents separately from their atomic publication."""
+    updates: dict[str, Any] = {}
+    documents: list[TaskDocument] = []
+    if targets.leaf_path is None or targets.leaf is None:
+        updates["leaf"] = {
+            "state": "skipped",
+            "reason": "no contract-bound leaf task document authored",
+        }
+    else:
+        if targets.completed_leaf is None:
+            raise FinalizeTaskDocumentError("preflighted leaf completion candidate is missing")
+        if targets.completed_leaf != targets.leaf:
+            documents.append(targets.completed_leaf)
+        updates["leaf"] = _task_update_payload(
+            targets.leaf_path,
+            targets.completed_leaf,
+            dry_run=dry_run,
+        )
+        if targets.completed_leaf == targets.leaf:
+            updates["leaf"]["state"] = "already-completed"
+
+    if targets.parent_path is None or targets.parent is None or targets.parent_row is None:
+        updates["parent"] = {"state": "skipped", "reason": "leaf has no immediate parent"}
+    else:
+        if targets.completed_parent is None:
+            raise FinalizeTaskDocumentError("preflighted parent completion candidate is missing")
+        if targets.completed_parent != targets.parent:
+            documents.append(targets.completed_parent)
+        updates["parent"] = _task_update_payload(
+            targets.parent_path,
+            targets.completed_parent,
+            dry_run=dry_run,
+        )
+        if targets.completed_parent == targets.parent:
+            updates["parent"]["state"] = "already-completed"
+        updates["parent"]["subtaskNumber"] = targets.parent_row.number
+    return updates, documents
 
 
 def _require_finalize_sources_current(targets: FinalizeTaskTargets) -> None:
@@ -623,6 +650,8 @@ def _require_finalize_sources_current(targets: FinalizeTaskTargets) -> None:
 
 
 def _leaf_completion_candidate(doc: TaskDocument) -> TaskDocument:
+    if doc.status == "Completed":
+        return doc
     data = doc.model_dump(by_alias=True)
     data["status"] = "Completed"
     data["decisions"] = _finalized_decisions(data)
@@ -641,9 +670,13 @@ def _parent_completion_candidate(
             f"preflighted parent row disappeared before reconciliation: {subtask_number!r}"
         )
     refs[index]["status"] = "Completed"
-    data["decisions"] = _finalized_decisions(data)
     updated = TaskDocument.model_validate(data)
-    return demote_completed_master_if_unresolved(updated)
+    updated = demote_completed_master_if_unresolved(updated)
+    if updated == doc:
+        return doc
+    data = updated.model_dump(by_alias=True)
+    data["decisions"] = _finalized_decisions(data)
+    return TaskDocument.model_validate(data)
 
 
 def _task_update_payload(

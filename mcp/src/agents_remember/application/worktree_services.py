@@ -31,6 +31,7 @@ from agents_remember.worktrees.integration.closeout.preparation.continuation imp
     PreparedCloseoutContinuation,
 )
 from agents_remember.worktrees.services import (
+    LeafAgentArchivePort,
     ProviderSetupRequestSpec,
     TerminalGuard,
     WorktreeServices,
@@ -210,7 +211,9 @@ class CitationGuardAdapter:
         )
 
 
-def build_default_worktree_services() -> WorktreeServices:
+def build_default_worktree_services(
+    *, leaf_agent_archive: LeafAgentArchivePort | None = None
+) -> WorktreeServices:
     return WorktreeServices(
         provider_lifecycle=ProviderLifecycleAdapter(),
         memory_quality=MemoryQualityAdapter(),
@@ -223,6 +226,7 @@ def build_default_worktree_services() -> WorktreeServices:
         knowledge_worklist=LeafWorklistRecompute(),
         knowledge_gate=KnowledgeGate(),
         review_artifact_cleanup=ReviewArtifactCleanup(),
+        leaf_agent_archive=leaf_agent_archive,
     )
 
 

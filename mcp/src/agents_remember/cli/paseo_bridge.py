@@ -68,9 +68,13 @@ def bridge_call(
     config: McpRuntimeConfig,
     command: str,
     payload: dict[str, Any],
+    *,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Run one bridge command against the configured Paseo runtime and return its result."""
 
+    if timeout_seconds is None:
+        timeout_seconds = PASEO_BRIDGE_TIMEOUT_SECONDS
     settings = require_bridge_runtime(config)
     try:
         node = product_node().node
@@ -97,14 +101,19 @@ def bridge_call(
             errors="replace",
             capture_output=True,
             check=False,
-            timeout=PASEO_BRIDGE_TIMEOUT_SECONDS,
-            env=_bridge_environment(settings),
+            timeout=timeout_seconds,
+            env={
+                **_bridge_environment(settings),
+                "AR_PASEO_DEADLINE_MS": str(
+                    min(_SCRIPT_DEADLINE_MS, max(1, int(timeout_seconds * 1000) - 100))
+                ),
+            },
         )
     except subprocess.TimeoutExpired as error:
         raise PaseoBridgeFailure(
             BRIDGE_TIMEOUT,
             f"The Paseo bridge call {command!r} did not end within "
-            f"{PASEO_BRIDGE_TIMEOUT_SECONDS} seconds and was stopped.",
+            f"{timeout_seconds} seconds and was stopped.",
         ) from error
     except OSError as error:
         raise PaseoBridgeFailure(

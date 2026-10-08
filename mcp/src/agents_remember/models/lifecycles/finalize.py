@@ -33,6 +33,7 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=8)
     taskArchive: dict[str, Any] = Field(default_factory=dict)
+    agentArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
     # The atomic-series activation facts the SUCCESS path of a real series finalize carries:
     # ``worktrees/modules/finalize.py`` merges them out of

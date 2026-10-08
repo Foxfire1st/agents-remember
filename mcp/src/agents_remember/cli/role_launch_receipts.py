@@ -26,8 +26,9 @@ from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     selection_binding,
 )
-from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, run_launch_call
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
+from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
@@ -71,18 +72,91 @@ def _execute_prepared_launch(
     The receipt already names the agent id, so running the same call again reaches the same agent.
     """
 
-    launch_call = receipt.get("replayRequest")
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _same_request_receipt(path, receipt)
+        closing = _leaf_is_closing(current)
+    if closing:
+        return _refuse_closing_launch(config, path, current)
+    launch_call = current.get("replayRequest")
     if not isinstance(launch_call, dict):
         raise HTTPException(
             status_code=409,
             detail="The unresolved launch has no saved launch call; reconcile the Paseo runtime before retrying.",
         )
-    artifact = receipt.get("handoverArtifact")
+    artifact = current.get("handoverArtifact")
     if isinstance(artifact, dict):
         # The first message names this file; it must hold that message whenever it is sent.
-        _rebind_report_access(receipt)
+        _rebind_report_access(current)
         restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
-    outcome = run_launch_call(config, launch_call)
+    if current.get("role") in LEAF_ROLES:
+        outcome = run_launch_call(
+            config, launch_call, before_create=lambda: _leaf_before_create(path, current)
+        )
+    else:
+        outcome = run_launch_call(config, launch_call)
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _same_request_receipt(path, receipt)
+        if not _leaf_is_closing(current):
+            return _publish_launch_outcome(path, current, launch_call, outcome)
+        if outcome.kind == "created":
+            current.update(execution=outcome.execution, agent=outcome.applied, hostAgentExists=True)
+            _write_receipt(path, current)
+        elif outcome.lost_agent_id:
+            current["hostAgentExists"] = True
+            _write_receipt(path, current)
+    return _refuse_closing_launch(
+        config, path, current, creation_returned=outcome.kind == "created"
+    )
+
+
+def _same_request_receipt(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
+    current = _read_receipt(path)
+    if current is None or current.get("requestId") != receipt.get("requestId"):
+        raise HTTPException(status_code=409, detail="The prepared launch receipt was replaced.")
+    return current
+
+
+def _leaf_is_closing(receipt: dict[str, Any]) -> bool:
+    selection = receipt.get("selection")
+    archive = receipt.get("leafArchive")
+    return (
+        receipt.get("role") in LEAF_ROLES
+        and isinstance(selection, dict)
+        and selection.get("role") == receipt.get("role")
+        and isinstance(selection.get("taskDocumentRef"), dict)
+        and isinstance(archive, dict)
+        and archive.get("closing") is True
+        and archive.get("taskDocumentRef") == selection["taskDocumentRef"]
+    )
+
+
+def _leaf_before_create(path: Path, receipt: dict[str, Any]) -> bool:
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _same_request_receipt(path, receipt)
+        if _leaf_is_closing(current):
+            return False
+        current["leafCreateEntered"] = True
+        _write_receipt(path, current)
+        return True
+
+
+def _refuse_closing_launch(
+    config: McpRuntimeConfig,
+    path: Path,
+    receipt: dict[str, Any],
+    *,
+    creation_returned: bool = False,
+) -> JSONResponse:
+    # Archival already depends on receipts; resolve that owner only on the retired-start route.
+    from agents_remember.cli.role_launch_archive import refuse_retired_start  # noqa: PLC0415
+
+    refused = refuse_retired_start(config, path, receipt, creation_returned=creation_returned)
+    return JSONResponse(_public_execution(refused), status_code=409)
+
+
+def _publish_launch_outcome(
+    path: Path, receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
+) -> JSONResponse:
     if outcome.kind == "created":
         receipt["execution"] = outcome.execution
         receipt["agent"] = outcome.applied
@@ -610,6 +684,13 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             if isinstance(override, dict):
                 retry_payload["agentOverride"] = override
             public["retryPayload"] = retry_payload
+    if _leaf_is_closing(receipt) and receipt["leafArchive"].get("startRefused") is True:
+        # Unsettled archive status also prevents a different request moving an in-flight receipt.
+        own = receipt["leafArchive"].get("outcomes", {}).get(receipt.get("agentId"), {})
+        if own.get("state") in {"archived", "gone"}:
+            public["status"] = "rejected"
+        public.update(startRefused=True, canStart=False, canRevive=False, canRetry=False)
+        public.pop("retryPayload", None)
     reference = receipt.get("execution")
     if isinstance(reference, dict):
         public["execution"] = {
@@ -650,13 +731,39 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
     return receipt
 
 
-def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
-    temporary = _write_receipt_aside(path, receipt)
-    try:
-        temporary.replace(path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+def _write_receipt(path: Path, receipt: dict[str, Any], *, archive_update: bool = False) -> None:
+    with exclusive_file_lock(path, "role execution receipt"):
+        current = _read_receipt(path)
+        if (
+            current is not None
+            and current.get("requestId") == receipt.get("requestId")
+            and current.get("leafCreateEntered") is True
+        ):
+            receipt["leafCreateEntered"] = True
+        if (
+            not archive_update
+            and current is not None
+            and current.get("requestId") == receipt.get("requestId")
+            and _leaf_is_closing(current)
+        ):
+            receipt["leafArchive"] = current["leafArchive"]
+            if "pendingArchiveAgentId" in current:
+                receipt["pendingArchiveAgentId"] = current["pendingArchiveAgentId"]
+            else:
+                receipt.pop("pendingArchiveAgentId", None)
+            if current["leafArchive"].get("startRefused") is True:
+                for key in ("status", "detail", "replayRequest"):
+                    if key in current:
+                        receipt[key] = current[key]
+                    else:
+                        receipt.pop(key, None)
+                receipt["canRevive"] = False
+        temporary = _write_receipt_aside(path, receipt)
+        try:
+            temporary.replace(path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
 
 def _create_receipt(path: Path, receipt: dict[str, Any]) -> bool:

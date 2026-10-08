@@ -16,6 +16,7 @@ from agents_remember.application.worktree_services import (
     bind_worktree_services,
     build_default_worktree_services,
 )
+from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
@@ -81,7 +82,9 @@ def launched_server_instructions() -> str | None:
 
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
-    bind_worktree_services(build_default_worktree_services())
+    bind_worktree_services(
+        build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
+    )
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
     server_startup.initialize_mcp_application(config)

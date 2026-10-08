@@ -25,6 +25,7 @@ from agents_remember.application.task_docs.task_execution_registration import (
 )
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.cli.role_launch_routes import register_role_launch_routes
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
@@ -201,8 +202,10 @@ def _dev_app():
     stamp "dashboard" onto every later test in the same interpreter.
     """
     declare_process_role("dashboard")
-    bind_worktree_services(build_default_worktree_services())
     config = load_config(os.environ[_DEV_CONFIG_ENV])
+    bind_worktree_services(
+        build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
+    )
     heartbeat_env = os.environ.get(_DEV_HEARTBEAT_ENV)
     app = create_app(
         config,
@@ -300,11 +303,13 @@ def run(args: argparse.Namespace) -> int:
     # test suite calls in-process, and declaring there would stamp "dashboard" onto every
     # later test in the same interpreter.
     declare_process_role("dashboard")
-    bind_worktree_services(build_default_worktree_services())
     resolved = _resolve_settings(args)
     if resolved is None:
         return 1
     config_path, config = resolved
+    bind_worktree_services(
+        build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
+    )
     port = args.port if args.port is not None else config.dashboard.port
     if args.daemon or args.status or args.stop:
         return _run_daemon_command(args, config, port)
