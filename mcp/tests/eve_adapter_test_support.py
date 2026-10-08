@@ -15,18 +15,23 @@ cursor and reconnect assertions meaningful:
 
 from __future__ import annotations
 
+import asyncio
+import errno
 import functools
 import json
 import tempfile
 import threading
 from collections.abc import AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.eve_protocol import EveStreamEvent, parse_event_frame
+from agents_remember.serving.eve_runtime_client import EveRuntimeProcess
+from agents_remember.serving.eve_runtime_launch import choose_runtime_port
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from eve_capsule_test_support import (
     FixtureCarrierRequest,
     binding_env,
@@ -135,6 +140,7 @@ class FakeEveRuntime:
         self.cancel_error: HarnessControlError | None = None
         self.cancel_status = "accepted"
         self.stream_refusals = 0
+        self.stream_passes: list[tuple[str, int, int]] = []
         #: The two session controls ``eve_runtime_client.EveRuntimeTransport`` declares. They are
         #: recorded here because a fake that silently accepts a control the adapter never calls is
         #: how this fake fell out of the protocol in the first place (D19): a member the fake does
@@ -251,6 +257,7 @@ class FakeEveRuntime:
         tail = len(session.events)
         for index in range(start_index, tail):
             yield parse_event_frame(json.dumps(session.events[index]), index=index)
+        self.stream_passes.append((session_id, start_index, tail))
 
     # -- test controls --------------------------------------------------------------------
 
@@ -597,3 +604,45 @@ def staged_runtime_root(scratch: Path, *, authored: Path | None = None) -> Path:
         if origin.exists():
             (scratch / name).write_bytes(origin.read_bytes())
     return scratch
+
+
+class IsolatedEveRuntimeProcess(EveRuntimeProcess):
+    """Retry an observed bind/close race only when the Eve child reports EADDRINUSE."""
+
+    async def start(self) -> None:
+        loop = asyncio.get_running_loop()
+        retry_deadline: float | None = None
+        while True:
+            try:
+                if retry_deadline is None:
+                    await super().start()
+                else:
+                    remaining = retry_deadline - loop.time()
+                    if loop.time() >= retry_deadline:
+                        raise TimeoutError(
+                            "Eve runtime could not bind a private port before the hang guard"
+                        )
+                    await asyncio.wait_for(super().start(), timeout=remaining)
+                return
+            except (HarnessControlError, OSError) as error:
+                detail = f"{error} {self.stderr_tail}".lower()
+                collision = (
+                    (isinstance(error, OSError) and error.errno == errno.EADDRINUSE)
+                    or "eaddrinuse" in detail
+                    or "address already in use" in detail
+                )
+                await self.stop("graceful")
+                if not collision:
+                    raise
+                if retry_deadline is None:
+                    retry_deadline = loop.time() + HANG_GUARD_SECONDS
+                if loop.time() >= retry_deadline:
+                    raise TimeoutError(
+                        "Eve runtime could not bind a private port before the hang guard"
+                    ) from error
+                self._launch = replace(self._launch, port=choose_runtime_port(self._launch.host))
+                self._stderr.clear()
+                self._stopping = False
+            except BaseException:
+                await self.stop("forced")
+                raise

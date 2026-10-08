@@ -21,6 +21,8 @@ import sys
 import threading
 from pathlib import Path
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -97,7 +99,7 @@ class _Gate:
             return
         self.armed = False
         self.entered.set()
-        if not self.release.wait(timeout=10):
+        if not self.release.wait(timeout=HANG_GUARD_SECONDS):
             raise AssertionError("a parked pass was never released")
 
 

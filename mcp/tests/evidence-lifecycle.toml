@@ -375,6 +375,24 @@ replacement_contract = "node:mcp/tests/test_pytest_bootstrap_boundaries.py::Pyte
 consumer_scope = "all-tests"
 
 [[artifact]]
+path = "mcp/tests/conversation_open_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "mcp/tests/test_conversation_library_open.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the conversation open test's existing host, gates, resume ports and opener fakes, with an explicit parked-resolution entry signal"
+introduced_by = "260928-MIK-L87"
+lifetime = "permanent"
+permanence_rationale = "The existing open-drive fakes and the new resolution opportunity signal have one owner outside the already-large behavior test module; test cases and assertions remain in that module."
+replacement_contract = "node:mcp/tests/test_conversation_library_open.py::OpenServiceTests::test_prelaunch_poll_stays_pending_then_real_mismatch_retires_for_real"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_conversation_library_open.py",
+]
+
+[[artifact]]
 path = "mcp/tests/curator_coherence_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -498,6 +516,25 @@ consumers = [
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_adapter_event_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "mcp/tests/test_eve_adapter.py"
+category = "public-contract"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the Eve adapter test's existing event pump and harness, with an exact durable-stream completion signal"
+introduced_by = "260928-MIK-L87"
+lifetime = "permanent"
+permanence_rationale = "The subscriber opportunity proof shares the existing pump and harness owner while the behavior cases remain in their original test module, reducing that module below the file-size rail."
+replacement_contract = "node:mcp/tests/test_eve_adapter.py::EveAdapterReconnectTests::test_reconnect_from_the_cursor_does_not_duplicate_the_transcript"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_product_integration.py",
 ]
 
 [[artifact]]
@@ -1075,6 +1112,7 @@ consumers = [
   "mcp/tests/test_dagger_registry_lock.py",
   "mcp/tests/test_dagger_runtime_authority.py",
   "mcp/tests/test_dashboard_host.py",
+  "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
   "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_direct_landing.py",
@@ -1368,6 +1406,7 @@ consumers = [
   "mcp/tests/test_structural_dispatch_recovery.py",
   "mcp/tests/test_structural_limits.py",
   "mcp/tests/test_suite_budget.py",
+  "mcp/tests/test_suite_load_independence.py",
   "mcp/tests/test_sync_dashboard.py",
   "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_sync_runtime.py",
@@ -1680,7 +1719,12 @@ consumers = [
   "mcp/tests/test_knowledge_leaf_read.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_reopen.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_worktree_candidate_capture.py",
 ]
 
 [[artifact]]
@@ -2008,6 +2052,24 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/reviewer_worklist_process_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "mcp/tests/test_reviewer_worklist_process.py"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "event-controlled subprocess replies, lifetime children, request clocks and executor contention used by real worklist process tests"
+introduced_by = "260928-MIK-L87"
+lifetime = "permanent"
+permanence_rationale = "One deterministic fake owner supplies explicit admission, reply and executor-opportunity signals without machine-speed sleeps and keeps the existing process test module below the file-size rail."
+replacement_contract = "node:mcp/tests/test_reviewer_worklist_process.py::test_identical_requests_share_one_child_and_others_wait_for_one_of_two_slots"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_reviewer_worklist_process.py",
 ]
 
 [[artifact]]

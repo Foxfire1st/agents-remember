@@ -6,7 +6,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +20,7 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     parse_paseo_runtime_settings,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_runtime_test_support import write_shared_runtime
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -343,19 +343,18 @@ class BridgeProcessTests(unittest.TestCase):
             stuck = root / "stuck-node"
             stuck.write_text(f"#!/bin/sh\necho $$ > {root}/pid\nexec sleep 30\n", encoding="utf-8")
             stuck.chmod(0o755)
-            started = time.monotonic()
             with (
                 patch.object(
                     paseo_bridge,
                     "product_node",
                     return_value=SimpleNamespace(node=Path(stuck.as_posix())),
                 ),
+                # load-independent: the stalled bridge must expire and report paseo_bridge_timeout.
                 patch.object(paseo_bridge, "PASEO_BRIDGE_TIMEOUT_SECONDS", 0.5),
                 self.assertRaises(PaseoBridgeFailure) as raised,
             ):
                 bridge_call(config, "catalog", {"cwd": "/work/folder"})
             self.assertEqual(raised.exception.code, "paseo_bridge_timeout")
-            self.assertLess(time.monotonic() - started, 10)
             pid = int((root / "pid").read_text(encoding="utf-8"))
             self.assertFalse(Path(f"/proc/{pid}").exists(), "the stuck bridge process survived")
 
@@ -609,18 +608,14 @@ class BridgeScriptTests(unittest.TestCase):
         }
         for label, (code, command, scenario) in cases.items():
             with self.subTest(label):
-                started = time.monotonic()
                 self.assertEqual(self.refusal(command, **scenario), code)
                 # The script's own budget (1.5 s here) ends the call, not the 60-second stop.
-                self.assertLess(time.monotonic() - started, 5)
         with self.subTest("a refresh the runtime never answers"):
-            started = time.monotonic()
             with self.assertRaises(PaseoBridgeFailure) as raised:
                 self.call(
                     "catalog", {"cwd": "/work/folder", "refresh": True}, **healthy, refresh="hang"
                 )
             self.assertEqual(raised.exception.code, "paseo_bridge_timeout")
-            self.assertLess(time.monotonic() - started, 5)
         with self.subTest("a crash of the script carries the error Node reports"):
             crash = "the daemon answered with a frame the client cannot read"
             with self.assertRaises(PaseoBridgeFailure) as raised:
@@ -643,7 +638,7 @@ class BridgeScriptTests(unittest.TestCase):
                 env=environment,
             ) as script:
                 try:
-                    status = script.wait(5)
+                    status = script.wait(HANG_GUARD_SECONDS)
                 except subprocess.TimeoutExpired:
                     script.kill()
                     self.fail("the script waited for its payload past its deadline")

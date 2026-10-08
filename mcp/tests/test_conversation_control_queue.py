@@ -49,6 +49,7 @@ from agents_remember.serving.harness_control_client import (
     set_control_model,
     submit_control_prompt,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 SESSION = "ar-queue-1"
 
@@ -156,7 +157,7 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.adapter.submit_gate = asyncio.Event()
         self.adapter.set_activity("idle")
         head_before = third.items[0]
-        deadline = asyncio.get_running_loop().time() + 5.0
+        deadline = asyncio.get_running_loop().time() + HANG_GUARD_SECONDS
         while True:
             fourth = await self._queue()
             if fourth.items[0].phase == "dispatching":
@@ -177,7 +178,7 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
         setter = asyncio.create_task(
             asyncio.to_thread(set_control_model, self.harness.control_entry, "any-model")
         )
-        deadline = asyncio.get_running_loop().time() + 5.0
+        deadline = asyncio.get_running_loop().time() + HANG_GUARD_SECONDS
         while True:
             timeline = await self.service.read_full_timeline(
                 self.harness.control_entry, expected_bridge_epoch=self.epoch
@@ -194,7 +195,7 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
         # its blocked caller resolves without a cancellation-wait on the thread.
         self.adapter.auto_release = True
         await drive_activity(self.harness, "idle")
-        await asyncio.wait_for(asyncio.shield(setter), timeout=10.0)
+        await asyncio.wait_for(asyncio.shield(setter), timeout=HANG_GUARD_SECONDS)
 
     async def test_preview_transform_strips_collapses_redacts_and_truncates(self) -> None:
         text = "  hello\x00\x07 world \n\t  PASSWORD=hunter2 secret  " + "x" * 400
@@ -310,7 +311,7 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queued_head.phase, "queued")
         self.adapter.submit_gate = asyncio.Event()
         await drive_activity(self.harness, "idle")
-        deadline = asyncio.get_running_loop().time() + 5.0
+        deadline = asyncio.get_running_loop().time() + HANG_GUARD_SECONDS
         head = await self._queue_row(0)
         while head.phase != "dispatching":
             if asyncio.get_running_loop().time() > deadline:

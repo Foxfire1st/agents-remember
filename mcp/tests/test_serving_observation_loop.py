@@ -41,6 +41,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -83,7 +85,9 @@ async def _parked_forever(*_args: object, **_kwargs: object) -> None:
     await asyncio.Event().wait()
 
 
-async def _wait_until(predicate: Callable[[], bool], *, timeout: float = 10.0) -> None:
+async def _wait_until(
+    predicate: Callable[[], bool], *, timeout: float = HANG_GUARD_SECONDS
+) -> None:
     """Yield until ``predicate`` holds. The deadline bounds a hung test, never a cadence."""
 
     deadline = time.monotonic() + timeout
@@ -201,7 +205,7 @@ class _RefreshProbe:
         try:
             if self.block_first and self.calls == 1:
                 self.first_call_entered.set()
-                self.release_first_call.wait(timeout=10)
+                self.release_first_call.wait(timeout=HANG_GUARD_SECONDS)
             if self.failures > 0 or self.fail_on == self.calls:
                 self.failures = max(self.failures - 1, 0)
                 self.outcomes.append("failed")
@@ -252,7 +256,7 @@ class _Gate:
         self.calls += 1
         if self.calls == self.block_at:
             self.entered.set()
-            self.release.wait(timeout=10)
+            self.release.wait(timeout=HANG_GUARD_SECONDS)
         return []
 
 

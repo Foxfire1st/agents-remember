@@ -12,7 +12,7 @@ These cases drive the real ``_serving_lifespan`` under the shared serving fixtur
 ``test_serving_observation_loop`` (its virtual clock, recorders, and probe -- no HTTP request, no
 browser, no real second) and park a real ``refresh`` worker in its thread, so "did shutdown wait?"
 is answered by an ordered witness instead of by timing luck: cancellation is requested while the
-worker is provably in flight, the worker is released a fixed interval later, and the host's own
+worker is provably in flight, the worker is released after its cancellation drain is observed, and the host's own
 shutdown callback reports the state it found.
 
 The three cases are the packet's two required classes plus the startup-prime edge it was revised to
@@ -28,8 +28,8 @@ correct: a worker that has not drained must keep the terminal host open. It also
 SWALLOWS its cancellation parks the case inside that ``await`` forever, so the run dies on the lane's
 timeout with no assertion ever printed and the clause the case exists for is never reached. The
 bound below is on the test's own await and on nothing else: same fixture, same real lifespan, same
-patches, and the positive path still finishes in the same fraction of a second (the parked worker is
-released one interval after cancellation). What changes is that a drain that never returns arrives
+patches, and the parked worker is released when the cancelled owner actually awaits it. A drain
+that never returns arrives
 as a named failure, with the tasks that are still running reported by name.
 
 That report is not yet a printed summary, and two separate leaks had to be closed before it could
@@ -62,6 +62,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -80,30 +82,11 @@ from test_serving_observation_loop import (
     _wait_until,
 )
 
-_REAL_SLEEP = asyncio.sleep
-"""The real sleep, captured before the shared fixture swaps ``asyncio.sleep`` for its clock."""
-
 _CATALOG_FILE = "terminal-sessions.json"
-_SETTLE_SECONDS = 0.05
-"""A real window for a leaked worker to write after the host closed; never a cadence."""
+_FINALIZER_BOUND_SECONDS = HANG_GUARD_SECONDS
+"""The lifespan exit only has a test hang guard; production still owns an unbounded drain."""
 
-_RELEASE_DELAY_SECONDS = 0.25
-"""How long after cancellation the parked worker is released.
-
-Far longer than the teardown path itself, so "the drain waited for the worker" and "the drain
-returned without it" are separated by an interval no scheduler noise can close.
-"""
-
-_FINALIZER_BOUND_SECONDS = 5.0
-"""How long the lifespan's own finalizer is given to return before a stuck drain is named.
-
-Twenty times the interval the positive path needs (the worker is released 0.25s after cancellation,
-and the drain returns as soon as it is), so no scheduler can reach it. A drain that DOES reach it is
-one the production code is still waiting on: the case reports which task is still running instead of
-parking the lane in an unbreakable ``await``.
-"""
-
-_DRAIN_RETRY_SECONDS = 1.0
+_DRAIN_RETRY_SECONDS = HANG_GUARD_SECONDS
 _DRAIN_RETRIES = 4
 """The forced drain's own bound: cancel every background task, wait, repeat.
 
@@ -338,10 +321,9 @@ class _DrainGate:
     always the pre-serve startup prime, so ``block_at=2`` parks the recurring owner's own first
     pass -- the in-flight worker shutdown must wait for.
 
-    The worker is released by the case's monitor a fixed interval *after* cancellation is
-    requested, and ``release`` is only ever set by that monitor. Nothing else can unblock it, so
-    the worker is provably still in flight for the whole interval. ``on_release`` is the pass's own
-    last durable act: the catalog commit the packet requires to survive cancellation.
+    The monitor releases the worker only after its cancelled owner directly awaits that worker.
+    ``on_release`` is the pass's own last durable act: the catalog commit that must survive
+    cancellation. No scheduler interval supplies the ordering witness.
     """
 
     def __init__(
@@ -365,7 +347,8 @@ class _DrainGate:
             return []
         self._events.append("worker-entered")
         self.entered.set()
-        self.release.wait(timeout=10)
+        if not self.release.wait(timeout=HANG_GUARD_SECONDS):
+            raise AssertionError("the parked observation worker was not released")
         if self._on_release is not None:
             self._on_release()
         self._events.append("worker-released")
@@ -373,22 +356,43 @@ class _DrainGate:
         return []
 
 
+@contextlib.contextmanager
+def _observe_worker_drain(probe: _RefreshProbe, draining: asyncio.Event) -> Any:
+    """Witness the cancelled product coroutine's direct await of its exact thread task."""
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+
+    class ObservedWorker(asyncio.Task[object]):
+        def __await__(self) -> Any:
+            owner = asyncio.current_task()
+            if owner is not None and owner.cancelling():
+                draining.set()
+            return super().__await__()
+
+    def task_factory(owner_loop: asyncio.AbstractEventLoop, coroutine: Any, **kwargs: Any) -> Any:
+        frame = getattr(coroutine, "cr_frame", None)
+        if frame is not None and frame.f_locals.get("func") == probe.refresh:
+            return ObservedWorker(coroutine, loop=owner_loop, **kwargs)
+        return asyncio.Task(coroutine, loop=owner_loop, **kwargs)
+
+    loop.set_task_factory(task_factory)
+    try:
+        yield
+    finally:
+        loop.set_task_factory(previous_factory)
+
+
 async def _release_after_cancellation(
     observer: asyncio.Task[object],
     gate: _DrainGate,
     events: list[str],
+    draining: asyncio.Event,
 ) -> None:
-    """Release the parked worker one interval after the observer's cancellation was requested.
-
-    ``Task.cancelling()`` only becomes non-zero through the lifespan's own ``task.cancel()``, so
-    observing it is the witness that teardown had begun while the worker was still parked -- and
-    the delay after it is what makes "host shutdown waited" and "host shutdown did not wait"
-    separable without a race.
-    """
-
-    await _wait_until(lambda: observer.cancelling() >= 1)
+    """Release after the cancelled owner reaches the real worker-drain await."""
+    await _wait_until(draining.is_set)
+    assert observer.cancelling() >= 1, "the worker await did not follow cancellation"
+    assert not gate.released.is_set(), "the worker escaped before its drain was observed"
     events.append("cancellation-requested")
-    await _REAL_SLEEP(_RELEASE_DELAY_SECONDS)
     gate.release.set()
 
 
@@ -445,20 +449,26 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         probe = _RefreshProbe(inner=gate)
         fixture = _ServingFixture(self.tmp, probe)
         at_shutdown: list[tuple[int, bool, list[str]]] = []
+        closed_state: list[tuple[int, Any]] = []
+        draining = asyncio.Event()
 
         def _host_shutdown() -> None:
             events.append("host-shutdown")
+            closed_state.append((probe.calls, _durable_tree(self.tmp)))
             # Read inside the callback: this is the state the terminal host is closed over.
             at_shutdown.append((probe.active, gate.released.is_set(), _committed_ids(catalog.path)))
 
         fixture.shutdown.side_effect = _host_shutdown
 
-        with mock.patch.object(lifespan_module, "logger") as log_spy:
+        with (
+            mock.patch.object(lifespan_module, "logger") as log_spy,
+            _observe_worker_drain(probe, draining),
+        ):
             async with _bounded_running(fixture, on_unfinished=self._note_unfinished):
                 await _wait_until(gate.entered.is_set)
                 observer = _observer_tasks(fixture.created)[0]
                 monitor = asyncio.get_running_loop().create_task(
-                    _release_after_cancellation(observer, gate, events)
+                    _release_after_cancellation(observer, gate, events, draining)
                 )
             await monitor
 
@@ -476,9 +486,9 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         # Exception``, and ``CancelledError`` is a ``BaseException``.
         self.assertEqual(_observation_failure_lines(log_spy), [])
         # No future pass starts, and nothing is written after the host closed.
-        calls_at_teardown = probe.calls
-        after_shutdown = _durable_tree(self.tmp)
-        await _REAL_SLEEP(_SETTLE_SECONDS)
+        self.assertTrue(all(task.done() for task in fixture.created))
+        self.assertEqual(fixture.clock.pending, 0)
+        calls_at_teardown, after_shutdown = closed_state[0]
         self.assertEqual(probe.calls, calls_at_teardown)
         self.assertEqual(_durable_tree(self.tmp), after_shutdown)
         # Control for the identity above: this run really did commit durable catalog truth, so the
@@ -489,8 +499,10 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         probe = _RefreshProbe(block_first=True)
         fixture = _ServingFixture(self.tmp, probe)
         lifespan = _serving_lifespan(fixture.runtime, cast(ProviderMetricsStore, mock.Mock()))
+        draining = asyncio.Event()
 
         with (
+            _observe_worker_drain(probe, draining),
             mock.patch.object(lifespan_module, "migrate_control_plane_identity_logs"),
             mock.patch.object(lifespan_module, "compact_workspace_river"),
             mock.patch.object(lifespan_module, "_metrics_loop", _parked_forever),
@@ -508,7 +520,7 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
             startup.cancel()
             # The drain is what holds this task open. A prime that merely cancelled its
             # ``to_thread`` call would already have returned here, with the worker still running.
-            await _REAL_SLEEP(_SETTLE_SECONDS)
+            await _wait_until(draining.is_set)
             self.assertFalse(startup.done())
             self.assertEqual(probe.active, 1)
 
@@ -521,6 +533,12 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(probe.outcomes, ["ok"])
         self.assertEqual(probe.calls, 1)
         self.assertEqual(_observation_failure_lines(log_spy), [])
+        for guard in (_FINALIZER_BOUND_SECONDS, _DRAIN_RETRY_SECONDS):
+            with self.subTest(finalizer_guard=guard):
+                result = mock.AsyncMock(return_value=({startup}, set()))
+                with mock.patch.object(asyncio, "wait", result):
+                    self.assertTrue(await _finalizer_returned(startup, guard))
+                result.assert_awaited_once_with({startup}, timeout=HANG_GUARD_SECONDS)
 
     async def test_the_final_in_flight_commit_stays_relayable_after_the_next_startup(self) -> None:
         clock = _VirtualClock([])
@@ -531,20 +549,22 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         fixture = _ServingFixture(self.tmp, probe, clock=clock)
         stopped_sweep = mock.Mock()
         at_shutdown: list[list[str]] = []
+        draining = asyncio.Event()
         fixture.shutdown.side_effect = lambda: at_shutdown.append(_committed_ids(catalog.path))
 
-        async with _bounded_running(
-            fixture,
-            on_unfinished=self._note_unfinished,
-            notifier=True,
-            settings=_two_row_settings(enabled=False, interval_seconds=4.0),
-            notifier_sweep=stopped_sweep,
-        ):
-            await _wait_until(gate.entered.is_set)
-            observer = _observer_tasks(fixture.created)[0]
-            monitor = asyncio.get_running_loop().create_task(
-                _release_after_cancellation(observer, gate, [])
-            )
+        with _observe_worker_drain(probe, draining):
+            async with _bounded_running(
+                fixture,
+                on_unfinished=self._note_unfinished,
+                notifier=True,
+                settings=_two_row_settings(enabled=False, interval_seconds=4.0),
+                notifier_sweep=stopped_sweep,
+            ):
+                await _wait_until(gate.entered.is_set)
+                observer = _observer_tasks(fixture.created)[0]
+                monitor = asyncio.get_running_loop().create_task(
+                    _release_after_cancellation(observer, gate, [], draining)
+                )
         await monitor
 
         # The notifier had already stopped: its sweep is never synthesized as a teardown fallback.

@@ -2,6 +2,9 @@
 // component-render tests (React Aria widgets, the honest-motion gate) don't crash on missing
 // globals. Per-test code may still override these (e.g. useShouldAnimate.test stubs matchMedia).
 import { afterEach } from "vitest";
+import { configure } from "@testing-library/react";
+
+configure({ asyncUtilTimeout: 20_000 });
 
 // The setup-level unhandled-error trap (L8-R10): a green suite must never hide a live exception.
 // Errors reported through the window, unhandled promise rejections, and console.error are all

@@ -33,6 +33,7 @@ from agents_remember.models.knowledge_files.documents import (
 from agents_remember.models.knowledge_files.ids import derived_realization_id, derived_record_id
 
 BLOB = "d8baa15ca43be010159ae15f6b0e744949e6d33a"
+INDEX_REWRITE_WAIT_SECONDS = 120.0
 OTHER_BLOB = "6aa80fe43345f17ee2533b3d1f54b1c4b4e7a940"
 
 REVIEW_PATH = "dashboard/src/data/review.ts"
@@ -99,13 +100,18 @@ def rewrite_in_the_second_of_the_index_write(repository: Path, target: Path, tex
     recorded = target.read_text("utf-8")
     assert text != recorded and len(text.encode()) == len(recorded.encode())
     index = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "index"))
-    for _ in range(40):
-        while not 0.10 < time.time() % 1 < 0.35:  # well inside one second of the coarse clock
+    deadline = time.monotonic() + INDEX_REWRITE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        # load-independent: alignment within a real clock second is the subject of this Git test.
+        while not 0.10 < time.time() % 1 < 0.35:
+            if time.monotonic() >= deadline:
+                raise AssertionError("the index write could not be aligned within one second")
             time.sleep(0.005)
         target.write_text(recorded, "utf-8")
         git(repository, "add", "--all")
         target.write_text(text, "utf-8")
         if int(index.stat().st_mtime) == int(target.stat().st_mtime):
+            # load-independent: capture starts after the tested same-second rewrite window.
             time.sleep(1.05 - time.time() % 1)
             return
     raise AssertionError("the index write and the rewrite could not be placed in one second")

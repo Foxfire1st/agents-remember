@@ -10,6 +10,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import daemon
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
 from agents_remember.serving.paseo.paseo_start import HostObservation, ensure_host
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_runtime_test_support import FakePaseo, free, runtime_settings, write_shared_runtime
 
 
@@ -91,7 +92,9 @@ def test_foreground_serves_without_waiting_for_host_and_sim_skips_it(monkeypatch
     events = []
     monkeypatch.setattr(dashboard, "declare_process_role", lambda role: None)
     monkeypatch.setattr(dashboard, "bind_worktree_services", lambda services: None)
-    monkeypatch.setattr(dashboard, "build_default_worktree_services", lambda: None)
+    monkeypatch.setattr(
+        dashboard, "build_default_worktree_services", lambda *, leaf_agent_archive: None
+    )
     monkeypatch.setattr(
         dashboard, "_resolve_settings", lambda arguments: (str(cfg.config_path), cfg)
     )
@@ -130,7 +133,7 @@ def test_real_background_function_serves_before_host_outcome_and_logs(
     def runner(argv, timeout):
         if list(argv)[2:4] == ["daemon", "start"]:
             entered.set()
-            assert release.wait(2)
+            assert release.wait(HANG_GUARD_SECONDS)
         return fake(argv, timeout)
 
     def pending(actual):
@@ -146,11 +149,11 @@ def test_real_background_function_serves_before_host_outcome_and_logs(
     monkeypatch.setattr(daemon, "record_host_outcome", logged)
     dashboard._start_host_background(cfg)
     try:
-        assert entered.wait(1)
+        assert entered.wait(HANG_GUARD_SECONDS)
         assert not finished.is_set()
     finally:
         release.set()
-    assert finished.wait(1)
+    assert finished.wait(HANG_GUARD_SECONDS)
     assert "host not running" in capsys.readouterr().out
     assert fake.mutations() == [("daemon", "start")]
 
@@ -159,7 +162,9 @@ def test_supervised_child_does_not_start_host_again(monkeypatch, tmp_path):
     cfg = config(tmp_path)
     monkeypatch.setattr(dashboard, "declare_process_role", lambda role: None)
     monkeypatch.setattr(dashboard, "bind_worktree_services", lambda services: None)
-    monkeypatch.setattr(dashboard, "build_default_worktree_services", lambda: None)
+    monkeypatch.setattr(
+        dashboard, "build_default_worktree_services", lambda *, leaf_agent_archive: None
+    )
     monkeypatch.setattr(dashboard, "_resolve_settings", lambda args: (str(cfg.config_path), cfg))
     monkeypatch.setattr(
         dashboard, "_build_app", lambda args, config: dashboard._DashboardApp(object(), None)

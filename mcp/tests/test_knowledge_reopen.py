@@ -10,7 +10,6 @@ validator inside it), the closeout's closing write, and record landing.
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,6 +67,7 @@ from agents_remember.worktrees.services import (
     reset_worktree_services,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
+from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
 from test_knowledge_closeout_gate import (
     CODE_A,
     CODE_B,
@@ -676,26 +676,6 @@ def test_a_leaf_that_continues_after_its_closeout_writes_its_next_attempt(
     )
 
 
-def _rewrite_in_the_second_of_the_index_write(repository: Path, target: Path, text: str) -> None:
-    """Record ``target`` in the repository's index, then rewrite it in place with ``text``: same
-    size, same clock second, which Git recognises only by its index file's own time. Returns in a
-    later second, as a capture is normally taken."""
-
-    recorded = target.read_text("utf-8")
-    assert text != recorded and len(text.encode()) == len(recorded.encode())
-    index = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "index"))
-    for _ in range(40):
-        while not 0.10 < time.time() % 1 < 0.35:  # well inside one second of the coarse clock
-            time.sleep(0.005)
-        target.write_text(recorded, "utf-8")
-        git(repository, "add", "--all")
-        target.write_text(text, "utf-8")
-        if int(index.stat().st_mtime) == int(target.stat().st_mtime):
-            time.sleep(1.05 - time.time() % 1)
-            return
-    raise AssertionError("the index write and the rewrite could not be placed in one second")
-
-
 def test_a_file_rewritten_while_the_gate_runs_is_never_committed_unjudged(
     world: Gated, ports: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -719,7 +699,7 @@ def test_a_file_rewritten_while_the_gate_runs_is_never_committed_unjudged(
     def rewriting(contract: Any, *, code_tree: str, memory_tree: str) -> str | None:
         refusal = gate(contract, code_tree=code_tree, memory_tree=memory_tree)
         judged.append(memory_tree)
-        _rewrite_in_the_second_of_the_index_write(world.memory, card, "# b\n")
+        rewrite_in_the_second_of_the_index_write(world.memory, card, "# b\n")
         return refusal
 
     head = git(world.memory, "rev-parse", "HEAD")

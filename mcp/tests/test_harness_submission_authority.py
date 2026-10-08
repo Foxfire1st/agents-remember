@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -234,13 +236,13 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         authority = _authority(adapter)
         try:
             first_task = asyncio.create_task(authority.submit(_prompt("first")))
-            await asyncio.wait_for(adapter.submit_started.wait(), 1)
+            await asyncio.wait_for(adapter.submit_started.wait(), HANG_GUARD_SECONDS)
 
             second = await authority.submit(_prompt("second", "withdraw me"))
             self.assertEqual(second.acceptance, "queued")
             status = await asyncio.wait_for(
                 authority.ledger.status("epoch-1", ("second",), cockpit_only=True),
-                0.1,
+                HANG_GUARD_SECONDS,
             )
             second_status = status.submissions[0].submission
             self.assertIsNotNone(second_status)
@@ -248,13 +250,13 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second_status.state, "queued")
             withdrawn = await asyncio.wait_for(
                 authority.withdraw("epoch-1", "second", cockpit_only=True),
-                0.1,
+                HANG_GUARD_SECONDS,
             )
             self.assertEqual((withdrawn.outcome, withdrawn.state), ("withdrawn", "withdrawn"))
             self.assertEqual([item.request_id for item in adapter.submissions], ["first"])
 
             adapter.release_submit.set()
-            first = await asyncio.wait_for(first_task, 1)
+            first = await asyncio.wait_for(first_task, HANG_GUARD_SECONDS)
             self.assertEqual(first.acceptance, "immediate")
             assert authority.active_operation is not None
             await _complete(authority, authority.active_operation, 1)
@@ -267,7 +269,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         authority = _authority(adapter)
         try:
             submit_task = asyncio.create_task(authority.submit(_prompt("dispatch-wins")))
-            await asyncio.wait_for(adapter.submit_started.wait(), 1)
+            await asyncio.wait_for(adapter.submit_started.wait(), HANG_GUARD_SECONDS)
             result = await authority.withdraw("epoch-1", "dispatch-wins", cockpit_only=True)
             self.assertEqual((result.outcome, result.state), ("not-withdrawable", "dispatching"))
             adapter.release_submit.set()
@@ -283,11 +285,11 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         authority = _authority(adapter)
         try:
             submit_task = asyncio.create_task(authority.submit(_prompt("withdraw-preflight")))
-            await asyncio.wait_for(adapter.preflight_started.wait(), 1)
+            await asyncio.wait_for(adapter.preflight_started.wait(), HANG_GUARD_SECONDS)
 
             withdrawn = await authority.withdraw("epoch-1", "withdraw-preflight", cockpit_only=True)
             self.assertEqual((withdrawn.outcome, withdrawn.state), ("withdrawn", "withdrawn"))
-            receipt = await asyncio.wait_for(submit_task, 1)
+            receipt = await asyncio.wait_for(submit_task, HANG_GUARD_SECONDS)
             self.assertEqual(receipt.acceptance, "rejected")
 
             adapter.release_preflight.set()
@@ -311,7 +313,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         authority = _authority(adapter)
         try:
             first_task = asyncio.create_task(authority.submit(_prompt("early")))
-            await asyncio.wait_for(adapter.submit_started.wait(), 1)
+            await asyncio.wait_for(adapter.submit_started.wait(), HANG_GUARD_SECONDS)
             first_ref = authority.active_operation
             assert first_ref is not None
             await _complete(authority, first_ref, 1)

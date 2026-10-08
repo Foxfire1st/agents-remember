@@ -9,7 +9,7 @@
 // no body answers are held, as a slow one is. `ReviewSurface` is the real component tree.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
@@ -37,8 +37,6 @@ const Z66_REVISION = links.find(
   (link) => link.invariant === 'INV-Z66EMHMH',
 )!.invariant_revision_key;
 const J = { key: 'j', code: 'KeyJ' };
-// A cold surface render under a loaded suite can exceed the library's 1 s default.
-const WAIT = { timeout: 5000 };
 const UNPARSED =
   'the after memory tree has family records that do not parse: ' +
   'knowledge/families/FAM-4V4GSQCS-Bounded-notes-listing-with-unchanged-meaning.json';
@@ -77,6 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -102,7 +101,7 @@ async function follow(view: View, scope: HTMLElement, hunk: string, occurrence: 
       .find((one) => one.dataset.hunk === hunk);
     expect(found).toBeTruthy();
     return found!;
-  }, WAIT);
+  });
   if (mark.getAttribute('aria-expanded') !== 'true') fireEvent.click(mark);
   const panel = view.getByTestId('review-hunk-mark-panel');
   const button = within(panel)
@@ -146,7 +145,7 @@ const card = (view: View, entries: string) =>
   view.getAllByTestId('review-expression-card').find((node) => node.dataset.entries === entries)!;
 
 async function toUnknownMember(view: View) {
-  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }, WAIT));
+  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }));
   await follow(
     view,
     view.container,
@@ -157,8 +156,8 @@ async function toUnknownMember(view: View) {
     const node = selectedMember(view);
     expect(node?.dataset.revision).toBe(Z66_REVISION);
     return node!;
-  }, WAIT);
-  await waitFor(() => expect(document.activeElement).toBe(row), WAIT);
+  });
+  await waitFor(() => expect(document.activeElement).toBe(row));
   return row;
 }
 
@@ -199,10 +198,9 @@ it('states the followed unknown membership once on the member, below the way bac
   fireEvent.click(back);
   await waitFor(
     () => expect(document.activeElement?.getAttribute('data-hunk')).toBe('124:1:124:1'),
-    WAIT,
   );
   expect(view.getByTestId('review-workspace').dataset.markerReturn).toBeUndefined();
-}, 20_000);
+});
 
 it('moves with j after a marker return, never taking focus from the held return first', async () => {
   const view = open();
@@ -210,23 +208,25 @@ it('moves with j after a marker return, never taking focus from the held return 
   // From the member view's own card excerpt, follow the confirmed absence, then come back.
   const origin = await follow(
     view,
-    await waitFor(() => card(view, 'RLZ-7X2C4VRQ'), WAIT),
+    await waitFor(() => card(view, 'RLZ-7X2C4VRQ')),
     '124:1:124:1',
     'No recorded family (before, r1)',
   );
-  expect(await view.findByRole('heading', { name: 'No recorded family' }, WAIT)).toBeTruthy();
+  expect(await view.findByRole('heading', { name: 'No recorded family' })).toBeTruthy();
+  vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
   fireEvent.click(view.getByTestId('review-marker-return'));
-  const held = await waitFor(() => {
-    const active = document.activeElement as HTMLElement | null;
-    expect(active?.dataset.testid).toBe('review-hunk-mark');
-    expect(active?.closest('[data-testid="review-expression-card"]')).toBeTruthy();
-    return active!;
-  }, WAIT);
+  const held = await waitFor(async () => {
+    await act(async () => { vi.advanceTimersToNextFrame(); });
+    const active = document.activeElement as HTMLElement;
+    expect(active.dataset.testid).toBe('review-hunk-mark');
+    expect(active.closest('[data-testid="review-expression-card"]')).toBeTruthy();
+    return active;
+  });
   expect(held.dataset.hunk).toBe(origin.dataset.hunk);
   const row = selectedMember(view)!;
   expect(row.dataset.revision).toBe(Z66_REVISION);
   // Nothing of the triage moves focus on its own while the return is held.
-  await new Promise((settle) => setTimeout(settle, 150));
+  await act(async () => { vi.advanceTimersToNextFrame(); });
   expect(document.activeElement).toBe(held);
   expect(view.getByTestId('review-triage-bar')).toBeTruthy();
 
@@ -246,7 +246,8 @@ it('moves with j after a marker return, never taking focus from the held return 
     (one) => one.invariant_revision_id === next.dataset.revision,
   )!;
   expect(requested.at(-1)?.searchParams.get('selectorId')).toBe(member.invariant_id);
-  // The released hold does not take focus back.
-  await new Promise((settle) => setTimeout(settle, 150));
+  // The selected answer has been delivered and flushed; the released hold gets another frame.
+  await act(async () => {});
+  await act(async () => { vi.advanceTimersToNextFrame(); });
   expect(document.activeElement).toBe(next);
-}, 20_000);
+});

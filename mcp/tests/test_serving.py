@@ -27,6 +27,7 @@ from unittest import mock
 
 import httpx
 import watchfiles.main
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from fastapi.testclient import TestClient
 from watchfiles._rust_notify import RustNotify
 
@@ -126,7 +127,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         await projector.prime()
         gen = stream_events(projector)
 
-        first = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        first = await asyncio.wait_for(gen.__anext__(), timeout=HANG_GUARD_SECONDS)
         self.assertEqual(first.event, "snapshot")
         self.assertEqual(len(projector._subscribers), 1)
         _, initial = projector.current()
@@ -135,7 +136,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
             initial.model_copy(update={"lifecycles": [_lifecycle("handoff")]})
         )
 
-        second = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        second = await asyncio.wait_for(gen.__anext__(), timeout=HANG_GUARD_SECONDS)
         self.assertEqual(second.event, "lifecycle")
         self.assertEqual(
             second.data, _lifecycle("handoff").model_dump(by_alias=True, exclude_none=True)
@@ -157,6 +158,16 @@ class StateEtagTests(unittest.TestCase):
     def _client_with_held_projection(
         self, held: list[WorkspaceProjection], *, interval: float = 0.02
     ) -> TestClient:
+        self._published_projections: list[WorkspaceProjection] = []
+        publish = Projector._publish_projection
+
+        def observed_publish(projector: Projector, projection: WorkspaceProjection) -> None:
+            publish(projector, projection)
+            self._published_projections.append(projection)
+
+        published = mock.patch.object(Projector, "_publish_projection", observed_publish)
+        published.start()
+        self.addCleanup(published.stop)
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
             side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
@@ -176,7 +187,7 @@ class StateEtagTests(unittest.TestCase):
 
     def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> httpx.Response:
         """Poll /api/state with If-None-Match until the tick loop publishes ``want_status``."""
-        deadline = time.monotonic() + 5.0
+        deadline = time.monotonic() + HANG_GUARD_SECONDS
         while True:
             response = client.get("/api/state", headers={"If-None-Match": etag})
             if response.status_code == want_status or time.monotonic() > deadline:
@@ -201,7 +212,12 @@ class StateEtagTests(unittest.TestCase):
             held[0] = _projection(
                 lifecycles=(_lifecycle("L1").model_copy(update={"staleSeconds": 77.0}),)
             )
-            time.sleep(0.1)  # several ticks at interval=0.02
+            wait_until(
+                lambda: (
+                    bool(self._published_projections) and self._published_projections[-1] is held[0]
+                ),
+                "publication of the volatile-only projection tick",
+            )
             still = client.get("/api/state", headers={"If-None-Match": etag})
             self.assertEqual(still.status_code, 304)
             self.assertEqual(still.headers["etag"], etag)
@@ -235,7 +251,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
                 try:
-                    async with asyncio.timeout(5):
+                    async with asyncio.timeout(HANG_GUARD_SECONDS):
                         while not native.call_count:
                             await asyncio.sleep(0)
                     self.assertIs(native.call_args.args[2], False)
@@ -244,7 +260,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
                     draft = nested / ".task.json.tmp"
                     draft.write_text("{}", encoding="utf-8")
                     draft.rename(nested / "task.json")
-                    await asyncio.wait_for(changed.wait(), timeout=5)
+                    await asyncio.wait_for(changed.wait(), timeout=HANG_GUARD_SECONDS)
                     self.assertEqual(
                         pacer.notify_change.call_args.args[0], frozenset({ProjectionDomain.TASKS})
                     )

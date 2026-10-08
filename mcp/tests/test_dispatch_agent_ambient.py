@@ -28,6 +28,7 @@ from agents_remember.serving.ambient_seat import (
     AmbientSeatError,
     resolve_ambient_caller,
 )
+from agents_remember.serving.hosted_readiness import ReadinessWait
 from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -266,6 +267,19 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         spawn.assert_not_called()
 
     def test_ambient_dispatch_runs_the_real_spawn_and_persists_the_brief(self) -> None:
+        readiness_sleep = mock.Mock()
+        self.addCleanup(readiness_sleep.assert_not_called)
+        bound = mock.patch(
+            "agents_remember.serving.dispatch_brief.DISPATCH_BRIEF_READINESS_WAIT_SECONDS", 0.0
+        )
+        wait = mock.patch(
+            "agents_remember.serving.dispatch_brief.ReadinessWait",
+            side_effect=lambda **kwargs: ReadinessWait(**kwargs, sleep=readiness_sleep),
+        )
+        bound.start()
+        wait.start()
+        self.addCleanup(bound.stop)
+        self.addCleanup(wait.stop)
         host = _FakeHost()
         _write_architect_settings(self.root)
         result = dispatch_agent_tool(

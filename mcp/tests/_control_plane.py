@@ -74,6 +74,7 @@ from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     utc_now,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 
 NOW = "2026-07-20T08:00:00+00:00"
@@ -397,7 +398,9 @@ def make_harness(
     return ControlHarness(root, adapter, session, harness=harness)
 
 
-async def drive_activity(harness: ControlHarness, activity: str, timeout: float = 5.0) -> None:
+async def drive_activity(
+    harness: ControlHarness, activity: str, timeout: float = HANG_GUARD_SECONDS
+) -> None:
     """Set the adapter activity and wait until the bridge reduces it visibly.
 
     A bare ``set_activity`` races the submit path: a submission admitted while

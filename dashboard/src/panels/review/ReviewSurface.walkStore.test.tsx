@@ -11,7 +11,6 @@ import { treeOrderStore } from './triageOrderPreference';
 import {
   J,
   K,
-  WAIT,
   captured,
   families,
   familyBlock,
@@ -26,8 +25,6 @@ import {
   triageStatus,
   world,
 } from './walk.test-utils';
-
-vi.setConfig({ testTimeout: 60000 });
 
 const body = (name: string) => captured<ReviewResult>(`walkStore.${name}.captured.json`);
 const SHARED = body('shared');
@@ -92,15 +89,14 @@ const clickFamilyRow = async (view: View, id: string) => {
   fireEvent.click(within(familyBlock(view, id)).getByTestId('review-family-open'));
   await waitFor(
     () => expect(view.getByTestId('review-center-family').dataset.family).toBe(id),
-    WAIT,
   );
   await settled(view);
 };
 
 it("keeps both families as j selects the second family's member and k returns through a failed read", async () => {
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
-  await waitFor(() => expect(families(view)).toHaveLength(2), WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
+  await waitFor(() => expect(families(view)).toHaveLength(2));
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);
   expect(new Set(first)).toEqual(new Set([FAM1_ID, FAM2_ID]));
@@ -134,8 +130,8 @@ it('stops j at the continuation control of a kept family, loads nothing, and con
   useFirstPage = true;
   treeOrderStore.getState().setOrder('authored');
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
-  await waitFor(() => expect(families(view)).toEqual([FAM1_ID, FAM2_ID]), WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
+  await waitFor(() => expect(families(view)).toEqual([FAM1_ID, FAM2_ID]));
   // Both families return two members per side: the first one has unreturned members.
   expect(familyBlock(view, FAM1_ID).dataset.membersUnreturned).toBe('true');
   await clickFamilyRow(view, FAM2_ID);
@@ -165,7 +161,6 @@ it('stops j at the continuation control of a kept family, loads nothing, and con
   fireEvent.click(control);
   await waitFor(
     () => expect(view.getByTestId('review-center-family').dataset.family).toBe(FAM1_ID),
-    WAIT,
   );
   await settled(view);
   const request = world.requests.reviews()[asked];
@@ -187,8 +182,8 @@ it('stops j at the continuation control of a kept family, loads nothing, and con
 
 it('keeps the first family when a member of the second is opened from the reading area, and k steps back', async () => {
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
-  await waitFor(() => expect(families(view)).toHaveLength(2), WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
+  await waitFor(() => expect(families(view)).toHaveLength(2));
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);
   const before = reviewCount();
@@ -196,7 +191,7 @@ it('keeps the first family when a member of the second is opened from the readin
     .getAllByTestId('review-center-open-member')
     .find((button) => button.textContent?.includes('INV-PPPPPP'))!;
   fireEvent.click(opener);
-  await waitFor(() => expect(view.getByTestId('review-center-member')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-center-member')).toBeTruthy());
   await settled(view);
   expect(reviewCount() - before).toBe(1);
   expect(selectedNode(view)!.textContent).toContain('INV-PPPPPP');

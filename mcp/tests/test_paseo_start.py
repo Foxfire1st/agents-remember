@@ -12,6 +12,7 @@ from agents_remember.serving.paseo import paseo_start
 from agents_remember.serving.paseo.paseo_daemon import runtime_status
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
 from agents_remember.serving.paseo.paseo_start import ensure_host, observe_host
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_runtime_test_support import (
     PINNED,
     FakePaseo,
@@ -149,7 +150,7 @@ def test_contending_start_joins_the_same_owned_outcome_without_retry(tmp_path, f
         def _daemon_start(self, words):
             self.record(4242, self.supervisor())
             entered.set()
-            assert release.wait(2)
+            assert release.wait(HANG_GUARD_SECONDS)
             self.record_file.unlink()
             self.processes.pop(4242)
             return super()._daemon_start(words)
@@ -165,13 +166,13 @@ def test_contending_start_joins_the_same_owned_outcome_without_retry(tmp_path, f
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(ensure_host, config, runner=fake, reader=fake.reader, probe=free)
         try:
-            assert entered.wait(1)
+            assert entered.wait(HANG_GUARD_SECONDS)
             second = pool.submit(ensure_host, config, runner=fake, reader=fake.reader, probe=free)
-            assert observed.wait(1)
+            assert observed.wait(HANG_GUARD_SECONDS)
             assert not second.done()
         finally:
             release.set()
-        one, two = first.result(2), second.result(2)
+        one, two = first.result(HANG_GUARD_SECONDS), second.result(HANG_GUARD_SECONDS)
     assert one.state == two.state and one.line == two.line
     assert one.ready is (not failed)
     assert fake.mutations().count(("daemon", "start")) == 1

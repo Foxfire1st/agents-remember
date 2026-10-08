@@ -177,6 +177,7 @@ class RunnerContractTests(unittest.TestCase):
                 run_git(
                     repo,
                     stall,
+                    # load-independent: this bound must expire against the deliberately stalled command.
                     GitRunnerOptions(timeout=1),
                 )
 

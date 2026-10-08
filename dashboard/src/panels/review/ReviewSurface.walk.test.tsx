@@ -19,7 +19,6 @@ import {
   R6R_ID,
   R6R_TITLE,
   SHARED,
-  WAIT,
   type View,
   clickedSecondFamily,
   families,
@@ -42,7 +41,7 @@ installWorld();
 
 it('walks seven changes and the second family by key, and k returns through every change passed', async () => {
   const view = open(R6R);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
   const workspace = view.getByTestId('review-workspace');
   expect(families(view)).toEqual([R6R_ID]);
   within(familyBlock(view, R6R_ID)).getByTestId('review-family-open').focus();
@@ -106,7 +105,7 @@ const catalogueRows = (view: View) =>
 
 it('keeps the first family when its second family is clicked, and the previous-change control reaches the shared member', async () => {
   const view = open(R6R);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
   // The shared member is chosen from the list of all invariants: both of its families are shown.
   const all = view.getByTestId('review-all-invariants') as HTMLDetailsElement;
   all.open = true;
@@ -116,7 +115,7 @@ it('keeps the first family when its second family is clicked, and the previous-c
       (row) => row.dataset.subjectId === SHARED.payload!.knowledge.revision_selection!.record_id,
     )!;
   fireEvent.click(sharedRow);
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
   await settled(view);
   expect(keptTags(view)).toEqual([]);
 
@@ -168,7 +167,7 @@ it('tags a kept family, counts it apart, describes the subject context only and 
 
 it('lists a catalogue row for every family the tree shows while it shows a kept one', async () => {
   const view = open(SHARED);
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
   // Without a kept family the tree stands in for the families it shows, as before.
   expect(catalogueRows(view)).not.toContain(R6R_ID);
   expect(catalogueRows(view)).not.toContain(HBJ_ID);
@@ -186,7 +185,7 @@ it('lists a catalogue row for every family the tree shows while it shows a kept 
   // Choosing the second family there starts afresh with that family alone.
   const before = reviewCount();
   fireEvent.click(rows.find((row) => row.dataset.subjectId === HBJ_ID)!);
-  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]));
   expect(keptTags(view)).toEqual([]);
   expect(reviewCount() - before).toBe(0);
   expect(catalogueRows(view)).not.toContain(HBJ_ID);
@@ -219,7 +218,7 @@ it.each([1, 3, 5])(
   'drops "No later change" when the answer that %i further press(es) of j outran brings a later change',
   async (further) => {
     const view = open(R6R);
-    await view.findAllByTestId('review-change-badge', undefined, WAIT);
+    await view.findAllByTestId('review-change-badge', undefined);
     // The shared member's answer, which brings the second family, is held until the test releases
     // it.
     const shared = SHARED.payload!.knowledge.revision_selection!.record_id;
@@ -247,7 +246,7 @@ it.each([1, 3, 5])(
     for (let pressed = 0; pressed < further; pressed += 1) press(J);
     expect(triageStatus(view)).toBe('No later change in this tree; the selection stays.');
     release();
-    await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]), WAIT);
+    await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
     // Every render React still owed has been made.
     await act(async () => {});
     // The second family is a later change, so the message is no longer true of the tree: it is
@@ -260,7 +259,7 @@ it.each([1, 3, 5])(
 
 it('drops "No later change" when the filter that hid the later family is cleared', async () => {
   const view = open(SHARED);
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
   // The shared member is the last change of the first family. Under a filter that shows this family
   // alone, the tree as shown holds nothing later.
   expect(selectedName(view)).toBe('INV-2TQGXFAX');

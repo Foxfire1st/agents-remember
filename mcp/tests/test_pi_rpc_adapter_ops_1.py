@@ -4,10 +4,12 @@ import asyncio
 import unittest
 from collections import deque
 from collections.abc import Mapping
+from unittest import mock
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.pi_rpc_adapter import PiAdapterLimits, PiRpcAdapter
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_pi_rpc_adapter import (
     _direct_set_effort,
     _direct_set_model,
@@ -264,7 +266,7 @@ class PiRpcAdapterTests1(unittest.IsolatedAsyncioTestCase):
                         transport.command_hangs[stalled_command] = 1
                     timed_out = await asyncio.wait_for(
                         bridge.submissions().set_model("local/chat-test"),
-                        timeout=1.0,
+                        timeout=HANG_GUARD_SECONDS,
                     )
                     self.assertEqual(
                         (timed_out.ok, timed_out.acceptance, timed_out.effective_value),
@@ -273,18 +275,40 @@ class PiRpcAdapterTests1(unittest.IsolatedAsyncioTestCase):
                     active = bridge._authority.active_operation
                     assert active is not None
                     self.assertEqual(active.kind, "set-model")
-                    later_task = asyncio.create_task(
-                        bridge.submissions().set_model("anthropic/claude-test")
-                    )
-                    await asyncio.sleep(0.02)
-                    self.assertFalse(later_task.done())
+                    blocked = asyncio.Event()
+                    authority = bridge._authority
+                    dispatchable_head = authority._dispatchable_head_locked
+
+                    def observed_head(
+                        dispatchable_head=dispatchable_head,
+                        authority=authority,
+                        active=active,
+                        blocked=blocked,
+                    ):
+                        result = dispatchable_head()
+                        if (
+                            result is None
+                            and authority.active_operation == active
+                            and len(authority._timeline) > 1
+                        ):
+                            blocked.set()
+                        return result
+
+                    with mock.patch.object(
+                        authority, "_dispatchable_head_locked", side_effect=observed_head
+                    ):
+                        later_task = asyncio.create_task(
+                            bridge.submissions().set_model("anthropic/claude-test")
+                        )
+                        await asyncio.wait_for(blocked.wait(), timeout=HANG_GUARD_SECONDS)
+                        self.assertFalse(later_task.done())
                     await bridge.submissions().resolve_operation(
                         active.operation_id,
                         active.kind,
                         resolution="not-applied",
                         detail="test operator cleared the unknown mutation blocker",
                     )
-                    later = await asyncio.wait_for(later_task, timeout=1.0)
+                    later = await asyncio.wait_for(later_task, timeout=HANG_GUARD_SECONDS)
                     self.assertEqual((later.ok, later.acceptance), (True, "echo-verified"))
                     self.assertEqual(
                         adapter.advertise().selected_model_key,

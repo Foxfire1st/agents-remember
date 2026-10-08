@@ -1,7 +1,7 @@
 // The launcher bar against the host catalog (PNT-R02): an unoffered role default disables Start
 // until an offered value is picked, a failed model listing leaves its agent launchable, and an
 // options error is shown with a Refresh control that repeats the call.
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoleChatsPane } from "./RoleChats";
 import { launchChoiceProblem, type RoleAgentChoice, type RoleDefaults } from "./roleLaunchModel";
@@ -51,6 +51,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -133,6 +134,7 @@ describe("launcher bar and the host catalog", () => {
   });
 
   it("rereads a launch in progress without an ordinary status line", async () => {
+    vi.useFakeTimers();
     // The backend's launch lock is held by a launch: the options route marks its refusal.
     optionsReplies = [
       { status: 409, body: { detail: "A role launch or result check is already in progress.", launchInProgress: true } },
@@ -140,15 +142,17 @@ describe("launcher bar and the host catalog", () => {
     ];
     const { getByRole, getByTestId, queryByRole } = renderLauncher();
 
-    await waitFor(() => expect(optionsRequests.length).toBe(1));
+    await act(async () => {});
+    expect(optionsRequests.length).toBe(1);
     expect(getByTestId("role-launcher").querySelector('[role="status"]')).toBeNull();
     expect(queryByRole("alert")).toBeNull();
     expect(optionsRequests).toEqual([{ role: "architect" }]);
     expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(true);
 
     // No click: the launcher reads again by itself and restores Start when the read succeeds.
-    await waitFor(() => expect(optionsRequests.length).toBe(2), { timeout: 4000 });
-    await waitFor(() => expect(getByTestId("role-launcher").querySelector('[role="status"],[role="alert"]')).toBeNull());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(optionsRequests.length).toBe(2);
+    expect(getByTestId("role-launcher").querySelector('[role="status"],[role="alert"]')).toBeNull();
     expect(queryByRole("alert")).toBeNull();
     expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false);
   });

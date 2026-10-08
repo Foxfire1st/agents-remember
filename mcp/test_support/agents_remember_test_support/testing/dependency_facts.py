@@ -8,8 +8,15 @@ reporting all consume this same source-derived graph.
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
+import os
+import stat
+import sys
+import tempfile
 from collections import deque
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +27,102 @@ from agents_remember_test_support.code_quality.scope import (
     pytest_testpaths,
     top_level_packages,
 )
+
+DEFAULT_FACTS_STORE = (
+    Path(tempfile.gettempdir()) / f"agents-remember-test-facts-{os.getuid()}" / "facts.json"
+)
+FileFacts = tuple[frozenset[str], frozenset[str], bool, bool]
+
+
+def _private_store_parent(path: Path) -> bool:
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = path.parent.lstat()
+        return (
+            stat.S_ISDIR(info.st_mode)
+            and info.st_uid == os.getuid()
+            and stat.S_IMODE(info.st_mode) == 0o700
+        )
+    except OSError:
+        return False
+
+
+def _safe_store_file(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+
+
+def _read_facts_store(path: Path | None) -> tuple[dict[str, object], int]:
+    if path is None or not _private_store_parent(path):
+        return {}, 0
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, encoding="utf-8") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                return {}, 0
+            entries = json.load(stream)
+        if not isinstance(entries, dict):
+            return {}, 0
+        usable = {
+            key: value for key, value in entries.items() if _stored_file_facts(value) is not None
+        }
+        return usable, len(entries)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        # The disposable store never decides whether source analysis succeeds.
+        return {}, 0
+
+
+def _write_facts_store(path: Path | None, entries: dict[str, object]) -> None:
+    if path is None or not _private_store_parent(path) or not _safe_store_file(path):
+        return
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(entries, stream, separators=(",", ":"))
+        temporary.replace(path)
+    except OSError:
+        pass
+    finally:
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+
+def _stored_file_facts(value: object) -> FileFacts | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    imports, literals, directory_reader, file_reader = value
+    if not all(
+        isinstance(items, list) and all(isinstance(item, str) for item in items)
+        for items in (imports, literals)
+    ):
+        return None
+    if type(directory_reader) is not bool or type(file_reader) is not bool:
+        return None
+    return frozenset(imports), frozenset(literals), directory_reader, file_reader
+
+
+def _derive_file_facts(path: Path, source: bytes, module: str | None) -> FileFacts:
+    text = source.decode("utf-8")
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError as error:
+        raise ScopeError(f"test ownership could not parse {path}: {error}") from error
+    return (
+        frozenset(_tree_imports(tree, module, package_module=path.name == "__init__.py")),
+        _code_string_literals(tree),
+        any(token in text for token in (".glob(", ".rglob(", ".iterdir(", "load_fixture(")),
+        any(token in text for token in (".read_text(", ".read_bytes(", "open(")),
+    )
 
 
 def is_test_module(path: Path) -> bool:
@@ -115,6 +218,10 @@ def file_imports(path: Path, root_module: str | None) -> set[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, UnicodeError) as error:
         raise ScopeError(f"test ownership could not parse {path}: {error}") from error
+    return _tree_imports(tree, root_module, package_module=path.name == "__init__.py")
+
+
+def _tree_imports(tree: ast.AST, root_module: str | None, *, package_module: bool) -> set[str]:
     imports: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -125,7 +232,7 @@ def file_imports(path: Path, root_module: str | None) -> set[str]:
                 import_from_modules(
                     node,
                     root_module,
-                    package_module=path.name == "__init__.py",
+                    package_module=package_module,
                 )
             )
     imports.update(_pytest_plugin_imports(tree))
@@ -208,7 +315,9 @@ class RepositoryDependencyFacts:
     parse_error: str | None
 
     @classmethod
-    def build(cls, project_root: Path) -> RepositoryDependencyFacts:
+    def build(
+        cls, project_root: Path, store: Path | None = DEFAULT_FACTS_STORE
+    ) -> RepositoryDependencyFacts:
         root = project_root.resolve()
         tracked_paths = {path for path in git_ls_files(root) if (root / path).is_file()}
         tracked_paths.update(git_untracked_files(root, [Path(".")]))
@@ -228,21 +337,45 @@ class RepositoryDependencyFacts:
         directory_readers: set[Path] = set()
         file_readers: set[Path] = set()
         parse_error: str | None = None
+        entries, stored_count = _read_facts_store(store)
+        current_entries: dict[str, object] = {}
+        implementation_path = Path(__file__).resolve()
+        implementation_bytes = implementation_path.read_bytes()
+        implementation_hash = hashlib.sha256(implementation_bytes).hexdigest()
         try:
             for path in python_paths:
                 source_path = root / path
-                source = source_path.read_text(encoding="utf-8")
-                resolved_imports = frozenset(file_imports(source_path, modules.get(path)))
+                source = (
+                    implementation_bytes
+                    if source_path == implementation_path
+                    else source_path.read_bytes()
+                )
+                identity = json.dumps(
+                    [
+                        implementation_hash,
+                        list(sys.version_info),
+                        modules.get(path),
+                        path.name == "__init__.py",
+                    ]
+                ).encode()
+                key = hashlib.sha256(identity + b"\0" + source).hexdigest()
+                derived = _stored_file_facts(entries.get(key))
+                if derived is None:
+                    derived = _derive_file_facts(source_path, source, modules.get(path))
+                resolved_imports, literals, directory_reader, file_reader = derived
+                current_entries[key] = [
+                    sorted(resolved_imports),
+                    sorted(literals),
+                    directory_reader,
+                    file_reader,
+                ]
                 imports[path] = resolved_imports
                 for module in resolved_imports:
                     importers.setdefault(module, set()).add(path)
-                tree = ast.parse(source, filename=str(source_path))
-                string_literals[path] = _code_string_literals(tree)
-                if any(
-                    token in source for token in (".glob(", ".rglob(", ".iterdir(", "load_fixture(")
-                ):
+                string_literals[path] = literals
+                if directory_reader:
                     directory_readers.add(path)
-                if any(token in source for token in (".read_text(", ".read_bytes(", "open(")):
+                if file_reader:
                     file_readers.add(path)
         except (OSError, SyntaxError, UnicodeError, ScopeError) as error:
             parse_error = str(error)
@@ -251,6 +384,13 @@ class RepositoryDependencyFacts:
             string_literals.clear()
             directory_readers.clear()
             file_readers.clear()
+        changed = stored_count != len(entries) or any(
+            entries.get(key) != value for key, value in current_entries.items()
+        )
+        entries.update(current_entries)
+        compact = max(stored_count, len(entries)) > 4 * len(python_paths)
+        if changed or compact:
+            _write_facts_store(store, current_entries if compact else entries)
         return cls(
             project_root=root,
             tracked=tracked,

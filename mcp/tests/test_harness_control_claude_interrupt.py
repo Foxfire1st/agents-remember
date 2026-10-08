@@ -10,6 +10,7 @@ from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
     ClaudeAdapterLimits,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_harness_control_claude import (
     INTERRUPT_FIXTURE_ROOT,
     NOW,
@@ -45,7 +46,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         )
         await transport.wait_for_writes(4)
         transport.feed(_replay(transport.writes[3]))
-        receipt = await asyncio.wait_for(submission, timeout=1.0)
+        receipt = await asyncio.wait_for(submission, timeout=HANG_GUARD_SECONDS)
         assert receipt.acceptance == "immediate"
         self.assertEqual(bridge.snapshot().activity, "running")
         return bridge
@@ -80,7 +81,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
             )
             control_response, aborted, marker, result = self._interrupt_frames()
             transport.feed(control_response)
-            acknowledgement = await asyncio.wait_for(interrupt_task, timeout=1.0)
+            acknowledgement = await asyncio.wait_for(interrupt_task, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(acknowledgement.acknowledgement, "accepted")
             self.assertEqual(acknowledgement.bridge_epoch, epoch)
             self.assertEqual(acknowledgement.vendor_correlation_id, "ar-claude-interrupt-1")
@@ -115,7 +116,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
             await transport.wait_for_writes(5)
             control_response, _, _, _ = self._interrupt_frames()
             transport.feed(control_response)
-            first = await asyncio.wait_for(interrupt_task, timeout=1.0)
+            first = await asyncio.wait_for(interrupt_task, timeout=HANG_GUARD_SECONDS)
             replay = await bridge.interrupt(epoch)
             self.assertEqual(replay, first)
             self.assertEqual(len(transport.writes), 5)
@@ -149,7 +150,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         await transport.wait_for_writes(5)
         control_response, _, _, _ = self._interrupt_frames()
         transport.feed(control_response)
-        acknowledgement = await asyncio.wait_for(interrupt_task, timeout=1.0)
+        acknowledgement = await asyncio.wait_for(interrupt_task, timeout=HANG_GUARD_SECONDS)
         self.assertEqual(acknowledgement.acknowledgement, "accepted")
 
     async def test_accepted_interrupt_racing_a_rate_limit_error_stays_failed(self) -> None:
@@ -192,7 +193,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
             await transport.wait_for_writes(5)
             control_response, _, _, _ = self._interrupt_frames()
             transport.feed(control_response)
-            acknowledgement = await asyncio.wait_for(interrupt_task, timeout=1.0)
+            acknowledgement = await asyncio.wait_for(interrupt_task, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(acknowledgement.acknowledgement, "accepted")
             # The interrupt raced a natural completion: the native success keeps its meaning.
             transport.feed(_result("essay done"))
@@ -219,7 +220,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         try:
             await transport.wait_for_writes(4)
             transport.feed(_replay(transport.writes[3]))
-            receipt = await asyncio.wait_for(submission, timeout=1.0)
+            receipt = await asyncio.wait_for(submission, timeout=HANG_GUARD_SECONDS)
             assert receipt.acceptance == "immediate"
             epoch = bridge.submissions().bridge_epoch
             # No control_response arrives inside the acknowledgement bound: the bytes were

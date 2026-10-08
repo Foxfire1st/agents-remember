@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -107,7 +109,7 @@ class _FakeHost:
         if self.entered is not None:
             self.entered.set()
         if self.release is not None:
-            self.release.wait(timeout=5)
+            self.release.wait(timeout=HANG_GUARD_SECONDS)
         return self.result
 
 
@@ -455,12 +457,12 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         first = threading.Thread(target=run_first)
         first.start()
         assert host.entered is not None
-        self.assertTrue(host.entered.wait(timeout=1))
+        self.assertTrue(host.entered.wait(timeout=HANG_GUARD_SECONDS))
 
         contender_result: list[list[TerminalCatalogEntry]] = []
         contender = threading.Thread(target=lambda: contender_result.append(sweeper.refresh()))
         contender.start()
-        contender.join(timeout=0.25)
+        contender.join(timeout=HANG_GUARD_SECONDS)
         try:
             self.assertFalse(contender.is_alive())
             self.assertEqual(host.calls, 1)
@@ -468,7 +470,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         finally:
             assert host.release is not None
             host.release.set()
-            first.join(timeout=1)
+            first.join(timeout=HANG_GUARD_SECONDS)
         self.assertFalse(first.is_alive())
         self.assertEqual(first_errors, [])
         self.assertEqual([entry.id for entry in first_result[0]], ["full"])
@@ -509,12 +511,12 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         first = threading.Thread(target=run_first)
         first.start()
         assert host.entered is not None
-        self.assertTrue(host.entered.wait(timeout=1))
+        self.assertTrue(host.entered.wait(timeout=HANG_GUARD_SECONDS))
 
         contender_result: list[list[TerminalCatalogEntry]] = []
         contender = threading.Thread(target=lambda: contender_result.append(sweeper.refresh()))
         contender.start()
-        contender.join(timeout=0.25)
+        contender.join(timeout=HANG_GUARD_SECONDS)
         try:
             self.assertFalse(contender.is_alive())
             self.assertEqual(host.calls, 1)
@@ -522,7 +524,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         finally:
             assert host.release is not None
             host.release.set()
-            first.join(timeout=1)
+            first.join(timeout=HANG_GUARD_SECONDS)
         self.assertFalse(first.is_alive())
         self.assertEqual(first_errors, [])
         self.assertEqual([entry.id for entry in first_result[0]], ["starting"])

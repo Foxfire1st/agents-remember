@@ -11,6 +11,7 @@ import pytest
 from agents_remember_test_support.testing.global_state import (
     begin_pytest_process,
     end_pytest_process,
+    reset_process_mutable_state,
     restore_owned_mutable_state,
     snapshot_owned_mutable_state,
 )
@@ -68,3 +69,12 @@ def reject_owned_global_state_leaks() -> Iterator[None]:
             + "\n".join(changed),
             pytrace=False,
         )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def reset_process_state_at_module_boundaries() -> Iterator[None]:
+    reset_process_mutable_state()
+    try:
+        yield
+    finally:
+        reset_process_mutable_state()

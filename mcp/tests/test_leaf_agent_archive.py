@@ -32,6 +32,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.services import bind_worktree_services, worktree_services
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import HTTPException
 from test_lifecycle_finalize import _FinalizeFixtures, _payload
 
@@ -126,7 +127,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             thread = threading.Thread(target=launch)
             thread.start()
             try:
-                self.assertTrue(entered.wait(5))
+                self.assertTrue(entered.wait(HANG_GUARD_SECONDS))
                 closing = archive.LeafAgentArchive(self.config).archive(self.contract)
                 self.assertTrue(thread.is_alive())
                 self.assertFalse(release.is_set(), "closing waited for the opaque creation call")
@@ -138,7 +139,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                     self.assertNotIn(body["agentId"], {row["agentId"] for row in closing["gone"]})
             finally:
                 release.set()
-                thread.join(5)
+                thread.join(HANG_GUARD_SECONDS)
             self.assertFalse(thread.is_alive())
             self.assertFalse(failures)
             self.assertEqual(answers[0].status_code, 409)
@@ -175,7 +176,9 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             state.live[state.body["agentId"]] = True
         if command == state.phase:
             state.entered.set()
-            self.assertTrue(state.release.wait(5), "deterministic creation barrier timed out")
+            self.assertTrue(
+                state.release.wait(HANG_GUARD_SECONDS), "deterministic creation barrier timed out"
+            )
         if command == "workspace-open":
             return {"workspace": {"id": "mock-workspace", "directory": str(self.tmp)}}
         if command == "agent-create":
@@ -402,7 +405,7 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             ):
                 owner = asyncio.create_task(lifespan._terminal_observation_loop(runtime))
                 try:
-                    await asyncio.wait_for(observed.wait(), timeout=10)
+                    await asyncio.wait_for(observed.wait(), timeout=HANG_GUARD_SECONDS)
                 finally:
                     owner.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

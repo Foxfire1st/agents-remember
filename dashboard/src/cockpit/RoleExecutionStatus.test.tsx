@@ -1,5 +1,5 @@
 // The launcher retains selected-execution behavior while showing only actionable failures.
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoleChatsPane } from "./RoleChats";
 import { HOST_UNREACHABLE_LINE, RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
@@ -16,6 +16,7 @@ function execution(fields: Partial<RoleScopedExecution>): RoleScopedExecution {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -166,20 +167,24 @@ describe("launcher bar and the execution's state", () => {
   });
 
   it("names an explicit Result held by a launch and clears the line after its reread", async () => {
+    vi.useFakeTimers();
     results = [execution({}), execution({ status: "completed", canStart: true, result: { summary: "DONE" } })];
     const { getByTestId, getByRole } = renderLauncher(execution({}));
-    await waitFor(() => expect(resultReads).toBe(1));
+    await act(async () => {});
+    expect(resultReads).toBe(1);
     const result = getByRole("button", { name: "Refresh role result" }) as HTMLButtonElement;
-    await waitFor(() => expect(result.disabled).toBe(false));
+    expect(result.disabled).toBe(false);
     lockedResults = 1;
     fireEvent.click(result);
-    await waitFor(() => expect(resultReads).toBe(2));
+    await act(async () => {});
+    expect(resultReads).toBe(2);
     const launcher = getByTestId("role-launcher");
-    await waitFor(() => expect(launcher.querySelector('[role="alert"]')?.textContent).toContain("report could not be opened while a role launch"));
+    expect(launcher.querySelector('[role="alert"]')?.textContent).toContain("report could not be opened while a role launch");
     expect(launcher.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(reportRequests).toHaveLength(0);
-    await waitFor(() => expect(resultReads).toBe(3), { timeout: 4000 });
-    await waitFor(() => expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(resultReads).toBe(3);
+    expect((getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false);
     expect(launcher.textContent).not.toContain("DONE");
     expect(launcher.querySelector('[role="status"],[role="alert"]')).toBeNull();
   });

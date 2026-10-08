@@ -13,6 +13,7 @@ from agents_remember.models.conversations.control_wire import (
     LaunchSpec,
 )
 from agents_remember.serving.pi_rpc_process import PiRpcSubprocess
+from agents_remember_test_support.testing.waits import async_wait_until
 
 
 def _child_launch(script: str) -> LaunchSpec:
@@ -100,7 +101,10 @@ for command in (first, second):
             cancelled = asyncio.create_task(
                 transport.request({"id": "cancelled-1", "type": "slow"})
             )
-            await asyncio.sleep(0.01)
+            await async_wait_until(
+                lambda: "cancelled-1" in transport._pending,
+                "the first correlated Pi request to reach the transport",
+            )
             cancelled.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await cancelled

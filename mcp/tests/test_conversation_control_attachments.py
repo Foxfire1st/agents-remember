@@ -33,6 +33,7 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationRejectedError,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 SESSION = "ar-attach-1"
 
@@ -340,7 +341,7 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
         # dispatches it through the asset channel with the rebound identity.
         self.adapter.auto_release = True
         self.adapter.set_activity("idle")
-        deadline = asyncio.get_running_loop().time() + 5.0
+        deadline = asyncio.get_running_loop().time() + HANG_GUARD_SECONDS
         while len(self.adapter.submit_requests) < 2:
             if asyncio.get_running_loop().time() > deadline:
                 self.fail("the resubmitted prompt never dispatched")

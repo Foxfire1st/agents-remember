@@ -27,6 +27,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
     // Unbounded forks saturated this shared host and drove it into swap; keep every
     // config-backed run at the measured safe ceiling.
     maxWorkers: 2,

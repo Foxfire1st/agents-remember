@@ -34,6 +34,7 @@ from agents_remember.serving.harness_control_models import (
     PromptRequest,
     ShutdownMode,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "codex_app_server_0_144_3.json"
 
@@ -285,7 +286,7 @@ async def assert_notification_is_inert(
 async def next_event_of_kind(events: AsyncIterator[AdapterEvent], kind: str) -> AdapterEvent:
     """The next event of ``kind``, skipping the ones the adapter emits on the way there."""
     while True:
-        event = await asyncio.wait_for(anext(events), 1)
+        event = await asyncio.wait_for(anext(events), HANG_GUARD_SECONDS)
         if event.kind == kind:
             return event
 

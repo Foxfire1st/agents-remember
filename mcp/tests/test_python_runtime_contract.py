@@ -6,6 +6,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -52,7 +54,7 @@ runpy.run_path(checker, run_name="__main__")
         capture_output=True,
         text=True,
         check=False,
-        timeout=10,
+        timeout=HANG_GUARD_SECONDS,
     )
     assert result.returncode == 1
     assert result.stdout == ""

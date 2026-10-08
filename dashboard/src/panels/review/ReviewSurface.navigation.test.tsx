@@ -32,7 +32,6 @@ import {
   J,
   R6R,
   R6R_ID,
-  WAIT,
   familyBlock,
   open,
   press,
@@ -40,9 +39,6 @@ import {
   selectedNode,
   serveWorld,
 } from './walk.test-utils';
-
-// A cold render of a real answer on a loaded machine can take longer than the library's 5 s default.
-vi.setConfig({ testTimeout: 60000 });
 
 const captured = JSON.parse(
   readFileSync(
@@ -71,6 +67,7 @@ const target = {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -493,12 +490,13 @@ it('settles on the latest of rapid selections and never shows a superseded answe
 });
 
 it('does not move a reader who is working when the catalogue answers after the bounded wait', async () => {
+  vi.useFakeTimers();
   const server = delayedServer({ holdCatalogue: true });
   const view = render(<ReviewSurface {...target} />);
   // The bounded wait releases the whole-task read.
-  await waitFor(() => expect(server.heldFor(null)).toHaveLength(1), {
-    timeout: SUBJECT_HOLD_MS * 4,
-  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
+  expect(server.heldFor(null)).toHaveLength(1);
+  vi.useRealTimers();
   await server.answer(null);
   await view.findByTestId('review-center-unselected');
   const workspace = view.getByTestId('review-workspace');
@@ -524,11 +522,12 @@ it('does not move a reader who is working when the catalogue answers after the b
 });
 
 it('lands a reader who has not acted on the first family when the catalogue answers late, without remounting', async () => {
+  vi.useFakeTimers();
   const server = delayedServer({ holdCatalogue: true });
   const view = render(<ReviewSurface {...target} />);
-  await waitFor(() => expect(server.heldFor(null)).toHaveLength(1), {
-    timeout: SUBJECT_HOLD_MS * 4,
-  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
+  expect(server.heldFor(null)).toHaveLength(1);
+  vi.useRealTimers();
   await server.answer(null);
   await view.findByTestId('review-center-unselected');
   const workspace = view.getByTestId('review-workspace');
@@ -546,12 +545,13 @@ it('lands a reader who has not acted on the first family when the catalogue answ
 });
 
 it('keeps the task-context answer the bounded wait released when the catalogue answers before it (MIK-R40 rule 5)', async () => {
+  vi.useFakeTimers();
   const server = delayedServer({ holdCatalogue: true });
   const view = render(<ReviewSurface {...target} />);
   // The catalogue is slower than the bound: the whole-task read is released and still in flight.
-  await waitFor(() => expect(server.heldFor(null)).toHaveLength(1), {
-    timeout: SUBJECT_HOLD_MS * 4,
-  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
+  expect(server.heldFor(null)).toHaveLength(1);
+  vi.useRealTimers();
   // The catalogue answers first: the reader, who has not acted, is taken to the first family.
   await server.releaseCatalogue();
   await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1));
@@ -734,7 +734,7 @@ it('keeps every j pressed in the turn that shows the previous answer, and lands 
   // The real-data world of the MIK-R39 tests: family FAM-R6R095RW with its seven changes.
   serveWorld();
   const view = open(R6R);
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
   within(familyBlock(view, R6R_ID)).getByTestId('review-family-open').focus();
   const shows = (change: string) =>
     view.getByTestId('review-surface').dataset.reviewPending === undefined &&
@@ -744,7 +744,7 @@ it('keeps every j pressed in the turn that shows the previous answer, and lands 
     waitFor(() => {
       expect(shows(change)).toBe(true);
       expect(document.activeElement).toBe(selectedNode(view));
-    }, WAIT);
+    });
   // The second press is made by a mutation observer, in the first microtask in which the first
   // change's answer is shown: after its commit and before React has run that commit's passive effects.
   let pressedAgain = false;
@@ -765,8 +765,8 @@ it('keeps every j pressed in the turn that shows the previous answer, and lands 
     await waitFor(() => {
       if (selectedNode(view) === before) press(J);
       expect(selectedNode(view)).not.toBe(before);
-    }, WAIT);
-    await waitFor(() => expect(pressedAgain, 'the second press is made').toBe(true), WAIT);
+    });
+    await waitFor(() => expect(pressedAgain, 'the second press is made').toBe(true));
   } finally {
     observer.disconnect();
   }

@@ -1089,11 +1089,11 @@ def test_the_gate_memo_reuses_a_verdict_only_for_the_identical_inputs(
                 failed = evaluate_leaf_gate(world.contract, answered)
                 assert failed is not None and not failed.memoisable
         assert evaluated.call_count == 7
-
     world.task_document()  # back to the inputs of the second evaluation, whose verdict passed
     heads = (git(world.memory, "rev-parse", name) for name in ("main", "HEAD"))
     key = memo.memo_key(world.contract, answered, *heads)
     assert key is not None and memo.remembered(key) is not None  # the passing verdict is kept
+    # load-independent: late is passed as the injected now value to exercise memo expiry.
     late = time.monotonic() + memo.MAX_AGE_SECONDS + 1
     assert memo.remembered(key, now=late) is None  # and never older than one run's span
 

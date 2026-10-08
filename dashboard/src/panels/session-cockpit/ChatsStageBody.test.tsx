@@ -113,6 +113,7 @@ afterEach(async () => {
     // A real-timer test may leave the virtualizer's 150 ms scroll-observer debounce pending;
     // let it fire while jsdom is still alive so it cannot land after teardown, where React
     // has no `window` to schedule against.
+    // load-independent: same-event-loop teardown follows the product 150 ms debounce
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   sessionStore.getState().hydrate([]);

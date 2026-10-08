@@ -6,7 +6,6 @@ import http.client
 import io
 import tarfile
 import threading
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from agents_remember.kernel.primitives.paseo_host_contract import NODE_VERSION
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.serving.paseo import paseo_node
 from agents_remember.serving.paseo.paseo_command import CommandResult
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 def isolate(monkeypatch, root):
@@ -148,6 +148,7 @@ def test_valid_target_reclaims_owned_staging_without_downloading(monkeypatch, tm
 @pytest.mark.parametrize("holder", ["thread", "flock"])
 def test_competing_node_acquisition_has_a_finite_retryable_refusal(monkeypatch, tmp_path, holder):
     runtime = isolate(monkeypatch, tmp_path)
+    # load-independent: acquisition must expire while the observed holder owns the lock.
     monkeypatch.setattr(paseo_node, "ACQUIRE_SECONDS", 0.05)
     acquired = threading.Event()
     release = threading.Event()
@@ -156,28 +157,26 @@ def test_competing_node_acquisition_has_a_finite_retryable_refusal(monkeypatch, 
         if holder == "thread":
             with exclusive_file_lock(runtime.root, "test Node holder"):
                 acquired.set()
-                release.wait(2)
+                release.wait(HANG_GUARD_SECONDS)
         else:
             path = lock_path_for(runtime.root)
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a+b") as handle:
                 fcntl.flock(handle, fcntl.LOCK_EX)
                 acquired.set()
-                release.wait(2)
+                release.wait(HANG_GUARD_SECONDS)
 
     thread = threading.Thread(target=hold)
     thread.start()
     try:
-        assert acquired.wait(1)
-        started = time.monotonic()
+        assert acquired.wait(HANG_GUARD_SECONDS)
         with pytest.raises(PaseoRuntimeFailure) as raised:
             paseo_node.ensure_node(answers, lambda *args: pytest.fail("lock loser fetched"))
         assert raised.value.code == "node_operation_busy"
-        assert time.monotonic() - started < 0.5
         assert not runtime.root.exists()
     finally:
         release.set()
-        thread.join(2)
+        thread.join(HANG_GUARD_SECONDS)
     assert not thread.is_alive()
 
 

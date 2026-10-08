@@ -47,6 +47,7 @@ const response = (body: unknown) => ({ ok: true, status: 200, json: async () => 
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -146,6 +147,7 @@ it('reads the catalogue once on entry, then asks the review only for the subject
 it.each([300, 600])(
   'opens with one review read when the catalogue answers after %i ms',
   async (catalogueMs) => {
+    vi.useFakeTimers();
     expect(catalogueMs).toBeLessThan(SUBJECT_HOLD_MS);
     const urls: URL[] = [];
     vi.stubGlobal(
@@ -154,6 +156,7 @@ it.each([300, 600])(
         const url = new URL(address, 'http://localhost');
         urls.push(url);
         if (url.pathname.endsWith('/entries')) {
+          // load-independent: catalogue delay and product hold run on the same fake clock
           await new Promise((resolve) => setTimeout(resolve, catalogueMs));
           return response(CATALOGUE);
         }
@@ -179,14 +182,11 @@ it.each([300, 600])(
         onBack={() => undefined}
       />,
     );
-    await waitFor(
-      () =>
-        expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-      { timeout: SUBJECT_HOLD_MS * 4 },
-    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(catalogueMs); });
+    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
     // Past the bound as well: the wait ended with the catalogue's answer, so nothing is released.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, SUBJECT_HOLD_MS));
+      await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS);
     });
     expect(reviewReads()).toHaveLength(1);
     expect(reviewReads()[0].searchParams.get('selectorKind')).toBe('family');
@@ -196,6 +196,7 @@ it.each([300, 600])(
 );
 
 it('reads the task-context review and shows the source explorer when the catalogue never answers', async () => {
+  vi.useFakeTimers();
   const urls: URL[] = [];
   vi.stubGlobal(
     'fetch',
@@ -208,7 +209,6 @@ it('reads the task-context review and shows the source explorer when the catalog
     }),
   );
   const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');
-  const opened = Date.now();
 
   const view = render(
     <ReviewSurface
@@ -219,10 +219,13 @@ it('reads the task-context review and shows the source explorer when the catalog
     />,
   );
 
-  await waitFor(() => expect(reviewReads()).toHaveLength(1), { timeout: SUBJECT_HOLD_MS * 4 });
+  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS - 1); });
+  expect(reviewReads()).toHaveLength(0);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(reviewReads()).toHaveLength(1);
   // The bounded wait released into the task-context review: no subject is named.
   expect(reviewReads()[0].searchParams.get('selectorKind')).toBeNull();
-  expect(Date.now() - opened).toBeLessThan(SUBJECT_HOLD_MS * 4);
+  vi.useRealTimers();
   await waitFor(() =>
     expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(
       recorded.source.inventory.entries.length,

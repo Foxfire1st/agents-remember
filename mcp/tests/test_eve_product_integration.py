@@ -14,7 +14,6 @@ own.
 
 from __future__ import annotations
 
-import asyncio
 import atexit
 import json
 import re
@@ -25,6 +24,8 @@ import unittest
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+
+from agents_remember_test_support.testing.waits import async_wait_until
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mcp" / "src"))
 
@@ -1557,13 +1558,13 @@ class EveAdapterToProjectionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             session_id = runtime.created[0]
             runtime.turn_events(session_id, FakeTurn(number=0, deltas=("note.",), message="done"))
-            # The bridge's reader loop is a task; give it the same bounded settle the adapter suite
-            # uses, then page the buffer it filled.
-            for _ in range(50):
-                await asyncio.sleep(0.01)
-                frames = bridge.evidence().frames
-                if any(frame.native_method == "session.waiting" for frame in frames):
-                    break
+            # Wait for the reader's turn boundary before paging its evidence.
+            await async_wait_until(
+                lambda: any(
+                    frame.native_method == "session.waiting" for frame in bridge.evidence().frames
+                ),
+                "the bridge to collect the session.waiting frame",
+            )
             return bridge.evidence().frames
         finally:
             await bridge.stop("forced")
@@ -1827,7 +1828,6 @@ class EveInteractionProjectionTests(unittest.IsolatedAsyncioTestCase):
         self, emit: object, *, expected: str
     ) -> tuple[tuple[ConversationItem, ...], AdapterSnapshot]:
         """Emit one native event, then return the projected items and the adapter's own snapshot."""
-
         require_installed_eve_application()
         runtime = FakeEveRuntime()
         adapter = EveSessionAdapter(runtime_factory=FakeRuntimeFactory(runtime), clock=lambda: NOW)
@@ -1839,12 +1839,12 @@ class EveInteractionProjectionTests(unittest.IsolatedAsyncioTestCase):
             )
             session_id = runtime.created[0]
             emit(runtime, session_id)  # type: ignore[operator]
-            for _ in range(120):
-                await asyncio.sleep(0.02)
-                if any(
+            await async_wait_until(
+                lambda: any(
                     str(frame.raw.get("type")) == expected for frame in bridge.evidence().frames
-                ):
-                    break
+                ),
+                f"the bridge to collect the {expected} frame",
+            )
             frames = tuple(bridge.evidence().frames)
             snapshot = await adapter.snapshot()
         finally:

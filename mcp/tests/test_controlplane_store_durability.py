@@ -10,7 +10,9 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
+import _store_durability as durability
 import pytest
 from _store_durability import (
     ADAPTERS,
@@ -21,6 +23,7 @@ from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.serving.projections.snapshots import read_gates
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from pydantic import ValidationError
 
 # A line cut off mid-write: exactly what a crash or an interleaved append leaves behind.
@@ -101,6 +104,42 @@ class MultiProcessDurabilityTests(_TempRootTest):
                 self.assertEqual(result["attempted"], 1, _describe(result))
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["stragglers"], [], _describe(result))
+
+        with self.subTest("a missing release cannot perform an unforced rewrite"):
+            released = mock.Mock()
+            released.wait.return_value = False
+            ready = mock.Mock()
+            with mock.patch.object(Path, "write_text") as write:
+                with (
+                    self.assertRaisesRegex(
+                        AssertionError, "never received its opportunity release"
+                    ),
+                    durability.parked_rewrite(ready, released),
+                ):
+                    Path("unused").write_text("unjudged rewrite")
+                write.assert_not_called()
+            released.wait.assert_called_once_with(HANG_GUARD_SECONDS)
+            ready.clear.assert_called_once_with()
+
+        with self.subTest(
+            "a delayed appender cannot turn missing opportunity into a passing result"
+        ):
+            ready = mock.Mock()
+            opportunity = mock.Mock()
+            opportunity.wait.return_value = False
+            released = mock.Mock()
+            context = mock.Mock()
+            context.Event.side_effect = [ready, released, opportunity]
+            with (
+                mock.patch.object(durability, "_context", return_value=context),
+                mock.patch.object(durability, "_join", return_value=[]),
+                mock.patch.object(durability, "_forced_result") as result,
+            ):
+                with self.assertRaisesRegex(AssertionError, "no lock/write opportunity"):
+                    run_forced_lost_update(CASES[0], self.tmp / "absent-opportunity")
+                result.assert_not_called()
+            opportunity.wait.assert_called_once_with(HANG_GUARD_SECONDS)
+            released.set.assert_called_once_with()
 
 
 class TornLinePolicyTests(_TempRootTest):

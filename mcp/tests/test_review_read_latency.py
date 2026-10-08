@@ -72,6 +72,7 @@ from agents_remember.tasks import store as task_store
 from agents_remember.worktrees.modules import git as capture_owner
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
 from test_review_git_trees import (  # noqa: F401 - ``world`` is the fixture
     CODE_FILE,
     CODE_V1,
@@ -992,25 +993,6 @@ def test_exact_filename_patches_keep_quoted_bytes_and_do_not_expand_to_siblings_
 # -- rule 6: never a stale answer ---------------------------------------------------------------------
 
 
-def _rewrite_in_the_second_of_the_index_write(repository: Path, target: Path, text: str) -> None:
-    """Record ``target`` in the worktree's index, then rewrite it in place: same size, same clock
-    second, which Git recognises only by its index file's own time. Returns in a later second."""
-
-    recorded = target.read_text("utf-8")
-    assert text != recorded and len(text.encode()) == len(recorded.encode())
-    index = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "index"))
-    for _ in range(40):
-        while not 0.10 < time.time() % 1 < 0.35:  # well inside one second of the coarse clock
-            time.sleep(0.005)
-        target.write_text(recorded, "utf-8")
-        git(repository, "add", "--all")
-        target.write_text(text, "utf-8")
-        if int(index.stat().st_mtime) == int(target.stat().st_mtime):
-            time.sleep(1.05 - time.time() % 1)
-            return
-    raise AssertionError("the index write and the rewrite could not be placed in one second")
-
-
 def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept(
     world: World,  # noqa: F811
 ) -> None:
@@ -1054,14 +1036,14 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
     assert code_edited[1] != edited[1] and code_edited[2] != edited[2]
 
     # A same-size rewrite in the second the worktree's index was written, on each side.
-    _rewrite_in_the_second_of_the_index_write(
+    rewrite_in_the_second_of_the_index_write(
         world.memory_worktree,
         world.memory_worktree / INVARIANT_PATH,
         invariant(2, "Values land exactly as printed."),
     )
     rewritten = read()
     assert rewritten[0] == "Values land exactly as printed." and rewritten[2] != code_edited[2]
-    _rewrite_in_the_second_of_the_index_write(
+    rewrite_in_the_second_of_the_index_write(
         world.code_worktree,
         world.code_worktree / CODE_FILE,
         CODE_V1.replace("return value", "return value + 3"),
@@ -1073,7 +1055,7 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
     )
     # The leaf-wide view of the rewritten worktrees is computed for them, not served from before.
     before_view = ports.trees(_query())
-    _rewrite_in_the_second_of_the_index_write(
+    rewrite_in_the_second_of_the_index_write(
         world.memory_worktree,
         world.memory_worktree / INVARIANT_PATH,
         invariant(2, "Values land exactly as granted."),

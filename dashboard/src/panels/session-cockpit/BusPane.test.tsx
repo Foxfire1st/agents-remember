@@ -50,6 +50,7 @@ afterEach(async () => {
     // The virtualized pickup ledger's scroll-observer debounce (150 ms) can survive a
     // real-timer test's cleanup; flush it while jsdom is still alive so it cannot land
     // after teardown, where React has no `window` to schedule against.
+    // load-independent: same-event-loop teardown follows the product 150 ms debounce
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   vi.unstubAllGlobals();

@@ -10,9 +10,6 @@ import type { ReviewResult } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
 import { treeOrderStore } from './triageOrderPreference';
 
-// A cold render of a real answer on a loaded machine can take longer than the library's 5 s default.
-vi.setConfig({ testTimeout: 60000 });
-
 const captured = <T,>(name: string): T =>
   JSON.parse(
     readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
@@ -22,8 +19,6 @@ const memberA = captured<ReviewResult>('triage.memberA.captured.json');
 const memberH = captured<ReviewResult>('triage.memberH.captured.json');
 const entries = captured<unknown>('triage.entries.captured.json');
 const J = { key: 'j', code: 'KeyJ' };
-// A cold surface render under a loaded suite can exceed the library's 1 s default.
-const WAIT = { timeout: 30000 };
 
 const subjectOf = (result: ReviewResult) => result.payload!.knowledge.revision_selection!.record_id;
 const refused = {
@@ -76,7 +71,7 @@ it('moves the selection to the next change and keeps family context, focus and w
       onBack={() => undefined}
     />,
   );
-  await view.findAllByTestId('review-change-badge', undefined, WAIT);
+  await view.findAllByTestId('review-change-badge', undefined);
   const workspace = view.getByTestId('review-workspace');
   // The centre's member list follows the tree's displayed order (triage, then authored).
   const treeOrder = () => [
@@ -91,7 +86,7 @@ it('moves the selection to the next change and keeps family context, focus and w
   // a subscription made in a passive effect: each click waits until the control shows its order, so
   // the second click cannot repeat the first.
   const orderShown = (order: string) =>
-    waitFor(() => expect(view.getByTestId('review-tree-order').dataset.order).toBe(order), WAIT);
+    waitFor(() => expect(view.getByTestId('review-tree-order').dataset.order).toBe(order));
   fireEvent.click(view.getByTestId('review-tree-order'));
   await orderShown('authored');
   expect(centreOrder()).toEqual(treeOrder());
@@ -107,15 +102,14 @@ it('moves the selection to the next change and keeps family context, focus and w
   await waitFor(() => {
     if (current() === before) fireEvent.keyDown(document.activeElement!, J);
     expect(current()).not.toBe(before);
-  }, WAIT);
+  });
   // The revised member's subject is read, as a click would read it.
-  await view.findByTestId('review-center-member', undefined, WAIT);
+  await view.findByTestId('review-center-member', undefined);
   await waitFor(
     () =>
       expect(view.getByTestId('review-center-column').textContent).toContain(
         'INV-AAAAAA holds (r2).',
       ),
-    WAIT,
   );
   const first = node(view.container, 'INV-AAAAAA');
   expect(first.getAttribute('aria-current')).toBe('true');
@@ -130,7 +124,6 @@ it('moves the selection to the next change and keeps family context, focus and w
       expect(view.getByTestId('review-center-column').textContent).toContain(
         'INV-HHHHHH holds (r1).',
       ),
-    WAIT,
   );
   const second = node(view.container, 'INV-HHHHHH');
   expect(second.getAttribute('aria-current')).toBe('true');

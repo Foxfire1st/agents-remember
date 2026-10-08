@@ -31,7 +31,6 @@ import argparse
 import asyncio
 import json
 import os
-import socket
 import subprocess
 import sys
 import threading
@@ -46,6 +45,7 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "mcp" / "src"))
 sys.path.insert(0, str(REPO_ROOT / "mcp" / "tests"))
+sys.path.insert(0, str(REPO_ROOT / "mcp" / "test_support"))
 
 from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
@@ -84,6 +84,8 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     PromptRequest,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from eve_adapter_test_support import IsolatedEveRuntimeProcess
 from eve_capsule_test_support import (
     FixtureCarrierRequest,
     FixtureWorld,
@@ -114,13 +116,7 @@ SCENARIO_TIMEOUT_SECONDS = 180.0
 START_TIMEOUT_SECONDS = 240.0
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
-class TracingEveRuntime(EveRuntimeProcess):
+class TracingEveRuntime(IsolatedEveRuntimeProcess):
     """The production transport, recording its native stream connections and request bodies.
 
     The stream lines let an operator see the reconnect cadence the bounded read produces. The
@@ -220,7 +216,7 @@ class LiveFixture:
             workspace_root=self.workspace,
             binding_ref="ar-binding:worker:live-fixture:implementation",
         )
-        self.model_port = _free_port()
+        self.model_port = 0
         self.model_server = None
         self.model_state = report_dir / "model-state.json"
         self.model_trace = report_dir / "model-trace.ndjson"
@@ -270,9 +266,10 @@ class LiveFixture:
         self.model_server = serve(
             plan=self.plan,
             state_path=self.model_state,
-            port=self.model_port,
+            port=0,
             trace_path=self.model_trace,
         )
+        self.model_port = int(self.model_server.server_address[1])
         threading.Thread(target=self.model_server.serve_forever, daemon=True).start()
         self.notes.append(f"model fixture on http://127.0.0.1:{self.model_port}/v1")
 
@@ -498,7 +495,6 @@ async def _run_real_attempt(
 
     workspace = report_dir / "workspace-real-model"
     workspace.mkdir(parents=True, exist_ok=True)
-    port = _free_port()
     launch = LaunchSpec(
         identity=ControlIdentity(
             ar_session_id="live-eve-real-model",
@@ -520,7 +516,11 @@ async def _run_real_attempt(
         },
     )
     adapter = EveSessionAdapter(
-        limits=EveAdapterLimits(health_timeout_seconds=START_TIMEOUT_SECONDS), clock=_now
+        runtime_factory=lambda spec: IsolatedEveRuntimeProcess(
+            spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS
+        ),
+        limits=EveAdapterLimits(health_timeout_seconds=START_TIMEOUT_SECONDS),
+        clock=_now,
     )
     result: dict[str, Any] = {
         "provider": candidate["label"],
@@ -528,7 +528,6 @@ async def _run_real_attempt(
         "model": candidate["model"],
         "credentialEnv": candidate["key_env"],
         "credentialPresent": credential_present,
-        "runtimePort": port,
     }
     try:
         await asyncio.wait_for(adapter.start(launch), timeout=START_TIMEOUT_SECONDS)
@@ -680,7 +679,7 @@ async def _scenario_reconnect(fixture: LiveFixture) -> ScenarioResult:
     cursor = before.raw.get("streamCursor")
     session_id = before.vendor_session_id
     # A fresh subscriber opens a new connection from the persisted absolute index.
-    events = await fixture.pump(until=None, timeout=5.0)
+    events = await fixture.pump(until=None, timeout=HANG_GUARD_SECONDS)
     after = await fixture.adapter.snapshot()
     observations = {
         "sessionId": session_id,
@@ -889,7 +888,7 @@ async def _await_turn(fixture: LiveFixture, *, timeout: float = 30.0) -> str | N
     assert fixture.adapter is not None
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
-        await fixture.pump(until=None, timeout=1.0)
+        await fixture.pump(until=None, timeout=HANG_GUARD_SECONDS)
         observed = (await fixture.adapter.snapshot()).raw.get("observedTurnId")
         if observed is not None:
             return str(observed)
@@ -909,7 +908,7 @@ async def _scenario_restart(fixture: LiveFixture, *, runtime_root: Path) -> Scen
     restarted = await fixture.start_adapter(runtime_root=runtime_root, epoch="epoch-2")
     # Re-attach explicitly to the durable id the previous epoch proved.
     restarted.attach_durable_session(session_id)
-    events = await fixture.pump(until=None, timeout=8.0)
+    events = await fixture.pump(until=None, timeout=HANG_GUARD_SECONDS)
     observations = {
         "sessionId": session_id,
         "cursorBeforeRestart": cursor,
@@ -983,12 +982,12 @@ async def _start_concurrent_session(
     )
     # One provider per session, so an interleaved transcript cannot come from a shared model script
     # handing the other session's answer to this one.
-    port = _free_port()
     provider = serve(
         plan=[fixture.plan[session.plan_index]],
         state_path=fixture.report_dir / f"model-state-{label}.json",
-        port=port,
+        port=0,
     )
+    port = int(provider.server_address[1])
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     providers.append(provider)
     base = fixture._launch_spec(
@@ -1011,7 +1010,11 @@ async def _start_concurrent_session(
         },
     )
     adapter = EveSessionAdapter(
-        limits=EveAdapterLimits(health_timeout_seconds=START_TIMEOUT_SECONDS), clock=_now
+        runtime_factory=lambda spec: IsolatedEveRuntimeProcess(
+            spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS
+        ),
+        limits=EveAdapterLimits(health_timeout_seconds=START_TIMEOUT_SECONDS),
+        clock=_now,
     )
     await asyncio.wait_for(adapter.start(launch), timeout=START_TIMEOUT_SECONDS)
     return adapter
@@ -1061,7 +1064,6 @@ async def _deliver_concurrently(
         asyncio.ensure_future(submit_on(first, "live-req-a", "session a complete")),
         asyncio.ensure_future(submit_on(second, "live-req-b", "session b complete")),
     ]
-    await asyncio.sleep(0.2)
     return tuple(await asyncio.gather(*tasks))
 
 
@@ -1286,9 +1288,9 @@ async def _capsule_runtime(
             NODE_EXECUTABLE_ENV: fixture.resolve_node(),
             STATE_ROOT_ENV: str(fixture.report_dir / "epochs" / epoch),
         },
-        port=_free_port(),
+        port=0,
     )
-    return EveRuntimeProcess(spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS)
+    return IsolatedEveRuntimeProcess(spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS)
 
 
 async def _drain(runtime: EveRuntimeProcess, session_id: str) -> list[Any]:
@@ -1560,7 +1562,6 @@ async def _observe_edited_carrier(run: CapsuleRun, observation: _CapsuleObservat
             await edited.send_message(run.session_id, "delivery after the carrier changed")
         except HarnessControlError as error:
             refusal = str(error)
-        await asyncio.sleep(0.5)
         observation.record("editedCarrierRefused", bool(refusal))
         observation.record("editedCarrierDetail", refusal[:400], required=False)
         observation.record("editedCarrierMadeNoModelCall", len(run.trace()) == before)
@@ -1647,13 +1648,13 @@ async def _observe_unbound_launch(
     """A launch that declares no capsule: it starts, refuses every session, and runs no model."""
 
     trace_path = fixture.report_dir / "unbound-model-trace.ndjson"
-    port = _free_port()
     provider = serve(
         plan=[{"text": "this answer must never be requested"}],
         state_path=fixture.report_dir / "unbound-model-state.json",
-        port=port,
+        port=0,
         trace_path=trace_path,
     )
+    port = int(provider.server_address[1])
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     unbound = await _unbound_runtime(
         fixture, runtime_root=runtime_root, epoch="capsule-unbound", provider_port=port
@@ -1669,7 +1670,6 @@ async def _observe_unbound_launch(
             "unboundSessionRefused", "401" in refusal or "ar_binding_required" in refusal
         )
         observation.record("unboundDetail", refusal[:300], required=False)
-        await asyncio.sleep(0.5)
         observation.record("unboundMadeNoModelCall", not _read_trace(trace_path))
     finally:
         await unbound.stop("graceful")
@@ -1687,7 +1687,6 @@ async def _scenario_capsule_execution(
     compiled = world.bind(carrier_directory=fixture.report_dir / "execution-capsule")
     sibling = world.sibling_worktree
     memory = world.memory_worktree
-    provider_port = _free_port()
     trace_path = fixture.report_dir / "execution-model-trace.ndjson"
     provider = serve(
         plan=[
@@ -1699,9 +1698,10 @@ async def _scenario_capsule_execution(
             {"text": "memory attempt done"},
         ],
         state_path=fixture.report_dir / "execution-model-state.json",
-        port=provider_port,
+        port=0,
         trace_path=trace_path,
     )
+    port = int(provider.server_address[1])
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     run = CapsuleRun(
         fixture=fixture,
@@ -1709,7 +1709,7 @@ async def _scenario_capsule_execution(
         runtime_root=runtime_root,
         epoch="capsule-execution",
         session_id="",
-        provider_port=provider_port,
+        provider_port=port,
         trace_path=trace_path,
     )
     runtime = await run.runtime()
@@ -1773,14 +1773,14 @@ async def _scenario_capsule_binding(fixture: LiveFixture, *, runtime_root: Path)
     observation.record("admittedWorkspace", str(fixture.workspace), required=False)
     # This scenario's own provider and trace: the six native scenarios above share one model script,
     # and a request from their history would be read as if it were this scenario's first call.
-    provider_port = _free_port()
     trace_path = fixture.report_dir / "capsule-model-trace.ndjson"
     provider = serve(
         plan=[{"text": f"capsule scenario answer {index}"} for index in range(16)],
         state_path=fixture.report_dir / "capsule-model-state.json",
-        port=provider_port,
+        port=0,
         trace_path=trace_path,
     )
+    port = int(provider.server_address[1])
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     run = CapsuleRun(
         fixture=fixture,
@@ -1788,7 +1788,7 @@ async def _scenario_capsule_binding(fixture: LiveFixture, *, runtime_root: Path)
         runtime_root=runtime_root,
         epoch=epoch,
         session_id="",
-        provider_port=provider_port,
+        provider_port=port,
         trace_path=trace_path,
     )
     runtime = await run.runtime()

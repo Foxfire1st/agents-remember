@@ -38,6 +38,7 @@ from agents_remember.kernel.git_command import run_git_with_index
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.worktrees.modules import git as capture_owner
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
 
 EXCLUDE_VARIANTS: tuple[tuple[str, ...], ...] = ((), ("memory.md",), MEMORY_CONTENT_EXCLUDES)
 
@@ -589,25 +590,6 @@ def test_a_capture_taken_in_a_subdirectory_clears_the_flags_of_the_whole_worktre
     )
 
 
-def rewrite_in_the_second_of_the_index_write(worktree: Worktree, target: Path, text: str) -> None:
-    """Record ``target`` in the worktree's index, then rewrite it in place: same size, same clock
-    second, which Git recognises only by its index file's own time. Returns in a later second."""
-
-    recorded = target.read_text("utf-8")
-    assert text != recorded and len(text.encode()) == len(recorded.encode())
-    index = worktree.index()
-    for _ in range(40):
-        while not 0.10 < time.time() % 1 < 0.35:  # well inside one second of the coarse clock
-            time.sleep(0.005)
-        target.write_text(recorded, "utf-8")
-        git(worktree.root, "add", "--all")
-        target.write_text(text, "utf-8")
-        if int(index.stat().st_mtime) == int(target.stat().st_mtime):
-            time.sleep(1.05 - time.time() % 1)
-            return
-    raise AssertionError("the index write and the rewrite could not be placed in one second")
-
-
 def test_a_same_size_rewrite_in_the_second_of_the_index_write_changes_the_tree(
     worktree: Worktree,
 ) -> None:
@@ -616,7 +598,7 @@ def test_a_same_size_rewrite_in_the_second_of_the_index_write_changes_the_tree(
 
     target = worktree.root / "dir/b.txt"
     before = capture(worktree).tree
-    rewrite_in_the_second_of_the_index_write(worktree, target, "bravo two\n")
+    rewrite_in_the_second_of_the_index_write(worktree.root, target, "bravo two\n")
     captured = capture(worktree)
     assert not captured.fell_back and captured.tree != before
     assert git(worktree.root, "rev-parse", f"{captured.tree}:dir/b.txt") == git(

@@ -66,6 +66,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  // load-independent: same-event-loop teardown follows the product 150 ms debounce
   await new Promise((resolve) => setTimeout(resolve, 200));
   activeConversationStore.getState().reset();
 });

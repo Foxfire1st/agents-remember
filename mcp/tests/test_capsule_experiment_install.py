@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(MCP_SRC) not in sys.path:
@@ -33,6 +34,7 @@ if str(MCP_SRC) not in sys.path:
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.install import experiment as install_experiment
 from agents_remember.install import runtime as install_runtime
+from agents_remember.kernel.agentic_settings import default_agentic_settings_seed_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.core import runtime_install_payload
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
@@ -119,7 +121,9 @@ def create_install_source(root: Path) -> Path:
 def dispatcherless_deps() -> install_runtime.ProviderDependencyInstall:
     """Provider dependencies off: this module never starts a provider stack."""
 
-    return install_runtime.ProviderDependencyInstall(settings={}, timeout=1, enabled=False)
+    return install_runtime.ProviderDependencyInstall(
+        settings={}, timeout=int(HANG_GUARD_SECONDS), enabled=False
+    )
 
 
 def run_install(
@@ -499,9 +503,12 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
     coordination_root = tmp_path / "ar-coordination"
     config_path = coordination_root / "system" / "settings.json"
 
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(default_agentic_settings_seed_text(), encoding="utf-8")
+    before_settings = config_path.read_bytes()
     run_install(source, coordination_root, experiment=None)
     before_files = snapshot_regular_files(coordination_root)
-    before_settings = config_path.read_bytes()
+    assert config_path.read_bytes() == before_settings
 
     summary = run_install(source, coordination_root, experiment="role-capsules")
 

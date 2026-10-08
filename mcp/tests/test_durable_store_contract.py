@@ -33,6 +33,7 @@ import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -60,13 +61,29 @@ from agents_remember.controlplane.records import GateAnchor, GateRecord, create_
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel import atomic_write, file_lock
 from agents_remember.kernel.file_lock import thread_mutex_for
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from pydantic import ValidationError
 
 # Long enough that a wedged lock fails the test instead of hanging the suite, short enough that a
 # real deadlock is reported in seconds rather than at the pytest timeout.
-WATCHDOG_SECONDS = 15.0
+WATCHDOG_SECONDS = HANG_GUARD_SECONDS
 
 NOW = datetime(2026, 6, 14, 10, 0, 0, tzinfo=UTC)
+
+
+def _observe_contended_mutex(path: Path, contended: threading.Event, contender: threading.Thread):
+    mutex = thread_mutex_for(path)
+
+    def acquire(*, timeout: float = -1) -> bool:
+        if threading.current_thread() is not contender:
+            return mutex.acquire(timeout=timeout)
+        acquired = mutex.acquire(blocking=False)
+        if not acquired:
+            contended.set()
+            return mutex.acquire(timeout=timeout)
+        return True
+
+    return SimpleNamespace(acquire=acquire, release=mutex.release)
 
 
 class _TempRoot(unittest.TestCase):
@@ -270,8 +287,8 @@ class InProcessExclusivityTests(_TempRoot):
 
         parked = threading.Event()
         release = threading.Event()
-        dismiss_started = threading.Event()
         dismiss_done = threading.Event()
+        contended = threading.Event()
         failures: list[BaseException] = []
         park_guard = threading.Lock()
         parked_already: list[bool] = []
@@ -295,7 +312,6 @@ class InProcessExclusivityTests(_TempRoot):
                 failures.append(error)
 
         def dismiss() -> None:
-            dismiss_started.set()
             try:
                 store.dismiss(_drift("actionable-drift:new"))
             except BaseException as error:  # reported to the main thread, never swallowed
@@ -303,17 +319,26 @@ class InProcessExclusivityTests(_TempRoot):
             finally:
                 dismiss_done.set()
 
-        with patch.object(attention_module, "rewrite_lines", parking_rewrite):
-            sweeper = threading.Thread(target=sweep, daemon=True)
+        sweeper = threading.Thread(target=sweep, daemon=True)
+        dismisser = threading.Thread(target=dismiss, daemon=True)
+        with (
+            patch.object(attention_module, "rewrite_lines", parking_rewrite),
+            patch.object(
+                file_lock,
+                "thread_mutex_for",
+                side_effect=lambda path: _observe_contended_mutex(path, contended, dismisser),
+            ),
+        ):
             sweeper.start()
             self.assertTrue(parked.wait(WATCHDOG_SECONDS), "the sweep never reached its rewrite")
-            dismisser = threading.Thread(target=dismiss, daemon=True)
             dismisser.start()
-            self.assertTrue(dismiss_started.wait(WATCHDOG_SECONDS))
+            self.assertTrue(
+                contended.wait(WATCHDOG_SECONDS), "dismiss did not reach the held mutex"
+            )
             # The window is open right now: the sweep is holding a set it read before this
             # dismissal existed. The dismisser must be shut out of it, not merely lucky.
             self.assertFalse(
-                dismiss_done.wait(0.25),
+                dismiss_done.is_set(),
                 "the dismissal proceeded while a prune held the log -- the two overlap",
             )
             release.set()

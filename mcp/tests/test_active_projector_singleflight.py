@@ -57,7 +57,7 @@ async def test_concurrent_reconnect_replaces_a_retired_projector_once() -> None:
         async def close(self) -> None:
             # Reproduce the real retired-projector cleanup yield that formerly
             # let a second request pop the first request's replacement.
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0)
 
     class _Projected:
         def __init__(self, *_args: object, **_kwargs: object) -> None:

@@ -11,6 +11,7 @@ from agents_remember.serving.harness_control_models import (
     InteractionResponse,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_harness_control_claude import (
     NOW,
     SESSION_ID,
@@ -155,7 +156,7 @@ class ClaudeStreamJsonAdapterTests1(unittest.IsolatedAsyncioTestCase):
             await transport.wait_for_writes(4)
             turn = _load_fixture("turn.jsonl")
             transport.feed(turn[0])
-            receipt = await asyncio.wait_for(submission, timeout=1.0)
+            receipt = await asyncio.wait_for(submission, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(receipt.acceptance, "immediate")
             self.assertEqual(bridge.snapshot().activity, "running")
             self.assertFalse(

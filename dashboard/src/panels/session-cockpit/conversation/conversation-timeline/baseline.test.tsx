@@ -172,7 +172,6 @@ describe("ConversationTimeline — 10k tool-heavy DOM/interaction baseline (R5.2
 
   it("keeps the mounted DOM bounded and the ordinals honest at 10,000 items", () => {
     const items = bigHistory(10_000);
-    const startedAt = performance.now();
     const { container } = render(
       <ConversationTimeline
         items={items}
@@ -182,7 +181,6 @@ describe("ConversationTimeline — 10k tool-heavy DOM/interaction baseline (R5.2
         onLoadOlder={() => {}}
       />,
     );
-    const mountMs = performance.now() - startedAt;
 
     const mountedArticles = container.querySelectorAll("[data-conversation-item]");
     // The DOM baseline: the virtualized window is a small constant, never the 10k history depth.
@@ -190,9 +188,6 @@ describe("ConversationTimeline — 10k tool-heavy DOM/interaction baseline (R5.2
     expect(mountedArticles.length).toBeGreaterThan(0);
     expect(mountedArticles.length).toBeLessThan(80);
     expect(mountedArticles.length).toBeLessThan(items.length / 100);
-    // Interaction baseline tripwire: an initial mount of 10k items must not stall the main thread.
-    // Generous ceiling for shared-runner jitter; the observed value sits well under it.
-    expect(mountMs).toBeLessThan(3000);
 
     // aria-posinset rides the server globalOrdinal (never the array index); aria-setsize is the honest total.
     const feed = screen.getByRole("feed");

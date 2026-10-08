@@ -21,6 +21,7 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.pi_rpc_adapter import PiAdapterLimits, PiRpcAdapter
 from agents_remember.serving.pi_rpc_protocol import PiRpcJsonlDecoder
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_pi_rpc_adapter import (
     _direct_submit,
     _FakePiTransport,
@@ -95,7 +96,7 @@ class PiRpcAdapterTests2(unittest.IsolatedAsyncioTestCase):
             events = []
             for frame in frames:
                 transport.emit(frame)
-                events.append(await asyncio.wait_for(anext(stream), timeout=1.0))
+                events.append(await asyncio.wait_for(anext(stream), timeout=HANG_GUARD_SECONDS))
             snapshots = [event.snapshot for event in events]
             assert all(snapshot is not None for snapshot in snapshots)
             typed_snapshots = cast(list[AdapterSnapshot], snapshots)
@@ -143,7 +144,7 @@ class PiRpcAdapterTests2(unittest.IsolatedAsyncioTestCase):
                                 "message": "Confirm action",
                             }
                         )
-                        blocked = await asyncio.wait_for(anext(stream), timeout=1.0)
+                        blocked = await asyncio.wait_for(anext(stream), timeout=HANG_GUARD_SECONDS)
                         blocked_snapshot = blocked.snapshot
                         assert blocked_snapshot is not None
                         pending = blocked_snapshot.pending_interaction
@@ -282,7 +283,7 @@ class PiRpcAdapterTests2(unittest.IsolatedAsyncioTestCase):
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         try:
             transport.fail_events(HarnessControlError("malformed Pi RPC JSONL frame"))
-            failed = await asyncio.wait_for(anext(stream), timeout=1.0)
+            failed = await asyncio.wait_for(anext(stream), timeout=HANG_GUARD_SECONDS)
             self.assertEqual(failed.kind, "failed")
             failed_snapshot = failed.snapshot
             assert failed_snapshot is not None

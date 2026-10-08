@@ -4,8 +4,9 @@
 // each test then makes one selection and reads what the tree shows. `ReviewSurface` is the real
 // component and only `fetch` is stubbed.
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
+import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import {
   HBJ,
   HBJ_ID,
@@ -13,7 +14,6 @@ import {
   R6R,
   R6R_ID,
   SHARED,
-  WAIT,
   type View,
   bodyOf,
   captured,
@@ -34,6 +34,7 @@ import {
 } from './walk.test-utils';
 
 installWorld();
+afterEach(() => vi.useRealTimers());
 
 const ZS9 = bodyOf('INV-ZS9ZS878');
 const ZS9_SUBJECT = ZS9.payload!.knowledge.revision_selection!.record_id;
@@ -64,7 +65,7 @@ it('starts afresh at a row of the list of all invariants, at the moment of the s
   expect(view.getByTestId('review-reading-pending')).toBeTruthy();
   noKept(view);
   expect(families(view)).toEqual([HBJ_ID]);
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID]));
   noKept(view);
 });
 
@@ -78,14 +79,14 @@ it('starts afresh at the family row of the subject already selected', async () =
   noKept(view);
   expect(reviewCount() - before).toBe(0);
   // The clicked row is gone with the kept family; focus ends on the selected row, not on the body.
-  await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)), WAIT);
+  await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)));
   expect(selectedNode(view)!.dataset.family).toBe(HBJ_ID);
 });
 
 it('starts afresh at "All source changes"', async () => {
   const view = await keptState();
   fireEvent.click(view.getByTestId('review-task-source'));
-  await waitFor(() => expect(view.getByTestId('review-center-unselected')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-center-unselected')).toBeTruthy());
   expect(families(view)).toEqual([]);
   noKept(view);
   // With no family to stand for, the tree's place is after the catalogue's rows, still as a child of
@@ -101,7 +102,7 @@ it('starts afresh at a refresh of the review', async () => {
   fireEvent.click(view.getByTestId('review-refresh'));
   expect(families(view)).toEqual([HBJ_ID]);
   noKept(view);
-  await waitFor(() => expect(reviewCount() - before).toBe(1), WAIT);
+  await waitFor(() => expect(reviewCount() - before).toBe(1));
   await settled(view);
   expect(families(view)).toEqual([HBJ_ID]);
   noKept(view);
@@ -115,7 +116,7 @@ it('starts afresh at an answer of another comparison and says so', async () => {
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? other : previous(url, asked));
   // A member row of the kept family: an in-tree selection, answered by another comparison.
   fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
-  await waitFor(() => expect(view.getByTestId('review-family-walk-notice')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-family-walk-notice')).toBeTruthy());
   expect(view.getByTestId('review-family-walk-notice').textContent).toContain('comparison changed');
   expect(families(view)).toEqual([R6R_ID]);
   noKept(view);
@@ -143,7 +144,7 @@ it('keeps every row when a selected subject is refused, and starts afresh at the
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? refusal : previous(url, asked));
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
-  await waitFor(() => expect(view.getByTestId('review-reading-problem')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-reading-problem')).toBeTruthy());
   // The tree keeps every row, the selection mark is on the requested row, and k works from it.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toHaveLength(1);
@@ -160,12 +161,12 @@ it('starts afresh at the offer to open the task context after a refusal', async 
   const previous = world.answer;
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? refusal : previous(url, asked));
   fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
-  const offer = await view.findByTestId('review-source-instead', undefined, WAIT);
+  const offer = await view.findByTestId('review-source-instead', undefined);
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   fireEvent.click(offer);
   noKept(view);
   expect(families(view)).toEqual([HBJ_ID]);
-  await waitFor(() => expect(families(view)).toEqual([]), WAIT);
+  await waitFor(() => expect(families(view)).toEqual([]));
   noKept(view);
 });
 
@@ -176,14 +177,14 @@ it('keeps every row when the read of a selected subject fails', async () => {
     asked === subjectOf(ZS9) ? new TypeError('fetch failed') : previous(url, asked);
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
-  await waitFor(() => expect(view.getByTestId('review-reading-problem')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-reading-problem')).toBeTruthy());
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toHaveLength(1);
   expect(selectedNode(view)).toBe(row);
   // Reading again after the failure: the retry answers, and the tree is still whole.
   world.answer = previous;
   fireEvent.click(view.getByTestId('review-retry'));
-  await waitFor(() => expect(view.queryByTestId('review-reading-problem')).toBeNull(), WAIT);
+  await waitFor(() => expect(view.queryByTestId('review-reading-problem')).toBeNull());
   // The answer is the subject's own: the second family is now the kept one.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
@@ -216,26 +217,27 @@ it('starts afresh at a followed intent marker, and its return does not bring the
     const found = view.getAllByTestId('review-hunk-mark');
     expect(found).toHaveLength(1);
     return found[0];
-  }, WAIT);
+  });
   fireEvent.click(mark);
   const occurrences = within(view.getByTestId('review-hunk-mark-panel')).getAllByTestId(
     'review-hunk-mark-occurrence',
   );
   // INV-ZS9ZS878 as a member of the first family: the kept family itself, followed from a file.
   fireEvent.click(occurrences.find((one) => one.textContent?.includes('(after,'))!);
-  await waitFor(() => expect(selectedNode(view) && selectedName(view)).toBe('INV-ZS9ZS878'), WAIT);
-  await waitFor(() => expect(view.queryByTestId('review-reading-pending')).toBeNull(), WAIT);
+  await waitFor(() => expect(selectedNode(view) && selectedName(view)).toBe('INV-ZS9ZS878'));
+  await waitFor(() => expect(view.queryByTestId('review-reading-pending')).toBeNull());
   // The tree is the marker's subject's own: the second family is not kept beside it.
   expect(families(view)).toEqual([R6R_ID]);
   noKept(view);
   // The way back restores the reading position; it brings no kept family back either.
   fireEvent.click(view.getByTestId('review-marker-return'));
-  await waitFor(() => expect(view.queryByTestId('review-marker-return')).toBeNull(), WAIT);
-  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]), WAIT);
+  await waitFor(() => expect(view.queryByTestId('review-marker-return')).toBeNull());
+  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]));
   noKept(view);
-}, 30000);
+});
 
 it('opens on the subject asked for with its own families only, and a late catalogue selects the first family afresh', async () => {
+  vi.useFakeTimers();
   const catalogue = [R6R, HBJ].map((body) => ({
     selector_kind: 'family',
     selector_id: body.payload!.knowledge.revision_selection!.record_id,
@@ -267,9 +269,10 @@ it('opens on the subject asked for with its own families only, and a late catalo
       onBack={() => undefined}
     />,
   );
-  await view.findByTestId('review-center-unselected', undefined, WAIT);
-  release?.();
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID]), WAIT);
+  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
+  expect(view.getByTestId('review-center-unselected')).toBeTruthy();
+  await act(async () => release?.());
+  expect(families(view)).toEqual([R6R_ID]);
   noKept(view);
   expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID);
 });
@@ -288,7 +291,7 @@ it('keeps the families and states the subject when the answer composes no family
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? bare : previous(url, asked));
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
-  await waitFor(() => expect(view.getByTestId('review-family-subject-state')).toBeTruthy(), WAIT);
+  await waitFor(() => expect(view.getByTestId('review-family-subject-state')).toBeTruthy());
   expect(view.getByTestId('review-family-subject-state').textContent).toBe(
     'For the selected subject: The selected invariant has no recorded family membership.',
   );
@@ -315,7 +318,7 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
   fireEvent.click(
     within(view.getByTestId('review-catalogue-navigation')).getByText('Refresh subjects'),
   );
-  await waitFor(() => expect(catalogueReads()).toBe(listed + 1), WAIT);
+  await waitFor(() => expect(catalogueReads()).toBe(listed + 1));
   expect(shown()).toEqual(initial);
   // Opening a file of the source explorer.
   fireEvent.click(
@@ -323,16 +326,16 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
       .getAllByTestId('review-inventory-open')
       .find((one) => one.textContent?.includes('familyWalkMerge'))!,
   );
-  await view.findByTestId('review-opened-file', undefined, WAIT);
+  await view.findByTestId('review-opened-file', undefined);
   expect(shown()).toEqual(initial);
   // A lane destination of the unexplained-changes lane, and the way back to a family.
-  const destinations = await view.findByTestId('review-lane-destinations', undefined, WAIT);
-  await waitFor(() => expect(destinations.dataset.laneState).toBe('measured'), WAIT);
+  const destinations = await view.findByTestId('review-lane-destinations', undefined);
+  await waitFor(() => expect(destinations.dataset.laneState).toBe('measured'));
   fireEvent.click(within(destinations).getAllByTestId('review-lane-destination')[0]);
-  await view.findByTestId('review-lane', undefined, WAIT);
+  await view.findByTestId('review-lane', undefined);
   expect(shown()).toEqual(initial);
   expect(reviewCount()).toBe(reads);
-}, 30000);
+});
 
 // Every element asked to come into view while `run` is in progress (jsdom has no `scrollIntoView`).
 async function recordingScrolls(run: (scrolled: Element[]) => Promise<void>) {
@@ -357,7 +360,7 @@ it.each([true, false])(
     });
     try {
       const view = open(SHARED);
-      await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]), WAIT);
+      await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
       const workspace = view.getByTestId('review-workspace');
       await recordingScrolls(async (scrolled) => {
         const reads = reviewCount();
@@ -400,14 +403,13 @@ it('does not reveal a stacked in-tree answer after the reader moved focus while 
   try {
     await recordingScrolls(async (scrolled) => {
       fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
-      await view.findByTestId('review-reading-pending', undefined, WAIT);
+      await view.findByTestId('review-reading-pending', undefined);
       const elsewhere = view.getByTestId('review-family-filter');
       elsewhere.focus();
       release?.();
       await waitFor(
         () =>
           expect(view.getByTestId('review-center-member').textContent).toContain('INV-ZS9ZS878'),
-        WAIT,
       );
       await act(async () => {});
       expect(document.activeElement).toBe(elsewhere);
@@ -428,7 +430,7 @@ it('brings the selected row into view once the answer of a refresh is shown, wit
     fireEvent.click(button);
     // Not at the click: the rail keeps its place until the refreshed answer is shown.
     expect(scrolled).toEqual([]);
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)), WAIT);
+    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
     expect(document.activeElement).toBe(button);
   });
 });
@@ -459,12 +461,12 @@ it('waits for the answer of a refresh asked before the effects of the previous a
     });
     try {
       fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
-      await waitFor(() => expect(atClick, 'the refresh is asked').toBeDefined(), WAIT);
+      await waitFor(() => expect(atClick, 'the refresh is asked').toBeDefined());
     } finally {
       observer.disconnect();
     }
     expect(atClick).toEqual([]);
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)), WAIT);
+    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
   });
 });
 
@@ -475,7 +477,7 @@ it('forgets the scroll a refresh asked for when its read fails, so a later page 
     world.answer = () => new TypeError('fetch failed');
     fireEvent.click(view.getByTestId('review-refresh'));
     // The comparison last read stays on screen, with the failure stated beside it.
-    await view.findByTestId('review-failure', undefined, WAIT);
+    await view.findByTestId('review-failure', undefined);
     expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID);
     world.answer = previous;
     // A page of the subject on screen is then read: an answer that is no selection and no refresh.
@@ -484,7 +486,7 @@ it('forgets the scroll a refresh asked for when its read fails, so a later page 
     await waitFor(() => {
       expect(reviewCount()).toBe(reads + 1);
       expect(view.getByTestId('review-page-controls').dataset.pageRequested).toBe('records');
-    }, WAIT);
+    });
     // Every effect of that answer has run: nothing was brought into view.
     await act(async () => {});
     expect(scrolled).toEqual([]);
@@ -497,7 +499,7 @@ it('brings the selected row into view when the retry of a failed refresh is answ
     const previous = world.answer;
     world.answer = () => new TypeError('fetch failed');
     fireEvent.click(view.getByTestId('review-refresh'));
-    const retry = await view.findByTestId('review-retry', undefined, WAIT);
+    const retry = await view.findByTestId('review-retry', undefined);
     // Every effect of the failure has run: the request of the refresh is dropped.
     await act(async () => {});
     world.answer = previous;
@@ -506,7 +508,7 @@ it('brings the selected row into view when the retry of a failed refresh is answ
     // The retry is the refresh again. Not at the click: the rail keeps its place until the answer
     // is shown.
     expect(scrolled).toEqual([]);
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)), WAIT);
+    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
     expect(reviewCount() - reads).toBe(1);
     expect(view.queryByTestId('review-retry')).toBeNull();
     expect(families(view)).toEqual([HBJ_ID]);
@@ -534,7 +536,7 @@ async function inTheTurnOfAFailedRefresh(view: View, next: () => void) {
   });
   try {
     fireEvent.click(view.getByTestId('review-refresh'));
-    await waitFor(() => expect(run, 'the failure is shown').toBe(true), WAIT);
+    await waitFor(() => expect(run, 'the failure is shown').toBe(true));
   } finally {
     observer.disconnect();
   }
@@ -548,7 +550,7 @@ it('brings the selected row into view after a refresh asked in the turn that sho
     await inTheTurnOfAFailedRefresh(view, () =>
       fireEvent.click(view.getByTestId('review-refresh')),
     );
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)), WAIT);
+    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
     expect(view.queryByTestId('review-retry')).toBeNull();
   });
 });
@@ -559,7 +561,7 @@ it('brings the selected row into view when the retry is made in the turn that sh
     // The retry comes before the effect that drops the request of the failed refresh, and is the
     // refresh again all the same.
     await inTheTurnOfAFailedRefresh(view, () => fireEvent.click(view.getByTestId('review-retry')));
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)), WAIT);
+    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
     expect(view.queryByTestId('review-retry')).toBeNull();
   });
 });

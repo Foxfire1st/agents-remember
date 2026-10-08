@@ -54,6 +54,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 afterEach(() => {
   for (const id of Object.keys(activeConversationStore.getState().bySession)) disconnectConversation(id);
   activeConversationStore.getState().reset();
+  vi.useRealTimers();
 });
 
 describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error threading)", () => {
@@ -394,6 +395,7 @@ describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error 
   });
 
   it("retries a transient boot-race failure on the quiet connecting phase, never fail-loud (R10)", async () => {
+    vi.useFakeTimers();
     // A fresh launch's first fetch can race the runner's boot and
     // answer transiently (503 / connection refused). Unlike a hard 4xx it must NOT flash the
     // fail-loud "structured surface unavailable" alarm — it retries quietly across the boot window.
@@ -404,12 +406,12 @@ describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error 
     }) as unknown as typeof fetch;
 
     connectConversation("s9", "e1", { fetchImpl: alwaysTransient, eventSourceCtor: FakeEventSource });
-    await flush();
+    await vi.advanceTimersByTimeAsync(0);
     // Right after the first transient 503: no fail-loud error (contrast the 409 case above which
     // sets errorBySession immediately). The surface stays on the quiet connecting phase.
     expect(activeConversationStore.getState().errorBySession.s9).toBeUndefined();
     // It keeps retrying rather than giving up after one attempt.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await vi.advanceTimersByTimeAsync(500);
     expect(calls).toBeGreaterThanOrEqual(2);
     // Stop the bounded retry loop for a clean teardown.
     disconnectConversation("s9");

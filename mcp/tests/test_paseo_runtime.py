@@ -41,6 +41,7 @@ from agents_remember.serving.paseo.paseo_process_record import (
 )
 from agents_remember.serving.paseo.paseo_provision import provision_runtime
 from agents_remember.serving.paseo.paseo_settings import daemon_settings
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from paseo_runtime_test_support import (
     OTHER_SECRET,
     PINNED,
@@ -810,7 +811,7 @@ class PaseoRuntimeTests(unittest.TestCase):
             try:
                 # A start returns before the new program's command line and environment are
                 # in place; until then /proc shows both empty.
-                deadline = time.monotonic() + 10
+                deadline = time.monotonic() + HANG_GUARD_SECONDS
                 facts = read_process(child.pid)
                 while facts is not None and not (facts.command_line and facts.paseo_home):
                     self.assertLess(time.monotonic(), deadline, "the child never showed in /proc")

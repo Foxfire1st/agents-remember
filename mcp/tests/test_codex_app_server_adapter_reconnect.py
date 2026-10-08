@@ -15,6 +15,7 @@ from agents_remember.serving.codex_app_server_state import interaction_prompt, i
 from agents_remember.serving.harness_control_models import (
     InteractionResponse,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_codex_app_server_adapter import (
     FakeCodexTransport,
     fixture,
@@ -192,7 +193,7 @@ async def test_unknown_server_request_is_declined_while_experimental_history_sta
         )
         degraded: Mapping[str, object] | None = None
         while degraded is None:
-            event = await asyncio.wait_for(anext(events), timeout=1.0)
+            event = await asyncio.wait_for(anext(events), timeout=HANG_GUARD_SECONDS)
             if isinstance(event.raw.get("degraded"), str):
                 degraded = event.raw
         assert degraded["codexMethod"] == "item/tool/requestUserInput"

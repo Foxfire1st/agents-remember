@@ -45,7 +45,10 @@ class GateToolTests2(GateToolTests):
             gate_id=gate_id,
             lifecycle_id="L1",
             wait=GateWait(
-                timeout_seconds=10.0, sleep=lambda _s: None, monotonic=lambda: next(clock)
+                # load-independent: GateWait uses the injected monotonic clock, never real time.
+                timeout_seconds=10.0,
+                sleep=lambda _s: None,
+                monotonic=lambda: next(clock),
             ),
         )
         self.assertTrue(result["timedOut"])
@@ -69,7 +72,7 @@ class GateToolTests2(GateToolTests):
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
-            wait=GateWait(timeout_seconds=10.0, sleep=lambda _s: None),
+            wait=GateWait(timeout_seconds=0.0, sleep=lambda _s: None),
         )
 
         self.assertFalse(result["timedOut"])

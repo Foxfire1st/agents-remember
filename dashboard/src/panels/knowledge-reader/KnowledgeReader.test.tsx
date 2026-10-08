@@ -582,8 +582,7 @@ it('names side reads that failed, pins a clean published view, and drops stale e
   await waitFor(() => expect(window.location.hash).toContain('commit=published'));
   // The pinned commit's listings answer now, after the switch back: they must not land.
   const late = heldTree.waiting.length;
-  heldTree.waiting.forEach((release) => release());
-  await new Promise((settle) => setTimeout(settle, 20));
+  await act(async () => { heldTree!.waiting.forEach((release) => release()); });
   expect(late).toBeGreaterThan(0);
   expect(within(view.getByTestId('knowledge-tree')).queryAllByTestId('tree-node')).toHaveLength(0);
 });
@@ -842,7 +841,7 @@ it('shares one record-list acquisition through delay, known branches, rerenders 
   await waitFor(() => expect(pending.length).toBeGreaterThan(0));
   const tree = view.getByTestId('knowledge-tree');
   fireEvent.click(await within(tree).findByRole('treeitem', { name: /Records/ }));
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await act(async () => {});
   expect((view.getByLabelText('Record ID') as HTMLInputElement).disabled).toBe(false);
   expect(view.getByTestId('reader-path-view')).toBeTruthy();
   await waitFor(() => expect(tree.querySelectorAll('[data-testid=tree-node]').length).toBeGreaterThan(0));
@@ -853,7 +852,7 @@ it('shares one record-list acquisition through delay, known branches, rerenders 
   const settledCalls = [...requests];
   view.rerender(<KnowledgeReader active={false} />);
   view.rerender(<KnowledgeReader active />);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await act(async () => {});
   expect(requests).toEqual(settledCalls);
   const pane = view.getByTestId('knowledge-view');
   pane.scrollTop = 2100;

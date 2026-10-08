@@ -20,9 +20,6 @@ export const captured = <T,>(name: string): T =>
   JSON.parse(
     readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
   ) as T;
-
-// A cold render of a real answer (160 to 220 kB) under a loaded suite can exceed the 1 s default.
-export const WAIT = { timeout: 8000 };
 export const J = { key: 'j', code: 'KeyJ' };
 export const K = { key: 'k', code: 'KeyK' };
 
@@ -109,7 +106,7 @@ async function settledOn(view: RenderResult, selected: () => HTMLElement | null)
     const surface = view.getByTestId('review-surface');
     expect(surface.dataset.reviewPending).toBeUndefined();
     expect(selected()).not.toBeNull();
-  }, WAIT);
+  });
 }
 
 // The distinct member occurrences a family block shows (a revised member lists two revision rows).
@@ -220,8 +217,6 @@ export function serveWorld() {
 
 // Serve the world to every test of the file.
 export function installWorld() {
-  // A cold render of a real answer under a loaded machine is slower than the library's 5 s default.
-  vi.setConfig({ testTimeout: 60000 });
   beforeEach(serveWorld);
   afterEach(() => {
     cleanup();
@@ -232,7 +227,7 @@ export function installWorld() {
 export async function settled(view: View) {
   await settledOn(view, () => selectedNode(view));
   // The selection's answer has landed in the reading area and focus is on the selected node.
-  await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)), WAIT);
+  await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)));
 }
 
 // The views whose keymap binding has taken a press.
@@ -252,12 +247,11 @@ export async function step(view: View, key: typeof J, requestsMade: number) {
   await waitFor(() => {
     if (!bound.has(view) && !taken()) press(key);
     expect(taken(), 'the press takes effect').toBe(true);
-  }, WAIT);
+  });
   bound.add(view);
   await settled(view);
   await waitFor(
     () => expect(reviewCount() - before, 'review requests of one press').toBe(requestsMade),
-    WAIT,
   );
 }
 
@@ -265,11 +259,10 @@ export async function step(view: View, key: typeof J, requestsMade: number) {
 // second family's own row selects that family and (MIK-R39) leaves the first family in the tree as a
 // kept family.
 export async function clickedSecondFamily(view: View, shown = [R6R_ID, HBJ_ID]) {
-  await waitFor(() => expect(families(view)).toEqual(shown), WAIT);
+  await waitFor(() => expect(families(view)).toEqual(shown));
   fireEvent.click(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-open'));
   await waitFor(
     () => expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID),
-    WAIT,
   );
   await settled(view);
 }

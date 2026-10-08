@@ -20,6 +20,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.models.structural.agent import DispatchAgentRequest
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.hosted_readiness import ReadinessWait
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     DispatchBriefReceiptStore,
@@ -116,6 +117,19 @@ class StructuralDispatchRecoveryTests(unittest.TestCase):
         self.assertEqual(len(self._briefs()), 1)
 
     def test_receipt_bind_failure_is_unknown_not_rollback_and_retry_repairs_it(self) -> None:
+        readiness_sleep = mock.Mock()
+        self.addCleanup(readiness_sleep.assert_not_called)
+        bound = mock.patch(
+            "agents_remember.serving.dispatch_brief.DISPATCH_BRIEF_READINESS_WAIT_SECONDS", 0.0
+        )
+        wait = mock.patch(
+            "agents_remember.serving.dispatch_brief.ReadinessWait",
+            side_effect=lambda **kwargs: ReadinessWait(**kwargs, sleep=readiness_sleep),
+        )
+        bound.start()
+        wait.start()
+        self.addCleanup(bound.stop)
+        self.addCleanup(wait.stop)
         with mock.patch.object(
             DispatchBriefReceiptStore,
             "bind",
@@ -171,6 +185,19 @@ class StructuralDispatchRecoveryTests(unittest.TestCase):
         retire.assert_not_called()
 
     def test_terminal_failed_brief_retires_and_replaces_that_generation(self) -> None:
+        readiness_sleep = mock.Mock()
+        self.addCleanup(readiness_sleep.assert_not_called)
+        bound = mock.patch(
+            "agents_remember.serving.dispatch_brief.DISPATCH_BRIEF_READINESS_WAIT_SECONDS", 0.0
+        )
+        wait = mock.patch(
+            "agents_remember.serving.dispatch_brief.ReadinessWait",
+            side_effect=lambda **kwargs: ReadinessWait(**kwargs, sleep=readiness_sleep),
+        )
+        bound.start()
+        wait.start()
+        self.addCleanup(bound.stop)
+        self.addCleanup(wait.stop)
         first = self._dispatch()
         self.assertTrue(first["ok"])
         original = self._architect()

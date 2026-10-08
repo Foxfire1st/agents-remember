@@ -416,6 +416,7 @@ integration = [
 ]
 architecture-fitness = [
   "mcp/tests/test_atomic_write.py",
+  "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
   "mcp/tests/test_evidence_lanes.py",
   "mcp/tests/test_file_size_detector.py",
@@ -431,6 +432,7 @@ architecture-fitness = [
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_static.py",
   "mcp/tests/test_structural_limits.py",
+  "mcp/tests/test_suite_load_independence.py",
   "mcp/tests/test_tool_response_conformance.py",
   "mcp/tests/test_wire_contract.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",

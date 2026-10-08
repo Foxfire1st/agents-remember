@@ -8,6 +8,7 @@ from agents_remember.errors import CodexAppServerError, HarnessAdapterBusyError
 from agents_remember.models.conversations.control_wire import (
     ControlOperationRef,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_codex_app_server_adapter import (
     TEST_SETTINGS,
     BlockingTurnStartTransport,
@@ -42,13 +43,13 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
     try:
         first_request = request("request-early")
         first_task = asyncio.create_task(adapter.submit(first_request))
-        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        await asyncio.wait_for(transport.turn_start_requested.wait(), HANG_GUARD_SECONDS)
         transport.emit(early_notification)
         await settle()
         assert list(adapter._unbound_completions) == ["turn-early"]
 
         transport.release_turn_start.set()
-        first_receipt = await asyncio.wait_for(first_task, 1)
+        first_receipt = await asyncio.wait_for(first_task, HANG_GUARD_SECONDS)
         assert first_receipt.acceptance == "immediate"
         first_event = await next_event_of_kind(events, "completed")
         assert first_event.operation == first_request.operation
@@ -62,14 +63,14 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
         transport.queue_response("turn/start", turn_start_result(data, "turn-successor"))
         successor_request = request("request-successor")
         successor_task = asyncio.create_task(adapter.submit(successor_request))
-        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        await asyncio.wait_for(transport.turn_start_requested.wait(), HANG_GUARD_SECONDS)
 
         # A retained old duplicate is discarded even while the successor start is pending.
         await assert_notification_is_inert(adapter, transport, early_notification)
         assert adapter._unbound_completions == {}
 
         transport.release_turn_start.set()
-        await asyncio.wait_for(successor_task, 1)
+        await asyncio.wait_for(successor_task, HANG_GUARD_SECONDS)
         assert adapter._turn_operations == {"turn-successor": successor_request.operation}
 
         await assert_notification_is_inert(adapter, transport, early_notification)
@@ -102,13 +103,13 @@ async def test_early_completion_plus_rejected_turn_start_clears_all_correlation(
     notification = turn_completed_notification(data, turn_id)
     try:
         submit_task = asyncio.create_task(adapter.submit(request(f"request-{status}")))
-        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        await asyncio.wait_for(transport.turn_start_requested.wait(), HANG_GUARD_SECONDS)
         transport.emit(notification)
         await settle()
         assert list(adapter._unbound_completions) == [turn_id]
 
         transport.release_turn_start.set()
-        receipt = await asyncio.wait_for(submit_task, 1)
+        receipt = await asyncio.wait_for(submit_task, HANG_GUARD_SECONDS)
         assert receipt.acceptance == "rejected"
         assert adapter._unbound_completions == {}
         assert adapter._turn_operations == {}
@@ -143,7 +144,7 @@ async def test_mismatched_early_completion_is_cleared_before_successor_activatio
         transport.turn_start_requested = asyncio.Event()
         transport.release_turn_start = asyncio.Event()
         submit_task = asyncio.create_task(adapter.submit(request("request-successor")))
-        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        await asyncio.wait_for(transport.turn_start_requested.wait(), HANG_GUARD_SECONDS)
         transport.emit(turn_completed_notification(data, "turn-evicted-old"))
         await settle()
         assert list(adapter._unbound_completions) == ["turn-evicted-old"]

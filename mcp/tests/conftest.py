@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -22,6 +24,7 @@ from agents_remember_test_support.testing.hermetic_bootstrap import (
     activate_current_pytest_environment,
     candidate_test_process,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 # This is an actual pytest process, using the existing test isolation owner. No daemon,
 # lifecycle-worker identity, or Dagger capability is supplied to the ordinary test loop.
@@ -38,12 +41,13 @@ _ISOLATED_ENVIRONMENT = mock.patch.dict(
         "XDG_DATA_HOME": str(_ISOLATED_ROOT / "data"),
         "XDG_CACHE_HOME": str(_ISOLATED_ROOT / "cache"),
         "CODEX_HOME": str(_ISOLATED_ROOT / "codex"),
+        "TMUX_TMPDIR": str(_ISOLATED_ROOT / "tmux"),
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
     },
 )
 _ISOLATED_ENVIRONMENT.start()
-for directory in ("home", "config", "data", "cache", "codex"):
+for directory in ("home", "config", "data", "cache", "codex", "tmux"):
     (_ISOLATED_ROOT / directory).mkdir()
 # Inherited live opt-ins and credentials must never make an ordinary run contact a service.
 # Tests that exercise these inputs construct their own local environment explicitly.
@@ -58,6 +62,8 @@ for name in tuple(os.environ):
             "AR_CODEX_APP_SERVER_LIVE_SMOKE",
             "AR_CODEX_APP_SERVER_LIVE_CONFORMANCE",
             "SSH_AUTH_SOCK",
+            "TMUX",
+            "TMUX_PANE",
             "GITHUB_TOKEN",
             "GH_TOKEN",
             "AWS_PROFILE",
@@ -193,6 +199,15 @@ def worktree_services() -> Iterator[None]:
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     del config
-    _ISOLATED_ENVIRONMENT.stop()
-    _ENVIRONMENT_LEASE.close()
-    _TEMPORARY.cleanup()
+    try:
+        if shutil.which("tmux") is not None:
+            subprocess.run(
+                ["tmux", "kill-server"],
+                capture_output=True,
+                check=False,
+                timeout=HANG_GUARD_SECONDS,
+            )
+    finally:
+        _ISOLATED_ENVIRONMENT.stop()
+        _ENVIRONMENT_LEASE.close()
+        _TEMPORARY.cleanup()

@@ -28,6 +28,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -55,7 +57,9 @@ def _raw_spawn(argv: Sequence[str], cwd: Path) -> PtyProcess:
     return spawn_pty(harness, cwd)
 
 
-def _read_until(session: TerminalSession, marker: bytes, timeout: float = 10.0) -> bytes:
+def _read_until(
+    session: TerminalSession, marker: bytes, timeout: float = HANG_GUARD_SECONDS
+) -> bytes:
     """Accumulate output from one PTY client until ``marker`` appears or ``timeout`` elapses."""
     fd = session.master_fd
     buf = bytearray()
@@ -136,7 +140,7 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
                     ["tmux", "kill-session", "-t", self.tmux_name],
                     check=False,
                     capture_output=True,
-                    timeout=5,
+                    timeout=HANG_GUARD_SECONDS,
                     env=tmux_client_environment(os.environ),
                 )
 

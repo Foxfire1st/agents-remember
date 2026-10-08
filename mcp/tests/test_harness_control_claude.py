@@ -11,6 +11,8 @@ from collections.abc import (
 from itertools import count
 from pathlib import Path
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -115,7 +117,7 @@ class _FakeClaudeTransport:
         while len(self.writes) < count:
             self._write_event.clear()
             if len(self.writes) < count:
-                await asyncio.wait_for(self._write_event.wait(), timeout=1.0)
+                await asyncio.wait_for(self._write_event.wait(), timeout=HANG_GUARD_SECONDS)
 
 
 def _identity() -> ControlIdentity:

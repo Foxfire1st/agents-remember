@@ -65,6 +65,7 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     // debounces scroll (150 ms): a real-timer test that fired wheel/scroll can leave that
     // callback pending past jsdom teardown, where React has no `window` to schedule
     // against. Flush it while jsdom is still alive.
+    // load-independent: same-event-loop teardown follows the product 150 ms debounce
     await new Promise((resolve) => setTimeout(resolve, 200));
   });
 

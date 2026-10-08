@@ -30,6 +30,7 @@ from agents_remember.serving.build_info import process_serving_build
 from agents_remember.worktrees.integration.closeout.preparation import code_view
 from agents_remember.worktrees.modules import onboarding
 from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 def _pair() -> MemoryCandidatePairIdentity:
@@ -126,7 +127,7 @@ class MemoryQualityRunRegistryTests(unittest.TestCase):
         self.addCleanup(runs._registry.clear)
 
     def _poll_until_settled(self, run_id: str) -> runs.QualityRunSnapshot:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + HANG_GUARD_SECONDS
         snapshot = None
         while time.monotonic() < deadline:
             snapshot = runs.poll_quality_run("repo", run_id)

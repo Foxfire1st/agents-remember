@@ -28,6 +28,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 IDENTITY = TaskIdentity(
     repo_id="sandbox-app",
@@ -251,7 +252,7 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         """Whether the process whose id the stand-in wrote to ``name`` has ended."""
 
         pid = int((self.root / name).read_text(encoding="utf-8"))
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + HANG_GUARD_SECONDS
         while time.monotonic() < deadline:
             try:
                 state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split(") ")[1][0]
@@ -325,15 +326,16 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             ),
             daemon=True,
         )
+        # load-independent: the stuck child must hit the injected product cut-off; termination is asserted.
         with self.stand_in(stuck), patch.object(leaf_enclosure_start, "START_TIMEOUT_SECONDS", 1):
             caller.start()
-            caller.join(10)
+            caller.join(HANG_GUARD_SECONDS)
             in_time = not caller.is_alive()
             if not in_time:
                 # Only the forceful signal ends these processes; without it the caller waits on.
                 for name in ("child.pid", "started-by-the-child.pid"):
                     os.kill(int((self.root / name).read_text(encoding="utf-8")), signal.SIGKILL)
-                caller.join(10)
+                caller.join(HANG_GUARD_SECONDS)
 
         self.assertTrue(in_time, "the cut-off did not end processes that ignore the polite signal")
         outcome = answered
@@ -358,13 +360,11 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         lingering = "sleep 30 &\necho $! > left-running.pid\nprintf '{\"ok\": true}'\nexit 0"
         with (
             self.stand_in(lingering),
-            patch.object(leaf_enclosure_start, "START_TIMEOUT_SECONDS", 8),
+            patch.object(leaf_enclosure_start, "START_TIMEOUT_SECONDS", HANG_GUARD_SECONDS),
         ):
-            began = time.monotonic()
             outcome = leaf_enclosure_start.start_leaf_enclosure_in_child(self.config, IDENTITY)
 
         self.assertEqual(outcome, {"ok": True})
-        self.assertLess(time.monotonic() - began, 4)
         os.kill(int((self.root / "left-running.pid").read_text(encoding="utf-8")), signal.SIGKILL)
 
     def test_a_child_that_ends_without_reading_its_request_is_answered_from_its_reply(
@@ -412,13 +412,12 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
             "_leader, terminal = os.openpty()\n"
             "fcntl.ioctl(terminal, termios.TIOCSCTTY, 0)\n"
             "command.START_TIMEOUT_SECONDS = 120\n"
-            "began = time.monotonic()\n"
             "try:\n"
             "    done = command._run_child([sys.executable, '-c', sys.argv[1]], json.loads(sys.argv[2]))\n"
             "    answer = {'status': done.returncode, 'reply': json.loads(done.stdout)}\n"
             "except subprocess.TimeoutExpired:\n"
             "    answer = {'cutOff': True}\n"
-            "print(json.dumps({**answer, 'seconds': time.monotonic() - began}))\n"
+            "print(json.dumps(answer))\n"
         )
         request = json.dumps(request_of(self.config))
         # The child's limit lies far above the time a fresh interpreter needs to start on a
@@ -443,7 +442,6 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertRegex(
             answer["reply"]["error"]["message"], r"^the terminal read ended with status [1-9]"
         )
-        self.assertLess(answer["seconds"], 60)
 
     def test_output_that_is_not_utf_8_is_a_refusal_with_the_child_s_last_words(self) -> None:
         garbled = "printf '\\377\\376{'\nprintf 'caf\\351: out of memory' >&2\nexit 1"

@@ -46,6 +46,7 @@ from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalLivenessObservation,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from test_harness_control import (
@@ -88,7 +89,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                         ControlSubmission(source="durable", request_id="active-durable"),
                     )
                 )
-                await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
+                await asyncio.wait_for(adapter.submit_started.wait(), timeout=HANG_GUARD_SECONDS)
                 queued = await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
@@ -153,7 +154,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(receipt.acceptance, "unknown")
                 self.assertEqual(receipt.request_id, "outer-loss-request")
-                await asyncio.wait_for(server.dropped.wait(), timeout=1.0)
+                await asyncio.wait_for(server.dropped.wait(), timeout=HANG_GUARD_SECONDS)
 
                 reconciled = await asyncio.to_thread(
                     reconcile_control_prompt, entry, "outer-loss-request"
@@ -233,7 +234,9 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                             },
                         )
                     )
-                    await asyncio.wait_for(adapter.submit_started.wait(), timeout=5.0)
+                    await asyncio.wait_for(
+                        adapter.submit_started.wait(), timeout=HANG_GUARD_SECONDS
+                    )
                     duplicate_call = asyncio.create_task(
                         asyncio.to_thread(
                             client.post,
@@ -245,7 +248,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                             },
                         )
                     )
-                    duplicate = await asyncio.wait_for(duplicate_call, timeout=5.0)
+                    duplicate = await asyncio.wait_for(duplicate_call, timeout=HANG_GUARD_SECONDS)
                     adapter.release_submit.set()
                     first = await first_call
                     reconciled = await asyncio.to_thread(

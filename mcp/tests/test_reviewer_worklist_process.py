@@ -44,8 +44,30 @@ from agents_remember.models.knowledge.review_trees import ReviewTreesResult
 from agents_remember.serving import build_info
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.review_trees import register_review_trees_route
+from agents_remember_test_support.testing.waits import (
+    HANG_GUARD_SECONDS,
+    wait_until,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from reviewer_worklist_process_test_support import (
+    _BLOCKED_GIT,
+    _PARENT,
+    _alive,
+    _all_children,
+    _children,
+    _wait_gone,
+    busy_default_executor,
+    controlled_worklist_clock,
+    held_child_script,
+    joined_requesters,
+)
+from reviewer_worklist_process_test_support import (
+    LIFETIME_CHILD as _LIFETIME_CHILD,
+)
+from reviewer_worklist_process_test_support import (
+    WORKLIST_REPLY as _REPLY,
+)
 from test_review_git_trees import (  # noqa: F401 - fixture
     CODE_FILE,
     CODE_V1,
@@ -174,15 +196,6 @@ child.main()
         assert _body(guarded_answer, by_alias=True) == _body(answer, by_alias=True)
 
 
-_REPLY = """
-import json, os, sys, time
-r = json.load(sys.stdin)
-answer = {'operation': r['operation'], 'request': r['request'], 'source': r['source'],
-          'module': r['source']['packageRoot'] + '/application/reviewer_worklist_child.py',
-          'pid': os.getpid(), 'document': None, 'reads': {}, 'computation': [time.monotonic(), time.monotonic()], 'error': None}
-"""
-
-
 def test_real_child_transport_failures_are_explicit_uncached_and_recoverable(world: World) -> None:  # noqa: F811
     world.edit()
     ports = _ports(world)
@@ -280,28 +293,6 @@ sys.stdout.write(json.dumps(answer).replace('"NUMBER"', {number!r}))
     assert ports.trees(_query()).state == "trees"
 
 
-def _children(pid: int) -> list[int]:
-    try:
-        return [int(one) for one in Path(f"/proc/{pid}/task/{pid}/children").read_text().split()]
-    except FileNotFoundError:
-        return []
-
-
-_BLOCKED_GIT = """
-import os, subprocess
-from agents_remember.application import reviewer_worklist_child as child
-def blocked(*args, **kwargs):
-    read_end, write_end = os.pipe()
-    try:
-        subprocess.run(['git', 'cat-file', '--batch'], cwd=args[0].code_repo_path,
-                       stdin=read_end, capture_output=True, check=True)
-    finally:
-        os.close(read_end); os.close(write_end)
-child.leaf_worklist = blocked
-child.main()
-"""
-
-
 def test_actual_disconnect_deadline_shutdown_and_queue_reap_children(world: World) -> None:  # noqa: F811
     world.edit()
     ports = _ports(world)
@@ -313,12 +304,20 @@ def test_actual_disconnect_deadline_shutdown_and_queue_reap_children(world: Worl
         _route_stop(world, stop)
 
     owner = process_owner.ReviewerWorklistProcesses()
-    with (
-        _child_script("import time; time.sleep(30)"),
-        mock.patch.object(process_owner, "DEADLINE_SECONDS", 0.2),
-        pytest.raises(process_owner.WorklistProcessError, match="deadline"),
-    ):
-        isolated_leaf_worklist(contract, candidate=candidate, base=base, processes=owner)
+    collect = owner._collect
+    with controlled_worklist_clock(process_owner) as clock:
+
+        def expired_after_launch(*args: Any) -> Any:
+            clock[0] += process_owner.DEADLINE_SECONDS + 1
+            return collect(*args)
+
+        with (
+            _child_script("import threading; threading.Event().wait()") as expired_children,
+            mock.patch.object(owner, "_collect", expired_after_launch),
+            pytest.raises(process_owner.WorklistProcessError, match="deadline"),
+        ):
+            isolated_leaf_worklist(contract, candidate=candidate, base=base, processes=owner)
+    assert len(expired_children) == 1 and expired_children[0].poll() is not None
     assert not owner._active
 
     # Two different computations hold both slots; a third waits its turn instead of being refused,
@@ -333,18 +332,18 @@ def test_actual_disconnect_deadline_shutdown_and_queue_reap_children(world: Worl
         except Exception as error:
             failures.append(error)
 
-    with _child_script("import time; time.sleep(30)") as children:
+    with _child_script("import threading; threading.Event().wait()") as children:
         workers = [threading.Thread(target=work, args=(number,)) for number in range(3)]
         for worker in workers:
             worker.start()
-        until = time.monotonic() + 5
-        while owner._waiting != 3 and time.monotonic() < until:
-            time.sleep(0.01)
-        time.sleep(0.3)
+        wait_until(
+            lambda: owner._waiting == 3 and len(owner._queue) == 1 and len(children) == 2,
+            "third request queued behind both occupied child slots",
+        )
         assert owner._waiting == 3 and len(children) == 2 and not failures
         owner.shutdown()
         for worker in workers:
-            worker.join(timeout=5)
+            worker.join(timeout=HANG_GUARD_SECONDS)
     assert len(failures) == 3 and not owner._active and not owner._queue
     assert all(child.poll() is not None for child in children)
 
@@ -386,7 +385,7 @@ def _route_stop(world: World, stop: str) -> None:  # noqa: F811
             "server": ("localhost", 1),
             "client": ("localhost", 2),
         }
-        asyncio.run(asyncio.wait_for(app(scope, received, send), timeout=10))
+        asyncio.run(asyncio.wait_for(app(scope, received, send), timeout=HANG_GUARD_SECONDS))
     assert git_pids and children and all(child.poll() is not None for child in children)
     assert all(not Path(f"/proc/{pid}").exists() for pid in git_pids)
     assert not owner._active and len(review_leaf_view_memo.LEAF_VIEW_MEMO) == 0
@@ -399,13 +398,6 @@ def _source() -> dict[str, Any]:
     return process_owner.build_identity(
         process_serving_build().payload().model_dump(mode="json", exclude_none=True)
     )
-
-
-_SLEEPING_REPLY = _REPLY + "time.sleep(0.8); json.dump(answer, sys.stdout)"
-
-
-def _alive(children: list[subprocess.Popen[Any]]) -> int:
-    return sum(child.poll() is None for child in children)
 
 
 def _ask(owner: Any, payload: dict[str, Any], answers: list[Any], errors: list[Exception]) -> None:
@@ -421,7 +413,10 @@ def test_identical_requests_share_one_child_and_others_wait_for_one_of_two_slots
     same: list[Any] = []
     other: list[Any] = []
     errors: list[Exception] = []
-    with _child_script(_SLEEPING_REPLY) as children:
+    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+        children,
+        release,
+    ):
         threads = [
             threading.Thread(target=_ask, args=(owner, {"tree": "a"}, same, errors))
             for _ in range(4)
@@ -431,10 +426,13 @@ def test_identical_requests_share_one_child_and_others_wait_for_one_of_two_slots
         ]
         for thread in threads:
             thread.start()
-        most = 0
-        while any(thread.is_alive() for thread in threads):
-            most = max(most, _alive(children))
-            time.sleep(0.01)
+        wait_until(
+            lambda: owner._waiting == 7 and len(owner._queue) == 2 and _alive(children) == 2,
+            "all seven requests admitted with two occupied slots",
+        )
+        most = _alive(children)
+        release()
+        most = max(most, joined_requesters(threads, children))
     assert not errors
     assert len(same) == 4 and all(answer == same[0] for answer in same)  # one answer, four copies
     assert len({id(answer) for answer in same}) == 4 and len(other) == 3
@@ -448,9 +446,9 @@ def test_overload_is_refused_only_past_the_waiting_bound_or_the_deadline_and_say
     answers: list[Any] = []
     errors: list[Exception] = []
     with (
-        _child_script("import time; time.sleep(30)") as children,
+        _child_script("import threading; threading.Event().wait()") as children,
         mock.patch.object(process_owner, "MAX_WAITING_COMPUTATIONS", 4),
-        mock.patch.object(process_owner, "DEADLINE_SECONDS", 1.5),
+        controlled_worklist_clock(process_owner) as clock,
     ):
         threads = [
             threading.Thread(target=_ask, args=(owner, {"tree": number}, answers, errors))
@@ -458,15 +456,16 @@ def test_overload_is_refused_only_past_the_waiting_bound_or_the_deadline_and_say
         ]
         for thread in threads:
             thread.start()
-        until = time.monotonic() + 5
-        while owner._waiting != 4 and time.monotonic() < until:
-            time.sleep(0.01)
-        started = time.monotonic()
+        wait_until(
+            lambda: owner._waiting == 4 and len(owner._queue) == 2 and _alive(children) == 2,
+            "four admitted computations with two children and two queued",
+        )
         with pytest.raises(process_owner.WorklistOverloaded) as beyond:
             owner.compute({"tree": "fifth"}, _source())
-        assert time.monotonic() - started < 0.5  # the bound refuses at once; waiting is not refusal
+        assert owner._waiting == 4 and len(owner._queue) == 2  # refused without joining the queue
+        clock[0] += process_owner.DEADLINE_SECONDS + 1
         for thread in threads:
-            thread.join(timeout=10)
+            thread.join(timeout=HANG_GUARD_SECONDS)
     assert beyond.value.code == "reviewer_busy"
     assert beyond.value.next_action == "the reviewer is computing other worklists; retry"
     # Two held the children and ran out of time; two never got a child, which is overload.
@@ -488,22 +487,27 @@ def test_a_cancelled_requester_leaves_the_shared_child_to_the_others_and_the_las
         with process_owner.worklist_request(leaving):
             _ask(owner, {"tree": "a"}, [], errors)
 
-    with _child_script(_SLEEPING_REPLY) as children:
+    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+        children,
+        release,
+    ):
         first = threading.Thread(target=impatient)
         second = threading.Thread(target=_ask, args=(owner, {"tree": "a"}, answers, errors))
         first.start()
         second.start()
-        until = time.monotonic() + 5
-        while owner._waiting != 2 and time.monotonic() < until:
-            time.sleep(0.01)
+        wait_until(
+            lambda: owner._waiting == 2 and len(children) == 1, "both requesters sharing the child"
+        )
         leaving.set()
-        first.join(timeout=5)
-        second.join(timeout=10)
+        first.join(timeout=HANG_GUARD_SECONDS)
+        assert not first.is_alive() and len(owner._active) == 1
+        release()
+        second.join(timeout=HANG_GUARD_SECONDS)
     assert len(answers) == 1 and len(children) == 1  # the other requester still got its answer
     assert [str(error) for error in errors] == ["reviewer worklist computation was cancelled"]
 
     sole = threading.Event()
-    with _child_script("import time; time.sleep(30)") as children:
+    with _child_script("import threading; threading.Event().wait()") as children:
         errors.clear()
 
         def alone() -> None:
@@ -512,11 +516,9 @@ def test_a_cancelled_requester_leaves_the_shared_child_to_the_others_and_the_las
 
         thread = threading.Thread(target=alone)
         thread.start()
-        until = time.monotonic() + 5
-        while not children and time.monotonic() < until:
-            time.sleep(0.01)
+        wait_until(lambda: bool(children), "worklist child started")
         sole.set()
-        thread.join(timeout=10)
+        thread.join(timeout=HANG_GUARD_SECONDS)
         assert children and children[0].poll() is not None  # reaped before the request returned
     assert not owner._active
 
@@ -559,7 +561,7 @@ def test_four_concurrent_first_reads_answer_alike_from_one_child(world: World) -
     barrier = threading.Barrier(4)
 
     def first_read() -> None:
-        barrier.wait()
+        barrier.wait(timeout=HANG_GUARD_SECONDS)
         try:
             answers.append(ports.trees(_query()))
         except Exception as error:
@@ -583,9 +585,7 @@ def test_three_changed_leaves_opened_in_quick_succession_all_answer(world: World
     owner = process_owner.ReviewerWorklistProcesses()
     answers: list[Any] = []
     delayed = (
-        "import time; time.sleep(2)\n"
-        "from agents_remember.application import reviewer_worklist_child as child\n"
-        "child.main()"
+        "from agents_remember.application import reviewer_worklist_child as child\nchild.main()"
     )
 
     def read() -> None:
@@ -594,7 +594,7 @@ def test_three_changed_leaves_opened_in_quick_succession_all_answer(world: World
         )
 
     world.edit()
-    with _child_script(delayed) as children:
+    with held_child_script(_child_script, "", delayed) as (children, release):
         threads = []
         for number in range(3):
             (world.code_worktree / CODE_FILE).write_text(
@@ -602,63 +602,21 @@ def test_three_changed_leaves_opened_in_quick_succession_all_answer(world: World
             )
             threads.append(threading.Thread(target=read))
             threads[-1].start()
-            until = time.monotonic() + 30
-            while owner._waiting != number + 1 and time.monotonic() < until:
-                time.sleep(0.01)
-        most = 0
-        while any(thread.is_alive() for thread in threads):
-            most = max(most, _alive(children))
-            time.sleep(0.02)
+            wait_until(
+                lambda number=number: owner._waiting == number + 1, "changed leaf request admitted"
+            )
+        wait_until(
+            lambda: len(owner._queue) == 1 and _alive(children) == 2,
+            "third leaf queued behind two children",
+        )
+        most = _alive(children)
+        release()
+        most = max(most, joined_requesters(threads, children))
     assert [answer.state for answer in answers] == ["trees"] * 3
     assert all(answer.worklist is not None for answer in answers)
     assert len(children) == 3 and most == 2
     assert not owner._active and owner._waiting == 0
 
-
-def _all_children(pid: int) -> list[int]:
-    found: list[int] = []
-    for task in Path(f"/proc/{pid}/task").glob("*/children"):
-        found += [int(one) for one in task.read_text().split()]
-    return found
-
-
-def _gone(pid: int) -> bool:
-    try:
-        return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0] == "Z"
-    except FileNotFoundError:
-        return True
-
-
-def _wait_gone(pids: list[int], seconds: float) -> bool:
-    until = time.monotonic() + seconds
-    while time.monotonic() < until:
-        if all(_gone(pid) for pid in pids):
-            return True
-        time.sleep(0.05)
-    return all(_gone(pid) for pid in pids)
-
-
-_LIFETIME_CHILD = """
-import os, subprocess, sys
-from agents_remember.kernel import reviewer_worklist_process as owner
-owner.CHILD_DEADLINE_SECONDS = float(sys.argv[1])
-owner.arm_child_lifetime()
-subprocess.run(['git', 'cat-file', '--batch'], stdin=os.pipe()[0], cwd=sys.argv[2])
-"""
-
-_PARENT = """
-import json, subprocess, sys
-from agents_remember.kernel import reviewer_worklist_process as owner
-spec = json.load(open(sys.argv[1]))
-actual = subprocess.Popen
-def spawn(argv, *args, **kwargs):
-    if argv[1:] == ['-P', '-m', owner.CHILD_MODULE]:
-        argv = [argv[0], '-P', '-c', spec['script']]
-    return actual(argv, *args, **kwargs)
-subprocess.Popen = spawn
-print('ready', flush=True)
-owner.ReviewerWorklistProcesses().compute(spec['payload'], spec['source'])
-"""
 
 linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="parent-death signal")
 
@@ -667,21 +625,23 @@ linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pa
 def test_the_child_and_its_git_children_end_at_its_own_deadline(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     environment = process_owner._environment(_source())
-    started = time.monotonic()
     child = subprocess.Popen(
         [sys.executable, "-P", "-c", _LIFETIME_CHILD, "0.8", str(tmp_path)],
         env=environment,
         start_new_session=True,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
     )
-    until = time.monotonic() + 15
+    until = time.monotonic() + HANG_GUARD_SECONDS
     git: list[int] = []
     while not git and time.monotonic() < until:
         git = _children(child.pid)
         time.sleep(0.05)
     assert git, "the child never started its Git process"
-    assert _wait_gone([child.pid, *git], 5)
-    assert child.wait(timeout=5) < 0 and time.monotonic() - started < 15  # killed, not exited
+    assert child.stdin is not None
+    child.stdin.write(b"x")
+    child.stdin.close()  # The alarm starts only after its Git descendant was observed.
+    assert _wait_gone([child.pid, *git], HANG_GUARD_SECONDS)
+    assert child.wait(timeout=HANG_GUARD_SECONDS) < 0  # killed, not exited
 
 
 @linux_only
@@ -725,11 +685,11 @@ def test_a_killed_dashboard_takes_the_child_blocked_in_git_and_its_git_process_w
             time.sleep(0.05)
         assert child and git, "the child never blocked in Git"
         parent.kill()  # SIGKILL: no handler, no shutdown, no cleanup of any kind runs
-        parent.wait(timeout=10)
-        assert _wait_gone([*child, *git], 5), (child, git)
+        parent.wait(timeout=HANG_GUARD_SECONDS)
+        assert _wait_gone([*child, *git], HANG_GUARD_SECONDS), (child, git)
     finally:
         parent.kill()
-        parent.wait(timeout=10)
+        parent.wait(timeout=HANG_GUARD_SECONDS)
         if parent.stdout is not None:
             parent.stdout.close()
 
@@ -835,25 +795,21 @@ def test_a_busy_default_executor_cannot_delay_a_tree_read() -> None:
     app = FastAPI()
     register_review_trees_route(app, port)
 
-    async def scenario() -> float:
-        loop = asyncio.get_running_loop()
-        background = [
-            loop.run_in_executor(None, time.sleep, 2.0) for _ in range((os.cpu_count() or 4) + 8)
-        ]
-        await asyncio.sleep(0.2)  # every default-executor thread is now busy, with work queued
-        started = time.monotonic()
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://reviewer"
-        ) as client:
-            response = await client.get(
-                "/api/review/trees", params={"repo": REPO, "master": MASTER, "leaf": LEAF}
-            )
-        seconds = time.monotonic() - started
-        assert response.status_code == 200 and response.json()["state"] == "not-converted"
-        await asyncio.gather(*background)
-        return seconds
+    async def scenario() -> None:
+        async with busy_default_executor() as background:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://reviewer"
+            ) as client:
+                response = await asyncio.wait_for(
+                    client.get(
+                        "/api/review/trees", params={"repo": REPO, "master": MASTER, "leaf": LEAF}
+                    ),
+                    timeout=HANG_GUARD_SECONDS,
+                )
+            assert response.status_code == 200 and response.json()["state"] == "not-converted"
+            assert all(not job.done() for job in background)
 
-    assert asyncio.run(scenario()) < 1.0
+    asyncio.run(scenario())
 
 
 def test_a_pin_another_reader_made_or_is_making_is_the_answer_not_a_refusal(
@@ -920,8 +876,19 @@ def test_a_pin_another_reader_made_or_is_making_is_the_answer_not_a_refusal(
     lock = Path(git_in("rev-parse", "--path-format=absolute", "--git-path", ref) + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text("")
-    threading.Timer(0.05, lock.unlink).start()
-    assert review_tree_comparison._pin(record) is None
+    blocked_attempts: list[Any] = []
+
+    def held_lock(root: Path, argv: list[str], *args: Any) -> Any:
+        result = actual(root, argv, *args)
+        if argv[:2] == ["update-ref", ref] and lock.exists():
+            assert result.returncode != 0 and "cannot lock ref" in result.stderr
+            blocked_attempts.append(result)
+            lock.unlink()  # Only after the contender actually encountered the held ref lock.
+        return result
+
+    with mock.patch.object(review_tree_comparison, "run_git", held_lock):
+        assert review_tree_comparison._pin(record) is None
+    assert len(blocked_attempts) == 1
     assert git_in("rev-parse", ref) == tree and not lock.exists()
 
 
@@ -938,36 +905,39 @@ def test_a_request_arriving_while_a_cancelled_flight_is_reaped_starts_its_own_co
         with process_owner.worklist_request(leaving):
             _ask(owner, {"tree": "a"}, [], errors)
 
-    with _child_script(_SLEEPING_REPLY) as children:
+    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+        children,
+        release,
+    ):
         first = threading.Thread(target=impatient)
         first.start()
-        until = time.monotonic() + 5
-        while not children and time.monotonic() < until:
-            time.sleep(0.01)
+        wait_until(lambda: bool(children), "worklist child started")
         # Hold the first flight in its reaping: cancelled, child still alive, still registered.
         real_stop = process_owner._stop
         reaping = threading.Event()
 
         def slow_stop(process: Any) -> None:
-            reaping.wait(5)
+            assert reaping.wait(HANG_GUARD_SECONDS), "reaping was not released"
             real_stop(process)
 
         with mock.patch.object(process_owner, "_stop", slow_stop):
             leaving.set()
-            until = time.monotonic() + 5
-            while time.monotonic() < until:
+
+            def cancelled() -> bool:
                 with owner._lock:
-                    cancelled = [f for f in owner._flights.values() if f.cancel.is_set()]
-                if cancelled:
-                    break
-                time.sleep(0.005)
-            assert cancelled, "the flight was never cancelled"
+                    return any(f.cancel.is_set() for f in owner._flights.values())
+
+            wait_until(cancelled, "the first flight cancelled before reaping")
             second = threading.Thread(target=_ask, args=(owner, {"tree": "a"}, answers, errors))
             second.start()
-            time.sleep(0.2)
+            wait_until(
+                lambda: len(children) == 2,
+                "new request started its own child while first is reaping",
+            )
+            release()
             reaping.set()
-            first.join(timeout=10)
-            second.join(timeout=15)
+            first.join(timeout=HANG_GUARD_SECONDS)
+            second.join(timeout=HANG_GUARD_SECONDS)
     assert len(answers) == 1, errors  # the newcomer was answered, not told "cancelled"
     assert [str(error) for error in errors] == ["reviewer worklist computation was cancelled"]
     assert len(children) == 2 and not owner._active and not owner._flights
@@ -978,15 +948,22 @@ def test_twelve_identical_concurrent_reads_share_one_child_without_a_refusal() -
     owner = process_owner.ReviewerWorklistProcesses()
     answers: list[Any] = []
     errors: list[Exception] = []
-    with _child_script(_SLEEPING_REPLY) as children:
+    with held_child_script(_child_script, _REPLY, "json.dump(answer, sys.stdout)") as (
+        children,
+        release,
+    ):
         threads = [
             threading.Thread(target=_ask, args=(owner, {"tree": "same"}, answers, errors))
             for _ in range(12)
         ]
         for thread in threads:
             thread.start()
+        wait_until(
+            lambda: owner._waiting == 12 and len(children) == 1, "all twelve sharers admitted"
+        )
+        release()
         for thread in threads:
-            thread.join(timeout=20)
+            thread.join(timeout=HANG_GUARD_SECONDS)
     assert not errors and len(answers) == 12 and len(children) == 1
     assert all(answer == answers[0] for answer in answers)
 
@@ -995,24 +972,37 @@ def test_the_requests_deadline_runs_from_its_arrival_and_the_child_gets_what_is_
     world: World,  # noqa: F811
 ) -> None:
     world.edit()
-    ports = _ports(world)
     slow = review_tree_knowledge._measured_tree_diff
+    owner = process_owner.ReviewerWorklistProcesses()
+    budgets: list[float] = []
+    collect = owner._collect
+    with controlled_worklist_clock(process_owner) as clock:
+        arrived = clock[0]
 
-    def slow_diff(*args: Any) -> Any:
-        time.sleep(1.2)  # the work before the child starts
-        return slow(*args)
+        def slow_diff(*args: Any) -> Any:
+            clock[0] += 1.2  # work before the child consumes the injected request clock
+            return slow(*args)
 
-    started = time.monotonic()
-    with (
-        _child_script("import time; time.sleep(30)"),
-        mock.patch.object(process_owner, "DEADLINE_SECONDS", 2.0),
-        mock.patch.object(review_tree_knowledge, "_measured_tree_diff", slow_diff),
-        process_owner.worklist_request(threading.Event()),
-    ):
-        answer = ports.trees(_query())
+        def expire_with_remaining_budget(process: Any, data: bytes, flight: Any) -> Any:
+            assert flight.created == arrived
+            budgets.append(process_owner.DEADLINE_SECONDS - (clock[0] - flight.created))
+            clock[0] = arrived + process_owner.DEADLINE_SECONDS + 1
+            return collect(process, data, flight)
+
+        with (
+            _child_script("import threading; threading.Event().wait()") as children,
+            mock.patch.object(process_owner, "DEADLINE_SECONDS", 2.0),
+            mock.patch.object(review_tree_knowledge, "_measured_tree_diff", slow_diff),
+            mock.patch.object(owner, "_collect", expire_with_remaining_budget),
+            process_owner.worklist_request(threading.Event()),
+        ):
+            answer = review_tree_knowledge.read_review_trees(
+                world.config, _query(), processes=owner
+            )
     assert answer.state == "refused" and answer.refusal is not None
     assert "deadline" in answer.refusal.detail
-    assert time.monotonic() - started < 2.9  # not 1.2 s before plus a whole 2 s after
+    assert budgets == pytest.approx([0.8])  # the child receives only what remains of the request
+    assert len(children) == 1 and children[0].poll() is not None
 
 
 def test_the_waiting_bound_counts_computations_not_the_requests_sharing_them() -> None:
@@ -1042,17 +1032,19 @@ def _prove_computation_bound() -> None:
     threads: list[threading.Thread] = []
 
     def held(*args: Any) -> Any:
-        assert release.wait(30), "requesters did not reach the controlled collection barrier"
+        assert release.wait(HANG_GUARD_SECONDS), (
+            "requesters did not reach the controlled collection barrier"
+        )
         return collect(*args)
 
     def joined(waiters: int, computations: int) -> None:
-        until = time.monotonic() + 20
-        while time.monotonic() < until:
+        def ready() -> bool:
             with owner._lock:
-                if owner._waiting == waiters and len(owner._flights) == computations:
-                    return
-            time.sleep(0.005)
-        pytest.fail(f"requesters did not join: waiting={owner._waiting}, errors={errors}")
+                return owner._waiting == waiters and len(owner._flights) == computations
+
+        wait_until(
+            ready, f"{waiters} requesters to join {computations} computations; errors={errors}"
+        )
 
     with (
         _child_script(_REPLY + "json.dump(answer, sys.stdout)") as children,
@@ -1080,7 +1072,7 @@ def _prove_computation_bound() -> None:
         finally:
             release.set()
             for thread in threads:
-                thread.join(timeout=30)
+                thread.join(timeout=HANG_GUARD_SECONDS)
             owner.shutdown()
     assert not errors and len(answers) == 19
     assert len(children) == 8 and not owner._flights and not owner._active

@@ -10,6 +10,7 @@ import { startSubmitRecord } from "../data/submitMachine";
 import {
   clearSubmissionAuthorityCache,
   pollSubmissionLifecycleOnce,
+  VISIBLE_STATUS_POLL_MS,
   type SubmissionLifecycleTransport,
   type SubmissionStatusBatchWire,
 } from "../data/submissionLifecycleClient";
@@ -50,6 +51,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -537,6 +539,7 @@ describe("SessionComposer (FEUI-L5)", () => {
   });
 
   it("shows no withdrawable claim on a bare queued receipt and settles delivering on the dispatching poll", async () => {
+    vi.useFakeTimers();
     const session = readySession("queued-dispatch-grace");
     sessionStore.getState().hydrate([session]);
     let releaseStatus: () => void = () => {};
@@ -583,9 +586,8 @@ describe("SessionComposer (FEUI-L5)", () => {
     // Bare queued receipt: the draft is released (the draft-release commit point) but no withdrawable claim
     // and no queue preview — under the dispatch grace the record is already dispatching-head,
     // so the claim would be a lie on every send.
-    await waitFor(() =>
-      expect(getByTestId("session-composer-status").textContent).toContain("queued"),
-    );
+    await act(async () => {});
+    expect(getByTestId("session-composer-status").textContent).toContain("queued");
     const receiptStatus = getByTestId("session-composer-status").textContent ?? "";
     expect(receiptStatus).toContain("draft released");
     expect(receiptStatus).not.toContain("withdrawable");
@@ -594,35 +596,21 @@ describe("SessionComposer (FEUI-L5)", () => {
 
     // The first lifecycle poll reports dispatching: the composer settles on delivering… with
     // the draft still cleared and no queue surface ever shown.
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([url]) => String(url).endsWith("/submission-status")),
-      ).toBe(true),
-    );
-    act(() => releaseStatus());
-    await waitFor(() =>
-      expect(getByTestId("session-composer-status").textContent).toContain("delivering…"),
-    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS); });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/submission-status"))).toBe(true);
+    await act(async () => releaseStatus());
+    expect(getByTestId("session-composer-status").textContent).toContain("delivering…");
     expect(queryByTestId("queue-preview")).toBeNull();
     expect(sessionCockpitStore.getState().perSession[session.id]?.composer.draft).toBe("");
     expect(sessionCockpitStore.getState().perSession[session.id]?.queue).toEqual([]);
 
     // Dispatching is not terminal: polling continues, and the delivered upgrade on a later poll
     // settles the composer on the server's terminal word instead of "delivering…" forever.
-    await waitFor(
-      () =>
-        expect(
-          fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/submission-status")),
-        ).toHaveLength(2),
-      { timeout: 3_000 },
-    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS); });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/submission-status"))).toHaveLength(2);
     statusState = "delivered";
-    act(() => releaseStatus());
-    await waitFor(() =>
-      expect(getByTestId("session-composer-status").textContent).toContain(
-        "delivered · draft released",
-      ),
-    );
+    await act(async () => releaseStatus());
+    expect(getByTestId("session-composer-status").textContent).toContain("delivered · draft released");
     expect(queryByTestId("queue-preview")).toBeNull();
     expect(sessionCockpitStore.getState().perSession[session.id]?.queue).toEqual([]);
   });

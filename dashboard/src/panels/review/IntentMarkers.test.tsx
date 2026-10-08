@@ -6,7 +6,7 @@
 // what the reader sees and what a followed marker asks the workspace to select.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ReviewChangedFile,
@@ -44,6 +44,7 @@ const task = { repo: 'agents-remember', master: 'm', leaf: 'l' };
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -411,18 +412,21 @@ describe('the return to a followed marker', () => {
   });
 
   it('keeps the returned mark focused while the pane settles, never against the reader', async () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
     // Review R2-F1: a redraw after the reveal leaves focus on the body; the short hold gives it back.
     const scope = scopeOf({ returning: { path: 'pkg/lines.txt', pane: 'file', hunk: '4:1:4:1' } });
     const { view } = open('curated', 'pkg/lines.txt', { scope });
     const four = (await marks(view, 3))[1];
-    await waitFor(() => expect(document.activeElement).toBe(four));
+    await act(async () => { await vi.advanceTimersByTimeAsync(32); });
+    expect(document.activeElement).toBe(four);
     four.blur();
     expect(document.activeElement).toBe(document.body);
-    await waitFor(() => expect(document.activeElement).toBe(four));
+    await act(async () => { vi.advanceTimersToNextFrame(); });
+    expect(document.activeElement).toBe(four);
     // The reader's own key ends the hold: focus the reader leaves on the body stays there.
     fireEvent.keyDown(document.body, { key: 'Escape' });
     four.blur();
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     expect(document.activeElement).toBe(document.body);
   });
 
@@ -754,7 +758,8 @@ describe("a card's excerpt", () => {
       scope: { classify, listed: () => false, partial: true },
     });
     const excerpt = await view.findByTestId('review-card-excerpt');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The excerpt has rendered; flush its effects before asserting no classification was requested.
+    await act(async () => {});
     expect(within(excerpt).queryByTestId('review-marks-state')).toBeNull();
     expect(classify).not.toHaveBeenCalled();
   });

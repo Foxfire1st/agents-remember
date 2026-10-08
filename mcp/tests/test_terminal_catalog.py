@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from agents_remember.serving.terminal_catalog import (
     DispatchBriefReceiptStore,
     TerminalCatalog,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
 def _entry(
@@ -142,17 +144,33 @@ class TerminalCatalogTests(unittest.TestCase):
         other = TerminalCatalog(self.catalog.path)
         self.catalog.upsert(_entry("worker"))
         finished = threading.Event()
+        contended = threading.Event()
+        real_flock = fcntl.flock
+
+        def observed_flock(fd: int, operation: int) -> None:
+            if threading.current_thread() is writer and operation == fcntl.LOCK_EX:
+                try:
+                    real_flock(fd, operation | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    contended.set()
+                else:
+                    return
+            real_flock(fd, operation)
 
         def terminate() -> None:
             other.mark_terminated("worker", "2026-07-12T10:01:00+00:00")
             finished.set()
 
-        with self.catalog.batch():
+        with self.catalog.batch(), patch.object(fcntl, "flock", observed_flock):
             self.catalog.record_turn_state("worker", "working", changed_at="2026-07-12T10:00Z")
             writer = threading.Thread(target=terminate)
             writer.start()
-            self.assertFalse(finished.wait(timeout=0.05))
-        writer.join(timeout=1)
+            self.assertTrue(
+                contended.wait(HANG_GUARD_SECONDS), "writer did not reach the held lock"
+            )
+            self.assertFalse(finished.is_set())
+        writer.join(timeout=HANG_GUARD_SECONDS)
+        self.assertFalse(writer.is_alive())
         self.assertEqual(other.get("worker").status, "terminated")  # type: ignore[union-attr]
 
         with self.catalog.batch():

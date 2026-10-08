@@ -25,16 +25,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import socket
+import sys
 import time
 from pathlib import Path
+from unittest import mock
 
+import httpx
 import pytest
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.eve_adapter import (
     PROVIDER_DEFAULT_EFFORT,
     REASONING_EFFORTS,
 )
+from agents_remember.serving.eve_protocol import EveRuntimeLaunch
 from agents_remember.serving.eve_runtime_client import EveRuntimeProcess
 from agents_remember.serving.eve_runtime_launch import (
     DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -48,8 +51,10 @@ from agents_remember.serving.eve_runtime_launch import (
     resolve_node_executable,
     resolve_runtime_spec,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from eve_adapter_test_support import (
     EVE_APPLICATION_ROOT,
+    IsolatedEveRuntimeProcess,
     RecordedModelRequest,
     require_installed_eve_application,
     serve_recording_provider,
@@ -69,12 +74,6 @@ BINDING_REF = "ar-binding:effort-runtime-fixture"
 START_TIMEOUT_SECONDS = 240.0
 CALL_TIMEOUT_SECONDS = 120.0
 AUTHORED_AGENT = EVE_APPLICATION_ROOT / "agent" / "agent.ts"
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 def _admitted_workspace(root: Path) -> dict[str, str]:
@@ -140,14 +139,14 @@ async def _one_level(tmp_path: Path, effort: str) -> tuple[list[RecordedModelReq
             PROVIDER_API_KEY_ENV: "effort-runtime-fixture-key",
             PROVIDER_NAME_ENV: "ar-eve",
         },
-        port=_free_port(),
+        port=0,
         state_root=root / "epoch",
     )
     # The staged copy is the checkout's own authored bytes: the assertion below is about the source
     # this repository ships, not about a reduced application written for the case.
     assert (spec.root / "agent" / "agent.ts").read_text(encoding="utf-8") == authored
 
-    runtime = EveRuntimeProcess(spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS)
+    runtime = IsolatedEveRuntimeProcess(spec.launch, health_timeout_seconds=START_TIMEOUT_SECONDS)
     try:
         await runtime.start()
         await runtime.health()
@@ -213,3 +212,115 @@ class EveEffortConsumerTests:
         for request in recorded:
             assert request.body.get("model") == FIXTURE_MODEL
             assert "messages" in request.body
+
+
+def test_an_observed_bind_collision_retries_and_other_start_failures_do_not() -> None:
+    async def exercise() -> None:
+        ports: list[int] = []
+
+        async def first_bind_fails(runtime: EveRuntimeProcess) -> None:
+            ports.append(runtime._launch.port)
+            if len(ports) == 1:
+                runtime._stderr.extend(b"EADDRINUSE: address already in use")
+                raise HarnessControlError("the Eve child exited before readiness")
+
+        runtime = IsolatedEveRuntimeProcess(EveRuntimeLaunch(runtime_root="unused", port=65000))
+        with (
+            mock.patch.object(EveRuntimeProcess, "start", first_bind_fails),
+            mock.patch.object(EveRuntimeProcess, "stop", new_callable=mock.AsyncMock) as stopped,
+            mock.patch("eve_adapter_test_support.choose_runtime_port", return_value=65001),
+        ):
+            await runtime.start()
+            assert ports == [65000, 65001]
+            stopped.assert_awaited_once_with("graceful")
+            assert runtime.stderr_tail == ""
+
+        original_failure = HarnessControlError("missing runtime dependency")
+        with (
+            mock.patch.object(EveRuntimeProcess, "start", new_callable=mock.AsyncMock) as start,
+            mock.patch.object(EveRuntimeProcess, "stop", new_callable=mock.AsyncMock) as stopped,
+            mock.patch("eve_adapter_test_support.choose_runtime_port") as choose,
+        ):
+            start.side_effect = original_failure
+            with pytest.raises(HarnessControlError) as failure:
+                await runtime.start()
+            assert failure.value is original_failure
+            start.assert_awaited_once()
+            stopped.assert_awaited_once_with("graceful")
+            choose.assert_not_called()
+
+    asyncio.run(exercise())
+
+
+async def _stall_after_owning_startup_resources(
+    runtime: EveRuntimeProcess, started: asyncio.Event, release: asyncio.Event
+) -> None:
+    runtime._process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import signal; signal.pause()",
+        stderr=asyncio.subprocess.PIPE,
+    )
+    runtime._client = httpx.AsyncClient()
+    runtime._stderr_task = asyncio.create_task(runtime._drain_stderr())
+    started.set()
+    await release.wait()
+
+
+@pytest.mark.parametrize("failure_kind", ["cancellation", "failure"])
+def test_failed_start_reaps_its_actual_child_client_and_stderr_task(failure_kind: str) -> None:
+    async def exercise() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        cancellations: list[asyncio.CancelledError] = []
+        failure = RuntimeError("startup failed after acquiring its resources")
+
+        async def stalled_start(runtime: EveRuntimeProcess) -> None:
+            try:
+                await _stall_after_owning_startup_resources(runtime, started, release)
+            except asyncio.CancelledError as cancellation:
+                cancellations.append(cancellation)
+                raise
+            raise failure
+
+        runtime = IsolatedEveRuntimeProcess(EveRuntimeLaunch(runtime_root="unused", port=65000))
+        startup: asyncio.Task[None] | None = None
+        try:
+            with (
+                mock.patch.object(EveRuntimeProcess, "start", stalled_start),
+                mock.patch.object(runtime, "stop", wraps=runtime.stop) as stopped,
+                mock.patch("eve_adapter_test_support.choose_runtime_port") as choose,
+            ):
+                startup = asyncio.create_task(runtime.start())
+                await asyncio.wait_for(started.wait(), timeout=HANG_GUARD_SECONDS)
+                child, client, stderr_task = runtime._process, runtime._client, runtime._stderr_task
+                assert child is not None and client is not None and stderr_task is not None
+                assert child.returncode is None
+                assert not client.is_closed
+                assert not stderr_task.done()
+                if failure_kind == "cancellation":
+                    startup.cancel("cancel after all three resources exist")
+                    with pytest.raises(asyncio.CancelledError) as cancelled:
+                        await asyncio.wait_for(startup, timeout=HANG_GUARD_SECONDS)
+                    assert cancelled.value is cancellations[0]
+                else:
+                    release.set()
+                    with pytest.raises(RuntimeError) as failed:
+                        await asyncio.wait_for(startup, timeout=HANG_GUARD_SECONDS)
+                    assert failed.value is failure
+                stopped.assert_awaited_once_with("forced")
+                choose.assert_not_called()
+                assert child.returncode is not None
+                assert client.is_closed
+                assert stderr_task.done()
+                assert runtime._process is None
+                assert runtime._client is None
+                assert runtime._stderr_task is None
+        finally:
+            if startup is not None and not startup.done():
+                startup.cancel()
+                with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+                    await startup
+            await runtime.stop("forced")
+
+    asyncio.run(exercise())

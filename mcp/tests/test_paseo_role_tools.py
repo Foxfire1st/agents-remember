@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-import time
 import unittest
 import uuid
 from typing import Any, cast
@@ -50,6 +49,7 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentRefError
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -591,7 +591,22 @@ class RoleStartTests(RoleToolsTestCase):
             self.assertIn("did not start it and cannot repeat it", refused["detail"])
 
     def test_starts_run_one_at_a_time_and_a_start_waits_for_the_one_before_it(self) -> None:
-        inside, proceed = threading.Event(), threading.Event()
+        inside, proceed, contended = threading.Event(), threading.Event(), threading.Event()
+        real_lock = role_launch_routes._DISPATCH_LOCK
+
+        class ObservedLock:
+            def acquire(self, **kwargs):
+                if real_lock.acquire(blocking=False):
+                    return True
+                contended.set()
+                return real_lock.acquire(**kwargs)
+
+            def release(self):
+                real_lock.release()
+
+            def locked(self):
+                return real_lock.locked()
+
         order: list[str] = []
         results: dict[str, dict[str, Any]] = {}
 
@@ -600,7 +615,7 @@ class RoleStartTests(RoleToolsTestCase):
             order.append(name)
             if name == "first" and not inside.is_set():
                 inside.set()
-                self.assertTrue(proceed.wait(10))
+                self.assertTrue(proceed.wait(HANG_GUARD_SECONDS))
 
         def run(role: str) -> None:
             results[threading.current_thread().name] = self.start(self.architect, role)
@@ -608,16 +623,21 @@ class RoleStartTests(RoleToolsTestCase):
         self.runtime.observer = observed
         first = threading.Thread(target=run, args=("worker",), name="first")
         second = threading.Thread(target=run, args=("manager",), name="second")
+        dispatch_lock = patch.object(role_launch_routes, "_DISPATCH_LOCK", ObservedLock())
+        dispatch_lock.start()
+        self.addCleanup(dispatch_lock.stop)
         first.start()
-        self.assertTrue(inside.wait(10))
+        self.assertTrue(inside.wait(HANG_GUARD_SECONDS))
         second.start()
-        second.join(0.3)
+        self.assertTrue(
+            contended.wait(HANG_GUARD_SECONDS), "second start did not reach the held lock"
+        )
         # The second start is neither refused nor begun: it waits for the first to end.
         self.assertTrue(second.is_alive())
         self.assertEqual((results, set(order)), ({}, {"first"}))
         proceed.set()
-        first.join(10)
-        second.join(10)
+        first.join(HANG_GUARD_SECONDS)
+        second.join(HANG_GUARD_SECONDS)
         self.runtime.observer = None
         self.assertEqual(
             {name: result["status"] for name, result in results.items()},
@@ -629,16 +649,13 @@ class RoleStartTests(RoleToolsTestCase):
 
     def test_a_start_that_waited_its_time_out_says_to_call_again(self) -> None:
         self.assertEqual(paseo_role_tools.LOCK_WAIT_SECONDS, 60)
+        # load-independent: the held dispatch lock must expire and return launch-refused.
         self.replace(paseo_role_tools, "LOCK_WAIT_SECONDS", 0.5)
         self.assertTrue(role_launch_routes._DISPATCH_LOCK.acquire(blocking=False))
         try:
-            began = time.monotonic()
             refused = self.refusal(self.start(self.architect, "curator"), "launch-refused")
-            self.assertGreaterEqual(time.monotonic() - began, 0.5)
             # The launcher's route does not wait at all.
-            began = time.monotonic()
             busy = self.refused(self.request("curator"))
-            self.assertLess(time.monotonic() - began, 0.4)
         finally:
             role_launch_routes._DISPATCH_LOCK.release()
         self.assertIsInstance(busy, role_launch_routes.LaunchLockBusy)

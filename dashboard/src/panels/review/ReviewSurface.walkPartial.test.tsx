@@ -13,7 +13,6 @@ import {
   K,
   R6R_ID,
   SHARED,
-  WAIT,
   bodyOf,
   clickedSecondFamily,
   families,
@@ -61,14 +60,13 @@ it('stops j at the control of a kept real partial family, then continues it by s
   const before = reviewCount();
   press(J);
   const control = within(block).getAllByTestId('review-family-roster-next')[0];
-  await waitFor(() => expect(document.activeElement).toBe(control), WAIT);
+  await waitFor(() => expect(document.activeElement).toBe(control));
   expect(triageStatus(view)).toContain('are not yet returned');
   expect(reviewCount() - before).toBe(0);
   // The next j has nothing later to move to: the kept family is the last in the displayed order.
   press(J);
   await waitFor(
     () => expect(triageStatus(view)).toBe('No later change in this tree; the selection stays.'),
-    WAIT,
   );
   expect(reviewCount() - before).toBe(0);
   expect(selectedNode(view)!.dataset.family).toBe(HBJ_ID);
@@ -78,7 +76,6 @@ it('stops j at the control of a kept real partial family, then continues it by s
   fireEvent.click(control);
   await waitFor(
     () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
-    WAIT,
   );
   await settled(view);
   const request = world.requests.reviews()[asked];
@@ -104,7 +101,6 @@ it('drops "No earlier change" when the order control lists the other family befo
   fireEvent.click(view.getByTestId('review-tree-order'));
   await waitFor(
     () => expect(view.getByTestId('review-tree-order').dataset.order).toBe('authored'),
-    WAIT,
   );
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(triageStatus(view)).toBe('');

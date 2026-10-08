@@ -7,6 +7,7 @@ from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
     ClaudeAdapterLimits,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_harness_control_claude import (
     NOW,
     _adapter,
@@ -37,7 +38,7 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_wire_text(transport.writes[3]), "/model haiku")
             transport.feed(_replay(transport.writes[3]))
             transport.feed(_result("Set model to Haiku for this session only"))
-            model = await asyncio.wait_for(model_task, timeout=1.0)
+            model = await asyncio.wait_for(model_task, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(
                 (model.ok, model.acceptance, model.effective_value),
                 (True, "echo-verified", "haiku"),
@@ -57,7 +58,7 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
             transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("Set model to Sonnet for this session only"))
             self.assertEqual(
-                (await asyncio.wait_for(sonnet_task, timeout=1.0)).acceptance,
+                (await asyncio.wait_for(sonnet_task, timeout=HANG_GUARD_SECONDS)).acceptance,
                 "echo-verified",
             )
 
@@ -68,7 +69,7 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
             transport.feed(
                 _result("Set effort level to low (this session only): Quick implementation")
             )
-            effort = await asyncio.wait_for(effort_task, timeout=1.0)
+            effort = await asyncio.wait_for(effort_task, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(
                 (effort.ok, effort.acceptance, effort.effective_value),
                 (True, "echo-verified", "low"),
@@ -108,7 +109,7 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
             await transport.wait_for_writes(5)
             transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("Set model to Haiku for this session only"))
-            retry = await asyncio.wait_for(retry_task, timeout=1.0)
+            retry = await asyncio.wait_for(retry_task, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(retry.acceptance, "echo-verified")
         finally:
             await adapter.stop("forced")
@@ -126,7 +127,7 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
         try:
             await transport.wait_for_writes(4)
             transport.disconnect()
-            receipt = await asyncio.wait_for(submission, timeout=1.0)
+            receipt = await asyncio.wait_for(submission, timeout=HANG_GUARD_SECONDS)
             self.assertEqual(receipt.acceptance, "unknown")
             await _settle()
             self.assertEqual(bridge.snapshot().control, "disconnected")
@@ -192,4 +193,4 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
         transport.feed({"type": "notification", "subtype": "first"})
         transport.feed({"type": "notification", "subtype": "second"})
         await _settle()
-        await asyncio.wait_for(adapter.stop("forced"), timeout=1.0)
+        await asyncio.wait_for(adapter.stop("forced"), timeout=HANG_GUARD_SECONDS)

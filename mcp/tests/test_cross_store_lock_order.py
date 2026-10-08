@@ -35,6 +35,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -74,8 +76,8 @@ from agents_remember.serving.terminal_tmux import TmuxProbeResult
 from fastapi import Request, UploadFile
 
 NOW = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
-RENDEZVOUS_TIMEOUT_SECONDS = 10.0
-DEADLOCK_DETECTION_SECONDS = 20.0
+RENDEZVOUS_TIMEOUT_SECONDS = HANG_GUARD_SECONDS
+DEADLOCK_DETECTION_SECONDS = HANG_GUARD_SECONDS
 
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 

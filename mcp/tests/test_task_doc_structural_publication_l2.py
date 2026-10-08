@@ -22,6 +22,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.tasks import SubTaskRef
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_task_execution_topology import MASTER_A, MASTER_C
 
 
@@ -132,8 +133,8 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
             accepted_paths = {source.json_path for source in context.source_snapshots}
             self.assertIn(selected_json, accepted_paths)
             self.assertNotIn(sprint_json, accepted_paths)
-            reached_publication.wait(timeout=10)
-            if not release.wait(timeout=10):
+            reached_publication.wait(timeout=HANG_GUARD_SECONDS)
+            if not release.wait(timeout=HANG_GUARD_SECONDS):
                 raise AssertionError("create publication release was not signalled")
             return real_publish(context)
 
@@ -146,12 +147,12 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
             ThreadPoolExecutor(max_workers=1) as pool,
         ):
             pending_create = pool.submit(self._create_selected_master)
-            reached_publication.wait(timeout=10)
+            reached_publication.wait(timeout=HANG_GUARD_SECONDS)
             detached = self._detach()
             self.assertEqual(detached["state"], "detached")
             self.assertEqual(self.owner._sprint().orchestrates, ["master-a"])
             release.set()
-            created = pending_create.result(timeout=10)
+            created = pending_create.result(timeout=HANG_GUARD_SECONDS)
         self.assertTrue(created["ok"])
         self.assertEqual(created["operation"], "task_doc.create")
         self.assertEqual(self.owner._sprint().orchestrates, ["master-a"])

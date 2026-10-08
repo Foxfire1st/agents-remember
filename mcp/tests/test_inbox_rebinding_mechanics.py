@@ -41,6 +41,7 @@ from agents_remember.serving.agent_notifier_models import (
 from agents_remember.serving.inbox_reclamation import TmuxSessionNameSnapshot
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from test_inbox_arrival_guarantee import NOW, _seat
 
 SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
@@ -266,7 +267,7 @@ class SupersedeDuringInFlightDeliveryTests(unittest.TestCase):
 
             def blocking_submit(_target, _text, submission):
                 submitted.set()
-                if not release.wait(timeout=5):
+                if not release.wait(timeout=HANG_GUARD_SECONDS):
                     raise AssertionError("release not set")
                 return SubmissionReceipt(
                     request_id=submission.request_id,
@@ -293,7 +294,9 @@ class SupersedeDuringInFlightDeliveryTests(unittest.TestCase):
             ):
                 thread = threading.Thread(target=run_sweep)
                 thread.start()
-                self.assertTrue(submitted.wait(timeout=5), "delivery did not start")
+                self.assertTrue(
+                    submitted.wait(timeout=HANG_GUARD_SECONDS), "delivery did not start"
+                )
                 operator_inbox_supersede_payload(
                     McpRuntimeConfig(
                         config_path=root / "settings.json",
@@ -306,8 +309,8 @@ class SupersedeDuringInFlightDeliveryTests(unittest.TestCase):
                     superseded_by="manager-1",
                 )
                 release.set()
-                sweep_done.wait(timeout=10)
-                thread.join(timeout=10)
+                sweep_done.wait(timeout=HANG_GUARD_SECONDS)
+                thread.join(timeout=HANG_GUARD_SECONDS)
             if sweep_error:
                 raise sweep_error[0]
             final = store.current()["e1"]

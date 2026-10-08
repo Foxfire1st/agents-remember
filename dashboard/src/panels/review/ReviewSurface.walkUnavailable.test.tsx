@@ -8,7 +8,6 @@ import {
   R6R_ID,
   HBJ_ID,
   SHARED,
-  WAIT,
   bodyOf,
   captured,
   clickedSecondFamily,
@@ -66,9 +65,8 @@ it.each(cases)(
       fireEvent.click(within(familyBlock(view, R6R_ID)).getByTestId('review-family-open'));
       await waitFor(
         () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
-        WAIT,
       );
-      await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)), WAIT);
+      await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)));
     }
     const previous = world.answer;
     world.answer = (url, asked) =>
@@ -86,7 +84,7 @@ it.each(cases)(
         row.focus();
         fireEvent.click(row);
       }
-      const status = await view.findByTestId('review-reading-problem', undefined, WAIT);
+      const status = await view.findByTestId('review-reading-problem', undefined);
       await act(async () => {});
       expect(status.textContent).toContain('INV-2E8MG43K');
       expect(scrolled).toEqual(stacked ? [view.getByTestId('review-center-column')] : []);
@@ -130,11 +128,11 @@ it.each(['failed', 'refused'])(
       await viewport(true, async (scrolled) => {
         row.focus();
         fireEvent.click(row);
-        await view.findByTestId('review-reading-pending', undefined, WAIT);
+        await view.findByTestId('review-reading-pending', undefined);
         const elsewhere = view.getByTestId('review-family-filter');
         elsewhere.focus();
         release?.();
-        await view.findByTestId('review-reading-problem', undefined, WAIT);
+        await view.findByTestId('review-reading-problem', undefined);
         await act(async () => {});
         expect(document.activeElement).toBe(elsewhere);
         expect(scrolled).toEqual([]);
