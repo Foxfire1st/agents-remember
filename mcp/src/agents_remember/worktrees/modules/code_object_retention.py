@@ -1,18 +1,11 @@
-"""Explicit retention for the code objects a comparison binds, and its explicit release.
+"""Custody measurement and explicit release for the code objects a comparison once bound.
 
-A captured candidate tree is not in any commit. It is written by the capture owner through a private
-index, so nothing points at it: ``git gc`` may delete it at any moment, and the only thing standing
-between "the comparison can be reopened" and "the tree is gone" is an object reference that survives
-reclamation. This module is that reference, and the whole of it:
+A captured candidate tree is not in any commit. It was written by the capture owner through a private
+index, so nothing points at it except an object reference that survives reclamation: a retention
+commit whose tree is the captured tree and whose parent is the recorded base commit, pointed at by
+``refs/ar/retained-code/...``. Nothing writes those pins any more (the reviewer compares Git trees,
+MIK-R25); this module reads and releases the ones earlier versions wrote:
 
-* **Retention is one commit and one ref.** :func:`retain_code_object` writes a commit whose tree is
-  the captured tree and whose parent is the recorded base commit, then points
-  ``refs/ar/retained-code/...`` at it. One ref therefore keeps *both* bound objects alive -- the
-  candidate tree as the commit's own tree and the base commit as its ancestor -- and no other object
-  is touched, moved or rewritten. The user's branches, index and working tree are not involved. The
-  namespace is outside ``refs/heads`` and ``refs/remotes`` on purpose: nothing fetches, pushes,
-  merges, rebases or deletes it, so ``worktree remove``, ``branch -D``, ``worktree prune`` and
-  ``gc --prune=now`` all leave it exactly where it is.
 * **Custody is measured, never assumed -- and only *named* history counts.** :func:`code_object_custody`
   asks whether the tree is held by the durable history the caller names: the protected source branch
   and the commits a task record landed. It deliberately does **not** sweep every local branch tip,
@@ -29,9 +22,9 @@ reclamation. This module is that reference, and the whole of it:
   value is what a reader stores as the unavailable-history record, so a later reopen answers "this
   history was deleted, here is why" instead of silently resolving to whatever is at the path today.
 
-Nothing here decides *what* should be retained, *when* a comparison is finished with a tree, or what
-the retention means. This module moves one object reference and reports what it found; the caller owns
-the policy, the record and the lifetime.
+Nothing here decides *when* a comparison is finished with a tree, or what the retention means. This
+module moves one object reference and reports what it found; the caller owns the policy, the record
+and the lifetime.
 """
 
 from __future__ import annotations
@@ -43,7 +36,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.errors import CodeObjectRetentionError
-from agents_remember.kernel.git_command import GitRunnerOptions, run_git
+from agents_remember.kernel.git_command import run_git
 
 __all__ = [
     "CUSTODY_COMMITTED_HISTORY",
@@ -59,9 +52,7 @@ __all__ = [
     "code_object_observation",
     "object_readable",
     "release_retained_code_object",
-    "retain_code_object",
     "retained_object_readable",
-    "retention_ref",
 ]
 
 # The one ref namespace this module creates refs under. A namespace of its own rather than a branch:
@@ -84,11 +75,6 @@ CUSTODY_UNREADABLE: Literal["absent"] = "absent"
 CodeObjectObservation = Literal["retained", "committed-history", "absent"]
 
 _GIT_OBJECT = r"^[0-9a-f]{40}$|^[0-9a-f]{64}$"
-
-# The identity every retention commit is written under, and the date of last resort. Both are
-# constants because the commit id has to be a function of the retained objects and nothing else.
-_RETENTION_EMAIL = "retention@agents-remember.invalid"
-_EPOCH = "1970-01-01T00:00:00+00:00"
 
 
 @dataclass(frozen=True)
@@ -143,25 +129,6 @@ class ReleasedCodeObject(BaseModel):
     recorded_at: str = Field(min_length=1, max_length=512)
 
 
-def retention_ref(leaf_id: str, generation_id: str) -> str:
-    """Return the one ref name this feature retains one comparison generation's code under.
-
-    Both segments are derived from identities the caller already holds rather than from a counter, so
-    a retry of the same generation addresses the same ref and converges instead of accumulating pins.
-    A segment that could escape the namespace is refused: a ref is a name, and a name that can leave
-    its namespace is not one.
-    """
-
-    for segment, value in (("leaf", leaf_id), ("generation", generation_id)):
-        if not value or "/" in value or "\\" in value or value in {".", ".."}:
-            raise CodeObjectRetentionError(
-                "code-object-ref-invalid",
-                f"the {segment} segment of a retention ref must be a single nonempty path segment, "
-                f"not {value!r}",
-            )
-    return f"{RETAINED_CODE_REF_NAMESPACE}/{leaf_id}/{generation_id}"
-
-
 def object_readable(code_repo: Path, object_id: str) -> bool:
     """Return whether one object is present and readable in this repository.
 
@@ -173,43 +140,6 @@ def object_readable(code_repo: Path, object_id: str) -> bool:
     if not object_id:
         return False
     return run_git(code_repo, ["cat-file", "-e", object_id]).returncode == 0
-
-
-def retain_code_object(
-    code_repo: Path,
-    *,
-    ref: str,
-    tree: str,
-    base_commit: str,
-    message: str,
-) -> RetainedCodeObject:
-    """Keep one captured tree, and the base commit it was derived from, reachable through one ref.
-
-    The retention commit's parent is the *recorded* base commit rather than ``HEAD``: the two bound
-    endpoints of a comparison stay in one ancestry, so reclamation cannot keep the candidate tree and
-    drop the baseline it is compared against.
-
-    The operation is idempotent in exactly one direction. A ref that is absent is created; a ref that
-    already holds a commit with this tree and this parent is returned as it stands, because that is
-    the same pin and re-creating it would add nothing. A ref that holds anything else is refused
-    rather than overwritten: the objects behind it may be another generation's only copy, and a
-    retention owner that silently re-pointed it would be the thing that loses history.
-    """
-
-    _require_namespaced(ref)
-    _require_present(code_repo, tree, "tree")
-    _require_present(code_repo, base_commit, "base commit")
-    existing = _ref_commit(code_repo, ref)
-    if existing is not None:
-        return _existing_or_refuse(code_repo, existing, ref=ref, tree=tree, base_commit=base_commit)
-    commit = _retention_commit(code_repo, tree=tree, base_commit=base_commit, message=message)
-    update = run_git(code_repo, ["update-ref", ref, commit])
-    if update.returncode != 0:
-        raise CodeObjectRetentionError(
-            "code-object-ref-unwritable",
-            f"the retention ref {ref} could not be created: {_diagnostic(update.stderr, update.stdout)}",
-        )
-    return RetainedCodeObject(ref=ref, commit=commit, tree=tree, base_commit=base_commit)
 
 
 def code_object_custody(
@@ -319,102 +249,6 @@ def release_retained_code_object(
 # -- the Git questions this module asks ---------------------------------------------------------
 
 
-def _require_namespaced(ref: str) -> None:
-    """Refuse a ref that is not one name inside this module's retention namespace."""
-
-    if not ref.startswith(f"{RETAINED_CODE_REF_NAMESPACE}/"):
-        raise CodeObjectRetentionError(
-            "code-object-ref-invalid",
-            f"a retention ref must live under {RETAINED_CODE_REF_NAMESPACE}/, not at {ref!r}",
-        )
-    remainder = ref[len(RETAINED_CODE_REF_NAMESPACE) + 1 :]
-    if not remainder or ".." in ref or ref.endswith("/") or "//" in ref:
-        raise CodeObjectRetentionError(
-            "code-object-ref-invalid", f"{ref!r} is not a usable retention ref name"
-        )
-
-
-def _require_present(code_repo: Path, object_id: str, what: str) -> None:
-    """Refuse to write a pin for an object this repository cannot read."""
-
-    if not object_readable(code_repo, object_id):
-        raise CodeObjectRetentionError(
-            "code-object-missing",
-            f"the {what} {object_id} is not readable in {code_repo}, so there is nothing to retain",
-        )
-
-
-def _existing_or_refuse(
-    code_repo: Path,
-    existing: str,
-    *,
-    ref: str,
-    tree: str,
-    base_commit: str,
-) -> RetainedCodeObject:
-    """Return the pin already at this ref, or refuse a ref that names a different one."""
-
-    if _commit_tree(code_repo, existing) == tree and _parent_of(code_repo, existing) == base_commit:
-        return RetainedCodeObject(ref=ref, commit=existing, tree=tree, base_commit=base_commit)
-    raise CodeObjectRetentionError(
-        "code-object-ref-occupied",
-        f"the retention ref {ref} already names {existing}, which is not a pin for tree {tree} "
-        f"based on {base_commit}; a retention owner does not re-point a ref another generation owns",
-    )
-
-
-def _retention_commit(code_repo: Path, *, tree: str, base_commit: str, message: str) -> str:
-    """Write the one commit that makes ``tree`` reachable, with ``base_commit`` as its parent.
-
-    The commit is a *function of the two objects it keeps*: its author, committer and both timestamps
-    are supplied explicitly rather than taken from the ambient identity and the clock, so the same
-    tree on the same base always produces the same commit id. That is not cosmetic. A retention
-    commit that embedded "now" would make a re-created pin after an explicit release a *different*
-    object, and the generation describing it a different generation -- so an exact retry of one freeze
-    would stop converging the moment it crossed a second, and two generations would claim one index
-    for a comparison nobody changed. The timestamp is the base commit's own, which keeps the pin
-    meaningful in ``git log`` while staying derived from an immutable input.
-
-    ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` are the only spelling Git offers for this -- ``commit-tree``
-    has no argv for them -- which is exactly what the runner's ``identity`` option exists for.
-    """
-
-    written = run_git(
-        code_repo,
-        ["commit-tree", tree, "-p", base_commit, "-m", message],
-        GitRunnerOptions(identity=_retention_identity(code_repo, base_commit)),
-    )
-    commit = written.stdout.strip()
-    if written.returncode != 0 or not commit:
-        raise CodeObjectRetentionError(
-            "code-object-retention-unavailable",
-            "the retention commit could not be written: "
-            f"{_diagnostic(written.stderr, written.stdout)}",
-        )
-    return commit
-
-
-def _retention_identity(code_repo: Path, base_commit: str) -> dict[str, str]:
-    """The one identity a retention commit is written under, dated by the base commit.
-
-    A pin is written by a feature rather than by a person, so it names the feature. The date comes
-    from the recorded base commit -- an object that can never change -- and falls back to the epoch
-    only when Git cannot report it, because "no date at all" would reintroduce the clock.
-    """
-
-    dated = run_git(code_repo, ["show", "-s", "--format=%cI", base_commit])
-    stamp = dated.stdout.strip() if dated.returncode == 0 and dated.stdout.strip() else _EPOCH
-    who = "Agents Remember comparison retention"
-    return {
-        "GIT_AUTHOR_NAME": who,
-        "GIT_AUTHOR_EMAIL": _RETENTION_EMAIL,
-        "GIT_COMMITTER_NAME": who,
-        "GIT_COMMITTER_EMAIL": _RETENTION_EMAIL,
-        "GIT_AUTHOR_DATE": stamp,
-        "GIT_COMMITTER_DATE": stamp,
-    }
-
-
 def _ref_commit(code_repo: Path, ref: str) -> str | None:
     """The commit one ref resolves to, or ``None`` when the ref is absent."""
 
@@ -455,13 +289,6 @@ def _commit_tree(code_repo: Path, commit: str) -> str:
     """The tree one commit names, or the empty string when it cannot be read."""
 
     resolved = run_git(code_repo, ["rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}"])
-    return resolved.stdout.strip() if resolved.returncode == 0 else ""
-
-
-def _parent_of(code_repo: Path, commit: str) -> str:
-    """The first parent of one commit, or the empty string when it has none."""
-
-    resolved = run_git(code_repo, ["rev-parse", "--verify", "--quiet", f"{commit}^"])
     return resolved.stdout.strip() if resolved.returncode == 0 else ""
 
 

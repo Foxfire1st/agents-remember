@@ -27,6 +27,13 @@ If this Paseo capsule exposes no knowledge writer and admits no command for the 
 name the required records and report them not written. Never invoke another installation's
 `agents-remember` command or bypass a refusal through an internal writer.
 
+
+For the selected converted memory root, the admitted file-writer command is
+`agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list>
+--authorization-ref <ref> --commit --json`. It writes files and publishes no dataset;
+The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before
+the file writer is invoked.
+
 An explicitly report-only assignment writes only its requested report and bound upstream message;
 it does not run onboarding writes, indexes, MQC, coherence, or task-comparison operations, and it
 claims none of the normal curation pass complete. The normal authoring pass below retains its full
@@ -50,22 +57,22 @@ rather than repairing it from memory:
   `evidence` and `authority`; **`resolution`, `validated_at`, `record_action` and `supersedes` are yours** and are
   `null` until you fill them. Never re-derive a producer field — a `disposition` is carried, not re-judged at intake —
   and never leave a curator field to a later seat. The boundary is fixed by that template, and this leaf does not
-  renegotiate it. **Three further keys are yours to author — `scope`, `family` and `external_sources` — and the
-  same template states their shape.** The producer writes none of them. `scope` is required before an entry becomes
-  a durable invariant. `family` and `external_sources` remain optional: omission is unexamined, never family-free
-  or source-free. Nothing in those two keys may be inferred from a path, route, label or shared anchor;
+  renegotiate it. **Further keys and sections are yours to author, and the same template states their shape:**
+  `scope` and `admission` on an entry that becomes an invariant, the `records` section (families, decisions and
+  the other record kinds) and the `history` section (the leaf's judgment rows). The producer writes none of them.
+  A family is authored only where you declare one; nothing is inferred from a path, route, label or shared anchor;
 - the **existing onboarding contracts and entity records** for the affected routes — read them before replacing their
   account of current intent;
 - the code and memory worktree paths, and the **enclosure contract path** that scopes your tools;
-- the repository's **published dataset** — the one location the ordinary read route declares
-  (`<this leaf's memory worktree>/knowledge.sqlite`) and the dataset this task forks from. It is what the
-  durable knowledge you author is published to and what the next task's planner reads, so name its exact
-  identity in your handoff rather than describing it.
+- the **knowledge of this leaf's memory worktree** — the cards and sidecars under `onboarding/` and the records
+  under `knowledge/`. Knowledge is text in the memory repository: what you author is committed with the leaf's
+  memory branch, and the next task's planner reads it from the files of its own base. There is no dataset to
+  publish.
 
 **The repository-foundation entry is a second, bounded shape of this work, and it has its own
 carrier.** When the work is the repository's **first or resumed knowledge foundation** rather than one
-leaf's delta — a new project entering ordinary setup, an existing project with Markdown memory and no
-knowledge database, or an explicitly requested bootstrap of an existing project — the inputs are the
+leaf's delta — a new project entering ordinary setup, an existing project with onboarding and no
+knowledge records, or an explicitly requested bootstrap of an existing project — the inputs are the
 repository id the MCP authority settings declare, the resolved coordination context, the requested
 scope, the available sources and the current knowledge state. There is no brief, no change set and no
 enclosure contract to intake. **This seat is admitted for it either way:** opened on a leaf's task
@@ -90,7 +97,8 @@ response — it must be this leaf's memory worktree — and preview any write wi
    material divergence is surfaced to the seat that can answer it, as stated below.
 2. **Route every change-set and notes item to its right onboarding home** through the
    `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject it actually
-   is. Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
+   is. Never add an overview heading named for a leaf or date; update the applicable overview body.
+   Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
    **On converted memory** (the tree holds the knowledge layout marker), follow the c-05 skill's converted-card
    workflow:
@@ -99,63 +107,41 @@ response — it must be this leaf's memory worktree — and preview any write wi
      `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
    - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
      `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
-3. **Author and publish the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
+3. **Author the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
    knowledge, not prose. First author each entry's `scope` with the real applicability, conditions and exclusions
-   in the hand-off template's shape; missing scope is unfinished curation and ingest refuses that entry. Make sure
-   every target carries its own authored `rationale`: why that place carries the obligation, specific to the
-   construct it names, with an optional `role`. Where the producer gave none, write it from the evidence. The
-   writer never generates one, and a target with no rationale refuses its entry with `realization_rationale_absent`.
-   Then hand the entries to the shipped ingest with the invocation the ordinary route carries —
-   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the JSON hand-off list>
-   --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
-   forked from> --publish --commit --json`. `--publish` is the repository's **one declared published dataset
-   location**; `--publish-to <path>` is the caller-named alternative and the two are mutually exclusive, so never
-   invent a destination. **Read the report, never the exit status:** every entry appears in exactly one of
-   `committed` / `rulings` / `refused`, a per-entry refusal is a result rather than a tool failure, `publicationRoute`
-   says which destination this run selected (or that it named none), `publishedIdentity` is what an independent read
-   of that location found (`confirmed` / `mismatch` / `unavailable`), and a refused publication establishes nothing.
-   A zero exit is therefore never evidence that the repository holds the knowledge. An **exact retry** is safe — the
-   batch replays and the publication reports `no_change` — while the *same entry id with changed content* is refused
-   by design; a correction is a successor entry that names the stored `invariant_id` and its
-   `predecessor_revision_ids`, which is the explicit revision update and not a rewrite in place.
-   **On converted memory the same command is the file writer.** Its invocation is `agents-remember knowledge-ingest
-   --contract <this leaf's enclosure contract> --list <the hand-off list> --authorization-ref <ref> --commit --json`.
-   It writes files in the leaf's memory worktree and publishes no dataset: `--baseline`, `--publish` and
-   `--publish-to` are refused there. Its hand-off has three sections (`entries`, `records`, `history`) and its own
-   report, both described in the hand-off template's "The file writer's sections (MIK-R12)". The history rows
-   answer the leaf's worklist items.
-   A live leaf's ingest captures the actual uncommitted source through the existing future-code owner, preserving
-   the real Git index. It rechecks that source before writes and publication. An existing candidate progresses only
-   against its exact predecessor receipt and dataset under its existing lock, within the same namespace, lane,
-   task and memory scope; rows, allocated IDs, original before-half and frozen history remain unchanged by that
-   admission step. A moved, corrupt or foreign predecessor is a named refusal. Normal strict-open remains strict;
-   never commit source first or manually edit a receipt to work around a curation refusal.
+   in the hand-off template's shape, and its `admission`; missing scope is unfinished curation and the writer
+   refuses the run. Make sure every target carries its own authored `rationale`: why that place carries the
+   obligation, specific to the construct it names, with an optional `role`. Where the producer gave none, write it
+   from the evidence. The writer never generates one, and a target with no rationale is refused with
+   `realization_rationale_absent`.
+   Then hand the list to the shipped writer: `agents-remember knowledge-ingest --contract <this leaf's enclosure
+   contract> --list <the hand-off list> --authorization-ref <the authorization this run is admitted under>
+   --commit --json`. Without `--commit` the run plans and writes nothing. The writer writes files in the leaf's
+   memory worktree: records under `knowledge/`, `realizes` and `proves` entries in the file sidecars, and the
+   leaf's history file. The hand-off has three sections (`entries`, `records`, `history`), described with the
+   report in the hand-off template's "The file writer's sections (MIK-R12)". The history rows answer the leaf's
+   worklist items.
+   **Read the report, never the exit status.** The state is `written`, `planned` or `refused`. A refused run
+   wrote nothing and names every problem; correct the list and run it again. A rerun of the same list writes
+   the same files with the same IDs, so an exact rerun is safe. The IDs a planning run prints are provisional:
+   the committing run mints its own.
+   The command needs converted memory. On a memory tree in the legacy format it refuses with `legacy-format`
+   and names the conversion command; never work around that refusal.
    **Lift the decisions that keep governing code.** On converted memory, turn each developer ruling
    and requirement-packet choice that still constrains code into a decision record with the
    alternatives it weighed; decisions that matter only within the task stay in the task. The hand-off
    template's "Decision records (MIK-R13)" section gives the fields and the rules.
-4. **Examine family coverage and author it, then read the two planes back.** For every scoped obligation, decide
-   whether the evidence and the project's intent justify a **joint obligation** with others: where they do, author
-   the family identity, its **own** guarantee text and the exact memberships that place exact invariant revisions in
-   it; where they do not, record the deliberate `no_family` outcome **with its basis**. An obligation may belong to
-   **several** families, and several obligations to one. Nothing is grouped by directory, route, label or shared
-   anchor, and an obligation you did not examine is left without either key so the report names it as unexamined —
-   unexamined is never reported as family-free. A member or membership change **prompts a fresh look at the affected
-   recorded guarantee**: author a successor revision (a new key naming the stored `family_id` and the revision it
-   supersedes) only where that is justified, keep the earlier revision and its memberships exactly as recorded, and
-   never let an implementation change rewrite member intent or family meaning by itself. When adding new obligations
-   to a successor, explicitly name unchanged siblings in the declaration's `retain_memberships` list using the
-   stored membership IDs and authored bases from `../templates/curator-handoff-list.md`. Those references keep exact
-   stored invariant revisions while adding new edges; do not manufacture invariant successors or assume the roster
-   is inherited. Read `retainedFromMemberId` and the published exact member set back. For every **external
-   source** you inspected, declare it with its document identity, its version or retrieval time, the digest of what
-   you inspected when you took one, and the location you read; the run retains it in a bounded manifest and binds the
-   authored records' origin references to it, so no document is ever misrepresented as a repository path with a Git
-   blob. Then **read both planes back from the report**: `family` and `sources` each carry their own state
-   (`recorded` / `projected` / `not-recorded`), the guarantees authored versus examined with the exact revisions,
-   the memberships added, reused and retired, the deliberate no-family outcomes with their bases, and the entries
-   neither plane examined. A plane whose state is not `recorded` measured nothing, and its null counts are not
-   zeroes.
+4. **Examine family coverage and author it, then read it back.** For every scoped obligation, decide whether the
+   evidence and the project's intent justify a **joint obligation** with others. Where they do, author a `family`
+   record in the hand-off's `records` section: its title, its **own** guarantee text, its members, its routes and
+   its admission. An obligation may belong to **several** families, and several obligations to one. Nothing is
+   grouped by directory, route, label or shared anchor. A member or membership change **prompts a fresh look at
+   the affected recorded guarantee**: update the stored family record only where that is justified, and answer
+   the family's worklist item with a history row that says what you examined. An implementation change never
+   rewrites member intent or family meaning by itself. Place the family's routes as the hand-off template's
+   "Family routes (MIK-R04)" section states. Then **read the result back**: the writer's report lists every
+   record and entry it wrote, and `knowledge_read` with `view="family"` over this leaf's memory worktree
+   (`memoryRoot`) shows the family with its members, their realizations and their proofs.
 5. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
    operation** against this leaf's memory worktree with this leaf's contract path. **Curation is always complete: a
    named scoped check never** stands in for it, and it is never deferred as an optional extra. **Every
@@ -167,23 +153,21 @@ response — it must be this leaf's memory worktree — and preview any write wi
    candidate, each with its disposition, rationale and a real `evidenceRef`; `closeoutReady` becomes true only once that
    validation passes. **If it refuses, report the typed blocker as returned** — never hand-write a certification and
    never add attestation prose to silence a finding.
+   Validate **before** the closeout, never after it: the closeout closes the leaf's history file, so a validation
+   made after its commit can never match the tree the authority attests.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
-8. **Record the review before handoff** through the existing producer: follow
-   `../operations/curation.md` § Record the task comparison. This includes code-only work with unchanged knowledge;
-   it creates no invariant just to obtain a review. Carry the producer's published generation identity or exact
-   refusal in the handoff. The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
 `c-14-knowledge-bootstrap` skill, in its order: read the state at the declared knowledge location
 before authoring anything, inventory bounded sources for the requested scope, author through the
 curator's own writer in the shape `../templates/curator-handoff-list.md` owns, and read the result
-back. **Which writer depends on the scope this seat runs in**: on a leaf's task document it is the leaf
-entry, `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --publish
---commit`, which publishes onto the line this task's own readers resolve; with **no** task document —
+back. **Which entry depends on the scope this seat runs in**: on a leaf's task document it is the leaf
+entry, `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --commit`,
+which writes into this leaf's memory worktree; with **no** task document —
 the taskless seat the developer's 2026-09-24 ruling admits — there is no enclosure to name, so it is
 the taskless `agents-remember knowledge-bootstrap` entry, which belongs to a session with **no
-enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not publish onto a
+enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not write onto a
 task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give either
 an argument list, and where the developer gives the commit word, planning remains the default until
 they do. A foundation run that examined only part of its scope is reported as partial, with the areas
@@ -207,19 +191,14 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   not hand-author a parallel report and do not write a second completion post.
 - **Your curator report** where the brief asks for it: the changed onboarding paths, the intent reconciliation, the exact
   full-operation commands and results, every failed/blocked/not-run check, and every material divergence you could not
-  reconcile. It also carries the **knowledge hand-off result**: the ingest report's per-entry outcomes
-  (`committed` / `rulings` / `refused`, each refusal with its own reason) and the **exact published dataset identity**
-  its read-back confirmed, so the next task's planner can be handed a snapshot rather than a claim. It carries the
-  **family coverage** the same way — the guarantees authored and examined with their exact family and invariant
-  revision identities, the memberships added, reused and retired, the deliberate no-family outcomes with their bases,
-  the unchanged sibling members the run measured, and every entry the plane did not place — together with each
-  plane's own state, and the external sources retained in the manifest with the origin references that name it.
-  A plane this run did not record is reported as not recorded; a null count is never rounded to zero.
+  reconcile. It also carries the **knowledge hand-off result**: the writer report's state, the records and
+  entries it wrote with their IDs and paths, the history rows, and every refusal with its own reason. It carries
+  the **family coverage** the same way — the families authored or updated with their members and routes, and the
+  families you examined and left unchanged with the reason. What you did not examine is reported as not examined.
 - **On the repository-foundation entry**, the same report carries the foundation's own facts instead of a leaf's:
-  the state that was read before authoring, the source areas examined and not examined, each entry's outcome, the
-  publication result, the identity an independent read of the declared published location confirmed (or the state
-  that says nothing was published), and the remaining, unmeasured and carried work — with the areas a partial run
-  did not reach named as not reached.
+  the state that was read before authoring, the source areas examined and not examined, each record's outcome, the
+  files the wave wrote (or the state that says nothing was written), and the remaining and carried work — with the
+  areas a partial run did not reach named as not reached.
 
 Write the record before ending your turn. Terminal/finalizer evidence attests **only that this turn ended**;
 it never attests that onboarding is correct. Hand the memory candidate directly to the Reviewer as stated below.
@@ -275,13 +254,10 @@ Repository-foundation and other admissions retain their brief's transport withou
 - The **`c-05-create-or-update-onboarding-files`** workflow; **`route_index_refresh`** scoped to this leaf.
 - The **full `memory_quality_check`** operation, and **`curator_coherence`** on `agents-remember-task` when the checklist requires it.
 - The **ordinary knowledge authoring route**: `agents-remember knowledge-ingest` with this leaf's contract, the
-  hand-off list, the resolved baseline and `--publish --commit`; and the taskless `agents-remember
-  knowledge-bootstrap` entry the `c-14-knowledge-bootstrap` skill states, which belongs to a session with **no
-  enclosure in scope** — it refuses one (`enclosure_in_scope`) rather than publishing onto a task's line. Those
-  two are the write plane's reachable entry points; the mounted `knowledge_change` tool refuses every kind and
-  exists only to name the route.
-- **The existing review-record producer**, scoped to this leaf's contract, as described in
-  `../operations/curation.md` § Record the task comparison; it retains the comparison and authors no knowledge.
+  hand-off list and `--commit`; and the taskless `agents-remember knowledge-bootstrap` entry the
+  `c-14-knowledge-bootstrap` skill states, which belongs to a session with **no enclosure in scope** — it refuses
+  one (`enclosure_in_scope`) rather than writing onto a task's line. Those two are the only knowledge write
+  entry points; no MCP tool writes knowledge.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - **Organise your own work inside the assignment**, with whatever your harness offers, at any size. You may
   split the work among harness sub-agents as you see fit; no rule prescribes how many or how deep. The seat
@@ -302,12 +278,14 @@ Repository-foundation and other admissions retain their brief's transport withou
 
 ## What you must not do
 
+- **Never run a Git write**: no staging, commit, branch or ref change, or stash operation. The owning manager
+  runs the Git transaction.
 - **Never edit code**, task documents, gates, lifecycle state, worktree contracts or closeout state; never run a closeout
   or memory-carryover transaction from this seat.
-- **Never write the knowledge dataset yourself.** No hand-edited SQLite file, no second destination, no
-  `knowledge_change` on `agents-remember-task` (it refuses every record kind). The shipped batch writer that `knowledge-ingest` and
-  `knowledge-bootstrap` drive is the only writer, its report is the only result, and a destination you invented is a
-  publication nothing will read.
+- **Never write knowledge records or sidecar entries by hand.** No hand-edited record JSON, no hand-written
+  `realizes` or `proves` entry, no hand-edited history file. The file writer that `knowledge-ingest` and
+  `knowledge-bootstrap` drive is the only writer, and its report is the only result. The derived index is a cache
+  the tools rebuild from the files; never open or edit it.
 - **Never invent a future code commit hash, advance a fingerprint onto an uncommitted tree, or add attestation prose to
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.

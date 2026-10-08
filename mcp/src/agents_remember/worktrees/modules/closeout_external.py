@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,10 +35,9 @@ from agents_remember.worktrees.knowledge_validation import PairedCode, memory_co
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
-    commit_verified_staged,
-    head_commit,
+    PublicationHooks,
+    publish_tree_commit,
     require_git,
-    stage_tree,
     stage_worktree_content,
     worktree_candidate_tree,
     worktree_dirty,
@@ -52,6 +52,8 @@ from agents_remember.worktrees.modules.onboarding import (
 )
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
+    observe_admitted_tip,
+    require_admitted_tip,
     resume_external_commits,
 )
 from agents_remember.worktrees.series_closeout import series_memory_closeout
@@ -253,76 +255,124 @@ def _commit_memory_content(
 
     ``closing`` (converted memory) is the closeout's own closing of the leaf's history file: the
     exact tree is validated and gated before anything is committed
-    (:func:`_refuse_ungated_memory`), and a refusal -- or any failure before the commit begins --
-    restores the file, so a refused closeout leaves it as the leaf wrote it (L09 review R1,
-    finding 2). A converted leaf with nothing left to commit is gated all the same: the commit
-    this closeout records as the leaf's memory output is its ``HEAD``, and its tree is judged.
+    (:func:`_refuse_ungated_memory`). A converted leaf with nothing left to commit is gated all
+    the same: the commit this closeout records as the leaf's memory output is its ``HEAD``, and
+    its tree is judged.
 
     Every write the closeout itself makes to the memory content is on disk before that tree is
     read: the metadata refresh and the history closing (the caller's), and the ledger cache's
     ignore rule (:func:`ignore_memory_cache`, which may add one line to ``.gitignore``). The tree
-    the gate judges is therefore the tree the commit records (L37 P1c, C9). A working tree that
+    the gate judges is therefore the tree the commit records. A working tree that
     changed while the gate ran is refused before any Git mutation (:func:`_require_judged_tree`);
-    the commit is then staged from the judged tree object itself (:func:`stage_tree`), so nothing
-    written after that check can enter it, and its proof expects the judged tree. A refusal
-    restores ``.gitignore`` with the closing; the index is not touched until the gate has passed.
+    the commit is then staged from the judged tree object itself (:func:`stage_tree`) and published
+    from that tree (:func:`publish_tree_commit`), so nothing written after that check can enter it
+    and nothing written later refuses it; its proof expects the judged tree.
+
+    **The publication is bound to what the closeout admitted**: the
+    contract's memory work branch, and the commit that branch named before the tree to commit was
+    read (:func:`observe_admitted_tip`). A ``HEAD`` switched to another branch, a detached
+    ``HEAD`` or a branch moved by someone else's commit between that reading and the publication
+    refuses; nothing is committed on any branch.
+
+    **One restoring block** runs from the first preparation until publication returns:
+    whatever refuses or fails in between (the gate, a changed tree, a ``HEAD`` that is not the
+    admitted branch, a journal that cannot record the intent, a moved branch, an unfinished merge,
+    a Git failure) leaves the leaf's history file open again and the ignore rule taken back, each
+    only while the file still holds exactly what the closeout wrote; the publication itself puts
+    the index back to the tree it held when it began (:func:`publish_tree_commit`). A partial
+    publication can raise after the branch moves: if ``HEAD`` switches and the expected-old
+    takeback fails, the published commit can remain reachable while these preparations restore.
+    After publication returns successfully, its proof runs outside this restoring block; a
+    failed proof leaves the preparations in place and is completed by the rerun, which finds
+    nothing left to commit.
     """
 
     repository = contract.memory_worktree
     assert repository is not None
     ignore = repository / ".gitignore"
-    unignored = ignore.read_bytes() if ignore.is_file() else None
-    judged = None
+    preparations: list[HistoryClosing | None] = [closing]
     try:
+        unignored = ignore.read_bytes() if ignore.is_file() else None
+        admitted = observe_admitted_tip(repository, contract.memory_work_branch, side="memory")
         dirty = worktree_dirty(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
         if dirty:
-            ignore_memory_cache(repository)
+            try:
+                ignore_memory_cache(repository)
+            finally:
+                written = ignore.read_bytes() if ignore.is_file() else None
+                if written != unignored:
+                    preparations.append(HistoryClosing(ignore, unignored, written))
+        judged = None
         if closing is not None:
             judged = _exact_memory_tree(contract, repository)
             _refuse_ungated_memory(contract, code_commit, judged)
+        # The gate can take a minute: the checkout is compared with what was admitted as soon as
+        # it has answered, before anything more is prepared or an intent is recorded, and again
+        # below on the very snapshot the publication is bound to.
+        require_admitted_tip(repository, admitted)
         if not dirty:
-            return head_commit(repository), False
+            # Nothing to commit: the memory output this closeout records is the admitted tip.
+            assert admitted.head is not None
+            return admitted.head, False
         prepare_memory_cache(repository)
         if judged is not None:
             _require_judged_tree(repository, judged)
+        report_operation_progress(
+            args, "memory-commit", current_command="commit verified memory content"
+        )
+        intent = begin_git_mutation(
+            args,
+            leg="memory",
+            repository=repository,
+            expected_output_tree=judged,
+            use_current_candidate=judged is None,
+        )
+        assert intent.before is not None
+        require_admitted_tip(repository, admitted, snapshot=intent.before)
+        # With a judged tree the commit is that tree object, not the working tree again: a file
+        # written after the check above is not committed, does not refuse the closeout and stays
+        # an uncommitted change. The publication stages, publishes and, on any refusal,
+        # gives the index back. Unconverted memory has no gate: it stages the worktree's content.
+        committed = publish_tree_commit(
+            repository,
+            effective_input.memory_content_message(code_commit),
+            tree=judged,
+            before=intent.before,
+            hooks=PublicationHooks(stage=_worktree_stager(repository)) if judged is None else None,
+        )
     except BaseException:
-        if closing is not None:
-            closing.restore()
-        _restore_ignore_file(ignore, unignored)
+        _restore_preparations(*preparations)
         raise
-    report_operation_progress(
-        args, "memory-commit", current_command="commit verified memory content"
-    )
-    intent = begin_git_mutation(
-        args,
-        leg="memory",
-        repository=repository,
-        expected_output_tree=judged,
-        use_current_candidate=judged is None,
-    )
-    if judged is None:
-        stage_worktree_content(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
-    else:
-        # The commit is built from the judged tree object, not from the working tree again: a file
-        # written after the check above is not committed, and stays an uncommitted change (R5-3).
-        stage_tree(repository, judged)
-    committed = commit_verified_staged(
-        repository,
-        effective_input.memory_content_message(code_commit),
-        exclude_paths=MEMORY_CONTENT_EXCLUDES,
-    )
     prove_git_commit(args, intent, repository=repository, commit=committed)
     return committed, True
 
 
-def _require_judged_tree(repository: Path, judged: str) -> None:
-    """Refuse a commit whose tree is not the one the gate judged (MIK-R09 rule 3; L37 P1c, C11).
+def _worktree_stager(repository: Path) -> Callable[[], str]:
+    """Stage the memory worktree's content (the ungated route) and name the tree staged."""
 
-    The gate reads ``judged`` from the working tree through a fresh index, and its evaluation can
-    take a minute; the commit then stages through the repository's own index. A file written
-    meanwhile, or content staged in that index which the working tree does not hold, would be
-    committed without having been judged. The tree the commit is about to record is read here as
-    the commit stages it, before any Git mutation, and must be ``judged``.
+    def stage() -> str:
+        stage_worktree_content(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
+        return require_git(repository, ["write-tree"])
+
+    return stage
+
+
+def _restore_preparations(*preparations: HistoryClosing | None) -> None:
+    for preparation in preparations:
+        if preparation is not None:
+            preparation.restore()
+
+
+def _require_judged_tree(repository: Path, judged: str) -> None:
+    """Refuse a commit whose tree is not the one the gate judged (MIK-R09 rule 3).
+
+    The gate reads ``judged`` from the working tree through a copy of the worktree's own index (a
+    capture that starts from that index and rehashes what it must), and its evaluation can take a
+    minute; the commit then stages from the repository's own index. A file written meanwhile, or
+    content staged in that index which the working tree does not hold, would be committed without
+    having been judged. The tree the commit is about to record is read here as the commit stages
+    it, before any Git mutation, and must be ``judged``. What is written after this check does not
+    enter the commit and does not refuse it (:func:`publish_tree_commit`).
     """
 
     staging = ephemeral_git_mutation_snapshot(repository, memory_cache=True).candidateTree
@@ -333,15 +383,6 @@ def _require_judged_tree(repository: Path, judged: str) -> None:
             "gate ran. Nothing is committed; rerun the closeout and the gate judges the tree as "
             "it is now"
         )
-
-
-def _restore_ignore_file(ignore: Path, previous: bytes | None) -> None:
-    """Take back the ignore rule a refused closeout recorded (``None``: there was no file)."""
-
-    if previous is None:
-        ignore.unlink(missing_ok=True)
-    elif ignore.read_bytes() != previous:
-        ignore.write_bytes(previous)
 
 
 @dataclass(frozen=True)

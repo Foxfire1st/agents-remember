@@ -17,8 +17,10 @@ and measure the boundary in front of the panes rather than the panes themselves:
 from __future__ import annotations
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
+from agents_remember.application import knowledge_review
 from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
     compose_review,
@@ -26,7 +28,6 @@ from agents_remember.application.knowledge_review import (
     resolve_review_candidate,
     review_records_for,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.serving.review import register_review_routes, review_request_from_query
@@ -40,6 +41,7 @@ from test_knowledge_review_surface import (
     review_config,
     review_request,
 )
+from test_review_git_trees import INVARIANT, LEAF, MASTER, REPO, _resolve, _seed, build_world
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -79,7 +81,7 @@ def test_an_absent_candidate_dataset_refuses_by_name_rather_than_substituting_on
         repository_id=fixture.repository_id,
         leaf_id=REPOSITORY_LEAF,
         baseline_database=fixture.before.database_path,
-        candidate_database=tmp_path / "absent" / "knowledge-candidate.sqlite",
+        candidate_database=tmp_path / "absent" / "knowledge-candidate.db",
         baseline_code_root=fixture.before.git_root,
         candidate_code_root=fixture.after.git_root,
         baseline_code_tree_id=fixture.before_tree_id,
@@ -110,7 +112,7 @@ def test_an_absent_baseline_half_refuses_by_name_rather_than_substituting_an_emp
     resolution = ReviewCandidateResolution(
         repository_id=fixture.repository_id,
         leaf_id=REPOSITORY_LEAF,
-        baseline_database=tmp_path / "absent-baseline" / "knowledge-candidate.sqlite",
+        baseline_database=tmp_path / "absent-baseline" / "knowledge-candidate.db",
         candidate_database=fixture.after.database_path,
         baseline_code_root=fixture.before.git_root,
         candidate_code_root=fixture.after.git_root,
@@ -144,7 +146,7 @@ def test_a_before_side_that_is_present_but_unreadable_refuses_by_name(
     the candidate, since only one of the two can be repaired by authoring knowledge again.
     """
 
-    corrupt = tmp_path / "corrupt-baseline" / "knowledge-candidate.sqlite"
+    corrupt = tmp_path / "corrupt-baseline" / "knowledge-candidate.db"
     corrupt.parent.mkdir()
     corrupt.write_bytes(b"this is not a database\n")
     resolution = ReviewCandidateResolution(
@@ -163,86 +165,17 @@ def test_a_before_side_that_is_present_but_unreadable_refuses_by_name(
     assert result.refusal is not None
     assert result.refusal.code == "candidate_dataset_absent"
     assert "baseline" in result.refusal.detail, result.refusal.detail
-    assert "present but cannot be read" in result.refusal.detail, result.refusal.detail
+    assert "baseline index cannot be read" in result.refusal.detail, result.refusal.detail
     assert str(corrupt) in result.refusal.detail, result.refusal.detail
-    assert result.refusal.offending_input == corrupt.name
+    assert result.refusal.offending_input == "baseline"
     assert result.refusal.next_action
     assert corrupt.read_bytes() == b"this is not a database\n", (
         "the refused review rewrote the side it could not read"
     )
 
 
-ENTRY_MASTER = "260921_icr"
-
-
-def _entry_route_config(root: Path, fixture: DiffFixture, code_root: Path) -> McpRuntimeConfig:
-    """A configuration whose one recorded enclosure resolves to a pair this case owns.
-
-    The entry route resolves its pair from canonical task context and the browser never names a
-    dataset, so a case that drives that route has to *be* that context rather than hand it a
-    resolution: a coordination root, one enclosure contract under it, and the leaf root the
-    contract's own recorded worktree group derives. The code side points at the fixture's own
-    repository, because a resolution requires a live code worktree and this case is about the
-    knowledge halves.
-
-    The repository the contract names is the fixture's own namespace, because the halves are copied
-    from datasets bound to it and carry no receipt beside them: a candidate with no receipt is read
-    under the requested name, which is the shipped fallback for a pair a caller assembled itself.
-    """
-
-    repository_id = fixture.repository_id
-    contract_path = (
-        root / "coordination" / "tasks" / repository_id / ENTRY_MASTER / "enclosures" / "leaf"
-    )
-    contract_path.mkdir(parents=True)
-    contract_file = contract_path / "series-contract.md"
-    contract_file.write_text(
-        "---\n"
-        "schema: ar-series-contract/v1\n"
-        "schemaVersion: 1.0\n"
-        "kind: leaf\n"
-        "task_id: 260921_ENTRY\n"
-        "task_name: entry_route\n"
-        f"repo_name: {repository_id}\n"
-        "workflow_kind: light-task\n"
-        "memory_mode: external\n"
-        "\n"
-        "coordination:\n"
-        f"  root: {root}\n"
-        f"  task_root: {root / 'tasks'}\n"
-        f"  task_artifact: {root / 'tasks' / 'task.md'}\n"
-        f"  worktree_group: {root / 'leaf'}\n"
-        f"  leaf_id: {REPOSITORY_LEAF}\n"
-        f"  parent_task_name: {ENTRY_MASTER}\n"
-        "\n"
-        "code:\n"
-        f"  repo_path: {code_root}\n"
-        "  source_branch: main\n"
-        "  work_branch: ar/entry\n"
-        f"  base_commit: {fixture.before_tree_id}\n"
-        f"  worktree: {code_root}\n"
-        "\n"
-        "memory:\n"
-        "  mode: external\n"
-        f"  repo_path: {code_root}\n"
-        "  source_branch: main\n"
-        "  work_branch: ar/entry\n"
-        f"  base_commit: {fixture.after_tree_id}\n"
-        f"  worktree: {code_root}\n"
-        f"  ledger: {code_root / 'memory.md'}\n"
-        "---\n",
-        encoding="utf-8",
-    )
-    return McpRuntimeConfig(
-        workspace_root=root,
-        coordination_root=root / "coordination",
-        config_path=root / "config.json",
-        transcript_root=root / "transcripts",
-    )
-
-
 def test_the_entry_route_refuses_a_damaged_before_half_instead_of_raising(
-    fixture: DiffFixture, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """The entry list answers an unreadable before side the same way the composition does.
 
@@ -253,33 +186,41 @@ def test_the_entry_route_refuses_a_damaged_before_half_instead_of_raising(
 
     The pair is resolved the way production resolves it, from canonical task context, and the case
     proves the refusal is caused by the corruption rather than by a fixture that could never answer:
-    replacing the damaged side with the dataset that actually belongs there turns the same route into
+    replacing the damaged side with the index that actually belongs there turns the same route into
     an entry list.
     """
 
-    config = _entry_route_config(tmp_path, fixture, fixture.after.git_root)
-    repository_id = fixture.repository_id
-    resolved = resolve_review_candidate(config, repository_id, ENTRY_MASTER, REPOSITORY_LEAF)
-    assert isinstance(resolved, ReviewCandidateResolution), resolved
-    resolved.candidate_database.parent.mkdir(parents=True, exist_ok=True)
-    resolved.candidate_database.write_bytes(fixture.after.database_path.read_bytes())
-    resolved.baseline_database.parent.mkdir(parents=True, exist_ok=True)
-    resolved.baseline_database.write_bytes(b"this is not a database\n")
+    world = build_world(tmp_path / "converted-entry")
+    world.edit()
+    resolved = _resolve(world)
+    baseline_bytes = resolved.baseline_database.read_bytes()
 
-    refused = list_knowledge_review_entries(config, repository_id, ENTRY_MASTER, REPOSITORY_LEAF)
+    def corrupt_after_resolution(*args, **kwargs):
+        actual = resolve_review_candidate(*args, **kwargs)
+        assert isinstance(actual, ReviewCandidateResolution), actual
+        assert actual.baseline_database == resolved.baseline_database
+        # The resolver repairs corrupt derived caches, so corrupt only after its real read.
+        actual.baseline_database.write_bytes(b"this is not a database\n")
+        return actual
+
+    with mock.patch.object(
+        knowledge_review, "resolve_review_candidate", side_effect=corrupt_after_resolution
+    ):
+        refused = list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
     assert refused.state == "refused", refused
     assert refused.entries == ()
     assert refused.refusal is not None
     assert refused.refusal.code == "candidate_dataset_absent"
     assert "baseline" in refused.refusal.detail, refused.refusal.detail
-    assert "present but cannot be read" in refused.refusal.detail, refused.refusal.detail
+    assert "baseline index cannot be read" in refused.refusal.detail, refused.refusal.detail
     assert str(resolved.baseline_database) in refused.refusal.detail, refused.refusal.detail
     assert refused.refusal.next_action
 
-    resolved.baseline_database.write_bytes(fixture.before.database_path.read_bytes())
-    offered = list_knowledge_review_entries(config, repository_id, ENTRY_MASTER, REPOSITORY_LEAF)
+    resolved.baseline_database.write_bytes(baseline_bytes)
+    offered = list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
     assert offered.state == "entries", offered
-    assert fixture.retry_invariant_id in {entry.selector_id for entry in offered.entries}, offered
+    assert _seed().invariant_id in {entry.selector_id for entry in offered.entries}, offered
+    assert INVARIANT in {entry.label for entry in offered.entries}
 
 
 def test_the_transport_admits_exactly_the_two_reviewable_selector_kinds() -> None:

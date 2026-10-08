@@ -37,18 +37,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from agents_remember.memory.knowledge import families, memberships, realizations
 from agents_remember.memory.knowledge.logical import dataset_identity
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.graph import (
-    FamilyMemberDraft,
-    RealizationClaimDraft,
-    RealizationRole,
-)
+from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.source import FileLocator, LineRangeLocator, SourceLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from knowledge_rows_test_support import (
     FamilyMemberRequest,
     FamilyRequest,
     FamilyRevisionRequest,
@@ -57,13 +53,11 @@ from agents_remember.models.knowledge.result import (
     RealizationClaimRequest,
     RevisionDraft,
     RevisionRequest,
-)
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    LineRangeLocator,
-    SourceAnchorDraft,
-    SourceLocator,
+    RowStore,
+    families,
+    memberships,
+    open_knowledge_store,
+    realizations,
 )
 
 REPOSITORY_AUTHORITY_HOME = "agents-remember"
@@ -213,7 +207,7 @@ class ReadScopeFixture:
     git_tree_id: str
     git_blobs: Mapping[str, str]
 
-    def reopen(self) -> OpenedKnowledgeStore:
+    def reopen(self) -> RowStore:
         """Reopen the fixture store so a case reads what was really persisted."""
 
         return open_knowledge_store(self.database_path, self.repository_id)
@@ -360,7 +354,7 @@ def _seed_identities(
     )
 
 
-def _build_invariants(store: OpenedKnowledgeStore, fixture: ReadScopeFixture) -> None:
+def _build_invariants(store: RowStore, fixture: ReadScopeFixture) -> None:
     """Author the four invariant identities and every revision the fixture needs."""
 
     created = store.create_repository(
@@ -467,7 +461,7 @@ def _revision(
 
 
 def _create_invariant(
-    store: OpenedKnowledgeStore, fixture: ReadScopeFixture, invariant_id: str, label: str
+    store: RowStore, fixture: ReadScopeFixture, invariant_id: str, label: str
 ) -> None:
     created = store.create_invariant(
         InvariantRequest(
@@ -480,9 +474,7 @@ def _create_invariant(
     _require("create_invariant", created.state, created.refusal)
 
 
-def _create_revision(
-    store: OpenedKnowledgeStore, fixture: ReadScopeFixture, seed: RevisionSeed
-) -> None:
+def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionSeed) -> None:
     created = store.create_revision(
         RevisionRequest(
             repository_id=fixture.repository_id,
@@ -520,7 +512,7 @@ def _invariant_of(fixture: ReadScopeFixture, revision_id: str) -> str:
     raise AssertionError(f"{revision_id} is not a revision of this fixture")
 
 
-def _build_families(store: OpenedKnowledgeStore, fixture: ReadScopeFixture) -> None:
+def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
     """Author the three families and the exact memberships the stopping rule is read through."""
 
     for seed, members in (
@@ -587,7 +579,7 @@ def _family_guarantee(family_id: str, fixture: ReadScopeFixture) -> str:
     }[family_id]
 
 
-def _build_realizations(store: OpenedKnowledgeStore, fixture: ReadScopeFixture) -> None:
+def _build_realizations(store: RowStore, fixture: ReadScopeFixture) -> None:
     """Author every realization claim, each citing the recorded blob its repository holds."""
 
     for seed in _realization_seeds(fixture):
@@ -650,9 +642,7 @@ def _realization_seeds(fixture: ReadScopeFixture) -> tuple[RealizationSeed, ...]
     )
 
 
-def _create_realization(
-    store: OpenedKnowledgeStore, fixture: ReadScopeFixture, seed: RealizationSeed
-) -> None:
+def _create_realization(store: RowStore, fixture: ReadScopeFixture, seed: RealizationSeed) -> None:
     realization = seed.realization
     created = realizations.create_realization_claim(
         store,

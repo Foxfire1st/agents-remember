@@ -17,7 +17,6 @@ from agents_remember.application.review_final_output_receipt import (
 from agents_remember.application.review_sync_rebinding import rebinding_result_block
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
-from agents_remember.errors import TaskIntentError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
@@ -91,7 +90,6 @@ from .lifecycle.lifecycle_control_authority import (
 from .lifecycle.lifecycle_operation_location import (
     LifecycleOperationPublicAddress,
     configured_lifecycle_operation_location,
-    unreadable_operation_refusal,
 )
 from .worktree_tool_requests import (
     DEFAULT_START_EXECUTION,
@@ -368,7 +366,6 @@ def worktree_sync_tool(
         contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
         resolution_action=resolution.action if resolution is not None else None,
-        knowledge_resolution=resolution.knowledge if resolution is not None else None,
         dry_run=dry_run,
     )
     payload = _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
@@ -777,43 +774,6 @@ def _journal_read_refusal(
         "detail": decision.detail,
         **{key: value for key, value in payload.items() if key != "state"},
     }
-
-
-def _start_operation_refusal(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    address: LifecycleOperationPublicAddress,
-    error: Exception,
-) -> dict[str, Any]:
-    """Translate one start/admission failure without duplicating route classifiers."""
-
-    if isinstance(error, CloseoutInputError):
-        return _closeout_input_refusal(address.operation, error)
-    if isinstance(error, TaskIntentError):
-        return {
-            "ok": False,
-            "operation": address.operation,
-            "state": "refused",
-            "status": error.status,
-            "detail": error.detail,
-            "nextAction": error.next_action,
-        }
-    if isinstance(error, LifecycleControlError):
-        return {
-            "ok": False,
-            "operation": address.operation,
-            "state": "refused",
-            "status": error.status,
-            "detail": error.detail,
-            **error.response_fields(
-                contract_path=contract_path.as_posix(),
-                kind=address.kind,
-                generation=address.generation or 0,
-            ),
-        }
-    if isinstance(error, LifecycleOperationReadError):
-        return _journal_read_refusal(address.operation, address.kind, error)
-    return unreadable_operation_refusal(config, contract_path, address, error)
 
 
 def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:

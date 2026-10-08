@@ -24,7 +24,6 @@ import apsw
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
 from agents_remember.memory.knowledge import schema
 from agents_remember.memory.knowledge.connection import (
-    fetch_one,
     inspect_schema,
     open_read_only_database,
 )
@@ -134,12 +133,6 @@ def logical_body_from_tables(
     }
 
 
-def logical_digest_of_tables(generation: SchemaGeneration | str, tables: Mapping[str, Any]) -> str:
-    """Return the canonical logical digest of an already-encoded table mapping."""
-
-    return sha256_digest(logical_body_from_tables(generation, tables))
-
-
 def snapshot_identity(
     connection: apsw.Connection,
     repository: RepositoryIdentity,
@@ -200,27 +193,6 @@ def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
             f"holds {len(rows)} rows"
         )
     return RepositoryIdentity(repository_id=str(rows[0][0]), authority_home=str(rows[0][1]))
-
-
-def require_bound_repository(connection: apsw.Connection, repository_id: str) -> RepositoryIdentity:
-    """Return the stored namespace row, refusing a database that is not bound to it.
-
-    A candidate database with no repository row, or one bound elsewhere, is not the destination the
-    admission described. The refusal is a storage error rather than a returned refusal code because
-    the caller reaches this only after `change_candidate` has already checked the same fact for its
-    typed receipt; this is the second, defensive read.
-    """
-
-    row = fetch_one(
-        connection,
-        "SELECT repository_id, authority_home FROM repository WHERE repository_id = ?",
-        (repository_id,),
-    )
-    if row is None:
-        raise KnowledgeStorageError(
-            f"the candidate database is not bound to repository namespace {repository_id}"
-        )
-    return RepositoryIdentity(repository_id=str(row[0]), authority_home=str(row[1]))
 
 
 def _rows_of(

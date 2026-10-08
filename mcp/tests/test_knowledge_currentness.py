@@ -32,7 +32,6 @@ from agents_remember.kernel.coordination_context.models import CoordinationConte
 from agents_remember.mcp.tools.knowledge import ReadToolRequest, knowledge_read_payload
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import (
-    INDEX_REPOSITORY_ID,
     IndexMismatchError,
     KnowledgeIndex,
     build_index,
@@ -510,8 +509,7 @@ def test_observations_are_keyed_by_blob_locator_and_extractor_version_and_reused
 def _read(world: World, view: str, **fields: Any) -> dict[str, Any]:
     return knowledge_read_payload(
         ReadToolRequest(
-            database_path=str(world.memory),
-            repository_id=INDEX_REPOSITORY_ID,
+            memory_root=str(world.memory),
             view=view,
             **fields,
         ),

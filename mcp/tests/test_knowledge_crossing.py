@@ -218,7 +218,7 @@ def test_a_crossing_moves_the_leaf_markers_converts_each_side_and_merges(tmp_pat
     assert plan.report["cards"]["fromOwn"] == 1  # the other card converts to the base bytes
     code_paths = frozenset(git(code.root, "ls-tree", "-r", "--name-only", code.head).split("\n"))
     assert validate_plan(plan, (incoming.files,), code_paths, "merged") == []
-    with pytest.raises(CrossingError, match="not a crossing sync"):
+    with pytest.raises(CrossingError, match="no tree of this merge is converted"):
         cross(
             (base, own, own), objects, own_paired_commit=code.head, repository=base_root, owner=None
         )

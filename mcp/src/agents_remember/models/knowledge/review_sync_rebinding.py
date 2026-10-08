@@ -1,46 +1,4 @@
-"""The typed record binding one comparison generation to the pair a managed sync resolved (ICR-R22@v1).
-
-A comparison generation (:mod:`agents_remember.application.review_comparison_generation`) records what
-a review *read*: the candidate source tree captured from the leaf's own worktree, and the knowledge
-dataset the review compared. A managed sync
-(:mod:`agents_remember.worktrees.sync_transaction`) then moves both -- the work branch is carried onto
-the official line, so the leaf's ``HEAD`` is the merge commit rather than the head the review captured,
-and the memory worktree's published dataset is the union the merge produced rather than the dataset the
-review compared. A reader holding only "a generation was frozen" cannot tell whether that generation
-still describes the pair the leaf now holds, which is what the packet's conforming example requires and
-its non-conforming example denies.
-
-:class:`ReviewSyncRebinding` is the value itself: the generation the review published, the code
-identity that generation reviewed beside the code identity the leaf holds after the sync, the knowledge
-dataset the review compared beside the dataset standing at the repository's declared publication
-location after the sync, and the match each side earned. Every field is an identity an owner produced
--- the generation's own sealed manifest, :mod:`agents_remember.worktrees.modules.future_code_candidate`,
-and :mod:`agents_remember.application.published_intent` -- so a reader compares the record's own values
-instead of trusting a sentence about them. The one sentence the record publishes,
-:meth:`ReviewSyncRebinding.statement`, is derived from those values and cannot outrun them.
-
-**The verdict can only claim coverage it measured.** ``current`` is the single value that says the
-reviewed generation still describes the resolved pair, and it requires a *measured* match on every
-channel the generation actually retained: a record whose knowledge channel resolved to no dataset must
-never read as coverage, because "nothing was there to compare" and "the comparison agreed" are
-different facts. ``moved`` either channel earns when it was compared and differed. ``unmeasured`` is
-the honest answer for a retained knowledge operand that could not be compared at all -- the declared
-publication location held nothing this code can read -- and it is not a softer ``moved``: it is never
-coverage, and the validator refuses it beside a location that did hold a readable dataset.
-
-**A source side that could not be captured produces no record at all.** The resolved side is measured
-by re-deriving the leaf's own capture, and a worktree the merge left unable to produce one (a dirty
-candidate, an unreadable repository) is a real outcome of a sync. No candidate tree is invented for it:
-the operation reports that state instead of publishing a record whose source identity nobody observed,
-because an identity this vocabulary did not measure is exactly the invented input it refuses to carry.
-
-**This record supersedes; it does not replace.** It changes no dataset, publishes no successor
-generation and grants no clearance: the successor is
-:func:`agents_remember.application.review_comparison_freeze.freeze_review_comparison` with the recorded
-generation as its ``parent``, and the action this record names is that call. A record that overwrote
-the generation it judged, or that re-ran the comparison itself, would be the parallel review authority
-the packet forbids.
-"""
+"""Tree-bound sync rebinding v2, plus the read-only v1 decoder for retained historical receipts."""
 
 from __future__ import annotations
 
@@ -58,10 +16,13 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
+from agents_remember.models.knowledge.review_final_output_receipt import tree_comparison_digest
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
     "REVIEW_SYNC_REBINDING_VERSION",
     "REVIEW_SYNC_SELECTION_RULE",
+    "LegacyReviewSyncRebinding",
     "ReviewSyncRebinding",
     "ReviewSyncRebindingVerdict",
     "SyncChannelMatch",
@@ -69,17 +30,20 @@ __all__ = [
     "code_channel_match",
     "knowledge_channel_match",
     "review_sync_verdict",
+    "tree_sync_verdict",
 ]
 
 # The record's own version, a literal of this vocabulary's rather than a package version read at run
 # time, so two rebindings produced by different layouts are distinguishable from the records.
-REVIEW_SYNC_REBINDING_VERSION: Literal["ar-review-sync-rebinding/v1"] = (
-    "ar-review-sync-rebinding/v1"
+REVIEW_SYNC_REBINDING_VERSION: Literal["ar-review-sync-rebinding/v2"] = (
+    "ar-review-sync-rebinding/v2"
 )
 
 # Which generation a rebinding judges. The same rule the final-output receipt names, spelled here so a
 # reader of this record does not have to import the owner that produced it to learn what it selected.
-REVIEW_SYNC_SELECTION_RULE: Literal["latest-published-generation"] = "latest-published-generation"
+REVIEW_SYNC_SELECTION_RULE: Literal["latest-recorded-tree-comparison"] = (
+    "latest-recorded-tree-comparison"
+)
 
 # Whether one channel's post-sync identity is the identity the review recorded. ``selected-not-retained``
 # is not a fourth kind of mismatch: it is the state of a channel the generation itself declined to
@@ -190,7 +154,7 @@ class SyncKnowledgeObservation(KnowledgeModel):
         return self
 
 
-class ReviewSyncRebinding(KnowledgeModel):
+class LegacyReviewSyncRebinding(KnowledgeModel):
     """One generation beside the source/knowledge pair a managed sync resolved, and the verdict.
 
     The reviewed identities are read from the generation's own sealed manifest and the resolved ones
@@ -206,14 +170,14 @@ class ReviewSyncRebinding(KnowledgeModel):
     predecessor, which is the freeze owner's act and not this record's.
     """
 
-    rebinding_version: Literal["ar-review-sync-rebinding/v1"] = REVIEW_SYNC_REBINDING_VERSION
+    rebinding_version: Literal["ar-review-sync-rebinding/v1"] = "ar-review-sync-rebinding/v1"
     recorded_at: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     repository_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     master: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     leaf_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     task_root: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
     contract_path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    selection_rule: Literal["latest-published-generation"] = REVIEW_SYNC_SELECTION_RULE
+    selection_rule: Literal["latest-published-generation"] = "latest-published-generation"
     # The generation this record judges: its own id, index, seal and the digest of the manifest bytes
     # that carried them. All four are carried rather than recomputed, because a reader compares this
     # record against the published generation and a digest derived here would be a second identity.
@@ -240,7 +204,7 @@ class ReviewSyncRebinding(KnowledgeModel):
     successor_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
 
     @model_validator(mode="after")
-    def _the_rebinding_agrees_with_itself(self) -> ReviewSyncRebinding:
+    def _the_rebinding_agrees_with_itself(self) -> LegacyReviewSyncRebinding:
         """Refuse a record whose verdicts do not follow from the identities it carries.
 
         Every rule compares two values the record already holds, so an inconsistent record is
@@ -300,91 +264,88 @@ class ReviewSyncRebinding(KnowledgeModel):
         return self
 
     def covers_resolved_pair(self) -> bool:
-        """Whether this record established that the review still describes the resolved pair.
+        """The retired dataset record has no exact memory-tree proof."""
+        return False
 
-        The predicate exists so a consumer branches on one method rather than re-deriving the rule:
-        ``current`` is the only verdict that covers the pair, and it is reachable only through the
-        validator above.
-        """
+    def statement(self) -> str:
+        return (
+            f"Historical v1 rebinding {self.supersedes_generation_id} retained reviewed code tree "
+            f"{self.reviewed_candidate_code_tree_id} and resolved code tree "
+            f"{self.resolved_candidate_code_tree_id}, with historical verdict {self.state}; "
+            "the exact reviewed memory tree was not recorded, so tree-pair coverage is unavailable."
+        )
 
+
+class ReviewSyncRebinding(KnowledgeModel):
+    """A managed sync's exact code and memory capture beside the retained source comparison."""
+
+    rebinding_version: Literal["ar-review-sync-rebinding/v2"] = REVIEW_SYNC_REBINDING_VERSION
+    recorded_at: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    repository_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    master: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    leaf_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    task_root: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    contract_path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    selection_rule: Literal["latest-recorded-tree-comparison"] = REVIEW_SYNC_SELECTION_RULE
+    comparison: ReviewTreeComparisonRecord
+    comparison_digest: str = Field(pattern=SHA256_PATTERN)
+    resolved_code_head: str = Field(pattern=GIT_OBJECT_PATTERN)
+    resolved_candidate_code_tree_id: str = Field(pattern=GIT_OBJECT_PATTERN)
+    resolved_memory_head: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    resolved_candidate_memory_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    memory_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    code_match: SyncChannelMatch
+    memory_match: SyncChannelMatch
+    state: ReviewSyncRebindingVerdict
+    successor_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _validate_tree_binding(self) -> ReviewSyncRebinding:
+        if self.leaf_id != self.comparison.leaf_id:
+            raise ValueError("the rebinding must name the source comparison's leaf")
+        if self.comparison_digest != tree_comparison_digest(self.comparison):
+            raise ValueError("the comparison digest must describe the complete source record")
+        if (self.resolved_memory_head is None) != (self.resolved_candidate_memory_tree_id is None):
+            raise ValueError("the resolved memory head and tree are present together")
+        code = code_channel_match(
+            self.comparison.code_candidate.tree, self.resolved_candidate_code_tree_id
+        )
+        memory = (
+            "unmeasured"
+            if self.resolved_candidate_memory_tree_id is None
+            else code_channel_match(
+                self.comparison.memory_candidate.tree, self.resolved_candidate_memory_tree_id
+            )
+        )
+        if (self.code_match, self.memory_match) != (code, memory):
+            raise ValueError("matches must follow from both exact candidate trees")
+        if self.state != tree_sync_verdict(code, memory):
+            raise ValueError("currency requires a measured match on both code and memory trees")
+        return self
+
+    def covers_resolved_pair(self) -> bool:
         return self.state == "current"
 
     def statement(self) -> str:
-        """Return the one sentence this record publishes, derived from its own fields.
-
-        One clause per verdict, and each says only what the record measured. ``moved`` names the
-        channel that moved and the supersession remedy; ``unmeasured`` says the retained knowledge
-        operand was never compared and names why the location answered nothing; and ``current`` -- the
-        only value that claims coverage -- says the reviewed comparison still describes both sides of
-        the resolved pair.
-        """
-
-        if self.state == "moved":
-            verdict = (
-                "the reviewed comparison no longer describes it; publish a successor generation "
-                "naming that one as its predecessor, or read the review as covering the inputs it "
-                "recorded"
-            )
-        elif self.state == "unmeasured":
-            verdict = (
-                "the knowledge operand this generation retained was not compared against any dataset "
-                "at the declared publication location, so this rebinding covers the resolved source "
-                "and leaves the resolved knowledge unmeasured"
-            )
-        else:
-            verdict = "the reviewed comparison still describes both sides of it"
         return (
-            f"the managed sync resolved this leaf's pair and comparison generation "
-            f"{self.supersedes_generation_id} (index {self.supersedes_generation_index}) was measured "
-            f"against it: {self._code_clause()}; {self._knowledge_clause()}; {verdict}."
-        )
-
-    def _code_clause(self) -> str:
-        """The source half of the sentence, which names every tree it compared.
-
-        **The head locates the capture; it does not carry it.** The resolved candidate is the shipped
-        capture owner's add-all tree, computed in an isolated index from the worktree's whole content,
-        so it equals the head's own tree only while that worktree is clean. The state where it does
-        not is exactly the state the packet requires a sync to preserve -- the curator's uncommitted
-        work, parked and handed back -- and a sentence claiming the head *carries* that tree is denied
-        by Git there. Naming the head as where the capture was taken is true in both states.
-        """
-
-        capture = self.resolved_candidate_code_tree_id
-        located = (
-            f"candidate tree {capture} captured from the leaf's worktree at work branch head "
-            f"{self.resolved_code_head}"
-        )
-        if self.code_match == "matches-reviewed-input":
-            return f"{located}, the candidate tree the review captured"
-        return (
-            f"{located}, not the review's captured candidate tree "
-            f"{self.reviewed_candidate_code_tree_id}"
-        )
-
-    def _knowledge_clause(self) -> str:
-        """The knowledge half of the sentence, which never claims an unmeasured comparison."""
-
-        observed = self.resolved_knowledge
-        digest = None if observed.dataset is None else observed.dataset.logical_digest
-        if self.knowledge_match == "matches-reviewed-input":
-            return (
-                f"the dataset {digest} at {observed.path} is the candidate dataset the review "
-                "compared"
+            f"Managed sync measured tree comparison {self.comparison.task_id}/"
+            f"{self.comparison.leaf_id}/{self.comparison.number}: reviewed code tree "
+            f"{self.comparison.code_candidate.tree}, resolved {self.resolved_candidate_code_tree_id} "
+            f"({self.code_match}); reviewed memory tree {self.comparison.memory_candidate.tree}, "
+            f"resolved {self.resolved_candidate_memory_tree_id} ({self.memory_match}); {self.state}. "
+            + (
+                self.successor_action
+                if self.state != "current"
+                else "Both resolved trees remain the reviewed candidates."
             )
-        if self.knowledge_match == "differs-from-reviewed-input":
-            return (
-                f"the dataset {digest} at {observed.path} is not the candidate dataset the review "
-                f"compared ({self.reviewed_knowledge_logical_digest})"
-            )
-        if self.reviewed_knowledge_state != "retained":
-            return (
-                f"generation {self.supersedes_generation_id} records "
-                f"{self.reviewed_knowledge_state} for its knowledge operand, so no dataset was "
-                "compared to a reviewed one"
-            )
-        return (
-            f"the declared publication location {observed.path} is {observed.state}, so the dataset "
-            f"it holds was not compared to the reviewed candidate "
-            f"{self.reviewed_knowledge_logical_digest}"
         )
+
+
+def tree_sync_verdict(
+    code: SyncChannelMatch, memory: SyncChannelMatch
+) -> ReviewSyncRebindingVerdict:
+    if "differs-from-reviewed-input" in (code, memory):
+        return "moved"
+    if "unmeasured" in (code, memory):
+        return "unmeasured"
+    return "current"

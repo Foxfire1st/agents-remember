@@ -15,8 +15,7 @@ Why this leaf appends **one** table rather than a record group of its own:
 * The change set, the effect claim, the preservation claim and the unresolved question are *typed
   records*, and ``KS-R10@v1`` already built the envelope they live in: ``knowledge_record`` carries
   the kind, the authority home, the lifecycle and the governing route, and ``record_revision``
-  carries the frozen payload and its content digest. Their payload shapes are registered in
-  :data:`agents_remember.memory.knowledge.record_envelope.PAYLOAD_MODELS` under
+  carries the frozen payload and its content digest. Their canonical payload shapes used the retired envelope registry under
   ``(invariant_effect_claim, invariant-effect-claim/v1)``, ``(preservation_claim,
   preservation-claim/v1)``, ``(unresolved_question, unresolved-question/v1)`` and
   ``(semantic_change_set, semantic-change-set/v1)``, exactly as the requirement record group's is, so

@@ -505,6 +505,50 @@ def test_an_uncovered_new_file_is_satisfied_by_its_onboarding_trace(
     assert tool["itemsByKind"]["unexplained_hunk"] == 1
 
 
+def test_the_writer_names_the_unexplained_items_an_onboarding_row_answers(
+    world: World, tmp_path: Path
+) -> None:
+    """MIK-R07 rule 1 (L37 carry): a row whose hand-off names no item lists the items it answers.
+
+    An unexplained hunk in an uncovered file is answered by the file's ``onboarding:<path>`` row,
+    and MIK-R30 raises no card item of its own there. Catches a row left with ``items: []``
+    because the hunk's own lookup finds only a hunk row.
+    """
+
+    task_root = tmp_path / "task"
+    task_root.mkdir()
+    (task_root / "task.md").write_text("# task\n", encoding="utf-8")
+    world.code_commit({FRESH: "VALUE = 1\n"})
+    contract = load_contract(_contract(world, task_root))
+    document = leaf_worklist(contract)
+    assert document is not None
+    item = only(document, FRESH)
+    subject = f"onboarding:{FRESH}"
+    assert item["facts"]["onboardingTrace"]["subject"] == subject
+    assert subject not in {one["subject"] for one in document["items"]}  # no trace item of its own
+
+    report = write_knowledge(
+        WriteRequest(
+            memory_root=world.memory,
+            code_root=world.code,
+            owner=Owner(task="260928-MIK", kind="leaf", id=LEAF),
+            handoff_path="handoff.json",
+            document={
+                "history": [{"subject": subject, "disposition": "no_impact", "reason": "A value."}]
+            },
+            commit=True,
+            worklist=document,
+        )
+    )
+
+    assert report.state == "written", (report.problems, report.violations)
+    history = json.loads((world.memory / f"knowledge/history/{LEAF}.json").read_text())
+    (row,) = [one for one in history["rows"] if one["subject"] == subject]
+    assert row["items"] == [item["id"]]
+    answered = leaf_worklist(contract)
+    assert answered is not None and only(answered, FRESH)["satisfiedBy"] == row["id"]
+
+
 # --------------------------------------------------------------------------------------------------
 # Writer refusals (Failure And Recovery)
 # --------------------------------------------------------------------------------------------------

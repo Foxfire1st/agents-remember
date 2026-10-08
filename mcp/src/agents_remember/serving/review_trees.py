@@ -9,9 +9,11 @@ expression cards of one selection (MIK-R31). ``lane=files`` asks for the two des
 unexplained-changes lane, and ``file=<path>`` for the classification of one changed path (MIK-R32);
 each names one question, so at most one of ``invariants``, ``lane`` and ``file`` is given.
 
-Every typed answer is a 200: ``trees``, ``not-converted`` (the leaf's memory is unconverted, so its
-review is the dataset review) and ``refused`` (with the owner's refusal in the body). Only a process
-composed without the port answers non-2xx (503), because then no answer exists at all.
+Every typed answer is a 200: ``trees``, ``refused`` (with the owner's refusal in the body; a leaf
+whose memory is unconverted is refused this way, each knowledge side named ``legacy-unavailable``,
+and its review reads source identities only) and ``not-converted`` (a resolution with no tree
+comparison that names no unreadable knowledge side). Only a process composed without the port
+answers non-2xx (503), because then no answer exists at all.
 """
 
 from __future__ import annotations

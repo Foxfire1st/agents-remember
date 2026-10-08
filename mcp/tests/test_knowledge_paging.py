@@ -41,12 +41,10 @@ from agents_remember.application.published_intent import (
 )
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.mcp.tools.knowledge import (
-    ProjectToolRequest,
     ReadToolRequest,
-    knowledge_project_payload,
     knowledge_read_payload,
 )
-from agents_remember.memory.knowledge_index import INDEX_REPOSITORY_ID, KnowledgeIndex, text_uuid
+from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
@@ -55,7 +53,6 @@ from agents_remember.models.knowledge_files.documents import (
 )
 from knowledge_index_test_support import (
     anchor,
-    build_parity_dataset,
     commit_all,
     git,
     init_repository,
@@ -178,7 +175,7 @@ def _read(
     tmp_path: Path, root: Path, *, workspace: Path | None = None, **arguments: Any
 ) -> dict[str, Any]:
     return knowledge_read_payload(
-        ReadToolRequest(database_path=str(root), repository_id=INDEX_REPOSITORY_ID, **arguments),
+        ReadToolRequest(memory_root=str(root), **arguments),
         workspace_root=None if workspace is None else str(workspace),
         coordination_root=str(tmp_path / "coordination"),
     )
@@ -399,60 +396,6 @@ def test_a_continuation_whose_binding_does_not_hold_is_refused_with_no_page(
     fresh = _read(tmp_path, root, view="family", family_revision_id=family)
     assert fresh["memoryTree"]["treeId"] in changed["refusalDetail"]
     assert fresh["memoryTree"]["treeId"] != fields["t"]
-
-
-def test_a_projection_over_the_artifact_limit_continues_in_parts_and_never_raises(
-    tmp_path: Path,
-) -> None:
-    root = _tree(tmp_path, _statements(40, words=120))
-    family = text_uuid("revision", f"{FAMILY}@1")
-    destination = tmp_path / "vault"
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(destination),
-            formats=("markdown", "json"),
-            views=({"view": "family", "familyRevisionId": family, "subject": FAMILY},),
-        ),
-        coordination_root=str(tmp_path / "coordination"),
-    )
-    assert projected["state"] == "projected", projected
-    parts = sorted(projected["published"])
-    assert len(parts) > 2 and f"family/{FAMILY}.md" in parts and f"family/{FAMILY}.json" in parts
-    texts = [(destination / part).read_text("utf-8") for part in parts]
-    assert all(len(text) <= PROSE_MAX_LENGTH for text in texts)
-    positions = [
-        line
-        for text in texts
-        if text.startswith("#")
-        for line in text.splitlines()
-        if line.startswith("## position ")
-    ]
-    # Every row of the projected page reaches exactly one Markdown part, in order.
-    assert positions == [f"## position {number}" for number in range(1, len(positions) + 1)]
-    assert len(positions) > 40
-
-    rng = random.Random(3)
-    noise = " ".join("".join(rng.choices(string.ascii_lowercase, k=9)) for _ in range(1990))
-    huge = _tree(tmp_path / "huge", [noise[: PROSE_MAX_LENGTH - 10], "Small."])
-    refused = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(huge),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(tmp_path / "vault-huge"),
-            views=(
-                {
-                    "view": "invariant",
-                    "invariantRevisionId": text_uuid("revision", f"{_member(0)}@1"),
-                    "subject": _member(0),
-                },
-            ),
-        ),
-        coordination_root=str(tmp_path / "huge" / "coordination"),
-    )
-    assert refused["state"] == "refused", refused
-    assert refused["refusalCode"] == "oversized_row"
 
 
 def _walk_block(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str, list[str]]:
@@ -702,20 +645,3 @@ def test_an_empty_ordering_is_refused_not_defaulted_on_every_path(tmp_path: Path
     tree = _read(tmp_path, root, view="family", family_revision_id=family, ordering_input="")
     assert tree["refusalCode"] == "unadmitted_ordering_input"
     assert tree["threshold"]["tokens"] == KNOWLEDGE_PAGE_THRESHOLD_TOKENS  # rule 1, refusals too
-    database, repository = build_parity_dataset(tmp_path / "database")
-    unconverted = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(database),
-            repository_id=repository,
-            view="family",
-            ordering_input="",
-        )
-    )
-    assert unconverted["refusalCode"] == "unadmitted_ordering_input"
-    assert "threshold" not in unconverted  # a database read is unchanged
-    defaulted = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(database), repository_id=repository, view="curation_queue"
-        )
-    )
-    assert defaulted["state"] == "view", defaulted

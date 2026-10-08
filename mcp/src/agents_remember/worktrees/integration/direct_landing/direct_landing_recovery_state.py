@@ -26,6 +26,26 @@ DirectRecoveryState = Literal[
     "developer-decision",
 ]
 
+UNPUBLISHED_REFUSAL = "unpublished-refusal"
+"""What a generation's result names as ``cancelledBy`` when its own refusal cancelled it."""
+
+
+def cancelled_unpublished(record: LifecycleOperationRecord) -> bool:
+    """Whether this generation's own refusal cancelled it before it published anything.
+
+    Such a generation left nothing behind (its closing and its ignore rule were restored, the
+    index was given back), so it has nothing to recover and the next request, the same one
+    included, replaces it. A generation cancelled through the control action is not one of these.
+    """
+
+    return (
+        record.operationKind == "direct-landing"
+        and record.status == "cancelled"
+        and record.generationDisposition == "cancelled"
+        and isinstance(record.result, dict)
+        and record.result.get("cancelledBy") == UNPUBLISHED_REFUSAL
+    )
+
 
 @dataclass(frozen=True)
 class DirectLandingRecoveryClassification:
@@ -81,7 +101,9 @@ def classify_direct_landing_recovery(
     """Return recoverable only for exact accepted, intended, or proven live evidence."""
 
     operation_input = record.input
-    if record.operationKind != "direct-landing":
+    if record.operationKind != "direct-landing" or cancelled_unpublished(record):
+        # A generation its own refusal cancelled has nothing to recover or to decide: whatever the
+        # memory checkout holds now is judged afresh by the next request.
         return DirectLandingRecoveryClassification("not-applicable")
     if not isinstance(operation_input, DirectLandingOperationInput):
         return _decision(

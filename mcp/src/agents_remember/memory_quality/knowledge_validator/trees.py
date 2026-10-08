@@ -165,7 +165,7 @@ def _resolve_tree(repository: Path, treeish: str) -> str:
     return tree
 
 
-def _tree_blobs(repository: Path, tree: str) -> dict[str, str]:
+def tree_blobs(repository: Path, tree: str) -> dict[str, str]:
     """Map each regular file path of ``tree`` to its blob ID."""
 
     blobs: dict[str, str] = {}
@@ -186,9 +186,7 @@ def knowledge_tree_from_git(
 
     tree = _resolve_tree(repository, treeish)
     wanted = {
-        path: blob
-        for path, blob in _tree_blobs(repository, tree).items()
-        if is_knowledge_path(path)
+        path: blob for path, blob in tree_blobs(repository, tree).items() if is_knowledge_path(path)
     }
     contents = read_git_blobs_bytes(repository, wanted.values())
     files = {path: contents[blob] for path, blob in sorted(wanted.items())}
@@ -202,7 +200,7 @@ def history_tree_from_git(repository: Path, treeish: str) -> KnowledgeTree:
     tree = _resolve_tree(repository, treeish)
     wanted = {
         path: blob
-        for path, blob in _tree_blobs(repository, tree).items()
+        for path, blob in tree_blobs(repository, tree).items()
         if path.startswith("knowledge/history/")
     }
     contents = read_git_blobs_bytes(repository, wanted.values())
@@ -214,4 +212,4 @@ def code_tree_from_git(repository: Path, treeish: str, *, label: str | None = No
     """Return the file paths of a commit or tree in the code ``repository``."""
 
     tree = _resolve_tree(repository, treeish)
-    return CodePathSet(label=label or treeish, paths=frozenset(_tree_blobs(repository, tree)))
+    return CodePathSet(label=label or treeish, paths=frozenset(tree_blobs(repository, tree)))

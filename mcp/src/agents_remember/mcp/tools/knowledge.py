@@ -1,47 +1,61 @@
-"""Payload builders for the five mounted ``knowledge_*`` operation families.
+"""Payload builders for the three mounted ``knowledge_*`` operations.
 
 One builder per operation, each of which validates its wire request, delegates to the application
 seam that owns the operation, and returns the typed shape the response model declares. Nothing here
-decides anything: no classification is computed, no effect label is inferred, no draft is authored,
-no rationale is judged, no ambiguity is resolved by choosing, no missing assessment is filled, and no
-compatibility verdict is produced. Where a handler would have to decide something, it returns the
-unresolved state instead.
+decides anything: no classification is computed, no effect label is inferred, no draft is authored
+and no ambiguity is resolved by choosing.
 
-Two of the five are quoted at requirement level and their builders are the reason this module is
-short:
+**Knowledge is text (MIK-R26 rule 5).** ``knowledge_read`` and ``knowledge_integrity_check`` select a
+*memory tree* by its root directory -- a converted tree, one that holds ``knowledge/layout.json`` --
+and ``knowledge_read`` reads it through the derived index of that tree's current state (MIK-R23).
+``knowledge_diff`` names a memory repository and two of its Git revisions. No operation accepts a
+database path: an unconverted tree or a database file is refused as ``legacy-format``, and the
+refusal names the crossing sync, the conversion command and the line that holds the converted
+memory. The namespace a caller once supplied (``repositoryId``) is the index's own constant, which
+the server supplies.
 
 * ``knowledge_read`` returns "recorded claims and assessments as attributed records"; the payload it
   returns is the view payload itself, so the classification rule has exactly one implementation.
-* ``knowledge_diff`` includes "semantic effect labels ... only when supplied by an identified
-  agent/assessment, not inferred from the diff"; the builder collects the labels the comparison
-  already carries and never derives one.
+* ``knowledge_diff`` serves the Git diff of the knowledge files between two trees (records, history,
+  sidecars and onboarding cards), with their patches, grouped by record and by source path. It
+  includes no semantic effect label: none is inferred from the diff.
+* ``knowledge_integrity_check`` runs the knowledge validator (MIK-R22) over a memory tree and
+  returns a leaf's latest change-to-knowledge worklist (MIK-R08).
 
-**Every public builder here returns ``_tool_payload(...)``, like every other adapter module.**
-The five builders used to hand a raw ``dict`` straight to the transport: the registered response
-models (``models/tools/knowledge_responses.py``) were therefore never met by a payload, the
-registration-agreement check found five registered models with no adapter entry, and the
-choke-point sweep counted 19 modules instead of 20. The body each builder produces is unchanged and
-now lives in one private ``*_result`` helper; what the public name does is exactly what every other
-module's entry point does -- route the body through the choke point so it is validated against
-``TOOL_RESPONSE_MODELS["knowledge_*"]`` before it reaches the wire.
+The write side is not mounted: knowledge is written by the curator file writer, through
+``agents-remember knowledge-ingest`` and ``agents-remember knowledge-bootstrap``.
+
+**Every public builder here returns ``_tool_payload(...)``, like every other adapter module:** the
+body is validated against ``TOOL_RESPONSE_MODELS["knowledge_*"]`` before it reaches the wire.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
-from collections.abc import Iterable
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import apsw
-from pydantic import ValidationError
 
 from agents_remember.application.knowledge_currentness import CodeTree
-from agents_remember.application.knowledge_diff import diff_knowledge_scope
+from agents_remember.application.knowledge_file_diff import (
+    BoundedDiff,
+    LeftOut,
+    bounded_diff,
+    held_paths,
+    knowledge_file_diff,
+    narrowed_diff,
+)
 from agents_remember.application.knowledge_paging import threshold_block
 from agents_remember.application.knowledge_paging.currentness import WalkCurrentness
+from agents_remember.application.knowledge_paging.threshold import (
+    ENVELOPE_RESERVE_TOKENS,
+    KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
+    response_tokens,
+)
 from agents_remember.application.knowledge_paging.tree_read import (
     DEFAULT_ORDERING,
     PageExtras,
@@ -49,98 +63,53 @@ from agents_remember.application.knowledge_paging.tree_read import (
     TreeExtras,
     read_tree_page,
 )
-from agents_remember.application.knowledge_paging.tree_seeds import tree_seed_refusal
-from agents_remember.application.knowledge_projection import (
-    ProjectionOptions,
-    project_knowledge,
-)
 from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
-from agents_remember.application.knowledge_views import (
-    VIEW_RENDERER_VERSION,
-    read_knowledge_view,
-)
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
-    converted_memory_tree,
-    memory_tree_block,
     select_knowledge_dataset,
 )
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.git_preparation import GitPreparationError
-from agents_remember.memory.knowledge.connection import (
-    inspect_schema,
-    open_read_only_database,
-)
-from agents_remember.memory.knowledge.detection import (
-    detection_input_digest,
-    detection_input_identity,
-    read_detection_run,
-)
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
-from agents_remember.memory.knowledge_index import IndexMismatchError, MemoryTreeError
-from agents_remember.models.knowledge.diff import KnowledgeDiffRequest
-from agents_remember.models.knowledge.projection_manifest import DestinationProfile
-from agents_remember.models.knowledge.view import (
-    ViewRefusal,
-    ViewRequest,
-    ViewResult,
-    rebuild_continuation,
-    require_admitted_ordering_input,
+from agents_remember.memory.knowledge_index import (
+    INDEX_REPOSITORY_ID,
+    IndexMismatchError,
+    MemoryTreeError,
 )
+from agents_remember.memory_quality.knowledge_validator.report import ValidationReport
+from agents_remember.memory_quality.knowledge_validator.trees import (
+    CodeDirectory,
+    KnowledgeTreeReadError,
+    knowledge_tree_from_directory,
+    knowledge_tree_from_git,
+)
+from agents_remember.memory_quality.knowledge_validator.validator import validate_tree
+from agents_remember.models.knowledge.review_trees import ReviewKnowledgeTreeDiff
+from agents_remember.models.knowledge.view import require_admitted_ordering_input
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
+from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.worktree_contract import load_contract
 
 from .base import _tool_payload
 
 __all__ = [
-    "ChangeToolRequest",
     "DiffToolRequest",
     "IntegrityCheckRequest",
-    "ProjectToolRequest",
     "ReadToolRequest",
-    "knowledge_change_payload",
     "knowledge_diff_payload",
     "knowledge_integrity_check_payload",
-    "knowledge_project_payload",
     "knowledge_read_payload",
 ]
-
-# The record kinds this surface is asked about, and the answer every one of them earns.
-#
-# This mounted surface does NOT write. It is a read/render/projection surface: ``knowledge_read``,
-# ``knowledge_diff``, ``knowledge_integrity_check`` and ``knowledge_project`` all answer from a
-# dataset the caller names, and no handler here opens the write path. The knowledge write plane has
-# ONE writer — the admitted batch operation ``knowledge_change``'s refusal names — and BOTH shipped
-# CLI entry points reach it: the ``agents-remember knowledge-ingest`` subcommand for a leaf
-# enclosure's ordinary route, and the ``agents-remember knowledge-bootstrap`` subcommand for a
-# repository with no enclosure in scope. A second write seam here would be the authority this packet
-# forbids the surface to add.
-#
-# The earlier spelling advertised two "admitted" kinds and then refused both anyway, which made the
-# tool's own description false and told the caller to supply an input its published signature cannot
-# carry. Both are removed: the set below is what the surface may be *asked* for, the refusal is
-# unconditional for every member of it, and the reason names where the write actually happens.
-DECLARED_CHANGE_KINDS: tuple[str, ...] = (
-    "evidence_claim",
-    "verification_observation",
-    "invariant_revision",
-    "assumption",
-    "semantic_change_set",
-    "requirement_revision",
-)
-
-# The curator-list write plane's two shipped CLI entry points, named so a refusal is actionable
-# rather than a dead end. One writer sits behind both -- ``ingest_curator_list``, reached from
-# ``cli/knowledge_ingest.py`` and ``cli/knowledge_bootstrap.py`` -- so both are named wherever a
-# model is told where the write plane is reachable. Kept as constants because the refusal detail
-# and a test quote them.
-WRITE_ENTRY_POINT = "agents-remember knowledge-ingest"
-TASKLESS_WRITE_ENTRY_POINT = "agents-remember knowledge-bootstrap"
 
 # The two shapes a source-resolution half can take, and the bound on how long resolving one may
 # take: a Git call that hangs must not hold a mounted read open.
 _TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 _GIT_TIMEOUT_SECONDS = 20
+# What ``afterRevision`` reports when the caller named none: the memory working tree.
+WORKING_TREE = "working tree"
 
 
 @dataclass(frozen=True)
@@ -148,22 +117,16 @@ class ReadToolRequest:
     """One ``knowledge_read`` call's arguments as one value.
 
     The tool signature stays flat because FastMCP derives the published input schema from it; this
-    value is what the builder consumes, so the builder itself is one argument wide and the flat wire
-    shape is preserved without a widened exemption.
+    value is what the builder consumes.
 
-    ``database_path`` and ``repository_id`` are the *selection*, and the caller owns both. Nothing
-    this server holds can answer either one: the runtime config carries no knowledge database or
-    namespace field, a repository's coordination declaration (settings, ``context_packet``) names the
-    code root, the memory root and the coordination paths, and no released helper resolves a
-    repository or a task to a knowledge SQLite path. The published schema makes them required rather
-    than optional-with-a-default precisely because a default would be this surface inventing a
-    selection. So a cold planner that has not been told the pair cannot discover it here; it is
-    supplied by the party that created or holds the dataset, exactly as ``databasePath`` is supplied
-    to every other ``knowledge_*`` operation.
+    ``memory_root`` is the *selection*, and the caller owns it: the root directory of a converted
+    memory tree (``memoryTree.memoryRoot`` of a published-intent block, a leaf's memory worktree, or
+    the repository's memory root). ``repository_id`` is not a wire argument: a memory tree's index
+    has one constant namespace (:data:`INDEX_REPOSITORY_ID`), which the server supplies and every
+    response states.
     """
 
-    database_path: str
-    repository_id: str
+    memory_root: str
     view: str
     ordering_input: str | None = None
     limit: int = 32
@@ -173,40 +136,24 @@ class ReadToolRequest:
     source_path: str | None = None
     repository_root: str | None = None
     code_tree_id: str | None = None
-
-
-@dataclass(frozen=True)
-class ChangeToolRequest:
-    """One ``knowledge_change`` call's arguments as one value."""
-
-    database_path: str
-    repository_id: str
-    record_kind: str
-    body: dict[str, Any] | None = None
+    repository_id: str = INDEX_REPOSITORY_ID
 
 
 @dataclass(frozen=True)
 class DiffToolRequest:
-    """One ``knowledge_diff`` call's arguments as one value."""
+    """One ``knowledge_diff`` call's arguments as one value.
 
-    database_path: str
-    repository_id: str
-    before_path: str
-    after_path: str
-    body: dict[str, Any] | None = None
+    ``memory_root`` is a memory repository (or one of its worktrees); ``before`` is a Git revision or
+    tree of it (``HEAD`` by default). ``after`` is another revision or tree, or ``None`` for the
+    memory working tree, so uncommitted knowledge changes can be seen. ``record_id`` and ``path``
+    optionally narrow the answer.
+    """
 
-
-@dataclass(frozen=True)
-class ProjectToolRequest:
-    """One ``knowledge_project`` call's arguments as one value."""
-
-    database_path: str
-    repository_id: str
-    destination_root: str
-    profile_id: str = "default"
-    formats: tuple[str, ...] = ("markdown",)
-    views: tuple[dict[str, Any], ...] = ()
-    authorized_overwrites: tuple[str, ...] = ()
+    memory_root: str
+    before: str = "HEAD"
+    after: str | None = None
+    record_id: str | None = None
+    path: str | None = None
 
 
 def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict[str, Any]:
@@ -220,46 +167,43 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
     }
 
 
-def _unusable_dataset(database_path: str, error: BaseException) -> tuple[str, str]:
-    """The refusal code and detail one failure to open or read a dataset earns.
+def _memory_tree_refusal(memory_root: str, operation: str) -> tuple[str, str] | None:
+    """Why ``memory_root`` is not a converted memory tree this operation can read, or ``None``.
 
-    Three facts, and they are different facts: a path that is not a file at all is an *absent
-    selection*, a database SQLite refuses to read (a directory, an empty file, a file that is not a
-    database, a file another process holds) is an *unusable snapshot*, and anything else that
-    surfaces from the file system is unreadable input. Answering any of them with an exception
-    would make the same input a typed refusal on the ``read_knowledge_scope`` seam and a traceback
-    on this one, which is the divergence the family's own docstring forbids.
-
-    The codes are the shipped literals and not surface-local spellings: a caller branches on
-    ``selected_input_unavailable`` or ``snapshot_unavailable`` exactly as it does against the
-    application seam.
+    MIK-R26 rule 5: no registered tool accepts a database path, and no tool reads unconverted
+    memory. A path that does not exist is an absent selection; an unconverted tree or a database
+    file is ``legacy-format``, and the refusal names how that memory converts and where converted
+    memory of the same repository can be read meanwhile.
     """
 
-    path = Path(database_path)
-    if not path.is_file():
+    path = Path(memory_root)
+    if path.is_dir() and (path / LAYOUT_MARKER_PATH).is_file():
+        return None
+    if not path.exists():
         return (
             "selected_input_unavailable",
-            f"the selected knowledge database is absent or is not a file: {path}",
+            f"the selected memory root does not exist: {path}; name the root directory of a "
+            f"converted memory tree (one that holds {LAYOUT_MARKER_PATH})",
         )
-    if isinstance(error, KnowledgeStorageError):
+    if path.is_dir():
         return (
-            "snapshot_unavailable",
-            f"the selected snapshot is not this dataset: {error} (at {path})",
+            LEGACY_FORMAT_CODE,
+            legacy_format_refusal(path, operation=operation, subject=f"the memory tree {path}"),
         )
     return (
-        "snapshot_unavailable",
-        f"the selected snapshot could not be read: {error} (at {path})",
+        LEGACY_FORMAT_CODE,
+        legacy_format_refusal(
+            path.parent, operation=operation, subject=f"the file {path}", database_file=True
+        ),
     )
 
 
 def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDataset:
-    """Resolve one caller-selected dataset path: a converted memory tree reads through its index.
+    """Resolve one caller-selected converted memory tree to the index of its current state.
 
-    ``databasePath`` keeps its published meaning -- the dataset a read opens -- and gains one
-    resolution (MIK-R23 rule 6): a path naming a converted memory tree (its root, or the published
-    ``knowledge.sqlite`` location inside it) is read through the index of that tree's current
-    state, and the response names the tree and the index state. Every other path is opened as
-    before, so an unconverted tree keeps today's database selection and refusals.
+    The caller has already established that ``path`` is a converted tree's root
+    (:func:`_memory_tree_refusal`); the tree's key is recomputed and its index reused or built
+    (MIK-R23 rule 6), and the response names the tree and the index state.
     """
 
     return select_knowledge_dataset(
@@ -282,9 +226,8 @@ class _NoCodeTreeError(ValueError):
         )
 
 
-# Every way resolving and opening a selection can fail, so each handler refuses the same inputs
-# the same way: an index that cannot be built (the tree, its Git objects, the cache) is
-# ``snapshot_unavailable`` naming the tree; everything else is the dataset refusal it was before.
+# Every way resolving and opening a selected memory tree can fail, so each handler refuses the same
+# inputs the same way: the tree, its Git objects or the cache could not give an index.
 _SELECTION_FAILURES = (
     _NoCodeTreeError,
     IndexMismatchError,
@@ -299,23 +242,10 @@ _SELECTION_FAILURES = (
 def _selection_refusal(path: str, error: BaseException) -> tuple[str, str]:
     if isinstance(error, _NoCodeTreeError):
         return ("selected_input_unavailable", str(error))
-    if isinstance(error, MemoryTreeError | GitPreparationError):
-        return ("snapshot_unavailable", f"the selected memory tree could not be indexed: {error}")
-    return _unusable_dataset(path, error)
-
-
-def _index_complete(*selected: SelectedKnowledgeDataset) -> bool | None:
-    """``False`` when any side was read from a partial index, ``True`` when all were complete.
-
-    ``None`` when no side is a memory tree: a database has no index state. A partial index is never
-    presented as complete (MIK-R23, Failure), so every surface that states completeness is forced
-    to ``False`` by it.
-    """
-
-    trees = [item.memory_tree for item in selected if item.memory_tree is not None]
-    if not trees:
-        return None
-    return all(tree.index_state == "complete" for tree in trees)
+    return (
+        "snapshot_unavailable",
+        f"the selected memory tree could not be indexed: {error} (at {path})",
+    )
 
 
 def _source_resolution(
@@ -385,11 +315,11 @@ def knowledge_read_payload(
     workspace_root: str | None = None,
     coordination_root: str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve one named view at one snapshot, through the response-model choke point."""
+    """Retrieve one named view of a memory tree, through the response-model choke point."""
 
     body = _read_result(request, workspace_root=workspace_root, coordination_root=coordination_root)
-    if body["state"] == "refused" and converted_memory_tree(Path(request.database_path)):
-        # MIK-R02 rule 1: a memory-tree refusal states the threshold too (a page states it in page).
+    if body["state"] == "refused":
+        # MIK-R02 rule 1: a refusal states the threshold too (a page states it in page).
         body.setdefault("threshold", threshold_block())
     return _tool_payload("knowledge_read", body)
 
@@ -402,12 +332,7 @@ def _read_result(
 ) -> dict[str, Any]:
     """The one ``knowledge_read`` body, before the registered model validates it."""
 
-    databasePath, repositoryId, view = (
-        request.database_path,
-        request.repository_id,
-        request.view,
-    )
-    path = Path(databasePath)
+    repository_id, view = request.repository_id, request.view
     if view not in (
         "source_context",
         "invariant",
@@ -417,64 +342,41 @@ def _read_result(
     ):
         return _refused_read(
             view,
-            repositoryId,
+            repository_id,
             "unknown_view",
             f"{view!r} is not one of the five named query views",
         )
-    # The admitted-ordering closure is checked **before** the dataset is opened, because the view
+    # The admitted-ordering closure is checked **before** the tree is opened, because the view
     # layer's own refusal is the answer the caller needs and the request model cannot carry the
     # unadmitted spelling to it: ``ViewRequest.ordering_input`` is a ``Literal``, so constructing the
-    # request with a fifth ordering raises instead of refusing, and the caller received a tool error
-    # where §2.5 promises ``unadmitted_ordering_input`` with the offending input. Asking the view
-    # module's one closure check first is what keeps the ordering refusal reachable from this surface
-    # (adversarial coverage review finding ``A-2``; the refusal itself is L20's, unchanged).
+    # request with a fifth ordering raises instead of refusing.
     ordering_refusal = require_admitted_ordering_input(_ordering(request))
     if ordering_refusal is not None:
-        return _refused_read(view, repositoryId, ordering_refusal.code, ordering_refusal.detail)
-    # The dataset is opened inside the boundary, because every failure to open or read it is a fact
-    # about the selection and not a programming error: the application seam this builder delegates
-    # to already turns all three into typed refusals, and a transport that let them escape as
-    # ``ToolError`` would refuse the same input on one surface and raise on another.
+        return _refused_read(view, repository_id, ordering_refusal.code, ordering_refusal.detail)
+    unreadable = _memory_tree_refusal(request.memory_root, "knowledge_read")
+    if unreadable is not None:
+        return _refused_read(view, repository_id, *unreadable)
+    # The tree is opened inside the boundary, because every failure to index or read it is a fact
+    # about the selection and not a programming error.
     try:
-        selected = _select(databasePath, coordination_root)
-        path = selected.database_path
+        selected = _select(request.memory_root, coordination_root)
         repository_root, code_tree_id = _source_resolution(request, workspace_root)
         context = open_read_context(
-            path,
-            repositoryId,
+            selected.database_path,
+            repository_id,
             repository_root=None if repository_root is None else Path(repository_root),
             code_tree_id=code_tree_id,
         )
-        if selected.memory_tree is not None:  # MIK-R02: a tree's pages are cut by the threshold
-            return read_tree_page(
-                request,
-                selected,
-                context,
-                extras=_tree_extras(selected),
-                workspace_root=workspace_root,
-            )
-        built = _view_request(request)
-        result = (
-            ViewResult(state="refused", repository_id=repositoryId, refusal=built)
-            if isinstance(built, ViewRefusal)
-            else read_knowledge_view(path, context, built)
+        # MIK-R02: a tree's pages are cut by the threshold.
+        return read_tree_page(
+            request,
+            selected,
+            context,
+            extras=_tree_extras(selected),
+            workspace_root=workspace_root,
         )
     except _SELECTION_FAILURES as error:
-        return _refused_read(view, repositoryId, *_selection_refusal(str(path), error))
-    if result.state == "refused" or result.payload is None:
-        assert result.refusal is not None
-        return _refused_read(view, repositoryId, result.refusal.code, result.refusal.detail)
-    payload = result.payload
-    return {
-        "ok": True,
-        "state": "view",
-        "view": payload.view,
-        "repositoryId": repositoryId,
-        "snapshot": payload.snapshot.logical_digest,
-        "completeWithinDeclaredScope": payload.completeness.complete_within_declared_scope,
-        "continuation": None if payload.continuation is None else payload.continuation.token,
-        "payload": payload.model_dump(mode="json"),
-    }
+        return _refused_read(view, repository_id, *_selection_refusal(request.memory_root, error))
 
 
 def _ordering(request: ReadToolRequest) -> str:
@@ -502,677 +404,412 @@ def _tree_extras(selected: SelectedKnowledgeDataset) -> TreeExtras:
     return prepare
 
 
-def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
-    """The validated view request one tool call describes, with its continuation rebuilt.
+def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
+    """The Git diff of the knowledge files of two memory trees, through the response-model choke point."""
 
-    A continuation token crosses this surface as one opaque string, and the binding it carries is
-    read back out of it here: this call knows the view a caller asked for, but not the snapshot the
-    token was minted at, and a snapshot identity invented at the transport would refuse every
-    continuation this surface had just returned. Text this substrate did not mint is refused as
-    ``continuation_unreadable`` rather than presented to the seam as a position.
+    body = _diff_result(request)
+    # The answer is cut to the threshold every bounded knowledge read states, and states it.
+    body.setdefault("threshold", threshold_block())
+    return _tool_payload("knowledge_diff", body)
+
+
+def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
+    """The one ``knowledge_diff`` body, before the registered model validates it (MIK-R26 rule 5).
+
+    The answer is the Git diff of the knowledge files between two trees of the memory repository:
+    record, history and census files, onboarding sidecars and the onboarding cards, each with its
+    patch, grouped by record and by source path (:func:`knowledge_file_diff`, over the reviewer's
+    own computation). A tree that holds no layout marker is unconverted and refused as
+    ``legacy-format``; a directory inside the repository is refused with the repository root to
+    pass; a ``record_id`` or a ``path`` that names nothing in either tree is refused by name, not
+    answered with an empty diff. The answer is cut to the threshold of ``knowledge_read``, and what
+    it leaves out is named. The builder reads files and Git objects only: it infers no semantic
+    effect label and opens no database.
     """
 
-    token = None
-    if request.continuation is not None:
-        rebuilt = rebuild_continuation(request.continuation, view=request.view)
-        if isinstance(rebuilt, ViewRefusal):
-            return rebuilt
-        token = rebuilt
-    return ViewRequest(
-        view=request.view,  # type: ignore[arg-type]
-        repository_id=request.repository_id,
-        invariant_revision_id=request.invariant_revision_id,
-        family_revision_id=request.family_revision_id,
-        source_path=request.source_path,
-        ordering_input=_ordering(request),  # type: ignore[arg-type]
-        limit=request.limit,
-        continuation=token,
-    )
-
-
-def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
-    """Refuse one mount-side change request, through the response-model choke point.
-
-    This surface records nothing. It has no admitted write operation for any kind, so every kind --
-    declared here or not -- is refused as ``registration_absent``, and the refusal names the writer
-    that can record: :func:`agents_remember.application.knowledge_curator_ingest.
-    ingest_curator_list`, the one batch operation that resolves a whole hand-off list and commits it
-    through the admitted batch. Two shipped CLI subcommands reach it -- ``agents-remember
-    knowledge-ingest`` for a leaf enclosure's ordinary route and ``agents-remember
-    knowledge-bootstrap`` for a repository with no enclosure in scope -- and both are named so a
-    caller is not pointed at half the route.
-
-    The reason is deliberately the *same* for a declared kind and for one this surface has never
-    heard of: the surface has nothing to add in either case, and two spellings of "this tool does
-    not write" would suggest the first one might.
-    """
-
-    return _tool_payload("knowledge_change", _change_result(request))
-
-
-def _change_result(request: ChangeToolRequest) -> dict[str, Any]:
-    """The one ``knowledge_change`` body, before the registered model validates it."""
-
-    repositoryId, recordKind = request.repository_id, request.record_kind
-    return {
-        "ok": True,
-        "state": "refused",
-        "recordKind": recordKind,
-        "repositoryId": repositoryId,
-        "refusalCode": "registration_absent",
-        "refusalDetail": (
-            f"this mounted surface does not write, so no {recordKind!r} row was written and no "
-            "destination is missing: the knowledge write plane has one writer, and both of its "
-            f"shipped CLI entry points reach it -- {WRITE_ENTRY_POINT!r} for a leaf enclosure's "
-            f"ordinary route and {TASKLESS_WRITE_ENTRY_POINT!r} for a repository with no enclosure "
-            "in scope. On a converted memory tree (knowledge/layout.json) both write knowledge "
-            "files through the curator file writer (MIK-R12) instead of the database. Call one of "
-            "those, or read the result here with knowledge_read"
-        ),
-    }
-
-
-def knowledge_diff_payload(
-    request: DiffToolRequest, *, coordination_root: str | None = None
-) -> dict[str, Any]:
-    """Compare two exact states, through the response-model choke point."""
-
-    return _tool_payload(
-        "knowledge_diff", _diff_result(request, coordination_root=coordination_root)
-    )
-
-
-def _diff_result(
-    request: DiffToolRequest, *, coordination_root: str | None = None
-) -> dict[str, Any]:
-    """The one ``knowledge_diff`` body, before the registered model validates it.
-
-    Only the semantic labels an identified source supplied are carried; the builder never derives
-    one from the change.
-    """
-
-    repositoryId = request.repository_id
-    supplied = _supplied_effect_labels(request.body)
-    try:
-        built = _diff_request(request.body)
-    except ValidationError as invalid:
-        # A body the shipped request model refuses is a caller error this surface can *name*: the
-        # validation message lists the exact missing or malformed field, and returning it as a typed
-        # refusal keeps the operation's contract ("the comparison refused, here is why") instead of
-        # converting it into a transport-level tool failure.
+    def refused(code: str, detail: str) -> dict[str, Any]:
         return {
             "ok": True,
             "state": "refused",
-            "repositoryId": repositoryId,
-            "refusalCode": "invalid_payload",
-            "refusalDetail": (
-                "the comparison body is not a valid KnowledgeDiffRequest: "
-                f"{invalid.error_count()} validation error(s); {invalid}"
-            ),
-        }
-    try:
-        before = _select(request.before_path, coordination_root)
-        after = _select(request.after_path, coordination_root)
-        result = diff_knowledge_scope(
-            built,
-            before_path=before.database_path,
-            after_path=after.database_path,
-        )
-    except _SELECTION_FAILURES as error:
-        code, detail = _selection_refusal(request.before_path, error)
-        return {
-            "ok": True,
-            "state": "refused",
-            "repositoryId": repositoryId,
+            "memoryRoot": request.memory_root,
             "refusalCode": code,
             "refusalDetail": detail,
         }
-    if result.state == "refused":
-        return {
+
+    root = Path(request.memory_root)
+    if root.is_file():
+        return refused(
+            LEGACY_FORMAT_CODE,
+            legacy_format_refusal(
+                root.parent,
+                operation="knowledge_diff",
+                subject=f"the file {root}",
+                database_file=True,
+            ),
+        )
+    if not root.is_dir():
+        return refused(
+            "selected_input_unavailable",
+            f"the selected memory root does not exist: {root}; name a memory repository",
+        )
+    inside = _repository_holding(root)
+    if inside is not None:
+        return refused(
+            "selected_input_unavailable",
+            f"the selected memory root {root} is a directory inside the memory repository at "
+            f"{inside}, and the knowledge files are found from the repository root: pass "
+            f"{inside} as memoryRoot, and name a file or a source with `path` to narrow the answer",
+        )
+    trees = _diff_trees(root, request)
+    if isinstance(trees, _Refusal):
+        return refused(trees.code, trees.detail)
+    compared = _compared(root, request, trees)
+    if isinstance(compared, _Refusal):
+        return refused(compared.code, compared.detail)
+    return _bounded_body(request, trees, compared)
+
+
+def _repository_holding(root: Path) -> Path | None:
+    """The root of the repository that ``root`` lies inside, when ``root`` is not that root itself.
+
+    Git reads its pathspecs from the directory it runs in, so a directory below the repository root
+    would be compared as if it held the whole memory tree and answer that nothing changed.
+    """
+
+    try:
+        named = run_git(
+            root, ["rev-parse", "--show-toplevel"], GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS)
+        )
+    except (OSError, subprocess.SubprocessError, GitPreparationError):
+        return None
+    top = named.stdout.strip()
+    if named.returncode != 0 or not top:
+        return None
+    return None if Path(top).resolve() == root.resolve() else Path(top)
+
+
+def _bounded_body(
+    request: DiffToolRequest, trees: tuple[str, str], diff: ReviewKnowledgeTreeDiff
+) -> dict[str, Any]:
+    """The ``compared`` body within the threshold, naming every file it had to leave out."""
+
+    def body(part: BoundedDiff) -> dict[str, Any]:
+        answer: dict[str, Any] = {
             "ok": True,
-            "state": "refused",
-            "repositoryId": repositoryId,
-            "refusalCode": None if result.refusal is None else result.refusal.code,
-            "refusalDetail": None if result.refusal is None else result.refusal.detail,
+            "state": "compared",
+            "memoryRoot": request.memory_root,
+            "beforeRevision": request.before,
+            "afterRevision": request.after or WORKING_TREE,
+            "threshold": threshold_block(),
+            "complete": part.complete,
+            "diff": part.diff.model_dump(mode="json"),
         }
+        if not part.complete:
+            answer["leftOut"] = _left_out(request, trees, diff.changed_files, part.left_out)
+        return answer
+
+    budget = KNOWLEDGE_PAGE_THRESHOLD_TOKENS - ENVELOPE_RESERVE_TOKENS
+    return body(bounded_diff(diff, lambda part: response_tokens(body(part)) <= budget))
+
+
+def _left_out(
+    request: DiffToolRequest, trees: tuple[str, str], changed: int, left_out: LeftOut
+) -> dict[str, Any]:
+    """What one answer does not hold, with the request that reaches each part of it."""
+
+    git = f"git -C {request.memory_root} diff -M {trees[0]} {trees[1]}"
+    said: list[str] = []
+    steps: list[str] = []
+    if left_out.files:
+        said.append(
+            f"{left_out.files} of the {changed} changed files do not fit within the "
+            f"{KNOWLEDGE_PAGE_THRESHOLD_TOKENS}-token threshold of one answer, so their patches "
+            f"are left out; `paths` names {len(left_out.paths)} of them in the answer's order"
+        )
+        steps.append(
+            "pass one path of `paths` (or a source path, or a `recordId`) as `path` to read that "
+            "file's patch"
+        )
+    if left_out.unnamed:
+        said.append(f"{left_out.unnamed} more could not even be named within the threshold")
+        steps.append(f"`{git} --name-only -- knowledge onboarding` lists every changed file")
+    if left_out.cut_patches:
+        said.append(
+            f"the patch of {', '.join(left_out.cut_patches)} is cut short, because one patch is "
+            "longer than an answer or than the longest patch a file change carries"
+        )
+        steps.append(f"`{git} -- <path>` prints a file's whole patch")
     return {
-        "ok": True,
-        "state": "compared",
-        "repositoryId": repositoryId,
-        "semanticEffectLabels": supplied,
-        "payload": result.model_dump(mode="json"),
-        "memoryTrees": _memory_trees(before, after),
-        "indexComplete": _index_complete(before, after),
+        "files": left_out.files,
+        "paths": list(left_out.paths),
+        "pathsNotNamed": left_out.unnamed,
+        "cutPatches": list(left_out.cut_patches),
+        "detail": "; ".join(said),
+        "nextAction": "; ".join(steps),
     }
 
 
-def _memory_trees(
-    before: SelectedKnowledgeDataset, after: SelectedKnowledgeDataset
-) -> dict[str, Any] | None:
-    """The memory-tree binding of each side read through an index, or ``None`` for two databases."""
+@dataclass(frozen=True)
+class _Refusal:
+    """Why one ``knowledge_diff`` request is refused: the shipped code and the sentence."""
 
-    sides = {
-        side: memory_tree_block(selected.memory_tree)
-        for side, selected in (("before", before), ("after", after))
-        if selected.memory_tree is not None
-    }
-    return sides or None
+    code: str
+    detail: str
 
 
-def _diff_request(request: dict[str, Any] | None) -> Any:
-    """The shipped diff request one tool call describes, taken from the caller's own validated body.
+def _diff_trees(root: Path, request: DiffToolRequest) -> tuple[str, str] | _Refusal:
+    """The tree each side of the request names, or the refusal the first unusable side earns."""
 
-    The namespace is **not** written into the body here. ``KnowledgeDiffRequest`` declares no
-    ``repository_id`` and its base model forbids undeclared fields, so injecting one made every call
-    of this tool raise ``validation error for KnowledgeDiffRequest: repository_id -- Extra inputs are
-    not permitted`` before any comparison ran. Nothing was lost with the injection: a comparison's
-    namespace is named twice already, by the two sides' own ``KnowledgeReadContext``, each of which
-    carries the ``repository_id`` its snapshot must belong to. The regression this case exists for is
-    the adversarial coverage review's finding ``A-2``: the family had a roster row and no functional
-    case, which is what let a body that could never validate ship as a mounted operation.
+    trees: list[str] = []
+    for named in (request.before, request.after):
+        resolved = _working_tree(root) if named is None else _resolve_tree(root, named)
+        revision = WORKING_TREE if named is None else named
+        if isinstance(resolved, str):
+            return _Refusal("selected_input_unavailable", resolved)
+        if not resolved.converted:
+            return _Refusal(
+                LEGACY_FORMAT_CODE,
+                legacy_format_refusal(
+                    root,
+                    operation="knowledge_diff",
+                    subject=f"the memory tree {root} at {revision} ({resolved.tree})",
+                ),
+            )
+        trees.append(resolved.tree)
+    return trees[0], trees[1]
+
+
+def _compared(
+    root: Path, request: DiffToolRequest, trees: tuple[str, str]
+) -> ReviewKnowledgeTreeDiff | _Refusal:
+    """The diff of the two trees, cut to what the request selects, or why it cannot be answered."""
+
+    try:
+        selected = narrowed_diff(knowledge_file_diff(root, *trees), request.record_id, request.path)
+        absent = _absent_selector(root, request, trees, selected)
+    except (OSError, ValueError, GitPreparationError) as error:
+        return _Refusal("snapshot_unavailable", f"the two memory trees cannot be compared: {error}")
+    return selected if absent is None else _Refusal("selector_absent", absent)
+
+
+def _absent_selector(
+    root: Path, request: DiffToolRequest, trees: tuple[str, str], selected: ReviewKnowledgeTreeDiff
+) -> str | None:
+    """Why a selector names nothing in either tree, or ``None`` when each names something.
+
+    A record or a file that a tree holds and that did not change is a true empty answer; a selector
+    that names nothing would read the same, so it is refused by name. The trees are listed only
+    when a selector was given and selected nothing.
     """
 
-    return KnowledgeDiffRequest.model_validate(dict(request or {}))
+    if (request.record_id is None and request.path is None) or selected.changed_files:
+        return None
+    held = held_paths(root, trees)
+    searched = (
+        f"{request.before} ({trees[0]}) and {request.after or WORKING_TREE} ({trees[1]}) were "
+        "searched"
+    )
+    if request.record_id is not None and not held.holds_record(request.record_id):
+        return (
+            f"neither memory tree holds a record {request.record_id!r}: {searched}; name the "
+            "identifier of a record file under knowledge/, for example INV-… or FAM-…"
+        )
+    if request.path is not None and not held.names(request.path):
+        return (
+            f"`path` {request.path!r} names nothing in either memory tree: {searched}; name a "
+            "knowledge file by its path in the memory repository (under knowledge/ or "
+            "onboarding/), or a source file or route by its path in the code repository"
+        )
+    return None
 
 
-def _supplied_effect_labels(request: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """The effect labels an identified agent or assessment supplied, and nothing else.
+def _working_tree(root: Path) -> _ResolvedTree | str:
+    """The memory working tree as a Git tree id, captured through a private index.
 
-    The builder reads them from the caller's own body. It never derives one from the change, because
-    "Semantic effect labels are included only when supplied by an identified agent/assessment, not
-    inferred from the diff" is the whole of what this operation promises.
+    The same capture the closeout and the reviewer use: the index is a scratch file, no ref, branch
+    or real index moves, and the tree's objects are unreferenced until something names them.
     """
 
-    body = request or {}
-    supplied = body.get("semantic_effect_labels") or body.get("semanticEffectLabels") or []
-    labels: list[dict[str, Any]] = []
-    for entry in supplied:
-        if isinstance(entry, dict) and entry.get("supplied_by"):
-            labels.append(dict(entry))
-    return labels
+    try:
+        with tempfile.TemporaryDirectory(prefix="ar-knowledge-diff-") as scratch:
+            tree = worktree_candidate_tree(root, Path(scratch) / "index")
+        marker = run_git(
+            root,
+            ["cat-file", "-e", f"{tree}:{LAYOUT_MARKER_PATH}"],
+            GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS),
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError, GitPreparationError) as error:
+        return f"the memory working tree at {root} cannot be captured: {error}"
+    return _ResolvedTree(tree, marker.returncode == 0)
+
+
+@dataclass(frozen=True)
+class _ResolvedTree:
+    tree: str
+    converted: bool
+
+
+def _resolve_tree(root: Path, revision: str) -> _ResolvedTree | str:
+    """The tree ``revision`` names in the repository at ``root``, or why it names none."""
+
+    options = GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS)
+    try:
+        named = run_git(
+            root, ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{tree}}"], options
+        )
+        if named.returncode != 0 or not _TREE_ID_PATTERN.match(named.stdout.strip()):
+            return f"{revision!r} names no tree in the Git repository at {root}"
+        tree = named.stdout.strip()
+        marker = run_git(root, ["cat-file", "-e", f"{tree}:{LAYOUT_MARKER_PATH}"], options)
+    except (OSError, subprocess.SubprocessError, GitPreparationError) as error:
+        return f"Git could not read the memory tree {revision!r} at {root}: {error}"
+    return _ResolvedTree(tree, marker.returncode == 0)
+
+
+# How many violations one response lists. The validator's report of a whole tree checked without a
+# base can hold thousands of rows (every anchor of every card); the counts always cover all of them.
+MAX_LISTED_VIOLATIONS = 100
 
 
 @dataclass(frozen=True)
 class IntegrityCheckRequest:
     """One ``knowledge_integrity_check`` call's inputs, as the registered tool received them."""
 
-    databasePath: str | None = None
-    repositoryId: str | None = None
-    scopeId: str | None = None
-    runId: str | None = None
-    inputDigest: str | None = None
+    memoryRoot: str | None = None
+    codeRoot: str | None = None
+    baseCommits: tuple[str, ...] | None = None
     contractPath: str | None = None
 
 
-def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[str, Any]:
-    """Report declared structural-rule violations and their limits, through the choke point.
+@dataclass(frozen=True)
+class _ValidatorInputs:
+    """The memory tree the validator reads, its paired code checkout and its comparison bases."""
 
-    ``contractPath`` names a leaf by its series contract and adds the leaf's latest persisted
-    MIK-R08 worklist (:func:`leaf_worklist_fields`). A dataset (``databasePath`` with
-    ``repositoryId``) and a leaf may be named together or alone; naming neither is refused.
+    memory_root: Path
+    code_root: Path
+    bases: tuple[str, ...]
+
+
+def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[str, Any]:
+    """Run the knowledge validator over one memory tree, through the choke point (MIK-R26 rule 5).
+
+    ``contractPath`` names a leaf by its contract: the validator then reads the leaf's memory
+    worktree against its recorded memory base and its code worktree, and the response adds the
+    leaf's latest persisted MIK-R08 worklist (:func:`leaf_worklist_fields`). ``memoryRoot`` with
+    ``codeRoot`` names a tree and its paired code checkout directly. Naming neither is refused.
     """
 
-    if request.databasePath is not None and request.repositoryId is not None:
-        result = _integrity_check_result(
-            databasePath=request.databasePath,
-            repositoryId=request.repositoryId,
-            scopeId=request.scopeId,
-            runId=request.runId,
-            inputDigest=request.inputDigest,
-        )
-    elif request.contractPath is not None and request.databasePath is None:
-        result = {
-            "ok": True,
-            "state": "reported",
-            "repositoryId": request.repositoryId,
-            "compatible": None,
-        }
-    else:
-        result = {
-            "ok": True,
-            "state": "refused",
-            "repositoryId": request.repositoryId,
-            "refusalCode": "selected_input_unavailable",
-            "refusalDetail": (
-                "name a knowledge dataset (databasePath with repositoryId), a leaf "
-                "(contractPath), or both"
-            ),
-            "compatible": None,
-        }
+    result = _integrity_check_result(request)
     if request.contractPath is not None:
         result.update(leaf_worklist_fields(request.contractPath))
     return _tool_payload("knowledge_integrity_check", result)
 
 
-def _integrity_check_result(
-    *,
-    databasePath: str,
-    repositoryId: str,
-    scopeId: str | None = None,
-    runId: str | None = None,
-    inputDigest: str | None = None,
-) -> dict[str, Any]:
-    """The one ``knowledge_integrity_check`` body, before the registered model validates it.
-
-    ``compatible`` is ``None`` and is present. A caller that wants a compatibility decision makes it;
-    this operation reports conditions, a traversal scope and the observable limitations of the read,
-    which is what ``Doc13:186`` writes for it.
-
-    The scope selects a run and never borrows another scope's run. Within one scope a namespace may
-    hold several runs -- the same policy re-executed over a moved snapshot is exactly that case --
-    so the exact ``runId`` or the exact ``inputDigest`` a caller names selects among them, and the
-    response always carries the selected run's identity, its input identity and the digest over it.
-    A caller is never left holding conditions it cannot tie to the inputs they were measured over.
-    """
-
-    # The report is a read of a dataset the caller selected, so a selection that cannot be read is
-    # reported as a refusal with the same shipped code the application seam uses, rather than
-    # escaping as ``ToolError`` -- a report about a file nobody could open is not a report.
-    try:
-        conditions = _recorded_conditions(
-            Path(databasePath),
-            repositoryId,
-            scopeId,
-            selector=_ExactInputSelector(run_id=runId, input_digest=inputDigest),
-        )
-    except (KnowledgeStorageError, apsw.Error, OSError) as error:
-        code, detail = _unusable_dataset(databasePath, error)
-        return {
-            "ok": True,
-            "state": "refused",
-            "repositoryId": repositoryId,
-            "refusalCode": code,
-            "refusalDetail": detail,
-            "compatible": None,
-        }
-    return {
-        "ok": True,
-        "state": "reported",
-        "repositoryId": repositoryId,
-        "conditions": conditions["conditions"],
-        "traversalScope": conditions["scope"],
-        "selectedRunId": conditions["selectedRunId"],
-        "inputDigest": conditions["inputDigest"],
-        "inputIdentities": conditions["inputIdentities"],
-        "matchingRunIds": conditions["matchingRunIds"],
-        "exactInputSelector": conditions["exactInputSelector"],
-        "limitations": conditions["limitations"],
-        "compatible": None,
-        "assessment": None,
-        "unresolved": conditions["unresolved"],
-    }
-
-
-@dataclass(frozen=True)
-class _ExactInputSelector:
-    """The exact run selector a caller named, as one value.
-
-    ``runId`` and ``inputDigest`` are two spellings of one request -- "report the run with this
-    identity", "report the run measured over these inputs" -- so they travel together and are echoed
-    together. A pair of ``None``s is a fact worth reporting rather than an absence: it says the run
-    below was selected by scope alone, and that ``matchingRunIds`` is where a narrower request would
-    come from.
-    """
-
-    run_id: str | None = None
-    input_digest: str | None = None
-
-    def as_wire(self) -> dict[str, Any] | None:
-        """The selector as the response spells it, or ``None`` when the caller named none."""
-
-        if self.run_id is None and self.input_digest is None:
-            return None
-        return {"runId": self.run_id, "inputDigest": self.input_digest}
-
-
-def _recorded_conditions(
-    database_path: Path,
-    repository_id: str,
-    scope_id: str | None,
-    *,
-    selector: _ExactInputSelector | None = None,
-) -> dict[str, Any]:
-    """The recorded detection conditions for the requested scope and exact inputs, with their limits.
-
-    The scope SELECTS the run; it is not echoed beside one. Before this, every ``detection_run``
-    record was read in ``record_id`` order and the first was reported, whatever scope the caller
-    asked for -- so with more than one run recorded the answer was whichever run happened to sort
-    first, while the response still named the requested scope. A caller reading "scope X" beside
-    conditions measured over scope Y was told something false about a real dataset.
-
-    The run's own ``governing_route_id`` is the registered traversal scope the tool documents, so the
-    match is against that. Within the selected scope, an exact ``run_id`` or ``input_digest`` picks
-    one run out of several instead of the report silently choosing the first identity-sorted match
-    and omitting which one it read. A caller that names no scope keeps the previous behaviour -- the
-    first recorded run -- and a caller whose selection matches no run is told so, with the runs that
-    did match carried back, rather than handed a different run's conditions.
-    """
-
-    resolved = selector or _ExactInputSelector()
-    connection = open_read_only_database(database_path)
-    try:
-        rows = tuple(
-            connection.execute(
-                "SELECT record_id FROM knowledge_record WHERE repository_id = ? AND kind = ? "
-                "ORDER BY record_id",
-                (repository_id, "detection_run"),
-            )
-        )
-        if not rows:
-            return _no_detection_run(scope_id, resolved)
-        store = OpenedKnowledgeStore(
-            database_path=database_path,
-            repository_id=repository_id,
-            schema=inspect_schema(connection),
-            connection=connection,
-            resource_lock_path=database_path.with_name(f"{database_path.name}.lock"),
-        )
-        run_ids = tuple(str(row[0]) for row in rows)
-        result = _run_for_scope(store, run_ids, scope_id, selector=resolved)
-        matching = _runs_in_scope(store, run_ids, scope_id)
-        if result is None:
-            return _no_run_for_scope(scope_id, resolved, matching)
-    finally:
-        connection.close()
-    return _condition_report(result, scope_id, resolved, matching)
-
-
-def _no_detection_run(scope_id: str | None, selector: _ExactInputSelector) -> dict[str, Any]:
-    """The honest report when no detection run is recorded: no conditions and a stated limit."""
-
-    return _report_facts(
-        scope=scope_id or "registered",
-        selector=selector,
-        matching_runs=[],
-        limitations=["no detection run is recorded for this namespace at this snapshot"],
-        unresolved=["no recorded detection run to report conditions from"],
-    )
-
-
-def _run_for_scope(
-    store: OpenedKnowledgeStore,
-    run_ids: Iterable[str],
-    scope_id: str | None,
-    *,
-    selector: _ExactInputSelector | None = None,
-) -> Any:
-    """The first recorded run this request selects, or ``None`` when nothing matches.
-
-    With no scope named, the first recorded run is the answer -- the behaviour this operation always
-    had, kept so a caller that does not scope its request is not newly refused. With one named, a run
-    measured over a different scope is not a weaker answer but the wrong one, so the search
-    continues and a namespace with no matching run reports that instead.
-
-    An exact ``run_id`` or ``input_digest`` is applied as well, and unlike the scope it *is* a
-    binding: a run whose recorded identity or input digest does not match the caller's is a
-    different execution, so the search continues past it and a request that names inputs nothing was
-    measured over reports no run rather than the first one that shares a scope.
-    """
-
-    resolved = selector or _ExactInputSelector()
-    for candidate_id in run_ids:
-        result = read_detection_run(store, candidate_id)
-        run = result.run
-        if scope_id is not None and (run is None or run.governing_route_id != scope_id):
-            continue
-        if resolved.run_id is not None and candidate_id != resolved.run_id:
-            continue
-        if resolved.input_digest is not None and (
-            run is None or detection_input_digest(run) != resolved.input_digest
-        ):
-            continue
-        return result
-    return None
-
-
-def _runs_in_scope(
-    store: OpenedKnowledgeStore, run_ids: Iterable[str], scope_id: str | None
-) -> list[dict[str, Any]]:
-    """Every recorded run the requested scope selects, as identity facts for the caller."""
-
-    matching: list[dict[str, Any]] = []
-    for candidate_id in run_ids:
-        result = read_detection_run(store, candidate_id)
-        run = result.run
-        if run is None:
-            continue
-        if scope_id is not None and run.governing_route_id != scope_id:
-            continue
-        matching.append(_run_identity(run))
-    return matching
-
-
-def _run_identity(run: Any) -> dict[str, Any]:
-    """One run's identity facts: its own id, its registered scope and the digest of its inputs."""
-
-    return {
-        "runId": run.run_id,
-        "governingRouteId": run.governing_route_id,
-        "inputDigest": detection_input_digest(run),
-    }
-
-
-def _no_run_for_scope(
-    scope_id: str | None,
-    selector: _ExactInputSelector,
-    matching_runs: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """The honest report when no recorded run matches the requested scope and exact inputs."""
-
-    detail = (
-        f"no recorded detection run measured the requested scope {scope_id!r}; the conditions "
-        "of another scope's run are not reported in its place"
-        if scope_id is not None
-        else "no recorded detection run is recorded for this namespace"
-    )
-    return _report_facts(
-        scope=scope_id or "registered",
-        selector=selector,
-        matching_runs=matching_runs,
-        limitations=[detail],
-        unresolved=[
-            "no recorded detection run matches the requested scope and exact inputs; the carried "
-            "matchingRunIds list names the runs this scope does hold"
-        ],
-    )
-
-
-def _report_facts(
-    *,
-    scope: str,
-    selector: _ExactInputSelector,
-    matching_runs: list[dict[str, Any]],
-    limitations: list[str],
-    unresolved: list[str | None],
-) -> dict[str, Any]:
-    """One report's common facts: the scope, the exact selector echoed, and what matched."""
-
-    return {
-        "conditions": [],
-        "scope": scope,
-        "selectedRunId": None,
-        "inputDigest": None,
-        "inputIdentities": [],
-        "matchingRunIds": matching_runs,
-        "exactInputSelector": selector.as_wire(),
-        "limitations": limitations,
-        "unresolved": unresolved,
-    }
-
-
-def _condition_report(
-    result: Any,
-    scope_id: str | None,
-    selector: _ExactInputSelector,
-    matching_runs: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """The recorded conditions and limitations of one detection run, and no verdict.
-
-    The run the conditions came from is named here, beside the input identity and the digest over
-    it, so "these conditions" and "the inputs they were measured over" are one answer. Before this
-    the response omitted all three, which left a caller unable to tell a report about its own
-    candidate from a report about another run in the same scope.
-
-    ``matchingRunIds`` carries every run this scope holds, the selected one included, so a caller
-    that received the first identity-sorted match can see that it was one of several and issue an
-    exact request from the response it already has.
-    """
-
-    if result.state == "refused" or result.run is None:
-        return _report_facts(
-            scope=scope_id or "registered",
-            selector=selector,
-            matching_runs=matching_runs,
-            limitations=["the recorded detection run could not be read"],
-            unresolved=[None if result.refusal is None else result.refusal.detail],
-        )
-    conditions = [
-        {"code": signal.condition, "matched_facts": [signal.detail]} for signal in result.signals
-    ]
-    return {
-        "conditions": conditions,
-        "scope": result.run.governing_route_id,
-        "selectedRunId": result.run.run_id,
-        "inputDigest": detection_input_digest(result.run),
-        "inputIdentities": [detection_input_identity(result.run)],
-        "matchingRunIds": matching_runs,
-        "exactInputSelector": selector.as_wire(),
-        "limitations": list(result.run.limitations),
-        "unresolved": [] if conditions else ["no condition matched the recorded scope"],
-    }
-
-
-def knowledge_project_payload(
-    request: ProjectToolRequest, *, coordination_root: str | None = None
-) -> dict[str, Any]:
-    """Render named read-only views into an explicitly authorized destination, through the choke point."""
-
-    return _tool_payload(
-        "knowledge_project", _project_result(request, coordination_root=coordination_root)
-    )
-
-
-def _project_result(
-    request: ProjectToolRequest, *, coordination_root: str | None = None
-) -> dict[str, Any]:
-    """The one ``knowledge_project`` body, before the registered model validates it."""
-
-    destinationRoot = request.destination_root
-    profile = DestinationProfile(
-        profile_id=request.profile_id,
-        destination_root=destinationRoot,
-        formats=request.formats or ("markdown",),  # type: ignore[arg-type]
-        renderer_version=VIEW_RENDERER_VERSION,
-    )
-    requests = _projection_requests(request.repository_id, request.views)
-    if not requests:
-        return _refused_project(
-            destinationRoot,
-            "unresolved_projection_input",
-            "no view was named to project, so no artifact is emitted",
-        )
-    selected = _projection_selection(request, requests, coordination_root)
-    if isinstance(selected, dict):
-        return selected
-    report = project_knowledge(
-        selected.database_path,
-        profile,
-        requests,
-        ProjectionOptions(
-            authorized_overwrites=request.authorized_overwrites,
-            whole_views=selected.memory_tree is not None,  # L01: no 64-row cap on a tree
-        ),
-    )
-    if report.state == "refused" or report.refusal is not None:
-        assert report.refusal is not None
-        return _refused_project(destinationRoot, report.refusal.code, report.refusal.detail)
-    return {
-        "ok": True,
-        "state": "projected",
-        "destinationRoot": report.destination_root,
-        "rendererVersion": report.renderer_version,
-        "manifestGeneration": report.manifest_generation,
-        "published": [
-            outcome.destination_relative_path
-            for outcome in report.outcomes
-            if outcome.state in ("published", "unchanged")
-        ],
-        "retained": [entry.model_dump(mode="json") for entry in report.retained],
-        "discrepancies": [entry.model_dump(mode="json") for entry in report.discrepancies],
-        "memoryTree": memory_tree_block(selected.memory_tree),
-        "indexComplete": _index_complete(selected),
-    }
-
-
-def _projection_selection(
-    request: ProjectToolRequest,
-    requests: tuple[tuple[ViewRequest, str], ...],
-    coordination_root: str | None,
-) -> SelectedKnowledgeDataset | dict[str, Any]:
-    """The dataset a projection reads, or its refusal: an unreadable selection, or a converted
-    tree's seed that the tree does not hold (never projected empty, L37)."""
-
-    try:
-        selected = _select(request.database_path, coordination_root)
-        absent = _tree_seeds_absent(selected, requests)
-    except _SELECTION_FAILURES as error:
-        refusal = _selection_refusal(request.database_path, error)
-        return _refused_project(request.destination_root, *refusal)
-    if absent is not None:
-        return _refused_project(request.destination_root, "selector_absent", absent)
-    return selected
-
-
-def _tree_seeds_absent(
-    selected: SelectedKnowledgeDataset, requests: tuple[tuple[ViewRequest, str], ...]
-) -> str | None:
-    """On a converted tree, the reason the first seed the tree does not hold is refused."""
-
-    tree = selected.memory_tree
-    if tree is None:
-        return None
-    for view, _subject in requests:
-        absent = tree_seed_refusal(
-            selected.database_path,
-            tree.tree_key,
-            invariant_revision_id=view.invariant_revision_id,
-            family_revision_id=view.family_revision_id,
-        )
-        if absent is not None:
-            return absent
-    return None
-
-
-def _projection_requests(
-    repository_id: str, views: tuple[dict[str, Any], ...]
-) -> tuple[tuple[ViewRequest, str], ...]:
-    """One view request per named projection input, each with the identity it is about."""
-
-    requests: list[tuple[ViewRequest, str]] = []
-    for entry in views:
-        view = str(entry.get("view", ""))
-        subject = str(entry.get("subject", view))
-        requests.append(
-            (
-                ViewRequest(
-                    view=view,  # type: ignore[arg-type]
-                    repository_id=repository_id,
-                    invariant_revision_id=entry.get("invariantRevisionId"),
-                    family_revision_id=entry.get("familyRevisionId"),
-                    ordering_input=str(entry.get("orderingInput", "stable_ordering")),  # type: ignore[arg-type]
-                ),
-                subject,
-            )
-        )
-    return tuple(requests)
-
-
-def _refused_project(destination_root: str, code: str, detail: str) -> dict[str, Any]:
+def _refused_check(memory_root: str | None, code: str, detail: str) -> dict[str, Any]:
     return {
         "ok": True,
         "state": "refused",
-        "destinationRoot": destination_root,
-        "rendererVersion": VIEW_RENDERER_VERSION,
+        "memoryRoot": memory_root,
         "refusalCode": code,
         "refusalDetail": detail,
+    }
+
+
+def _validator_inputs(request: IntegrityCheckRequest) -> _ValidatorInputs | tuple[str, str]:
+    """The trees one call names, or the refusal code and detail for a call that names too little."""
+
+    memory_root, code_root, bases = request.memoryRoot, request.codeRoot, request.baseCommits
+    if request.contractPath is not None and (memory_root is None or code_root is None):
+        try:
+            contract = load_contract(Path(request.contractPath))
+        except (ValueError, OSError) as error:
+            return (
+                "selected_input_unavailable",
+                f"contractPath {request.contractPath} cannot be loaded as a worktree contract: "
+                f"{error}",
+            )
+        if memory_root is None and contract.memory_worktree is not None:
+            memory_root = str(contract.memory_worktree)
+            if bases is None and contract.memory_base_commit:
+                bases = (contract.memory_base_commit,)
+        if code_root is None:
+            code_root = str(contract.code_worktree)
+    if memory_root is None or code_root is None:
+        return (
+            "selected_input_unavailable",
+            "name a leaf (contractPath), or a memory tree with its paired code checkout "
+            "(memoryRoot with codeRoot); the validator checks anchors against the code tree",
+        )
+    return _ValidatorInputs(Path(memory_root), Path(code_root), tuple(bases or ()))
+
+
+def _integrity_check_result(request: IntegrityCheckRequest) -> dict[str, Any]:
+    """The one ``knowledge_integrity_check`` body, before the registered model validates it.
+
+    The validator is the one :func:`validate_tree` every commit route runs, over the tree's working
+    files: against the bases named (a leaf's recorded memory base by default), or with no base, in
+    which case every anchor is checked for path existence. It writes nothing and opens no database.
+    """
+
+    inputs = _validator_inputs(request)
+    if not isinstance(inputs, _ValidatorInputs):
+        return _refused_check(request.memoryRoot, *inputs)
+    memory_root = str(inputs.memory_root)
+    unreadable = _memory_tree_refusal(memory_root, "knowledge_integrity_check")
+    if unreadable is not None:
+        return _refused_check(memory_root, *unreadable)
+    if not inputs.code_root.is_dir():
+        return _refused_check(
+            memory_root,
+            "selected_input_unavailable",
+            f"the paired code checkout does not exist: {inputs.code_root}",
+        )
+    try:
+        report = validate_tree(
+            knowledge_tree_from_directory(inputs.memory_root),
+            bases=[
+                knowledge_tree_from_git(inputs.memory_root, base, label=f"base {base}")
+                for base in inputs.bases
+            ],
+            code=CodeDirectory(label=inputs.code_root.as_posix(), root=inputs.code_root),
+        )
+    except (OSError, KnowledgeTreeReadError, ValueError) as error:
+        return _refused_check(
+            memory_root,
+            "snapshot_unavailable",
+            f"the validator's inputs could not be read: {error}",
+        )
+    return {
+        "ok": True,
+        "state": "reported",
+        "memoryRoot": memory_root,
+        "codeRoot": inputs.code_root.as_posix(),
+        "bases": list(inputs.bases),
+        "validation": _validation_block(report),
+    }
+
+
+def _validation_block(report: ValidationReport) -> dict[str, Any]:
+    """The validator's report as the response carries it: every count, and a bounded listing.
+
+    Refusing violations are listed before report-only findings, so a truncated listing never hides
+    a refusal behind findings that refuse nothing.
+    """
+
+    counts: dict[tuple[str, bool], int] = {}
+    for violation in report.violations:
+        key = (violation.rule, violation.report_only)
+        counts[key] = counts.get(key, 0) + 1
+    listed = [*report.refusals, *report.reports][:MAX_LISTED_VIOLATIONS]
+    return {
+        "candidate": report.candidate,
+        "ok": report.ok,
+        "refusalCount": len(report.refusals),
+        "reportCount": len(report.reports),
+        "byRule": [
+            {"rule": rule, "reportOnly": report_only, "count": count}
+            for (rule, report_only), count in sorted(counts.items())
+        ],
+        "violations": [violation.to_document() for violation in listed],
+        "violationsTruncated": len(report.violations) > len(listed),
     }

@@ -18,6 +18,7 @@ from typing import get_args
 from agents_remember.models.worktree import NextOperation
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_paths,
+    current_curator_coherence_predecessor,
 )
 from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -188,15 +189,10 @@ def _external_memory_leaf(root: Path) -> WorktreeContract:
     )
 
 
-def test_a_published_coherence_authority_puts_validate_before_integration(tmp_path: Path) -> None:
-    """D-25: the validate window closes at finalize, so the hint must name the step before it.
-
-    ``lifecycle_finalize_task``'s automatic cleanup collects the enclosure root, and the standalone
-    ``curator_coherence`` validate addresses exactly that location -- so a leaf that follows the old
-    chain (closeout -> integrate -> finalize) can never re-prove the authority it published. The
-    guidance now names the validation as the move out of closeout-completed, for precisely the leaf
-    that has something to validate.
-    """
+def test_published_coherence_remains_historical_and_closeout_points_to_integration(
+    tmp_path: Path,
+) -> None:
+    """Closeout's own writes change the candidate; its historical proof is preserved as recorded."""
 
     contract = _external_memory_leaf(tmp_path)
     paths = curator_coherence_paths(contract)
@@ -204,22 +200,22 @@ def test_a_published_coherence_authority_puts_validate_before_integration(tmp_pa
     paths.canonical.write_text(
         '{"schemaVersion": "ar-curator-coherence-authority/v1"}\n', encoding="utf-8"
     )
+    recorded = paths.canonical.read_bytes()
+    digest = current_curator_coherence_predecessor(contract)
 
     guidance = lifecycle_guidance(contract)
 
     assert guidance["phase"] == "integration-pending"
-    assert guidance.get("nextTool") == "curator_coherence"
+    assert guidance.get("nextTool") == "worktree_integrate"
     assert guidance["nextOperation"] == "request_integration_decision"
     args = guidance.get("nextArgs", {})
     assert args["contract_path"] == contract.contract_path.as_posix()
-    assert args["action"] == "validate"
-    assert args["caller"] == {
-        "role": "curator",
-        "task_document_ref": {"repository": "repo", "path": "leaf/leaf.json"},
-    }
-    # The reason has to travel with the step, or the next operator skips it again.
-    assert "validate now" in guidance["summary"]
-    assert "lifecycle_finalize_task's automatic cleanup collects it" in guidance["summary"]
+    assert args["strategy"] == "ff-only" and args["dry_run"] is True
+    assert "action" not in args and "caller" not in args
+    assert digest[:12] in guidance["summary"]
+    assert "pre-closeout candidate" in guidance["summary"]
+    assert "does not validate the live tree" in guidance["summary"]
+    assert paths.canonical.read_bytes() == recorded
 
 
 def test_a_leaf_that_has_not_published_is_still_told_to_integrate(tmp_path: Path) -> None:

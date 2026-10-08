@@ -24,17 +24,13 @@ from agents_remember.application.knowledge_read import (
     read_knowledge_scope,
     read_row_counts,
 )
-from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import _manifest_digest
 from agents_remember.memory.knowledge.schema_generations import (
-    GENERATIONS,
-    generation_for_key,
+    CURRENT_GENERATION,
     generation_of_database,
 )
-from agents_remember.memory.knowledge.store import open_knowledge_store
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
     AnchorResolution,
     FamilyRevisionSeed,
@@ -49,14 +45,15 @@ from agents_remember.models.knowledge.read import (
     SelectionReason,
     continue_from_cursor,
 )
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-    SymbolLocator,
-)
+from agents_remember.models.knowledge.source import FileLocator, SymbolLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from generation_test_support import declared_schema_name
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from read_scope_test_support import (
     ABSENT_PATH,
     ABSENT_RECORDED_BLOB,
@@ -81,22 +78,14 @@ SCHEMA_NAME = "ar-knowledge-sqlite/v1"
 
 
 def _unregistered_generation_name() -> str:
-    """Return a schema name **no** registered generation carries, derived from the registry.
+    """A schema name this build does not declare: one past the declared version.
 
     The "another schema generation" case below needs a declared generation the build does not
-    support, and a literal is exactly how it stopped being one: the case spelled
-    ``ar-knowledge-sqlite/v9`` until ``KS-R21@v1`` registered generation 9, after which the
-    declaration named the dataset's *own* generation, the guard returned ``page`` where the case
-    asserted ``refused``, and the only case for the caller-declared-generation rule measured the
-    supported path instead (adversarial coverage review finding ``A-1``). The probe asks the code's
-    own registry rather than restating a number: it starts one past the newest registered version
-    and walks up to the first name the registry does not contain.
+    support, and it is derived from the code's own declaration rather than spelled, so it cannot
+    silently become the dataset's own schema when the declared version changes.
     """
 
-    candidate = GENERATIONS[-1].user_version + 1
-    while generation_for_key(f"ar-knowledge-sqlite/v{candidate}", candidate) is not None:
-        candidate += 1
-    return f"ar-knowledge-sqlite/v{candidate}"
+    return f"ar-knowledge-sqlite/v{CURRENT_GENERATION.user_version + 1}"
 
 
 UNSUPPORTED_SCHEMA_NAME = _unregistered_generation_name()
@@ -829,8 +818,8 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
     current generation again, because a registry that ever contains the name reddens here.
     """
 
-    assert UNSUPPORTED_SCHEMA_NAME not in {generation.schema_name for generation in GENERATIONS}, (
-        f"{UNSUPPORTED_SCHEMA_NAME} is a registered generation, so this case no longer reaches the "
+    assert CURRENT_GENERATION.schema_name != UNSUPPORTED_SCHEMA_NAME, (
+        f"{UNSUPPORTED_SCHEMA_NAME} is the declared schema, so this case no longer reaches the "
         "guard it exists for"
     )
     resolved = anchored_context(fixture)

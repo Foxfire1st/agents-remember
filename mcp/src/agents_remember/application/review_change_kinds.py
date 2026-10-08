@@ -106,7 +106,7 @@ def with_change_kinds(
 ) -> ReviewFamilyContext:
     """``context`` with each family entry carrying the change facts of its returned members.
 
-    A dataset review (no tree comparison) gets its context back exactly as composed.
+    A review with no tree comparison gets its context back exactly as composed.
     """
 
     if trees is None or not context.entries:

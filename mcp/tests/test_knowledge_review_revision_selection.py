@@ -43,7 +43,6 @@ from agents_remember.application.review_revision_comparison import (
     revision_heads,
     select_subject_revisions,
 )
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffRequest,
@@ -55,13 +54,14 @@ from agents_remember.models.knowledge.read import (
     InvariantRevisionSeed,
 )
 from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.review import ReviewSurfaceRequest
+from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
+from knowledge_rows_test_support import (
     InvariantRequest,
     RevisionDraft,
     RevisionRequest,
+    open_knowledge_store,
 )
-from agents_remember.models.knowledge.review import ReviewSurfaceRequest
-from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
 pytestmark = pytest.mark.evidence_unit
 

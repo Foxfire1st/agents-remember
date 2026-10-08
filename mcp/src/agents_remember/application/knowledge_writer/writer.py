@@ -59,6 +59,7 @@ from agents_remember.models.knowledge_files.documents import (
     parse_history_document,
 )
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
+from agents_remember.models.knowledge_files.unexplained import FILE_ITEM_KIND, HUNK_ITEM_KIND
 
 UNCONVERTED = (
     "this memory tree has no layout marker, so it is unconverted: the file writer writes converted "
@@ -129,6 +130,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         questions=request.questions,
         reconsiderations=_reconsideration_items(request.worklist),
         worklist_items=_worklist_items(request.worklist),
+        trace_items=_trace_items(request.worklist),
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
@@ -221,6 +223,7 @@ def _reconsideration_items(worklist: Mapping[str, Any] | None) -> dict[str, Mapp
 
 
 _ITEM_ID = re.compile(r"sha256:[0-9a-f]{64}")
+_UNEXPLAINED_KINDS = frozenset({HUNK_ITEM_KIND, FILE_ITEM_KIND})
 
 
 def _worklist_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str, str], ...]:
@@ -236,6 +239,29 @@ def _worklist_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str,
         and isinstance(item_id := item.get("id"), str)
         and _ITEM_ID.fullmatch(item_id)
     )
+
+
+def _trace_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str], ...]:
+    """``(onboarding subject, id)`` of every unexplained item the file's onboarding row answers.
+
+    An ``unexplained_hunk`` or ``unexplained_file`` item in an uncovered file is answered by the
+    file's onboarding trace (MIK-R10 rule 5); its facts name the trace's subject.
+    """
+
+    found: list[tuple[str, str]] = []
+    for item in (worklist or {}).get("items") or ():
+        facts = item.get("facts") if isinstance(item, Mapping) else None
+        trace = facts.get("onboardingTrace") if isinstance(facts, Mapping) else None
+        subject = trace.get("subject") if isinstance(trace, Mapping) else None
+        item_id = item.get("id") if isinstance(item, Mapping) else None
+        if (
+            isinstance(subject, str)
+            and isinstance(item_id, str)
+            and _ITEM_ID.fullmatch(item_id)
+            and item.get("kind") in _UNEXPLAINED_KINDS
+        ):
+            found.append((subject, item_id))
+    return tuple(found)
 
 
 def _append_raised(request: WriteRequest, raised: list[tuple[str, str]]) -> tuple[Problem, ...]:

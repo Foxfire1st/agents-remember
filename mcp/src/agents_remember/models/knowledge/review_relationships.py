@@ -16,8 +16,9 @@ two-sided fact rather than two one-sided rows. The rules the shape enforces:
 * **A state is never blank.** Every side states which snapshot fact it is: ``recorded`` (the
   relationship and its recorded address are both there), ``unresolved`` (the relationship is
   recorded and its address is not readable), ``ungoverned`` (the snapshot records the identity and no
-  governing route) or ``not_recorded`` (the snapshot does not record the identity at all). Each
-  carries the sentence that says so, and the two last states are deliberately different facts.
+  governing route), ``unavailable`` (the snapshot records the identity and its route declarations
+  were not read) or ``not_recorded`` (the snapshot does not record the identity at all). Each carries
+  the sentence that says so, and the three last states are deliberately different facts.
 * **Authored lineage is the author's own edge, and it is labelled as such.** A successor, a split and
   a merge are read from the snapshots' own predecessor tables; nothing here derives a lineage from a
   path's similarity, a label, a version or an insertion order, and the vocabulary has no field a
@@ -74,9 +75,12 @@ ReviewRelationshipSideName = Literal["before", "after"]
 # What one side of one relationship is. ``recorded`` is the ordinary case: the snapshot holds the
 # relationship row and the address it names. ``unresolved`` is the relationship recorded with an
 # address this display could not read, ``ungoverned`` is an identity the snapshot records with no
-# governing route, and ``not_recorded`` is an identity the snapshot does not record at all -- the
-# last two are different facts and neither is a missing route.
-ReviewRelationshipState = Literal["recorded", "absent", "unresolved", "ungoverned", "not_recorded"]
+# governing route, ``unavailable`` is an identity the snapshot records whose route declarations this
+# display could not read, and ``not_recorded`` is an identity the snapshot does not record at all --
+# the last three are different facts and none of them is a missing route.
+ReviewRelationshipState = Literal[
+    "recorded", "absent", "unresolved", "ungoverned", "unavailable", "not_recorded"
+]
 
 # How one relationship moved between the two snapshots. ``retracted`` and ``added`` are one-sided
 # facts: the association is recorded by one snapshot and the other snapshot does not hold it at all,
@@ -84,10 +88,13 @@ ReviewRelationshipState = Literal["recorded", "absent", "unresolved", "ungoverne
 # deliberately not ``retracted``: the other snapshot *holds* the record and the declared selection did
 # not reach it, which is a fact about the selection rather than a deletion -- the comparison's own
 # named misreading, kept out of this vocabulary by having its own word. ``reassigned`` is the
-# governing-route case: both snapshots record an association and the route that governs the identity
-# is not the same one.
+# family-association case: both snapshots record the association and the family revision it sits in
+# is not the same one. A governing route is never ``reassigned``: a family declares a set of routes,
+# so a changed route reads as one ``retracted`` and one ``added`` relationship. ``unresolved`` states
+# that no association comparison was measurable: a governing-route side whose route declarations
+# were not read is compared with nothing.
 ReviewRelationshipTransition = Literal[
-    "unchanged", "moved", "reassigned", "retracted", "outside_selection", "added"
+    "unchanged", "moved", "reassigned", "retracted", "outside_selection", "added", "unresolved"
 ]
 
 # The three authored relations the lineage entries name. They are read from the snapshots' own
@@ -114,6 +121,7 @@ ReviewRelationshipGapCode = Literal[
     "predecessor_records_no_relationship",
     "successor_line_unresolved",
     "route_not_recorded",
+    "route_unavailable",
 ]
 
 # Why one movement's two sides are displayed as one association. Every value is a *recorded* relation
@@ -308,7 +316,7 @@ class ReviewRelationshipMovement(KnowledgeModel):
                 "withdrawn, or held by the other snapshot outside the declared selection -- and once "
                 "per recorded side rather than summed"
             )
-        if self.transition in ("unchanged", "moved", "reassigned") and 0 in sides:
+        if self.transition in ("unchanged", "moved", "reassigned", "unresolved") and 0 in sides:
             raise ValueError(
                 "a two-sided transition displays the side each snapshot recorded; a movement with "
                 "one side is an addition or a retraction and says so"

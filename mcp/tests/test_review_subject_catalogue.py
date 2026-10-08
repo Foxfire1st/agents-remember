@@ -18,22 +18,21 @@ import pytest
 from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
-    resolve_review_candidate,
+    read_knowledge_review,
 )
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
-from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.review import ReviewSurfaceRequest
+from diff_scope_test_support import DiffFixture, build_diff_fixture
+from knowledge_rows_test_support import (
     InvariantRequest,
     RevisionDraft,
     RevisionRequest,
+    open_knowledge_store,
 )
-from agents_remember.models.knowledge.review import ReviewSurfaceRequest
-from diff_scope_test_support import DiffFixture, build_diff_fixture
 from read_scope_test_support import APPLICABILITY, CONDITIONS, EXCLUSIONS
+from test_review_git_trees import CODE_FILE, LEAF, MASTER, REPO, build_world, commit
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -121,12 +120,15 @@ def _insert_bare_identity(database_path: Path, fixture: DiffFixture) -> str:
     store = open_knowledge_store(database_path, fixture.repository_id)
     try:
         invariant_id = str(uuid4())
-        with store.immediate_transaction():
-            store.insert_invariant_identity(
+        created = store.create_invariant(
+            InvariantRequest(
+                repository_id=fixture.repository_id,
                 invariant_id=invariant_id,
                 display_label=BARE_LABEL,
                 provenance=fixture.before.fixture.authorship,
             )
+        )
+        assert created.state == "created"
         return invariant_id
     finally:
         store.close()
@@ -146,87 +148,6 @@ def review_request_for(fixture: DiffFixture, kind: str, selector_id: str) -> Rev
         leaf_id="260921-icr-l9",
         selector=selector,
     )
-
-
-ENTRY_MASTER = "260921_icr_l9"
-ENTRY_LEAF = "260921-icr-l9"
-
-
-def _entry_route_config(
-    root: Path, fixture: DiffFixture, *, before_tree: str, after_tree: str
-) -> McpRuntimeConfig:
-    """A configuration whose one recorded enclosure resolves to a pair this case owns.
-
-    The entry route resolves its pair from canonical task context and the browser never names a
-    dataset, so a case that drives that route has to *be* that context: a coordination root, one
-    enclosure contract under it, and the leaf root the contract's own recorded worktree group
-    derives. The code side points at the fixture's own repository, because a resolution requires
-    a live code worktree and this case is about the knowledge halves. The datasets the resolution
-    derives are overwritten with this case's own bytes before the route is driven.
-    """
-
-    repository_id = fixture.repository_id
-    code_root = fixture.after.git_root
-    contract_path = (
-        root / "coordination" / "tasks" / repository_id / ENTRY_MASTER / "enclosures" / "leaf"
-    )
-    contract_path.mkdir(parents=True)
-    (contract_path / "series-contract.md").write_text(
-        "---\n"
-        "schema: ar-series-contract/v1\n"
-        "schemaVersion: 1.0\n"
-        "kind: leaf\n"
-        "task_id: 260921_ENTRY\n"
-        "task_name: entry_route\n"
-        f"repo_name: {repository_id}\n"
-        "workflow_kind: light-task\n"
-        "memory_mode: external\n"
-        "\n"
-        "coordination:\n"
-        f"  root: {root}\n"
-        f"  task_root: {root / 'tasks'}\n"
-        f"  task_artifact: {root / 'tasks' / 'task.md'}\n"
-        f"  worktree_group: {root / 'leaf'}\n"
-        f"  leaf_id: {ENTRY_LEAF}\n"
-        f"  parent_task_name: {ENTRY_MASTER}\n"
-        "\n"
-        "code:\n"
-        f"  repo_path: {code_root}\n"
-        "  source_branch: main\n"
-        "  work_branch: ar/entry\n"
-        f"  base_commit: {before_tree}\n"
-        f"  worktree: {code_root}\n"
-        "\n"
-        "memory:\n"
-        "  mode: external\n"
-        f"  repo_path: {code_root}\n"
-        "  source_branch: main\n"
-        "  work_branch: ar/entry\n"
-        f"  base_commit: {after_tree}\n"
-        f"  worktree: {code_root}\n"
-        f"  ledger: {code_root / 'memory.md'}\n"
-        "---\n",
-        encoding="utf-8",
-    )
-    return McpRuntimeConfig(
-        workspace_root=root,
-        coordination_root=root / "coordination",
-        config_path=root / "config.json",
-        transcript_root=root / "transcripts",
-    )
-
-
-def _place_pair(
-    config: McpRuntimeConfig, fixture: DiffFixture, *, before_bytes: bytes, after_bytes: bytes
-) -> None:
-    """Overwrite the resolved pair's datasets with this case's own bytes before driving the route."""
-
-    resolved = resolve_review_candidate(config, fixture.repository_id, ENTRY_MASTER, ENTRY_LEAF)
-    assert isinstance(resolved, ReviewCandidateResolution), resolved
-    resolved.baseline_database.parent.mkdir(parents=True, exist_ok=True)
-    resolved.baseline_database.write_bytes(before_bytes)
-    resolved.candidate_database.parent.mkdir(parents=True, exist_ok=True)
-    resolved.candidate_database.write_bytes(after_bytes)
 
 
 def test_the_catalogue_unions_both_snapshots_with_labels_and_presence(
@@ -429,117 +350,55 @@ def test_a_recorded_but_unselectable_subject_is_listed_and_its_open_carries_the_
     assert context.payload.source.inventory.state == "measured"
 
 
-def test_the_entry_route_carries_labelled_totals_for_the_whole_catalogue(
-    fixture: DiffFixture, tmp_path: Path
-) -> None:
-    """The entries route answers the whole population with totals no caller has to re-derive."""
-
-    config = _entry_route_config(
-        tmp_path / "route",
-        fixture,
-        before_tree=fixture.before_tree_id,
-        after_tree=fixture.after_tree_id,
-    )
-    _place_pair(
-        config,
-        fixture,
-        before_bytes=fixture.before.database_path.read_bytes(),
-        after_bytes=fixture.after.database_path.read_bytes(),
-    )
-    result = list_knowledge_review_entries(config, fixture.repository_id, ENTRY_MASTER, ENTRY_LEAF)
+def test_the_entry_route_carries_labelled_totals_for_the_whole_catalogue(tmp_path: Path) -> None:
+    world = build_world(tmp_path / "public")
+    result = list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
     assert result.state == "entries", result.refusal
     assert result.total_subjects == len(result.entries) > 0
     assert result.invariant_total + result.family_total == result.total_subjects
     assert result.invariant_total == sum(
-        1 for entry in result.entries if entry.selector_kind == "invariant"
+        entry.selector_kind == "invariant" for entry in result.entries
     )
-    assert result.family_total == sum(
-        1 for entry in result.entries if entry.selector_kind == "family"
-    )
+    assert result.family_total == sum(entry.selector_kind == "family" for entry in result.entries)
 
 
-def test_zero_subjects_is_a_valid_catalogue_beside_the_source_inventory(
-    fixture: DiffFixture, tmp_path: Path
-) -> None:
-    """An empty pair answers entries with zero totals, and the task source still reviews."""
-
-    empty_before = tmp_path / "empty-before.sqlite"
-    empty_after = tmp_path / "empty-after.sqlite"
-    for path in (empty_before, empty_after):
-        store = open_knowledge_store(path, fixture.repository_id)
-        try:
-            created = store.create_repository(
-                RepositoryIdentity(
-                    repository_id=fixture.repository_id, authority_home="agents-remember"
-                )
-            )
-            assert created.state == "created", created.refusal
-        finally:
-            store.close()
-    config = _entry_route_config(
-        tmp_path / "route",
-        fixture,
-        before_tree=fixture.before_tree_id,
-        after_tree=fixture.after_tree_id,
-    )
-    _place_pair(
-        config,
-        fixture,
-        before_bytes=empty_before.read_bytes(),
-        after_bytes=empty_after.read_bytes(),
-    )
-    result = list_knowledge_review_entries(config, fixture.repository_id, ENTRY_MASTER, ENTRY_LEAF)
+def test_zero_subjects_is_a_valid_catalogue_beside_the_source_inventory(tmp_path: Path) -> None:
+    world = build_world(tmp_path / "public")
+    for root in (world.memory, world.memory_worktree):
+        for kind in ("invariants", "families"):
+            directory = root / "knowledge" / kind
+            for path in directory.glob("*.json"):
+                path.unlink()
+        for path in (root / "onboarding").rglob("*.json"):
+            path.unlink()
+        memory_head = commit(root, {}, trailer=world.code_base)
+        if root == world.memory:
+            world.memory_base = memory_head
+    world.contract()
+    result = list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
     assert result.state == "entries", result.refusal
     assert result.entries == ()
     assert result.total_subjects == result.invariant_total == result.family_total == 0
-
-    context = compose_review(
-        resolution_for(fixture, before_database=empty_before, after_database=empty_after),
-        ReviewSurfaceRequest(
-            repository_id=fixture.repository_id,
-            master="260921_complete-code-and-intent-review",
-            leaf_id="260921-icr-l9",
-            selector=None,
-        ),
-    )
-    assert context.state == "review", context.refusal
-    assert context.payload is not None
+    (world.code_worktree / CODE_FILE).write_text("def land(value):\n    return value + 1\n")
+    context = read_knowledge_review(world.config, world.review())
+    assert context.state == "review" and context.payload is not None, context.refusal
     assert context.payload.source.inventory.state == "measured"
     assert context.payload.source.inventory.listed_total > 0
 
 
 def test_catalogue_loading_runs_no_comparison(
-    fixture: DiffFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The entries route lists the whole catalogue without entering the shipped comparison.
-
-    Catalogue loading must not fully compare every historical subject before displaying task
-    source, so the diff is rigged to fail the case if the route reaches it for any subject.
-    Both bindings are rigged -- the defining module's and the adapter's own ``from``-imported
-    one -- so neither call shape can slip past the tripwire.
-    """
-
-    def _forbidden(*args: object, **kwargs: object) -> object:
+    def forbidden(*args: object, **kwargs: object) -> object:
         raise AssertionError("the catalogue must not enter the shipped comparison")
 
     monkeypatch.setattr(
-        "agents_remember.application.knowledge_diff.diff_knowledge_scope", _forbidden
+        "agents_remember.application.knowledge_diff.diff_knowledge_scope", forbidden
     )
     monkeypatch.setattr(
-        "agents_remember.application.knowledge_review.diff_knowledge_scope", _forbidden
+        "agents_remember.application.knowledge_review.diff_knowledge_scope", forbidden
     )
-    config = _entry_route_config(
-        tmp_path / "route",
-        fixture,
-        before_tree=fixture.before_tree_id,
-        after_tree=fixture.after_tree_id,
-    )
-    _place_pair(
-        config,
-        fixture,
-        before_bytes=fixture.before.database_path.read_bytes(),
-        after_bytes=fixture.after.database_path.read_bytes(),
-    )
-    result = list_knowledge_review_entries(config, fixture.repository_id, ENTRY_MASTER, ENTRY_LEAF)
+    world = build_world(tmp_path / "public")
+    result = list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
     assert result.state == "entries", result.refusal
     assert result.total_subjects == len(result.entries) > 0

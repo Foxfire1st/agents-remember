@@ -1,4 +1,4 @@
-"""The knowledge operation family: the mounted surface for the application read/render API.
+"""The knowledge operation family: the mounted surface over a memory tree's text knowledge.
 
 This is the family module ``registration/__init__.py``'s docstring describes: one
 ``register_knowledge_tools(server, config)`` that declares its family against the server it is
@@ -6,20 +6,22 @@ handed, delegating to the payload builders in :mod:`agents_remember.mcp.tools.kn
 **appended** to ``TOOL_REGISTRARS``, never inserted: FastMCP publishes tools in registration order,
 so every existing name keeps the position it was advertised at.
 
-Five operation families, spelled as ``Doc13:181-187`` spells them: ``knowledge_read``,
-``knowledge_change``, ``knowledge_diff``, ``knowledge_integrity_check``, ``knowledge_project``.
+Three operations: ``knowledge_read``, ``knowledge_diff`` and ``knowledge_integrity_check``.
+
+**No registered tool accepts a database path (MIK-R26 rule 5).** Each operation selects a memory
+tree by its root directory and reads the tree's text knowledge through its derived index
+(MIK-R23). The namespace is the index's own constant; the server supplies it. An unconverted tree
+or a database file is refused as ``legacy-format``.
+
+**Nothing here writes.** Knowledge is written by the curator file writer, reached through the
+``agents-remember knowledge-ingest`` and ``agents-remember knowledge-bootstrap`` commands
+(MIK-R12). The earlier ``knowledge_change`` and ``knowledge_project`` tools are removed from the
+registered set: the first only ever refused, and the second rendered views of the database.
 
 **The surface performs no domain reasoning.** Each handler validates its wire request, delegates, and
 returns the typed shape the response model declares. ``knowledge_read`` returns recorded claims and
-assessments as attributed records; ``knowledge_change`` records a caller-authored proposal through an
-admitted operation another leaf owns and authors nothing; ``knowledge_diff`` carries only effect
-labels an identified agent or assessment supplied; ``knowledge_integrity_check`` reports conditions
-and their limits and produces no verdict; ``knowledge_project`` renders through the projection writer
-and writes no file itself.
-
-**Nothing is mounted for the reviewer.** ``KS-R22@v1`` owns the Intent Reviewer, the cockpit route and
-the browser client. What this module publishes is the interface L22 mounts -- the five operations, the
-review-matrix view and the typed models behind them -- and it adds no panel, no route and no client.
+assessments as attributed records; ``knowledge_diff`` returns the files' own Git diff and no effect
+label; ``knowledge_integrity_check`` returns the validator's report and a leaf's worklist.
 """
 
 from typing import Any
@@ -29,39 +31,28 @@ from mcp.server.fastmcp import FastMCP
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from ..tools.knowledge import (
-    ChangeToolRequest,
     DiffToolRequest,
     IntegrityCheckRequest,
-    ProjectToolRequest,
     ReadToolRequest,
-    knowledge_change_payload,
     knowledge_diff_payload,
     knowledge_integrity_check_payload,
-    knowledge_project_payload,
     knowledge_read_payload,
 )
 
 
 def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """Register the knowledge read, change, diff, integrity and projection operations.
+    """Register the knowledge read, diff and integrity operations.
 
-    The runtime configuration supplies exactly one thing to this family: the workspace root a read
-    falls back to when the caller names no repository of its own. It is handed over as the *default
-    repository*, not as half of a source-resolution pair: the read builder completes the pair or
-    names neither half, because a context carrying ``repository_root`` without ``code_tree_id`` is
-    refused by its own model and a minimal schema-conformant call would then raise instead of
-    returning a view. It also supplies the coordination root, under whose runtime directory a
-    converted memory tree's derived index is cached when a read selects that tree (MIK-R23).
-    Everything else a handler needs -- the dataset path, the namespace and the
-    destination -- is caller-supplied, because the substrate decides nothing about which dataset or
-    which vault is meant.
+    The runtime configuration supplies two things to this family. The workspace root is the
+    *default repository* a read falls back to when the caller names no repository of its own; the
+    read builder completes the source-resolution pair or names neither half. The coordination root
+    is where a memory tree's derived index is cached (MIK-R23). The memory tree itself is
+    caller-supplied, because the substrate decides nothing about which tree is meant.
     """
 
     _register_knowledge_read(server, config)
-    _register_knowledge_change(server)
-    _register_knowledge_diff(server, config)
+    _register_knowledge_diff(server)
     _register_knowledge_integrity_check(server)
-    _register_knowledge_project(server, config)
 
 
 def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -69,8 +60,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
 
     @server.tool()
     def knowledge_read(
-        databasePath: str,
-        repositoryId: str,
+        memoryRoot: str,
         view: str,
         *,
         orderingInput: str | None = None,
@@ -82,31 +72,35 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         repositoryRoot: str | None = None,
         codeTreeId: str | None = None,
     ) -> dict[str, Any]:
-        """Retrieve one named view from supplied seeds at one snapshot, using explicit filters and a
-        snapshot-bound continuation. The five views are source_context, invariant, family,
-        review_matrix and curation_queue. Returns recorded claims and assessments as attributed
-        records: every ordered position and every no-consequence statement carries an `authored` or
-        `mechanical` provenance class, and a value that cannot be classified is reported as an
-        unresolved limitation rather than returned with an empty class. orderingInput defaults to
-        stable_ordering. For a converted memory tree (databasePath is its root) every response is a
-        page within one token threshold (`page`, and `threshold` on a refusal), and `continuation`
-        accepts the token any page minted, including the published-intent block of read_ar_files:
-        pass it with its `continuationView` as `view` and no other subject (the token binds its
-        ordering and code tree; repositoryRoot relocates the code repository). `currentness`
-        gives each returned invariant's state (stale, unverifiable, unrealized, current) at the
-        walk's code tree: the one named by `codeTreeId`, or the continuation's on a resumed page;
-        without either they are unverifiable. On a converted tree, source_context with sourcePath
-        is the family-complete leaf read: the path's own invariants, then each containing family's
-        header (guarantee, routes, members) and its remaining members with their entries, then the
+        """Retrieve one named view of a memory tree's knowledge from supplied seeds at one snapshot,
+        using explicit filters and a snapshot-bound continuation. `memoryRoot` is the root
+        directory of a converted memory tree (one that holds knowledge/layout.json): a leaf's
+        memory worktree, or `memoryTree.memoryRoot` of a read_ar_files published-intent block. An
+        unconverted tree or a database file is refused as `legacy-format`. The five views are
+        source_context, invariant, family, review_matrix and curation_queue. Returns recorded
+        claims and assessments as attributed records: every ordered position and every
+        no-consequence statement carries an `authored` or `mechanical` provenance class, and a
+        value that cannot be classified is reported as an unresolved limitation rather than
+        returned with an empty class. orderingInput defaults to stable_ordering. Every response is
+        a page within one token threshold (`page`, and `threshold` on a refusal), and
+        `continuation` accepts the token any page minted, including the published-intent block of
+        read_ar_files: pass it with its `continuationView` as `view` and no other subject (the
+        token binds its ordering and code tree; repositoryRoot relocates the code repository).
+        `currentness` gives each returned invariant's state (stale, unverifiable, unrealized,
+        current) at the walk's code tree: the one named by `codeTreeId`, or the continuation's on a
+        resumed page; without either they are unverifiable. source_context with sourcePath is the
+        family-complete leaf read: the path's own invariants, then each containing family's header
+        (guarantee, routes, members) and its remaining members with their entries, then the
         advertised families -- the same selection and manifestDigest read_ar_files returns -- then
         one compact chain_family row per family routed at the path's directory or an ancestor
         (`payload.routeChain`; no_governing_family when none). source_context with a family ID in
         familyRevisionId and no sourcePath returns that family's full content. The invariant view
-        names the invariant's families in `families`."""
+        names the invariant's families in `families`. No mounted tool writes knowledge: the
+        curator file writer does, through `agents-remember knowledge-ingest` for a leaf and
+        `agents-remember knowledge-bootstrap` for a repository with no leaf."""
         return knowledge_read_payload(
             ReadToolRequest(
-                database_path=databasePath,
-                repository_id=repositoryId,
+                memory_root=memoryRoot,
                 view=view,
                 ordering_input=orderingInput,
                 limit=limit,
@@ -122,131 +116,78 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         )
 
 
-def _register_knowledge_change(server: FastMCP) -> None:
-    """The record operation's mount point: it declares the shape and writes nothing.
-
-    The tool is still mounted because its *name* is part of the published family -- a caller asking
-    for it must get a typed refusal rather than "no such tool" -- but the handler now says exactly
-    what it does, which is refuse and point at the writer that can record.
-    """
-
-    @server.tool()
-    def knowledge_change(
-        databasePath: str,
-        repositoryId: str,
-        recordKind: str,
-        request: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Refuse a mount-side change request and name the writer that can record. Do not use this
-        tool to record: it has no admitted write operation for any kind, so every kind is refused
-        with `registration_absent` and nothing is written. The knowledge write plane has one writer
-        -- the batch operation that commits a whole curator hand-off list -- and both shipped CLI
-        subcommands reach it: `agents-remember knowledge-ingest` for a leaf enclosure's ordinary
-        route, and `agents-remember knowledge-bootstrap` for a repository with no enclosure in
-        scope. On a converted memory tree (it holds `knowledge/layout.json`) both write
-        knowledge files through the curator file writer instead. `knowledge-ingest` additionally
-        publishes that candidate to the repository's one declared published dataset location and
-        reads the published identity back; read the committed result back with `knowledge_read`."""
-        return knowledge_change_payload(
-            ChangeToolRequest(
-                database_path=databasePath,
-                repository_id=repositoryId,
-                record_kind=recordKind,
-                body=request,
-            )
-        )
-
-
-def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_knowledge_diff(server: FastMCP) -> None:
     """The comparison operation, which infers no semantic label."""
 
     @server.tool()
     def knowledge_diff(
-        databasePath: str,
-        repositoryId: str,
-        beforePath: str,
-        afterPath: str,
-        request: dict[str, Any] | None = None,
+        memoryRoot: str,
+        beforeRevision: str = "HEAD",
+        afterRevision: str | None = None,
+        recordId: str | None = None,
+        path: str | None = None,
     ) -> dict[str, Any]:
-        """Return field and record changes grouped by invariant content, realization claims, evidence
-        records and relationships between exact states. Semantic effect labels are included only when
-        supplied by an identified agent or assessment, never inferred from the diff."""
+        """Return the Git diff of the knowledge files of a memory repository: every changed file
+        under knowledge/ and onboarding/ with its patch. Record files (and a record's .md prose)
+        are grouped by record, with the realization and proof entries that changed; an onboarding
+        card (.md) and its sidecar (.json) are grouped under the source path the sidecar declares;
+        history files and any other changed knowledge file are listed beside them.
+        `memoryRoot` is the root of the memory repository (or of one of its worktrees); a
+        directory inside it is refused with the root to pass. With `afterRevision` given, the two
+        Git revisions or trees are compared and nothing is written. With no `afterRevision`,
+        `beforeRevision` (default `HEAD`) is compared with the memory WORKING TREE, so uncommitted
+        knowledge changes show: to do that the working tree is captured as a Git tree, which
+        writes loose, unreferenced objects into the repository's object store (no ref, branch,
+        index or working file changes; Git's own garbage collection removes them later).
+        One answer stays within the token `threshold` that `knowledge_read` states. `complete`
+        says whether it holds every selected file's whole patch; when it does not, `leftOut` names
+        the files whose patch is absent (`paths`, in the answer's order; `pathsNotNamed` counts any
+        that could not even be named), the patches cut short (`cutPatches`), and how to reach each
+        (`nextAction`). `recordId` narrows the answer to one record and the source paths that name
+        it; `path` narrows it to one changed file (a record file, a sidecar or a card, by its
+        memory-repository path) or, given a source path, to that source's card and sidecar. A
+        `recordId` or a `path` that names nothing in either tree is refused by name
+        (`selector_absent`); one that names something unchanged answers with no file. A side whose
+        tree is unconverted (it holds no knowledge/layout.json) is refused as `legacy-format`. The
+        diff is the files' own change: no semantic effect label is inferred from it."""
         return knowledge_diff_payload(
             DiffToolRequest(
-                database_path=databasePath,
-                repository_id=repositoryId,
-                before_path=beforePath,
-                after_path=afterPath,
-                body=request,
-            ),
-            coordination_root=str(config.coordination_root),
-        )
-
-
-def _register_knowledge_integrity_check(server: FastMCP) -> None:
-    """The report operation, which produces no verdict."""
-
-    @server.tool()
-    def knowledge_integrity_check(
-        databasePath: str | None = None,
-        repositoryId: str | None = None,
-        scopeId: str | None = None,
-        *,
-        runId: str | None = None,
-        inputDigest: str | None = None,
-        contractPath: str | None = None,
-    ) -> dict[str, Any]:
-        """Report declared structural-rule violations, mechanically matched review conditions, their
-        registered traversal scope and the observable mapping and scan limitations. It produces no
-        compatibility verdict and no causal explanation: `compatible` is absent by design, not
-        omitted by accident, and an unresolved assessment stays unresolved. The scope selects the
-        recorded run; `runId` or `inputDigest` selects one exact run among several in that scope, and
-        the response names the selected run and its input identities so the conditions cannot be
-        read as belonging to a run they were not measured over. `contractPath` names a leaf by its
-        series contract and adds that leaf's latest change-to-knowledge worklist (MIK-R08): its
-        state, digest, item counts and items, with the persisted file's path for every item's
-        facts; a leaf may be named without a dataset."""
-        return knowledge_integrity_check_payload(
-            IntegrityCheckRequest(
-                databasePath=databasePath,
-                repositoryId=repositoryId,
-                scopeId=scopeId,
-                runId=runId,
-                inputDigest=inputDigest,
-                contractPath=contractPath,
+                memory_root=memoryRoot,
+                before=beforeRevision,
+                after=afterRevision,
+                record_id=recordId,
+                path=path,
             )
         )
 
 
-def _register_knowledge_project(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """The projection operation, the only write path to a destination."""
+def _register_knowledge_integrity_check(server: FastMCP) -> None:
+    """The validator's report and the leaf's worklist."""
 
     @server.tool()
-    def knowledge_project(
-        databasePath: str,
-        repositoryId: str,
-        destinationRoot: str,
+    def knowledge_integrity_check(
+        memoryRoot: str | None = None,
         *,
-        profileId: str = "default",
-        formats: list[str] | None = None,
-        views: list[dict[str, Any]] | None = None,
-        authorizedOverwrites: list[str] | None = None,
+        codeRoot: str | None = None,
+        baseCommits: list[str] | None = None,
+        contractPath: str | None = None,
     ) -> dict[str, Any]:
-        """Render named read-only views into an explicitly authorized destination. Authored
-        explanations are copied with their provenance and are never invented or reassessed; Markdown
-        and JSON are sibling views from the same resolved records and a JSON projection is not a
-        portable database export. Managed outputs are tracked in projection-manifest.json, writes are
-        confined and staged, and an externally edited file is reported and preserved unless the
-        caller authorizes an overwrite for that exact path."""
-        return knowledge_project_payload(
-            ProjectToolRequest(
-                database_path=databasePath,
-                repository_id=repositoryId,
-                destination_root=destinationRoot,
-                profile_id=profileId,
-                formats=tuple(formats or ("markdown",)),
-                views=tuple(views or ()),
-                authorized_overwrites=tuple(authorizedOverwrites or ()),
-            ),
-            coordination_root=str(config.coordination_root),
+        """Run the knowledge validator (MIK-R22) over one converted memory tree and return its
+        report: `validation.ok`, the refusal and report-only counts, the counts by rule, and the
+        first violations (refusing ones first; `violationsTruncated` says when more exist). Name a
+        leaf by `contractPath`: the validator reads the leaf's memory worktree against its
+        recorded memory base and its code worktree, and the response adds the leaf's latest
+        change-to-knowledge worklist (MIK-R08): its state, digest, item counts and items, with the
+        persisted file's path for every item's facts. Or name a tree directly with `memoryRoot`
+        and its paired code checkout `codeRoot`. `baseCommits` are memory commits to compare
+        anchors with; with none, every anchor is checked for path existence. An unconverted tree
+        or a database file is refused as `legacy-format`. The tool reads only: it writes no file
+        and opens no database."""
+        return knowledge_integrity_check_payload(
+            IntegrityCheckRequest(
+                memoryRoot=memoryRoot,
+                codeRoot=codeRoot,
+                baseCommits=None if baseCommits is None else tuple(baseCommits),
+                contractPath=contractPath,
+            )
         )

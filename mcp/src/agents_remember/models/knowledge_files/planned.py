@@ -21,7 +21,6 @@ declaration and never reads knowledge), the history row model, the worklist and 
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -36,7 +35,6 @@ __all__ = [
     "REFS_BY_DISPOSITION",
     "REQUIREMENT_REF_PATTERN",
     "SUBJECT_UNKNOWN",
-    "parse_planned_subject",
     "planned_item_open",
     "planned_subject",
 ]
@@ -74,13 +72,6 @@ def planned_subject(subject: str, effect: str) -> str:
     """The planned subject key of one declaration: ``planned:<declared subject>#<effect>``."""
 
     return f"planned:{subject}#{effect}"
-
-
-def parse_planned_subject(value: str) -> tuple[str, str] | None:
-    """The ``(declared subject, effect)`` a planned subject key names, or ``None``."""
-
-    matched = re.match(PLANNED_SUBJECT_PATTERN, value)
-    return None if matched is None else (matched["subject"], matched["effect"])
 
 
 def planned_item_open(item: Mapping[str, Any], rows_by_subject: Mapping[str, str]) -> bool:

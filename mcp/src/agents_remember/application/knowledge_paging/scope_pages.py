@@ -31,7 +31,6 @@ from agents_remember.application.knowledge_paging.pager import (
     PageBinding,
     PageCut,
     PageRow,
-    cut_page,
     page_block,
 )
 from agents_remember.application.knowledge_read import select_knowledge_scope
@@ -53,7 +52,6 @@ __all__ = [
     "ScopePageRequest",
     "TreeBinding",
     "prepare_scope",
-    "scope_page",
     "scope_rows",
     "scope_view",
 ]
@@ -233,21 +231,6 @@ def _next_manifest(
         return PagingRefusal("continuation_unreadable", f"a queued seed is not a seed: {error}")
     selected = select_knowledge_scope(request.database_path, request.context, seed)
     return selected if isinstance(selected, KnowledgeReadResult) else selected.manifest_digest
-
-
-def scope_page(
-    request: ScopePageRequest,
-) -> dict[str, Any] | KnowledgeReadResult | PagingRefusal:
-    """One page of a seed's scope, its read's own refusal, or a refused continuation."""
-
-    prepared = prepare_scope(request)
-    if not isinstance(prepared, PreparedScope):
-        return prepared
-    wrap = request.wrap or (lambda block: block)
-    _cut, response = cut_page(
-        prepared.rows, prepared.position, lambda cut: wrap(prepared.render(cut))
-    )
-    return response
 
 
 def _seed_json(seed: KnowledgeReadSeed) -> dict[str, str]:

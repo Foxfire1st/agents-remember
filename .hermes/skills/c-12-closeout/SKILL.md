@@ -203,11 +203,9 @@ External-memory closeout order is:
 1. Confirm the worker's targeted-check report and the curator's complete onboarding
    handoff when those roles are present. Record failed or not-run checks as
    reported; do not reinterpret a subset as full green.
-   Carry the curator's `review-record-comparison` result from
-   `../l-01-agent-lifecycles/operations/curation.md` § Record the task comparison, including
-   code-only work recorded with `--unchanged-knowledge`. A missing/refused record is an explicit
-   evidence gap, never proof of absent knowledge. This is handoff context: closeout neither invokes
-   the producer nor adds a gate, and never replaces an existing frozen generation with today's data.
+   Carry the curator's knowledge hand-off result (the file writer's report) as handoff context. The
+   reviewer compares the leaf's base and candidate from Git, so no separate comparison record exists
+   and closeout produces none.
 2. Preview the exact enabled code and memory-content commit legs with
    their messages, source refs, destination refs, and current conflict/ref
    facts. Preview performs no quality, test, memory, certification, or review
@@ -321,6 +319,23 @@ through `worktree_status` and execute only its advertised action through
 code/tree/memory evidence and reuses each already produced commit once; the queue is not an
 input. A transient landing lock, synthesized subject, repeat-from-scratch, or raw Git is not
 recovery.
+
+A generation stays in flight, with a recovery action, only when its memory commit is, or may be, on
+the branch. A landing that is refused or fails before that leaves nothing behind: the memory branch
+moved, `HEAD` was switched, a merge is unfinished, the commit object could not be written, or the
+memory checkout changed after it was judged. The generation is then cancelled in the same call, the
+leaf's history file and the ignore rule are restored, and the index is given back (unless it holds
+someone else's staged edit). The refusal names `direct_landing` as the next action: repeat the same
+call once the cause is gone, any number of times; each repeat judges the memory checkout as it is
+then.
+
+Hook behavior belongs to the selected publication route. The ordinary closeout and direct-landing
+commits written through `publish_tree_commit` use `commit-tree`, which runs no `pre-commit`,
+`commit-msg`, `prepare-commit-msg` or `post-commit` hook. The prepared closeout retains its declared
+code and memory policies: its code commit uses `--no-verify`, which skips `pre-commit` and
+`commit-msg` but still runs `prepare-commit-msg` and `post-commit`; its ordinary memory commit runs
+all four hooks. The mandatory invariant gate and knowledge validator remain the publication checks.
+A `reference-transaction` hook still runs when a branch moves through a Git ref transaction.
 
 ## Explicit Legacy Operation Repair
 

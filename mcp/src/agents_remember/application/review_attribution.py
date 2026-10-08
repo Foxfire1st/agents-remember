@@ -48,10 +48,6 @@ from typing import Literal
 
 import apsw
 
-from agents_remember.application.knowledge_before_half import (
-    damaged_before_half_reason,
-    read_before_half,
-)
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.diff_display import (
     MappingFact,
@@ -137,8 +133,8 @@ class AttributionSideInput:
     dropped side would leave the ones that remain looking complete, which is exactly the negative
     conclusion an unread snapshot cannot support.
 
-    A before side's **half directory** is the directory its dataset file lives in, which is where a
-    recorded first-generation origin sits (``ICR-R05``'s layout), so no caller has to name it.
+    ``incomplete`` carries the actual partial-index reason. Valid mappings remain positive facts,
+    while the missing population cannot license a negative attribution conclusion.
     """
 
     side: ReadSide
@@ -146,6 +142,7 @@ class AttributionSideInput:
     context: KnowledgeReadContext | None = None
     connection: apsw.Connection | None = None
     unreadable: str | None = None
+    incomplete: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +173,11 @@ def selected_subject(selector: KnowledgeReadSeed | None) -> SelectedSubject | No
     if isinstance(selector, FamilyRevisionSeed):
         return SelectedSubject(kind="family_revision", identity=str(selector.revision_id))
     return None
+
+
+def index_incomplete_detail(tree: str, problems: tuple[tuple[str, str], ...]) -> str:
+    """The known reason an index cannot license absence, with its valid rows still retained."""
+    return f"the memory tree {tree} has a partial index ({len(problems)} rejected files): {problems[:3]}; valid mappings were read, but absence is unknown"
 
 
 def review_attribution(
@@ -225,9 +227,6 @@ def _read_side(
             entry.unreadable
             or "this snapshot's dataset was never bound to a read context, so no mapping was read",
         )
-    damage = _damaged_half(entry)
-    if damage is not None:
-        return _unavailable_side(entry, damage)
     connection = entry.connection
     owned = connection is None
     try:
@@ -272,7 +271,9 @@ def _registered_mappings(
                     subject_link=matches is not None and matches(row),
                 )
             )
-    state, detail = _inspection_state(entry, len(facts))
+    state, detail = _inspection_state(len(facts))
+    if entry.incomplete is not None:
+        state, detail = "unavailable", entry.incomplete
     return _SideReading(
         inspection=SideInspection(
             side=entry.side,
@@ -331,62 +332,14 @@ def _family_revision_ids(
         return None
 
 
-def _inspection_state(
-    entry: AttributionSideInput, registered: int
-) -> tuple[AttributionSideState, str]:
-    """Whether this side was completely inspected, or is a legitimately known-empty side.
+def _inspection_state(registered: int) -> tuple[AttributionSideState, str]:
+    """Report only that the index mappings were inspected; no origin implies empty history."""
 
-    ``known_empty`` is a stronger statement than a scan that found nothing, so it is claimed only for
-    a before half whose own recorded origin identifies an explicitly empty first generation and whose
-    dataset the origin record is checked against. A side that registered nothing without such a record
-    is ``inspected``: the read completed, and that is all that was established.
-    """
-
-    if registered == 0 and entry.side == "before" and _identified_first_generation(entry.database):
-        return (
-            "known_empty",
-            "this before half records an explicitly identified empty first generation whose origin "
-            "matches the dataset beside it, so no registered mapping exists here by construction and "
-            "its absence is not an unread silence",
-        )
     return (
         "inspected",
         f"every registered claim at the measured changed paths was read from this snapshot ({registered} "
         "mapping(s)), and each one's anchor was observed against this side's own bound code tree",
     )
-
-
-def _damaged_half(entry: AttributionSideInput) -> str | None:
-    """Why a before half is present-but-not-what-it-claims, or ``None`` when it is sound.
-
-    A half whose recorded origin disagrees with the bytes beside it is *damaged*: R05's own reader
-    refuses to call it the generation it names, and the review's preflight refuses the pair as
-    "present but cannot be read". The partition therefore must not read it either -- a half that cannot
-    be read is not a half that registered nothing, so it is ``unavailable`` and every path it did not
-    map is of undetermined attribution rather than confirmed unregistered.
-
-    Only a *before* side has this layout: a before half records its generation beside the dataset
-    (``ICR-R05``), while a candidate carries a receipt instead, so the question is asked of the side
-    that can answer it. ``None`` is the answer for an absent dataset too -- absence is its own state
-    with its own reason, and this reader does not restate it.
-    """
-
-    if entry.side != "before":
-        return None
-    try:
-        return damaged_before_half_reason(Path(entry.database))
-    except (OSError, KnowledgeStorageError, apsw.Error) as error:
-        return f"{type(error).__name__}: {error}"
-
-
-def _identified_first_generation(database: Path) -> bool:
-    """Whether the half one dataset sits in records it as an identified empty first generation."""
-
-    try:
-        half = read_before_half(Path(database).parent)
-    except (OSError, KnowledgeStorageError, apsw.Error):
-        return False
-    return half.state == "identified" and half.origin is not None
 
 
 def _unavailable_side(entry: AttributionSideInput, reason: str) -> _SideReading:

@@ -7,8 +7,8 @@
 indexes a Git tree read through Git objects. The index lands in ``--cache-dir``, or in
 ``<coordination-root>/runtime/knowledge-index``. The command prints one JSON object: the tree key,
 whether the file was reused, its path, its state (``complete`` or ``partial``) with every problem,
-and the build's counts and time. The index path is a dataset the knowledge read tools accept as
-their ``database_path``.
+and the build's counts and time. The index is a derived SQLite file, never a source of truth: the
+text files in Git are, and the read tools build or reuse the index of the tree they are asked about.
 
 Exit status: 0 for a complete index, 1 for a partial one, 2 when the tree cannot be read.
 """

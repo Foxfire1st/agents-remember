@@ -12,6 +12,7 @@ from agents_remember.worktrees.integration.closeout.recovery_projection import (
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
+    DirectLandingPublicationRefused,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_execution import (
     execute_or_require_direct_landing_recovery,
@@ -86,6 +87,17 @@ def _direct_recovery_failure(
     error: DirectLandingError,
 ) -> LifecycleControlError:
     """Translate one failed attempt after reclassifying its current evidence."""
+    if isinstance(error, DirectLandingPublicationRefused):
+        # Nothing was published; the generation was cancelled and its preparations restored. There
+        # is nothing left to recover: the direct landing itself is repeated.
+        return LifecycleControlError(
+            error.status,
+            error.detail,
+            expected=error.expected,
+            observed=error.observed,
+            next_action="direct-landing",
+            next_tool="direct_landing",
+        )
     classification = classify_direct_landing_recovery(
         current_contract,
         _current_record(store, requeued),

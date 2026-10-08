@@ -110,12 +110,9 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 98 call sites name 91 ids on the PNT line (96 and 89 at the
-    master's merged base, before the role tools): some tools have
-    two entry points (``operator_inbox_post_payload`` and
-    ``registered_operator_inbox_post_payload``), and the five ``knowledge_*`` builders route
-    through the choke point as of ``260918-TSIP-L10`` -- before that they returned a raw dict,
-    which is why five registered models had no adapter entry here.
+    adapter surface it describes. 96 call sites name 89 ids. Role-start and
+    role-message adapters remain; the retired database-only change and projection adapters are gone.
+    Some tools have two entry points, and every knowledge builder routes through the same choke point.
     """
 
     sites: dict[str, list[str]] = {}
@@ -203,8 +200,8 @@ def advertised_tool_names() -> set[str]:
     population the roster assertions compare against, and it is derived from the registration
     modules rather than from ``PUBLIC_TOOLS`` -- so a tool that is registered but missing from
     the roster (or the reverse) is a disagreement this module can see, which a literal count
-    could never show. `T94`: the roster is 72 at this master's merged base, and the figure every
-    check on this master was measured against before it was 67.
+    could never show. `T94`: the roster was 72 at that master's merged base (67 before it); it is
+    72 with role tools retained and the two database-only tools removed.
     """
 
     server = FastMCP("tsip-l10-roster-probe")
@@ -221,21 +218,15 @@ def advertised_tool_names() -> set[str]:
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
 #
-# 74 on the PNT line: the ONT line registered its role-preparation tool without this edit (73
-# against the 72 written here, so this case failed on that base), and PNT-R06 removes that tool
-# and adds `role_start` and `role_message`.
-ROSTER_SIZE = 74
+# Role start and role messaging remain public; database-only change and projection do not.
+ROSTER_SIZE = 72
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
-#
-# 21 modules and 98 handlers on the PNT line: the ONT line added one module with one handler
-# (its role-preparation tool) without this edit; PNT-R06 replaces it with `role_agents.py`, whose
-# two handlers are `role_start_payload` and `role_message_payload`.
 TOOL_MODULE_COUNT = 21
-TOOL_HANDLER_COUNT = 98
+TOOL_HANDLER_COUNT = 96
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -479,8 +470,8 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 21 modules hold 98 handlers and 98 call sites on the PNT line (20, 96 and 96
-        at the master's merged base) -- the same count the registration census reports, so the two readings cannot drift apart -- and the
+        handlers. 21 modules hold 96 handlers and 96 call sites -- the same
+        count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring
         nothing. This is the case the five ``knowledge_*`` builders failed before
@@ -800,6 +791,7 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
             emitted |= literal_keyword_values(path, "next_tool")
         self.assertEqual(
             {
+                "direct_landing",
                 "worktree_closeout_preview",
                 "worktree_operation_control",
             },

@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal, cast
@@ -379,10 +379,15 @@ def _snake(key: object) -> object:
 # -- rule 2: the Git diff of the memory trees ----------------------------------------------------
 
 
-def knowledge_tree_diff(repository: Path, before: str, after: str) -> ReviewKnowledgeTreeDiff:
-    """The knowledge files that differ between two memory trees, with their Git patches, grouped."""
+def knowledge_tree_diff(
+    repository: Path, before: str, after: str, *, served: Callable[[str], bool] = is_indexed_path
+) -> ReviewKnowledgeTreeDiff:
+    """The knowledge files that differ between two memory trees, with their Git patches, grouped.
 
-    return _measured_tree_diff(repository, before, after).diff
+    ``served`` says which changed paths are answered; the reviewer shows what its index reads.
+    """
+
+    return _measured_tree_diff(repository, before, after, served).diff
 
 
 @dataclass(frozen=True)
@@ -405,11 +410,8 @@ class _Listed:
     after: str | None
     """The object the after tree holds at the path, when it holds one there."""
 
-    @property
-    def indexed(self) -> bool:
-        return is_indexed_path(self.path) or (
-            self.old_path is not None and is_indexed_path(self.old_path)
-        )
+    def among(self, served: Callable[[str], bool]) -> bool:
+        return served(self.path) or (self.old_path is not None and served(self.old_path))
 
     @property
     def sections(self) -> int:
@@ -429,7 +431,9 @@ class _Listed:
         }
 
 
-def _measured_tree_diff(repository: Path, before: str, after: str) -> _MeasuredDiff:
+def _measured_tree_diff(
+    repository: Path, before: str, after: str, served: Callable[[str], bool] = is_indexed_path
+) -> _MeasuredDiff:
     """The knowledge diff from a bounded number of Git children (MIK-R40 rule 4).
 
     Git is asked three questions whatever the number of changed files: which paths changed and
@@ -440,8 +444,11 @@ def _measured_tree_diff(repository: Path, before: str, after: str) -> _MeasuredD
     """
 
     listed = _listed_changes(repository, before, after)
-    patches, complete = _patches(repository, before, after, listed)
-    indexed = [(one, patch) for one, patch in zip(listed, patches, strict=True) if one.indexed]
+    kept = [one.among(served) for one in listed]
+    patches, complete = [""] * len(listed), True
+    if any(kept):
+        patches, complete = _patches(repository, before, after, listed)
+    indexed = [(one, patch) for one, patch, keep in zip(listed, patches, kept, strict=True) if keep]
     documents, documents_complete = _documents(repository, [one for one, _ in indexed])
     changes: list[ReviewKnowledgeFileChange] = []
     groups = _Groups()
@@ -581,8 +588,6 @@ def _patches(
     (L40-R1-F4). Any first read failure leaves the result unkeepable, even when recovery succeeds.
     """
 
-    if not any(one.indexed for one in listed):
-        return [""] * len(listed), True
     args = [
         "diff",
         *PARSED_DIFF_OPTIONS,

@@ -350,7 +350,7 @@ class ReviewFamilyContextEntry(KnowledgeModel):
     candidates: tuple[ReviewFamilyGuarantee, ...] = ()
     state: ReviewFamilyEntryState
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    # The change facts of a tree comparison (MIK-R33); a dataset review carries none.
+    # The change facts of a tree comparison (MIK-R33); a review with no tree comparison carries none.
     change_kinds: ReviewFamilyChanges | None = None
 
     @model_validator(mode="after")

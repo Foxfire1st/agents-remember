@@ -17,6 +17,10 @@ from agents_remember.memory_quality.knowledge_validator.report import Violation
 Action = Literal["created", "updated", "unchanged", "removed"]
 WriteState = Literal["written", "planned", "refused"]
 EvidenceState = Literal["proof_written", "needs_facet", "unresolvable"]
+PROVISIONAL_IDS_NOTE = (
+    "this is a planning run: the IDs (and the file names holding them) of the records, entries "
+    "and rows it would create are provisional; the committing run mints its own"
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,19 @@ class WriteReport:
     def refused(self) -> bool:
         return self.state == "refused"
 
+    @property
+    def provisional_ids(self) -> bool:
+        """Whether this report shows IDs that no file holds: a planning run that would create.
+
+        IDs are drawn at random on each run, so the IDs a planning run prints for the records,
+        entries and rows it *would create* are not the ones the committing run will mint.
+        """
+
+        return self.state == "planned" and (
+            any(one.action == "created" for one in (*self.records, *self.entries))
+            or bool(self.rows)
+        )
+
     def to_document(self) -> dict[str, Any]:
         return {
             "operation": "knowledge-write",
@@ -126,6 +143,7 @@ class WriteReport:
             "authorization": self.authorization,
             "carried": list(self.carried),
             "requirementEndpoints": [_endpoint(one) for one in self.requirements],
+            "provisionalIds": self.provisional_ids,
         }
 
     def render(self) -> str:
@@ -161,6 +179,8 @@ class WriteReport:
         ]
         lines += map(_endpoint_line, self.requirements)
         lines += [f"  note: {one}" for one in self.notes]
+        if self.provisional_ids:
+            lines.append(f"  note: {PROVISIONAL_IDS_NOTE}")
         return "\n".join(lines)
 
 

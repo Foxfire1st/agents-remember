@@ -253,12 +253,26 @@ class LandingGateRequest:
 
 
 @dataclass(frozen=True)
+class DirectGateSource:
+    """The exact open history source selected before a direct landing closes it."""
+
+    memory_repository: Path
+    memory_head: str
+    memory_tree: str
+    code_commit: str
+    owner: str
+    history_path: str
+    history_bytes: bytes
+
+
+@dataclass(frozen=True)
 class DirectGateVerdict:
     """The gate's verdict over a direct landing: whether it applies, whose leaf, and any refusal."""
 
     applies: bool
     owner: str | None
     refusal: str | None
+    source: DirectGateSource | None = None
 
 
 class KnowledgeGatePort(Protocol):
@@ -278,6 +292,15 @@ class KnowledgeGatePort(Protocol):
     ) -> str | None: ...
 
     def direct_verdict(
+        self,
+        contract: WorktreeContract,
+        *,
+        code_commit: str,
+        memory_tree: str,
+        source: DirectGateSource | None = None,
+    ) -> DirectGateVerdict: ...
+
+    def direct_source(
         self, contract: WorktreeContract, *, code_commit: str, memory_tree: str
     ) -> DirectGateVerdict: ...
 
@@ -399,6 +422,7 @@ __all__ = [
     "CrossingPlanView",
     "CrossingRequest",
     "CrossingStepFailed",
+    "DirectGateSource",
     "DirectGateVerdict",
     "KnowledgeCrossingPort",
     "KnowledgeGatePort",

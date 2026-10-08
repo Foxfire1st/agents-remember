@@ -100,8 +100,8 @@ list.
 
 ### Realization rationale and role: one authored explanation per target
 
-Each target becomes one realization claim, and that claim stores the author's own explanation of what
-this place does for the obligation. The writer never generates one.
+Each target becomes one `realizes` entry in the file's sidecar, and that entry stores the author's own
+explanation of what this place does for the obligation. The writer never generates one.
 
 - **`target[].rationale` is required.** Write why *this* place carries the obligation, specific to the
   construct its locator names. Two constructs cited by one entry usually do different work, so give
@@ -124,20 +124,17 @@ this place does for the obligation. The writer never generates one.
   another value as text.
 - **A target with no rationale at either level refuses its whole entry** with
   `realization_rationale_absent`, and a rationale longer than 20000 characters refuses it with
-  `realization_rationale_too_long`. Each refusal lands before any identity is minted or any row is
-  written, names the entry and every offending target by position, path and locator, and leaves the
-  other entries of the list to commit. Correct them and run the list again.
-- **These checks apply to entries that would write new realizations.** An exact retry of an entry the
-  candidate already committed writes nothing, so it is not checked again: it replays, and it can publish,
-  exactly as before. That includes entries committed before targets carried a rationale. Changing the
-  content of an already committed entry is still refused as `allocation_content_conflict`; author a
-  successor entry instead.
+  `realization_rationale_too_long`. Each refusal lands before any ID is minted or any file is
+  written and names the entry and every offending target by position, path and locator. The writer
+  refuses the whole run and writes nothing. Correct the entries and run the list again.
+- **These checks apply on every run.** A rerun reads the whole list again, so an entry written by an
+  earlier run is checked like a new one.
 
 The producer states the rationale when it emits the target, because it knows why it named the place.
 A curator who receives a target without one authors it from the evidence before ingest. That is
-supplying a missing explanation, not re-deriving a producer field. A target's own `rationale` and
-`role`, and the entry-level defaults, are part of the entry's retry content: changing any of them under
-an already-minted entry key is changed content, not an exact retry.
+supplying a missing explanation, not re-deriving a producer field. A rerun whose list changes a
+target's `rationale` or `role` rewrites the `realizes` entry this leaf wrote from that entry; the
+entry keeps its ID.
 
 ## Rule 1 — co-resolution: name where the thing lives, not where you looked
 
@@ -160,10 +157,11 @@ write, including in a dry run. The producer does not guess these fields. Applica
 where the obligation holds; conditions and exclusions describe its real boundaries. Ingest workflow,
 disposition and evidence provenance are not substitutes for semantic scope.
 
-The ordinary ingest carries these fields into the existing invariant revision and its retry digest.
-Changing scope under an already-minted entry key is changed content, not an exact retry: author an
-explicit successor with the stored invariant and predecessor revision identities. Historical records
-are never rewritten or silently migrated; an old list without authored scope remains unfilled curation.
+The writer carries these fields into the invariant record (`applicability`, `conditions`,
+`exclusions`). A rerun of the same list updates the record this leaf created from the same entry. A
+stored invariant is changed by naming it in `invariant_id`; a record another leaf authored also
+needs a `history` row about it (see *The file writer's sections* below). An old list without authored
+scope remains unfilled curation.
 
 **A `target` entry is a path *and* the construct inside it, produced by one resolution act.** Resolve
 the place once, in the same act that identifies the construct, and emit both together: a `symbol`
@@ -258,11 +256,11 @@ by the commit it was measured at:
   "statement": "The frozen candidate's own test population is red — unit 2190 passed / 1 failed and integration 377 passed / 2 failed at c5a74a85, deterministically — because a later landing raised the current schema generation to 9 and left three earlier leaves' generation-bound literals pinned to the value that is now current.",
   "kind": "finding",
   "target": [
-    { "path": "mcp/tests/test_knowledge_family_composition.py", "locator": { "kind": "file" }, "governing_route": "mcp/tests" }
+    { "path": "mcp/tests/test_knowledge_family_routes.py", "locator": { "kind": "file" }, "governing_route": "mcp/tests" }
   ],
   "found_at": [
-    { "path": "mcp/tests/test_knowledge_family_composition.py", "locator": { "kind": "line_range", "start": 270, "end": 270 }, "commit": "c5a74a85" },
-    { "path": "mcp/tests/test_knowledge_portable_boundaries.py", "locator": { "kind": "line_range", "start": 215, "end": 215 }, "commit": "c5a74a85" },
+    { "path": "mcp/tests/test_knowledge_family_routes.py", "locator": { "kind": "line_range", "start": 270, "end": 270 }, "commit": "c5a74a85" },
+    { "path": "mcp/tests/test_knowledge_read_paths.py", "locator": { "kind": "line_range", "start": 215, "end": 215 }, "commit": "c5a74a85" },
     { "path": "mcp/tests/test_knowledge_read_boundaries.py", "locator": { "kind": "line_range", "start": 804, "end": 804 }, "commit": "c5a74a85" }
   ],
   "disposition": "fixed",
@@ -291,8 +289,7 @@ by the commit it was measured at:
   the word would author a route named `absent` and govern the anchor with it. The word is matched in any
   case once trimmed (`"Absent"`, `" ABSENT "`). Written at a target or at
   `authority.governing_route`, it refuses the entry with `realization_governing_route_absent_literal`,
-  naming where it was written; `null` is read as no route. As with the other realization checks, an
-  exact retry of an entry the candidate already committed is not checked again. Missing is honest:
+  naming where it was written; `null` is read as no route. Missing is honest:
   of the fixture's 41 entries, 3 of its 40
   real target places had no memory route at all (`system/tools.md`, the repository-root
   `pyproject.toml`, and a task-tree path), and a fourth entry's whole target list is empty. Never
@@ -305,129 +302,40 @@ by the commit it was measured at:
   field: a verdict imported from another document is an input the curator must be able to see, and an
   unaudited verdict has already cost a master one sealed review finding.
 
-## The curator's three authored keys beside the thirteen fields
+## The curator's authored keys beside the thirteen fields
 
 The thirteen fields above are the producer's contract and they do not change: nine producer fields and
-four curator fields, at revision 1. Three further keys belong to the **curator** — a producer emits
-none of them. `scope` is required before durable invariant authoring and has the semantic shape stated
-above. `family` and `external_sources` record what the curator examined beyond the producer's finding.
-These two remain optional: omission is **unexamined**, which differs from examining and recording an
-explicit outcome. Optional family/source coverage never makes semantic scope optional.
+four curator fields, at revision 1. The curator adds its own keys to an entry, and a producer emits
+none of them:
 
-**`family` — the justified joint obligation and this entry's exact memberships.** A family exists only
-where the curator declared one; nothing here infers a family from a path, a directory, a route, a label
-or a shared anchor, because that inference is the bulk import this shape exists to refuse.
+- `scope` is required before an entry becomes a new invariant, in the shape stated above.
+- `admission`, `status`, `invariant_id`, `supersedes` and `proofs` are described in *The file
+  writer's sections* below.
 
-```json
-"family": { "state": "member",
-  "memberships": [
-    { "family": "<the local key this list spells>",
-      "basis": "<why this obligation shares this joint guarantee>",
-      "declares": { "label": "<display label>", "version": "v1",
-                    "guarantee": "<the family's own text, never its members' statements>",
-                    "predecessor_revision_ids": [],
-                    "family_id": "<absent for a new family; the stored identity when revising one>" },
-      "family_revision_id": "<absent unless this membership joins a revision already stored>" } ],
-  "retire": [ "<a stored membership identity this run can read>" ] }
-```
+**A family is a record, not an entry key.** The curator authors a joint obligation as a `family`
+item in the hand-off's `records` section: its `title`, its own `guarantee` text (never its members'
+statements), its `members` (invariant IDs, or `handoff:<entry id>` handles for invariants this list
+authors), its `routes` and its `admission` (`joint_guarantee`, with the justification). A family
+exists only where the curator declared one. Nothing infers a family from a path, a directory, a
+route, a label or a shared anchor. A changed guarantee or member list is an update of the stored
+family record (`id` names it), and the leaf's `history` section carries the row that explains it.
 
-```json
-"family": { "state": "no_family", "basis": "<why no joint obligation is supported>" }
-```
+**An external document is a reference target of a card.** A card that rests on a document outside
+the repository cites it in its sidecar's numbered references as `{"kind": "external", "document":
+{"document": "<URL or name>", "version": "<revision, when known>"}}` (MIK-R21 rule 6). An external
+document is never written as a repository path with a Git blob, and the writer keeps no manifest of
+external sources.
 
-- **`basis` is required wherever you decide**: on every membership, and on `no_family`. The run refuses
-  a blank one rather than storing an unexplained claim, and the `no_family` basis is recorded in the
-  revision's own conditions so the dataset — not only the report — distinguishes a family-free
-  obligation from an unexamined one.
-- **One declaration per key.** The key is a local handle for one creation operation, not an identity.
-  An entry that declares a key authors the family identity (unless it names a stored `family_id`) and
-  its guarantee revision; every other entry naming that key **joins** it and carries no `declares`.
-- **Reuse is by identity.** `family_id` must name a family the dataset holds, and `family_revision_id`
-  a recorded revision; naming either without the record present is refused rather than written.
-- **A changed guarantee is a successor**, declared under a **new key** that names the stored `family_id`
-  and the revision it supersedes in `predecessor_revision_ids`. Re-authoring a changed guarantee under
-  an already-allocated key is refused: one key names one declaration operation.
-- **A retirement names a stored membership identity** the run can read, so a removal is never authored
-  against a row nobody read. `memberships` may be absent when `retire` is present.
-- An ordinary membership cites *this entry's own* exact revision. A successor declaration can also
-  retain exact stored sibling revisions through `retain_memberships`, as below. The family and
-  invariant revisions remain separate endpoints; an older membership is never rewritten.
-
-### Retain exact siblings when adding new obligations to a family successor
-
-Read the existing family revision through `knowledge_read` with `view="family"` and the exact
-`familyRevisionId`, following its continuation when needed. A `family_member` row's
-`subject.record_id` is the membership ID; its statement names the exact invariant revision. Select
-the retention set deliberately. Do not infer it from all predecessor members, a latest head, labels,
-or another task's allocation journal, and do not revise an unchanged invariant just to add its edge.
-
-For example, the entry for a genuinely new paging obligation can declare the successor and keep two
-unchanged siblings. This is the entry's `family` portion; the ordinary producer fields and
-curator-authored `scope` still apply. Replace the labelled placeholders with IDs read from the store:
-
-```json
-"family": {
-  "state": "member",
-  "memberships": [{
-    "family": "review-guarantee-v2",
-    "basis": "The new paging obligation supports the existing review guarantee.",
-    "declares": {
-      "family_id": "<existing family UUID>",
-      "label": "Coherent review",
-      "version": "v2",
-      "guarantee": "Selected intent and complete recorded family context remain reachable together.",
-      "predecessor_revision_ids": ["<exact predecessor family revision UUID>"],
-      "retain_memberships": [
-        {"member_id": "<stored membership UUID for sibling A>", "basis": "Its unchanged statement still supports the guarantee."},
-        {"member_id": "<stored membership UUID for sibling B>", "basis": "Its existing scope and statement remain necessary here."}
-      ]
-    }
-  }]
-}
-```
-
-Each reference must exist in the selected dataset and belong to this family's explicitly declared
-predecessor revisions. A malformed, absent, foreign or mismatched reference refuses; repeated IDs
-and different old memberships resolving to the same new-family/invariant endpoint also refuse.
-Omission or `[]` retains none. Nothing is copied implicitly. Changing a nonempty set or its authored
-bases under an allocated declaration key is a content conflict; author a new successor declaration.
-
-The writer adds new membership edges to the new family revision. It does not rewrite the retained
-invariant's identity, revision, statement, scope or provenance, nor the old family or its memberships.
-Retaining and retiring the same source membership in one handoff refuses, including across separate
-entries; the historical membership must remain. In the report, membership
-`state="added"` means a new **edge**; `retainedFromMemberId` names the exact old membership whose
-invariant revision was kept. `unchangedSiblingMembers` includes those unchanged revisions after
-publication, while uncommitted coverage remains explicitly projected. Read the published family
-back and check its exact roster. This syntax extends a declaration carried by a genuine authored
-obligation; it does not introduce a separate family-only authoring operation.
-
-**`external_sources` — the bounded manifest, and the origin reference that names it.** An external
-document is not a repository path with a Git blob, so it never becomes a source anchor: the run records
-it in a bounded manifest beside the candidate and binds every authored record's `origin_refs` to that
-manifest's own digest.
-
-```json
-"external_sources": [
-  { "id": "<local id>", "document": "<URL or document identity>",
-    "version": "<document revision | null>", "retrieved_at": "<ISO instant | null>",
-    "content_digest": "<sha256 of what was inspected | null>",
-    "location": "<the passage or section it was read at>" } ]
-```
-
-- **At least one of `version` / `retrieved_at`.** A source nobody can find again is refused by name.
-- **`content_digest` is the digest of what you inspected, or `null`** when none was taken. It is never
-  filled with a favourable default, and the report says how many declared sources carried one.
-- **`external_sources: []` means you examined and declared none. Omitting the key means you did not
-  examine it.** The report keeps the two apart.
-- At most 32 sources per entry: a manifest is bounded and attributable, not a second store.
+**The entry keys `family` and `external_sources` belonged to the database ingest, which is
+retired (MIK-R26).** The file writer does not read them. Do not write them: a family goes into
+`records`, and an external document into a card's references.
 
 ## Where an entry lands once knowledge is text (MIK-R21)
 
-**Nothing here changes what a producer emits today.** Until the text-storage cutover (MIK-R37) the
-installed ingest still writes the knowledge database. This section records the file formats the
-curator writer (MIK-R12) will write the same entries into, so a producer and a curator can read what
-their fields become. The models, the ID helper and the formatter live in
+**Nothing here changes what a producer emits.** Knowledge is text in the memory repository, and the
+canonical knowledge database is retired (MIK-R26). This section records the file formats the curator
+writer (MIK-R12) writes the entries into, so a producer and a curator can read what their fields
+become. The models, the ID helper and the formatter live in
 `mcp/src/agents_remember/models/knowledge_files/`; their docstrings are the format reference.
 
 - **Records** are one JSON file each, flat per kind, named `knowledge/<kind-dir>/<ID>-<slug>.json`
@@ -484,11 +392,12 @@ places the routes; nothing assigns them automatically.
 
 ## The file writer's sections (MIK-R12)
 
-On a **converted** memory tree (one that holds the knowledge layout marker, MIK-R21 rule 1), `agents-remember knowledge-ingest`
-and `agents-remember knowledge-bootstrap` write through the curator file writer instead of the
-database. On unconverted memory, which is every memory tree until the cutover (MIK-R37), nothing
-below applies and the installed ingest is unchanged. The producer's thirteen fields do not change
-either: everything below is the **curator's**.
+`agents-remember knowledge-ingest` (a leaf, by its enclosure contract) and `agents-remember
+knowledge-bootstrap` (a taskless foundation wave) write through the curator file writer. It is the
+only writer. Both commands need a **converted** memory tree (one that holds the knowledge layout
+marker, MIK-R21 rule 1): on a tree in the legacy format they refuse with `legacy-format` and name
+the conversion command (`agents-remember knowledge-convert`). The producer's thirteen fields do not
+change: everything below is the **curator's**.
 
 The writer reads the list you already have, or an object with three sections:
 

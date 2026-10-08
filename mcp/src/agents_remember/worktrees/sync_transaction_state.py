@@ -17,6 +17,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     ValidationError,
     model_serializer,
+    model_validator,
 )
 
 from agents_remember.kernel.atomic_write import (
@@ -24,10 +25,8 @@ from agents_remember.kernel.atomic_write import (
     atomic_write_bytes,
     atomic_write_text,
 )
-from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.worktree import (
     MemorySyncChoice,
-    SyncKnowledgeConflict,
     SyncOperationProjection,
     SyncOperationState,
     SyncPhase,
@@ -45,6 +44,10 @@ SyncSideState = Literal[
 # parks its WIP before the carry and must return it. ``restore-conflict`` means the parked
 # candidate could not be reapplied onto the carried result and still needs its resolver.
 SyncWipState = Literal["", "parked", "restore-conflict", "restored"]
+
+# What a side of a journal written before MIK-R26 still carries: the database merge's conflict and
+# its authored decisions. Dropped on read (see ``SyncSideRecord._drop_retired_knowledge_keys``).
+_RETIRED_SIDE_KEYS = frozenset({"knowledgeConflict", "knowledgeReconciliations"})
 
 
 class SyncSideRecord(BaseModel):
@@ -68,21 +71,25 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
-    # The engine's own explanation for a conflicted knowledge dataset this side retained. It is
-    # journaled rather than only returned, because the agent reads it again on every later call:
-    # a resumed sync re-projects this side's state from the journal, and the diagnosis has to be
-    # there for that projection to say what to reconcile instead of only which file is unresolved.
-    knowledgeConflict: SyncKnowledgeConflict | None = None
-    # Every authored decision this side's retained knowledge merge has already accepted, in the
-    # order they were accepted. They travel together into the next attempt because a decision
-    # that settled one conflict has to still hold when the merge goes on to the next one: with
-    # only the newest decision carried, a two-conflict merge alternates between the same two
-    # rows forever and re-offers a decision that has already been made and already had its
-    # effect. Cleared with the conflict it belongs to.
-    knowledgeReconciliations: tuple[AuthoredReconciliation, ...] = ()
     # A crossing sync's durable report (MIK-R24 rule 8): the item-level conflicts, with each side's
     # value, and the cards taken from each side. The resolution payload names it and summarises it.
     crossingReport: str = Field(default="", max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_knowledge_keys(cls, data: Any) -> Any:
+        """Read a journal a build before MIK-R26 wrote: it carries the database merge's two keys.
+
+        Knowledge is text in Git and merges structurally, so no side records a database conflict or
+        an authored decision any more. A journal written before that still holds
+        ``knowledgeConflict`` and ``knowledgeReconciliations`` on each side; they are dropped on
+        read rather than refused, because a sync that was in flight across the upgrade must resume
+        or cancel from its own journal.
+        """
+
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if key not in _RETIRED_SIDE_KEYS}
+        return data
 
     @model_serializer(mode="wrap")
     def _omit_empty_crossing_report(self, handler: SerializerFunctionWrapHandler) -> Any:
@@ -516,7 +523,6 @@ def _active_sync_projection(
         identityMismatch=identity_mismatch,
         side=side,
         conflictFiles=side_record.conflictFiles if side_record is not None else (),
-        knowledgeConflict=side_record.knowledgeConflict if side_record is not None else None,
         summary=summary,
         nextArgs=(
             {

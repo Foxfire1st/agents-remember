@@ -46,6 +46,7 @@ from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     committed_changed_paths,
+    head_commit,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -817,7 +818,10 @@ def closeout_result(
     if args.operation_key and not args.candidate_tree:
         raise RuntimeError("closeout operation is missing its accepted candidate tree")
     if not args.candidate_tree:
-        args = replace(args, candidate_tree=code_candidate_tree(contract))
+        # The head is read before the tree: a commit that moves the branch at any later moment
+        # then refuses the code publication instead of becoming its parent (L26 review R3-2).
+        head = head_commit(contract.code_worktree) if contract.kind == "leaf" else None
+        args = replace(args, candidate_tree=code_candidate_tree(contract), candidate_head=head)
     approval_note = _closeout_approval_note(args)
     resuming = args.approval_claimed or args.recovery_commits is not None
     if not resuming:

@@ -1,50 +1,16 @@
-"""The complete owner-produced record collection for one review (``ICR-R14@v1``).
+"""The review's owner-produced assessments and collection availability (ICR-R14@v1).
 
-A review's records are produced by owners that already exist -- the detection owner records a run and
-its signals, the evidence owner records claims and verification observations, the curator authority
-publishes the authored assessments -- and this module is the one composition that reads **all** of
-them for one resolved candidate and hands them over as the bundle the surface freezes and renders. It
-produces no record, re-derives no owner's content and decides nothing: every collection below is the
-owner's own answer, read through the owner's own read operation.
+Curator assessments and their evidence are read through the curator's durable owner. Dependency
+currentness is measured against this resolution, including its recorded endpoints when a historical
+comparison is requested. A damaged authority is unavailable rather than an observed empty one.
 
-**Availability is a fact per collection, and an empty tuple never stands for three different ones.**
-Each collection carries a :class:`~agents_remember.models.knowledge.review.ReviewRecordChannel`
-naming the state its owner's answer earned:
+Detection runs, verification observations and evidence claims belonged to the retired canonical
+store. Converted memory trees have no format or writer for those record classes, so their channels
+remain visible as unavailable with no measured count. Proof entries and worklist history keep their
+own text-store answers; neither is relabelled as a canonical supporting record.
 
-* ``recorded`` / ``none_recorded`` -- the owner answered, and this is what it holds;
-* ``unavailable`` -- expected content that could not be read (an absent dataset, an unreadable
-  authority, a damaged record), carried with the owner's own refusal text as its provenance;
-* ``not_measured`` -- a quantity nothing measured (dependency currentness when this composition
-  produced none, whose measurement owner is named rather than guessed at);
-* ``not_selected`` -- a collection this composition did not read because the review selected no
-  operand that reaches it.
-
-A loader failure is therefore never reported as "no records ever existed", and no channel reports a
-positive it did not measure: an unreadable authority has no count, and an unmeasured assessment is
-left to the shipped projection's own unmeasured state.
-
-**One collection that cannot be read does not withdraw the others.** Every read below is guarded
-per collection, so a damaged detection run leaves the observations, claims and assessments supplied
-and names the run it could not serve -- the failure behavior ``ICR-R14@v1`` states.
-
-**The one measurement this composition produces is delegated.** Dependency currentness is not a
-collection an owner holds; it is measured against the comparison the resolution bound, and
-:mod:`agents_remember.application.review_assessment_currentness` owns that measurement and its
-availability statement (``ICR-R15@v1``). This module calls it and supplies what it answers, so a
-stored binding is reported from a measurement rather than from the presence of a mapping.
-
-**What this module does not do.** It does not filter records by subject or generation (that is
-``ICR-R26@v1``'s applicability classification), it does not re-derive the measurement itself
-(``ICR-R15@v1``'s owner does, and this module calls it), and it does not re-run detection, execute a
-command or author anything.
-
-**Authored effects are the matrix's collection, and the matrix reports them.** They live in the
-knowledge dataset and are read by the shipped review-matrix view inside the composition, which is why
-:func:`with_selection_channels` states their availability from that read's own answer rather than from
-a listing this module would have to invent. Evidence claims are the evidence owner's collection: this
-module reads every claim the candidate records, with the author, lifecycle, declared limitations and
-asserted coverage the owner holds, so the matrix's row selects *which* claims a selection reaches
-while the claim's own fields arrive intact.
+The review matrix supplies authored effects only when a subject is selected. Its availability and
+paging statement are taken from that read, and a task-context review reports it not selected.
 """
 
 from __future__ import annotations
@@ -52,11 +18,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
-import apsw
-from pydantic import ValidationError
-
-from agents_remember.application.knowledge_diff import open_diff_side
-from agents_remember.application.knowledge_evidence import read_evidence_scope
 from agents_remember.application.review_assessment_currentness import (
     CURRENTNESS_OWNER,
     comparison_currentness_measurement,
@@ -65,39 +26,15 @@ from agents_remember.application.review_assessment_currentness import (
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     resolve_review_candidate,
-    review_namespace,
 )
 from agents_remember.application.review_curator_records import (
     records_from_curator_generation,
     review_curator_records,
 )
 from agents_remember.application.review_record_rendering import (
-    ReviewClaimRecord,
     ReviewRecordInputs,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge import evidence_records
-from agents_remember.memory.knowledge.detection import read_detection_run, recorded_run_ids
-from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.memory.knowledge.store import (
-    OpenedKnowledgeStore,
-    open_existing_knowledge_store,
-)
-from agents_remember.models.knowledge.detection import DetectionSignalPayload
-from agents_remember.models.knowledge.evidence import (
-    VerificationObservationPayload,
-    coverage_identity,
-)
-from agents_remember.models.knowledge.evidence_read import (
-    ClaimCoverage,
-    ClaimSubject,
-    EvidenceClaimRecord,
-    EvidenceReadRequest,
-    EvidenceReadResult,
-    ObservationCandidateSeed,
-    VerificationObservationItem,
-)
-from agents_remember.models.knowledge.read import KnowledgeReadContext
 from agents_remember.models.knowledge.review import (
     ReviewCollectionPage,
     ReviewRecordChannel,
@@ -119,12 +56,6 @@ __all__ = [
     "without_selected_matrix",
 ]
 
-# What one owner's own record read raises when the bytes it holds are damaged: the storage refusal a
-# seal or row check reports, and the validation refusal a payload that no longer parses reports. One
-# damaged record is named rather than fatal, so both are caught per record and never around a whole
-# collection.
-_DAMAGED_RECORD_ERRORS: tuple[type[Exception], ...] = (KnowledgeStorageError, ValidationError)
-
 # The record kinds the knowledge pane renders as mechanically-sourced *authored* records. Declared
 # here, beside the channel that reports their availability, and imported by the review adapter --
 # one declaration, so the collection a channel counts and the collection a pane renders cannot come
@@ -136,15 +67,14 @@ EVIDENCE_CLAIM_KINDS: frozenset[str] = frozenset({"evidence_claim"})
 
 _COLLECTION_OWNERS: Mapping[ReviewRecordClassName, str] = {
     "assessments": "curator_coherence.load_curator_coherence_generation",
-    "detection_signals": "detection.read_detection_run",
-    "verification_observations": "knowledge_evidence.read_evidence_scope",
+    "detection_signals": "MIK-R26:retired-canonical-detection-records",
+    "verification_observations": "MIK-R26:retired-canonical-verification-records",
     "authored_effects": "knowledge_views.read_knowledge_view:review_matrix",
-    "evidence_claims": "evidence_records.claim_record",
+    "evidence_claims": "MIK-R26:retired-canonical-evidence-records",
     "assessment_currentness": CURRENTNESS_OWNER,
 }
 
-# The five collections a review of a resolved candidate supplies, in the order the surface reads them
-# and the order a payload renders them. ``assessment_currentness`` is reported separately because it
+# The five collection keys a review reports. ``assessment_currentness`` is separate because it
 # is a measurement rather than a collection.
 _COLLECTION_NAMES: tuple[ReviewRecordClassName, ...] = (
     "assessments",
@@ -154,17 +84,9 @@ _COLLECTION_NAMES: tuple[ReviewRecordClassName, ...] = (
     "evidence_claims",
 )
 
-# The two collections the composition adds once it has read the review matrix, with the kinds each
-# one selects. Declared as one value so a channel and the pane that renders it cannot drift apart.
+# The collection the composition adds after reading the matrix, with the kinds it selects.
 _SELECTION_KINDS: tuple[tuple[ReviewRecordClassName, frozenset[str]], ...] = (
     ("authored_effects", AUTHORED_EFFECT_KINDS),
-)
-
-# The one next action an unopened candidate dataset earns: it rules nothing out, so a reader must not
-# read its absence as an empty collection.
-_PLACE_DATASET = (
-    "place the candidate's dataset in the leaf's disposable knowledge root, then reopen the review; "
-    "an unopened dataset rules nothing out"
 )
 
 
@@ -229,32 +151,26 @@ def review_records_for_resolution(
         else records_from_curator_generation(resolved, curator_record_digest)
     )
     assessments, assessment_channel = curator.assessments, curator.channel
-    signals, signal_channel = _detection_signals(resolved)
-    observations, observation_channel = _observations(resolved)
-    claims, claim_channel = _evidence_claims(resolved)
     measurement = comparison_currentness_measurement(resolved)
     return ReviewRecordInputs(
         assessments=assessments,
         artifacts=curator.artifacts,
         currentness=measurement,
-        signals=signals,
-        observations=observations,
-        claims=claims,
         channels=(
             assessment_channel,
-            signal_channel,
-            observation_channel,
-            claim_channel,
+            _retired_channel("detection_signals"),
+            _retired_channel("verification_observations"),
+            _retired_channel("evidence_claims"),
             currentness_channel(assessment_channel, measurement, assessments),
         ),
     )
 
 
 def without_selected_matrix(records: ReviewRecordInputs) -> ReviewRecordInputs:
-    """State both matrix-sourced collections for a review that read no matrix at all.
+    """State the matrix-sourced collection for a review that read no matrix at all.
 
-    A task-context review compares no subject, so it never asks the view for a row: both collections
-    are ``not_selected`` rather than absent, because "this review did not ask" is a different fact
+    A task-context review compares no subject, so it never asks the view for a row: this collection
+    is ``not_selected`` rather than absent, because "this review did not ask" is a different fact
     from an owner answering that it holds none (``ICR-R14@v1``).
     """
 
@@ -291,7 +207,7 @@ def with_selection_channels(
     rows: Sequence[ReviewMatrixRow],
     selection: MatrixSelection,
 ) -> ReviewRecordInputs:
-    """Add the two matrix-sourced collections' availability to a bundle, from the matrix's own rows.
+    """Add the matrix-sourced collection's availability from the matrix's own rows.
 
     A review that selected a subject reports what the view returned, and the bound it reported travels
     with it: when the view rendered only a page of its selection, the count here is the page the
@@ -300,7 +216,7 @@ def with_selection_channels(
 
     ``unreadable`` is the third state and it is not an absence: a matrix read the composition *asked
     for* and could not be served -- a page cursor the view refused because its snapshot moved, a
-    damaged dataset -- leaves both collections ``unavailable`` with that refusal as the reason and its
+    damaged index -- leaves the collection ``unavailable`` with that refusal as the reason and its
     next action. Reporting a measured zero there would be the collapse of "an owner holds none" and
     "this composition could not read it" that ``ICR-R14@v1`` exists to keep apart.
 
@@ -338,328 +254,18 @@ def _selection_channel(
     return _answered(records, len(supplied), selection=selection)
 
 
-def _detection_signals(
-    resolved: ReviewCandidateResolution,
-) -> tuple[tuple[DetectionSignalPayload, ...], ReviewRecordChannel]:
-    """Every detection signal the candidate's recorded runs hold, read through the detection owner.
-
-    The runs are the recorded identities; each run's signals are read through
-    :func:`~agents_remember.memory.knowledge.detection.read_detection_run`, which recomputes the
-    stored revision's own seal. A damaged run is named and left out while its siblings are still
-    supplied, and a namespace that records no run at all is a measured zero rather than a silence.
-    """
-
-    opened = _open_candidate_store(resolved, "detection_signals")
-    if isinstance(opened, ReviewRecordChannel):
-        return (), opened
-    store = opened
-    try:
-        runs = recorded_run_ids(store)
-        signals, unreadable = _read_signal_runs(store, runs)
-    except KnowledgeStorageError as error:
-        return (), _unavailable(
-            "detection_signals",
-            _provenance("the recorded detection runs could not be read", None, str(error)),
-            next_action="repair the candidate dataset, then reopen the review",
-        )
-    finally:
-        store.close()
-    return _signal_channel(signals, runs, unreadable)
-
-
-def _signal_channel(
-    signals: Sequence[DetectionSignalPayload],
-    runs: Sequence[str],
-    unreadable: Sequence[str],
-) -> tuple[tuple[DetectionSignalPayload, ...], ReviewRecordChannel]:
-    """The supplied signals and the state the runs that produced them earned."""
-
-    if not runs:
-        return (), _absent(
-            "detection_signals",
-            "the candidate dataset records no detection run, so no detector signal exists for this "
-            "review; the detection owner answered for the runs it holds",
-        )
-    if not signals:
-        return (), _unavailable(
-            "detection_signals",
-            f"all {len(runs)} recorded detection run(s) could not be read, so no signal was "
-            "supplied; their identities are named rather than reported as a run that produced nothing",
-            next_action="rerecord the runs whose stored revision is damaged, then reopen the review",
-            unreadable=unreadable,
-        )
-    return tuple(signals), _recorded(
-        "detection_signals",
-        len(signals),
-        detail=(
-            f"{len(signals)} detector signal(s) read from {len(runs)} recorded run(s)"
-            + _unreadable_note(unreadable)
-        ),
-        unreadable=unreadable,
-    )
-
-
-def _read_signal_runs(
-    store: OpenedKnowledgeStore, runs: Sequence[str]
-) -> tuple[tuple[DetectionSignalPayload, ...], tuple[str, ...]]:
-    """Every readable run's signals, plus the identities of the runs that could not be served.
-
-    Each run is read under its own guard, because the detection owner reports a *damaged* revision by
-    raising -- :func:`~agents_remember.memory.knowledge.detection.read_detection_run` recomputes the
-    stored seal and raises :class:`~agents_remember.memory.knowledge.refusals.KnowledgeStorageError`
-    when it no longer matches -- while a run that is simply absent from the sequence answers with a
-    refusal. Both are one damaged identity here, named on the channel, and neither withdraws the
-    siblings that were read: a collection is only ``unavailable`` when nothing in it could be served.
-    """
-
-    signals: list[DetectionSignalPayload] = []
-    unreadable: list[str] = []
-    for run_id in runs:
-        try:
-            result = read_detection_run(store, run_id)
-        except _DAMAGED_RECORD_ERRORS:
-            unreadable.append(run_id)
-            continue
-        if result.state == "read":
-            signals.extend(result.signals)
-        else:
-            unreadable.append(run_id)
-    return tuple(signals), tuple(unreadable)
-
-
-def _observations(
-    resolved: ReviewCandidateResolution,
-) -> tuple[tuple[VerificationObservationPayload, ...], ReviewRecordChannel]:
-    """Every verification observation recorded against this candidate, through the evidence owner.
-
-    The seed names both halves of the candidate the way a record names them -- the candidate dataset's
-    own logical identity and the captured code tree -- so an observation recorded against either half
-    is selected. An empty result is the evidence owner's own ``selector_absent`` answer and becomes a
-    measured zero; every other refusal (an absent dataset, an unreadable snapshot, a selection past
-    its bound) is unavailability with that refusal as provenance, never an empty collection.
-    """
-
-    context = _candidate_context(resolved)
-    if isinstance(context, ReviewRecordChannel):
-        return (), context
-    result = read_evidence_scope(
-        resolved.candidate_database,
-        context,
-        EvidenceReadRequest(
-            seed=ObservationCandidateSeed(
-                knowledge_logical_digest=context.knowledge.logical_digest,
-                code_candidate_tree_id=resolved.candidate_code_tree_id,
-            )
-        ),
-    )
-    if result.state == "refused":
-        return (), _observation_refusal(result)
-    observations = tuple(
-        item.observation.payload
-        for item in _page_items(result)
-        if isinstance(item, VerificationObservationItem)
-    )
-    return observations, _answered("verification_observations", len(observations))
-
-
-def _observation_refusal(result: EvidenceReadResult) -> ReviewRecordChannel:
-    """The state one refused observation read earns: a measured zero, or unavailability."""
-
-    refusal_value = result.refusal
-    code = None if refusal_value is None else refusal_value.code
-    if code == "selector_absent":
-        return _absent(
-            "verification_observations",
-            "the candidate's dataset answers for this exact candidate and records no verification "
-            "observation for it; the evidence owner's own answer is a measured zero, not an unread "
-            "authority",
-        )
-    return _unavailable(
-        "verification_observations",
-        _provenance(
-            "the evidence owner refused to read this candidate's observations",
-            code,
-            _detail(result),
-        ),
-        next_action=(
-            "repair the candidate's dataset or receipt, then reopen the review"
-            if refusal_value is None
-            else refusal_value.next_action
-        ),
-    )
-
-
-def _evidence_claims(
-    resolved: ReviewCandidateResolution,
-) -> tuple[tuple[ReviewClaimRecord, ...], ReviewRecordChannel]:
-    """Every evidence claim this candidate records, read through the evidence record owner.
-
-    The collection is the owner's *complete* one -- every claim identity the candidate records, read
-    one at a time through the owner's own single-record reader -- rather than the matrix page, because
-    the matrix selects which claims a subject reaches and this module supplies what the candidate
-    records. Reading one record at a time is what makes the isolation real on this collection too: a
-    claim whose envelope, payload or coverage cannot be read is named on the channel while its
-    siblings are still supplied, instead of the whole collection becoming one refusal.
-    """
-
-    opened = _open_candidate_store(resolved, "evidence_claims")
-    if isinstance(opened, ReviewRecordChannel):
-        return (), opened
-    store = opened
-    try:
-        claims, unreadable = _claim_records(store)
-    except _DAMAGED_RECORD_ERRORS as error:
-        return (), _unavailable(
-            "evidence_claims",
-            _provenance("the recorded evidence claims could not be listed", None, str(error)),
-            next_action="repair the candidate dataset, then reopen the review",
-        )
-    finally:
-        store.close()
-    if not claims:
-        return (), _absent(
-            "evidence_claims",
-            "the candidate dataset records no evidence claim, so no authored evidence exists for "
-            "this review; the evidence owner answered for the claims it holds",
-        )
-    return claims, _recorded(
-        "evidence_claims",
-        len(claims),
-        detail=(
-            f"{len(claims)} evidence claim(s) read from their own owner with the author, lifecycle, "
-            f"declared limitations and asserted coverage each records{_unreadable_note(unreadable)}"
-        ),
-        unreadable=unreadable,
-    )
-
-
-def _claim_records(
-    store: OpenedKnowledgeStore,
-) -> tuple[tuple[ReviewClaimRecord, ...], tuple[str, ...]]:
-    """One renderer input per readable claim, plus the identities that could not be read.
-
-    Each identity is read through the evidence owner's own single-record reader rather than through
-    the owner's all-or-nothing enumerator, so one damaged claim is named while its siblings are
-    supplied: the same per-record isolation the detection channel has, for the same reason.
-    """
-
-    claims: list[ReviewClaimRecord] = []
-    unreadable: list[str] = []
-    for claim_id in evidence_records.claim_ids(store):
-        try:
-            record = evidence_records.claim_record(store, claim_id)
-            coverage = evidence_records.claimed_coverage_of_claim(store, claim_id)
-            subject = evidence_records.subject_of_claim(store, claim_id)
-        except _DAMAGED_RECORD_ERRORS:
-            unreadable.append(claim_id)
-            continue
-        if record is None:  # a listed identity whose own envelope cannot be read is damaged
-            unreadable.append(claim_id)
-            continue
-        claims.append(_claim_record(record, coverage, subject))
-    return tuple(claims), tuple(unreadable)
-
-
-def _claim_record(
-    record: EvidenceClaimRecord,
-    coverage: Sequence[ClaimCoverage],
-    subject: ClaimSubject | None,
-) -> ReviewClaimRecord:
-    """One claim's authored fields, rendered as the pane's own input value.
-
-    The subject travels as the identity the owner's own subject edge records, and it is the
-    *invariant revision* subject only: a facet-revision subject is a different kind of identity and
-    the review's selected subject is never a facet, so it is reported as the absence it is rather
-    than narrowed into an invariant revision id (``ICR-R26@v1``).
-    """
-
-    return ReviewClaimRecord(
-        claim_id=record.claim_id,
-        author_ref=record.provenance.actor_ref,
-        lifecycle=record.state_at_origin,
-        limitations=record.payload.limitations,
-        claimed_coverage=tuple(
-            f"{edge.endpoint.kind}:{coverage_identity(edge.endpoint)}" for edge in coverage
-        ),
-        assessment_refs=tuple(record.payload.assessment_refs),
-        subject_revision_id=_claim_subject_revision(subject),
-    )
-
-
-def _claim_subject_revision(subject: ClaimSubject | None) -> str | None:
-    """The exact invariant revision one claim's own recorded subject edge names, or ``None``."""
-
-    if subject is None:
-        return None
-    recorded = subject.subject
-    if getattr(recorded, "kind", None) != "invariant_revision":
-        return None
-    return str(recorded.revision_id)
-
-
-def _candidate_context(
-    resolved: ReviewCandidateResolution,
-) -> KnowledgeReadContext | ReviewRecordChannel:
-    """The candidate's own read context, or the unavailable channel its absence earns.
-
-    An absent dataset is named as absent rather than reported as a zero: the records it would hold are
-    not knowable from its absence, and ``apsw``'s own open failure is caught here as well so a file
-    that exists but cannot be read reaches the caller as a state instead of an exception.
-    """
-
-    if not resolved.candidate_database.is_file():
-        return _absent_dataset(
-            "verification_observations", f"{resolved.candidate_database.name} is not present"
-        )
-    try:
-        return open_diff_side(
-            resolved.candidate_database,
-            review_namespace(resolved.repository_id, resolved.candidate_database),
-            repository_root=resolved.candidate_code_root,
-            code_tree_id=resolved.candidate_code_tree_id,
-        )
-    except (KnowledgeStorageError, ValueError, OSError, apsw.Error) as error:
-        return _absent_dataset("verification_observations", str(error))
-
-
-def _page_items(result: EvidenceReadResult) -> tuple[object, ...]:
-    """Every item one served evidence page carries, or nothing for a page that was not served."""
-
-    page = result.page
-    return () if page is None else tuple(page.items)
-
-
-def _detail(result: EvidenceReadResult) -> str:
-    """The evidence owner's own refusal detail, or the fact that it refused without one."""
-
-    return "the read refused without a detail" if result.refusal is None else result.refusal.detail
-
-
-def _open_candidate_store(
-    resolved: ReviewCandidateResolution, records: ReviewRecordClassName
-) -> OpenedKnowledgeStore | ReviewRecordChannel:
-    """The candidate's dataset as a store, or the unavailable channel its absence earns."""
-
-    if not resolved.candidate_database.is_file():
-        return _absent_dataset(records, f"{resolved.candidate_database.name} is not present")
-    try:
-        return open_existing_knowledge_store(
-            resolved.candidate_database,
-            review_namespace(resolved.repository_id, resolved.candidate_database),
-        )
-    except (KnowledgeStorageError, ValueError, OSError, apsw.Error) as error:
-        return _absent_dataset(records, str(error))
-
-
-def _absent_dataset(records: ReviewRecordClassName, detail: str) -> ReviewRecordChannel:
-    """One collection whose dataset is absent or cannot be opened: unreadable, never empty."""
+def _retired_channel(records: ReviewRecordClassName) -> ReviewRecordChannel:
+    """Keep a retired record class visible without claiming the converted tree measured zero."""
 
     return _unavailable(
         records,
-        _provenance(
-            "the candidate dataset that would hold these records could not be opened", None, detail
+        f"{records} were canonical database records. Converted memory trees have no writer or "
+        "record format for this class, so this review cannot supply or count it; the canonical "
+        "reader was retired under MIK-R26",
+        next_action=(
+            "inspect the candidate's proof entries and worklist history through their text-store "
+            "views; those records keep their own meaning and do not supply this retired class"
         ),
-        next_action=_PLACE_DATASET,
     )
 
 
@@ -837,21 +443,3 @@ def _remaining_note(selection: MatrixSelection | None) -> str:
         "page this review rendered, and that page published no cursor, so the remainder is stated "
         "without a continuation rather than claimed to be reachable"
     )
-
-
-def _unreadable_note(unreadable: Sequence[str]) -> str:
-    """The named identities inside a supplied collection that could not be read."""
-
-    if not unreadable:
-        return ""
-    return (
-        f"; {len(unreadable)} further record(s) of this class could not be read and are named rather "
-        "than dropped"
-    )
-
-
-def _provenance(statement: str, status: str | None, detail: str) -> str:
-    """One unavailability statement: what failed, under which owner status, and the owner's words."""
-
-    named = "" if status is None else f" ({status})"
-    return f"{statement}{named}: {detail}"

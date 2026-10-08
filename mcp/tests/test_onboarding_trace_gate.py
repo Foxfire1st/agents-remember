@@ -726,6 +726,23 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
     assert response["curatorActionableCount"] == 0
 
 
+def test_the_onboarding_trace_block_names_the_traces_the_gate_holds_open(leaf: Leaf) -> None:
+    """L37 carry: after a closeout the census sees only the paths changed since the recorded
+    closeout commit, while the gate judges the leaf's base against its candidate. The response's
+    ``onboardingTrace`` block is computed over the gate's changed paths, so the two agree.
+
+    Catches a block that reports no open trace while the gate refuses the closeout for two.
+    """
+
+    (leaf.code / A).write_text(SOURCE + "\n# tail\n", encoding="utf-8")
+
+    response, _ = _run_controller(leaf, ())  # the census reports no changed path
+
+    assert response["knowledgeGate"]["openItemCount"] == 3
+    assert response["onboardingTrace"]["open"] == ["onboarding:pkg/a.py", "onboarding:pkg/overview"]
+    assert response["curatorActionableCount"] == 3
+
+
 def test_the_persisted_worklist_carries_the_onboarding_items_in_its_one_list(leaf: Leaf) -> None:
     """Ruling Q2: the gate's items, facts and satisfaction are in ``knowledge-worklist.json``."""
 

@@ -38,12 +38,15 @@ from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 __all__ = [
     "CUTOVER_LOCK_CODE",
+    "LEGACY_FORMAT_CODE",
     "CutoverProbeError",
     "converted_memory_location",
     "cutover_lock_refusal",
+    "legacy_format_refusal",
 ]
 
 CUTOVER_LOCK_CODE: Final = "unconverted-memory-locked"
+LEGACY_FORMAT_CODE: Final = "legacy-format"
 _WORKTREE_PREFIX: Final = "worktree "
 
 
@@ -141,6 +144,19 @@ def converted_memory_location(repository: Path) -> str | None:
     return _converted_branch(repository) or _converted_worktree(repository)
 
 
+def _converted_lines(repository: Path) -> str:
+    """Every place this repository holds converted memory, as text: a branch, a worktree, or both.
+
+    A reader needs the worktree (a directory to name as a memory root) and the branch (the line
+    it belongs to), so both are named when both exist. Empty when the repository holds none.
+    """
+
+    if not _is_repository(repository):
+        return ""
+    found = (_converted_branch(repository), _converted_worktree(repository))
+    return " and ".join(one for one in found if one is not None)
+
+
 def cutover_lock_refusal(repository: Path | None, *, operation: str, line: str) -> str | None:
     """Refuse ``operation`` on the unconverted memory of ``line`` once the repository is locked.
 
@@ -166,4 +182,40 @@ def cutover_lock_refusal(repository: Path | None, *, operation: str, line: str) 
         "is never written, checked, synced or landed (MIK-R24 rule 9, MIK-R09 rule 6). The line "
         "converts through the crossing sync: once the line it syncs from holds converted memory, "
         "run worktree_sync, which crosses the boundary (MIK-R24 rule 8)"
+    )
+
+
+def legacy_format_refusal(
+    repository: Path | None, *, operation: str, subject: str, database_file: bool = False
+) -> str:
+    """Word the refusal of a knowledge route that was handed memory in the legacy format (MIK-R26).
+
+    The canonical knowledge database is retired: knowledge is read and written as files, so a
+    route given an unconverted memory tree or a database file (``database_file``) has nothing to
+    open. The refusal names the two ways memory converts and, when Git can say, the line of
+    ``repository`` that already holds converted memory. It decides nothing; the caller established
+    the legacy input.
+    """
+
+    held = "This memory repository holds no converted memory yet."
+    if repository is not None and repository.is_dir():
+        try:
+            where = _converted_lines(repository)
+        except CutoverProbeError as error:
+            held = f"Whether this memory repository holds converted memory is unknown ({error})."
+        else:
+            if where:
+                held = f"Converted memory of this repository is on {where}; read it there."
+    what = (
+        "it is a knowledge database file, the legacy format, and no route opens one: name the "
+        "root directory of a converted memory tree instead"
+        if database_file
+        else f"it is memory in the legacy format (no {LAYOUT_MARKER_PATH})"
+    )
+    return (
+        f"{operation} refuses {subject}: {what}. The canonical knowledge database is retired "
+        "(MIK-R26), so knowledge is read and written only as files. A line that descends from a "
+        "converted line converts through the crossing sync: run worktree_sync (MIK-R24 rule 8). A "
+        "repository that was never converted converts with `agents-remember knowledge-convert "
+        f"MEMORY_ROOT --code CODE_REPOSITORY` (MIK-R24). {held}"
     )

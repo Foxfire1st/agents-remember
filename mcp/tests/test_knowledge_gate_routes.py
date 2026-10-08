@@ -214,7 +214,7 @@ def test_a_hand_closed_leaf_file_is_refused_at_closeout_validation_and_record_la
 
 
 def _closeout(world: Gated, code_commit: str) -> Any:
-    """``external_closeout_commits`` with only the journal hooks stubbed."""
+    """Run the actual mutation evidence and commit proof around this route's gate."""
 
     effective = EffectiveCloseoutInput.model_validate(
         {
@@ -232,11 +232,13 @@ def _closeout(world: Gated, code_commit: str) -> Any:
     with (
         mock.patch.object(closeout_external, "_refresh_external_memory", return_value=refresh),
         mock.patch.object(closeout_external, "report_operation_progress"),
-        mock.patch.object(closeout_external, "prove_git_commit"),
         mock.patch.object(closeout_external, "refresh_memory_cache", return_value={}),
     ):
         return closeout_external.external_closeout_commits(
-            world.contract, WorktreeArgs(contract_path=world.contract_path()), effective, change
+            world.contract,
+            WorktreeArgs(contract_path=world.contract_path(), closeout_input=effective),
+            effective,
+            change,
         )
 
 
@@ -260,8 +262,7 @@ def test_the_worktree_closeout_refuses_restores_the_file_and_commits_it_closed_o
     assert history.read_bytes() == open_bytes  # the refused closeout left the file as written
 
     write(world.memory, {"onboarding/pkg/a.py.md": "# a\n"})
-    with mock.patch.object(closeout_external, "begin_git_mutation", return_value=None):
-        outcome = _closeout(world, code_commit)
+    outcome = _closeout(world, code_commit)
     committed = json.loads(git(world.memory, "show", f"{outcome.memory_commit}:{HISTORY}"))
     assert committed["closed"] is True
     assert committed["rows"] == json.loads(open_bytes)["rows"]

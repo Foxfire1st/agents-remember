@@ -234,8 +234,8 @@ def _published_coherence_authority(contract: WorktreeContract) -> str:
 
     Never raises, and answers ``""`` for every contract the coherence route does not apply to (a
     series contract, a leaf without external memory, a leaf with no memory worktree) and for a leaf
-    that has not published yet -- the hint must degrade to the ordinary integration step rather than
-    send an operator to a tool that will refuse.
+    that has not published yet. This identifies historical evidence without validating it against
+    the live candidate after the closeout's own writes.
     """
 
     if (
@@ -248,23 +248,6 @@ def _published_coherence_authority(contract: WorktreeContract) -> str:
         return current_curator_coherence_predecessor(contract)
     except (CuratorCoherenceError, OSError):
         return ""
-
-
-def _canonical_curator_caller(contract: WorktreeContract) -> dict[str, object]:
-    """The exact ``caller`` the coherence route expects for this contract, as a plain payload.
-
-    Derived from the contract's own task root and leaf id, which is precisely what the route's
-    caller refusal asks a caller to supply: a hint that names a tool while leaving its one
-    identity argument blank would be the same instructions-do-not-travel defect (D-26) one level up.
-    """
-
-    return {
-        "role": "curator",
-        "task_document_ref": {
-            "repository": contract.repo_name,
-            "path": f"{contract.task_root.name}/{contract.leaf_id}.json",
-        },
-    }
 
 
 def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
@@ -382,36 +365,16 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
     """
     if contract.closeout_status == "completed":
         authority_digest = _published_coherence_authority(contract)
+        summary = "Closeout completed; integrate the task branches back into their source branches."
         if authority_digest:
-            # D-25: the documented order is closeout -> prepare -> publish -> **validate** ->
-            # integrate -> finalize, and the validate window closes at finalize, whose automatic
-            # cleanup collects the enclosure root. The hint chain used to walk straight from
-            # closeout to ``worktree_integrate`` and never named the step, so an operator following
-            # the tool's own guidance could not see it -- and a leaf that missed the window could
-            # never re-prove what it had published. The move is still the integration decision; the
-            # validation is its precondition.
-            return {
-                "phase": "integration-pending",
-                "summary": (
-                    "Closeout completed and this leaf's curator-coherence authority is published "
-                    f"({authority_digest[:12]}...). Run its standalone validate now, while the "
-                    "enclosure root still exists: lifecycle_finalize_task's automatic cleanup "
-                    "collects it and the validate window closes with it. Then integrate."
-                ),
-                **next_guidance(
-                    "request_integration_decision",
-                    tool="curator_coherence",
-                    args=contract_next_args(
-                        contract,
-                        action="validate",
-                        caller=_canonical_curator_caller(contract),
-                    ),
-                    required_args=["contract_path", "action", "caller"],
-                ),
-            }
+            summary += (
+                f" The published curator-coherence authority ({authority_digest[:12]}...) records "
+                "the pre-closeout candidate; it does not validate the live tree after closeout's "
+                "history and fingerprint writes."
+            )
         return {
             "phase": "integration-pending",
-            "summary": "Closeout completed; integrate the task branches back into their source branches.",
+            "summary": summary,
             **next_guidance(
                 "request_integration_decision",
                 tool="worktree_integrate",

@@ -35,7 +35,6 @@ __all__ = [
     "RenamePair",
     "git_rename_inference",
     "moved_pairs",
-    "no_rename_inference",
     "rename_command",
     "with_rename_inferences",
 ]
@@ -127,13 +126,6 @@ def git_rename_inference(before: TreeSide, after: TreeSide) -> RenameObservation
     return RenameObservations(available=True, pairs=pairs)
 
 
-def no_rename_inference(before: TreeSide, after: TreeSide) -> RenameObservations:
-    """The unmeasured inference, for a caller that must run no Git command at all."""
-
-    del before, after
-    return RenameObservations(available=False, detail=_MISSING_TREE_RENAME_DETAIL)
-
-
 @dataclass(frozen=True)
 class RenameInferenceSources:
     """The two bound code trees and the seam the inference is measured through, as one value.
@@ -156,7 +148,7 @@ class RenameInferenceSources:
 
 def with_rename_inferences(
     movements: tuple[ReviewRelationshipMovement, ...],
-    route: ReviewRelationshipMovement | None,
+    routes: tuple[ReviewRelationshipMovement, ...],
     sources: RenameInferenceSources,
 ) -> tuple[ReviewRelationshipMovement, ...]:
     """Attach Git's labelled rename inference to the movements whose recorded addresses differ.
@@ -169,14 +161,14 @@ def with_rename_inferences(
 
     candidates = tuple(movement for movement in movements if moved_pairs(movement))
     if not candidates:
-        return movements if route is None else (*movements, route)
+        return (*movements, *routes)
     observation = sources.observe()
     command = rename_command(sources)
     annotated = tuple(
         _with_inference(movement, observation, command) if movement in candidates else movement
         for movement in movements
     )
-    return annotated if route is None else (*annotated, route)
+    return (*annotated, *routes)
 
 
 def rename_command(sources: RenameInferenceSources) -> str:

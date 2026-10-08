@@ -30,11 +30,11 @@ from agents_remember.models.knowledge.base import (
     REFERENCE_MAX_LENGTH,
     KnowledgeModel,
 )
-from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_lane import (
     ReviewFileClassification,
     ReviewUnexplainedLane,
 )
+from agents_remember.models.knowledge.review_refusal import ReviewRefusal
 from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
 
 __all__ = [
@@ -242,8 +242,11 @@ ReviewTreesState = Literal["trees", "not-converted", "refused"]
 class ReviewTreesResult(KnowledgeModel):
     """The reviewer's tree view of one leaf, or why there is none.
 
-    ``not-converted`` is the leaf whose memory is unconverted: its review is the dataset review
-    exactly as before, and nothing here applies. ``refused`` carries the typed refusal.
+    ``refused`` carries the typed refusal. A leaf whose memory is unconverted has no tree view and
+    is answered ``refused``: its resolution names both knowledge sides ``legacy-unavailable``,
+    because the canonical datasets such a review once read are retired, and its review reads the
+    source identities of its code pair only. ``not-converted`` is the answer for a resolution that
+    offers no tree comparison and names no knowledge side it could not read.
     """
 
     state: ReviewTreesState

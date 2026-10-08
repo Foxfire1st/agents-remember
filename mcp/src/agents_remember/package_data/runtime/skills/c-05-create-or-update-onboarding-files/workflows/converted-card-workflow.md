@@ -103,8 +103,9 @@ A converted card is two files at the mirrored path:
    reference the card's Markdown no longer cites and reports the count as `removedReferences`. A tree-wide run
    never removes a reference.
 
-Numbers are not reused or renumbered: the remaining references keep theirs, and a new row gets the next number
-after the highest one.
+Nothing is renumbered: the remaining references keep their numbers. A new row gets the next number after the
+highest one the sidecar holds. The sidecar keeps no record of removed numbers, so when the removed reference
+was the highest, a later new row gets its number again.
 
 ## A source file moved
 

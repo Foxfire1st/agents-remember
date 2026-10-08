@@ -53,25 +53,20 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory.knowledge import realizations
-from agents_remember.memory.knowledge.records import (
-    claim_row_digest,
-    decode_authorship,
-    stored_realization_role,
-)
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
-from agents_remember.models.knowledge.graph import RealizationClaimDraft, RealizationRole
-from agents_remember.models.knowledge.result import (
+from agents_remember.memory.knowledge.records import decode_authorship
+from agents_remember.models.knowledge.graph import RealizationRole
+from agents_remember.models.knowledge.source import FileLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from knowledge_row_codec_test_support import claim_row_digest, stored_realization_role
+from knowledge_rows_test_support import (
     NewAnchor,
     RealizationClaimRequest,
     RemoveRealizationClaimRequest,
     RevisionDraft,
     RevisionRequest,
-)
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
+    RowStore,
+    open_knowledge_store,
+    realizations,
 )
 from read_scope_test_support import (
     APPLICABILITY,
@@ -289,9 +284,7 @@ def _build_candidate(
     )
 
 
-def _author_revised_revision(
-    store: OpenedKnowledgeStore, baseline: ReadScopeFixture, revision_id: str
-) -> None:
+def _author_revised_revision(store: RowStore, baseline: ReadScopeFixture, revision_id: str) -> None:
     """Author the candidate's revised statement as a successor of the baseline's subject revision.
 
     This is the substrate's only shape for a revised statement, and the store says so itself: the
@@ -321,7 +314,7 @@ def _author_revised_revision(
 
 
 def _move_retry_claim(
-    store: OpenedKnowledgeStore, baseline: ReadScopeFixture, revised_revision_id: str
+    store: RowStore, baseline: ReadScopeFixture, revised_revision_id: str
 ) -> None:
     """Move the baseline's realization of the retry obligation onto the successor revision.
 
@@ -343,9 +336,7 @@ def _move_retry_claim(
     _require("move_retry_claim", removed.state, removed.refusal, expected="removed")
 
 
-def _add_unselected_revision(
-    store: OpenedKnowledgeStore, baseline: ReadScopeFixture, revision_id: str
-) -> None:
+def _add_unselected_revision(store: RowStore, baseline: ReadScopeFixture, revision_id: str) -> None:
     """Author a fourth retry revision that neither side's selection reaches and no claim cites."""
 
     created = store.create_revision(
@@ -367,7 +358,7 @@ def _add_unselected_revision(
     _require("add_unselected_revision", created.state, created.refusal)
 
 
-def _remove_retired_claim(store: OpenedKnowledgeStore, baseline: ReadScopeFixture) -> None:
+def _remove_retired_claim(store: RowStore, baseline: ReadScopeFixture) -> None:
     """Remove the baseline's claim at the retired path, leaving its anchor row recorded.
 
     Only the *relationship* is removed. The anchor row stays, which is what lets the comparison show
@@ -387,7 +378,7 @@ def _remove_retired_claim(store: OpenedKnowledgeStore, baseline: ReadScopeFixtur
 
 
 def _add_successor_claim(
-    store: OpenedKnowledgeStore,
+    store: RowStore,
     baseline: ReadScopeFixture,
     *,
     added: AddedRealization,
@@ -426,7 +417,7 @@ def _add_successor_claim(
     _require("add_successor_claim", created.state, created.refusal)
 
 
-def _claim_row_digest(store: OpenedKnowledgeStore, claim_id: str) -> str:
+def _claim_row_digest(store: RowStore, claim_id: str) -> str:
     """Return one claim's row digest, recomputed from the row the store actually holds.
 
     A claim has no stored ``row_digest`` column -- the digest is derived over the row's own values by

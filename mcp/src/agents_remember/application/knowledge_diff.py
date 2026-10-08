@@ -30,7 +30,7 @@ Four boundaries this module owns, each because getting it wrong is a different k
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +187,7 @@ def diff_knowledge_scope(
     before_path: Path,
     after_path: Path,
     probe: TreeDifferenceProbe | None = None,
+    incomplete_sides: Mapping[ReadSide, str] | None = None,
 ) -> KnowledgeDiffResult:
     """Compare two named snapshots for one selected invariant or family.
 
@@ -230,7 +231,11 @@ def diff_knowledge_scope(
         return _compare_inside_one_snapshot_pair(
             request,
             binding=binding,
-            paths=SnapshotPair(before=before_database, after=after_database),
+            paths=SnapshotPair(
+                before=before_database,
+                after=after_database,
+                incomplete_sides=incomplete_sides or {},
+            ),
             cursor=cursor,
             probe=git_tree_difference_probe if probe is None else probe,
         )
@@ -281,7 +286,7 @@ def _resolve_sides(
                 request,
                 selected_input_unavailable_refusal(
                     "diff_knowledge_scope",
-                    f"the {side} knowledge database is absent or is not a file: {path}",
+                    f"the {side} knowledge index is absent or is not a file: {path}",
                     record_id=str(path),
                 ),
             )
@@ -324,6 +329,7 @@ class SnapshotPair:
 
     before: Path
     after: Path
+    incomplete_sides: Mapping[ReadSide, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -421,7 +427,9 @@ def _select_and_compare(
                 tree_id=request.after.context.code_tree_id,
                 root=request.after.context.repository_root,
             ),
-            attribution=_registered_mapping_reader(request, paths, open_pair),
+            attribution=_registered_mapping_reader(
+                request, paths, open_pair, paths.incomplete_sides
+            ),
         ),
     )
     position = 0 if cursor is None else cursor.position
@@ -452,6 +460,7 @@ def _registered_mapping_reader(
     request: KnowledgeDiffRequest,
     paths: SnapshotPair,
     open_pair: OpenPair,
+    incomplete_sides: Mapping[ReadSide, str],
 ) -> AttributionReader:
     """The registered-mapping reader for this comparison's own two open snapshots.
 
@@ -468,12 +477,14 @@ def _registered_mapping_reader(
             database=paths.before,
             context=request.before.context,
             connection=open_pair.before,
+            incomplete=incomplete_sides.get("before"),
         ),
         AttributionSideInput(
             side="after",
             database=paths.after,
             context=request.after.context,
             connection=open_pair.after,
+            incomplete=incomplete_sides.get("after"),
         ),
     )
     subject = selected_subject(request.selector)

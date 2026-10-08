@@ -70,8 +70,8 @@ Each step names the surface that owns it. This operation **runs** that surface a
    `c-03-repo-bootstrap` skill. A thin root overview is enough to start; it is the artifact the first
    baseline will carry. (`docs/` and `system/` content is enough to adopt when the developer wants no
    onboarding yet.)
-6. **Reach the repository's knowledge foundation.** The foundation — the authored records in the
-   knowledge database, as distinct from the Markdown onboarding and from the baseline — is the
+6. **Reach the repository's knowledge foundation.** The foundation — the authored records under
+   `knowledge/` in the memory repository, as distinct from the onboarding cards and from the baseline — is the
    curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the read-and-report
    carrier that exists for it before a task does**: the roles admitted without a task document are the
    taskless seats `bootstrap`, `chat`, `terminal` and — since the developer's 2026-09-24 ruling —
@@ -87,7 +87,7 @@ Each step names the surface that owns it. This operation **runs** that surface a
    that resolves `HEAD`, not an onboarding corpus and not an adopted baseline, so a repository whose
    knowledge begins before its onboarding is a supported order rather than a defect. Nothing about it
    is fabricated to make the step run — no development leaf, worktree or enclosure is created to
-   satisfy an argument list, and no database is written by hand.
+   satisfy an argument list, and no record is written by hand.
 7. **Adopt the first attributed baseline** through `memory_baseline_adopt`, with
    `memory_baseline_status` read before and after and the drift-acceptance decision put to the
    developer rather than assumed. Procedure: the `c-10-adopt-memory-baseline` skill.
@@ -109,8 +109,8 @@ operation exists to make legible; a seat that cannot name them is guessing.
 | Unresolvable coordination root | `server_info` reports no `coordinationRoot`, or `context_packet`/`resolve_context` refuse for the named repository | The coordinator runtime scaffold is missing or the repository is not configured. Run the `c-13-install-and-onboard` skill; if the scaffold itself is absent, `runtime_install` creates it. Do not hand-build a coordination root. |
 | Memory root is not a Git repository | Step 7's refusal naming the memory root | Re-run step 4 with Git initialization enabled; adoption needs a repository, not just directories. |
 | Baseline already adopted | `memory_baseline_status` reports attributed memory | Setup is done. Adoption is valid only before attributed memory exists; treat the report as the ordinary-use transition and stop. |
-| Knowledge foundation not recorded | `memory_init`'s `knowledge` block reports `not-recorded`, or `agents-remember knowledge-bootstrap --repo <repo_id> --status` reports `destinationNow.state = not-recorded` | The repository has no published knowledge at the location the ordinary read route selects. This is step 6's real work, not a failure: onboarding and the baseline can both be complete while it is still true, and neither substitutes for it. |
-| Knowledge foundation already recorded | the same two surfaces report `recorded`, with the dataset's identity | Read it before extending it and never reinitialize it. A recorded foundation is extended or resumed through the same curator procedure; it is not replaced by a scaffold. |
+| Knowledge foundation not recorded | `memory_init`'s `knowledge` block reports `not-recorded` | The repository has no recorded knowledge at the location the ordinary read route selects. This is step 6's real work, not a failure: onboarding and the baseline can both be complete while it is still true, and neither substitutes for it. |
+| Knowledge foundation already recorded | the same block reports `recorded`, with its identity | Read it before extending it and never reinitialize it. A recorded foundation is extended or resumed through the same curator procedure; it is not replaced by a scaffold. |
 | Knowledge foundation unusable or bound elsewhere | `unusable`, with the shipped refusal code (`selected_input_unavailable` when there is no file to open, `snapshot_unavailable` when the bytes are not the expected dataset) | Report the exact state, path and code, and stop: the route is the developer's decision about the object standing there. **Never delete, overwrite or migrate it, and never report it as `not-recorded`.** |
 | Knowledge admission refused | `memory_init`'s `knowledge.state = context-not-admitted`, with its own `code`, `detail` and `nextAction` | An admission failure, not a knowledge state. Report the refusal's own route (`repository_not_allowed`, `coordination_root_unavailable`, `code_checkout_unavailable`, `code_checkout_is_not_a_git_checkout`, `code_revision_unavailable`, `memory_revision_unavailable`, `memory_layer_not_resolved`), and do not work around it by naming a path or a revision yourself. |
 

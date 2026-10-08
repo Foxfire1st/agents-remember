@@ -30,10 +30,11 @@ recorded; and a head that records nothing yields a sentence that says what was a
 **What the sides carry, and what may not be inferred from them.** Each side states which snapshot
 fact it is: the relationship row and its recorded address (``recorded``), the row with an address
 this display could not read (``unresolved``), an identity the snapshot records with no governing
-route (``ungoverned``) or an identity the snapshot does not record at all (``not_recorded``). The
-last two are different facts and neither is a missing route, so neither is defaulted to the other or
-to the repository root. Every unresolved side stays visible with its own code and reason, which is
-the packet's Failure And Recovery Behavior taken as a value.
+route (``ungoverned``), an identity whose route declarations were not read (``unavailable``) or an
+identity the snapshot does not record at all (``not_recorded``). The last three are different facts
+and none is a missing route, so none is defaulted to another or to the repository root. Every
+unresolved side stays visible with its own code and reason, which is the packet's Failure And
+Recovery Behavior taken as a value.
 
 **The rename inference is labelled and proves nothing.** When one movement's recorded sides name
 different addresses, the labelled inference that
@@ -45,7 +46,7 @@ side, identity, attribution or association is derived from it, and this traversa
 **Three responsibilities are their own modules, and this one calls them.** The relationships one
 snapshot's union items record, with its identity rows and its own edges:
 :mod:`agents_remember.application.review_recorded_relationships`. The reviewed identity's recorded
-governing-route association: :mod:`agents_remember.application.review_governing_route`. The labelled
+governing-route associations: :mod:`agents_remember.application.review_governing_route`. The labelled
 Git rename inference: :mod:`agents_remember.application.review_rename_inference`. What remains here is
 the traversal and its display: pairing the recorded sides by the author's own edges, building one
 movement per relationship, naming the authored lineage and the unresolved states, and rendering the
@@ -63,7 +64,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.application.review_governing_route import governing_route_movement
+from agents_remember.application.review_governing_route import governing_route_movements
 from agents_remember.application.review_recorded_relationships import (
     RecordedRelationship,
     RecordedSnapshot,
@@ -148,8 +149,9 @@ def relationship_movements(
     The union items are the shipped comparison's own page, so a relationship only the baseline
     selected is traversed exactly like one both snapshots hold; nothing here re-selects, widens a
     frontier or reads the candidate's graph as though it were the whole history. The reviewed
-    subject's governing route is read for that identity on each snapshot and displayed as its own
-    movement, because it is a recorded association the comparison's union does not carry as an item.
+    subject's governing routes are read for that identity on each snapshot and displayed as their own
+    movements, one per route, because they are recorded associations the comparison's union does not
+    carry as items.
     """
 
     before_connection = open_read_only_database(Path(sources.before_database))
@@ -162,13 +164,13 @@ def relationship_movements(
             "after", sources.after_database, sources.repository_id, after_connection
         )
         movements = _movements(items, before, after, sources)
-        route = governing_route_movement(sources.selector, sources.repository_id, before, after)
+        routes = governing_route_movements(sources.selector, sources.repository_id, before, after)
     finally:
         before_connection.close()
         after_connection.close()
     return with_rename_inferences(
         movements,
-        route,
+        routes,
         RenameInferenceSources(
             before_code=sources.before_code,
             after_code=sources.after_code,

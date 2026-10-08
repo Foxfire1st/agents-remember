@@ -1,11 +1,4 @@
-"""The connection, pragma and schema-validation boundary of the knowledge store.
-
-Every decision about *what a connection is* lives here: which pragmas are set and verified, how
-an empty database becomes this schema generation, and how an existing one is checked against
-the generation this code assumes. Keeping it separate from the mutation logic means the
-mutation reads as a sequence of typed checks rather than a mix of SQLite plumbing and identity
-rules.
-"""
+"""Read-only index connections, pinned index schema creation, and schema inspection."""
 
 from __future__ import annotations
 
@@ -23,32 +16,6 @@ from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 BUSY_TIMEOUT_MILLISECONDS = 1000
 
 
-def open_database(database_path: Path) -> apsw.Connection:
-    """Open one connection and apply the pragmas the store depends on."""
-
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = apsw.Connection(str(database_path))
-    apply_connection_contract(connection)
-    return connection
-
-
-def apply_connection_contract(connection: apsw.Connection) -> None:
-    """Set and verify the pragmas every read and write in this store depends on.
-
-    ``foreign_keys`` is verified rather than assumed: without it a deferred constraint never
-    fires, and every "the database refuses it" guarantee in this package would silently become
-    an intention.
-    """
-
-    connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MILLISECONDS}")
-    connection.execute("PRAGMA foreign_keys=ON")
-    if next(iter(connection.execute("PRAGMA foreign_keys")))[0] != 1:
-        raise KnowledgeStorageError(
-            "this SQLite build did not accept PRAGMA foreign_keys=ON; the store refuses to "
-            "operate without enforced referential integrity"
-        )
-
-
 def open_read_only_database(database_path: Path) -> apsw.Connection:
     """Open one existing database through a connection that cannot write it.
 
@@ -61,12 +28,6 @@ def open_read_only_database(database_path: Path) -> apsw.Connection:
     connection = apsw.Connection(str(database_path), flags=apsw.SQLITE_OPEN_READONLY)
     connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MILLISECONDS}")
     return connection
-
-
-def journal_mode(connection: apsw.Connection) -> str:
-    """Return the connection's current journal mode, lowercased."""
-
-    return str(next(iter(connection.execute("PRAGMA journal_mode")))[0]).lower()
 
 
 def fetch_one(
@@ -154,30 +115,6 @@ class _ImmediateTransaction:
         self._connection.execute("COMMIT")
 
 
-def discard_closed_wal_peers(database_path: Path) -> None:
-    """Remove the journal peers of one database that no connection holds.
-
-    **No caller in this package may use this on close.** It cannot tell whether another
-    connection -- in this process or another -- still has the database open, and it does not need
-    to: SQLite checkpoints its WAL and removes both peer files itself when the last connection
-    closes cleanly. What the unlink can do instead is destroy committed content. A reader holding
-    a read transaction blocks that checkpoint, so a writer's committed frames are still only in
-    the WAL when a closing writer unlinks it; the committed rows are then absent from the main
-    file and the database is left unreadable until it is rebuilt. That is the failure this
-    function's earlier docstring claimed was impossible, and it is reachable in the intended
-    multi-consumer shape of this store (one consumer reading while another writes).
-
-    It remains here, with that boundary stated, for a caller that has independently established
-    that no connection holds the database -- an offline repair or an enclosure cleanup that owns
-    the file exclusively. Every ordinary close relies on SQLite instead.
-    """
-
-    for suffix in ("-wal", "-shm"):
-        peer = database_path.with_name(database_path.name + suffix)
-        if peer.exists():
-            peer.unlink()
-
-
 def _require_declared_tables(
     connection: apsw.Connection, declared: schema_generations.SchemaGeneration
 ) -> None:
@@ -188,9 +125,8 @@ def _require_declared_tables(
     missing = [name for name in declared.tables if name not in present]
     if missing:
         raise KnowledgeStorageError(
-            f"unsupported schema: missing canonical table(s) {', '.join(missing)}. Session "
-            "changesets can silently omit a table that exists on only one side, so a partial "
-            "schema is refused rather than written through."
+            f"unsupported schema: missing canonical table(s) {', '.join(missing)}. The index "
+            "cannot answer its declared queries with a partial schema."
         )
     for table, columns in declared.columns.items():
         actual = tuple(str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})"))

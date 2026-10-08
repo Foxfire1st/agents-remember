@@ -6,16 +6,12 @@ invariant was displayed in both panes of a different invariant. ``ICR-R14@v1`` d
 owner-produced collections; these cases measure the attribution half -- which of those records may be
 displayed beside which subject, and why -- through the **production composition**
 (``cli.dashboard.serving_collaborators``, the same port ``create_app`` is given) over a real leaf
-enclosure with real datasets and records produced by their owning operations:
+enclosure with converted memory trees and records produced by their owning operations:
 
 * five assessments published through the curator-coherence authority, for the selected subject, for a
   *sibling* invariant the selection's recorded relationships reach, for an invariant the selection
   does **not** reach, for an identity neither snapshot records, and one that names the selected
   subject's own identity where a revision belongs (the malformed binding);
-* a detection run holding two signals, one whose recorded path reaches the selection and one whose
-  path reaches nothing the selection holds;
-* a verification observation bound to the candidate, an evidence claim whose subject is the
-  selected subject's own revision, and an authored open question that records no subject at all;
 * and a source movement after publication, so the same assessment is measured once as this
   generation's record and once as historical input of the previous one.
 
@@ -29,8 +25,7 @@ The load-bearing properties, one case each:
 * an assessment of a previous generation is displayed ``historical`` -- with the candidate tree it
   really examined -- and never as the displayed generation's result;
 * the records that *are* the selected subject's carry a recorded binding that names it: the direct
-  assessment, the signal whose recorded path reaches it, and the evidence claim whose own recorded
-  subject revision is one the selection retains;
+  assessment whose own recorded subject revisions the selection retains;
 * the population a record is classified against is the **selection**, not the comparison's bounded
   page, so every page size classifies the same records the same way;
 * the source inventory is measured from the two bound code trees and is unaffected by any of it.
@@ -45,64 +40,26 @@ from typing import get_args
 from uuid import uuid4
 
 import pytest
-from agents_remember.application.knowledge import (
-    admitted_evidence_request,
-    admitted_knowledge_destination,
-    change_knowledge_candidate,
-    resolve_candidate_context,
-    write_authorship,
-    write_knowledge_evidence,
-)
-from agents_remember.application.knowledge_diff import open_diff_side
-from agents_remember.application.knowledge_review import resolve_review_candidate
+from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
+from agents_remember.application.worktree_services import (
+    bind_worktree_services,
+    build_default_worktree_services,
+)
 from agents_remember.cli.dashboard import serving_collaborators
-from agents_remember.memory.knowledge.detection import (
-    DetectionRunAssembly,
-    build_detection_run,
-    record_detection_run,
-)
-from agents_remember.memory.knowledge.store import open_existing_knowledge_store
+from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.knowledge.authorship import Authorship
-from agents_remember.models.knowledge.candidate import (
-    AddSemanticChangeSet,
-    AddUnresolvedQuestion,
-    CandidateResolution,
-    ChangeBatch,
-)
-from agents_remember.models.knowledge.detection import (
-    DetectionCondition,
-    DetectionInputSide,
-    DetectionRecordedInputSet,
-    DetectionRelationshipPath,
-    DetectionRunRequest,
-    DetectionScopeManifest,
-    DetectionSignalPayload,
-)
-from agents_remember.models.knowledge.evidence import (
-    AddEvidenceClaim,
-    AddVerificationObservation,
-    AnchorCoverage,
-    EvidenceClaimPayload,
-    InvariantRevisionSubject,
-    ResultArtifactReference,
-    RunEnvironment,
-    VerificationObservationPayload,
-)
-from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.review import (
     KnowledgeReviewPayload,
     ReviewApplicabilitySummary,
     ReviewDisplayedApplicability,
-    ReviewRefusal,
 )
 from agents_remember.models.knowledge.review_applicability import (
     REVIEW_APPLICABILITY_CLASSES,
     ReviewContextRecord,
 )
 from agents_remember.models.knowledge.review_records import ReviewRecordClassName
-from agents_remember.models.knowledge.snapshot import SnapshotIdentity
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceJudgment,
     CuratorCoherenceRequest,
@@ -118,14 +75,24 @@ from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
+from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from curator_coherence_test_support import write_curator_task_topology
-from test_knowledge_review_source_endpoints import EndpointFixture, build_endpoint_fixture
+from test_review_git_trees import (
+    FAMILY,
+    INVARIANT,
+    World,
+    _resolve,
+    _seed,
+    build_world,
+    commit,
+    git,
+    invariant,
+)
 from test_worktree_support import write_passing_route_review
 
 pytestmark = pytest.mark.evidence_unit
 
-REPOSITORY_AUTHORITY_HOME = "agents-remember"
 EVIDENCE_RELATIVE = "notes/reports/icr-l26-evidence.md"
 EVIDENCE_TEXT = "# fixture evidence\n\nthe record these assessments cite\n"
 SOURCE_MOVEMENT_PATH = "src/moved_after_the_assessment.py"
@@ -137,30 +104,31 @@ UNRELATED_ASSESSMENT = "ICR-L26-AS-UNRELATED"
 UNRESOLVABLE_ASSESSMENT = "ICR-L26-AS-UNRESOLVABLE"
 MALFORMED_ASSESSMENT = "ICR-L26-AS-MALFORMED"
 
-DIRECT_OBSERVATION = "icr-l26-suite"
-DIRECT_SIGNAL_CONDITION: DetectionCondition = "absent_anchor"
-UNRESOLVED_SIGNAL_CONDITION: DetectionCondition = "removed_or_reparented_attribution"
-_SIGNAL_LIMITATIONS = (
-    "unmapped_changed_paths",
-    "truncated_scan",
-    "no_semantic_assessment_performed",
-)
+SIBLING = "INV-BBBBBB"
+UNRELATED = "INV-CCCCCC"
+SELECTED_ID = text_uuid("identity", INVARIANT)
+BEFORE_REVISION = text_uuid("revision", f"{INVARIANT}@1")
+AFTER_REVISION = text_uuid("revision", f"{INVARIANT}@2")
+SIBLING_ID = text_uuid("identity", SIBLING)
+SIBLING_REVISION = text_uuid("revision", f"{SIBLING}@1")
+UNRELATED_ID = text_uuid("identity", UNRELATED)
+UNRELATED_REVISION = text_uuid("revision", f"{UNRELATED}@1")
 
 
 @dataclass(frozen=True)
 class Journey:
-    """One live enclosure whose candidate dataset holds records of every supplied class."""
+    """One live enclosure with five curator-published assessments about its candidate.
 
-    endpoint: EndpointFixture
+    The dataset's own record classes (detection signals, evidence claims, observations, authored
+    effects) are not in it: their writers were retired with the canonical database (MIK-R26).
+    """
+
+    endpoint: World
     contract: WorktreeContract
     sprint: TaskDocumentRef
     unrelated_invariant: str
-    signal_ids: tuple[str, str]
     malformed_assessment_id: str
     pages: dict[int, KnowledgeReviewPayload]
-    claim_id: str
-    observation_id: str
-    question_id: str
     candidate_tree_id: str
     first: KnowledgeReviewPayload
 
@@ -169,7 +137,7 @@ class Journey:
 
         port = serving_collaborators(self.endpoint.config).knowledge_review
         assert port is not None, "the composition root must publish the review port"
-        request = self.endpoint.request().model_copy(update={"page_size": page_size})
+        request = self.endpoint.review(selector=_seed(), page_size=page_size)
         result = port(request)
         assert result.state == "review", result.refusal
         assert result.payload is not None
@@ -205,14 +173,18 @@ class Journey:
 def journey(tmp_path_factory: pytest.TempPathFactory) -> Journey:
     """One enclosure per module: the publication journey is expensive and read-only afterwards."""
 
-    return _build_journey(tmp_path_factory.mktemp("subject-isolation"))
+    bind_worktree_services(build_default_worktree_services())
+    try:
+        return _build_journey(tmp_path_factory.mktemp("subject-isolation"))
+    finally:
+        reset_worktree_services()
 
 
 @pytest.fixture(scope="module")
 def moved(journey: Journey) -> KnowledgeReviewPayload:
     """The same review read after the candidate's source moved, so the generation is another one."""
 
-    target = journey.endpoint.worktree / SOURCE_MOVEMENT_PATH
+    target = journey.endpoint.code_worktree / SOURCE_MOVEMENT_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(SOURCE_MOVEMENT_TEXT, encoding="utf-8")
     return journey.read()
@@ -230,7 +202,7 @@ def test_a_sibling_subjects_assessment_is_context_and_never_the_selected_subject
     """
 
     payload = journey.first
-    sibling = journey.endpoint.diff.sibling_invariant_id
+    sibling = SIBLING_ID
     assert journey.state_of(payload, SIBLING_ASSESSMENT) == "<absent>"
     assert not [
         row for row in payload.evidence.assessments if row.assessment_id == SIBLING_ASSESSMENT
@@ -263,9 +235,9 @@ def test_the_selected_subjects_own_assessment_is_direct_with_its_recorded_bindin
     direct = displayed[DIRECT_ASSESSMENT]
     assert direct.applicability is not None
     assert direct.applicability.state == "direct"
-    assert direct.applicability.subject_id == journey.endpoint.diff.retry_invariant_id
-    assert journey.endpoint.diff.subject_revision_id in direct.applicability.subject_revision_ids
-    assert journey.endpoint.diff.revised_revision_id in direct.applicability.subject_revision_ids
+    assert direct.applicability.subject_id == SELECTED_ID
+    assert BEFORE_REVISION in direct.applicability.subject_revision_ids
+    assert AFTER_REVISION in direct.applicability.subject_revision_ids
     assert f"code-tree:candidate:{journey.candidate_tree_id}" in direct.applicability.references
     # Provenance travels with the displayed value, exactly as the owner recorded it.
     assert direct.author_ref and direct.role_ref == "architect"
@@ -349,9 +321,7 @@ def test_a_malformed_revision_binding_is_unresolved_and_never_a_retained_revisio
     malformed = displayed[journey.malformed_assessment_id]
     assert malformed.applicability is not None
     assert malformed.applicability.state == "unresolved"
-    assert (
-        f"revision:{journey.endpoint.diff.retry_invariant_id}" in malformed.applicability.references
-    )
+    assert f"revision:{SELECTED_ID}" in malformed.applicability.references
     assert "could not be resolved" in malformed.applicability.detail
     # The claim the malformed match used to make is gone: its "revision" is the subject's identity.
     assert "retains" not in malformed.applicability.detail
@@ -409,10 +379,7 @@ def test_a_direct_label_never_cites_a_retained_list_that_does_not_carry_the_reco
 
     published_basis = "ICR-R07's own recorded selection lists as retained"
     recorded_basis = "the two snapshots record for that subject"
-    matched = (
-        journey.endpoint.diff.subject_revision_id,
-        journey.endpoint.diff.revised_revision_id,
-    )
+    matched = (BEFORE_REVISION, AFTER_REVISION)
     for page_size, payload in ((0, journey.first), *sorted(journey.pages.items())):
         row = next(
             entry
@@ -441,9 +408,10 @@ def test_every_supplied_collection_reports_its_complete_population(journey: Jour
     channels = {row.records: row for row in payload.evidence.channels}
     summary = journey.summary(payload, "assessments")
     assert channels["assessments"].record_count == summary.supplied == 5
-    assert channels["evidence_claims"].record_count == 1
-    assert channels["detection_signals"].record_count == 2
-    assert channels["verification_observations"].record_count == 1
+    # Their canonical writers/readers were retired; these channels have no measured population.
+    for records in ("evidence_claims", "detection_signals", "verification_observations"):
+        assert (channels[records].state, channels[records].record_count) == ("unavailable", None)
+        assert "retired" in channels[records].detail
     # Every summary partitions its collection, over the classes this pane actually displays.
     for row in payload.knowledge.applicability:
         displayed = row.direct + row.historical + row.context + row.candidate + row.unresolved
@@ -453,54 +421,6 @@ def test_every_supplied_collection_reports_its_complete_population(journey: Jour
         "verification_observations",
         "evidence_claims",
     }
-
-
-def test_the_records_own_bindings_attribute_the_signals_and_the_claim(journey: Journey) -> None:
-    """A signal's recorded path and a claim's recorded subject revision are what attribute them.
-
-    The one signal whose recorded relationship path reaches a revision this selection retains is
-    ``direct``; the one whose path reaches nothing the selection holds is ``unresolved`` and carries
-    the path it recorded. The evidence claim is attributed by its own recorded subject revision, read
-    from the evidence owner rather than guessed from the matrix row.
-    """
-
-    payload = journey.first
-    signals = {row.signal_id: row for row in payload.knowledge.signals}
-    assert set(signals) == set(journey.signal_ids)
-    direct = signals[journey.signal_ids[0]]
-    assert direct.applicability is not None
-    assert direct.applicability.state == "direct"
-    assert direct.applicability.subject_id == journey.endpoint.diff.retry_invariant_id
-    unresolved = signals[journey.signal_ids[1]]
-    assert unresolved.applicability is not None
-    assert unresolved.applicability.state == "unresolved"
-    assert unresolved.relationship_paths == ("icr-l26-unrecorded-path:icr-l26-unrecorded-item",)
-
-    links = {row.claim_id: row for row in payload.evidence.evidence_links}
-    assert set(links) == {journey.claim_id}
-    link = links[journey.claim_id]
-    assert link.applicability is not None
-    assert link.applicability.state == "direct"
-    assert link.applicability.subject_id == journey.endpoint.diff.retry_invariant_id
-    assert link.author_ref == "agent:icr-l26"
-    assert link.limitations == ("Asserted coverage only; the claim states no sufficiency.",)
-
-    # The observation is bound to the candidate rather than to a subject, and says so.
-    observations = {row.observation_id: row for row in payload.evidence.observations}
-    assert set(observations) == {DIRECT_OBSERVATION}
-    observation = observations[DIRECT_OBSERVATION]
-    assert observation.applicability is not None
-    assert observation.applicability.state == "candidate"
-    assert observation.execution_result == "passed"
-
-    # An authored question that records no subject at all is displayed with the reason it could not
-    # be attributed -- never as a judgment on the selected subject and never dropped.
-    effects = {row.record_id: row for row in payload.knowledge.authored_effects}
-    assert set(effects) == {journey.question_id}
-    effect = effects[journey.question_id]
-    assert effect.applicability is not None
-    assert effect.applicability.state == "unresolved"
-    assert "cannot establish which subject it belongs to" in effect.applicability.detail
 
 
 def test_the_source_inventory_is_independent_of_the_record_selection(journey: Journey) -> None:
@@ -559,51 +479,82 @@ def test_a_label_and_a_summary_refuse_a_claim_their_recorded_facts_do_not_suppor
 
 
 def _build_journey(directory: Path) -> Journey:
-    endpoint = build_endpoint_fixture(directory / "endpoints", memory_mode="external")
-    contract = load_contract(endpoint.contract.contract_path)
+    endpoint = build_world(directory / "endpoints")
+    family_path = f"knowledge/families/{FAMILY}-landing.json"
+    family = json.loads((endpoint.memory / family_path).read_text())
+    family["members"].append(SIBLING)
+    records = {family_path: canonical_text(family)}
+    for identity, statement in ((SIBLING, "Sibling values land."), (UNRELATED, "Unrelated rule.")):
+        record = json.loads(invariant(statement=statement))
+        record["id"] = identity
+        records[f"knowledge/invariants/{identity}-rule.json"] = canonical_text(record)
+    endpoint.memory_base = commit(endpoint.memory, records, trailer=endpoint.code_base)
+    git(endpoint.memory_worktree, "merge", "--ff-only", "main")
+    contract = load_contract(endpoint.contract())
+    endpoint.edit()
+    unmapped = endpoint.code_worktree / "src/unmapped.py"
+    unmapped.parent.mkdir(parents=True)
+    unmapped.write_text("# changed source with no recorded realization\n", encoding="utf-8")
+    answered = write_knowledge(
+        WriteRequest(
+            memory_root=endpoint.memory_worktree,
+            code_root=endpoint.code_worktree,
+            owner=Owner(task=contract.task_id, kind="leaf", id=contract.leaf_id),
+            handoff_path="notes/reports/icr-l26-history-handoff.json",
+            document={
+                "history": [
+                    {
+                        "subject": INVARIANT,
+                        "disposition": "changed",
+                        "effect": "clarify",
+                        "reason": "The fixture clarifies the selected statement.",
+                        "covers": ["RLZ-A00001"],
+                    },
+                    {
+                        "subject": FAMILY,
+                        "disposition": "no_impact",
+                        "reason": "Both authored member statements retain the landing guarantee.",
+                        "examined": [INVARIANT, SIBLING],
+                    },
+                    *(
+                        {
+                            "subject": f"onboarding:{path}",
+                            "disposition": "no_impact",
+                            "reason": "The fixture's harmless source edit preserves this description.",
+                        }
+                        for path in ("overview", "pkg/a.py", "src/unmapped.py")
+                    ),
+                ]
+            },
+            commit=True,
+        )
+    )
+    assert answered.state == "written", answered.render()
     sprint = write_curator_task_topology(contract)
-    resolved = endpoint.resolve()
+    resolved = _resolve(endpoint)
     assert resolved.candidate_code_tree_id is not None
-    unrelated_invariant = endpoint.diff.before.fixture.resolution_invariant_id
     catalogue = {row.selector_id for row in read_subject_catalogue(resolved)}
-    assert unrelated_invariant in catalogue
-    authorship = write_authorship(
-        actor_ref="agent:icr-l26",
-        authorization_ref="260921-ICR developer approval",
-        origin_refs=("requirement:ICR-R26@v1",),
-    )
-    destination = _destination(endpoint, resolved.candidate_database, authorship)
-    snapshot = _candidate_snapshot(endpoint)
-    signal_ids = _record_detection_run(endpoint, resolved, authorship)
-    claim_id = _record_evidence_claim(endpoint, destination)
-    observation_id = _record_observation(
-        destination, DIRECT_OBSERVATION, resolved.candidate_code_tree_id, snapshot
-    )
-    question_id = _record_authored_effect(endpoint, destination, resolved.candidate_code_tree_id)
+    assert {SELECTED_ID, SIBLING_ID, UNRELATED_ID} <= catalogue
     write_passing_route_review(contract)
-    _publish_assessments(contract, sprint, endpoint, unrelated_invariant)
+    _publish_assessments(contract, sprint)
     return Journey(
         endpoint=endpoint,
         contract=contract,
         sprint=sprint,
-        unrelated_invariant=unrelated_invariant,
-        signal_ids=signal_ids,
+        unrelated_invariant=UNRELATED_ID,
         malformed_assessment_id=MALFORMED_ASSESSMENT,
         pages={size: _read_through_port(endpoint, page_size=size) for size in (1, 2)},
-        claim_id=claim_id,
-        observation_id=observation_id,
-        question_id=question_id,
         candidate_tree_id=resolved.candidate_code_tree_id,
         first=_read_through_port(endpoint),
     )
 
 
-def _read_through_port(endpoint: EndpointFixture, page_size: int = 0) -> KnowledgeReviewPayload:
+def _read_through_port(endpoint: World, page_size: int = 0) -> KnowledgeReviewPayload:
     """One read through the production port; the page-size series is read in the same generation."""
 
     port = serving_collaborators(endpoint.config).knowledge_review
     assert port is not None
-    request = endpoint.request().model_copy(update={"page_size": page_size})
+    request = endpoint.review(selector=_seed(), page_size=page_size)
     result = port(request)
     assert result.state == "review", result.refusal
     assert result.payload is not None
@@ -613,10 +564,8 @@ def _read_through_port(endpoint: EndpointFixture, page_size: int = 0) -> Knowled
 def _publish_assessments(
     contract: WorktreeContract,
     sprint: TaskDocumentRef,
-    endpoint: EndpointFixture,
-    unrelated_invariant: str,
 ) -> None:
-    """Publish four assessments in one generation, through the curator-coherence authority."""
+    """Publish five assessments in one generation, through the curator-coherence authority."""
 
     evidence = contract.task_root / EVIDENCE_RELATIVE
     evidence.parent.mkdir(parents=True, exist_ok=True)
@@ -645,21 +594,21 @@ def _publish_assessments(
             review_assessments=[
                 _assessment(
                     DIRECT_ASSESSMENT,
-                    endpoint.diff.retry_invariant_id,
-                    (endpoint.diff.subject_revision_id,),
-                    (endpoint.diff.revised_revision_id,),
+                    SELECTED_ID,
+                    (BEFORE_REVISION,),
+                    (AFTER_REVISION,),
                 ),
                 _assessment(
                     SIBLING_ASSESSMENT,
-                    endpoint.diff.sibling_invariant_id,
-                    (endpoint.diff.batch_revision_id,),
-                    (endpoint.diff.batch_revision_id,),
+                    SIBLING_ID,
+                    (SIBLING_REVISION,),
+                    (SIBLING_REVISION,),
                 ),
                 _assessment(
                     UNRELATED_ASSESSMENT,
-                    unrelated_invariant,
-                    (endpoint.diff.before.fixture.resolution_revision_id,),
-                    (endpoint.diff.before.fixture.resolution_revision_id,),
+                    UNRELATED_ID,
+                    (UNRELATED_REVISION,),
+                    (UNRELATED_REVISION,),
                 ),
                 _assessment(
                     UNRESOLVABLE_ASSESSMENT,
@@ -673,9 +622,9 @@ def _publish_assessments(
                 # reported unresolved rather than matched.
                 _assessment(
                     MALFORMED_ASSESSMENT,
-                    endpoint.diff.retry_invariant_id,
+                    SELECTED_ID,
                     (),
-                    (endpoint.diff.retry_invariant_id,),
+                    (SELECTED_ID,),
                 ),
             ],
             expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
@@ -709,217 +658,4 @@ def _assessment(
         evidenceRefs=(AssessmentEvidenceReference(namespace="task", ref=EVIDENCE_RELATIVE),),
         comparisonRef="icr-l26-comparison",
         scopeManifestRef="icr-l26-scope",
-    )
-
-
-def _record_detection_run(
-    endpoint: EndpointFixture, resolved, authorship: Authorship
-) -> tuple[str, str]:
-    """Record one run holding two signals: one reaching the selection, one reaching nothing."""
-
-    store = open_diff_side(
-        resolved.candidate_database,
-        endpoint.repository_id,
-        repository_root=resolved.candidate_code_root,
-        code_tree_id=resolved.candidate_code_tree_id,
-    )
-    signals = (
-        _signal(
-            endpoint,
-            store,
-            condition=DIRECT_SIGNAL_CONDITION,
-            path=DetectionRelationshipPath(
-                path_id="icr-l26-recorded-path",
-                snapshot_side="trigger",
-                edges=(endpoint.diff.moved_claim_id,),
-                reached_item_id=endpoint.diff.revised_revision_id,
-            ),
-        ),
-        _signal(
-            endpoint,
-            store,
-            condition=UNRESOLVED_SIGNAL_CONDITION,
-            path=DetectionRelationshipPath(
-                path_id="icr-l26-unrecorded-path",
-                snapshot_side="trigger",
-                edges=("icr-l26-unrecorded-edge",),
-                reached_item_id="icr-l26-unrecorded-item",
-            ),
-        ),
-    )
-    candidate_store = _candidate_store(endpoint)
-    try:
-        result = record_detection_run(
-            candidate_store,
-            DetectionRunRequest(
-                repository_id=endpoint.repository_id,
-                provenance=authorship,
-                run=build_detection_run(
-                    DetectionRunAssembly(
-                        run_id=str(uuid4()),
-                        repository_id=endpoint.repository_id,
-                        assessed_repository_id=endpoint.repository_id,
-                        governing_route_id=str(uuid4()),
-                        input_sides=signals[0].input_set.sides,
-                        policy_version="family-detection/v1",
-                    ),
-                    signals,
-                ),
-                signals=signals,
-                assessed_database_paths=(str(resolved.baseline_database),),
-            ),
-        )
-    finally:
-        candidate_store.close()
-    assert result.state == "created", result.refusal
-    return (signals[0].signal_id, signals[1].signal_id)
-
-
-def _signal(
-    endpoint: EndpointFixture,
-    store,
-    *,
-    condition: DetectionCondition,
-    path: DetectionRelationshipPath,
-) -> DetectionSignalPayload:
-    return DetectionSignalPayload(
-        signal_id=str(uuid4()),
-        repository_id=endpoint.repository_id,
-        governing_route_id=str(uuid4()),
-        condition=condition,
-        input_set=DetectionRecordedInputSet(
-            declared="trigger_side_only",
-            sides=(
-                DetectionInputSide(
-                    side="trigger",
-                    context=store,
-                    selector_digest="f" * 64,
-                    selector_policy_version="knowledge-read-selection/v1",
-                ),
-            ),
-        ),
-        observed_changes=(),
-        relationship_paths=(path,),
-        extractor_version="recorded-anchor-locator/v1",
-        policy_version="family-detection/v1",
-        scope_manifest=DetectionScopeManifest(
-            manifest_ref="icr-l26-manifest",
-            retention_required=False,
-            destination_kind="enclosure_local",
-            retention_basis="the manifest is retained with the run's own report",
-        ),
-        registered_scope_status="incomplete_scan",
-        unmapped_changed_paths=("src/unmapped.py",),
-        limitations=_SIGNAL_LIMITATIONS,
-        detail=(
-            f"condition={condition}; followed_paths={path.path_id}; limitations="
-            "unmapped_changed_paths | truncated_scan | no_semantic_assessment_performed"
-        ),
-    )
-
-
-def _record_evidence_claim(endpoint: EndpointFixture, destination) -> str:
-    after = endpoint.diff.after.fixture
-    command = AddEvidenceClaim(
-        claim_id=str(uuid4()),
-        revision_id=str(uuid4()),
-        subject=InvariantRevisionSubject(revision_id=after.subject_revision_id),
-        evidence_anchor_id=after.integration.anchor_id,
-        coverage=(AnchorCoverage(anchor_id=after.integration.anchor_id),),
-        payload=EvidenceClaimPayload(
-            explanation="The recorded realization covers the retry budget the review compares.",
-            limitations="Asserted coverage only; the claim states no sufficiency.",
-        ),
-    )
-    result = write_knowledge_evidence(destination, admitted_evidence_request(destination, command))
-    assert result.state == "applied", result.refusal
-    return command.claim_id
-
-
-def _record_observation(
-    destination, command_name: str, tree_id: str, knowledge_candidate: SnapshotIdentity | None
-) -> str:
-    command = AddVerificationObservation(
-        observation_id=str(uuid4()),
-        revision_id=str(uuid4()),
-        payload=VerificationObservationPayload(
-            command_name=command_name,
-            command_identity="mcp/.venv/bin/python -m pytest mcp/tests -q",
-            knowledge_candidate=knowledge_candidate,
-            code_candidate_tree_id=tree_id,
-            result_artifact=ResultArtifactReference(
-                path="reports/icr-l26-suite.json",
-                sha256="d" * 64,
-                size_bytes=64,
-                digest_checked_against_bytes=False,
-            ),
-            execution_result="passed",
-            environment=RunEnvironment(host="fixture-builder", interpreter="cpython-3.13"),
-        ),
-    )
-    result = write_knowledge_evidence(destination, admitted_evidence_request(destination, command))
-    assert result.state == "applied", result.refusal
-    return command.observation_id
-
-
-def _record_authored_effect(endpoint: EndpointFixture, destination, tree_id: str) -> str:
-    change_set_id = str(uuid4())
-    question_id = str(uuid4())
-    resolution = CandidateResolution(
-        lane="draft-candidate",
-        code_tree_id=tree_id,
-        memory_tree_id=tree_id,
-        snapshot_ref="icr-l26-candidate",
-        candidate_ref="icr-l26-review",
-    )
-    snapshot = _candidate_snapshot(endpoint)
-    commands = (
-        AddSemanticChangeSet(
-            record_id=change_set_id,
-            revision_id=str(uuid4()),
-            payload={
-                "baseline": snapshot.model_dump(mode="json"),
-                "candidate": snapshot.model_dump(mode="json"),
-            },
-        ),
-        AddUnresolvedQuestion(
-            record_id=question_id,
-            revision_id=str(uuid4()),
-            payload={
-                "change_set_id": change_set_id,
-                "statement": "Is the shared retry budget still the intended shape after this move?",
-            },
-        ),
-    )
-    result = change_knowledge_candidate(
-        destination,
-        ChangeBatch(expected=resolve_candidate_context(destination, resolution), commands=commands),
-    )
-    assert result.state == "changed", result.refusal
-    return question_id
-
-
-def _candidate_snapshot(endpoint: EndpointFixture) -> SnapshotIdentity:
-    store = _candidate_store(endpoint)
-    try:
-        return store.snapshot_identity()
-    finally:
-        store.close()
-
-
-def _candidate_store(endpoint: EndpointFixture):
-    resolved = resolve_review_candidate(
-        endpoint.config, endpoint.repository_id, endpoint.master, endpoint.request().leaf_id
-    )
-    assert not isinstance(resolved, ReviewRefusal), resolved
-    return open_existing_knowledge_store(resolved.candidate_database, endpoint.repository_id)
-
-
-def _destination(endpoint: EndpointFixture, database: Path, authorship: Authorship):
-    return admitted_knowledge_destination(
-        database,
-        RepositoryIdentity(
-            repository_id=endpoint.repository_id, authority_home=REPOSITORY_AUTHORITY_HOME
-        ),
-        authorship,
     )

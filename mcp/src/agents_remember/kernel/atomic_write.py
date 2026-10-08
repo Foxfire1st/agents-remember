@@ -186,17 +186,3 @@ def atomic_replace(source: Path, destination: Path) -> None:
             ),
             cause=exc,
         ) from exc
-
-
-def fsync_file(path: Path) -> None:
-    """Flush one already-written file's data to stable storage.
-
-    The file-data half of this module's durability contract, exposed because a producer that
-    writes a file through another owner -- a database that closes its own handles, for instance
-    -- still has to reach stable storage before a rename publishes it. The directory fsync in
-    :func:`atomic_replace` records that the new *name* exists; it says nothing about the bytes
-    the name points at, so one does not substitute for the other.
-    """
-
-    with path.open("rb") as handle:
-        os.fsync(handle.fileno())

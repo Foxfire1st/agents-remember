@@ -31,7 +31,6 @@ import apsw
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.records import decode_typed_column
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 from agents_remember.models.knowledge.facet import ENDPOINT_COLUMNS
 from agents_remember.models.knowledge.read import AnchorResolutionState, KnowledgeReadSnapshot
@@ -43,7 +42,6 @@ __all__ = [
     "REGISTERED_REALIZATIONS",
     "StoreViewReader",
     "open_view_reader",
-    "store_view_reader",
 ]
 
 # One statement per question, with the columns named rather than selected by ``*``: a column added
@@ -400,32 +398,6 @@ class StoreViewReader:
             author_ref=_provenance_author(row[7]),
             payload={} if decoded is None else {str(key): value for key, value in decoded.items()},
         )
-
-
-def store_view_reader(
-    store: OpenedKnowledgeStore,
-    identity: KnowledgeSchemaIdentity,
-    *,
-    resolve_anchor: object = None,
-) -> StoreViewReader:
-    """Build the reader over one already-open store, binding the snapshot it declares.
-
-    The snapshot is composed from two recorded facts -- the schema generation the dataset implements
-    and the logical digest it holds -- and not from anything the caller supplies. ``resolve_anchor``
-    is the anchor resolver, passed *in* rather than resolved here: resolving one needs the read
-    context the application layer owns, and this package sits below that layer.
-    """
-
-    resolved = dataset_identity(store.database_path)
-    snapshot = KnowledgeReadSnapshot(
-        repository_id=store.repository_id,
-        schema_version=identity.schema_name,
-        logical_digest=resolved.logical_digest,
-        context_digest=identity.fingerprint,
-    )
-    return StoreViewReader(
-        store.connection, store.repository_id, snapshot, resolve_anchor=resolve_anchor
-    )
 
 
 def open_view_reader(

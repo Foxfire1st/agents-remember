@@ -56,8 +56,6 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 from agents_remember.models.lifecycles.review_assessment import (
     AssessmentBindingStatus,
     ReviewAssessment,
-    SubjectAssessmentState,
-    assessment_state_for,
 )
 
 # The same two-member vocabulary the shipped ``DetectionRunCurrentness.binding_state`` uses. Named
@@ -262,12 +260,6 @@ def no_currentness_measurement(
     )
 
 
-def unavailable_currentness_measurement(detail: str) -> AssessmentCurrentnessMeasurement:
-    """Return the measurement that was attempted and failed, carrying the failure's own reason."""
-
-    return AssessmentCurrentnessMeasurement(state="unavailable", detail=detail)
-
-
 def measured_currentness(
     values: Mapping[tuple[str, str], tuple[str, str]],
     *,
@@ -283,16 +275,6 @@ def measured_currentness(
         detail=detail,
         unmeasured=tuple(unmeasured),
         unmeasured_detail=unmeasured_detail,
-    )
-
-
-def declared_identities(assessment: ReviewAssessment) -> tuple[tuple[str, str], ...]:
-    """Return every identity one assessment declares, in recorded order, excluding self-references."""
-
-    return tuple(
-        edge.identity
-        for edge in assessment.examinedInputs.declaration.edges
-        if edge.kind not in SELF_REFERENTIAL_KINDS
     )
 
 
@@ -398,26 +380,6 @@ def supplied_measurement_statuses(
     }
 
 
-def subject_state(
-    assessments: Sequence[ReviewAssessment],
-    *,
-    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
-) -> SubjectAssessmentState:
-    """Project every stored assessment of one subject onto the distinct reportable states.
-
-    ``current`` is the caller's measurement of the world, keyed by assessment id so a subject with
-    several assessments over different comparisons reports each one's own currentness rather than a
-    single verdict inherited from a sibling -- requirement 5.5's per-examined-item rule, in the one
-    place a projection could break it. ``None`` means no measurement of the world was supplied at
-    all, and every record is then reported ``not-measured``: "nothing measured this" is its own
-    state, and it is neither "still matches" nor "no longer matches" (``ICR-R15@v1``).
-    """
-
-    return assessment_state_for(
-        assessments, statuses=supplied_measurement_statuses(assessments, current)
-    )
-
-
 class AssessmentBindingStaleError(ValueError):
     """One assessment's recorded binding no longer matches the inputs it would be used against."""
 
@@ -482,7 +444,6 @@ __all__ = [
     "CurrentnessMeasurementState",
     "CurrentnessStatus",
     "assessment_currentness",
-    "declared_identities",
     "disputed_dependencies",
     "measured_binding_status",
     "measured_binding_statuses",
@@ -490,8 +451,6 @@ __all__ = [
     "no_currentness_measurement",
     "require_assessment_dependencies",
     "require_current_assessment_binding",
-    "subject_state",
     "supplied_measurement_statuses",
-    "unavailable_currentness_measurement",
     "unmeasured_identities",
 ]

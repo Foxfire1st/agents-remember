@@ -13,7 +13,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application import memory_tools
+from agents_remember.application import memory_tools, prepared_certification
 from agents_remember.application.memory_quality import census as census_module
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
@@ -631,6 +631,82 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     assert unbuilt["ok"] is False and "R24.7-converted-base" in _rules(unbuilt["findings"])
 
 
+class _QualityPhaseReached(Exception):
+    """The prepared closeout reached its memory-quality phase; the case needs nothing after it."""
+
+
+def test_the_prepared_closeout_hands_its_quality_phase_the_converted_base(tmp_path: Path) -> None:
+    """L37 carry: the prepared closeout's quality phase gets the converted-base port (MIK-R24
+    rule 7), bound to the candidate's own physical code root and coordination context.
+
+    ``context_check_base`` is measured by itself above; this drives the binding. Without it the
+    phase would check an unconverted base's anchors against nothing and refuse a converting leaf.
+    """
+
+    physical, logical, memory = tmp_path / "physical", tmp_path / "logical", tmp_path / "memory"
+    pair = SimpleNamespace(
+        memoryRoot=str(memory), onboardingRoot=str(memory / "onboarding"), codeRoot=str(logical)
+    )
+    request = SimpleNamespace(
+        candidate=SimpleNamespace(
+            codeView=SimpleNamespace(logicalPair=pair, physicalCodeRoot=str(physical))
+        )
+    )
+    contract = SimpleNamespace(repo_name="repo")
+    terminals = [SimpleNamespace(certificate=f"certificate-{number}") for number in range(4)]
+    current = SimpleNamespace(
+        contract=contract,
+        selected=SimpleNamespace(terminals=terminals, run=SimpleNamespace(admission="a")),
+    )
+    resolved = SimpleNamespace(
+        code_repository_root=None, memory_root=None, onboarding_root=None, storage="storage"
+    )
+    observed = SimpleNamespace(
+        code=SimpleNamespace(candidateTree="c" * 40), memory=SimpleNamespace(candidateTree="d" * 40)
+    )
+    port = object()
+    seen: dict[str, Any] = {}
+
+    def quality(_onboarding: Path, **arguments: Any) -> dict[str, Any]:
+        seen["drift"] = arguments["drift_context"]
+        raise _QualityPhaseReached
+
+    def base(code_root: Path, context: Any) -> object:
+        seen["base"] = (code_root, context)
+        return port
+
+    patched = {
+        "_current": lambda _request: current,
+        "require_current_curator_coherence": lambda _contract: "coherence",
+        "contract_context": lambda _contract: resolved,
+        "replace": lambda context, **changes: SimpleNamespace(**{**vars(context), **changes}),
+        "_PreparedScopeAuthority": lambda _request: SimpleNamespace(observe=lambda: observed),
+        "_admitted_source_index": lambda _trees: mock.MagicMock(),
+        "compile_scope_manifest": mock.Mock(),
+        "ContractDependencyAuthority": mock.Mock(),
+        "DependencyOwnerContext": mock.Mock(),
+        "compile_affected_closure_plan": mock.Mock(),
+        "AffectedClosureAdmission": mock.Mock(),
+        "execute_affected_closure": mock.Mock(),
+        "AffectedClosureExecution": mock.Mock(),
+        "RangeResolutionAffectedExecutor": mock.Mock(),
+        "RangeResolutionExecutionContext": mock.Mock(),
+        "run_memory_quality_check": quality,
+        "context_check_base": base,
+    }
+    with (
+        mock.patch.multiple(prepared_certification, **patched),
+        pytest.raises(_QualityPhaseReached),
+    ):
+        prepared_certification._run(cast(Any, request))
+
+    code_root, context = seen["base"]
+    assert code_root == physical  # the candidate's physical code root, not the logical one
+    assert (context.code_repository_root, context.memory_root) == (physical, memory)
+    assert seen["drift"].knowledge_base is port
+    assert seen["drift"].code_repository_root == physical
+
+
 def _card_with_rows(memory: Path, source: str, *rows: str) -> Path:
     card = memory / f"onboarding/{source}.md"
     table = "| Finding | Anchor | Source |\n| --- | --- | --- |\n" + "".join(
@@ -759,6 +835,17 @@ def test_a_leftover_evidence_line_is_refused_and_only_the_named_card_loses_refer
     leftover = author_card_references(memory, code.root)
     assert "still cites it" in leftover["refused"][0]["reason"]
     assert card.read_bytes() == stale
+
+    # Two rows of one run that re-author the same [n] are refused: the second would overwrite the
+    # first row's reference and leave two evidence lines citing one number.
+    table = "\n| Finding | Anchor | Source |\n| --- | --- | --- |\n"
+    twice = f"| Extra, once. [1] | `extra` | {EXTRA}:1-2 |\n| Extra, twice. [1] | `extra` | {EXTRA}:1-2 |\n"
+    card.write_text(text.replace("- Extra. [1]\n", "") + table + twice, encoding="utf-8")
+    doubled, sidecar_before = card.read_bytes(), (memory / f"onboarding/{EXTRA}.json").read_bytes()
+    refused = author_card_references(memory, code.root)
+    assert "both re-author reference [1]" in refused["refused"][0]["reason"]
+    assert card.read_bytes() == doubled
+    assert (memory / f"onboarding/{EXTRA}.json").read_bytes() == sidecar_before
 
     # Removing a reference: delete its line, then run the fixer on that card. A tree-wide run never
     # removes one, even from a card it authors.

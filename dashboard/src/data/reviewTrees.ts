@@ -19,9 +19,10 @@
 // Every key is snake_case, the review surface's convention: the server re-keys the currentness and
 // worklist documents its owners spell in camelCase (MIK-L25 review F9), so no key here is camelCase.
 //
-// Three answers are kept apart: `trees`, `not-converted` (the leaf's review is the dataset review;
-// nothing here applies) and `refused` (the owner's refusal). A body that is none of these, and a
-// request that never reached the server, are failures in the shared review vocabulary.
+// Three answers are kept apart: `trees`, `refused` (the owner's refusal; a leaf whose memory is
+// unconverted is refused, with each knowledge side named `legacy-unavailable`) and `not-converted`
+// (no tree comparison and no unreadable side; nothing here applies). A body that is none of these,
+// and a request that never reached the server, are failures in the shared review vocabulary.
 
 import { useEffect, useRef, useState } from 'react';
 

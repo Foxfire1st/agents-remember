@@ -9,11 +9,9 @@ from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvidence
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.models.memory_content_excludes import (
-    MEMORY_CONTENT_EXCLUDES,
-)
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
+    DirectLandingPublicationRefused,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
     DirectLandingRuntime,
@@ -33,11 +31,16 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     prove_git_commit,
     snapshot_is_clean,
 )
+from agents_remember.worktrees.knowledge_gate import ClosingReceiptError
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
-    commit_if_dirty,
+    CommitPublicationRefusal,
+    PublicationHooks,
+    branch_commit,
     ensure_git_identity,
     head_commit,
+    publish_tree_commit,
+    stage_tree,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -48,7 +51,7 @@ def execute_direct_landing(
 ) -> dict[str, object]:
     """Recover and finish one accepted direct generation without repeating proof."""
     record = runtime.store.read() or runtime.record
-    _require_mechanically_convergent_direct_state(contract, runtime, record)
+    _require_mechanically_convergent_direct_state(contract, record)
     record = reconcile_direct_landing(contract, runtime.store)
     runtime.record = record
     operation_input = direct_landing_input(record)
@@ -82,10 +85,22 @@ def execute_or_require_direct_landing_recovery(
     contract: WorktreeContract,
     runtime: DirectLandingRuntime,
 ) -> dict[str, object]:
-    """Execute once and persist a typed recovery requirement after ambiguity."""
+    """Execute once; a failure either leaves nothing behind or leaves a typed recovery.
+
+    A generation stays in flight, with a recovery action or a developer decision, only when
+    something irreversible has happened or cannot be ruled out (its memory commit is, or may be,
+    on the branch). A failure before that (a refusal by the stricter check, a refused or failed
+    publication, a memory or code state that changed after admission) cancels the generation and
+    restores its preparations (:func:`_refuse_unpublished`); the same request then starts a new
+    generation, which judges the memory checkout as it is then.
+    """
     try:
         return execute_direct_landing(contract, runtime)
+    except DirectLandingPublicationRefused:
+        raise
     except DirectLandingError as exc:
+        if _published_nothing(runtime):
+            raise _refuse_unpublished(runtime, exc) from exc
         classification = classify_direct_landing_recovery(
             contract,
             runtime.store.read() or runtime.record,
@@ -106,6 +121,22 @@ def execute_or_require_direct_landing_recovery(
         )
         raise
     except (OSError, RuntimeError) as exc:
+        observed = public_failure_evidence(
+            stage="direct-recovery-execution",
+            side="direct-landing",
+            name="accepted-generation",
+            error_type=type(exc).__name__,
+            observed={"state": "interrupted"},
+        )
+        if _published_nothing(runtime):
+            raise _refuse_unpublished(
+                runtime,
+                DirectLandingError(
+                    "direct-landing-interrupted-unpublished",
+                    f"direct landing was interrupted ({type(exc).__name__})",
+                    observed=observed,
+                ),
+            ) from exc
         classification = classify_direct_landing_recovery(
             contract,
             runtime.store.read() or runtime.record,
@@ -118,13 +149,6 @@ def execute_or_require_direct_landing_recovery(
                 expected=classification.expected,
                 observed=classification.observed,
             ) from exc
-        observed = public_failure_evidence(
-            stage="direct-recovery-execution",
-            side="direct-landing",
-            name="accepted-generation",
-            error_type=type(exc).__name__,
-            observed={"state": "interrupted"},
-        )
         detail = "direct landing was interrupted and requires same-generation recovery"
         runtime.require_input(
             status="direct-landing-recovery-required",
@@ -138,15 +162,68 @@ def execute_or_require_direct_landing_recovery(
         ) from exc
 
 
+def _published_nothing(runtime: DirectLandingRuntime) -> bool:
+    """Whether this generation provably has no memory commit on its branch.
+
+    True when no memory commit is recorded and either no publication was begun (or the one begun
+    was proven unchanged), or the one begun left the admitted branch on the admitted tip. A branch
+    that names anything else may hold this generation's commit, so that is never called
+    unpublished here; the publication's own refusals are, by the primitive's guarantee
+    (:func:`_direct_memory_commit`).
+    """
+
+    try:
+        record = runtime.store.read() or runtime.record
+    except RuntimeError:  # an unreadable journal proves nothing
+        return False
+    evidence = record.mutationEvidence.get("memory")
+    recovery = record.recoveryCommits
+    if (
+        record.status in {"completed", "cancelled"}
+        or evidence is None
+        or (recovery is not None and recovery.memoryContentCommit)
+    ):
+        return False
+    if evidence.state in {"pre-mutation", "reconciled-unchanged"}:
+        return True
+    before = evidence.before
+    if evidence.state != "mutation-intent" or before is None:
+        return False
+    try:
+        return branch_commit(Path(evidence.repository), before.headRef) == before.head
+    except (OSError, RuntimeError):
+        return False
+
+
+def _refuse_unpublished(
+    runtime: DirectLandingRuntime, error: DirectLandingError
+) -> DirectLandingPublicationRefused:
+    """Cancel the generation that published nothing, restore its preparations, name the refusal."""
+
+    detail = (
+        f"{error.detail}; nothing was published: this generation was cancelled and its "
+        "preparations were restored. Repeat the direct landing once the cause is gone"
+    )
+    try:
+        runtime.cancel_unpublished(status=error.status, detail=detail)
+    except ClosingReceiptError as unreadable:
+        return DirectLandingPublicationRefused(
+            "direct-landing-closing-receipt-unreadable", str(unreadable)
+        )
+    return DirectLandingPublicationRefused(
+        error.status, detail, expected=error.expected, observed=error.observed
+    )
+
+
 def _require_mechanically_convergent_direct_state(
     contract: WorktreeContract,
-    runtime: DirectLandingRuntime,
     record: LifecycleOperationRecord,
 ) -> None:
+    """Refuse a generation whose live evidence contradicts it (the caller decides what follows)."""
+
     classification = classify_direct_landing_recovery(contract, record)
     if classification.state != "developer-decision":
         return
-    _persist_direct_decision(runtime, classification)
     raise DirectLandingError(
         classification.status,
         classification.detail,
@@ -202,6 +279,8 @@ def _direct_memory_commit(
         runtime.record = reset_reconciled_attempt(runtime.store, leg="memory")
         evidence = runtime.record.mutationEvidence["memory"]
     if evidence.state == "mutation-intent":
+        # An attempt resumed from an earlier call may already be on the branch, so its refusal is
+        # judged by live evidence (:func:`_published_nothing`) and never cancelled outright.
         _require_prepared_direct_attempt(evidence, memory_repo)
         intent = evidence
     elif evidence.state == "pre-mutation":
@@ -223,20 +302,67 @@ def _direct_memory_commit(
             leg="memory",
             repository=memory_repo,
             expected_output_tree=direct_landing_input(runtime.record).memoryBefore.candidateTree,
-            use_current_candidate=True,
         )
+        if intent.before != direct_landing_input(runtime.record).memoryBefore:
+            raise DirectLandingError(
+                "direct-landing-memory-prestate-changed",
+                "memory Git state changed before the commit attempt; nothing lands",
+            )
     else:
         raise DirectLandingError(
             "direct-landing-memory-output-ambiguous",
             "memory Git evidence does not prove the accepted output; recover this generation",
         )
-    committed = commit_if_dirty(
-        memory_repo,
-        direct_landing_input(runtime.record).effectiveInput.memory_content_message(code_commit),
-        exclude_paths=MEMORY_CONTENT_EXCLUDES,
+    message = direct_landing_input(runtime.record).effectiveInput.memory_content_message(
+        code_commit
     )
+    committed = _publish_judged_tree(runtime, memory_repo, intent, message)
     prove_git_commit(args, intent, repository=memory_repo, commit=committed)
     return _required_recovery_commit(runtime.store.read(), "memoryContentCommit")
+
+
+def _publish_judged_tree(
+    runtime: DirectLandingRuntime,
+    memory_repo: Path,
+    intent: GitMutationEvidence,
+    message: str,
+) -> str:
+    """Publish the intended tree, or cancel the generation that provably published nothing.
+
+    Direct landing refuses any change since its judged snapshot, before staging and again from
+    staging up to the commit object (the publication's ``confirm``). Such a refusal, like the
+    publication's own (the branch moved, ``HEAD`` switched, an unfinished merge), comes before any
+    ref moves: the primitive has put the index back, the generation is cancelled and its kept
+    closing (history file and ignore rule) restored, so the same request can be made again once
+    the cause is gone (review R3, findings 1 and 4).
+    """
+
+    assert intent.expectedOutputTree is not None
+    assert intent.before is not None
+    expected_tree = intent.expectedOutputTree
+
+    def stage() -> str:
+        stage_tree(memory_repo, expected_tree)
+        return expected_tree
+
+    try:
+        _require_prepared_direct_attempt(intent, memory_repo)
+        return publish_tree_commit(
+            memory_repo,
+            message,
+            tree=expected_tree,
+            before=intent.before,
+            hooks=PublicationHooks(
+                stage=stage, confirm=lambda: _require_prepared_direct_attempt(intent, memory_repo)
+            ),
+        )
+    except CommitPublicationRefusal as refusal:
+        raise _refuse_unpublished(
+            runtime,
+            DirectLandingError("direct-landing-memory-publication-refused", str(refusal)),
+        ) from refusal
+    except DirectLandingError as changed:
+        raise _refuse_unpublished(runtime, changed) from changed
 
 
 def _require_accepted_memory_prestate(

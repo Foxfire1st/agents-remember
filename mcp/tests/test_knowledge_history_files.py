@@ -11,10 +11,10 @@ import copy
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
-from agents_remember.models.knowledge.effect import ADMITTED_EFFECT_LABELS
+from agents_remember.models.knowledge.effect import ADMITTED_EFFECT_LABELS, EffectLabel
 from agents_remember.models.knowledge_files import (
     HISTORY_ROW_KINDS,
     Anchor,
@@ -190,9 +190,27 @@ def test_row_kind_registry_owns_disjoint_subject_forms() -> None:
     # `retired`, which MIK-R07 rule 5 lists; the effect vocabulary is the unchanged nine.
     assert INVARIANT_DISPOSITIONS == ("changed", "moved", "deleted", "extended", "no_impact")
     assert FAMILY_DISPOSITIONS == ("changed", "rerouted", "assigned", "retired", "no_impact")
+    # The nine are declared twice: as the tuple the planned subject key is built from, and as the
+    # literal type a row's effect validates against. Both are pinned to the same nine names, so a
+    # tenth label cannot enter one of them and be admitted by a row or by a planned subject.
+    assert ADMITTED_EFFECT_LABELS == (
+        "restore",
+        "clarify",
+        "introduce",
+        "strengthen",
+        "weaken",
+        "replace",
+        "split",
+        "merge",
+        "retire",
+    )
+    assert get_args(EffectLabel) == ADMITTED_EFFECT_LABELS
     for effect in ADMITTED_EFFECT_LABELS:
         HistoryFile.model_validate(_history(_invariant_row(disposition="changed", effect=effect)))
+        assert row_kind_for_subject(f"planned:invariant:{INV}#{effect}").name == "planned"
     _refused(_history(_invariant_row(disposition="changed", effect="preserve")))
+    with pytest.raises(ValueError, match="no registered"):
+        row_kind_for_subject(f"planned:invariant:{INV}#preserve")
 
 
 # ------------------------------------------------------------------------------------------------

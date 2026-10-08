@@ -167,23 +167,6 @@ def _contract_read_state(read_failure: Mapping[str, object]) -> Literal["missing
     return "unreadable"
 
 
-def configured_unreadable_operation_projections(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    *,
-    error_type: str,
-    name: str,
-) -> list[LifecycleOperationProjection]:
-    """Resolve the configured locator before reading retained strict journals."""
-
-    _, location = configured_lifecycle_operation_location(config, contract_path)
-    return unreadable_contract_operation_projections(
-        location,
-        error_type=error_type,
-        name=name,
-    )
-
-
 def primary_operation_projection(
     projections: list[LifecycleOperationProjection],
 ) -> LifecycleOperationProjection | None:
@@ -228,62 +211,3 @@ def operation_address_projections(
             or item.generation == address.generation
         )
     ]
-
-
-def unreadable_operation_refusal(
-    config: McpRuntimeConfig,
-    contract_path: Path,
-    address: LifecycleOperationPublicAddress,
-    error: Exception,
-) -> dict[str, Any]:
-    """Translate one unreadable contract through retained locator-owned authority."""
-
-    try:
-        projections = configured_unreadable_operation_projections(
-            config,
-            contract_path,
-            error_type=type(error).__name__,
-            name=contract_path.name,
-        )
-    except LifecycleOperationLocationError as location_error:
-        return {"operation": address.operation, **location_decision_payload(location_error)}
-    matching = operation_address_projections(projections, address)
-    projection = primary_operation_projection(matching)
-    decision = projection.result if projection is not None else None
-    if not isinstance(decision, dict) or "decisionSurface" not in decision:
-        detail = "the canonical task contract is unreadable for this operation"
-        decision = {
-            "state": f"{address.kind}-contract-invalid",
-            "developerDecisionRequired": True,
-            "decisionSurface": detail,
-            "nextAction": "developer-decision",
-            "expected": {
-                "contractPath": contract_path.as_posix(),
-                "operationKind": address.kind,
-                **({"generation": address.generation} if address.generation is not None else {}),
-            },
-            "observed": {
-                "stage": "contract-read",
-                "side": "contract",
-                "name": contract_path.name,
-                "errorType": type(error).__name__,
-            },
-        }
-    result: dict[str, Any] = {
-        "ok": False,
-        "operation": address.operation,
-        "state": "refused",
-        "status": decision["state"],
-        "detail": decision["decisionSurface"],
-        **{key: decision[key] for key in ("nextAction", "expected", "observed")},
-    }
-    if decision.get("developerDecisionRequired") is True:
-        result.update(
-            {
-                "developerDecisionRequired": True,
-                "decisionSurface": decision["decisionSurface"],
-            }
-        )
-    if projection is not None:
-        result["lifecycleOperation"] = projection.model_dump(mode="json", exclude_none=True)
-    return result

@@ -18,6 +18,7 @@ from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    UNPUBLISHED_REFUSAL,
     classify_direct_landing_recovery,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
@@ -37,6 +38,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     initial_closeout_mutation_evidence,
     reconcile_closeout_mutations,
 )
+from agents_remember.worktrees.knowledge_gate import settle_direct_closing
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -104,6 +106,58 @@ class DirectLandingRuntime:
                 }
             )
         )
+        return self.record
+
+    def cancel_unpublished(self, *, status: str, detail: str) -> LifecycleOperationRecord:
+        """Cancel this generation after a refusal that published nothing; restore its kept closing.
+
+        The caller has proven that no ref moved (the refusal came before the commit was published,
+        or before a publication was begun). The memory attempt is therefore recorded as unchanged,
+        which is what lets the journal accept the cancellation; the history file and the ignore
+        rule the generation had prepared go back through its receipt; and the result names the
+        cancellation as its own (``cancelledBy``), so the next request, the same one included,
+        starts a fresh generation (:func:`cancelled_unpublished`).
+        """
+
+        stamp = _stamp()
+
+        def unchanged(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            mutations = {
+                leg: (
+                    evidence.model_copy(
+                        update={"state": "reconciled-unchanged", "observed": evidence.before}
+                    )
+                    if evidence.state == "mutation-intent"
+                    else evidence
+                )
+                for leg, evidence in record.mutationEvidence.items()
+            }
+            return record.model_copy(update={"heartbeatAt": stamp, "mutationEvidence": mutations})
+
+        def cancelled(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            return record.model_copy(
+                update={
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "finishedAt": stamp,
+                    "heartbeatAt": stamp,
+                    "cancelRequested": True,
+                    "generationDisposition": "cancelled",
+                    "currentCommand": "direct landing cancelled after a refused publication",
+                    "failure": f"{status}: {detail}",
+                    "result": {
+                        "state": status,
+                        "cancelledBy": UNPUBLISHED_REFUSAL,
+                        "nextAction": "direct-landing",
+                    },
+                    "guidance": "Nothing was published and the preparations were restored; "
+                    "repeat the direct landing once the cause is gone.",
+                }
+            )
+
+        self.store.update(unchanged)
+        self.record = self.store.update(cancelled)
+        settle_direct_closing(self.contract, current=self.record.fingerprint, state="cancelled")
         return self.record
 
     def require_input(

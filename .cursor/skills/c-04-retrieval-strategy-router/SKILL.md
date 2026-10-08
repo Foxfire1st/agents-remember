@@ -173,55 +173,49 @@ names an unresolved source question.
 ## Published Intent Before Planning
 
 The first question about a route is often "what did this repository already intend here?". The
-paired read answers it in the same call: `read_ar_files` resolves the repository's published
-knowledge dataset from that repository's own coordination context -- no leaf, no enclosure and no
-task is needed -- and reads the recorded intent about each requested path at that dataset's exact
-snapshot. The result carries it as `published_intent`.
+paired read answers it in the same call: `read_ar_files` resolves the repository's memory tree from
+that repository's own coordination context -- no leaf, no enclosure and no task is needed -- and
+reads the recorded intent about each requested path from that tree's knowledge files. The result
+carries it as `published_intent`.
 
-**Where the route reads, and what publishes there.** This route *declares* the publication
-location it reads: `<memory_root>/knowledge.sqlite`, one file in the memory layer the repository's
-coordination declaration resolves. The ordinary write side publishes to that same location: the
-ingest command selects it with `--publish` — resolving it through this read side's own declaration
-and reading the published identity back through the reader's owner — while an ingest that names no
-destination and passes no `--publish` still commits without publishing, so the flag stays a selection
-rather than a default. That wiring was ICR-R20@v1's obligation; the two-consecutive-task journey that
-has to prove task A's publication lands where task B's planner looks is ICR-R25@v1's. Do not read a
-`not-recorded` answer as "this repository never recorded intent": it means nothing is published at
-the location this read was addressed to.
+**Where the route reads.** Knowledge is text in the memory repository: cards and sidecars under
+`onboarding/`, records under `knowledge/`. The read goes through the tree's **derived index**, a
+cache the tools build from those files and rebuild when the tree changes; nothing writes it
+directly, and there is no knowledge database to publish to. The curator's writer
+(`agents-remember knowledge-ingest`, or `knowledge-bootstrap` for a taskless wave) writes the files,
+and a read of the tree sees them.
 
 Which memory root that is depends on scope, and there is no fallback between the two. With no
 enclosure in scope -- the taskless planner this route exists for -- it is the canonical external
 memory root. Inside a leaf enclosure the coordination context's memory root is the contract's memory
-**worktree**, that task's own memory line, so the read sees the publication on the line it is standing
-on and reports `not-recorded` when that line carries none. Neither root stands in for the other.
+**worktree**, that task's own memory line, so the read sees the knowledge on the line it is standing
+on. Neither root stands in for the other.
 
-`state: "recorded"` means a publication was read, and the block names it exactly: `datasetPath`,
-`repositoryId`, `schemaVersion`, `snapshot` (the logical digest every page was verified against)
-and `sourceResolution` (`repositoryRoot` plus `codeTreeId`, the tree recorded anchors were observed
-against). `seeds` holds one bounded entry per requested path; each entry carries the exact record
-identities it selected in the payload's own spellings (`kind`, `item_id`, `invariant_id`,
-`record_id`, `revision_id`), the authored statements with their essential conditions, and `counts`,
-`hasMore` and `continuation` whenever the page was bounded. A bounded page is not a smaller scope:
-`counts.primary_items_total` is the whole selection and `counts.primary_items_remaining` is what is
-still ahead.
+`state: "recorded"` means the tree was read, and the block names it exactly: `memoryTree`
+(`memoryRoot`, the tree's identity and the state of its index), `datasetPath` (the derived index
+file the read used, a cache and never an input you name), `schemaVersion`, `snapshot` (the logical
+digest every page was verified against) and `sourceResolution` (`repositoryRoot` plus `codeTreeId`,
+the tree recorded anchors were observed against). `seeds` holds one bounded entry per requested
+path; each entry carries its `rows` (every row names its `kind` and the record's `id`, with the
+authored statement and its essential conditions on a member row), its `counts`, `hasMore`, and
+`continuation` with `continuationOperation` and `continuationView` whenever the page was bounded.
+A bounded page is not a smaller scope: `counts.rowsTotal` is the whole selection,
+`counts.rowsReturned` is what this page carries and `counts.rowsRemaining` is what is still ahead.
 
-`state: "not-recorded"` means nothing is published at the location this read selected. That is an
-answer, not a failure: source and onboarding research continue unchanged, and nothing is claimed to
-have been measured. `state: "unusable"` means something is there and is not a publication this route
-can answer from -- a non-file entry where the dataset belongs (`selected_input_unavailable`), bytes
-that cannot be read as a dataset of this code, or a dataset bound to another repository's authority
-home (`snapshot_unavailable`). The failed binding is named, and no other repository's publication is
-read in its place.
+`state: "legacy-format"` means the memory tree is not converted (it holds no
+`knowledge/layout.json`). Its onboarding is returned as it is, marked `legacy-format`, and no
+knowledge section is read from it. That is an answer, not a failure: source and onboarding research
+continue unchanged, and nothing is claimed to have been measured. The block's `detail` names how the
+tree converts (the crossing sync for a line that descends from a converted line, or
+`agents-remember knowledge-convert`).
 
 Inside a `recorded` block, a seed that selects nothing is named rather than returned empty:
-`refusalCode: "registration_absent"` means the snapshot records nothing about that path, and
-`refusalCode: "selector_absent"` means the identity you named is not in this snapshot -- an earlier
-generation this publication does not carry. Neither is filled from today's data, and a path no
-recorded anchor could carry is refused as a seed rather than answered with an absence the read
-never observed.
+`refusalCode: "registration_absent"` means the tree records nothing about that path, and
+`refusalCode: "selector_absent"` means the identity you named is not in this tree. Neither is filled
+from another source, and a path no recorded anchor could carry is refused as a seed rather than
+answered with an absence the read never observed.
 
-**A path on a converted memory tree is read family-complete.** When the block's `memoryTree` is
-present, each path's entry is the family-complete leaf read (`page.selectionPolicy:
+**A path is read family-complete.** Each path's entry is the family-complete leaf read (`page.selectionPolicy:
 "family-complete-leaf"`): its `rows` are, in order, the path's own invariants (a `member` row --
 statement, applicability, conditions, exclusions, status, admission, `state` and every containing
 family in `families` -- followed by its `realization` and `proof` entry rows, each with path,
@@ -247,14 +241,13 @@ states `registration_absent`. To read a chain family whole, follow the row's `ex
 `sourcePath`. On a repeated `read_ar_files` in the same session an unchanged chain row may come
 back as a short `served_earlier` row; `knowledge_read` always returns it in full.
 
-**Follow a bounded page through `knowledge_read`.** When the block's `memoryTree` is present (a
-converted memory tree), the whole knowledge block is cut to one shared threshold, stated as
-`threshold` (8,000 `tiktoken:o200k_base` tokens); each page's `page` block states the walk's
-`total`, `returned` and `remaining` rows. A page with `continuation` set continues through the
-mounted read (`continuationOperation: "knowledge_read"`): pass the **value of**
-`memoryTree.memoryRoot` (not `datasetPath`, which names the derived index) as `databasePath`,
-`repositoryId` from the block, the `continuationView` as `view`, and the token as `continuation`
--- nothing else. The token carries its seed, its ordering and the code tree page 1 resolved
+**Follow a bounded page through `knowledge_read`.** The whole knowledge block is cut to one
+shared threshold, stated as `threshold` (8,000 `tiktoken:o200k_base` tokens); each page's `page`
+block states the walk's `total`, `returned` and `remaining` rows. A page with `continuation` set
+continues through the mounted read (`continuationOperation: "knowledge_read"`): pass the **value
+of** `memoryTree.memoryRoot` (not `datasetPath`, which names the derived index) as `memoryRoot`,
+the `continuationView` as `view`, and the token as `continuation` -- nothing else. The tool takes
+no repository identifier: the server supplies it. The token carries its seed, its ordering and the code tree page 1 resolved
 anchors at, so naming a different `orderingInput` or `codeTreeId` is refused; name
 `repositoryRoot` only when the code repository is not the mount's workspace. Repeat with each
 response's `continuation` (and its `payload.continuationView`) until a response carries none.
@@ -272,13 +265,13 @@ too large for the threshold on its own arrives alone, whole, flagged `oversized_
 differs from the walk's: restart from the seed, without a continuation. `continuation_unreadable`
 means the token is not one of these, or belongs to another view.
 
-A block read from a database (no `memoryTree`) keeps its `read_knowledge_scope` cursor, which the
-mounted read does not continue: read deeper by identity instead -- pass the **value of**
-`datasetPath` as `databasePath`, plus `repositoryId` from the block, `view: "invariant"` and
-`invariantRevisionId` for one exact retained revision (or `sourcePath` for the registered
-neighborhood of one file). The snapshot is retained evidence of an owner-produced input and never a
-new source of authored truth: no route here substitutes another repository, the current working
-tree, or a scratch dataset for the publication the repository actually records.
+**`knowledge_read` reads a memory tree, never a database.** Its `memoryRoot` names a converted
+memory tree (the canonical root, or a leaf's memory worktree). An unconverted tree or a database file
+is refused as `legacy-format`, and the refusal names how that memory converts. To read deeper by
+identity, pass `memoryRoot` with `view: "invariant"` and `invariantRevisionId`, `view: "family"` and
+`familyRevisionId`, or `view: "source_context"` and `sourcePath` for the neighbourhood of one file.
+No route here substitutes another repository, the current working tree or a scratch dataset for the
+memory tree the repository actually records.
 
 ## Route Index Semantics
 

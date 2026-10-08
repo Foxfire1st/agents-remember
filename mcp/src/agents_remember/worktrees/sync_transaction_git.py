@@ -7,26 +7,19 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
-from agents_remember.models.knowledge.merge import AuthoredReconciliation
-from agents_remember.worktrees.knowledge_conflict import (
-    RefusedKnowledgeStage,
-    settle_knowledge_conflict,
-    settle_knowledge_conflicts,
-)
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
     apply_crossing,
     close_crossing_history,
-    crossing_applies,
     crossing_plan,
     merge_base,
+    merge_structure,
     write_crossing_report,
 )
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
@@ -51,19 +44,16 @@ class SyncKnowledgeValidationError(SyncGitProofError):
 
 @dataclass(frozen=True)
 class SideMergeOutcome:
-    """What one side's merge attempt reached, with the adapter's reason when it stopped.
+    """What one side's merge attempt reached.
 
     ``state`` is ``completed`` or ``resolution-required``; ``conflicts`` names the paths still
-    unmerged; ``message`` is Git's own text for a conflict outside the knowledge adapter. ``refused``
-    carries the adapter's explanation for a conflicted knowledge dataset -- the row it refused and
-    the action it advertised -- so the caller can journal it and publish it rather than only knowing
-    that one path is unresolved.
+    unmerged; ``message`` is Git's own text for a conflict. ``crossing_report`` is the path of the
+    structural knowledge merge's report, when it left items for the curator or converted a side.
     """
 
     state: str
     conflicts: tuple[str, ...] = ()
     message: str = ""
-    refused: RefusedKnowledgeStage | None = None
     crossing_report: str = ""
 
 
@@ -383,64 +373,23 @@ def _require_active_merge(side: SyncSideRecord) -> None:
 def _continue_memory_merge(
     side: SyncSideRecord, paired_code: PairedCode | None
 ) -> SideMergeOutcome:
-    """Settle the memory merge: knowledge datasets route, everything else stays the agent's.
+    """Settle the memory merge: commit it when nothing is unmerged, else hand it to the agent.
 
-    A knowledge database is binary to Git, so an ordinary merge can only declare the whole file
-    conflicted and no amount of staging resolves it. Those paths are routed through the merge adapter
-    by :mod:`agents_remember.worktrees.knowledge_conflict` -- which republishes the union into the
-    worktree and stages it -- so the transaction finishes what Git cannot. Whatever the adapter will
-    not decide (a schema disagreement above all) comes back as a content conflict and is still the
-    agent's to resolve, so this narrows the agent's work rather than hiding any of it. A merged dataset
-    is structurally valid and nothing more; no compatibility verdict is taken here.
+    Knowledge is text. A merge with a converted side has already had its ``knowledge/`` and
+    ``onboarding/`` paths merged structurally (:func:`_apply_knowledge_merge`), so whatever is still
+    unmerged here is an item both sides authored differently, or a file outside those roots, and is
+    the agent's to resolve and ``continue``. The staged tree is validated (MIK-R22) before it is
+    committed.
     """
 
     _require_active_merge(side)
     _remove_memory_cache_from_index(side)
     conflicts = content_conflicts(side)
     if conflicts:
-        # ``ours`` is the work branch tip the merge started from and ``theirs`` is the source commit
-        # being merged in, which is exactly the left/right pair the adapter's request names.
-        settlement = settle_knowledge_conflicts(
-            Path(side.worktree), conflicts, side.preSyncHead, side.sourceCommit
-        )
-        if settlement.remaining:
-            return SideMergeOutcome(
-                state="resolution-required",
-                conflicts=settlement.remaining,
-                refused=settlement.guidance,
-            )
+        return SideMergeOutcome(state="resolution-required", conflicts=conflicts)
     validate_staged_resolution(side)
     return SideMergeOutcome(
         state="completed", conflicts=(), message=_finish_staged_memory_merge(side, paired_code)
-    )
-
-
-def reconcile_side_merge(
-    side: SyncSideRecord, path: str, reconciliations: Sequence[AuthoredReconciliation]
-) -> RefusedKnowledgeStage | None:
-    """Author the caller's decision for one retained knowledge conflict, and stage the result.
-
-    This is the supported operation's Git half, and it is deliberately the *same* route the automatic
-    pass takes: the three index stages are materialised again, the adapter is asked for the merge with
-    the caller's decision for that one conflict, and the settled dataset is republished into the
-    worktree and staged. Nothing about the conflict is interpreted here -- which row, which decision
-    and whether the decision is expressible at all are the adapter's answers, and the caller has
-    already checked the decision against the diagnosis it journaled.
-
-    Returns ``None`` when the path settled and is staged, and the adapter's fresh explanation when it
-    did not: a decision that settles the first conflict may reveal a second one, and that second one
-    is reported exactly as the first was. The caller finishes the merge afterwards through the
-    ordinary continuation, so a reconciled sync is a normal sync with one authored input.
-    """
-
-    worktree = Path(side.worktree)
-    _require_active_merge(side)
-    return settle_knowledge_conflict(
-        worktree,
-        path,
-        side.preSyncHead,
-        side.sourceCommit,
-        reconciliations=tuple(reconciliations),
     )
 
 
@@ -469,8 +418,9 @@ def start_side_merge(
 
     ``paired_code`` is the code commit the memory merge is paired with (the code side's result):
     the knowledge validator checks the merged memory tree against it (MIK-R22 rule 8).
-    ``crossing_owner`` names who performs the sync (the leaf, or the master line's task) for a
-    crossing sync (MIK-R24 rule 8), whose knowledge paths are merged structurally.
+    ``crossing_owner`` names who performs the sync (the leaf, or the master line's task): a memory
+    merge with a converted side has its knowledge paths merged structurally (MIK-R24 rule 8 step 3,
+    in every managed sync by MIK-R26 rule 2), and a conflicted record's row is that owner's.
     """
 
     worktree = Path(side.worktree)
@@ -484,12 +434,12 @@ def start_side_merge(
         raise SyncGitProofError(f"{side.side} sync requires a clean worktree before merging")
     discard_memory_cache_changes(side)
     memory_merge = side.side == "memory" and side.plan == "merge"
-    crossing = _crossing(side, paired_code, crossing_owner, memory_merge=memory_merge)
-    # A memory merge stops before committing so the knowledge adapter and validator see it staged.
+    knowledge = _knowledge_merge(side, paired_code, crossing_owner, memory_merge=memory_merge)
+    # A memory merge stops before committing so the structural merge and the validator see it staged.
     no_commit = ["--no-commit"] if memory_merge else []
     result = run_git(worktree, ["merge", *no_commit, "--no-edit", side.sourceCommit])
-    if crossing is not None:
-        return _apply_crossing_merge(side, crossing, result, paired_code)
+    if knowledge is not None:
+        return _apply_knowledge_merge(side, knowledge, result, paired_code)
     if result.returncode == 0:
         if memory_merge:
             return _continue_memory_merge(side, paired_code)
@@ -512,38 +462,49 @@ def start_side_merge(
     )
 
 
-def _apply_crossing_merge(
+def _apply_knowledge_merge(
     side: SyncSideRecord,
-    crossing: CrossingPlanView,
+    plan: CrossingPlanView,
     result: subprocess.CompletedProcess[str],
     paired_code: PairedCode | None,
 ) -> SideMergeOutcome:
-    """Replace the started merge's knowledge and onboarding paths with the crossing plan."""
+    """Replace the started merge's knowledge and onboarding paths with the structural plan.
+
+    The report is written when the merge leaves something to read: an item for the curator, or a
+    side it converted (a crossing). A clean merge of converted lines writes none.
+    """
 
     worktree = Path(side.worktree)
     if result.returncode not in {0, 1} or merge_head(worktree) != side.sourceCommit:
         raise SyncGitProofError(
-            (result.stderr or result.stdout).strip() or "memory crossing merge failed"
+            (result.stderr or result.stdout).strip() or "memory knowledge merge failed"
         )
+    report = ""
     try:
-        apply_crossing(worktree, crossing)
-        report = write_crossing_report(worktree, side.preSyncHead, side.sourceCommit, crossing)
+        apply_crossing(worktree, plan)
+        if plan.conflict_versions or plan.report.get("converted"):
+            report = write_crossing_report(
+                worktree, side.preSyncHead, side.sourceCommit, plan
+            ).as_posix()
     except CrossingSyncError as error:
         raise SyncGitProofError(str(error)) from error
     outcome = _continue_memory_merge(side, paired_code)
-    return replace(outcome, crossing_report=report.as_posix())
+    return replace(outcome, crossing_report=report)
 
 
-def _crossing(
+def _knowledge_merge(
     side: SyncSideRecord,
     paired_code: PairedCode | None,
     owner: tuple[Literal["leaf", "master"], str] | None,
     *,
     memory_merge: bool,
 ) -> CrossingPlanView | None:
-    """The structural plan of a crossing sync (MIK-R24 rule 8), or ``None`` for a plain merge.
+    """The structural plan of a memory merge with a converted side, or ``None`` for a plain merge.
 
-    It runs before Git touches the worktree, so a failing step leaves the line unchanged.
+    MIK-R24 rule 8 step 3 in every managed sync (MIK-R26 rule 2): three converted trees merge as
+    they are, and a crossing converts its unconverted trees first. Only three unconverted trees are
+    left to Git. It runs before Git touches the worktree, so a failing step leaves the line
+    unchanged.
     """
 
     if not memory_merge:
@@ -551,7 +512,7 @@ def _crossing(
     worktree = Path(side.worktree)
     try:
         base = merge_base(worktree, side.preSyncHead, side.sourceCommit)
-        if not crossing_applies(worktree, base, side.preSyncHead, side.sourceCommit):
+        if merge_structure(worktree, base, side.preSyncHead, side.sourceCommit) == "plain":
             return None
         if owner is None:
             raise CrossingSyncError(

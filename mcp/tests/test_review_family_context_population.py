@@ -18,17 +18,18 @@ from uuid import uuid4
 
 import pytest
 from agents_remember.application.knowledge_review import read_knowledge_review
-from agents_remember.memory.knowledge import families, memberships, realizations
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, FamilyRevisionSeed
-from agents_remember.models.knowledge.result import (
+from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
+from fastapi.testclient import TestClient
+from knowledge_rows_test_support import (
     FamilyRequest,
     FamilyRevisionRequest,
     RemoveFamilyMemberRequest,
+    families,
+    memberships,
+    open_knowledge_store,
 )
-from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
-from fastapi.testclient import TestClient
 from read_scope_test_support import BASE_LABEL
 from test_knowledge_review_source_endpoints import (
     LEAF_ID,
@@ -49,6 +50,7 @@ from test_review_family_context import (
     members_of,
     review,
 )
+from test_review_git_trees import build_world
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -431,10 +433,10 @@ def test_the_measured_zero_and_the_absent_family_stay_distinct(tmp_path: Path) -
     assert "measured zero" in context.detail
     assert "selected invariant" in context.detail
 
-    scenario = build_family_scenario(tmp_path / "absent-family")
+    world = build_world(tmp_path / "absent-family")
     result = read_knowledge_review(
-        scenario.endpoints.config,
-        family_request(scenario.endpoints, FamilyIdentitySeed(family_id=str(uuid4()))),
+        world.config,
+        world.review(selector=FamilyIdentitySeed(family_id=str(uuid4()))),
     )
 
     assert result.state == "refused"
@@ -457,17 +459,24 @@ def recorded_population(scenario: FamilyScenario, side: str) -> tuple[set, set]:
     )
     store = open_knowledge_store(database, diff.repository_id)
     try:
-        rows = memberships.list_members(store, revision_id).members
-        return (
-            {(row.member_id, row.invariant_revision_id) for row in rows},
-            {
-                (claim.claim_id, claim.invariant_revision_id)
-                for row in rows
-                for claim in realizations.list_claims_for_invariant_revision(
-                    store, row.invariant_revision_id
-                ).claims
-            },
-        )
+        members = {
+            (str(member), str(invariant))
+            for member, invariant in store.connection.execute(
+                "SELECT member_id, invariant_revision_id FROM family_member "
+                "WHERE repository_id = ? AND family_revision_id = ?",
+                (diff.repository_id, revision_id),
+            )
+        }
+        claims = {
+            (str(claim), str(invariant))
+            for _member, member_invariant in sorted(members)
+            for claim, invariant in store.connection.execute(
+                "SELECT claim_id, invariant_revision_id FROM realization_claim "
+                "WHERE repository_id = ? AND invariant_revision_id = ?",
+                (diff.repository_id, member_invariant),
+            )
+        }
+        return members, claims
     finally:
         store.close()
 

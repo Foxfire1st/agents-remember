@@ -51,7 +51,9 @@ from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
     ReviewRecordClassName,
+    evidence_classes_unread,
 )
+from agents_remember.models.knowledge.review_refusal import ReviewRefusal, ReviewRefusalCode
 from agents_remember.models.knowledge.review_relationships import (
     ReviewAuthoredLineage,
     ReviewRelationshipGap,
@@ -149,22 +151,6 @@ PROPOSED_ASSESSMENT_DISPOSITIONS: tuple[str, ...] = (
     "unresolved",
 )
 
-ReviewRefusalCode = Literal[
-    "candidate_unresolved",
-    "candidate_not_live",
-    "candidate_dataset_absent",
-    "subject_unresolved",
-    "comparison_refused",
-    "comparison_page_reset",
-    "comparison_page_unreadable",
-    "source_content_unresolved",
-    "review_adapter_unavailable",
-    # The leaf-wide tree view only (MIK-R42): its worklist computation could not start before its
-    # deadline because the reviewer was computing other worklists, and an input it read kept
-    # changing while it was composed.
-    "reviewer_busy",
-    "inputs_changing",
-]
 
 # The three bounded collections one review composes, declared once so the request, the payload and
 # the transport cannot come to disagree about which one a cursor addresses (ICR-R10). They are
@@ -403,21 +389,6 @@ class ComparisonIdentity(KnowledgeModel):
                 "one beside the statement is how an invented selection becomes readable"
             )
         return self
-
-
-class ReviewRefusal(KnowledgeModel):
-    """One typed review refusal, naming the offending input and the concrete next action.
-
-    A refusal is a state and never a degraded success: a caller that receives one has no panes, and
-    must not be able to read the absence of panes as a review of an empty candidate.
-    """
-
-    code: ReviewRefusalCode
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    next_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    offending_input: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    expected: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    observed: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
 
 
 class ReviewCollectionPage(KnowledgeModel):
@@ -965,6 +936,11 @@ class ReviewEvidencePane(KnowledgeModel):
     corpus can hold evidence and no assessment, an assessment and no evidence, or neither. Neither
     state has a favourable member, so no rendering can turn an absence into a clearance.
 
+    ``evidence_state`` summarises the two evidence classes this pane displays, the evidence claims
+    and the execution observations, and it agrees with their channels: ``none_recorded`` is a
+    measured zero, so a pane that displays no evidence while one of those channels is ``unavailable``
+    says ``unavailable`` instead of reporting a zero nobody counted.
+
     ``channels`` is the composition's own supply of every record class this review read, one entry per
     class, with the availability fact each owner's answer earned. It is carried here because this is
     the pane that displays records rather than recorded knowledge, and it is carried *whole*: a class
@@ -972,7 +948,7 @@ class ReviewEvidencePane(KnowledgeModel):
     the list.
     """
 
-    evidence_state: Literal["recorded", "none_recorded"]
+    evidence_state: Literal["recorded", "none_recorded", "unavailable"]
     assessment_state: Literal["assessed", "unassessed"]
     evidence_links: tuple[ReviewEvidenceLink, ...] = ()
     observations: tuple[ReviewObservation, ...] = ()
@@ -993,6 +969,13 @@ class ReviewEvidencePane(KnowledgeModel):
                 "the evidence pane's state must match the links and observations it carries; an "
                 "empty corpus reported as recorded, or a populated one reported as empty, is a "
                 "false statement about the evidence either way"
+            )
+        unread = evidence_classes_unread(self.channels)
+        if self.evidence_state != "recorded" and (self.evidence_state == "unavailable") != unread:
+            raise ValueError(
+                "an evidence pane that displays no evidence agrees with its channels: it is "
+                "unavailable exactly when an evidence class could not be read, because "
+                "none_recorded beside an unavailable channel reads as a zero nobody counted"
             )
         if (self.assessment_state == "assessed") != bool(self.assessments):
             raise ValueError(

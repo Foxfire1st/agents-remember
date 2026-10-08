@@ -48,11 +48,11 @@ from typing import Any
 
 import anyio
 import pytest
-from agents_remember.mcp.tools.knowledge import TASKLESS_WRITE_ENTRY_POINT, WRITE_ENTRY_POINT
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from pydantic import ValidationError
-from test_tool_entry_point_sweep import T34_REPAIRED_TOOLS, EntryPointWorld
+from test_tool_entry_point_sweep import T34_REPAIRED_TOOLS
+from tool_entry_point_world import EntryPointWorld
 from tool_refusal_census_support import drive_census
 
 REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus")
@@ -86,10 +86,8 @@ NAVIGATION_KEYS = ("nextStep", "nextTool", "nextAction", "nextArgs")
 STATEFUL_REFUSALS: frozenset[str] = frozenset(
     {
         "knowledge_read",
-        "knowledge_change",
         "knowledge_diff",
         "knowledge_integrity_check",
-        "knowledge_project",
     }
 )
 
@@ -97,12 +95,13 @@ STATEFUL_REFUSALS: frozenset[str] = frozenset(
 # shape -- the partition below and the axis case -- cannot disagree about what they are reading.
 STATEFUL_REFUSAL_STATE = "refused"
 
-# The one stateful refusal whose own detail names WHERE the knowledge write plane is reachable.
-# Both shipped CLI entry points are required by name, because one writer sits behind both: a
-# caller told about only `knowledge-ingest` cannot reach the route that exists for a repository
-# with no enclosure in scope, and a sentence naming one of two is the incomplete-about-the-store
-# class rather than a stylistic slip (`D55`).
-WRITE_ROUTE_NAMING_SURFACES: frozenset[str] = frozenset({"knowledge_change"})
+# The mounted knowledge tool whose description names WHERE knowledge is written. No mounted tool
+# writes (`knowledge_change` left the registered set with the canonical database, MIK-R26), so
+# the read's description carries the route. Both shipped CLI entry points are required by name,
+# because one writer sits behind both: a caller told about only `knowledge-ingest` cannot reach
+# the route that exists for a repository with no leaf, and a sentence naming one of two is the
+# incomplete-about-the-store class rather than a stylistic slip (`D55`).
+WRITE_ROUTE_NAMING_SURFACES: frozenset[str] = frozenset({"knowledge_read"})
 
 
 def is_stateful_refusal(payload: dict[str, Any]) -> bool:
@@ -414,23 +413,18 @@ class FailurePathCensusTests:
     def test_the_write_plane_is_named_by_both_its_shipped_entry_points(self) -> None:
         """One writer, two shipped CLI routes, and both named where a caller reads them.
 
-        Two surfaces are checked, because both are read at the moment of decision: the refusal
-        detail the call returns, and the tool *description* the model reads before it calls
-        anything. A description that names one route leaves the other undiscoverable, so the
-        check is by name on both, and it fails on either alone.
+        The surface checked is the tool *description* the model reads before it calls anything.
+        A description that names one route leaves the other undiscoverable, so the check is by
+        name, and it fails on either alone.
         """
 
-        for tool in sorted(WRITE_ROUTE_NAMING_SURFACES):
-            detail = str(self.census[tool]["payload"].get("refusalDetail", ""))
-            for entry_point in (WRITE_ENTRY_POINT, TASKLESS_WRITE_ENTRY_POINT):
-                assert entry_point in detail, (
-                    f"{tool} does not name {entry_point!r} in its refusal detail, so a caller is "
-                    f"pointed at part of the write plane's route only: {detail}"
-                )
         advertised = {tool.name: tool for tool in anyio.run(self.world.server.list_tools)}
         for tool in sorted(WRITE_ROUTE_NAMING_SURFACES):
             description = advertised[tool].description or ""
-            for entry_point in (WRITE_ENTRY_POINT, TASKLESS_WRITE_ENTRY_POINT):
+            for entry_point in (
+                "agents-remember knowledge-ingest",
+                "agents-remember knowledge-bootstrap",
+            ):
                 assert entry_point in description, (
                     f"the advertised description of {tool} does not name {entry_point!r}, so a "
                     f"model reaching for the write plane cannot find that route: {description}"

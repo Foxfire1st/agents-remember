@@ -1,236 +1,68 @@
 """The index behind the worklist scope and the mounted knowledge tools (MIK-R23 rule 6).
 
-* **Registered scope.** ``construct_registered_scope`` runs over an index through the adapter and
-  constructs the same scope as over the equivalent database fixture.
 * **Retired records** are never presented as live: the reused reads do not select them, and the
   index answers them with their ``retired`` status.
-* **Mounted tools.** ``knowledge_read``, ``knowledge_diff`` and ``knowledge_project`` resolve a
-  ``databasePath`` naming a converted memory tree (its root, or its published ``knowledge.sqlite``
-  location) through the tree's index, name the tree and the index state, and keep today's behaviour
-  for everything else.
+* **Mounted tools.** ``knowledge_read``, ``knowledge_diff`` and ``knowledge_integrity_check``
+  select a converted memory tree by its root directory, read it through the tree's index and name
+  the tree and the index state. No tool accepts a database path (MIK-R26 rule 5): an unconverted
+  tree or a database file is refused as ``legacy-format``, and nothing is opened.
+* **The integrity check** returns the knowledge validator's report of the tree it is handed.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-import shutil
+import re
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import apsw
 import pytest
+from agents_remember.application.knowledge_paging import KNOWLEDGE_PAGE_THRESHOLD_TOKENS
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
+from agents_remember.mcp.tools import knowledge as knowledge_tools
 from agents_remember.mcp.tools.knowledge import (
     DiffToolRequest,
-    ProjectToolRequest,
+    IntegrityCheckRequest,
     ReadToolRequest,
     knowledge_diff_payload,
-    knowledge_project_payload,
+    knowledge_integrity_check_payload,
     knowledge_read_payload,
 )
-from agents_remember.memory.knowledge.logical import dataset_identity
-from agents_remember.memory.knowledge.registered_scope import (
-    construct_registered_scope,
-    snapshot_source,
-)
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.memory.knowledge_index import (
     INDEX_REPOSITORY_ID,
-    KnowledgeIndex,
     KnowledgeIndexCache,
-    scope_snapshot_declaration,
-    scope_snapshot_source,
     text_uuid,
 )
+from agents_remember.memory_quality.knowledge_validator.trees import (
+    CodeDirectory,
+    knowledge_tree_from_directory,
+)
+from agents_remember.memory_quality.knowledge_validator.validator import validate_tree
 from agents_remember.models.knowledge.read import (
     KnowledgeReadBudget,
     KnowledgeReadRequest,
     PathSeed,
 )
-from agents_remember.models.knowledge.registered_scope import (
-    RegisteredScopeManifest,
-    RegisteredScopeRequest,
-    ScopeSnapshotDeclaration,
-)
-from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from knowledge_index_test_support import (
     FAMILY,
-    PARITY_PATHS,
     REVIEW_INVARIANT,
     REVIEW_PATH,
     SIBLING_INVARIANT,
-    add_parity_claim,
-    build_parity_dataset,
+    SIBLING_PATHS,
+    TEST_PATH,
     commit_all,
-    convert_dataset,
     init_repository,
     write_review_tree,
 )
+from knowledge_index_test_support import (
+    git as _git,
+)
 
 # --- the registered scope over the index ------------------------------------------------------
-
-
-def _canonical(
-    connections: tuple[apsw.Connection, ...], value: str, identity: Callable[[str], str]
-) -> str:
-    """Spell one scope identity by what it records, with record identities made comparable.
-
-    Each side's connection is asked in turn, so a member only one side holds is still spelled.
-    """
-
-    def first(statement: str) -> tuple[object, ...] | None:
-        for connection in connections:
-            row = next(iter(connection.execute(statement, (value,))), None)
-            if row is not None:
-                return tuple(row)
-        return None
-
-    for statement, tag in (
-        ("SELECT invariant_id FROM invariant_revision WHERE revision_id = ?", "invariant"),
-        ("SELECT family_id FROM family_revision WHERE revision_id = ?", "family"),
-    ):
-        row = first(statement)
-        if row is not None:
-            return f"{tag}:{identity(str(row[0]))}"
-    row = first("SELECT path, locator FROM source_anchor WHERE anchor_id = ?")
-    if row is not None:
-        return f"anchor:{row[0]}:{json.dumps(json.loads(str(row[1])), sort_keys=True)}"
-    row = first(
-        "SELECT r.invariant_id, a.path, a.locator FROM realization_claim c "
-        "JOIN source_anchor a ON a.anchor_id = c.anchor_id "
-        "JOIN invariant_revision r ON r.revision_id = c.invariant_revision_id WHERE c.claim_id = ?"
-    )
-    if row is not None:
-        locator = json.dumps(json.loads(str(row[2])), sort_keys=True)
-        return f"claim:{identity(str(row[0]))}:{row[1]}:{locator}"
-    row = first(
-        "SELECT f.family_id, r.invariant_id FROM family_member m "
-        "JOIN family_revision f ON f.revision_id = m.family_revision_id "
-        "JOIN invariant_revision r ON r.revision_id = m.invariant_revision_id WHERE m.member_id = ?"
-    )
-    if row is not None:
-        return f"member:{identity(str(row[0]))}:{identity(str(row[1]))}"
-    return value
-
-
-def _canonical_scope(
-    manifest: RegisteredScopeManifest,
-    connections: tuple[apsw.Connection, ...],
-    identity: Callable[[str], str],
-) -> dict[str, list[str]]:
-    def spell(value: str) -> str:
-        return _canonical(connections, value, identity)
-
-    membership = manifest.membership
-    return {
-        "invariants": sorted(map(spell, membership.invariant_revision_ids)),
-        "families": sorted(map(spell, membership.family_revision_ids)),
-        "claims": sorted(map(spell, membership.realization_claim_ids)),
-        "anchors": sorted(map(spell, membership.source_anchor_ids)),
-        "references": sorted(membership.recorded_reference_refs),
-        "edges": sorted(
-            f"{edge.edge_kind}|{edge.mapping_side}|{spell(edge.edge_id)}|"
-            f"{spell(edge.from_record_id)}|{spell(edge.to_record_id)}"
-            for edge in manifest.followed_edges
-        ),
-    }
-
-
-def _declaration(side: str, path: Path) -> ScopeSnapshotDeclaration:
-    return ScopeSnapshotDeclaration(
-        side=side,  # type: ignore[arg-type]
-        snapshot=dataset_identity(path),
-        selector_policy_version="recorded-family-frontier/v1",
-    )
-
-
-@pytest.mark.parametrize("divergent", [False, True], ids=["same-sides", "candidate-changed"])
-def test_the_registered_scope_constructs_the_same_scope_over_the_index(
-    tmp_path: Path, divergent: bool
-) -> None:
-    base_database, repository_id = build_parity_dataset(tmp_path / "dataset")
-    candidate_database = base_database
-    tree = tmp_path / "memory"
-    init_repository(tree)
-    convert_dataset(base_database, tree)
-    commit_all(tree)
-    if divergent:
-        # The candidate adds a realization of K at the batch path, which only that side holds: K
-        # and its membership join the scope from the candidate side alone.
-        candidate_database = tmp_path / "candidate" / "knowledge.sqlite"
-        candidate_database.parent.mkdir()
-        shutil.copyfile(base_database, candidate_database)
-        add_parity_claim(candidate_database, repository_id, "K", PARITY_PATHS[2])
-        convert_dataset(candidate_database, tree)
-    paths = (PARITY_PATHS[0], PARITY_PATHS[2])
-    databases = {"base": base_database, "candidate": candidate_database}
-    database_sources = tuple(
-        snapshot_source(
-            side,  # type: ignore[arg-type]
-            databases[side],
-            open_knowledge_store(databases[side], repository_id),
-        )
-        for side in ("base", "candidate")
-    )
-    over_database = construct_registered_scope(
-        RegisteredScopeRequest(
-            scope_id="parity",
-            repository_id=repository_id,
-            snapshots=tuple(_declaration(side, path) for side, path in databases.items()),
-            changed_paths=paths,
-        ),
-        database_sources,
-    )
-    cache = KnowledgeIndexCache(tmp_path / "cache")
-    with cache.for_git_tree(tree, "HEAD") as base, cache.for_directory(tree) as candidate:
-        assert (base.state.key != candidate.state.key) is divergent
-        index_sources = (
-            scope_snapshot_source("base", base),
-            scope_snapshot_source("candidate", candidate),
-        )
-        over_index = construct_registered_scope(
-            RegisteredScopeRequest(
-                scope_id="parity",
-                repository_id=base.repository_id,
-                snapshots=(
-                    scope_snapshot_declaration("base", base),
-                    scope_snapshot_declaration("candidate", candidate),
-                ),
-                changed_paths=paths,
-            ),
-            index_sources,
-        )
-        assert over_index.manifest is not None, over_index.refusal
-
-        def legacy(projected: str) -> str:
-            text_id = base.text_id(projected) or candidate.text_id(projected)
-            assert text_id is not None
-            record = base.record(text_id).value
-            assert record is not None
-            return str(record.document["origin"]["legacyId"])
-
-        observed = _canonical_scope(
-            over_index.manifest, tuple(source.store.connection for source in index_sources), legacy
-        )
-        for source in index_sources:
-            source.store.connection.close()
-    assert over_database.manifest is not None, over_database.refusal
-    expected = _canonical_scope(
-        over_database.manifest,
-        tuple(source.store.connection for source in database_sources),
-        lambda value: value,
-    )
-    for source in database_sources:
-        source.store.close()
-    assert observed == expected
-    # Not vacuous: both sides, the claims at both paths, and the memberships they reach.
-    assert len(expected["edges"]) >= 10 and len(expected["families"]) == 3
-    candidate_edges = [edge for edge in expected["edges"] if "|candidate|" in edge]
-    base_edges = [edge for edge in expected["edges"] if "|base|" in edge]
-    assert (len(candidate_edges) > len(base_edges)) is divergent
 
 
 # --- retired records ----------------------------------------------------------------------------
@@ -292,104 +124,469 @@ def _converted(tmp_path: Path) -> Path:
     return root
 
 
+def _read(root: Path, coordination: Path | None, **fields: Any) -> dict[str, Any]:
+    return knowledge_read_payload(
+        ReadToolRequest(memory_root=str(root), **fields),
+        coordination_root=None if coordination is None else str(coordination),
+    )
+
+
 def test_knowledge_read_resolves_a_converted_memory_tree_through_its_index(tmp_path: Path) -> None:
     root = _converted(tmp_path)
     coordination = tmp_path / "coordination"
-    for selection in (root, root / "knowledge.sqlite"):
-        response = knowledge_read_payload(
-            ReadToolRequest(
-                database_path=str(selection),
-                repository_id=INDEX_REPOSITORY_ID,
-                view="family",
-                family_revision_id=text_uuid("revision", f"{FAMILY}@1"),
-            ),
-            coordination_root=str(coordination),
-        )
-        assert response["state"] == "view", response
-        assert response["memoryTree"]["memoryRoot"] == str(root)
-        assert response["memoryTree"]["indexState"] == "complete"
+    family = text_uuid("revision", f"{FAMILY}@1")
+    response = _read(root, coordination, view="family", family_revision_id=family)
+    assert response["state"] == "view", response
+    assert response["memoryTree"]["memoryRoot"] == str(root)
+    assert response["memoryTree"]["indexState"] == "complete"
+    # The namespace is the index's constant, supplied by the server and stated in the response.
+    assert response["repositoryId"] == INDEX_REPOSITORY_ID
     cached = list((coordination / "runtime" / "knowledge-index").glob("*.sqlite"))
     assert [path.stem for path in cached] == [response["memoryTree"]["treeId"]]
 
-    refused = knowledge_read_payload(
-        ReadToolRequest(database_path=str(root), repository_id=INDEX_REPOSITORY_ID, view="family")
-    )
+    refused = _read(root, None, view="family")
     assert refused["state"] == "refused"
     assert refused["refusalCode"] == "snapshot_unavailable"
     assert "no coordination root" in refused["refusalDetail"]
 
 
-def test_knowledge_diff_and_project_resolve_converted_trees(tmp_path: Path) -> None:
+def test_the_bootstrap_skill_names_only_views_that_list_an_existing_foundation(
+    tmp_path: Path,
+) -> None:
+    """The skill tells a curator how to read a foundation that exists; each view it names lists rows.
+
+    Catches an example that sends the reader to a view which answers nothing on a tree that holds
+    records, from which the reader would conclude that no foundation exists.
+    """
+
+    skill = Path(__file__).resolve().parents[2] / "skills/c-14-knowledge-bootstrap/SKILL.md"
+    (row,) = (
+        line
+        for line in skill.read_text("utf-8").splitlines()
+        if line.startswith("| **Converted, records present**")
+    )
+    named = re.findall(r'view="([a-z_]+)"', row)
+    assert named == ["family", "invariant", "source_context"]
     root = _converted(tmp_path)
-    before = tmp_path / "before"
-    shutil.copytree(root, before)
+    for view in named:
+        listed = _read(root, tmp_path / "coordination", view=view)
+        assert listed["state"] == "view" and listed["payload"]["rows"], view
+    # The view the earlier text named first answers no row on the same tree.
+    assert _read(root, tmp_path / "coordination", view="curation_queue")["payload"]["rows"] == []
+
+
+def _diff(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:
+    return knowledge_diff_payload(
+        DiffToolRequest(memory_root=str(root), before=before, after=after, **fields)
+    )
+
+
+def test_knowledge_diff_serves_the_git_diff_of_the_knowledge_files(tmp_path: Path) -> None:
+    root = _converted(tmp_path)
+    base = commit_all(root, "base")
     target = next((root / "knowledge" / "invariants").glob(f"{REVIEW_INVARIANT}-*.json"))
     document = json.loads(target.read_text("utf-8"))
     document.update(revision=2, statement="A comparison shows every unchanged realization.")
     target.write_text(canonical_text(document), encoding="utf-8")
-    coordination = str(tmp_path / "coordination")
-    cache = KnowledgeIndexCache(tmp_path / "coordination" / "runtime" / "knowledge-index")
-    with cache.for_directory(before) as base, cache.for_directory(root) as candidate:
-        body = {
-            "selector": {
-                "kind": "invariant",
-                "invariant_id": text_uuid("identity", REVIEW_INVARIANT),
-            },
-            "before": {"context": _context(base)},
-            "after": {"context": _context(candidate)},
-        }
-    compared = knowledge_diff_payload(
-        DiffToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            before_path=str(before),
-            after_path=str(root / "knowledge.sqlite"),
-            body=body,
-        ),
-        coordination_root=coordination,
-    )
+    (root / "notes.txt").write_text("not knowledge\n", encoding="utf-8")
+    sidecar = root / "onboarding/dashboard/src/data/review.ts.json"
+    sidecar_document = json.loads(sidecar.read_text("utf-8"))
+    sidecar_document["realizes"][0]["rationale"] = "loadReview refuses a changed context."
+    sidecar.write_text(canonical_text(sidecar_document), encoding="utf-8")
+    changed = commit_all(root, "change the statement")
+
+    compared = _diff(root, base)  # the after side defaults to HEAD
     assert compared["state"] == "compared", compared
-    assert set(compared["memoryTrees"]) == {"before", "after"}
-    assert "every unchanged realization" in json.dumps(compared["payload"])
+    assert (compared["beforeRevision"], compared["afterRevision"]) == (base, "HEAD")
+    diff = compared["diff"]
+    assert diff["changed_files"] == 2 and len(diff["before_tree"]) == 40
+    (group,) = diff["records"]
+    assert group["record_id"] == REVIEW_INVARIANT and group["kind"] == "invariant"
+    (change,) = group["files"]
+    assert change["status"] == "modified" and change["path"].startswith("knowledge/invariants/")
+    assert "A comparison shows every unchanged realization." in change["patch"]
+    # The changed entry is named under its record and, with its sidecar, under its source path.
+    assert [entry[0] for entry in group["entries"]] == ["RLZ-RVW001"]
+    (source,) = diff["sources"]
+    assert source["source_path"] == "dashboard/src/data/review.ts"
+    assert source["records"] == [REVIEW_INVARIANT]
+    assert "refuses a changed context" in source["files"][0]["patch"]
+    # The answer carries only the files' own change: no label of any effect is inferred.
+    assert "semanticEffectLabels" not in compared
+    assert not any("notes.txt" in str(value) for value in diff.values())
+    assert _diff(root, base, changed)["diff"] == diff
 
-    destination = tmp_path / "vault"
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(destination),
-            views=(
-                {
-                    "view": "family",
-                    "family_revision_id": text_uuid("revision", f"{FAMILY}@1"),
-                },
-            ),
-        ),
-        coordination_root=coordination,
+    # The selectors narrow the same answer; a record or file that did not change answers empty.
+    assert _diff(root, base, record_id=REVIEW_INVARIANT)["diff"] == diff
+    by_file = _diff(root, base, path=change["path"])["diff"]
+    assert by_file["changed_files"] == 1 and by_file["sources"] == []
+    assert [file["path"] for file in by_file["records"][0]["files"]] == [change["path"]]
+    by_source = _diff(root, base, path="dashboard/src/data/review.ts")["diff"]
+    assert by_source["changed_files"] == 1 and by_source["records"][0]["files"] == []
+    assert by_source["sources"] == diff["sources"]
+    nothing = _diff(root, base, record_id=SIBLING_INVARIANT)["diff"]
+    assert (nothing["changed_files"], nothing["records"], nothing["sources"]) == (0, [], [])
+    same = _diff(root, changed)["diff"]
+    assert same["changed_files"] == 0 and same["records"] == []
+    # The whole answer fits one answer's bound, and says so.
+    assert compared["complete"] is True and "leftOut" not in compared
+    assert compared["threshold"]["tokens"] == KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+
+
+def test_knowledge_diff_refuses_a_path_that_names_nothing_in_either_tree(tmp_path: Path) -> None:
+    """A selector that names nothing would read like "nothing changed", so it is refused by name."""
+
+    root = _converted(tmp_path)
+    base = commit_all(root, "base")
+    _write(root, f"onboarding/{REVIEW_PATH}.md", "a card\n")
+    _write(root, "notes.txt", "not knowledge\n")
+    commit_all(root, "a card and a note")
+    assert _diff(root, base, path=REVIEW_PATH)["diff"]["changed_files"] == 1
+    # An absent knowledge file, an unknown source, and a file of the tree that is not knowledge.
+    for absent in ("knowledge/invariants/absent.json", "no/such/source.py", "notes.txt"):
+        refused = _diff(root, base, path=absent)
+        assert (refused["state"], refused["refusalCode"]) == ("refused", "selector_absent"), absent
+        assert repr(absent) in refused["refusalDetail"] and "diff" not in refused
+    both = _diff(root, base, record_id=REVIEW_INVARIANT, path="no/such/source.py")
+    assert both["refusalCode"] == "selector_absent" and "`path`" in both["refusalDetail"]
+    # A file, a source and a route that a tree holds and that did not change answer with no file.
+    family = next((root / "knowledge" / "families").glob(f"{FAMILY}-*.json"))
+    for held in (family.relative_to(root).as_posix(), SIBLING_PATHS[0], "dashboard/src"):
+        quiet = _diff(root, base, path=held)
+        assert quiet["state"] == "compared" and quiet["diff"]["changed_files"] == 0, held
+
+
+def _write(root: Path, path: str, text: str) -> None:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(text, encoding="utf-8")
+
+
+def _files(groups: list[dict[str, Any]], key: str) -> dict[str, list[str]]:
+    return {group[key]: [change["path"] for change in group["files"]] for group in groups}
+
+
+def test_knowledge_diff_serves_the_cards_beside_their_sidecars_and_refuses_an_unheld_record(
+    tmp_path: Path,
+) -> None:
+    """An onboarding card is a knowledge file: its change is served under its sidecar's source path.
+
+    A card joins its sidecar's group when both changed; a card whose sidecar did not change is
+    grouped by the path that sidecar declares in the tree that holds the card (the before tree for
+    a deleted card); a record's prose joins its record; a Markdown file with no sidecar stays under
+    ``other``. A card is selectable by its own path, and a record no tree holds is refused by name.
+    """
+
+    root = _converted(tmp_path)
+    sidecar, card = f"onboarding/{REVIEW_PATH}.json", f"onboarding/{REVIEW_PATH}.md"
+    lone = f"onboarding/{SIBLING_PATHS[0]}.md"  # its sidecar does not change
+    gone = f"onboarding/{TEST_PATH}.md"  # deleted, and its sidecar stays
+    overview = "onboarding/dashboard/src/overview.md"  # the route card beside the route sidecar
+    stray = "onboarding/bootstrap/STATE.md"  # no sidecar beside it
+    record = next((root / "knowledge" / "invariants").glob(f"{REVIEW_INVARIANT}-*.json"))
+    prose = record.with_suffix(".md").relative_to(root).as_posix()
+    for path in (card, lone, gone, stray, prose):
+        _write(root, path, "first\n")
+    base = commit_all(root, "cards")
+    for path in (card, lone, overview, stray, prose):
+        _write(root, path, "second\n")
+    (root / gone).unlink()
+    document = json.loads((root / sidecar).read_text("utf-8"))
+    document["realizes"][0]["rationale"] = "loadReview refuses a changed context."
+    (root / sidecar).write_text(canonical_text(document), encoding="utf-8")
+    commit_all(root, "edit the cards")
+
+    diff = _diff(root, base)["diff"]
+    assert diff["changed_files"] == 7
+    assert _files(diff["sources"], "source_path") == {
+        REVIEW_PATH: [sidecar, card],
+        SIBLING_PATHS[0]: [lone],
+        TEST_PATH: [gone],
+        "dashboard/src": [overview],
+    }
+    assert [change["path"] for change in diff["other"]] == [stray]
+    assert _files(diff["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
+    assert diff["records"][0]["kind"] == "invariant"
+    statuses = {
+        change["path"]: change["status"] for group in diff["sources"] for change in group["files"]
+    }
+    assert (statuses[card], statuses[gone]) == ("modified", "deleted")
+
+    by_card = _diff(root, base, path=card)["diff"]
+    assert by_card["changed_files"] == 1 and by_card["records"] == []
+    assert _files(by_card["sources"], "source_path") == {REVIEW_PATH: [card]}
+    assert "+second" in by_card["sources"][0]["files"][0]["patch"]
+    by_source = _diff(root, base, path=REVIEW_PATH)["diff"]
+    assert _files(by_source["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
+    by_record = _diff(root, base, record_id=REVIEW_INVARIANT)["diff"]
+    assert _files(by_record["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
+    assert _files(by_record["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
+
+    unheld = _diff(root, base, record_id="INV-N0SVCH")
+    assert (unheld["state"], unheld["refusalCode"]) == ("refused", "selector_absent")
+    assert "INV-N0SVCH" in unheld["refusalDetail"] and "diff" not in unheld
+    # A record a tree holds and that did not change is still answered, with nothing changed.
+    assert _diff(root, base, record_id=SIBLING_INVARIANT)["diff"]["changed_files"] == 0
+
+
+def test_knowledge_diff_refuses_a_directory_inside_the_memory_repository(tmp_path: Path) -> None:
+    """Git reads its pathspecs from the directory it runs in, so a directory below the root would
+    be compared as the whole memory tree and answer "nothing changed". It is refused instead, and
+    the refusal names the root to pass. A linked worktree is a root of its own."""
+
+    root = _converted(tmp_path)
+    base = commit_all(root, "base")
+    _write(root, f"onboarding/{REVIEW_PATH}.md", "a card\n")
+    commit_all(root, "a card")
+    assert _diff(root, base)["diff"]["changed_files"] == 1
+    for inside in (root / "onboarding", root / "knowledge" / "families"):
+        for refused in (_diff(inside, base), knowledge_diff_payload(DiffToolRequest(str(inside)))):
+            assert refused["state"] == "refused", (inside, refused)
+            assert refused["refusalCode"] == "selected_input_unavailable"
+            assert f"pass {root} as memoryRoot" in refused["refusalDetail"]
+    linked = tmp_path / "linked"
+    _git(root, "worktree", "add", "-q", "--detach", str(linked), "HEAD")
+    assert _diff(linked, base)["diff"]["changed_files"] == 1
+
+
+def _shown(answer: dict[str, Any]) -> list[str]:
+    diff = answer["diff"]
+    groups = (
+        *diff["records"],
+        *diff["sources"],
+        {"files": diff["history"]},
+        {"files": diff["other"]},
     )
-    assert projected["state"] == "projected", projected
-    assert projected["memoryTree"]["memoryRoot"] == str(root)
-    assert projected["published"]
+    return [change["path"] for group in groups for change in group["files"]]
 
 
-def test_an_unconverted_selection_keeps_the_database_path(tmp_path: Path) -> None:
+def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leaves_out(
+    tmp_path: Path,
+) -> None:
+    """One answer never exceeds the bound ``knowledge_read`` states (MIK-R02's constant).
+
+    The answer holds the patches of as many leading files as fit and names every file it left out,
+    each of which is then reached whole by ``path``. A patch longer than an answer is cut and named
+    as cut. When not even the names fit, the answer names as many as fit and counts the rest.
+    """
+
+    root = _converted(tmp_path)
+    cards = [f"onboarding/bound/card_{number:02}.py.md" for number in range(40)]
+    long, plain = "onboarding/bound/long.py.md", "onboarding/bound/plain.py.md"
+    bulk = [f"onboarding/bulk/file_{number:04}.py.md" for number in range(900)]
+    for path in (*cards, long, plain, *bulk):
+        _write(root, path, "first\n")
+    base = commit_all(root, "short cards")
+    for number, path in enumerate(cards):
+        _write(root, path, "".join(f"card {number} says thing {line}\n" for line in range(80)))
+    many = commit_all(root, "forty long cards")
+
+    answer = _diff(root, base, many)
+    left = answer["leftOut"]
+    assert answer["state"] == "compared" and answer["complete"] is False
+    assert answer["tokens"] <= answer["threshold"]["tokens"] == KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+    assert answer["diff"]["changed_files"] == len(cards)
+    # Nothing is dropped: the files shown and the files named are the whole change, in order.
+    assert _shown(answer) and _shown(answer) + left["paths"] == cards
+    assert (left["files"], left["pathsNotNamed"], left["cutPatches"]) == (len(left["paths"]), 0, [])
+    assert "as `path`" in left["nextAction"]
+    one = _diff(root, base, many, path=left["paths"][-1])
+    assert one["complete"] is True and "leftOut" not in one
+    assert (
+        _shown(one) == [left["paths"][-1]] and "says thing 79" in one["diff"]["other"][0]["patch"]
+    )
+
+    # One patch longer than an answer: as much of it as fits, cut at a line end, named as cut.
+    digests = [hashlib.sha256(str(line).encode()).hexdigest() for line in range(600)]
+    _write(root, long, "".join(f"{digest}\n" for digest in digests))
+    # A patch the per-file limit cuts although it fits an answer is named as cut too.
+    _write(root, plain, "".join(f"the same plain words on line {line}\n" for line in range(900)))
+    longer = commit_all(root, "two long cards")
+    cut = _diff(root, many, longer, path=long)
+    (change,) = cut["diff"]["other"]
+    assert cut["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and cut["complete"] is False
+    assert change["truncated"] is True and change["patch"].endswith("\n")
+    assert digests[0] in change["patch"] and digests[-1] not in change["patch"]
+    assert (cut["leftOut"]["files"], cut["leftOut"]["cutPatches"]) == (0, [long])
+    assert "-- <path>` prints a file's whole patch" in cut["leftOut"]["nextAction"]
+    limited = _diff(root, many, longer, path=plain)
+    assert limited["complete"] is False and limited["leftOut"]["cutPatches"] == [plain]
+    assert limited["diff"]["other"][0]["truncated"] is True
+
+    # More changed files than one answer can name: no patch, the names that fit, the rest counted.
+    for path in bulk:
+        _write(root, path, "second\n")
+    most = commit_all(root, "nine hundred cards")
+    crowd = _diff(root, longer, most)
+    named = crowd["leftOut"]["paths"]
+    assert crowd["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and _shown(crowd) == []
+    assert 0 < len(named) < len(bulk) and named == bulk[: len(named)]
+    assert crowd["leftOut"]["files"] == len(bulk) == crowd["diff"]["changed_files"]
+    assert crowd["leftOut"]["pathsNotNamed"] == len(bulk) - len(named)
+    assert (
+        "--name-only -- knowledge onboarding` lists every changed file"
+        in (crowd["leftOut"]["nextAction"])
+    )
+
+
+# --- MIK-R26 rule 5: no tool reads unconverted memory or a database file -------------------------
+
+
+def _legacy(tmp_path: Path) -> Path:
+    """An unconverted memory repository that holds a file named like the retired database."""
+
     legacy = tmp_path / "legacy"
     init_repository(legacy)
-    response = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(legacy / "knowledge.sqlite"),
-            repository_id=INDEX_REPOSITORY_ID,
-            view="family",
-        ),
-        coordination_root=str(tmp_path / "coordination"),
-    )
-    assert response["refusalCode"] == "selected_input_unavailable"
+    (legacy / "onboarding").mkdir()
+    (legacy / "onboarding" / "overview.md").write_text("# root\n", encoding="utf-8")
+    (legacy / "knowledge.sqlite").write_bytes(b"SQLite format 3\x00 never opened")
+    commit_all(legacy)
+    return legacy
+
+
+def _assert_legacy_format(response: dict[str, Any], *named: str) -> None:
+    assert response["state"] == "refused", response
+    assert response["refusalCode"] == "legacy-format", response
+    detail = response["refusalDetail"]
+    # The refusal names the crossing sync, the conversion command and where converted memory is.
+    assert "worktree_sync" in detail and "agents-remember knowledge-convert" in detail
+    assert "MIK-R26" in detail
+    for text in named:
+        assert text in detail, (text, detail)
     assert "memoryTree" not in response
-    assert not (tmp_path / "coordination").exists()
 
 
-def _context(index: KnowledgeIndex) -> dict[str, object]:
-    return open_read_context(index.database_path, index.repository_id).model_dump(mode="json")
+def test_every_knowledge_tool_refuses_legacy_memory_and_opens_no_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unconverted tree, a database file in one, and the frozen file inside a converted tree are
+    each refused as ``legacy-format`` by all three tools, and no SQLite file is opened or created.
+
+    Catches a fall-through that still opens the path it was handed as a dataset.
+    """
+
+    legacy = _legacy(tmp_path)
+    converted = _converted(tmp_path)
+    (converted / "knowledge.sqlite").write_bytes(b"SQLite format 3\x00 frozen at the cutover")
+    coordination = tmp_path / "coordination"
+    commit_all(converted, "freeze the database")
+    opened: list[str] = []
+    real = apsw.Connection
+
+    def spy(filename: str, *args: Any, **kwargs: Any) -> Any:
+        opened.append(str(filename))
+        return real(filename, *args, **kwargs)
+
+    monkeypatch.setattr(apsw, "Connection", spy)
+    selections = (
+        (legacy, f"the memory tree {legacy}", "holds no converted memory yet"),
+        (legacy / "knowledge.sqlite", "knowledge database file", "holds no converted memory yet"),
+        (converted / "knowledge.sqlite", "knowledge database file", f"worktree {converted}"),
+    )
+    for selection, subject, held in selections:
+        read = _read(selection, coordination, view="family")
+        _assert_legacy_format(read, "knowledge_read refuses", subject, held)
+        assert read["threshold"]["tokens"] > 0  # MIK-R02 rule 1: a refusal states the threshold
+        diff = _diff(selection, "HEAD")
+        _assert_legacy_format(diff, "knowledge_diff refuses", subject)
+        check = knowledge_integrity_check_payload(
+            IntegrityCheckRequest(memoryRoot=str(selection), codeRoot=str(tmp_path))
+        )
+        _assert_legacy_format(check, "knowledge_integrity_check refuses", subject)
+    assert opened == []
+    assert not coordination.exists()
+
+    absent = _read(tmp_path / "nowhere", coordination, view="family")
+    assert (absent["state"], absent["refusalCode"]) == ("refused", "selected_input_unavailable")
+    assert "does not exist" in absent["refusalDetail"]
+
+
+def test_knowledge_diff_with_no_after_revision_compares_with_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    root = _converted(tmp_path)
+    base = commit_all(root, "base")
+    target = next((root / "knowledge" / "invariants").glob(f"{REVIEW_INVARIANT}-*.json"))
+    # Nothing uncommitted yet: the working tree equals HEAD.
+    clean = knowledge_diff_payload(DiffToolRequest(memory_root=str(root)))
+    assert clean["state"] == "compared" and clean["afterRevision"] == "working tree", clean
+    assert clean["diff"]["changed_files"] == 0
+
+    document = json.loads(target.read_text("utf-8"))
+    document.update(
+        revision=2, statement="An uncommitted statement shows in the working tree diff."
+    )
+    target.write_text(canonical_text(document), encoding="utf-8")
+    (root / "knowledge" / "families" / "FAM-NEWONE-x.json").write_text("{}\n", encoding="utf-8")
+    loose, refs = _git(root, "count-objects"), _git(root, "for-each-ref")
+    uncommitted = knowledge_diff_payload(DiffToolRequest(memory_root=str(root)))
+    assert uncommitted["state"] == "compared", uncommitted
+    # The capture writes loose objects that nothing references (the tool's description says so),
+    # and a comparison of two named revisions writes none.
+    captured = _git(root, "count-objects")
+    assert int(captured.split()[0]) > int(loose.split()[0])
+    assert _git(root, "for-each-ref") == refs
+    _diff(root, base, base)
+    assert _git(root, "count-objects") == captured
+    diff = uncommitted["diff"]
+    assert diff["changed_files"] == 2
+    files = {
+        change["path"]: change
+        for group in (*diff["records"], {"files": diff["other"]})
+        for change in group["files"]
+    }
+    assert any("uncommitted statement" in change["patch"] for change in files.values())
+    assert any(change["status"] == "added" for change in files.values())
+    # The default before side is HEAD; naming it, or its commit, gives the same answer.
+    named = knowledge_diff_payload(DiffToolRequest(memory_root=str(root), before=base))
+    assert named["diff"] == uncommitted["diff"] and named["beforeRevision"] == base
+    # The working files, the index and the branch are unchanged by the read.
+    assert _git(root, "rev-parse", "HEAD") == base
+    assert _git(root, "diff", "--cached", "--name-only") == ""
+    # With both revisions named the two trees are compared, whatever the working tree holds.
+    committed = commit_all(root, "second state")
+    pair = _diff(root, base, committed)
+    assert pair["afterRevision"] == committed and pair["diff"]["changed_files"] == 2
+    assert _diff(root, committed)["diff"]["changed_files"] == 0
+
+
+def test_knowledge_diff_refuses_an_unconverted_working_tree(tmp_path: Path) -> None:
+    legacy = _legacy(tmp_path)
+    (legacy / "onboarding" / "overview.md").write_text("# changed\n", encoding="utf-8")
+    refused = knowledge_diff_payload(DiffToolRequest(memory_root=str(legacy)))
+    _assert_legacy_format(refused, "knowledge_diff refuses", "at HEAD")
+    assert refused.get("diff") is None
+    # A converted HEAD whose working tree lost its layout marker is refused on the working side.
+    converted = _converted(tmp_path / "converted")
+    (converted / "knowledge" / "layout.json").unlink()
+    gone = knowledge_diff_payload(DiffToolRequest(memory_root=str(converted)))
+    _assert_legacy_format(gone, "knowledge_diff refuses", "at working tree")
+
+
+def test_knowledge_diff_refuses_a_revision_whose_tree_is_unconverted_and_an_unknown_one(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "memory"
+    init_repository(root)
+    (root / "onboarding").mkdir(parents=True)
+    (root / "onboarding" / "overview.md").write_text("# root\n", encoding="utf-8")
+    unconverted = commit_all(root, "before the conversion")
+    write_review_tree(root)
+    commit_all(root, "converted")
+
+    # Either side may be the unconverted one; the converted pair is compared.
+    for before, after in ((unconverted, "HEAD"), ("HEAD", unconverted)):
+        refused = _diff(root, before, after)
+        _assert_legacy_format(refused, "knowledge_diff refuses", f"the memory tree {root}")
+        assert refused.get("diff") is None
+    assert _diff(root, "HEAD", "HEAD")["state"] == "compared"
+
+    unknown = _diff(root, "no-such-revision")
+    assert (unknown["state"], unknown["refusalCode"]) == ("refused", "selected_input_unavailable")
+    assert "no-such-revision" in unknown["refusalDetail"]
+    plain = tmp_path / "not-a-repository"
+    plain.mkdir()
+    assert _diff(plain, "HEAD")["refusalCode"] == "selected_input_unavailable"
+    assert _diff(tmp_path / "absent", "HEAD")["refusalCode"] == "selected_input_unavailable"
 
 
 def test_a_retired_family_is_never_selected_as_live(tmp_path: Path) -> None:
@@ -427,69 +624,18 @@ def _partial(tmp_path: Path) -> Path:
     return root
 
 
-def test_every_tool_surface_reports_a_partial_index_as_incomplete(tmp_path: Path) -> None:
+def test_the_read_reports_a_partial_index_as_incomplete(tmp_path: Path) -> None:
     root = _partial(tmp_path)
-    coordination = str(tmp_path / "coordination")
-    read = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            view="family",
-            family_revision_id=text_uuid("revision", f"{FAMILY}@1"),
-        ),
-        coordination_root=coordination,
-    )
+    coordination = tmp_path / "coordination"
+    family = text_uuid("revision", f"{FAMILY}@1")
+    read = _read(root, coordination, view="family", family_revision_id=family)
     assert read["state"] == "view"
     assert read["completeWithinDeclaredScope"] is False
     assert read["payload"]["completeness"]["complete_within_declared_scope"] is False
     assert read["indexComplete"] is False and read["memoryTree"]["indexState"] == "partial"
 
-    cache = KnowledgeIndexCache(tmp_path / "coordination" / "runtime" / "knowledge-index")
-    with cache.for_directory(root) as index:
-        context = _context(index)
-    compared = knowledge_diff_payload(
-        DiffToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            before_path=str(root),
-            after_path=str(root),
-            body={
-                "selector": {
-                    "kind": "invariant",
-                    "invariant_id": text_uuid("identity", REVIEW_INVARIANT),
-                },
-                "before": {"context": context},
-                "after": {"context": context},
-            },
-        ),
-        coordination_root=coordination,
-    )
-    assert compared["state"] == "compared", compared
-    assert compared["indexComplete"] is False
-    assert compared["memoryTrees"]["after"]["indexState"] == "partial"
-
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(tmp_path / "vault"),
-            views=({"view": "family", "family_revision_id": text_uuid("revision", f"{FAMILY}@1")},),
-        ),
-        coordination_root=coordination,
-    )
-    assert projected["state"] == "projected", projected
-    assert projected["indexComplete"] is False
-
     complete_root = _converted(tmp_path / "complete")
-    complete = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(complete_root),
-            repository_id=INDEX_REPOSITORY_ID,
-            view="family",
-            family_revision_id=text_uuid("revision", f"{FAMILY}@1"),
-        ),
-        coordination_root=coordination,
-    )
+    complete = _read(complete_root, coordination, view="family", family_revision_id=family)
     assert complete["completeWithinDeclaredScope"] is True and complete["indexComplete"] is True
 
 
@@ -500,120 +646,96 @@ def test_an_unbuildable_index_is_refused_not_raised(tmp_path: Path) -> None:
     root = _converted(tmp_path)
     blocked = tmp_path / "coordination-is-a-file"
     blocked.write_text("not a directory", "utf-8")
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(tmp_path / "vault"),
-            views=({"view": "family", "family_revision_id": text_uuid("revision", f"{FAMILY}@1")},),
-        ),
-        coordination_root=str(blocked),
-    )
-    assert projected["state"] == "refused"
-    assert projected["refusalCode"] in {"snapshot_unavailable", "selected_input_unavailable"}
-    compared = knowledge_diff_payload(
-        DiffToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            before_path=str(root),
-            after_path=str(root),
-            body={
-                "selector": {"kind": "invariant", "invariant_id": text_uuid("identity", "x")},
-                "before": {"context": {}},
-                "after": {"context": {}},
-            },
-        ),
-        coordination_root=str(blocked),
-    )
-    assert compared["state"] == "refused"
+    read = _read(root, blocked, view="family", family_revision_id=str(uuid.uuid4()))
+    assert read["state"] == "refused"
+    # The tree was selected; it is its index that could not be built, and the refusal says where.
+    assert read["refusalCode"] == "snapshot_unavailable"
+    assert "the selected memory tree could not be indexed" in read["refusalDetail"]
+    assert str(root) in read["refusalDetail"] and "memoryTree" not in read
 
 
-# --- F6: an unconverted root with a real database reads exactly as before -------------------------
-
-
-def test_a_real_database_in_an_unconverted_root_reads_identically(tmp_path: Path) -> None:
-    legacy = tmp_path / "legacy"
-    init_repository(legacy)
-    database, repository_id = build_parity_dataset(legacy)
-    commit_all(legacy)
-    family_revision = str(
-        next(
-            iter(apsw.Connection(str(database)).execute("SELECT revision_id FROM family_revision"))
-        )[0]
-    )
-    request = ReadToolRequest(
-        database_path=str(database),
-        repository_id=repository_id,
-        view="family",
-        family_revision_id=family_revision,
-    )
-    coordination = tmp_path / "coordination"
-    with_root = knowledge_read_payload(request, coordination_root=str(coordination))
-    without_root = knowledge_read_payload(request)
-    assert with_root["state"] == "view", with_root
-    assert with_root == without_root
-    assert "memoryTree" not in with_root and "indexComplete" not in with_root
-    assert not coordination.exists()
-
-
-def test_a_converted_tree_refuses_a_seed_it_does_not_hold_and_a_database_read_is_unchanged(
-    tmp_path: Path,
-) -> None:
+def test_a_converted_tree_refuses_a_seed_it_does_not_hold(tmp_path: Path) -> None:
     """L37 ruling (P2 task 4): an unheld seed is refused ``selector_absent``, never answered as an
-    empty, complete view; a database read keeps its answer."""
+    empty, complete view."""
 
     root = _converted(tmp_path)
-    coordination = str(tmp_path / "coordination")
-
-    def read(view: str, **seeds: str) -> dict[str, Any]:
-        return knowledge_read_payload(
-            ReadToolRequest(
-                database_path=str(root),
-                repository_id=INDEX_REPOSITORY_ID,
-                view=view,
-                invariant_revision_id=seeds.get("invariant_revision_id"),
-                family_revision_id=seeds.get("family_revision_id"),
-            ),
-            coordination_root=coordination,
-        )
-
+    coordination = tmp_path / "coordination"
     held = text_uuid("revision", f"{REVIEW_INVARIANT}@1")
-    assert read("invariant", invariant_revision_id=held)["state"] == "view"
+    assert (
+        _read(root, coordination, view="invariant", invariant_revision_id=held)["state"] == "view"
+    )
     for view, seeds in (
         ("invariant", {"invariant_revision_id": str(uuid.uuid4())}),  # a database-era ID
         ("invariant", {"invariant_revision_id": REVIEW_INVARIANT}),  # a bare record ID
         ("family", {"family_revision_id": str(uuid.uuid4())}),
         ("source_context", {"family_revision_id": "FAM-ZZZZZZ"}),
     ):
-        refused = read(view, **seeds)
+        refused = _read(root, coordination, view=view, **seeds)
         assert refused["state"] == "refused", (view, seeds, refused)
         assert refused["refusalCode"] == "selector_absent"
         assert "read_ar_files" in refused["refusalDetail"]
-    bare = read("invariant", invariant_revision_id=REVIEW_INVARIANT)["refusalDetail"]
-    assert f"whose seed is {held}" in bare
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(tmp_path / "projected"),
-            views=({"view": "invariant", "invariantRevisionId": REVIEW_INVARIANT},),
-        ),
-        coordination_root=coordination,
-    )
-    assert (projected["state"], projected["refusalCode"]) == ("refused", "selector_absent")
+    bare = _read(root, coordination, view="invariant", invariant_revision_id=REVIEW_INVARIANT)
+    assert f"whose seed is {held}" in bare["refusalDetail"]
 
-    database = tmp_path / "unconverted" / "knowledge.sqlite"
-    repository_id = str(uuid.uuid4())
-    store = open_knowledge_store(database, repository_id)
-    identity = RepositoryIdentity(repository_id=repository_id, authority_home="agents-remember")
-    assert store.create_repository(identity).state == "created"
-    store.close()
-    unchanged = knowledge_read_payload(
-        ReadToolRequest(
-            database_path=str(database),
-            repository_id=repository_id,
-            view="invariant",
-            invariant_revision_id=str(uuid.uuid4()),
-        )
+
+# --- knowledge_integrity_check: the validator's report -------------------------------------------
+
+
+def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MIK-R26 rule 5: the tool returns the validator's own report for the tree it is handed.
+
+    Catches a tool that reports from anything but ``validate_tree`` over the tree's working files,
+    a listing that hides a refusal behind report-only findings, and a call that names too little.
+    """
+
+    root = _converted(tmp_path)
+    code = tmp_path / "code"
+    code.mkdir()
+
+    def check(**fields: Any) -> dict[str, Any]:
+        return knowledge_integrity_check_payload(IntegrityCheckRequest(**fields))
+
+    expected = validate_tree(
+        knowledge_tree_from_directory(root), code=CodeDirectory(label=code.as_posix(), root=code)
     )
-    assert (unchanged["state"], unchanged["completeWithinDeclaredScope"]) == ("view", True)
+    assert expected.refusals  # the fixture's anchors name files this empty code checkout lacks
+    reported = check(memoryRoot=str(root), codeRoot=str(code))
+    assert reported["state"] == "reported", reported
+    validation = reported["validation"]
+    assert (reported["memoryRoot"], reported["codeRoot"]) == (str(root), code.as_posix())
+    assert (validation["ok"], validation["refusalCount"], validation["reportCount"]) == (
+        False,
+        len(expected.refusals),
+        len(expected.reports),
+    )
+    assert sum(one["count"] for one in validation["byRule"]) == len(expected.violations)
+    assert validation["violations"] == [
+        one.to_document() for one in (*expected.refusals, *expected.reports)
+    ]
+    assert validation["violationsTruncated"] is False
+    assert "worklistState" not in reported  # no leaf was named
+
+    # Against its own commit as the base nothing changed, so no anchor is checked for a path.
+    based = check(memoryRoot=str(root), codeRoot=str(code), baseCommits=("HEAD",))
+    assert based["bases"] == ["HEAD"]
+    assert based["validation"]["refusalCount"] < validation["refusalCount"]
+
+    monkeypatch.setattr(knowledge_tools, "MAX_LISTED_VIOLATIONS", 1)
+    bounded = check(memoryRoot=str(root), codeRoot=str(code))["validation"]
+    assert len(bounded["violations"]) == 1 and bounded["violationsTruncated"] is True
+    assert bounded["violations"][0]["reportOnly"] is False  # a refusal is listed first
+    assert bounded["refusalCount"] == validation["refusalCount"]
+
+    for too_little in ({}, {"memoryRoot": str(root)}, {"codeRoot": str(code)}):
+        refused = check(**too_little)
+        assert (refused["state"], refused["refusalCode"]) == (
+            "refused",
+            "selected_input_unavailable",
+        ), refused
+        assert "contractPath" in refused["refusalDetail"]
+    gone = check(memoryRoot=str(root), codeRoot=str(tmp_path / "no-code"))
+    assert gone["refusalCode"] == "selected_input_unavailable"
+    unreadable = check(memoryRoot=str(root), codeRoot=str(code), baseCommits=("no-such-commit",))
+    assert unreadable["refusalCode"] == "snapshot_unavailable"

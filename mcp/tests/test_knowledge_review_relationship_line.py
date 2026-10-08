@@ -21,16 +21,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from agents_remember.memory.knowledge import families, memberships
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft
-from agents_remember.models.knowledge.result import (
+from diff_scope_test_support import _git
+from knowledge_rows_test_support import (
     FamilyMemberRequest,
     FamilyRevisionRequest,
     RemoveFamilyMemberRequest,
+    families,
+    memberships,
+    open_knowledge_store,
 )
-from diff_scope_test_support import _git
 from read_scope_test_support import AUXILIARY_PATH, BASE_LABEL, DIRECT_FAMILY_GUARANTEE
 from test_knowledge_review_relationship_movement import (
     ClaimDraft,

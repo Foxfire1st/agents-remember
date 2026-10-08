@@ -1,6 +1,8 @@
-"""The supporting-record vocabulary: an evidence claim and a verification observation.
+"""The supporting-record vocabulary: the verification observation (the evidence claim is retired).
 
-``KS-R12@v1`` charters **two** record kinds and this module is their whole typed shape. They are
+``KS-R12@v1`` chartered **two** record kinds; the evidence-claim payload and its subject and coverage
+models were retired with the canonical database (MIK-R26), and this module keeps the typed shape of
+the verification observation, which the reviewer still reads. They are
 declared here, under the shipped :class:`KnowledgeModel` base (``extra="forbid"``, ``frozen=True``),
 so a payload is a validated value rather than the untyped properties bag ``design/storage-design.md``
 refuses, and so a field that is not declared here has nowhere to be stored.
@@ -46,41 +48,27 @@ synthesise the field.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
-    UUID_PATTERN,
     KnowledgeModel,
     KnowledgeState,
     require_consistent_acceptance,
     require_plain_git_path,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.result import KnowledgeRefusal
 
 # ---------------------------------------------------------------------------
 # The record kinds, their frozen payload schemas and the one closed vocabularies' names. The
 # ``(kind, record_schema)`` pair is the envelope seam's key, so the pair is declared here beside the
 # models rather than spelled a second time at the registry.
-
-EVIDENCE_CLAIM_KIND = "evidence_claim"
-EVIDENCE_CLAIM_SCHEMA = "evidence-claim/v1"
-
-VERIFICATION_OBSERVATION_KIND = "verification_observation"
-VERIFICATION_OBSERVATION_SCHEMA = "verification-observation/v1"
-
-# The provenance envelope each record stores. Both are authored rows written through the admitted
-# write boundary, so both store ``proposed`` origin data and neither can express a promotion.
-EVIDENCE_RECORD_LIFECYCLE = "proposed"
 
 
 # ---------------------------------------------------------------------------
@@ -94,88 +82,8 @@ EVIDENCE_RECORD_LIFECYCLE = "proposed"
 # land in.
 
 
-class RealizationClaimCoverage(KnowledgeModel):
-    """One realization claim the author asserts this evidence covers."""
-
-    kind: Literal["realization_claim"] = "realization_claim"
-    claim_id: str = Field(pattern=UUID_PATTERN)
-
-
-class AnchorCoverage(KnowledgeModel):
-    """One source anchor the author asserts this evidence covers."""
-
-    kind: Literal["source_anchor"] = "source_anchor"
-    anchor_id: str = Field(pattern=UUID_PATTERN)
-
-
-# The claimed-coverage endpoint set. It is closed at the two kinds the packet's own field list names
-# -- "a list of realisation claims or anchors" -- and neither member is a bare identity: the kind is
-# the model, so a caller cannot put an anchor identity where a claim belongs.
-CoverageEndpoint = Annotated[
-    RealizationClaimCoverage | AnchorCoverage,
-    Field(discriminator="kind"),
-]
-
-COVERAGE_ENDPOINT_KINDS: tuple[str, ...] = ("realization_claim", "source_anchor")
-
-COVERAGE_COLUMNS: Mapping[str, str] = {
-    "realization_claim": "claim_id",
-    "source_anchor": "anchor_id",
-}
-
-
 # ---------------------------------------------------------------------------
 # The claim's subject: exactly one of two kinds, each its own typed model and its own join table.
-
-
-class InvariantRevisionSubject(KnowledgeModel):
-    """The claim's subject is one exact invariant revision (the packet's first subject kind)."""
-
-    kind: Literal["invariant_revision"] = "invariant_revision"
-    revision_id: str = Field(pattern=UUID_PATTERN)
-
-
-class KnowledgeFacetRevisionSubject(KnowledgeModel):
-    """The claim's subject is one exact ``KnowledgeFacet`` revision owned by ``KS-R11@v1``.
-
-    ``KS-R11@v1`` stores a facet as a record envelope whose ``kind`` is one of the eight declared
-    subtypes and whose `record_revision` row carries the frozen payload, so the subject names the
-    *revision* row and the write path checks that the record it belongs to is a facet record. The
-    check is not this model's: the model fixes which table the identity addresses, and
-    :mod:`agents_remember.memory.knowledge.endpoints` owns what "is a facet revision" means.
-    """
-
-    kind: Literal["facet_revision"] = "facet_revision"
-    revision_id: str = Field(pattern=UUID_PATTERN)
-
-
-EvidenceSubject = Annotated[
-    InvariantRevisionSubject | KnowledgeFacetRevisionSubject,
-    Field(discriminator="kind"),
-]
-
-# The two subject kinds, as L11 actually delivered the second one: a facet is a record envelope
-# under one of ``FACET_KINDS``, and the subject names its sealed revision.
-SUBJECT_KINDS: tuple[str, ...] = ("invariant_revision", "facet_revision")
-
-SUBJECT_COLUMNS: Mapping[str, str] = {
-    "invariant_revision": "invariant_revision_id",
-    "facet_revision": "facet_revision_id",
-}
-
-
-def subject_revision_id(subject: EvidenceSubject) -> str:
-    """Return the exact revision identity one subject names."""
-
-    return subject.revision_id
-
-
-def subject_table(subject: EvidenceSubject) -> str:
-    """Return the canonical table one subject kind resolves to."""
-
-    if isinstance(subject, InvariantRevisionSubject):
-        return "invariant_revision"
-    return "record_revision"
 
 
 # ---------------------------------------------------------------------------
@@ -292,20 +200,6 @@ class PublicationReference(KnowledgeModel):
 # authored record.
 ExecutionResult = Literal["passed", "failed", "error", "skipped", "not_run"]
 
-EXECUTION_RESULTS: tuple[ExecutionResult, ...] = (
-    "passed",
-    "failed",
-    "error",
-    "skipped",
-    "not_run",
-)
-
-
-def execution_results() -> tuple[str, ...]:
-    """Return the closed execution-result vocabulary, for a caller that needs it as a value."""
-
-    return EXECUTION_RESULTS
-
 
 # ---------------------------------------------------------------------------
 # The environment identity: the run's environment, recorded at write time.
@@ -354,62 +248,6 @@ class RunEnvironment(KnowledgeModel):
 
 # ---------------------------------------------------------------------------
 # The two payloads.
-
-
-class EvidenceClaimPayload(KnowledgeModel):
-    """The frozen authored content of one evidence claim.
-
-    Everything the packet's C1 requires of the *claim* is here except the three things that are
-    structural rather than authored: the subject (a typed join table, so endpoint-kind compatibility
-    is a constraint of the schema), the claimed coverage (a typed relation, because "the list is what
-    the author asserts the evidence covers" and each listed endpoint must resolve), and the author
-    (the shipped provenance envelope, constructed at the admitted-write boundary and not accepted from
-    the caller).
-
-    ``limitations`` is required and may be the empty string. An empty value is a **recorded authored
-    fact** -- "this author declared no limitations" -- and the read projection renders it as exactly
-    that. It is never rendered as an unqualified endorsement and never re-read as "limitations
-    unknown". That is why the field is an ordinary bounded prose field with no ``min_length`` and is
-    not optional: ``None`` would be a different statement from ``""``, and only one of the two is
-    something an author can mean.
-
-    ``state_at_origin`` is the record's lifecycle as data, on the shipped ``proposed``/``accepted``
-    vocabulary. Persisting a claim endorses nothing: a faithfully stored proposal remains a proposal,
-    and the batch refuses a command that would store accepted origin data.
-    """
-
-    explanation: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    limitations: str = Field(default="", max_length=PROSE_MAX_LENGTH)
-    assessment_refs: tuple[str, ...] = ()
-    state_at_origin: KnowledgeState = "proposed"
-    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-
-    @field_validator("assessment_refs")
-    @classmethod
-    def _require_distinct_bounded_references(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        """Refuse a blank, oversized or duplicated assessment reference.
-
-        Each reference is an opaque, bounded string: this leaf does not validate that the referent
-        exists, and no code path may drop, default or synthesise one. Duplicates are refused because
-        two spellings of one reference in one list is a shape error rather than two facts.
-        """
-
-        seen: set[str] = set()
-        for reference in value:
-            cleaned = reference.strip()
-            if not cleaned:
-                raise ValueError("an assessment reference must not be blank")
-            if len(cleaned) > REFERENCE_MAX_LENGTH:
-                raise ValueError("an assessment reference is longer than the stored bound")
-            if cleaned in seen:
-                raise ValueError(f"assessment reference {cleaned!r} is listed twice")
-            seen.add(cleaned)
-        return value
-
-    @model_validator(mode="after")
-    def _require_consistent_origin(self) -> EvidenceClaimPayload:
-        require_consistent_acceptance(self.state_at_origin, self.acceptance_ref)
-        return self
 
 
 class VerificationObservationPayload(KnowledgeModel):
@@ -478,230 +316,10 @@ class VerificationObservationPayload(KnowledgeModel):
 # execute or infer something the caller wrote.
 
 
-class AddEvidenceClaim(KnowledgeModel):
-    """Record one authored evidence claim as one record envelope plus its first sealed revision.
-
-    The claim's subject and its claimed coverage travel as typed commands-side values rather than
-    inside the payload, because both are *resolved relations*: the write path refuses a subject,
-    anchor or coverage endpoint that does not resolve before any row is written, and a relation that
-    cannot be checked is exactly what the packet forbids.
-    """
-
-    kind: Literal["add_evidence_claim"] = "add_evidence_claim"
-    claim_id: str = Field(pattern=UUID_PATTERN)
-    revision_id: str = Field(pattern=UUID_PATTERN)
-    subject: EvidenceSubject
-    evidence_anchor_id: str = Field(pattern=UUID_PATTERN)
-    coverage: tuple[CoverageEndpoint, ...]
-    payload: EvidenceClaimPayload
-    governing_route_id: str | None = Field(default=None, pattern=UUID_PATTERN)
-
-    @model_validator(mode="after")
-    def _require_authored_content(self) -> AddEvidenceClaim:
-        """Refuse a claim that asserts nothing and a coverage list that names one endpoint twice.
-
-        An empty coverage list is refused because the list *is* the claim's assertion: "this evidence
-        covers these realisations" is the authored content, and the list is never widened by code to
-        the realisations that happen to exist. A duplicated endpoint is refused because two entries
-        for one endpoint are one assertion written twice -- and because the coverage table's primary
-        key makes it unrepresentable, so refusing it here names the caller's mistake instead of
-        letting it surface as a constraint violation.
-        """
-
-        if not self.coverage:
-            raise ValueError(
-                "an evidence claim states the coverage it asserts: an empty claimed-coverage list "
-                "is not a claim about evidence, and the list is never widened by code to the "
-                "realisations that happen to exist"
-            )
-        seen: set[tuple[str, str]] = set()
-        for endpoint in self.coverage:
-            if endpoint.kind not in COVERAGE_ENDPOINT_KINDS:  # pragma: no cover - union is closed
-                raise ValueError(
-                    f"claimed coverage names an unlisted endpoint kind {endpoint.kind!r}"
-                )
-            key = (endpoint.kind, coverage_identity(endpoint))
-            if key in seen:
-                raise ValueError(
-                    f"claimed coverage names {endpoint.kind} {coverage_identity(endpoint)!r} twice; "
-                    "one endpoint is covered once"
-                )
-            seen.add(key)
-        return self
-
-
-class AddVerificationObservation(KnowledgeModel):
-    """Record one authored verification observation under the same envelope and immutability rules.
-
-    ``artifact_root`` is the local checkout the artifact path is resolved against for the write-time
-    digest check. It is **environment configuration and never identity**: it is not stored, it is not
-    part of the payload, and it does not appear in any digest. It exists so §7.3 can record which of
-    the two admissible things happened -- a digest checked against bytes, or a digest asserted --
-    instead of always claiming the weaker one.
-    """
-
-    kind: Literal["add_verification_observation"] = "add_verification_observation"
-    observation_id: str = Field(pattern=UUID_PATTERN)
-    revision_id: str = Field(pattern=UUID_PATTERN)
-    payload: VerificationObservationPayload
-    governing_route_id: str | None = Field(default=None, pattern=UUID_PATTERN)
-    artifact_root: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
-
-
-# The two commands, as the union ``models.knowledge.candidate`` adds to its own. Declared here so the
-# vocabulary and the acts that author it stay in one file.
-EvidenceCommand = Annotated[
-    AddEvidenceClaim | AddVerificationObservation,
-    Field(discriminator="kind"),
-]
-
-EVIDENCE_COMMAND_KINDS: tuple[str, ...] = (
-    "add_evidence_claim",
-    "add_verification_observation",
-)
-
-# The canonical tables an evidence command writes. Declared here, beside the commands that address
-# them, and folded into the candidate module's ``MutableRecordTable`` so an expectation may name one
-# of them; a case asserts the two declarations agree rather than assuming they do.
-#
-# The two subject join tables and the coverage table are written *by* the claim command and are part
-# of it, on the shipped rule that a table enters the mutable set only when a command can write it.
-EVIDENCE_WRITABLE_TABLES: tuple[str, ...] = (
-    "knowledge_record",
-    "record_revision",
-    "evidence_claim",
-    "evidence_claim_invariant_subject",
-    "evidence_claim_facet_subject",
-    "evidence_claim_coverage",
-    "verification_observation",
-)
-
-EvidenceRecordTable = Literal[
-    "knowledge_record",
-    "record_revision",
-    "evidence_claim",
-    "evidence_claim_invariant_subject",
-    "evidence_claim_facet_subject",
-    "evidence_claim_coverage",
-    "verification_observation",
-]
-
-
-class EvidenceWriteIdentity(KnowledgeModel):
-    """One row an evidence write touched, carrying the digest the store computed for it."""
-
-    state: Literal["written", "removed"] = "written"
-    table: EvidenceRecordTable
-    record_id: str = Field(pattern=UUID_PATTERN)
-    digest: str = Field(pattern=SHA256_PATTERN)
-
-
-class EvidenceWriteRequest(KnowledgeModel):
-    """One standalone authored evidence write, addressed at exactly one namespace.
-
-    The shipped operations each have two entry points: the operation, which owns the candidate lock
-    and one ``BEGIN IMMEDIATE`` transaction, and the in-transaction step, which raises a typed refusal
-    for the batch path to roll back. This is the standalone operation's input -- one namespace and one
-    command -- so two writes do not need two differently shaped requests, and the provenance envelope
-    travels on the request exactly as the realization-claim request carries it.
-    """
-
-    repository_id: str = Field(pattern=UUID_PATTERN)
-    command: EvidenceCommand
-    provenance: Authorship
-
-
-class EvidenceWriteResult(KnowledgeModel):
-    """The factual receipt of one standalone evidence write.
-
-    It reports the rows the write touched, each carrying the digest the store computed for it, or the
-    typed refusal that replaced the whole write. It has no field that could carry an approval, an
-    endorsement or a semantic judgement.
-    """
-
-    state: Literal["applied", "refused"]
-    repository_id: str = Field(pattern=UUID_PATTERN)
-    written: tuple[EvidenceWriteIdentity, ...] = ()
-    refusal: KnowledgeRefusal | None = None
-
-    @model_validator(mode="after")
-    def _require_consistent_receipt(self) -> EvidenceWriteResult:
-        if self.state == "refused":
-            if self.refusal is None:
-                raise ValueError("a refused evidence write must carry its refusal")
-            if self.written:
-                raise ValueError("a refused evidence write changed nothing and reports no row")
-            return self
-        if self.refusal is not None:
-            raise ValueError("an evidence write that was not refused cannot also carry a refusal")
-        if not self.written:
-            raise ValueError("an applied evidence write reports at least one touched row")
-        return self
-
-
-def coverage_identity(endpoint: CoverageEndpoint) -> str:
-    """Return the exact identity one claimed-coverage endpoint names."""
-
-    if isinstance(endpoint, RealizationClaimCoverage):
-        return endpoint.claim_id
-    return endpoint.anchor_id
-
-
-def coverage_table(endpoint: CoverageEndpoint) -> str:
-    """Return the canonical table one claimed-coverage endpoint kind resolves to."""
-
-    if isinstance(endpoint, RealizationClaimCoverage):
-        return "realization_claim"
-    return "source_anchor"
-
-
-def claimed_coverage_row_identity(claim_id: str, endpoint: CoverageEndpoint) -> str:
-    """Return the row identity one claimed-coverage edge is addressed by.
-
-    The edge's identity is the pair, spelled as one string, because the coverage table's primary key
-    is ``(repository_id, claim_id, claim_id_endpoint)``: two entries of one claim are two rows and a
-    claim may not list one endpoint twice.
-    """
-
-    return f"{claim_id}/{endpoint.kind}/{coverage_identity(endpoint)}"
-
-
 __all__ = [
-    "COVERAGE_COLUMNS",
-    "COVERAGE_ENDPOINT_KINDS",
-    "EVIDENCE_CLAIM_KIND",
-    "EVIDENCE_CLAIM_SCHEMA",
-    "EVIDENCE_COMMAND_KINDS",
-    "EVIDENCE_RECORD_LIFECYCLE",
-    "EVIDENCE_WRITABLE_TABLES",
-    "EXECUTION_RESULTS",
-    "SUBJECT_COLUMNS",
-    "SUBJECT_KINDS",
-    "VERIFICATION_OBSERVATION_KIND",
-    "VERIFICATION_OBSERVATION_SCHEMA",
-    "AddEvidenceClaim",
-    "AddVerificationObservation",
-    "AnchorCoverage",
-    "CoverageEndpoint",
-    "EvidenceClaimPayload",
-    "EvidenceCommand",
-    "EvidenceRecordTable",
-    "EvidenceSubject",
-    "EvidenceWriteIdentity",
-    "EvidenceWriteRequest",
-    "EvidenceWriteResult",
     "ExecutionResult",
-    "InvariantRevisionSubject",
-    "KnowledgeFacetRevisionSubject",
     "PublicationReference",
-    "RealizationClaimCoverage",
     "ResultArtifactReference",
     "RunEnvironment",
     "VerificationObservationPayload",
-    "claimed_coverage_row_identity",
-    "coverage_identity",
-    "coverage_table",
-    "execution_results",
-    "subject_revision_id",
-    "subject_table",
 ]

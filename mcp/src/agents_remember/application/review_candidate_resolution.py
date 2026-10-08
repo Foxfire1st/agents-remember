@@ -45,9 +45,6 @@ from typing import TYPE_CHECKING
 
 import apsw
 
-from agents_remember.application.knowledge_baseline_generation import (
-    read_baseline_generation,
-)
 from agents_remember.application.review_tree_comparison import (
     live_review_trees,
     recheck_memory_candidate,
@@ -55,17 +52,12 @@ from agents_remember.application.review_tree_comparison import (
 )
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import IndexMismatchError, KnowledgeIndex
 from agents_remember.models.knowledge.review import (
     ReviewCandidateRef,
     ReviewRefusal,
     ReviewRefusalCode,
-)
-from agents_remember.models.knowledge.snapshot import (
-    CANDIDATE_DATABASE_NAME,
-    CANDIDATE_RECEIPT_NAME,
 )
 from agents_remember.worktrees.modules.future_code_candidate import (
     FutureCodeCandidateIdentity,
@@ -83,9 +75,6 @@ if TYPE_CHECKING:  # pragma: no cover - the annotation only; the value's owner i
     from agents_remember.application.review_tree_comparison import ReviewTrees
 
 __all__ = [
-    "REVIEW_BASELINE_DIRECTORY",
-    "REVIEW_CANDIDATE_DIRECTORY",
-    "REVIEW_CANDIDATE_RELATIVE_ROOT",
     "ReviewCandidateResolution",
     "candidate_receipt_refusal",
     "candidate_ref",
@@ -98,20 +87,6 @@ __all__ = [
     "unreadable_candidate_refusal",
 ]
 
-# Where a leaf's reviewable datasets live. Both are inside the leaf's **disposable** local root --
-# ``<worktree-group>/provider-runtime/dev-ar-coordination/``, the one root the checkout-coordination
-# contract declares a linked task worktree may hold undeclared state under -- so a review reads no
-# candidate out of the live coordination tree and writes beside none. The candidate half holds the
-# database the leaf is authoring; the baseline half holds the dataset that candidate descends from.
-# (This layout is the review surface's own recorded decision for this increment.)
-REVIEW_CANDIDATE_RELATIVE_ROOT = Path("provider-runtime") / "dev-ar-coordination" / "knowledge"
-
-# The two halves are named once, here, because two owners read them: the resolution below derives the
-# pair it reviews from them, and the ingest CLI derives the candidate directory it authors into from
-# the same two names. One spelling is what makes "the candidate the leaf authored" and "the candidate
-# the review resolved" the same directory rather than two conventions that happen to agree today.
-REVIEW_BASELINE_DIRECTORY = "baseline"
-REVIEW_CANDIDATE_DIRECTORY = "candidate"
 
 # The three fields of the capture's own identity, each with the words a refusal needs to name it. The
 # order is the order the capture observes them, so a refusal lists the moved inputs left to right.
@@ -169,7 +144,8 @@ class ReviewCandidateResolution:
     closed_leaf: ClosedLeafReview | None = None
     # The four-tree comparison this resolution reads, when the leaf's memory is converted (MIK-R25).
     # Both database paths are then the derived indexes of the two memory trees, never a copy; a
-    # knowledge side Git can no longer produce names no file. ``None`` is the dataset review.
+    # knowledge side Git can no longer produce names no file. ``None`` is a review with no tree
+    # comparison: unconverted memory, whose knowledge sides ``knowledge_unavailable`` then names.
     trees: ReviewTrees | None = None
     # ``(side, state, detail)`` for each knowledge side a recorded comparison can no longer read --
     # ``legacy-unavailable`` for a comparison recorded before the repository's conversion (MIK-R25
@@ -248,41 +224,33 @@ def _live_resolution(
     contract: WorktreeContract,
     captured: FutureCodeCandidateIdentity,
 ) -> ReviewCandidateResolution | ReviewRefusal:
-    """The live pair: four Git trees for a converted leaf (MIK-R25), else the dataset pair.
-
-    Every leaf whose memory is unconverted keeps the dataset pair below, byte for byte.
-    """
+    """Bind converted knowledge as four trees; unconverted knowledge leaves source identities readable."""
 
     trees = live_review_trees(config.coordination_root, contract, captured.codeCandidateTree)
     if isinstance(trees, ReviewRefusal):
         return trees
     if trees is not None:
         return tree_resolution(repository_id, contract, trees, candidate_identity=captured)
-    root = contract.worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
+    absent = contract.task_root / ".review-knowledge-unavailable"
     return ReviewCandidateResolution(
         repository_id=repository_id,
         leaf_id=contract.leaf_id,
-        baseline_database=root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME,
-        candidate_database=root / REVIEW_CANDIDATE_DIRECTORY / CANDIDATE_DATABASE_NAME,
+        baseline_database=absent / "before",
+        candidate_database=absent / "after",
         baseline_code_root=contract.code_repo_path,
-        # The candidate side resolves to **both** a root and a tree id or to neither: the read
-        # context refuses a root without a tree id, and correctly so -- that is an incomplete source
-        # resolution rather than a licence to read a working tree. Both are supplied from the same
-        # capture: the tree the isolated index produced, and the repository that holds it.
-        #
-        # The root is the *repository* rather than the disposable checkout the capture was taken in,
-        # because a tree id is resolvable exactly where the object lives: a linked worktree shares
-        # its repository's object store, so both objects resolve in both roots, and naming the
-        # repository is what makes the comparison the surface composes identical to the one its
-        # durable generation records (ICR-R12) -- an inventory whose reproduction command names a
-        # checkout that cleanup removes is not reproducible from the record. The capture itself still
-        # reads the live worktree; only the root the two bound objects are read in is the
-        # repository's.
         candidate_code_root=contract.code_repo_path,
         baseline_code_tree_id=contract.code_base_commit,
         candidate_code_tree_id=captured.codeCandidateTree,
         contract=contract,
         candidate_identity=captured,
+        knowledge_unavailable=tuple(
+            (
+                side,
+                "legacy-unavailable",
+                "the memory root is unconverted; canonical datasets are retired, so only source identities are reviewed",
+            )
+            for side in ("before", "after")
+        ),
     )
 
 
@@ -389,44 +357,7 @@ def missing_dataset_half(resolved: ReviewCandidateResolution) -> tuple[str, Path
 
 
 def review_namespace(requested: str, database: Path) -> str:
-    """The namespace to read one dataset under, from the record standing beside it.
-
-    The namespace and the requested repository are not the same string: a request names a
-    *repository* ("agents-remember"), while a dataset the write plane admitted is bound to a
-    *namespace* id derived from it, and a side opened under the requested spelling refuses against the
-    dataset's own binding. So the dataset's own **record** is the authority -- whatever the write
-    plane wrote beside these bytes when it placed them -- and a review of an admitted pair reads the
-    namespace the pair actually holds.
-
-    **Two records answer, because the two halves of a comparison are placed by two different acts.**
-    A *candidate* half is placed by an admission, which seals ``candidate-receipt.json`` beside it.
-    A *before* half is placed either by the first-generation owner, which leaves the admission's own
-    receipt beside the empty dataset it creates, or by a run handed a published ``--baseline``, which
-    writes ``baseline-generation.json`` -- and that record names the namespace the captured bytes
-    belong to. Consulting only the receipt was wrong for the second case in a way that could not
-    surface while nothing called the freeze: the before half of every continuity run is a selected
-    baseline, it never carries a receipt, and the fallback below would then stand the *requested*
-    repository in for a dataset bound to a namespace id, which the storage owner refuses. One rule --
-    the record beside the bytes -- read from whichever record the half's own placement wrote.
-
-    A dataset with **neither** record beside it is one this surface was handed directly rather than
-    one the write plane placed (a fixture, a comparison a caller assembled from two named files). For
-    that shape the requested repository *is* the available identity and is read as it always was,
-    because the alternative -- refusing every caller-assembled pair -- would break the comparison
-    contract for inputs that were never placed by a run.
-
-    A record that **exists but cannot be read** is a different fact and is refused: something wrote a
-    record here and it does not say which namespace this dataset belongs to, so standing in the
-    caller's word for the dataset's own record is exactly how a review comes to read a namespace
-    nothing admitted.
-    """
-
-    receipt_path = database.parent / CANDIDATE_RECEIPT_NAME
-    if receipt_path.exists():
-        return read_candidate_receipt(receipt_path).repository_id
-    generation = read_baseline_generation(database.parent)
-    if generation is not None:
-        return generation.repository_id
+    """Read a derived index's namespace; direct test pairs retain their supplied namespace."""
     return _index_namespace(database) or requested
 
 
@@ -452,8 +383,8 @@ def _index_namespace(database: Path) -> str | None:
 # the refusal is that an operator can act on it: the subject route, the entry route and the task-context
 # route all answer the same bytes, and three copies of this sentence is how they stop agreeing.
 _REPAIR_CANDIDATE_ACTION = (
-    "repair the candidate's receipt and dataset in the leaf's disposable knowledge root, then reopen "
-    "the review; the surface substitutes no other dataset"
+    "restore the recorded memory tree or rebuild its derived index, then reopen "
+    "the review; no current tree is substituted"
 )
 
 

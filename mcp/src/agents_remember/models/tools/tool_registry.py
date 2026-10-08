@@ -110,10 +110,8 @@ from agents_remember.models.terminal import (
     SpawnAgentSessionResponse,
 )
 from agents_remember.models.tools.knowledge_responses import (
-    KnowledgeChangeResponse,
     KnowledgeDiffResponse,
     KnowledgeIntegrityCheckResponse,
-    KnowledgeProjectResponse,
     KnowledgeReadResponse,
 )
 from agents_remember.models.worktree import (
@@ -249,10 +247,8 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "role_start": RoleStartResponse,
     "role_message": RoleMessageResponse,
     "knowledge_read": KnowledgeReadResponse,
-    "knowledge_change": KnowledgeChangeResponse,
     "knowledge_diff": KnowledgeDiffResponse,
     "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,
-    "knowledge_project": KnowledgeProjectResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {

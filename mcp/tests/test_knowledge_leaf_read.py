@@ -35,9 +35,7 @@ from agents_remember.application.published_intent import (
 )
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.mcp.tools.knowledge import (
-    ProjectToolRequest,
     ReadToolRequest,
-    knowledge_project_payload,
     knowledge_read_payload,
 )
 from agents_remember.memory.knowledge.read import SelectedScope
@@ -172,7 +170,7 @@ def _context(tmp_path: Path, memory: Path, code: Path | None = None) -> Coordina
 
 def _read(tmp_path: Path, root: Path, *, workspace: Path | None = None, **fields: Any) -> Any:
     return knowledge_read_payload(
-        ReadToolRequest(database_path=str(root), repository_id=INDEX_REPOSITORY_ID, **fields),
+        ReadToolRequest(memory_root=str(root), **fields),
         workspace_root=None if workspace is None else str(workspace),
         coordination_root=str(tmp_path / "coordination"),
     )
@@ -488,40 +486,6 @@ def test_a_tail_longer_than_one_queue_is_refused_by_name_within_the_threshold(
     laid = [entry for entry in block["seeds"] if entry["state"] == "page"]
     assert laid and refused["seedCount"] == len(paths) - len(laid)
     assert refused["firstSeed"] == {"kind": "path", "path": paths[len(laid)]}
-
-
-def test_a_tree_projection_carries_every_row_of_a_view(tmp_path: Path) -> None:
-    root = tmp_path / "memory"
-    init_repository(root)
-    write_document(root, LAYOUT_MARKER_PATH, {"schema": "ar-memory-layout/v2", "conversion": "x"})
-    members = [f"INV-W{number:05d}" for number in range(40)]
-    for number, identifier in enumerate(members):
-        _invariant(root, identifier)
-        _sidecar(root, f"src/w_{number}.py", [(f"RLZ-W{number:05d}", identifier)])
-    _family(root, "FAM-WDE001", members, ["src"])
-    commit_all(root)
-    family = text_uuid("revision", "FAM-WDE001@1")
-    whole = _read(tmp_path, root, view="family", family_revision_id=family)
-    total = whole["page"]["total"]
-    assert total > 64  # the renderer's slice would have cut it
-    vault = tmp_path / "vault"
-    projected = knowledge_project_payload(
-        ProjectToolRequest(
-            database_path=str(root),
-            repository_id=INDEX_REPOSITORY_ID,
-            destination_root=str(vault),
-            formats=("json",),
-            views=({"view": "family", "subject": "FAM-WDE001", "familyRevisionId": family},),
-        ),
-        coordination_root=str(tmp_path / "coordination"),
-    )
-    assert projected["state"] == "projected", projected
-    rows = [
-        row
-        for artifact in sorted((vault / "family").glob("FAM-WDE001*.json"))
-        for row in json.loads(artifact.read_text(encoding="utf-8"))["rows"]
-    ]
-    assert len(rows) == total
 
 
 def test_a_derived_reference_title_is_the_first_sentence_cut_to_a_fixed_length() -> None:

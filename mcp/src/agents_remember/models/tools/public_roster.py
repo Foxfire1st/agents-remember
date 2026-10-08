@@ -91,10 +91,8 @@ PUBLIC_TOOLS = (
     # Role start and role messaging by role agents.
     "role_start",
     "role_message",
-    # The knowledge operation family: read, change, diff, integrity and projection.
+    # Knowledge operations over a memory tree: read, diff and integrity.
     "knowledge_read",
-    "knowledge_change",
     "knowledge_diff",
     "knowledge_integrity_check",
-    "knowledge_project",
 )

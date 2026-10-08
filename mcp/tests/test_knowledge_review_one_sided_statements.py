@@ -44,20 +44,21 @@ from agents_remember.application.review_statement_sides import (
     STRUCTURED_VALUE_TAIL,
     structured_value_text,
 )
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
+from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.models.knowledge.base import KnowledgeState
 from agents_remember.models.knowledge.read import (
     InvariantIdentitySeed,
     KnowledgeReadSeed,
 )
-from agents_remember.models.knowledge.result import (
-    InvariantRequest,
-    RevisionDraft,
-    RevisionRequest,
-)
 from agents_remember.models.knowledge.review import (
     KnowledgeReviewPayload,
     ReviewSurfaceRequest,
+)
+from knowledge_rows_test_support import (
+    InvariantRequest,
+    RevisionDraft,
+    RevisionRequest,
+    open_knowledge_store,
 )
 from read_scope_test_support import (
     CONDITIONS,

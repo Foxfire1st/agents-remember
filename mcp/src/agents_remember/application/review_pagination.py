@@ -152,7 +152,6 @@ def unreadable_page_refusal(
 def records_page_refusal(
     refusal_value: ViewRefusal,
     *,
-    fallback_next_action: str,
     cursor: str | None = None,
 ) -> ReviewRefusal:
     """The review surface's refusal for a matrix cursor the view could not admit.
@@ -176,7 +175,7 @@ def records_page_refusal(
         return ReviewRefusal(
             code="comparison_refused",
             detail=f"{refusal_value.view}: {refusal_value.detail}",
-            next_action=refusal_value.next_action or fallback_next_action,
+            next_action=refusal_value.next_action,
             offending_input=refusal_value.offending_input,
             expected=refusal_value.expected,
             observed=refusal_value.observed,
@@ -184,7 +183,7 @@ def records_page_refusal(
     if refusal_value.code == _UNREADABLE_CURSOR:
         return unreadable_page_refusal(
             detail=f"{refusal_value.view}: {refusal_value.detail}",
-            next_action=refusal_value.next_action or fallback_next_action,
+            next_action=refusal_value.next_action,
             offending_input=refusal_value.offending_input or refusal_value.view,
             expected=refusal_value.expected,
             observed=refusal_value.observed,

@@ -45,14 +45,12 @@ from agents_remember.models.knowledge.base import (
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.read_anchor import (
-    ANCHOR_RESOLUTIONS,
     AnchorResolution,
     AnchorResolutionState,
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 
 __all__ = [
-    "ANCHOR_RESOLUTIONS",
     "EXACT_REVISION_SEED_KINDS",
     "IDENTITY_SEED_KINDS",
     "KNOWLEDGE_READ_POLICY_VERSION",

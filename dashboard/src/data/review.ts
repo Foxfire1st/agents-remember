@@ -414,7 +414,7 @@ export interface ReviewRecordChannel {
 }
 
 export interface ReviewEvidencePane {
-  evidence_state: "recorded" | "none_recorded";
+  evidence_state: "recorded" | "none_recorded" | "unavailable";
   assessment_state: "assessed" | "unassessed";
   evidence_links: ReviewEvidenceLink[];
   observations: ReviewObservation[];

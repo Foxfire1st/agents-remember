@@ -24,6 +24,7 @@ composition, not a degraded one:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import apsw
@@ -35,6 +36,7 @@ from agents_remember.application.knowledge_before_half import (
 from agents_remember.application.knowledge_diff import open_diff_side
 from agents_remember.application.review_attribution import (
     AttributionSideInput,
+    index_incomplete_detail,
     review_attribution,
     selected_subject,
 )
@@ -44,8 +46,6 @@ from agents_remember.application.review_candidate_resolution import (
     candidate_ref,
     missing_dataset_half,
     require_current_candidate_identity,
-    review_namespace,
-    unreadable_candidate_refusal,
 )
 from agents_remember.application.review_committed_leaf import (
     closed_leaf_intent_detail,
@@ -53,6 +53,10 @@ from agents_remember.application.review_committed_leaf import (
 )
 from agents_remember.application.review_evidence_records import without_selected_matrix
 from agents_remember.application.review_external_git_movement import external_git_movement
+from agents_remember.application.review_legacy_comparison import (
+    knowledge_unavailable_detail,
+    knowledge_unavailable_limitations,
+)
 from agents_remember.application.review_record_applicability import task_context_applicability
 from agents_remember.application.review_record_rendering import (
     KNOWLEDGE_APPLICABILITY_CLASSES,
@@ -186,6 +190,7 @@ def task_context_review(
                 # A reopened review declares which record answered and what it recorded about the
                 # intent half (ICR-R12); a live candidate contributes no token.
                 *closed_leaf_limitations(resolved),
+                *knowledge_unavailable_limitations(resolved),
             ),
         ),
     )
@@ -250,6 +255,9 @@ def task_context_detail(
     first: it is what a review of the task alone is.
     """
 
+    unavailable = knowledge_unavailable_detail(resolved)
+    if unavailable is not None:
+        return f"No knowledge subject was selected; {unavailable}. The complete recorded source comparison remains available."
     historical = closed_leaf_intent_detail(resolved)
     if historical is not None:
         return historical
@@ -319,22 +327,49 @@ def pair_attribution(
             resolved.candidate_code_tree_id,
         ),
     )
-    try:
-        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
-    except (KnowledgeStorageError, OSError, ValueError) as error:
-        # The preflight read these same bytes a moment ago; this guard exists so that a receipt which
-        # moves between the two reads is still a stated state rather than an escaping storage error.
-        return _pair_without_namespace(
-            resolved,
-            observed,
-            selector,
-            unreadable_candidate_refusal(resolved, str(error)),
-        )
     sides = tuple(
-        _pair_side(side, database, root, tree_id, namespace)
+        _bound_pair_side(resolved, side, database, root, tree_id)
         for side, database, root, tree_id in halves
     )
     return review_attribution(observed, sides=sides, subject=selected_subject(selector))
+
+
+def index_incompleteness(resolved: ReviewCandidateResolution) -> dict[ReadSide, str]:
+    """Only actual partial tree sides constrain the completeness of their attribution reads."""
+    if resolved.trees is None:
+        return {}
+    return {
+        side.side: index_incomplete_detail(side.tree, side.problems)
+        for side in resolved.trees.sides()
+        if side.index_state == "partial"
+    }
+
+
+def _bound_pair_side(
+    resolved: ReviewCandidateResolution,
+    side: ReadSide,
+    database: Path,
+    root: Path | None,
+    tree_id: str | None,
+) -> AttributionSideInput:
+    """Bind each actual tree side independently, preserving partial-index positive mappings."""
+    for name, state, detail in resolved.knowledge_unavailable:
+        if name == side:
+            return AttributionSideInput(
+                side=side, database=database, unreadable=f"{state}: {detail}"
+            )
+    trees = resolved.trees
+    wire = None if trees is None else next(one for one in trees.sides() if one.side == side)
+    if wire is not None and wire.state != "available":
+        return AttributionSideInput(
+            side=side,
+            database=database,
+            unreadable=f"memory tree {wire.tree} is {wire.state}: {wire.detail}",
+        )
+    bound = _pair_side(side, database, root, tree_id)
+    if wire is not None and wire.index_state == "partial":
+        bound = replace(bound, incomplete=index_incomplete_detail(wire.tree, wire.problems))
+    return bound
 
 
 def _pair_without_namespace(
@@ -402,7 +437,6 @@ def _pair_side(
     database: Path,
     root: Path | None,
     tree_id: str | None,
-    namespace: str,
 ) -> AttributionSideInput:
     """One half of a resolved pair as an attribution side, or as a half nothing could be read from.
 
@@ -417,7 +451,9 @@ def _pair_side(
     if isinstance(reading, str):
         return AttributionSideInput(side=side, database=database, unreadable=reading)
     try:
-        context = open_diff_side(database, namespace, repository_root=root, code_tree_id=tree_id)
+        context = open_diff_side(
+            database, reading.repository_id, repository_root=root, code_tree_id=tree_id
+        )
     except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:
         return AttributionSideInput(
             side=side, database=database, unreadable=f"{type(error).__name__}: {error}"

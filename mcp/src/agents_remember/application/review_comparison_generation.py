@@ -1,44 +1,7 @@
-"""The durable comparison generation: one manifest, its layout, and how it is read back.
+"""Decode retained historical comparison JSON, its exact source identities and artifact ownership.
 
-A comparison is only worth what can be reopened. The datasets it read live in a leaf's *disposable*
-knowledge root, the candidate it bound is a tree that exists in no commit, and the task worktree that
-held both is removed by cleanup. Once that has happened, a reader holding only "a comparison was
-made" has nothing: it cannot re-read the source it reviewed, the knowledge it compared against, or
-the evidence it cited.
-
-This module owns the durable record that changes that -- and only the record:
-
-* **The manifest.** :class:`ComparisonGenerationManifest` is one immutable, canonical-JSON record of
-  what a comparison bound: both code objects, both knowledge sides (or the typed state that says a
-  side legitimately has none), the selected scope and the exact inventory measured over it, the record
-  collections the composition supplied, the evidence references it cited, every owner-declared policy
-  version in play, and the lineage of the generation itself. It stores **references to owner-produced
-  content and no semantic judgment of its own** -- the one digest it computes for itself is a seal
-  over its own fields, so a manifest edited in place is detectable without trusting the file.
-* **The layout.** One directory per generation under ``<task_root>/notes/reports/`` -- the durable
-  task-artifact location :mod:`agents_remember.memory.knowledge.durable_evidence` fixes -- holding the
-  manifest, the retained knowledge snapshots beside it, and the explicit history-deletion records.
-  The whole directory is published by one rename, so a generation exists or it does not.
-* **The deletion record.** :class:`ComparisonHistoryDeletion` is the unavailable-history record an
-  explicit release or discard writes *before* it deletes, which is what later lets a reader tell a
-  deliberate deletion from an accidental loss instead of reporting both as missing bytes.
-
-**Reopening is the separate responsibility next door.**
-:mod:`agents_remember.application.review_comparison_reopen` measures a record this module published
-against the repository and the task artifacts it names, and reports one state per channel. It is
-separate because reading a record and *resolving what it points at* are different acts: this module
-never touches the code repository, and that one never writes.
-
-Known absence, unavailability and deletion are three states, never one:
-
-* ``not-recorded`` is R05's typed historical absence -- the leaf's knowledge side was never recorded,
-  which is a fact about the repository's history rather than a failure;
-* ``not-selected`` is this comparison's own statement that it selected no knowledge operand at all;
-* ``missing``, ``corrupt`` and ``unavailable-history`` are the three ways an expected input fails to
-  resolve, and each is measured on the channel that reports it.
-
-Nothing here re-measures a comparison, re-derives an identity another owner produced, or decides what
-a channel's content means.
+Normal reviews bind code and memory trees. No new canonical dataset generation is published here;
+legacy knowledge bindings remain readable metadata for historical source/evidence and archive owners.
 """
 
 from __future__ import annotations
@@ -87,9 +50,7 @@ __all__ = [
     "COMPARISON_DELETIONS_DIRECTORY",
     "COMPARISON_GENERATIONS_DIRECTORY",
     "COMPARISON_GENERATION_VERSION",
-    "COMPARISON_KNOWLEDGE_DIRECTORY",
     "COMPARISON_MANIFEST_NAME",
-    "COMPARISON_SNAPSHOT_NAME",
     "KNOWLEDGE_NOT_SELECTED",
     "TYPED_ABSENCE_STATES",
     "ComparisonArtifactReference",
@@ -104,7 +65,6 @@ __all__ = [
     "ComparisonSnapshotArtifact",
     "ComparisonSourceBinding",
     "KnowledgeSide",
-    "assemble_manifest",
     "comparison_generations_root",
     "deletion_record_path",
     "generation_directories",
@@ -115,7 +75,6 @@ __all__ = [
     "read_generation_refs",
     "read_history_deletion",
     "read_manifest",
-    "snapshot_path",
     "task_root_for_review",
     "write_history_deletion",
 ]
@@ -128,11 +87,9 @@ COMPARISON_GENERATION_VERSION: Literal["ar-review-comparison-generation/v1"] = (
 )
 
 # The layout, named once. Everything below derives its path from these and the task root, so the
-# freeze and the reopen cannot come to disagree about where a generation lives.
+# historical reopen and deletion owners agree about where a generation lives.
 COMPARISON_GENERATIONS_DIRECTORY = "comparison-generations"
 COMPARISON_MANIFEST_NAME = "manifest.json"
-COMPARISON_KNOWLEDGE_DIRECTORY = "knowledge"
-COMPARISON_SNAPSHOT_NAME = "snapshot.sqlite"
 COMPARISON_DELETIONS_DIRECTORY = "deletions"
 
 # The two states a knowledge side may carry instead of an identity. ``NOT_RECORDED`` is R05's own
@@ -357,12 +314,6 @@ class ComparisonRecordBinding(KnowledgeModel):
             )
         return self
 
-    @property
-    def record_total(self) -> int:
-        """Return how many records the composition supplied in total."""
-
-        return self.assessments + self.signals + self.observations
-
 
 class ComparisonPolicyStamp(KnowledgeModel):
     """One owner's declared policy version, named by the owner that declares it.
@@ -545,14 +496,6 @@ def manifest_path(task_root: Path, leaf_id: str, generation_id: str) -> Path:
     return generation_directory(task_root, leaf_id, generation_id) / COMPARISON_MANIFEST_NAME
 
 
-def snapshot_path(task_root: Path, leaf_id: str, generation_id: str, side: KnowledgeSide) -> Path:
-    """Return the retained snapshot path of one half of one generation."""
-
-    return generation_directory(task_root, leaf_id, generation_id) / (
-        f"{COMPARISON_KNOWLEDGE_DIRECTORY}/{side}/{COMPARISON_SNAPSHOT_NAME}"
-    )
-
-
 def deletion_record_path(task_root: Path, leaf_id: str, generation_id: str, target: str) -> Path:
     """Return the path the unavailable-history record for one target is written to."""
 
@@ -581,32 +524,6 @@ def generation_identity(binding_digest: str) -> str:
     """
 
     return str(uuid5(_GENERATION_NAMESPACE, binding_digest))
-
-
-def assemble_manifest(payload: dict[str, Any], *, recorded_at: str) -> ComparisonGenerationManifest:
-    """Seal one assembled field set and return the validated manifest it describes.
-
-    The seal is computed here, once, over exactly the fields the record will carry, and the model
-    then re-derives it on validation -- so a caller cannot publish a manifest whose digest was taken
-    over a different field set, which is the whole reason the two steps are one function.
-
-    ``payload`` must already be JSON-ready: every nested value is the ``model_dump(mode="json")`` of
-    the owner's own model rather than the model itself. That is what makes the seal a digest over the
-    *stored* encoding, and it is idempotent because every model this record nests is built from
-    strings, integers and tuples alone -- so the digest a writer computes and the digest a reader
-    recomputes are the same value rather than two encodings that happen to agree today.
-
-    The generation id is derived from that same seal rather than supplied by the caller, because an id
-    a caller could choose is an id a caller could reuse for a different comparison.
-    """
-
-    body = dict(payload)
-    body["recorded_at"] = recorded_at
-    body["binding_digest"] = sha256_digest(
-        {key: value for key, value in body.items() if key not in _UNSEALED_FIELDS}
-    )
-    body["generation_id"] = generation_identity(str(body["binding_digest"]))
-    return ComparisonGenerationManifest.model_validate(body)
 
 
 # -- reading the record -------------------------------------------------------------------------

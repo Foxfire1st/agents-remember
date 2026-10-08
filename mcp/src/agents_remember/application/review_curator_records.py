@@ -115,35 +115,6 @@ def records_from_curator_generation(
     return _generation_records(resolved, load_curator_coherence_generation(contract, record_digest))
 
 
-def require_curator_record_inputs(
-    resolved: ReviewCandidateResolution,
-    assessments: tuple[ReviewAssessment, ...],
-    artifacts: tuple[ComparisonArtifactReference, ...],
-    channels: tuple[ReviewRecordChannel, ...],
-) -> None:
-    """A producer pin must describe exactly what the immutable owner supplied, not generic citations."""
-
-    provenance = tuple(channel for channel in channels if channel.records == "assessments")
-    if len(provenance) > 1:
-        raise ValueError("assessment inputs require one unambiguous owner channel")
-    if not artifacts and not assessments:
-        if provenance and provenance[0].record_count not in (None, 0):
-            raise ValueError("assessment availability names records that were not supplied")
-        return
-    pins = tuple(reference for reference in artifacts if reference.owner == CURATOR_RECORD_OWNER)
-    if len(pins) != 1 or any(ref.owner not in RESERVED_CURATOR_OWNERS for ref in artifacts):
-        raise ValueError(
-            "assessment inputs require one exact curator record pin and its owned artifacts"
-        )
-    expected = records_from_curator_generation(resolved, pins[0].sha256)
-    if provenance != (expected.channel,):
-        raise ValueError("assessment channel provenance differs from the immutable curator owner")
-    if assessments != expected.assessments or set(artifacts) != set(expected.artifacts):
-        raise ValueError(
-            "assessment inputs or artifact references differ from the immutable curator owner"
-        )
-
-
 def _historical_records(resolved: ReviewCandidateResolution) -> CuratorAssessmentRecords:
     closed = resolved.closed_leaf
     assert closed is not None

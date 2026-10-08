@@ -178,11 +178,11 @@ class FutureCodeCandidateError(AgentsRememberError):
 
 
 class CodeObjectRetentionError(AgentsRememberError):
-    """A comparison's explicit code-object retention could not be created, or was not released.
+    """A comparison's retained code object could not be released.
 
-    Raised rather than returned because every caller is *inside* a publication that has not happened
-    yet: the freeze converts it into a typed refusal, and the retention owner itself has no result
-    value that could carry both facts a caller needs -- which ref, and which of the two objects.
+    Raised rather than returned because the caller is a deletion that has not happened yet: the
+    release owner itself has no result value that could carry both facts a caller needs -- which
+    ref, and which of the two objects.
     """
 
     def __init__(self, status: str, detail: str) -> None:

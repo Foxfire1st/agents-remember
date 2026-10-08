@@ -42,13 +42,17 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.memory.conversion.base import own_paired_code_commit
 from agents_remember.memory_quality.knowledge_validator.trees import knowledge_tree_from_git
-from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, parse_json
+from agents_remember.models.knowledge_files.canonical import (
+    CanonicalFormatError,
+    canonical_text,
+    parse_json,
+)
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
-from agents_remember.worktrees.services import DirectGateVerdict
+from agents_remember.worktrees.services import DirectGateSource, DirectGateVerdict
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-__all__ = ["direct_verdict", "open_leaf_owners"]
+__all__ = ["direct_source", "direct_verdict"]
 
 _HISTORY_PREFIX = "knowledge/history/"
 
@@ -59,11 +63,9 @@ def _git(repository: Path, *args: str) -> str | None:
     return value if result.returncode == 0 and value else None
 
 
-def open_leaf_owners(memory_repository: Path, memory_tree: str) -> list[str]:
-    """The leaves whose history file is open in ``memory_tree``."""
-
+def _open_histories(memory_repository: Path, memory_tree: str) -> list[tuple[str, str, bytes]]:
     tree = knowledge_tree_from_git(memory_repository, memory_tree)
-    owners = []
+    histories = []
     for path, data in sorted(tree.files.items()):
         if not (path.startswith(_HISTORY_PREFIX) and path.endswith(".json")):
             continue
@@ -77,12 +79,30 @@ def open_leaf_owners(memory_repository: Path, memory_tree: str) -> list[str]:
             and document.get("closed") is False
             and isinstance(document.get("leaf"), str)
         ):
-            owners.append(document["leaf"])
-    return owners
+            histories.append((document["leaf"], path, data))
+    return histories
+
+
+def direct_source(
+    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+) -> DirectGateVerdict:
+    """Bind the unique open history source before the route closes it; run no worklist gate."""
+    memory = contract.memory_repo_path
+    if memory is None:
+        return DirectGateVerdict(True, None, "direct landing has no memory repository to gate")
+    try:
+        return _source(memory, code_commit, memory_tree)
+    except subprocess.SubprocessError as error:
+        detail = git_failure(error).detail
+        return DirectGateVerdict(True, None, f"the mandatory invariant gate (MIK-R09): {detail}")
 
 
 def direct_verdict(
-    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+    contract: WorktreeContract,
+    *,
+    code_commit: str,
+    memory_tree: str,
+    source: DirectGateSource | None = None,
 ) -> DirectGateVerdict:
     """The gate's verdict over a direct landing's exact candidate (the caller probed the marker)."""
 
@@ -90,23 +110,34 @@ def direct_verdict(
     if memory is None:
         return DirectGateVerdict(True, None, "direct landing has no memory repository to gate")
     try:
-        return _verdict(contract, memory, code_commit, memory_tree)
+        selected = _source(
+            memory, code_commit, memory_tree if source is None else source.memory_tree
+        )
+        if selected.refusal is not None:
+            return selected
+        if source is not None:
+            refusal = _closed_source_refusal(memory, memory_tree, selected.source, source)
+            if refusal is not None:
+                return DirectGateVerdict(True, None, refusal)
+        elif not selected.applies:
+            return selected
+        assert selected.source is not None
+        return _verdict(contract, memory, code_commit, memory_tree, selected.source)
     except subprocess.SubprocessError as error:
         detail = git_failure(error).detail
         return DirectGateVerdict(True, None, f"the mandatory invariant gate (MIK-R09): {detail}")
 
 
-def _verdict(
-    contract: WorktreeContract, memory: Path, code_commit: str, memory_tree: str
-) -> DirectGateVerdict:
+def _source(memory: Path, code_commit: str, memory_tree: str) -> DirectGateVerdict:
     head = _git(memory, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
     if head is None:
         return DirectGateVerdict(True, None, "the series memory line has no head to land on")
     published = own_paired_code_commit(memory, head)
     if published == code_commit and _git(memory, "rev-parse", f"{head}^{{tree}}") == memory_tree:
         return DirectGateVerdict(False, None, None)  # a replay commits nothing
-    owners = open_leaf_owners(memory, memory_tree)
-    if len(owners) != 1:
+    histories = _open_histories(memory, memory_tree)
+    if len(histories) != 1:
+        owners = [owner for owner, _path, _data in histories]
         return DirectGateVerdict(
             True,
             None,
@@ -115,7 +146,49 @@ def _verdict(
             f"({', '.join(owners) or 'none'}); exactly one, knowledge/history/<leaf-id>.json with "
             "closed: false, names the leaf whose rows this landing publishes and closes",
         )
-    owner = owners[0]
+    owner, path, data = histories[0]
+    return DirectGateVerdict(
+        True,
+        owner,
+        None,
+        DirectGateSource(memory.resolve(), head, memory_tree, code_commit, owner, path, data),
+    )
+
+
+def _closed_source_refusal(
+    memory: Path,
+    memory_tree: str,
+    selected: DirectGateSource | None,
+    source: DirectGateSource,
+) -> str | None:
+    """Require the same source namespace and rows, with only its closing flag changed."""
+    if selected != source:
+        return "the direct landing's selected history source or memory head changed; retry the gate"
+    original = parse_json(source.history_bytes.decode("utf-8"))
+    assert isinstance(original, dict)
+    closed = canonical_text({**original, "closed": True}).encode("utf-8")
+    files = knowledge_tree_from_git(memory, memory_tree).files
+    if files.get(source.history_path) != closed:
+        return (
+            f"the direct landing's closed candidate changed the selected history source "
+            f"{source.history_path}; only its closing flag may change before the gate"
+        )
+    if _open_histories(memory, memory_tree):
+        return (
+            "the closed direct-landing candidate contains another open leaf history; retry the gate"
+        )
+    return None
+
+
+def _verdict(
+    contract: WorktreeContract,
+    memory: Path,
+    code_commit: str,
+    memory_tree: str,
+    source: DirectGateSource,
+) -> DirectGateVerdict:
+    owner, head = source.owner, source.memory_head
+    published = own_paired_code_commit(memory, head)
     document = _worklist(contract, _DirectSides(owner, head, published, code_commit, memory_tree))
     trees = GateTrees(
         code_repository=contract.code_repo_path,

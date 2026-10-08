@@ -1,49 +1,36 @@
-"""Movement and relationship evolution through actual store operations (ICR-R08@v1).
+"""The reviewer's relationship union and display over synthetic index-shaped unit rows.
 
-These cases exercise the recorded before/after relationship union the way the packet's verification
-clause asks for it: every population and every movement is produced by the *store's own operations*
-over the shared two-snapshot fixture -- a realization the author moved from one path to a successor
-revision's path, a realization withdrawn with its invariant still recorded, an authored split and an
-authored merge, a family membership whose family revision and member revision both moved, and a
-governing route each snapshot records separately -- and then read back through the production
-composition (:func:`~agents_remember.application.knowledge_review.read_knowledge_review`) on a real
-leaf enclosure with a real Git worktree.
-
-The load-bearing properties, one case each:
-
-* a moved realization is **one** relationship displaying both recorded paths under one preserved
-  invariant identity, and both of its locations carry that identity;
-* the packet's own non-conforming reading -- only the after graph is read, so the old association
-  vanishes -- is measured as a population the after side cannot produce, beside the union that can;
-* a withdrawn realization stays displayed with its deleted file, its side and its reason, and the
-  still-recorded invariant is not erased with the link;
-* a Git-inferred **source rename** is displayed as the labelled inference it is, and the same rename
-  with no authored edge produces a retraction and an addition rather than a movement -- the inference
-  never proves that an invariant moved;
-* the authored **split** and **merge** the candidate's own predecessor rows record are displayed
-  from those rows, with every related revision named;
-* a **family** association reassigned to a new family revision is displayed with both recorded sides
-  and the family identity preserved;
-* a **governing route** reassigned between the two snapshots is displayed with both recorded routes,
-  and an identity with no route is displayed as ungoverned rather than placed in the repository root;
-  and
-* the rename inference's two non-pairing states -- a measured absence and a measurement that was not
-  made -- are separate facts rather than an empty pairing.
+The fixture keeps meaningful reader cases that a text tree cannot author, such as multi-revision
+lineage. It calls the actual composition with explicit test-only row inputs; public resolution is
+covered by the converted-tree suite. The scalar governing-route retirement case uses that real tree
+fixture and verifies the family route sets remain available through their existing reader.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import apsw
 import pytest
-from agents_remember.application.knowledge_review import read_knowledge_review
-from agents_remember.memory.knowledge import families, memberships, realizations, routes
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
+from agents_remember.application.knowledge_review import read_complete_knowledge_review
+from agents_remember.application.review_governing_route import governing_route_movements
+from agents_remember.application.review_recorded_relationships import RecordedSnapshot
+from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.graph import FamilyMemberDraft
+from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
+from agents_remember.models.knowledge.source import FileLocator
+from agents_remember.models.knowledge_files import canonical_text
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from diff_scope_test_support import (
+    SUCCESSOR_PATH,
+    _claim_row_digest,
+    _git,
+)
+from knowledge_rows_test_support import (
     FamilyMemberRequest,
     FamilyRevisionRequest,
     NewAnchor,
@@ -52,12 +39,11 @@ from agents_remember.models.knowledge.result import (
     RemoveRealizationClaimRequest,
     RevisionDraft,
     RevisionRequest,
-)
-from agents_remember.models.knowledge.source import FileLocator, GitBlobIdentity, SourceAnchorDraft
-from diff_scope_test_support import (
-    SUCCESSOR_PATH,
-    _claim_row_digest,
-    _git,
+    RowStore,
+    families,
+    memberships,
+    open_knowledge_store,
+    realizations,
 )
 from read_scope_test_support import (
     ABSENT_PATH,
@@ -71,7 +57,9 @@ from test_knowledge_review_source_endpoints import (
     EndpointFixture,
     _place_datasets,
     build_endpoint_fixture,
+    compose_endpoint_review,
 )
+from test_review_git_trees import FAMILY, _resolve, build_world
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -85,9 +73,10 @@ RENAMED_PATH_TEXT = "# synchronization\nshared retry budget\npropagated\nmoved b
 MERGE_PATH = "src/retry_merge.py"
 MERGE_PATH_TEXT = "# retry merge\nrecords both predecessors' budget\n"
 
-# The two routes the snapshots record separately, at two scopes the route owner admits.
-BASELINE_ROUTE_PATH = "mcp/src/agents_remember/application"
-CANDIDATE_ROUTE_PATH = "mcp/src/agents_remember/memory"
+# The identities of the governing-route read's own in-memory snapshots.
+ROUTE_REPOSITORY = "repository"
+ROUTE_FAMILY = text_uuid("identity", FAMILY)
+ROUTE_INVARIANT = text_uuid("identity", "INV-R00001")
 
 
 @dataclass(frozen=True)
@@ -110,8 +99,6 @@ class MovementFixture:
     new_family_revision_id: str
     removed_member_id: str
     added_member_id: str
-    baseline_route_id: str
-    candidate_route_id: str
 
     @property
     def diff(self):
@@ -126,14 +113,10 @@ def movement_fixture(tmp_path_factory: pytest.TempPathFactory) -> MovementFixtur
 
 
 def build_movement_fixture(directory: Path) -> MovementFixture:
-    """One enclosure, its two datasets curated, and the exact identities each movement needs.
+    """Populate synthetic index-shaped rows and the real source trees their anchors name.
 
-    Everything here is a store operation or a real worktree edit: the rename is written into the
-    worktree the capture reads, the moved realization is re-authored with the blob the candidate tree
-    really holds, the merge revision and its claim are authored with two exact predecessors, the
-    membership is removed and re-authored against the candidate's new family revision, and each
-    snapshot's governing route is authored and set on its own dataset. Nothing is written by SQL and
-    no dataset is edited by hand.
+    The row fixture keeps lineage and movement reader cases the text format cannot author. It is
+    test-only input to the actual composition, and exercises no retired production writer.
     """
 
     endpoints = build_endpoint_fixture(directory / "endpoints")
@@ -181,12 +164,9 @@ def build_movement_fixture(directory: Path) -> MovementFixture:
             ),
         )
         family_revision_id, removed_member_id, added_member_id = _reassign_family(store, diff)
-        candidate_route_id = _author_route(store, diff, CANDIDATE_ROUTE_PATH)
-        _govern(store, diff, diff.retry_invariant_id, candidate_route_id)
     finally:
         store.close()
 
-    baseline_route_id = _record_baseline_route(diff)
     _place_datasets(diff, endpoints.contract)
     return MovementFixture(
         endpoints=endpoints,
@@ -195,8 +175,6 @@ def build_movement_fixture(directory: Path) -> MovementFixture:
         new_family_revision_id=family_revision_id,
         removed_member_id=removed_member_id,
         added_member_id=added_member_id,
-        baseline_route_id=baseline_route_id,
-        candidate_route_id=candidate_route_id,
     )
 
 
@@ -211,59 +189,8 @@ def _merge_predecessors(diff) -> tuple[str, ...]:
     return (diff.subject_revision_id, diff.before.fixture.base_revision_id)
 
 
-def _record_baseline_route(diff) -> str:
-    """Author the baseline's own route and set it as the reviewed invariant's governing route.
-
-    The baseline dataset is curated after the candidate was copied from it, which is the honest shape
-    of a reassignment in this store: a governing route cannot be repointed in place (the schema's own
-    trigger refuses it) and a second route for an already-governed row is refused by the operation, so
-    two snapshots recording two different routes is what a reassignment *is*.
-    """
-
-    store = open_knowledge_store(diff.before.database_path, diff.repository_id)
-    try:
-        route_id = _author_route(store, diff, BASELINE_ROUTE_PATH)
-        _govern(store, diff, diff.retry_invariant_id, route_id)
-        return route_id
-    finally:
-        store.close()
-
-
-def _author_route(store: OpenedKnowledgeStore, diff, path: str) -> str:
-    """Author one route through the shipped operation and return the identity it stored."""
-
-    route_id = str(uuid4())
-    authored = routes.author_route(
-        store.connection,
-        store.repository_id,
-        routes.RouteDraft(route_id=route_id, path=path),
-        diff.before.fixture.authorship,
-    )
-    assert authored == route_id, authored
-    return route_id
-
-
-def _govern(
-    store: OpenedKnowledgeStore,
-    diff,
-    invariant_id: str,
-    route_id: str,
-) -> None:
-    """Set one invariant's governing route through the shipped operation."""
-
-    refusal = routes.set_governing_route(
-        store.connection,
-        store.repository_id,
-        routes.GoverningRouteDraft(
-            governed_table="invariant", governed_id=invariant_id, route_id=route_id
-        ),
-        diff.before.fixture.authorship,
-    )
-    assert refusal is None, refusal
-
-
 def author_claim(
-    store: OpenedKnowledgeStore,
+    store: RowStore,
     diff,
     draft: ClaimDraft,
 ) -> None:
@@ -293,7 +220,7 @@ def author_claim(
     assert created.state == "created", created.refusal
 
 
-def remove_claim(store: OpenedKnowledgeStore, claim_id: str) -> None:
+def remove_claim(store: RowStore, claim_id: str) -> None:
     """Withdraw one realization through the shipped removal operation."""
 
     removed = realizations.remove_realization_claim(
@@ -308,7 +235,7 @@ def remove_claim(store: OpenedKnowledgeStore, claim_id: str) -> None:
 
 
 def author_revision(
-    store: OpenedKnowledgeStore,
+    store: RowStore,
     diff,
     revision_id: str,
     *,
@@ -336,7 +263,7 @@ def author_revision(
     assert created.state == "created", created.refusal
 
 
-def _reassign_family(store: OpenedKnowledgeStore, diff) -> tuple[str, str, str]:
+def _reassign_family(store: RowStore, diff) -> tuple[str, str, str]:
     """Move one member from the baseline's family revision to an authored successor revision.
 
     Two store operations and nothing else: the baseline membership is withdrawn by identity and row
@@ -396,19 +323,19 @@ def _reassign_family(store: OpenedKnowledgeStore, diff) -> tuple[str, str, str]:
 
 
 def review(fixture: MovementFixture, invariant_id: str | None = None):
-    """Compose the review the dashboard composes, for the fixture's selected subject."""
+    """Compose the selected subject over explicit synthetic unit inputs."""
 
     request = fixture.endpoints.request(invariant_id)
-    result = read_knowledge_review(fixture.endpoints.config, request)
+    result = compose_endpoint_review(fixture.endpoints, request)
     assert result.state == "review", result.refusal
     assert result.payload is not None
     return result.payload
 
 
 def review_of(endpoints, invariant_id: str):
-    """Compose the review the dashboard composes, for one fixture's selected subject."""
+    """Compose one subject over explicit synthetic unit inputs."""
 
-    result = read_knowledge_review(endpoints.config, endpoints.request(invariant_id))
+    result = compose_endpoint_review(endpoints, endpoints.request(invariant_id))
     assert result.state == "review", result.refusal
     assert result.payload is not None
     return result.payload
@@ -687,10 +614,7 @@ def test_the_same_rename_with_no_authored_edge_is_a_retraction_and_an_addition(
     endpoints = build_no_authored_edge_fixture(tmp_path)
     diff = endpoints.diff
 
-    result = read_knowledge_review(
-        endpoints.config,
-        endpoints.request(diff.retry_invariant_id),
-    )
+    result = compose_endpoint_review(endpoints, endpoints.request(diff.retry_invariant_id))
     assert result.state == "review", result.refusal
     payload = result.payload
     assert payload is not None
@@ -800,61 +724,167 @@ def test_a_family_association_reassigned_to_a_new_revision_displays_both_recorde
     assert "succession" in {entry.kind for entry in movement.lineage}
 
 
-def test_a_governing_route_reassignment_displays_both_recorded_routes(
-    movement_fixture: MovementFixture,
+def test_a_familys_declared_route_set_is_the_governing_association_read_from_text(
+    tmp_path: Path,
 ) -> None:
-    """Each snapshot's recorded route is displayed, and the difference between them is the movement."""
+    """A real converted tree: each route the family declares is one recorded association.
 
-    fixture = movement_fixture
-    payload = review(fixture)
-    routes_shown = [
-        movement
-        for movement in payload.source.relationships
-        if movement.relationship_kind == "governing_route"
-    ]
-    assert len(routes_shown) == 1
-    movement = routes_shown[0]
-
-    assert movement.transition == "reassigned"
-    assert movement.record_id == fixture.diff.retry_invariant_id
-    assert movement.before[0].route_id == fixture.baseline_route_id
-    assert movement.before[0].route_path == BASELINE_ROUTE_PATH
-    assert movement.after is not None
-    assert movement.after.route_id == fixture.candidate_route_id
-    assert movement.after.route_path == CANDIDATE_ROUTE_PATH
-    assert "governing-route association moved" in movement.statement
-    assert movement.gaps == ()
-
-
-def test_an_identity_with_no_route_is_displayed_as_ungoverned_and_never_as_the_root(
-    movement_fixture: MovementFixture,
-) -> None:
-    """No route is a recorded fact with its own state, not a default and not a missing route.
-
-    The reviewed subject is the fixture's *other* invariant, whose snapshots record no governing route
-    at all: both sides are ``ungoverned`` with their own sentence, no route id is invented, and the
-    movement is unchanged because nothing about it moved.
+    The retired canonical join row never existed in a derived index, so the old read answered
+    ``ungoverned`` for every identity. The route set in the family record file is the fact, and it is
+    shown (MIK-R26) as one relationship per route: the base tree declares ``pkg`` and the candidate
+    ``.`` and ``pkg``, so ``.`` is added and ``pkg`` is unchanged, and no value holds a joined list.
     """
 
-    fixture = movement_fixture
-    subject = fixture.diff.sibling_invariant_id
-    payload = review(fixture, subject)
-    routes_shown = [
+    world = build_world(tmp_path)
+    family_path = world.memory_worktree / f"knowledge/families/{FAMILY}-landing.json"
+    family = json.loads(family_path.read_text())
+    family["routes"] = [".", "pkg"]
+    family_path.write_text(canonical_text(family))
+    resolved = _resolve(world)
+    with KnowledgeIndex(resolved.candidate_database) as index:
+        assert index.family(FAMILY).value.routes == (".", "pkg")
+    result = read_complete_knowledge_review(
+        world.config,
+        world.review(selector=FamilyIdentitySeed(family_id=text_uuid("identity", FAMILY))),
+    )
+    assert result.payload is not None, result.refusal
+    added, unchanged = (
         movement
-        for movement in payload.source.relationships
+        for movement in result.payload.source.relationships
         if movement.relationship_kind == "governing_route"
-    ]
-    assert len(routes_shown) == 1
-    movement = routes_shown[0]
+    )
+    assert (added.transition, added.before, added.pairing_basis) == ("added", (), None)
+    assert added.after is not None and added.after.state == "recorded"
+    assert (added.after.route_id, added.after.route_path) == (".", ".")
+    assert added.after.record_kind == "family"
+    assert "declares the governing route . on the candidate" in added.statement
+    assert unchanged.transition == "unchanged" and unchanged.after is not None
+    assert [side.route_path for side in (*unchanged.before, unchanged.after)] == ["pkg", "pkg"]
+    assert [side.relationship_id for side in (*unchanged.before, unchanged.after)] == ["pkg", "pkg"]
+    assert unchanged.pairing_basis == "same_governed_identity"
 
-    assert movement.record_id == subject
-    assert movement.transition == "unchanged"
-    assert movement.before[0].state == "ungoverned"
-    assert movement.after is not None and movement.after.state == "ungoverned"
-    assert movement.before[0].route_id is None and movement.after.route_id is None
-    assert movement.gaps == ()
-    assert "no governing route" in movement.statement
-    assert "repository root" in movement.before[0].detail
+
+def _route_snapshot(side: str, routes: tuple[str, ...] | None, *, recorded: bool = True):
+    """One in-memory snapshot holding the tables the governing-route read asks.
+
+    ``routes`` is the family's declared set; ``None`` leaves out the route tables altogether, which
+    is a file whose route declarations cannot be read. ``recorded`` says whether the identities exist.
+    """
+
+    connection = apsw.Connection(":memory:")
+    connection.execute(
+        "CREATE TABLE family (repository_id TEXT, family_id TEXT);"
+        "CREATE TABLE invariant (repository_id TEXT, invariant_id TEXT)"
+    )
+    if recorded:
+        connection.execute("INSERT INTO family VALUES (?, ?)", (ROUTE_REPOSITORY, ROUTE_FAMILY))
+        connection.execute(
+            "INSERT INTO invariant VALUES (?, ?)", (ROUTE_REPOSITORY, ROUTE_INVARIANT)
+        )
+    if routes is not None:
+        connection.execute(
+            "CREATE TABLE ix_uuid (uuid TEXT, id TEXT, role TEXT);"
+            "CREATE TABLE ix_route (family TEXT, route TEXT)"
+        )
+        connection.execute("INSERT INTO ix_uuid VALUES (?, ?, 'identity')", (ROUTE_FAMILY, FAMILY))
+        connection.executemany(
+            "INSERT INTO ix_route VALUES (?, ?)", [(FAMILY, route) for route in routes]
+        )
+    return RecordedSnapshot(
+        side=side, database=Path(":memory:"), connection=connection, edges=frozenset()
+    )
+
+
+def _routes(selector, before, after):
+    """The governing-route movements as ``(transition, before states and routes, after)`` rows."""
+
+    def shown(side):
+        return None if side is None else (side.state, side.route_path)
+
+    movements = governing_route_movements(selector, ROUTE_REPOSITORY, before, after)
+    return movements, [
+        (movement.transition, [shown(side) for side in movement.before], shown(movement.after))
+        for movement in movements
+    ]
+
+
+def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ungoverned() -> None:
+    """The route read's own matrix: one relationship per route, and four states kept apart.
+
+    A route both snapshots declare is unchanged; a route one snapshot declares while the other is
+    governed by other routes is one-sided; an identity with no route to show contributes its state.
+    A file without the route tables was not read: it is ``unavailable`` with its own gap and the
+    comparison is ``unresolved``, never ``ungoverned`` and never ``unchanged``.
+    """
+
+    family = FamilyIdentitySeed(family_id=ROUTE_FAMILY)
+
+    movements, rows = _routes(
+        family, _route_snapshot("before", ("a", "b")), _route_snapshot("after", ("b", "c"))
+    )
+    assert rows == [
+        ("retracted", [("recorded", "a")], None),
+        ("unchanged", [("recorded", "b")], ("recorded", "b")),
+        ("added", [], ("recorded", "c")),
+    ]
+    assert [movement.pairing_basis for movement in movements] == [
+        None,
+        "same_governed_identity",
+        None,
+    ]
+    assert "on the baseline and not on the candidate" in movements[0].statement
+    sides = [side for movement in movements for side in (*movement.before, movement.after) if side]
+    assert all(side.route_id == side.relationship_id == side.route_path for side in sides)
+
+    # A changed route is one retracted and one added relationship; a route is never reassigned.
+    _movements, rows = _routes(
+        family, _route_snapshot("before", ("a",)), _route_snapshot("after", ("b",))
+    )
+    assert rows == [("retracted", [("recorded", "a")], None), ("added", [], ("recorded", "b"))]
+
+    movements, rows = _routes(
+        family, _route_snapshot("before", ()), _route_snapshot("after", ("a",))
+    )
+    assert rows == [("moved", [("ungoverned", None)], ("recorded", "a"))]
+    assert movements[0].gaps == ()
+
+    movements, rows = _routes(family, _route_snapshot("before", ()), _route_snapshot("after", ()))
+    assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
+
+    movements, rows = _routes(
+        family, _route_snapshot("before", ("a",), recorded=False), _route_snapshot("after", ("a",))
+    )
+    assert rows == [("moved", [("not_recorded", None)], ("recorded", "a"))]
+    assert [(gap.side, gap.code) for gap in movements[0].gaps] == [("before", "route_not_recorded")]
+    assert "no family identity recorded on the baseline" in movements[0].statement
+
+    movements, rows = _routes(
+        family, _route_snapshot("before", None), _route_snapshot("after", None)
+    )
+    assert rows == [("unresolved", [("unavailable", None)], ("unavailable", None))]
+    assert [(gap.side, gap.code) for gap in movements[0].gaps] == [
+        ("before", "route_unavailable"),
+        ("after", "route_unavailable"),
+    ]
+    assert "was not read" in movements[0].before[0].detail
+    assert "no movement of the governing-route association is stated" in movements[0].statement
+
+    movements, rows = _routes(
+        family, _route_snapshot("before", None), _route_snapshot("after", ("a",))
+    )
+    assert rows == [("unresolved", [("unavailable", None)], ("recorded", "a"))]
+
+    # An invariant file declares no route, so it is ungoverned whatever the file carries; a path
+    # selector names no identity and is answered with no association at all.
+    invariant = InvariantIdentitySeed(invariant_id=ROUTE_INVARIANT)
+    _movements, rows = _routes(
+        invariant, _route_snapshot("before", None), _route_snapshot("after", ("a",))
+    )
+    assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
+    assert _routes(None, _route_snapshot("before", ("a",)), _route_snapshot("after", ("a",))) == (
+        (),
+        [],
+    )
 
 
 def test_a_side_that_did_not_resolve_exactly_keeps_its_own_state_and_reason(

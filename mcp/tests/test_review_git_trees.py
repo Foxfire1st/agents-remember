@@ -34,10 +34,6 @@ from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     resolve_review_candidate,
 )
-from agents_remember.application.review_comparison_freeze import (
-    ComparisonGenerationRequest,
-    freeze_comparison_generation,
-)
 from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
@@ -275,8 +271,7 @@ def _repository(root: Path) -> Path:
     return root
 
 
-@pytest.fixture
-def world(tmp_path: Path) -> World:
+def build_world(tmp_path: Path) -> World:
     code = _repository(tmp_path / "repos" / "code")
     code_base = commit(code, {CODE_FILE: CODE_V1})
     memory = _repository(tmp_path / "repos" / "memory")
@@ -308,6 +303,11 @@ def world(tmp_path: Path) -> World:
     )
     made.contract()
     return made
+
+
+@pytest.fixture
+def world(tmp_path: Path) -> World:
+    return build_world(tmp_path)
 
 
 def _resolve(world: World, *, recorded: bool = False) -> ReviewCandidateResolution:
@@ -682,34 +682,26 @@ def test_no_review_path_opens_a_database_other_than_the_derived_index(world: Wor
     assert not list(world.root.rglob("knowledge.sqlite"))
 
 
-def test_an_unconverted_leaf_keeps_the_dataset_review(world: World) -> None:
-    # Unconvert both lines: the dataset review applies, exactly as before, and nothing is pinned.
+def test_an_unconverted_leaf_keeps_source_and_names_knowledge_unavailable(world: World) -> None:
+    # Both lines are unconverted: only the source endpoints remain readable, and no dataset is opened.
     for repository in (world.memory, world.memory_worktree):
         git(repository, "rm", "-q", "-r", "knowledge")
         git(repository, "commit", "-q", "-m", "unconverted")
     world.edit()
     resolved = _resolve(world)
     assert resolved.trees is None
-    assert resolved.candidate_database == (
-        world.root
-        / "group/provider-runtime/dev-ar-coordination/knowledge/candidate"
-        / "knowledge-candidate.sqlite"
-    )
+    assert {state for _, state, _ in resolved.knowledge_unavailable} == {"legacy-unavailable"}
+    assert not resolved.candidate_database.exists()
     assert _refs(world.code) == {} and _refs(world.memory) == {}
-    assert read_review_trees(world.config, _query()).state == "not-converted"
-
-
-def test_a_tree_comparison_is_never_frozen_into_a_dataset_generation(world: World) -> None:
-    world.edit()
-    resolved = _resolve(world)
-    review = compose_review(resolved, world.review())
-    assert review.payload is not None
-    frozen = freeze_comparison_generation(
-        ComparisonGenerationRequest(resolution=resolved, inventory=review.payload.source.inventory)
-    )
-    assert frozen.state == "refused" and frozen.refusal is not None
-    assert "no knowledge dataset is copied" in frozen.refusal.detail
-    assert not (world.task_root / "notes" / "reports" / "comparison-generations").exists()
+    unreadable = read_review_trees(world.config, _query())
+    assert unreadable.state == "refused" and unreadable.refusal is not None
+    assert "legacy-unavailable" in unreadable.refusal.detail
+    # What such a review reads now: the source identities of its code pair, and no knowledge.
+    context = compose_review(resolved, world.review())
+    assert context.payload is not None and context.payload.comparison is None
+    assert context.payload.source.inventory.state == "measured"
+    assert CODE_FILE in {entry.path for entry in context.payload.source.inventory.entries}
+    assert "history:intent:after:legacy-unavailable" in context.payload.limitations
 
 
 # -- rule 5: pins are named by the task directory (the archive hook: test_review_artifact_cleanup)

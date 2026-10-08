@@ -95,13 +95,16 @@ def legacy_comparison_resolution(
     try:
         code_range = recorded_committed_range(contract, memory=False)
     except RecordedEndpointAbsent as absent:
+        unrecorded = absent.kind == "not-recorded"
         return refusal(
-            "candidate_not_live",
-            f"leaf {contract.leaf_id} has no live worktree, records no comparison and no readable "
-            f"committed range: {absent}",
+            "candidate_not_live" if unrecorded else "candidate_unresolved",
+            f"leaf {contract.leaf_id} records no comparison and no readable committed range: {absent}"
+            if unrecorded
+            else f"the recorded source range cannot resolve: {absent}",
             next_action=(
-                "record the leaf's landed commit in its enclosure contract, or open the review while "
-                "the leaf is live; no branch tip is substituted"
+                "record the leaf's landed commit in its enclosure contract, or open the live review; no branch tip is substituted"
+                if unrecorded
+                else "restore the recorded commit in the repository the enclosure names"
             ),
             offending_input="code",
         )
@@ -249,7 +252,7 @@ def knowledge_unavailable_refusal(resolved: ReviewCandidateResolution) -> Review
 
 
 def knowledge_unavailable_limitations(resolved: ReviewCandidateResolution) -> tuple[str, ...]:
-    """The declared facts of a tree comparison or a legacy one; none for a dataset review."""
+    """The declared facts of a tree comparison or a legacy one; none when every side was read."""
 
     if resolved.trees is not None:
         return tree_limitations(resolved.trees)

@@ -503,8 +503,8 @@ class ServingCollaborators:
     review_trees: ReviewTreesPort | None = None
     """The same adapter's tree view (MIK-R25): the four trees, knowledge diff, currentness, worklist.
 
-    A fifth port because it answers for a converted leaf what the dataset review cannot: the Git
-    diff of the memory trees and the worklist view. Omitting it refuses that route by name.
+    A fifth port because it answers for a converted leaf what the subject review does not: the
+    Git diff of the memory trees and the worklist view. Omitting it refuses that route by name.
     """
 
     review_trees_shutdown: Callable[[], None] | None = None

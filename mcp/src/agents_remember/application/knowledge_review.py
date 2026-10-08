@@ -69,16 +69,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from agents_remember.application.knowledge_before_half import unreadable_half_refusal
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.application.review_candidate_resolution import (
-    REVIEW_BASELINE_DIRECTORY,
-    REVIEW_CANDIDATE_DIRECTORY,
-    REVIEW_CANDIDATE_RELATIVE_ROOT,
     ReviewCandidateResolution,
     candidate_ref,
-    missing_dataset_half,
     refusal,
     require_current_candidate_identity,
     resolve_review_candidate,
@@ -108,6 +103,7 @@ from agents_remember.application.review_family_context import (
     review_family_context,
 )
 from agents_remember.application.review_family_rosters import family_collection_refusal
+from agents_remember.application.review_legacy_comparison import knowledge_unavailable_limitations
 from agents_remember.application.review_pagination import (
     RecordsPagePosition,
     comparison_page,
@@ -160,7 +156,10 @@ from agents_remember.application.review_sync_movement import (
     review_staleness_with_external_movement,
     review_sync_movement,
 )
-from agents_remember.application.review_task_context import task_context_review
+from agents_remember.application.review_task_context import (
+    index_incompleteness,
+    task_context_review,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -201,9 +200,6 @@ from agents_remember.models.lifecycles.review_assessment import SubjectAssessmen
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
-    "REVIEW_BASELINE_DIRECTORY",
-    "REVIEW_CANDIDATE_DIRECTORY",
-    "REVIEW_CANDIDATE_RELATIVE_ROOT",
     "REVIEW_MATRIX_KINDS",
     "ReviewCandidateResolution",
     "ReviewRecordInputs",
@@ -579,7 +575,7 @@ def compose_review(
             ),
             evidence=evidence_pane(displayed_rows, records, subjects, applicability),
             # A tree comparison's families carry the change facts of the members this page
-            # returned (MIK-R33); a dataset review's context is published exactly as composed.
+            # returned (MIK-R33); without a tree comparison the context is published as composed.
             family_context=with_change_kinds(family.context, resolved.trees),
             staleness=staleness,
             submission=submission(stale),
@@ -600,6 +596,7 @@ def compose_review(
             limitations=(
                 *_limitations(comparison, inventory),
                 *closed_leaf_limitations(resolved),
+                *knowledge_unavailable_limitations(resolved),
             ),
         ),
     )
@@ -692,12 +689,10 @@ def _matrix_rows_remaining(matrix: tuple[ViewResult, str] | ViewRefusal) -> int:
 
 
 def _records_page(
-    matrix: tuple[ViewResult, str] | ViewRefusal, request: ReviewSurfaceRequest
+    matrix: tuple[ViewResult, str], request: ReviewSurfaceRequest
 ) -> ReviewCollectionPage | None:
-    """The matrix view's own counts as the records collection's page, or nothing when it refused."""
+    """The matrix view's own counts as the records collection's page."""
 
-    if isinstance(matrix, ViewRefusal):
-        return None
     payload = matrix[0].payload
     if payload is None:  # pragma: no cover - a served view always carries its payload
         return None
@@ -727,11 +722,7 @@ def _records_refusal(
 
     if not isinstance(matrix, ViewRefusal):
         return None
-    return records_page_refusal(
-        matrix,
-        fallback_next_action="repair the candidate dataset, then reopen the review",
-        cursor=cursor,
-    )
+    return records_page_refusal(matrix, cursor=cursor)
 
 
 def _knowledge_scope(
@@ -787,26 +778,9 @@ def _open_dataset_pair(
     review, which compares no dataset and therefore has nothing to open.
     """
 
-    unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
-    if unreadable is not None:
-        return refused(request.repository_id, unreadable)
-
-    absent = missing_dataset_half(resolved)
-    if absent is not None:
-        half, database = absent
-        return refused(
-            request.repository_id,
-            refusal(
-                "candidate_dataset_absent",
-                f"the resolved {half} dataset is absent, so there is nothing to compare",
-                next_action=(
-                    "author the candidate's knowledge in the leaf's disposable knowledge root, and "
-                    "place the dataset it forks from in the baseline half if this leaf has one; the "
-                    "surface substitutes no other dataset"
-                ),
-                offending_input=database.name,
-            ),
-        )
+    denied = pair_preflight_refusal(resolved)
+    if denied is not None:
+        return refused(request.repository_id, denied)
     try:
         return review_namespace(resolved.repository_id, resolved.candidate_database)
     except KnowledgeStorageError as error:
@@ -843,19 +817,11 @@ def _review_matrix(
             continuation=cursor,
         ),
     )
-    if matrix.state == "view" and matrix.payload is not None:
-        return matrix, namespace
+    # A view result carries exactly one outcome: its refusal, with the owner's own next action, or
+    # its payload.
     if matrix.refusal is not None:
         return matrix.refusal
-    return ViewRefusal(
-        code="snapshot_unavailable",
-        view="review_matrix",
-        detail=(
-            "the review-matrix view returned neither a payload nor a refusal, so no row of the "
-            "selection can be reported and none is invented"
-        ),
-        next_action="repair the candidate dataset, then reopen the review",
-    )
+    return matrix, namespace
 
 
 def _records_cursor(request: ReviewSurfaceRequest) -> ViewContinuation | ViewRefusal | None:
@@ -930,6 +896,7 @@ def _compare_scope(
         before_path=resolved.baseline_database,
         after_path=resolved.candidate_database,
         probe=probe,
+        incomplete_sides=index_incompleteness(resolved),
     )
 
 

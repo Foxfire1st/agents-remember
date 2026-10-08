@@ -67,7 +67,7 @@ from agents_remember.models.lifecycles.review_assessment_binding import (
     assessment_currentness,
     disputed_dependencies,
     require_current_assessment_binding,
-    subject_state,
+    supplied_measurement_statuses,
 )
 from agents_remember.models.lifecycles.review_assessment_store import (
     AssessmentInputs,
@@ -144,6 +144,14 @@ def _inputs(
         resolverVersion="curator-evidence-resolver/v1",
         policyVersion="review-assessment-policy/v1",
         evidenceBytes=evidence_bytes,
+    )
+
+
+def subject_state(assessments, *, current=None):
+    """Project every stored assessment of one subject onto the distinct reportable states."""
+
+    return assessment_state_for(
+        assessments, statuses=supplied_measurement_statuses(assessments, current)
     )
 
 

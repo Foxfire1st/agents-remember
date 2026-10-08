@@ -41,25 +41,13 @@ from uuid import uuid4
 
 import pytest
 from agents_remember.application.knowledge_review import (
-    list_knowledge_review_entries,
     read_knowledge_review,
-    review_records_for,
 )
-from agents_remember.memory.knowledge import families, memberships
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft
 from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
     InvariantIdentitySeed,
-)
-from agents_remember.models.knowledge.result import (
-    FamilyMemberRequest,
-    FamilyRequest,
-    FamilyRevisionRequest,
-    InvariantRequest,
-    RevisionDraft,
-    RevisionRequest,
 )
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.models.knowledge.review_family_context import (
@@ -73,6 +61,17 @@ from agents_remember.serving.review import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from knowledge_rows_test_support import (
+    FamilyMemberRequest,
+    FamilyRequest,
+    FamilyRevisionRequest,
+    InvariantRequest,
+    RevisionDraft,
+    RevisionRequest,
+    families,
+    memberships,
+    open_knowledge_store,
+)
 from read_scope_test_support import (
     APPLICABILITY,
     BASE_LABEL,
@@ -85,6 +84,7 @@ from test_knowledge_review_source_endpoints import (
     EndpointFixture,
     _place_datasets,
     build_endpoint_fixture,
+    compose_endpoint_review,
 )
 
 pytestmark = pytest.mark.evidence_unit
@@ -256,9 +256,9 @@ def family_request(
 
 
 def review(endpoints: EndpointFixture, request: ReviewSurfaceRequest | None = None):
-    """Compose the review the dashboard composes, and return its payload."""
+    """Compose family rows from explicit synthetic index-shaped inputs."""
 
-    result = read_knowledge_review(endpoints.config, request or endpoints.request())
+    result = compose_endpoint_review(endpoints, request or endpoints.request())
     assert result.state == "review", result.refusal
     assert result.payload is not None
     return result.payload
@@ -931,17 +931,14 @@ def test_the_family_context_reaches_the_client_over_the_real_review_route(
 
 
 def _served(fixture: EndpointFixture) -> FastAPI:
-    """The real routes over the real application owners, wired as the composition root wires them."""
+    """The real registrar and composition over explicit synthetic index-shaped inputs."""
 
     app = FastAPI()
     config = fixture.config
     register_review_routes(
         app,
         config,
-        lambda request: read_knowledge_review(config, request, review_records_for(config, request)),
-        lambda repository_id, master, leaf_id: list_knowledge_review_entries(
-            config, repository_id, master, leaf_id
-        ),
+        lambda request: compose_endpoint_review(fixture, request),
     )
     return app
 

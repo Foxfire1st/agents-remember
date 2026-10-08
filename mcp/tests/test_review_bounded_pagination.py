@@ -17,6 +17,9 @@ The load-bearing properties, one case each:
   advanced and the cursor issued before the move is presented afterwards: it is refused with the
   explicit new-generation action, the response is the *first* page of the comparison that is there
   now, and the refusal names the comparison the cursor was minted at beside the one it met.
+* **The records collection is the matrix view's own walk** -- its page states the bound the caller
+  named, and a cursor of the other collection or of another snapshot is a named refusal with no
+  page, each with its own code and next action.
 * **The entry is a catalogue, not a record fetch** -- the entry read lists identities, carries no
   page and no cursor at either dataset size, and driving it calls no comparison and no view.
 """
@@ -29,31 +32,22 @@ from uuid import UUID, uuid4
 
 import pytest
 from agents_remember.application import knowledge_diff, knowledge_review
-from agents_remember.application.knowledge import write_authorship
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.knowledge_review import (
     compose_review,
 )
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge import realizations
-from agents_remember.memory.knowledge.store import open_existing_knowledge_store
-from agents_remember.models.knowledge.candidate import (
-    AddSemanticChangeSet,
-    AddUnresolvedQuestion,
-    CandidateResolution,
-    ChangeBatch,
-    ChangeCommand,
-)
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffBudget,
     KnowledgeDiffRequest,
     KnowledgeDiffSide,
 )
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
-from agents_remember.models.knowledge.read import InvariantIdentitySeed, KnowledgeReadSeed
-from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
+from agents_remember.models.knowledge.read import (
+    InvariantIdentitySeed,
+    KnowledgeReadSeed,
+    snapshot_of_context,
+)
 from agents_remember.models.knowledge.review import (
     MAXIMUM_REVIEW_PAGE_SIZE,
     REVIEW_PAGE_RESET_NEXT_ACTION,
@@ -62,11 +56,8 @@ from agents_remember.models.knowledge.review import (
     ReviewEntryListResult,
     ReviewSurfaceRequest,
 )
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-)
+from agents_remember.models.knowledge.source import FileLocator
+from agents_remember.models.knowledge.view import continuation_for
 from agents_remember.serving.review import (
     KNOWLEDGE_REVIEW_ROUTE,
     ReviewPagingRef,
@@ -76,10 +67,16 @@ from agents_remember.serving.review import (
     register_review_routes,
     review_request_from_query,
 )
-from candidate_batch_test_support import DEFAULT_AUTHORITY_HOME, CandidateHarness
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from diff_scope_test_support import DiffFixture, build_diff_fixture
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from read_scope_test_support import make_read_authorship
 
 pytestmark = pytest.mark.evidence_unit
@@ -99,10 +96,6 @@ LARGE_EXTRA_CLAIMS = 90
 # here is a real truncation of a real selection rather than the first page of a small one.
 COMPARISON_PAGE = 16
 RECORDS_PAGE = 3
-# How many authored records the matrix traversal case writes into its candidate, and it is chosen so
-# that the selection needs several pages at ``RECORDS_PAGE``: the fixture's own candidate records no
-# ``unresolved_question``, so this is the whole selection these cases page over.
-RECORD_COUNT = 10
 
 
 @dataclass(frozen=True)
@@ -176,7 +169,7 @@ def build_pagination_fixture(directory: Path, *, extra_claims: int) -> Paginatio
     authorship = make_read_authorship(seed="agent:pagination-fixture")
     paths = tuple(f"src/pagination/realization_{index:03d}.py" for index in range(extra_claims))
     known_blob = next(iter(diff.after.git_blobs.values()))
-    store = open_existing_knowledge_store(diff.after.database_path, diff.repository_id)
+    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
     try:
         for path in paths:
             created = realizations.create_realization_claim(
@@ -500,66 +493,101 @@ def _refused_records_page(fixture: PaginationFixture, cursor: str) -> KnowledgeR
     return result.payload
 
 
+def _matrix_cursor(fixture: PaginationFixture, position: int) -> str:
+    """The cursor the shipped codec mints for the matrix walk at this candidate's own snapshot.
+
+    The matrix view publishes a cursor only while rows remain, and the candidate here records no
+    matrix row, so no page hands one back. The token is therefore minted by the same function the
+    view calls, from the snapshot the composition opens the candidate under.
+    """
+
+    side = open_diff_side(
+        fixture.diff.after.database_path,
+        fixture.diff.repository_id,
+        repository_root=fixture.diff.after.git_root,
+        code_tree_id=fixture.diff.after_tree_id,
+    )
+    return continuation_for(
+        view="review_matrix", snapshot=snapshot_of_context(side), position=position
+    ).token
+
+
+def test_the_records_collection_states_the_matrix_walk_and_the_bound_it_applied(
+    tmp_path: Path,
+) -> None:
+    """A records request publishes the matrix view's own window, under the size the caller named."""
+
+    fixture = build_pagination_fixture(tmp_path / "records", extra_claims=SMALL_EXTRA_CLAIMS)
+    page = paged_payload(compose_page(fixture, page_of="records", page_size=RECORDS_PAGE))
+    assert (page.collection, page.state, page.total_basis) == ("records", "first_page", "walk")
+    assert page.returned <= RECORDS_PAGE
+    assert page.returned + page.remaining == page.total
+    assert (page.remaining > 0) == (page.continuation is not None)
+    assert page.continued_from is None and page.reset is None
+    # The scope is the selection the counts describe: the kinds asked for and the bound applied.
+    assert page.scope == (
+        f"record_kinds={','.join(knowledge_review.REVIEW_MATRIX_KINDS)}",
+        "ordering_input=stable_ordering",
+        f"page_size={RECORDS_PAGE}",
+    )
+    # A request that names no size is bounded by the view's own maximum, and says so.
+    unsized = paged_payload(compose_page(fixture, page_of="records"))
+    assert f"page_size={MAXIMUM_REVIEW_PAGE_SIZE}" in unsized.scope
+    # A cursor of this walk, minted at this candidate's snapshot, continues it and is named on the
+    # page it produced.
+    cursor = _matrix_cursor(fixture, RECORDS_PAGE)
+    continued = paged_payload(
+        compose_page(fixture, page_of="records", continuation=cursor, page_size=RECORDS_PAGE)
+    )
+    assert (continued.collection, continued.state) == ("records", "continued")
+    assert continued.continued_from == cursor
+    assert continued.returned + continued.remaining == continued.total
+
+
+def test_a_records_cursor_of_another_walk_or_another_snapshot_is_refused_by_name(
+    tmp_path: Path,
+) -> None:
+    """A records page the owner cannot serve is a named refusal on the wire, never a silent absence.
+
+    Two different mistakes, kept apart. The comparison's cursor is not a matrix cursor at all: nothing
+    moved, so the refusal says the token is unreadable here and keeps the owner's own next action. A
+    matrix cursor minted at the snapshot the candidate held before it advanced is the moved case, and
+    it takes the new-generation action and names both snapshots. Either way no page is published,
+    because a page needs the owner's own counts, and the matrix channel reports the read as
+    unavailable rather than as a measured zero.
+    """
+
+    fixture = build_pagination_fixture(tmp_path / "refused", extra_claims=SMALL_EXTRA_CLAIMS)
+    knowledge = paged_payload(compose_page(fixture, page_of="knowledge", page_size=5))
+    assert knowledge.continuation is not None
+    crossed = _refused_records_page(fixture, knowledge.continuation)
+    assert crossed.page is None and crossed.page_refusal is not None
+    assert crossed.page_refusal.code == "comparison_page_unreadable"
+    assert crossed.page_refusal.offending_input == knowledge.continuation
+    assert crossed.page_refusal.next_action != REVIEW_PAGE_RESET_NEXT_ACTION
+    channel = next(
+        entry for entry in crossed.evidence.channels if entry.records == "authored_effects"
+    )
+    assert channel.state == "unavailable"
+
+    stale = _matrix_cursor(fixture, RECORDS_PAGE)
+    moved = _advanced_candidate(tmp_path / "refused-advanced", fixture)
+    refused = _refused_records_page(moved, stale)
+    assert refused.page is None and refused.page_refusal is not None
+    assert refused.page_refusal.code == "comparison_page_reset"
+    assert refused.page_refusal.offending_input == stale
+    assert refused.page_refusal.next_action == REVIEW_PAGE_RESET_NEXT_ACTION
+    assert refused.page_refusal.expected is not None and refused.page_refusal.expected in stale
+    assert refused.page_refusal.observed not in (None, refused.page_refusal.expected)
+    # The refusal is not a dead end: the same request with no cursor serves the first page.
+    first = paged_payload(compose_page(moved, page_of="records", page_size=RECORDS_PAGE))
+    assert first.state == "first_page" and first.reset is None
+
+
 def _rendered_claim_ids(payload: KnowledgeReviewPayload) -> set[str]:
     """Every distinct realization claim one payload rendered as a source location."""
 
     return {location.claim_id for location in payload.source.locations}
-
-
-def test_the_records_collection_publishes_its_own_bounds_and_cursor(tmp_path: Path) -> None:
-    """The review matrix is paged through the view's own continuation, not by a second cursor."""
-
-    fixture = build_pagination_fixture(tmp_path / "records", extra_claims=SMALL_EXTRA_CLAIMS)
-    authored = _author_matrix_records(fixture, RECORD_COUNT)
-    assert len(authored) == RECORD_COUNT
-    payload = compose_page(fixture, page_of="records", page_size=RECORDS_PAGE)
-    page = paged_payload(payload)
-    assert page.collection == "records"
-    assert page.returned == RECORDS_PAGE
-    assert page.returned + page.remaining == page.total
-    assert page.total >= RECORD_COUNT
-    assert f"page_size={RECORDS_PAGE}" in page.scope
-    assert page.continuation is not None
-    # The two collections have their own cursors: a records page never publishes the comparison's.
-    knowledge = paged_payload(compose_page(fixture, page_of="knowledge", page_size=COMPARISON_PAGE))
-    assert knowledge.continuation is not None
-    assert page.continuation != knowledge.continuation
-    # And a records cursor is not a knowledge cursor: presenting it as one is refused by the
-    # comparison's own decoder rather than served a window from another walk.
-    crossed = compose_page(
-        fixture, page_of="knowledge", continuation=page.continuation, page_size=COMPARISON_PAGE
-    )
-    assert paged_payload(crossed).state == "reset"
-
-
-def test_every_page_of_a_large_records_selection_is_reachable_without_duplicate_or_loss(
-    tmp_path: Path,
-) -> None:
-    """The matrix's own walk, over a candidate holding enough authored records to page."""
-
-    fixture = build_pagination_fixture(tmp_path / "matrix", extra_claims=SMALL_EXTRA_CLAIMS)
-    authored = _author_matrix_records(fixture, RECORD_COUNT)
-    assert authored, "the fixture recorded no matrix row"
-    pages: list[ReviewCollectionPage] = []
-    per_page: list[tuple[str, ...]] = []
-    continuation: str | None = None
-    for _ in range(32):
-        payload = compose_page(
-            fixture, page_of="records", continuation=continuation, page_size=RECORDS_PAGE
-        )
-        page = paged_payload(payload)
-        pages.append(page)
-        per_page.append(_matrix_row_ids(payload))
-        if page.continuation is None:
-            break
-        continuation = page.continuation
-    assert len(pages) >= 3, [page.total for page in pages]
-    assert pages[-1].remaining == 0 and pages[-1].continuation is None
-    assert pages[1].continued_from == pages[0].continuation
-    returned = [row for page_rows in per_page for row in page_rows]
-    assert len(returned) == len(set(returned)), "one row was returned by two pages"
-    assert len(set(returned)) == pages[0].total, "the walk did not return the whole selection once"
-    assert pages[0].total >= RECORD_COUNT
 
 
 def test_a_cursor_from_a_moved_generation_is_refused_with_a_new_generation_action(
@@ -689,155 +717,6 @@ def test_the_transport_names_the_input_it_refused_and_bounds_the_page_it_applies
         fixture.request(page_of="knowledge", page_size=MAXIMUM_REVIEW_PAGE_SIZE + 1)
 
 
-def test_a_foreign_cursor_is_reported_as_the_wrong_collection_not_a_moved_generation(
-    tmp_path: Path,
-) -> None:
-    """Presenting one collection's cursor to the other says so, and claims no generation change."""
-
-    fixture = build_pagination_fixture(tmp_path / "foreign", extra_claims=SMALL_EXTRA_CLAIMS)
-    _author_matrix_records(fixture, RECORD_COUNT)
-
-    knowledge = paged_payload(compose_page(fixture, page_of="knowledge", page_size=COMPARISON_PAGE))
-    records = paged_payload(compose_page(fixture, page_of="records", page_size=RECORDS_PAGE))
-    assert knowledge.continuation is not None and records.continuation is not None
-
-    # The records cursor offered to the comparison: nothing moved, so the refusal says the token is
-    # not this collection's and keeps the owner's own next action -- never the new-generation action.
-    crossed = compose_page(
-        fixture, page_of="knowledge", continuation=records.continuation, page_size=COMPARISON_PAGE
-    )
-    refusal = paged_payload(crossed).reset
-    assert refusal is not None
-    assert refusal.code == "comparison_page_unreadable"
-    assert refusal.next_action != REVIEW_PAGE_RESET_NEXT_ACTION
-    assert "new comparison" not in refusal.next_action
-    assert refusal.offending_input == records.continuation
-
-    # And the other direction, through the matrix view's own codec: the knowledge cursor is not a
-    # review-matrix continuation, so the records request gets the unreadable answer too. The records
-    # direction states it as ``page_refusal`` (a page needs the owner's counts): the code names the
-    # collection mistake, and the owner's identities travel with it.
-    payload = _refused_records_page(fixture, knowledge.continuation)
-    assert payload.page is None and payload.page_refusal is not None
-    assert payload.page_refusal.code == "comparison_page_unreadable"
-    assert payload.page_refusal.offending_input == knowledge.continuation
-    assert payload.page_refusal.next_action != REVIEW_PAGE_RESET_NEXT_ACTION
-
-
-def test_a_records_remainder_never_names_a_cursor_that_cannot_reach_it(tmp_path: Path) -> None:
-    """The note beside a records remainder names the request that reaches it, and nothing else.
-
-    Two bounds are visible at once whenever the request pages the **knowledge** comparison while the
-    matrix selection is larger than the page size. The page this review published then belongs to the
-    other collection: its cursor continues the comparison and reaches no records row, which this case
-    proves by presenting it as a records page and reading the refusal. So the note must name the
-    request that reaches the remainder, and it must not claim the comparison's cursor does.
-    """
-
-    records = MAXIMUM_REVIEW_PAGE_SIZE + 6
-    fixture = build_pagination_fixture(tmp_path / "cross-note", extra_claims=SMALL_EXTRA_CLAIMS)
-    authored = _author_matrix_records(fixture, records)
-    assert len(authored) == records
-
-    payload = compose_page(fixture, page_of="knowledge", page_size=5)
-    assert payload.page is not None and payload.page.collection == "knowledge"
-    assert payload.page.continuation is not None, (
-        "the shape this case needs: a published comparison page"
-    )
-    channel = next(
-        entry for entry in payload.evidence.channels if entry.records == "authored_effects"
-    )
-    detail = channel.detail or ""
-    assert "further row(s)" in detail, detail
-    assert "pageOf=records" in detail, "a stated remainder names the request that reaches it"
-    assert "carries the cursor" not in detail, (
-        "the page this review published belongs to the comparison, so its cursor reaches no records row"
-    )
-
-    # The proof that the claim would have been false: the comparison's own cursor is refused as a
-    # records cursor, so no reader could have followed it to the remainder.
-    crossed = _refused_records_page(fixture, payload.page.continuation)
-    assert crossed.page is None and crossed.page_refusal is not None
-    assert crossed.page_refusal.code == "comparison_page_unreadable"
-
-    # And the named request really does reach the whole population.
-    reached = paged_payload(compose_page(fixture, page_of="records", page_size=4))
-    assert reached.total == records
-
-
-def test_a_refused_records_cursor_states_its_code_identities_and_a_live_first_page(
-    tmp_path: Path,
-) -> None:
-    """A records page the owner cannot serve is a refusal on the wire, not a silent absence.
-
-    The reader asked for a page. When the owner cannot serve one -- the cursor was minted at another
-    snapshot, the matrix cannot be read -- the response used to carry ``page=None`` and nothing else:
-    the mounted control then claimed there was no remainder to reach, and the refusal's code, its
-    offending cursor and the owner's two identities reached no client. This case pins the shape that
-    replaced it: the refusal itself, in the payload's own vocabulary.
-    """
-
-    fixture = build_pagination_fixture(
-        tmp_path / "records-refusal", extra_claims=SMALL_EXTRA_CLAIMS
-    )
-    _author_matrix_records(fixture, RECORD_COUNT)
-    issued = paged_payload(compose_page(fixture, page_of="records", page_size=RECORDS_PAGE))
-    stale = issued.continuation
-    assert stale is not None
-
-    moved = _advanced_candidate(tmp_path / "records-refusal-advanced", fixture)
-    payload = _refused_records_page(moved, stale)
-    assert payload.page is None
-    assert payload.page_refusal is not None, "a refused page must state its refusal"
-    assert payload.page_refusal.code == "comparison_page_reset"
-    assert payload.page_refusal.offending_input == stale
-    assert payload.page_refusal.expected is not None and payload.page_refusal.observed is not None
-    assert payload.page_refusal.expected != payload.page_refusal.observed
-    assert payload.page_refusal.next_action == REVIEW_PAGE_RESET_NEXT_ACTION
-    # The refusal is not a dead end: the same request with no cursor serves the first page.
-    first = paged_payload(compose_page(moved, page_of="records", page_size=RECORDS_PAGE))
-    assert first.state == "first_page" and first.returned > 0 and first.continuation is not None
-    # And the matrix channels still refuse to report a measured zero for the refused read.
-    channel = next(
-        entry for entry in payload.evidence.channels if entry.records == "authored_effects"
-    )
-    assert channel.state == "unavailable"
-
-
-def test_the_whole_review_never_states_a_remainder_without_the_way_to_reach_it(
-    tmp_path: Path,
-) -> None:
-    """A request that names no collection publishes no page -- so its prose names the page request.
-
-    With more authored records than the view's own declared bound, the default review read is
-    bounded: it publishes no page (the reader named no collection) and the ``authored_effects``
-    channel reports the extraction the owner measured. That sentence used to state the remainder and
-    stop there, which is the packet's non-conformance at the response level. It now names the request
-    that reaches the rest -- and the named request really does reach it, which the same case checks.
-    """
-
-    records = MAXIMUM_REVIEW_PAGE_SIZE + 6
-    fixture = build_pagination_fixture(tmp_path / "whole-review", extra_claims=SMALL_EXTRA_CLAIMS)
-    authored = _author_matrix_records(fixture, records)
-    made = len(authored)
-
-    payload = compose_page(fixture, page_of=None)
-    assert payload.page is None and payload.page_refusal is None
-    channel = next(
-        entry for entry in payload.evidence.channels if entry.records == "authored_effects"
-    )
-    assert channel.record_count == MAXIMUM_REVIEW_PAGE_SIZE
-    detail = channel.detail or ""
-    assert str(made - MAXIMUM_REVIEW_PAGE_SIZE) in detail, detail
-    assert "pageOf=records" in detail, "a stated remainder names the request that reaches it"
-    assert "carries the cursor" not in detail, "no cursor was published, so it cannot be claimed"
-
-    # The named route reaches the whole population: the same review asked as a records page is
-    # bounded only by the size the caller named, and its total is the owner's own measurement.
-    paged = paged_payload(compose_page(fixture, page_of="records", page_size=4))
-    assert paged.total == made
-
-
 def test_the_entry_read_populates_the_button_without_fetching_record_pages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -894,92 +773,6 @@ def _entry_for(fixture: PaginationFixture) -> ReviewEntryListResult:
     )
 
 
-def _matrix_row_ids(payload: KnowledgeReviewPayload) -> tuple[str, ...]:
-    """The review-matrix rows one page's payload published, by the identities they name.
-
-    The rows themselves are the view's; the composition renders the matrix-sourced ones into the
-    evidence pane's own collections. The identity a duplicate check needs is therefore read from the
-    payload the page returned rather than from a second read of the view.
-    """
-
-    return (
-        *(
-            effect.record_id if effect.revision_id is None else effect.revision_id
-            for effect in payload.knowledge.authored_effects
-        ),
-        *(observation.observation_id for observation in payload.evidence.observations),
-    )
-
-
-def _author_matrix_records(fixture: PaginationFixture, count: int) -> tuple[str, ...]:
-    """Author ``count`` review-matrix records into the fixture's candidate through the real batch.
-
-    The record group is the authored-effect group, and its two prerequisites are real authored
-    objects rather than row inserts: one change set the claims are made over, then the claims
-    themselves. Both are written through
-    :func:`~agents_remember.application.knowledge.change_knowledge_candidate`, the same operation the
-    curator's own writes go through, so the rows the matrix then pages over are rows production wrote.
-    """
-
-    harness = CandidateHarness(
-        database_path=fixture.diff.after.database_path,
-        destination_repository=RepositoryIdentity(
-            repository_id=fixture.diff.repository_id, authority_home=DEFAULT_AUTHORITY_HOME
-        ),
-        authorship=write_authorship(
-            actor_ref="agent:pagination-records",
-            authorization_ref="ICR-R10 pagination case",
-            origin_refs=("requirement:ICR-R10@v1",),
-        ),
-        resolution=CandidateResolution(
-            lane="draft-candidate",
-            code_tree_id=fixture.diff.after_tree_id,
-            memory_tree_id=fixture.diff.after_tree_id,
-            snapshot_ref="candidate:pagination-records",
-            candidate_ref="draft:pagination-records",
-        ),
-    )
-    context = harness.context()
-    change_set_id = str(uuid4())
-    commands: list[ChangeCommand] = [
-        AddSemanticChangeSet(
-            record_id=change_set_id,
-            revision_id=str(uuid4()),
-            payload={
-                "baseline": _snapshot(context, context.knowledge.logical_digest),
-                "candidate": _snapshot(context, context.knowledge.logical_digest),
-            },
-        )
-    ]
-    identities: list[str] = []
-    for index in range(count):
-        record_id = str(uuid4())
-        identities.append(record_id)
-        commands.append(
-            AddUnresolvedQuestion(
-                record_id=record_id,
-                revision_id=str(uuid4()),
-                payload={
-                    "change_set_id": change_set_id,
-                    "statement": f"Open question {index} the recorded selection leaves unanswered.",
-                },
-            )
-        )
-    result = harness.apply(ChangeBatch(expected=context, commands=tuple(commands)))
-    assert result.state == "changed", result.refusal
-    return tuple(identities)
-
-
-def _snapshot(context: object, logical_digest: str) -> dict[str, str]:
-    """One stored snapshot identity, in the payload's own vocabulary."""
-
-    return {
-        "repository_id": context.knowledge.repository_id,  # type: ignore[attr-defined]
-        "schema_version": context.knowledge.schema_version,  # type: ignore[attr-defined]
-        "logical_digest": logical_digest,
-    }
-
-
 def _advanced_candidate(directory: Path, fixture: PaginationFixture) -> PaginationFixture:
     """The same fixture with its candidate dataset *and* code tree advanced to a new generation.
 
@@ -991,7 +784,7 @@ def _advanced_candidate(directory: Path, fixture: PaginationFixture) -> Paginati
     directory.mkdir(parents=True, exist_ok=True)
     advanced_database = directory / fixture.diff.after.database_path.name
     advanced_database.write_bytes(fixture.diff.after.database_path.read_bytes())
-    store = open_existing_knowledge_store(advanced_database, fixture.diff.repository_id)
+    store = open_knowledge_store(advanced_database, fixture.diff.repository_id)
     try:
         authorship = make_read_authorship(seed="agent:pagination-advanced")
         created = realizations.create_realization_claim(

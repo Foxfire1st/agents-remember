@@ -245,14 +245,13 @@ def _link_undetermined(
 # The remedy for a half that exists but could not be read, and for knowledge that was never created
 # (ICR-L43 review R2 O1, routed to MIK-R31 rule 6): the usable step names the cause.
 _RESTORE = (
-    "restore or repair the knowledge snapshot the detail names as unreadable -- the leaf's "
-    "own knowledge halves, or the retained snapshot of the named comparison generation -- "
-    "then expand the path again; this generation's changed paths stay expandable meanwhile"
+    "restore the named recorded memory tree or rebuild its derived index, then expand again; "
+    "for legacy-unavailable knowledge open a converted tree comparison instead. The recorded "
+    "comparison's changed source paths remain expandable and current knowledge is never substituted"
 )
 _INITIALIZE = (
-    "initialize this leaf's knowledge -- the snapshot files the detail names do not exist, so "
-    "it was never created -- then expand the path again; this generation's changed paths stay "
-    "expandable meanwhile"
+    "author this leaf's text knowledge through knowledge-ingest, then reopen its tree review; "
+    "the recorded source comparison's changed paths remain expandable"
 )
 
 

@@ -31,12 +31,9 @@ from agents_remember.application.knowledge_read import (
     open_read_context,
     read_knowledge_scope,
 )
-from agents_remember.memory.knowledge import read_anchors, realizations
-from agents_remember.memory.knowledge.connection import open_database
+from agents_remember.memory.knowledge import read_anchors
 from agents_remember.memory.knowledge.read_anchors import _confined_posix_relative
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
     AnchorResolution,
     InvariantRevisionSeed,
@@ -46,13 +43,15 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadSeed,
     PathSeed,
 )
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-)
+from agents_remember.models.knowledge.source import FileLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from generation_test_support import declared_schema_name
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from pydantic import ValidationError
 from read_scope_test_support import (
     INTEGRATION_PATH,
@@ -389,7 +388,8 @@ def test_a_stored_path_that_cannot_be_addressed_is_refused_rather_than_reported_
 
     unaddressable = ":(exclude)src/integration.py"
     donor_claim_id = str(uuid4())
-    connection = open_database(fixture.database_path)
+    store = open_knowledge_store(fixture.database_path, fixture.repository_id)
+    connection = store.connection
     try:
         donor = connection.execute(
             "SELECT anchor_id, provenance FROM source_anchor WHERE repository_id = ? AND anchor_id = ?",
@@ -426,7 +426,7 @@ def test_a_stored_path_that_cannot_be_addressed_is_refused_rather_than_reported_
             ),
         )
     finally:
-        connection.close()
+        store.close()
 
     result = read(fixture, subject_seed(fixture))
 

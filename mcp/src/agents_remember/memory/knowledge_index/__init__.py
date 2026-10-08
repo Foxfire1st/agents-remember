@@ -12,7 +12,6 @@ memory tree and nothing else.
 * :mod:`.projection` also writes the index as a dataset of the knowledge store's newest schema
   generation, so the existing read, view and traversal code runs over it unchanged.
 * :mod:`.query` answers the lookups; every answer carries the index state.
-* :mod:`.adapters` opens an index as a read-only store for the registered-scope construction.
 * :mod:`.cache` keeps one file per tree key under the coordination runtime, never inside a Git
   working tree, rebuilt when absent and evicted by age and size.
 
@@ -21,11 +20,6 @@ No knowledge writer writes the index, and the index is never merged: it is rebui
 
 from __future__ import annotations
 
-from agents_remember.memory.knowledge_index.adapters import (
-    index_store,
-    scope_snapshot_declaration,
-    scope_snapshot_source,
-)
 from agents_remember.memory.knowledge_index.build import BuildReport, build_index, parse_tree
 from agents_remember.memory.knowledge_index.cache import (
     CacheOutcome,
@@ -85,10 +79,7 @@ __all__ = [
     "directory_key",
     "directory_snapshot",
     "git_tree_snapshot",
-    "index_store",
     "is_indexed_path",
     "parse_tree",
-    "scope_snapshot_declaration",
-    "scope_snapshot_source",
     "text_uuid",
 ]

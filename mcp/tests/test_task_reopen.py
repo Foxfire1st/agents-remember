@@ -20,7 +20,8 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 )
 from agents_remember.worktrees.modules.git import branch_commit, branch_exists
 from agents_remember.worktrees.modules.startup.series_attach import series_attach_result
-from agents_remember.worktrees.reopen import SERIES_REOPEN_AUDIT_INTENT, reopen_task
+from agents_remember.worktrees.reopen import reopen_task
+from agents_remember.worktrees.reopen_series import SERIES_REOPEN_AUDIT_INTENT
 from agents_remember.worktrees.scheduling_mode import TERMINAL_SERIES_CLEANUP
 from agents_remember.worktrees.worktree_contract import (
     load_contract,

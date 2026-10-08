@@ -29,13 +29,20 @@ from uuid import UUID, uuid4
 import pytest
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_intent_summary import intent_summary_of
-from agents_remember.memory.knowledge import families, memberships, realizations
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
+from agents_remember.models.knowledge.graph import FamilyMemberDraft
 from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
+from agents_remember.models.knowledge.source import FileLocator
+from agents_remember.serving.review_summary import (
+    KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
+    register_review_summary_route,
+)
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from knowledge_rows_test_support import (
     FamilyMemberRequest,
     FamilyRequest,
     FamilyRevisionRequest,
@@ -44,15 +51,12 @@ from agents_remember.models.knowledge.result import (
     RealizationClaimRequest,
     RevisionDraft,
     RevisionRequest,
+    RowStore,
+    families,
+    memberships,
+    open_knowledge_store,
+    realizations,
 )
-from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
-from agents_remember.models.knowledge.source import FileLocator, GitBlobIdentity, SourceAnchorDraft
-from agents_remember.serving.review_summary import (
-    KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
-    register_review_summary_route,
-)
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -77,7 +81,7 @@ def _authorship() -> Authorship:
 class _Author:
     """The shipped write operations over one open snapshot, spelled as the fixture needs them."""
 
-    def __init__(self, store: OpenedKnowledgeStore) -> None:
+    def __init__(self, store: RowStore) -> None:
         self.store = store
         self.authorship = _authorship()
         # The origin state the next authored revision records; a case sets it to author an

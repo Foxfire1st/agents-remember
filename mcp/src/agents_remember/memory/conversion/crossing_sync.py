@@ -1,4 +1,4 @@
-"""A crossing sync's knowledge half: markers, conversion, structural merge, validation (MIK-R24 rule 8).
+"""A managed sync's knowledge half: markers, conversion, structural merge, validation (MIK-R24 rule 8).
 
 A managed sync is a *crossing sync* when at least one of its merge base, its own side and the
 incoming side is unconverted and at least one is converted. :func:`cross` runs the steps on the three
@@ -6,6 +6,12 @@ memory trees and returns a :class:`CrossingPlan` -- the merged ``knowledge/`` an
 files, the conflicts, and the report -- without touching any repository. The managed sync
 transaction applies the plan to its merge (``worktrees/knowledge_crossing``); if any step fails,
 :class:`CrossingError` names it and the line is left unchanged.
+
+**Every managed sync of converted memory merges this way (MIK-R26 rule 2).** When all three trees
+are converted, steps 1 and 2 have nothing to do -- no marker is moved and nothing is converted --
+and step 3 merges the three trees as they are, so two lines that both re-anchored the same entry
+never conflict on mechanical anchor fields. Only a merge whose three trees are all unconverted is
+left to plain Git, and :func:`cross` refuses to be asked about one.
 
 1. **Markers first.** When the own side is a leaf line, the Update History no-impact markers that
    leaf added (``No content impact:``/``No route impact:``, lines absent from the base) become
@@ -86,13 +92,6 @@ class CrossingPlan:
     conflict_versions: dict[str, tuple[bytes | None, bytes | None, bytes | None]] = field(
         default_factory=dict
     )
-
-
-def is_crossing(base: bool, own: bool, incoming: bool) -> bool:
-    """Rule 8: at least one of the three trees is unconverted and at least one is converted."""
-
-    states = {base, own, incoming}
-    return states == {True, False}
 
 
 def _version(tree: MemoryInput) -> str | None:
@@ -198,8 +197,11 @@ _SIDE_NAMES: Final = ("base", "own", "incoming")
 
 
 def _pinned_version(sides: Sides) -> str:
-    if not is_crossing(*(tree.converted for tree in sides)):
-        raise CrossingError("convert", "not a crossing sync: the three trees are all alike")
+    if not any(tree.converted for tree in sides):
+        raise CrossingError(
+            "convert",
+            "no tree of this merge is converted, so there is nothing to merge structurally",
+        )
     versions = {version for version in map(_version, sides) if version is not None}
     if len(versions) != 1:
         raise CrossingError(

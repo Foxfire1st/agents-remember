@@ -1,9 +1,9 @@
 {
   "captured_source_tree": "a8039b8e036e2c0d83100e9b4683901d6d54bd0d",
   "captured_at": "2026-09-28T10:39:12.669478+00:00",
-  "command": "/home/firefox/projects/agents-remember/mcp/.venv/bin/python /home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/l44_recapture_review_fixtures.py /home/firefox/projects/ar-coordination/worktrees/agents-remember/260921-icr-l44-ar/260921-icr-l44",
+  "command": "/workspace/agents-remember/mcp/.venv/bin/python /workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/l44_recapture_review_fixtures.py /workspace/ar-coordination/worktrees/agents-remember/260921-icr-l44-ar/260921-icr-l44",
   "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
-  "capture_record": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-capture/capture-record.json",
+  "capture_record": "/workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-capture/capture-record.json",
   "capture_record_sha256": "aeae0851e110a5244ccebfa34555479662e2e8e6a5a611695e3a167be5fb0172",
   "selection_rule": "each scenario was rebuilt with fresh identities until every route body it produced carried the committed capture's structural signature; attempts per group are recorded",
   "signature": "per body: revision_selection.state, before/after statement state, family_context.state, per family entry in order (display_label, entry state, selection state, per side: side state, members_total, roster page state, (member label, member state) pairs in served order), and the published page's (state, total, returned, remaining); familyPaging: every walk body",
@@ -37,7 +37,7 @@
     "stated_by": "260928-MIK-L31 worker (MIK-R31 rule 6, the L44-R1-F5 remainder)",
     "captured_source_tree": "18b773295b9aedc7cc14126a7fdadaf1d2fd5353",
     "captured_at": "2026-09-30T04:17:22.965137+00:00",
-    "command": "/home/firefox/projects/agents-remember/mcp/.venv/bin/python /home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/recapture_family_fixtures.py /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l31-ar/260928-mik-l31",
+    "command": "/workspace/agents-remember/mcp/.venv/bin/python /workspace/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/recapture_family_fixtures.py /workspace/ar-coordination/worktrees/agents-remember/260928-mik-l31-ar/260928-mik-l31",
     "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
     "producer": "L44's producer, executed unchanged except for the selection rule and output paths",
     "selection_rule": "the first build of each scenario is accepted (MIK-L31); no signature is matched",
@@ -48,7 +48,7 @@
       "walk": 1,
       "empty": 1
     },
-    "capture_record": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/fixture-capture/capture-record.json",
+    "capture_record": "/workspace/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/fixture-capture/capture-record.json",
     "capture_record_sha256": "9103054bec52f57743cad31f7c2350890a960fb7ce49b7aeb95ec2809c6f554c",
     "why": "L44 found the current route cannot emit the committed shapes (since L38 a roster page also carries the member revisions its content and claim items represent). Each fixture is now the current route's body for its scenario, with the member-source fields locator, resolved_ranges and locator_state; the dashboard expectations were updated to them.",
     "fixtures": [

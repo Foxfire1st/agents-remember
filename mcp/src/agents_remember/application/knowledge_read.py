@@ -190,7 +190,7 @@ def _guarded[T](
             context,
             selected_input_unavailable_refusal(
                 "read_knowledge_scope",
-                f"the selected knowledge database is absent or is not a file: {path}",
+                f"the selected knowledge index is absent or is not a file: {path}",
                 record_id=str(path),
             ),
         )
@@ -214,7 +214,7 @@ def _guarded[T](
             context,
             selected_input_unavailable_refusal(
                 "read_knowledge_scope",
-                f"the selected knowledge database could not be read: {error}",
+                f"the selected knowledge index could not be read: {error}",
                 record_id=str(path),
             ),
         )

@@ -1,15 +1,19 @@
-"""The crossing sync in the managed sync transaction, and the unconverted-line refusal (MIK-R24).
+"""The structural knowledge merge of the managed sync, and the unconverted-line refusal (MIK-R24).
 
-**Crossing sync (rule 8).** A memory merge is a crossing sync when at least one of its merge base,
-its own side and its incoming side lacks ``knowledge/layout.json`` and at least one has it. Before
-Git merges anything, :func:`crossing_plan` asks the bound ``KnowledgeCrossingPort`` for the
-structural merge of the three converted trees; a failing step is refused with its name and the line
-is left unchanged. After ``git merge --no-commit``, :func:`apply_crossing` replaces every
-``knowledge/`` and ``onboarding/`` path of the merge with the plan: clean paths are staged, and each
-conflicted path is left unmerged with its converted base, own and incoming versions as index stages
-1-3, so the ordinary resolution route (``continue``) is how the curator finishes it. The merge commit
-itself is validated against converted bases (rule 7) when it is committed. The crossing sync's own
-commit converts the line; there is no separate conversion commit.
+**Every memory merge with a converted side merges structurally (MIK-R24 rule 8 step 3, MIK-R26
+rule 2).** :func:`merge_structure` reads the layout marker of the merge base, the own side and the
+incoming side. When all three are converted, the three trees merge as they are. When at least one is
+unconverted and at least one converted, the merge is a *crossing sync* (rule 8): markers move and
+the unconverted trees are converted first. Only a merge of three unconverted trees is plain Git.
+
+Before Git merges anything, :func:`crossing_plan` asks the bound ``KnowledgeCrossingPort`` for the
+structural merge of the three trees; a failing step is refused with its name and the line is left
+unchanged. After ``git merge --no-commit``, :func:`apply_crossing` makes every ``knowledge/`` and
+``onboarding/`` path of the merge the plan's: clean paths are staged, and each conflicted path is
+left unmerged with its base, own and incoming versions as index stages 1-3, so the ordinary
+resolution route (``continue``) is how the curator finishes it. The merge commit itself is validated
+(MIK-R22), against converted bases (rule 7), when it is committed. A crossing sync's own commit
+converts the line; there is no separate conversion commit.
 
 **Unconverted lines (rule 9).** :func:`unconverted_line_refusal` is what a write or a memory-quality
 run calls on a leaf's memory tree: an unconverted tree whose official line is already converted is
@@ -70,14 +74,24 @@ def merge_base(worktree: Path, own: str, incoming: str) -> str:
     return _git(worktree, ["merge-base", own, incoming]).strip()
 
 
-def crossing_applies(repository: Path, base: str, own: str, incoming: str) -> bool:
-    """Rule 8: one of the three trees is unconverted and one is converted."""
+MergeStructure = Literal["plain", "converted", "crossing"]
+
+
+def merge_structure(repository: Path, base: str, own: str, incoming: str) -> MergeStructure:
+    """How the three trees of a memory merge are merged.
+
+    ``converted``: all three hold the layout marker and merge structurally as they are (MIK-R26
+    rule 2). ``crossing``: one is unconverted and one converted (MIK-R24 rule 8). ``plain``: none
+    is converted, so Git merges them as before.
+    """
 
     try:
         states = {has_layout_marker(repository, tree) for tree in (base, own, incoming)}
     except LayoutProbeError as error:
         raise CrossingSyncError(f"crossing sync step 'markers' failed: {error}") from error
-    return states == {True, False}
+    if states == {True}:
+        return "converted"
+    return "crossing" if True in states else "plain"
 
 
 def crossing_plan(
@@ -87,9 +101,14 @@ def crossing_plan(
     paired_code: PairedCode | None,
     owner: tuple[Literal["leaf", "master"], str],
 ) -> CrossingPlanView:
-    """Run steps 1-4 on (base, own, incoming) through the bound port; ``worktree`` is untouched."""
+    """Run steps 1-4 on (base, own, incoming) through the bound port; ``worktree`` is untouched.
 
-    if paired_code is None or not paired_code.commit:
+    A merge of three converted trees converts nothing, so it needs no paired code commit; a
+    crossing does, for the fallback cards of the trees it converts.
+    """
+
+    converting = merge_structure(worktree, *sides) == "crossing"
+    if converting and (paired_code is None or not paired_code.commit):
         raise CrossingSyncError(
             "crossing sync step 'convert' failed: the paired code commit is unknown, so the "
             "fallback cards have no code tree"
@@ -98,15 +117,15 @@ def crossing_plan(
     if port is None:
         raise CrossingSyncError(
             "crossing sync step 'convert' failed: the knowledge crossing is not bound in this "
-            "process, and a crossing sync is never merged as plain Git"
+            "process, and converted memory is never merged as plain Git"
         )
     try:
         return port.plan(
             CrossingRequest(
                 memory_repository=worktree,
                 sides=sides,
-                code_repository=paired_code.repository,
-                code_commit=paired_code.commit,
+                code_repository=worktree if paired_code is None else paired_code.repository,
+                code_commit="" if paired_code is None else paired_code.commit,
                 owner_kind=owner[0],
                 owner_id=owner[1],
             )
@@ -120,8 +139,25 @@ def _tracked(worktree: Path) -> set[str]:
     return {path for path in output.split("\0") if path}
 
 
+def _holds(target: Path, data: bytes) -> bool:
+    """Whether ``target`` is a regular file that already holds exactly ``data``."""
+
+    try:
+        return (
+            not target.is_symlink()
+            and target.stat().st_size == len(data)
+            and target.read_bytes() == data
+        )
+    except OSError:
+        return False
+
+
 def _write_plan_files(worktree: Path, plan: CrossingPlanView, tracked: set[str]) -> None:
-    """Delete the tracked paths the plan drops, and write every path it keeps."""
+    """Delete the tracked paths the plan drops, and write every path whose bytes it changes.
+
+    A path that already holds the plan's bytes is left alone, so an ordinary sync of converted
+    memory rewrites only what the merge changed and every other file keeps its file time.
+    """
 
     kept = {path for path, data in plan.files.items() if data is not None}
     for path in sorted(tracked - kept):
@@ -130,6 +166,8 @@ def _write_plan_files(worktree: Path, plan: CrossingPlanView, tracked: set[str])
         target = worktree / path
         if data is None:
             target.unlink(missing_ok=True)
+            continue
+        if _holds(target, data):
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -295,6 +333,7 @@ def crossing_summary(report_path: str) -> dict[str, object]:
         ],
         "conflictsTruncated": len(conflicts) > _PAYLOAD_CONFLICT_LIMIT,
         "cards": document.get("cards", {}),
+        "converted": document.get("converted", []),
         "markerRows": document.get("markerRows", 0),
         "recordConflictHistoryOwner": document.get("recordConflictHistoryOwner"),
         "howToResolve": HOW_TO_RESOLVE,

@@ -184,8 +184,17 @@ class _Card:
         named = _NAMED.match(finding)
         references = self.sidecar["references"]
         if named is not None and named["number"] in references:
-            self.reauthored[int(named["number"])] = line
-            return named["finding"].strip(), int(named["number"])
+            number = int(named["number"])
+            if number in self.reauthored:
+                # One run re-authors a reference once: a second row would overwrite the first
+                # row's reference and leave two evidence lines citing one number.
+                raise _Refused(
+                    f"lines {self.reauthored[number] + 1} and {line + 1} both re-author "
+                    f"reference [{number}]: keep one row, or give the other no number so it "
+                    "becomes a new reference"
+                )
+            self.reauthored[number] = line
+            return named["finding"].strip(), number
         number = self.next_number
         self.next_number += 1
         self.authored += 1

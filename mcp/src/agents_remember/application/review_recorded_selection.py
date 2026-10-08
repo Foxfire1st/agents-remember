@@ -35,6 +35,7 @@ from pathlib import Path
 import apsw
 
 from agents_remember.application.review_attribution import selected_subject
+from agents_remember.application.review_candidate_resolution import review_namespace
 from agents_remember.application.review_revision_comparison import SubjectRevisionSelection
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import (
@@ -410,26 +411,6 @@ def _relationship_ids(relationships: Sequence[ReviewRelationshipMovement]) -> tu
     )
 
 
-def _path_identities(
-    relationships: Sequence[ReviewRelationshipMovement],
-) -> dict[str, RecordedIdentity]:
-    """The recorded source paths one movement's sides name, with the identity each belongs to.
-
-    A realization's recorded address is a recorded relationship path, so a reference that names one
-    of them resolves to the identity the relationship sits under -- which is what lets a matrix row
-    or a signal that recorded an address, and not a revision identity, still be attributed.
-    """
-
-    return {
-        str(side.path): identity
-        for movement in relationships
-        for side in (*movement.before, movement.after)
-        if side is not None
-        and side.path is not None
-        and (identity := _side_identity(side)) is not None
-    }
-
-
 def _movement_path(movement: ReviewRelationshipMovement) -> str:
     """The recorded relationship spelling that reached one identity, in the movement's own words."""
 
@@ -500,7 +481,8 @@ def _snapshot_population(
         except (OSError, apsw.Error, KnowledgeStorageError):
             continue
         try:
-            _read_recorded_reach(population, connection, snapshots.repository_id, subject)
+            namespace = review_namespace(snapshots.repository_id, database)
+            _read_recorded_reach(population, connection, namespace, subject)
         except (OSError, apsw.Error, KnowledgeStorageError, ValueError):
             continue
         finally:

@@ -748,11 +748,20 @@ class LifecycleOperationStore:
         ]
         | None = None,
     ) -> LifecycleOperationRecord:
-        """Archive one exact terminal predecessor, then atomically publish N+1."""
+        """Archive one exact terminal predecessor, then atomically publish N+1.
+
+        A caller that finds the replacement already published (a live record of the candidate's
+        fingerprint that has a predecessor) is handed that record instead of a second successor.
+        That shortcut is for a record that is not terminal only: a terminal record of the same
+        fingerprint is itself a predecessor to replace. A direct landing cancelled by its own
+        refused publication is replaced by the same request any number of times, and each
+        successor carries its predecessor's fingerprint, which is its own.
+        """
         with exclusive_access(self.path, _OWNERSHIP):
             current = self.read()
             if (
                 current is not None
+                and current.status not in _TERMINAL
                 and current.fingerprint == candidate.fingerprint
                 and current.predecessorFingerprint
             ):

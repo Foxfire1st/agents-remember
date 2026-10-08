@@ -14,7 +14,7 @@ Why the tables are shaped this way:
   self-reference is ``DEFERRABLE INITIALLY DEFERRED`` like every shipped foreign key, so one
   transaction may insert a whole hierarchy without depending on insert order; the one-node cycle
   is a ``CHECK``, and the longer cycle is found by a recursive-CTE walk run inside the same
-  transaction before commit (:mod:`agents_remember.memory.knowledge.routes`).
+  transaction before commit in the retired canonical route writer.
 * ``knowledge_record`` is the envelope. It carries **no** content address, logical digest or
   fingerprint column, and that absence is what enforces requirement 3.3: a table with no
   identity-valued column cannot quietly become a second identity authority later.

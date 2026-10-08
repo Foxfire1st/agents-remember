@@ -66,6 +66,7 @@ from agents_remember.worktrees.knowledge_validation import (
 )
 from agents_remember.worktrees.modules.git import branch_commit, local_branch_ref
 from agents_remember.worktrees.services import (
+    DirectGateSource,
     DirectGateVerdict,
     KnowledgeGatePort,
     LandingGateRequest,
@@ -84,6 +85,7 @@ __all__ = [
     "closed_out_memory",
     "converted_memory",
     "direct_closing_receipt",
+    "direct_gate_source",
     "direct_gate_verdict",
     "forget_direct_closing",
     "keep_direct_closing",
@@ -273,7 +275,11 @@ def checkout_memory_converted(repository: Path) -> bool:
 
 
 def direct_gate_verdict(
-    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+    contract: WorktreeContract,
+    *,
+    code_commit: str,
+    memory_tree: str,
+    source: DirectGateSource | None = None,
 ) -> DirectGateVerdict:
     """The gate at direct landing over its exact candidate (``applies`` is False when unconverted)."""
 
@@ -288,7 +294,21 @@ def direct_gate_verdict(
     port = _port()
     if port is None:
         return DirectGateVerdict(True, None, GATE_UNBOUND)
-    return port.direct_verdict(contract, code_commit=code_commit, memory_tree=memory_tree)
+    if source is None:
+        return port.direct_verdict(contract, code_commit=code_commit, memory_tree=memory_tree)
+    return port.direct_verdict(
+        contract, code_commit=code_commit, memory_tree=memory_tree, source=source
+    )
+
+
+def direct_gate_source(
+    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+) -> DirectGateVerdict:
+    """Select the exact history source without judging an unfinished publication tree."""
+    port = _port()
+    if port is None:
+        return DirectGateVerdict(True, None, GATE_UNBOUND)
+    return port.direct_source(contract, code_commit=code_commit, memory_tree=memory_tree)
 
 
 def landing_gate_refusal(request: LandingGateRequest) -> str | None:
@@ -335,14 +355,18 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
 
 @dataclass(frozen=True)
 class HistoryClosing:
-    """One closing of a leaf's history file, and the bytes that were there (``None``: absent)."""
+    """One reversible file preparation, with its previous and exact written bytes."""
 
     path: Path
     previous: bytes | None
+    written: bytes | None
 
     def restore(self) -> None:
-        """Undo the closing, when the route refuses before its commit."""
+        """Undo this preparation on refusal while preserving an edit made afterward."""
 
+        current = self.path.read_bytes() if self.path.is_file() else None
+        if current != self.written:
+            return
         if self.previous is None:
             self.path.unlink(missing_ok=True)
         else:
@@ -382,13 +406,14 @@ def close_owner_history(memory_root: Path, owner: str) -> HistoryClosing:
         try:
             document = parse_json(previous.decode("utf-8"))
         except (UnicodeDecodeError, CanonicalFormatError):
-            return HistoryClosing(path, previous)
+            return HistoryClosing(path, previous, previous)
         if not isinstance(document, dict) or document.get("closed") is True:
-            return HistoryClosing(path, previous)
+            return HistoryClosing(path, previous, previous)
         document = {**document, "closed": True}
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, canonical_text(document))
-    return HistoryClosing(path, previous)
+    written = canonical_text(document)
+    atomic_write_text(path, written)
+    return HistoryClosing(path, previous, written.encode("utf-8"))
 
 
 DIRECT_CLOSING_RECEIPTS = "direct-landing-history-closings"
@@ -449,7 +474,10 @@ def _closed_blob(repository: Path | None, target: Path) -> str | None:
 
 
 def keep_direct_closing(
-    contract: WorktreeContract, closing: HistoryClosing, fingerprint: str
+    contract: WorktreeContract,
+    closing: HistoryClosing,
+    fingerprint: str,
+    ignore: HistoryClosing | None = None,
 ) -> bool:
     """Keep ``closing`` for the direct-landing generation ``fingerprint`` until it is decided.
 
@@ -464,15 +492,33 @@ def keep_direct_closing(
         return False
     repository = contract.memory_repo_path
     previous = closing.previous
+    if closing.written is None or closing.path.read_bytes() != closing.written:
+        raise ClosingReceiptError(
+            f"the direct landing's history {closing.path} changed before admission; nothing was admitted"
+        )
+    closed_blob = _closed_blob(repository, closing.path)
+    if closing.path.read_bytes() != closing.written:
+        raise ClosingReceiptError(
+            f"the direct landing's history {closing.path} changed before admission; nothing was admitted"
+        )
     document = {
         "schema": _RECEIPT_SCHEMA,
         "fingerprint": fingerprint,
         "repository": None if repository is None else str(repository),
         "path": closing.path.as_posix(),
         "previous": None if previous is None else base64.b64encode(previous).decode("ascii"),
-        "closed": _sha256(closing.path.read_bytes()),
-        "closedBlob": _closed_blob(repository, closing.path),
+        "closed": _sha256(closing.written),
+        "closedBlob": closed_blob,
     }
+    if ignore is not None and ignore.written != ignore.previous:
+        # The ignore rule the landing added for the ledger cache goes back with the closing.
+        document["ignore"] = {
+            "path": ignore.path.as_posix(),
+            "previous": None
+            if ignore.previous is None
+            else base64.b64encode(ignore.previous).decode("ascii"),
+            "written": None if ignore.written is None else _sha256(ignore.written),
+        }
     atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return True
 
@@ -578,11 +624,31 @@ def _landed(receipt: dict[str, Any]) -> bool:
     return held.returncode == 0 and held.stdout.strip() == blob
 
 
+def _restore_receipt_ignore(receipt: dict[str, Any]) -> None:
+    ignore = receipt.get("ignore")
+    if not isinstance(ignore, dict):
+        return
+    target = Path(ignore["path"])
+    current = target.read_bytes() if target.is_file() else None
+    written = ignore.get("written")
+    if (current is None) != (written is None) or (
+        current is not None and _sha256(current) != written
+    ):
+        return  # the rule's file changed since the landing wrote it: never overwritten
+    encoded = ignore.get("previous")
+    HistoryClosing(
+        target, None if encoded is None else base64.b64decode(str(encoded)), current
+    ).restore()
+
+
 def _restore_receipt(receipt: dict[str, Any]) -> bool:
+    _restore_receipt_ignore(receipt)
     target = Path(receipt["path"])
     current = target.read_bytes() if target.is_file() else None
     if current is None or _sha256(current) != receipt["closed"]:
         return False  # the file changed since the closing: it is never overwritten
     encoded = receipt.get("previous")
-    HistoryClosing(target, None if encoded is None else base64.b64decode(str(encoded))).restore()
+    HistoryClosing(
+        target, None if encoded is None else base64.b64decode(str(encoded)), current
+    ).restore()
     return True

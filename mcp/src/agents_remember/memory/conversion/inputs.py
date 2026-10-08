@@ -2,8 +2,10 @@
 
 Both readers return the same :class:`MemoryInput`: the exact bytes of every file under
 ``knowledge/`` and ``onboarding/`` (the route-index cache excluded, as the validator reads them) and a
-readable path to the tree's ``knowledge.sqlite`` when it has one. A database read from Git is copied
-to a scratch file first, because SQLite opens files, not blobs; it is only ever opened read-only.
+readable path to legacy ``knowledge.sqlite`` when conversion needs it. An already-converted Git
+tree returns its text files without resolving or materializing a historical database blob. A legacy
+database read from Git is copied to scratch because SQLite opens files, not blobs; it is opened
+read-only.
 """
 
 from __future__ import annotations
@@ -39,9 +41,11 @@ def memory_from_directory(root: Path, *, label: str | None = None) -> MemoryInpu
 def memory_from_git(
     repository: Path, treeish: str, scratch: Path, *, label: str | None = None
 ) -> MemoryInput:
-    """The memory tree ``treeish`` of ``repository``; its database is copied under ``scratch``."""
+    """The memory tree ``treeish``; only an unconverted tree's database is copied to ``scratch``."""
 
     tree = knowledge_tree_from_git(repository, treeish, label=label)
+    if tree.converted:
+        return MemoryInput(label=tree.label, files=tree.files, database=None)
     result = run_git(
         repository,
         ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{treeish}:{DATABASE_NAME}"],

@@ -31,6 +31,19 @@ from agents_remember.models.knowledge_files.documents import (
     record_path,
 )
 from agents_remember.models.knowledge_files.ids import derived_realization_id, derived_record_id
+from knowledge_rows_test_support import (
+    FamilyMemberRequest,
+    FamilyRequest,
+    FamilyRevisionRequest,
+    InvariantRequest,
+    RealizationClaimRequest,
+    RevisionDraft,
+    RevisionRequest,
+    families,
+    memberships,
+    open_knowledge_store,
+    realizations,
+)
 
 BLOB = "d8baa15ca43be010159ae15f6b0e744949e6d33a"
 INDEX_REWRITE_WAIT_SECONDS = 120.0
@@ -541,36 +554,21 @@ def build_parity_dataset(directory: Path) -> tuple[Path, str]:
     from datetime import UTC, datetime  # noqa: PLC0415
     from uuid import UUID, uuid4  # noqa: PLC0415
 
-    from agents_remember.memory.knowledge import (  # noqa: PLC0415
-        families,
-        memberships,
-        realizations,
-    )
-    from agents_remember.memory.knowledge.store import open_knowledge_store  # noqa: PLC0415
     from agents_remember.models.knowledge.authorship import Authorship  # noqa: PLC0415
     from agents_remember.models.knowledge.family import FamilyRevisionDraft  # noqa: PLC0415
-    from agents_remember.models.knowledge.graph import (  # noqa: PLC0415
-        FamilyMemberDraft,
-        RealizationClaimDraft,
-    )
+    from agents_remember.models.knowledge.graph import FamilyMemberDraft  # noqa: PLC0415
     from agents_remember.models.knowledge.repository import RepositoryIdentity  # noqa: PLC0415
-    from agents_remember.models.knowledge.result import (  # noqa: PLC0415
-        FamilyMemberRequest,
-        FamilyRequest,
-        FamilyRevisionRequest,
-        InvariantRequest,
-        NewAnchor,
-        RealizationClaimRequest,
-        RevisionDraft,
-        RevisionRequest,
-    )
     from agents_remember.models.knowledge.source import (  # noqa: PLC0415
         FileLocator,
-        GitBlobIdentity,
         LineRangeLocator,
-        SourceAnchorDraft,
         SymbolLocator,
     )
+    from anchor_fixture_models import (  # noqa: PLC0415
+        GitBlobIdentity,
+        RealizationClaimDraft,
+        SourceAnchorDraft,
+    )
+    from knowledge_rows_test_support import NewAnchor  # noqa: PLC0415
 
     def require(result: Any) -> None:
         assert result.state == "created", result.refusal
@@ -719,19 +717,14 @@ def add_parity_claim(database: Path, repository_id: str, name: str, path: str) -
     from datetime import UTC, datetime  # noqa: PLC0415
     from uuid import UUID, uuid4  # noqa: PLC0415
 
-    from agents_remember.memory.knowledge import realizations  # noqa: PLC0415
-    from agents_remember.memory.knowledge.store import open_knowledge_store  # noqa: PLC0415
     from agents_remember.models.knowledge.authorship import Authorship  # noqa: PLC0415
-    from agents_remember.models.knowledge.graph import RealizationClaimDraft  # noqa: PLC0415
-    from agents_remember.models.knowledge.result import (  # noqa: PLC0415
-        NewAnchor,
-        RealizationClaimRequest,
-    )
-    from agents_remember.models.knowledge.source import (  # noqa: PLC0415
-        FileLocator,
+    from agents_remember.models.knowledge.source import FileLocator  # noqa: PLC0415
+    from anchor_fixture_models import (  # noqa: PLC0415
         GitBlobIdentity,
+        RealizationClaimDraft,
         SourceAnchorDraft,
     )
+    from knowledge_rows_test_support import NewAnchor  # noqa: PLC0415
 
     store = open_knowledge_store(database, repository_id)
     try:

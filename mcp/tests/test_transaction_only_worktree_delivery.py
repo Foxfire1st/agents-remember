@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -27,6 +27,7 @@ from agents_remember.models.closeout.input import (
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
 )
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees import git_worktree_manager
@@ -34,11 +35,13 @@ from agents_remember.worktrees.integration.closeout import curator_coherence as 
 from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules import closeout_external
+from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import _commit_memory_content
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
+from agents_remember.worktrees.queue import closeout_recovery
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import load_contract
 from closeout_input_test_support import (
@@ -48,6 +51,8 @@ from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
+from test_knowledge_closeout_gate import CODE_A, LEAF, _edit, build_gated
+from test_knowledge_reopen import _public_closeout, _rows_for_the_edit, _write
 from test_source_lineage import _commit_on, _fixture, _git
 
 MESSAGES = CloseoutCommitMessages(
@@ -206,6 +211,379 @@ def _assert_memory_attribution(
         == f"Code-Commit: {code_commit}"
     )
     assert _git(memory_worktree, "ls-tree", "--name-only", content_commit, "--", "memory.md") == ""
+
+
+def _closeout_fixture(tmp_path):
+    """A leaf with a new code file and a new memory file, ready for the public closeout."""
+
+    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    contract = fixture.leaf_contract
+    assert contract.memory_repo_path is not None and contract.memory_worktree is not None
+    contract.memory_worktree.parent.mkdir(parents=True, exist_ok=True)
+    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
+    _git(
+        contract.memory_repo_path,
+        "worktree",
+        "add",
+        contract.memory_worktree.as_posix(),
+        contract.memory_work_branch,
+    )
+    _git(
+        fixture.code_repo,
+        "worktree",
+        "add",
+        contract.code_worktree.as_posix(),
+        contract.code_work_branch,
+    )
+    (contract.memory_worktree / "onboarding").mkdir(exist_ok=True)
+    (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    ensure_fixture_waiting_door(contract, force_synthetic=True)
+    contract = load_contract(contract.contract_path)
+    _bind_task_without_review(contract)
+    return contract, _public_config(tmp_path, contract)
+
+
+def _apply(config, contract) -> dict:
+    with mock.patch.object(lifecycle_operations, "require_first_ready_generation"):
+        return worktree_tools.worktree_closeout_apply_tool(
+            config,
+            contract.contract_path.as_posix(),
+            MESSAGES,
+            CloseoutApproval(intent_note="approved confined transaction"),
+        )
+
+
+def _move_branch(repository: Path) -> None:
+    """Publish one foreign commit on the repository's current branch, as another session would."""
+
+    foreign = _git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "foreign")
+    _git(repository, "update-ref", "HEAD", foreign)
+
+
+SEAMS = {
+    # Where inside ``publish_tree_commit`` the branch is moved, and what the refusal then says. The
+    # tip check names a move that happened before it; only the expected-old move of the ref can
+    # name one that happened after the commit object was written.
+    "before-tip-check": r"moved from .* after this closeout admitted it, so nothing was published",
+    "after-commit-written": r"moved while this closeout published, so nothing was published",
+}
+
+
+@contextmanager
+def _branch_race(repository: Path, seam: str):
+    """Move ``repository``'s branch with a foreign commit at one seam of the shared publication."""
+
+    native = git_owner.run_git
+    fired: list[bool] = []
+
+    def race(repo, args, *extra):
+        # The publication's own first read of the unfinished-action markers precedes its HEAD and
+        # tip checks; ``commit-tree`` follows them.
+        trigger = {"before-tip-check": "--git-path", "after-commit-written": "commit-tree"}[seam]
+        before_call = seam == "before-tip-check" and trigger in args and "MERGE_HEAD" in args
+        if repo == repository and not fired and before_call:
+            fired.append(True)
+            _move_branch(repository)
+        result = native(repo, args, *extra)
+        if repo == repository and not fired and seam == "after-commit-written" and trigger in args:
+            fired.append(True)
+            _move_branch(repository)
+        return result
+
+    with mock.patch.object(git_owner, "run_git", race):
+        yield
+    assert fired, f"the seam {seam} was never reached"
+
+
+@pytest.mark.parametrize("late", ("worktree", "index"))
+def test_ordinary_code_commit_is_the_admitted_tree_and_keeps_a_later_edit(
+    tmp_path, worktree_services, late
+):
+    """R5-3 for the code side: a file edited while the commit object is written is not committed
+    and does not refuse the closeout; it stays an uncommitted change."""
+
+    contract, config = _closeout_fixture(tmp_path)
+    native = git_owner.run_git
+    seen: list[str] = []
+
+    def edited_at_commit(repository, args, *extra):
+        if args[0] == "commit-tree" and repository == contract.code_worktree:
+            seen.append(args[1])
+            path = repository / "feature.py"
+            path.write_text("late user bytes\n", encoding="utf-8")
+            if late == "index":
+                _git(repository, "add", "--", "feature.py")
+                path.write_text("VALUE = 1\n", encoding="utf-8")
+        return native(repository, args, *extra)
+
+    with mock.patch.object(git_owner, "run_git", edited_at_commit):
+        applied = _apply(config, contract)
+    assert applied["ok"] is True, applied
+    code = contract.code_worktree
+    assert _git(code, "rev-parse", "HEAD^{tree}") == seen[0]
+    assert _git(code, "show", "HEAD:feature.py") == "VALUE = 1"
+    assert _git(code, "diff", "--name-only") == "feature.py"  # the index and worktree differ
+    assert _git(code, "diff", "--cached", "--name-only") == (
+        "feature.py" if late == "index" else ""
+    )
+
+
+def _code_and_memory_state(contract) -> tuple[str, ...]:
+    """Every fact a refused publication must give back: the refs, the index and the files."""
+
+    return tuple(
+        _git(repository, *arguments)
+        for repository in (contract.code_worktree, contract.memory_worktree)
+        for arguments in (
+            ("rev-parse", "HEAD"),
+            ("ls-files", "--stage"),
+            ("status", "--porcelain=v1", "--untracked-files=all"),
+        )
+    )
+
+
+@pytest.mark.parametrize("seam", SEAMS)
+def test_a_moved_code_branch_refuses_the_closeout_and_a_retry_completes_it(
+    tmp_path, worktree_services, seam
+):
+    contract, config = _closeout_fixture(tmp_path)
+    before = _code_and_memory_state(contract)
+    with (
+        _branch_race(contract.code_worktree, seam),
+        pytest.raises(RuntimeError, match=SEAMS[seam]),
+    ):
+        _apply(config, contract)
+    code = contract.code_worktree
+    assert _git(code, "rev-list", "--all", "--count") == _git(code, "rev-list", "HEAD", "--count")
+    after = _code_and_memory_state(contract)
+    assert after[0] != before[0] and after[1:3] == before[1:3] and after[3:] == before[3:]
+    assert _git(code, "log", "-1", "--format=%s") == "foreign"
+
+    applied = _apply(config, contract)  # the cause is gone: a plain retry completes
+    assert applied["ok"] is True, applied
+    assert _git(code, "show", "HEAD:feature.py") == "VALUE = 1"
+    assert _git(code, "log", "-1", "--format=%s") == MESSAGES.code
+
+
+@pytest.mark.parametrize("seam", SEAMS)
+def test_a_moved_memory_branch_leaves_the_pair_to_the_recovery_a_retry_runs(
+    tmp_path, worktree_services, seam
+):
+    """The code commit landed, the memory publication was refused, nothing of the memory side
+    stayed behind, and the rerun finishes the same pair on the code commit that landed."""
+
+    contract, config = _closeout_fixture(tmp_path)
+    memory = contract.memory_worktree
+    assert memory is not None
+    memory_before = tuple(
+        _git(memory, *arguments)
+        for arguments in (("ls-files", "--stage"), ("status", "--porcelain=v1", "-uall"))
+    )
+    with _branch_race(memory, seam), pytest.raises(RuntimeError, match=SEAMS[seam]):
+        _apply(config, contract)
+    landed_code = _git(contract.code_worktree, "rev-parse", "HEAD")
+    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    assert _git(memory, "rev-list", "--all", "--count") == _git(
+        memory, "rev-list", "HEAD", "--count"
+    )
+    assert (
+        _git(memory, "ls-files", "--stage"),
+        _git(memory, "status", "--porcelain=v1", "-uall"),
+    ) == memory_before
+    assert load_contract(contract.contract_path).closeout_status != "completed"
+
+    applied = _apply(config, contract)
+    assert applied["ok"] is True, applied
+    closed = load_contract(contract.contract_path)
+    assert closed.closeout_status == "completed" and closed.code_commit == landed_code
+    assert _git(memory, "show", "HEAD:feature.md") == "# Feature"
+    assert _git(memory, "rev-parse", "HEAD") == closed.memory_content_commit
+
+
+@pytest.mark.parametrize("refusal", (*SEAMS, "switched"))
+def test_a_refused_converted_memory_publication_gives_back_every_preparation(
+    tmp_path, worktree_services, refusal
+):
+    """On converted memory the closeout closes the leaf's history and may add an ignore rule. A
+    branch that moved (before the tip check or after the commit object was written), or a HEAD
+    switched to another branch, refuses at publication: the history file is open again byte for
+    byte, the ignore rule is gone, the index is as it was, and the rerun after the cause is gone
+    completes."""
+
+    world = build_gated(tmp_path)
+    _edit(world, CODE_A.replace("return value", "return -value"))
+    _write(world, _rows_for_the_edit())
+    history = world.memory / f"knowledge/history/{LEAF}.json"
+    ignore = world.memory / ".gitignore"
+    opened = history.read_bytes(), ignore.exists()
+    index = _git(world.memory, "ls-files", "--stage")
+    status = _git(world.memory, "status", "--porcelain=v1", "-uall")
+    _git(world.memory, "branch", "elsewhere")
+    published = closeout_external.publish_tree_commit
+
+    def switched(repository, message, **kwargs):
+        _git(repository, "symbolic-ref", "HEAD", "refs/heads/elsewhere")
+        try:
+            return published(repository, message, **kwargs)
+        finally:
+            _git(repository, "symbolic-ref", "HEAD", kwargs["before"].headRef)
+
+    if refusal == "switched":
+        race = mock.patch.object(closeout_external, "publish_tree_commit", switched)
+        match = "HEAD names refs/heads/elsewhere.*nothing was published; "
+    else:
+        race = _branch_race(world.memory, refusal)
+        match = SEAMS[refusal]
+    with race, pytest.raises(RuntimeError, match=match):
+        _public_closeout(world)
+    assert (history.read_bytes(), ignore.exists()) == opened
+    assert json.loads(history.read_text())["closed"] is False
+    assert _git(world.memory, "ls-files", "--stage") == index
+    # The closeout's metadata refresh (``overview.index.json``) is not a preparation it takes back.
+    assert [
+        row
+        for row in _git(world.memory, "status", "--porcelain=v1", "-uall").splitlines()
+        if not row.endswith("overview.index.json")
+    ] == status.splitlines()
+    # No ref reaches a commit the closeout made: everything reachable is on the current branch.
+    assert _git(world.memory, "rev-list", "--all", "--count") == _git(
+        world.memory, "rev-list", "HEAD", "--count"
+    )
+
+    closed = _public_closeout(world)
+    assert closed.payload["state"] == "closed"
+    memory = closed.payload["memory_content_commit"]
+    assert json.loads(_git(world.memory, "show", f"{memory}:knowledge/history/{LEAF}.json"))[
+        "closed"
+    ]
+
+
+def _converted_closeout_fixture(tmp_path):
+    """The public closeout fixture on converted memory, with a branch ``elsewhere`` on each side."""
+
+    contract, config = _closeout_fixture(tmp_path)
+    assert contract.memory_worktree is not None
+    layout = contract.memory_worktree / "knowledge" / "layout.json"
+    layout.parent.mkdir(exist_ok=True)
+    layout.write_text(
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}), encoding="utf-8"
+    )
+    for repository in (contract.code_worktree, contract.memory_worktree):
+        _git(repository, "branch", "elsewhere")
+    return contract, config
+
+
+def _memory_preparations(contract) -> tuple[object, ...]:
+    """What a refused memory publication gives back: the leaf's history file and the ignore rule."""
+
+    memory = contract.memory_worktree
+    history = memory / f"knowledge/history/{contract.leaf_id}.json"
+    ignore = memory / ".gitignore"
+    return (
+        history.read_bytes() if history.is_file() else None,
+        ignore.read_bytes() if ignore.is_file() else None,
+        _git(memory, "ls-files", "--stage"),
+    )
+
+
+UNADMITTED = {
+    # (what happens to the checkout, the side, the moment) -> what the refusal says. The moment is
+    # after the mandatory gate judged the tree ("judged") or when the publication takes the Git
+    # snapshot it is bound to ("intent", after the closeout's own check just before it).
+    ("switched", "memory", "intent"): r"memory worktree's HEAD names refs/heads/elsewhere, not",
+    ("moved", "memory", "intent"): r"moved from \w+ to \w+ after this closeout read the memory",
+    ("detached", "memory", "judged"): r"memory worktree's HEAD names no branch \(it is detached\)",
+    # Review R3, finding 3: a failure between the preparation and the publication restores too.
+    ("detached", "memory", "intent"): r"symbolic-ref",
+    ("journal", "memory", "intent"): r"the operation journal could not record the intent",
+    ("switched", "code", "intent"): r"code worktree's HEAD names refs/heads/elsewhere, not",
+    ("moved", "code", "judged"): r"moved from \w+ to \w+ after this closeout read the code",
+}
+
+
+def _disturb(repository: Path, event: str) -> None:
+    """Switch the checkout to another branch, detach it, or move its branch as another session."""
+
+    if event == "switched":
+        _git(repository, "symbolic-ref", "HEAD", "refs/heads/elsewhere")
+    elif event == "detached":
+        _git(repository, "update-ref", "--no-deref", "HEAD", _git(repository, "rev-parse", "HEAD"))
+    elif event == "moved":
+        _move_branch(repository)
+
+
+@contextmanager
+def _disturbed(contract, event: str, side: str, moment: str):
+    """Apply ``event`` once to ``side``'s checkout at ``moment`` of the closeout; yields the log."""
+
+    repository = contract.code_worktree if side == "code" else contract.memory_worktree
+    owner = closeout_recovery if side == "code" else closeout_external
+    begin, gate_calls, fired = owner.begin_git_mutation, [], []
+
+    def judged(*_args, **_kwargs):
+        # The gate is asked before the code commit (the preflight) and at the memory commit.
+        gate_calls.append(True)
+        if moment == "judged" and len(gate_calls) == (1 if side == "code" else 2):
+            fired.append(True)
+            _disturb(repository, event)
+
+    def intent(args, **kwargs):
+        if moment == "intent" and kwargs["leg"] == side and not fired:
+            fired.append(True)
+            _disturb(repository, event)
+            if event == "journal":
+                raise RuntimeError("the operation journal could not record the intent")
+        return begin(args, **kwargs)
+
+    with (
+        mock.patch.object(closeout_external, "leaf_gate_refusal", side_effect=judged),
+        mock.patch.object(owner, "begin_git_mutation", intent),
+    ):
+        yield fired
+
+
+@pytest.mark.parametrize(("event", "side", "moment"), UNADMITTED)
+def test_the_publication_is_bound_to_the_branch_and_the_head_the_closeout_admitted(
+    tmp_path, worktree_services, event, side, moment
+):
+    """Review R3, findings 2 and 3, through ``worktree_closeout_apply`` on converted memory. A
+    checkout switched to another branch, detached, or moved by someone else's commit between the
+    judgment and the publication refuses: no branch receives a commit of the refused side, the
+    leaf's history file and the ignore rule are as before, and the plain rerun completes."""
+
+    contract, config = _converted_closeout_fixture(tmp_path)
+    assert contract.memory_worktree is not None
+    repository = contract.code_worktree if side == "code" else contract.memory_worktree
+    branch = _git(repository, "symbolic-ref", "HEAD")
+    before = _memory_preparations(contract), _code_and_memory_state(contract)[:3]
+    with _disturbed(contract, event, side, moment) as fired:
+        with pytest.raises(RuntimeError, match=UNADMITTED[event, side, moment]):
+            _apply(config, contract)
+        assert fired
+        # Nothing of the refused side is committed anywhere: every ref of the repository names
+        # what it named, except the branch someone else moved.
+        foreign = _git(repository, "rev-parse", "HEAD") if event == "moved" else None
+        _git(repository, "symbolic-ref", "HEAD", branch)
+        commits = set(_git(repository, "rev-list", "--all").split())
+        assert _git(repository, "log", "-1", "--format=%s") in {"foreign", "base", "memory base"}
+        assert _git(repository, "rev-parse", "elsewhere") in commits - {foreign}
+        if side == "code":
+            assert _code_and_memory_state(contract)[1:3] == before[1][1:3]
+        else:  # the code commit of the pair landed; the rerun completes the pair on it
+            assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+        assert _memory_preparations(contract) == before[0]
+
+        applied = _apply(config, contract)  # the cause is gone: the plain rerun completes
+    assert applied["ok"] is True and applied["state"] == "closed", applied
+    closed = load_contract(contract.contract_path)
+    memory = contract.memory_worktree
+    assert _git(memory, "rev-parse", "HEAD") == closed.memory_content_commit
+    assert _git(contract.code_worktree, "rev-parse", "HEAD") == closed.code_commit
+    history = _git(memory, "show", f"HEAD:knowledge/history/{contract.leaf_id}.json")
+    assert json.loads(history)["closed"] is True
+    for repo in (contract.code_worktree, memory):
+        assert _git(repo, "rev-parse", "elsewhere") != _git(repo, "rev-parse", "HEAD")
 
 
 def test_public_closeout_commits_code_and_memory_without_acceptance_tools(

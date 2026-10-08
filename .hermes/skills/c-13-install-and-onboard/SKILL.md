@@ -308,8 +308,8 @@ unless a memory repo is already present and resolvable:
    to the resolved memory location, then adopt it as the Git-attributed baseline with
    `c-10-adopt-memory-baseline`. Its onboarding already exists, so skip Stage 5's
    onboarding half — but **do not skip Stage 5's knowledge half**: an existing
-   memory repo is exactly the case that can have Markdown onboarding and no
-   knowledge database, so read the knowledge state and run the foundation step
+   memory repo is exactly the case that can have onboarding and no
+   knowledge records, so read the knowledge state and run the foundation step
    when the location is `not-recorded`. An `unusable` location is reported with
    its code and path and repaired first: nothing is written over it.
 
@@ -323,7 +323,7 @@ rewrite or delete it, and never treat it as an already-present memory layer.
 ## Stage 5 - Bootstrap, The Knowledge Foundation, Then The First Baseline
 
 Run this stage's onboarding and baseline halves only when Stage 4 scaffolded a new memory repo; the
-knowledge half applies to **both** memory-repo answers, because a `recorded` knowledge database is not
+knowledge half applies to **both** memory-repo answers, because a `recorded` knowledge foundation is not
 something an existing memory repo is guaranteed to have. Stage 5 has three parts:
 
 1. **Reach the repository's knowledge foundation** - hand off to
@@ -334,17 +334,17 @@ something an existing memory repo is guaranteed to have. Stage 5 has three parts
    `memory_init` returns a `knowledge` block naming where the repository's
    foundation lives and what a read of that location finds now (`not-recorded`,
    `recorded` at an exact identity, `unusable`, or a refused admission with its
-   own `nextAction`), and `agents-remember knowledge-bootstrap --repo <repo_id>
-   --status` reports the same location read-only. Say which state it is, and run
+   own `nextAction`). Say which state it is, and run
    the foundation step when the location is `not-recorded`. An `unusable` location
    is reported with its code and path and repaired before anything is written to
-   it: the writer refuses that destination by name rather than overwriting it.
+   it. A memory tree in the legacy format is refused by the writer as
+   `legacy-format`, naming the conversion command.
 
    This part is **not conditional on the other two**: it needs a memory line that
    resolves `HEAD`, not an onboarding corpus and not an adopted baseline, and
    onboarding is optional input to it rather than a precondition. It authors
    knowledge records through the curator's own writer, so this skill never
-   populates a database itself, never invents records to make setup look
+   writes knowledge records itself, never invents records to make setup look
    finished, and never creates a development leaf, worktree or enclosure to give
    the writer an argument list it does not need — and it never names a role the
    opener will not admit: a taskless curator seat IS admitted (the developer's
@@ -411,10 +411,9 @@ Summarize:
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
 6. bootstrap: run via `c-03-repo-bootstrap` or skipped;
-7. knowledge foundation: the state read from `memory_init`'s `knowledge` block or
-   `agents-remember knowledge-bootstrap --status`, and then either the foundation
-   run carried as `c-14-knowledge-bootstrap` states, with its published dataset
-   identity, or the exact reason it was not run;
+7. knowledge foundation: the state read from `memory_init`'s `knowledge` block,
+   and then either the foundation run carried as `c-14-knowledge-bootstrap`
+   states, with the records it wrote, or the exact reason it was not run;
 8. first baseline: `memory_baseline_status` before and after adoption, the adoption
    result at its memory-content commit, or the exact reason it was not run;
 9. providers: indexing status and any deferred/degraded state;

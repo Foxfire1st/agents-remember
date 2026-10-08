@@ -31,6 +31,7 @@ from agents_remember.application.knowledge_writer.writer import WriteRequest, wr
 from agents_remember.application.memory_quality import controller
 from agents_remember.application.memory_scope import MemoryScope, MemoryScopeIdentity
 from agents_remember.errors import CuratorCoherenceError
+from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.mcp.tools.knowledge import (
     IntegrityCheckRequest,
     knowledge_integrity_check_payload,
@@ -392,6 +393,11 @@ def test_the_tool_returns_the_latest_worklist_and_the_checklist_shows_it(leaf: L
     contract = leaf.contract()
     absent = knowledge_integrity_check_payload(IntegrityCheckRequest(contractPath=str(contract)))
     assert absent["state"] == "reported" and absent["worklistState"] == "absent"
+    # MIK-R26 rule 5: the leaf's memory worktree is validated against its recorded base and its
+    # code worktree, and the report rides beside the worklist.
+    assert absent["memoryRoot"] == str(leaf.memory) and absent["codeRoot"] == leaf.code.as_posix()
+    assert absent["bases"] == [load_contract(contract).memory_base_commit]
+    assert absent["validation"]["ok"] is True, absent["validation"]
     (leaf.code / CODE_FILE).write_text(CODE_V1.replace("return value", "return -value"))
     document = leaf_worklist(load_contract(contract))
     assert document is not None
@@ -610,7 +616,12 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         ),
         code_root=leaf.code,
         onboarding_root=leaf.memory / "onboarding",
-        context=mock.Mock(),
+        # The onboarding trace gate resolves each changed path's storage from the real settings.
+        context=mock.Mock(
+            storage=StorageSettings(),
+            code_repository_name="agents-remember",
+            onboarding_root=leaf.memory / "onboarding",
+        ),
         curator_report_path=report,
         contract=contract,
         pair_identity=pair,

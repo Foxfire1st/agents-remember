@@ -40,17 +40,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from agents_remember.memory.knowledge import families, memberships, realizations
-from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_knowledge_store
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.graph import (
-    FamilyMemberDraft,
-    RealizationClaimDraft,
-    RealizationRole,
-)
+from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.result import (
+from agents_remember.models.knowledge.source import FileLocator, LineRangeLocator, SourceLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from knowledge_rows_test_support import (
     FamilyMemberRequest,
     FamilyRequest,
     FamilyRevisionRequest,
@@ -59,13 +55,11 @@ from agents_remember.models.knowledge.result import (
     RealizationClaimRequest,
     RevisionDraft,
     RevisionRequest,
-)
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    LineRangeLocator,
-    SourceAnchorDraft,
-    SourceLocator,
+    RowStore,
+    families,
+    memberships,
+    open_knowledge_store,
+    realizations,
 )
 
 # Stable prose so a reopened comparison is meaningful rather than incidental.
@@ -180,7 +174,7 @@ class BranchingKnowledgeFixture:
     synchronization: FixtureRealization
     absent_source: FixtureRealization
 
-    def reopen(self) -> OpenedKnowledgeStore:
+    def reopen(self) -> RowStore:
         """Reopen the fixture store so a test reads what was really persisted."""
 
         return open_knowledge_store(self.database_path, self.repository_id)
@@ -307,7 +301,7 @@ class _FamilySeed:
 
 
 def _build_identity_half(
-    store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
+    store: RowStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
 ) -> None:
     repository_result = store.create_repository(_repository_identity(fixture))
     _require(fixture, "create_repository", repository_result.state, repository_result.refusal)
@@ -326,7 +320,7 @@ def _build_identity_half(
 
 
 def _build_graph_half(
-    store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
+    store: RowStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
 ) -> None:
     _create_second_and_third_invariants(store, fixture, authorship)
     _create_families(store, fixture)
@@ -334,7 +328,7 @@ def _build_graph_half(
 
 
 def _create_second_and_third_invariants(
-    store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
+    store: RowStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
 ) -> None:
     for invariant_id, revision_id, label, statement in (
         (
@@ -377,7 +371,7 @@ def _create_second_and_third_invariants(
         _require(fixture, "create_revision", revision.state, revision.refusal)
 
 
-def _create_families(store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture) -> None:
+def _create_families(store: RowStore, fixture: BranchingKnowledgeFixture) -> None:
     _create_family(
         store,
         fixture,
@@ -437,9 +431,7 @@ def _create_families(store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFix
         )
 
 
-def _create_family(
-    store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture, seed: _FamilySeed
-) -> None:
+def _create_family(store: RowStore, fixture: BranchingKnowledgeFixture, seed: _FamilySeed) -> None:
     created = families.create_family(
         store,
         FamilyRequest(
@@ -468,7 +460,7 @@ def _create_family(
 
 
 def _create_membership(
-    store: OpenedKnowledgeStore,
+    store: RowStore,
     fixture: BranchingKnowledgeFixture,
     member_id: str,
     family_revision_id: str,
@@ -490,7 +482,7 @@ def _create_membership(
 
 
 def _create_realizations(
-    store: OpenedKnowledgeStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
+    store: RowStore, fixture: BranchingKnowledgeFixture, authorship: Authorship
 ) -> None:
     recordings: tuple[tuple[FixtureRealization, SourceLocator, RealizationRole, str], ...] = (
         (

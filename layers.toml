@@ -211,12 +211,15 @@ charter = """
 Memory repository initialization, baseline adoption and carryover. Above memory_quality
 because adopting a baseline asks whether it is current.
 
-Experimental knowledge storage (`memory/knowledge/`) also lives here: the concrete APSW-backed
-SQLite candidate that holds repository, invariant and revision identity. It is a durable record
-store, so it ranks with the record stores rather than with the application that admits its
-writes. Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
+Knowledge is text in Git: cards and sidecars under `onboarding/` and records under `knowledge/`
+(file models in `models/knowledge_files/`). The derived index of a memory tree also lives here
+(`memory/knowledge_index/`, built with the schema and the read code of `memory/knowledge/`): an
+APSW-backed SQLite cache that is rebuilt from those files and that no caller writes. The canonical
+knowledge database is retired (MIK-R26); `memory/conversion/` holds the one reader of a legacy
+database. The index storage ranks with the record stores rather than with the application.
+Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
 `models/knowledge` values or an already-prepared result from `application`, and never import
-this package.
+`memory/knowledge/`.
 """
 
 [package.providers]

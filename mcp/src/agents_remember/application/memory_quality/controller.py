@@ -703,7 +703,7 @@ def _attach_curator_checklist(
             knowledge_review = curator_knowledge_review_summaries(coherence)
         gate_findings, gate_report_only = _onboarding_refresh_gate(
             scope,
-            changed_paths,
+            (changed_paths, _gate_changed_paths(prepared.worklist, changed_paths)),
             current_working_paths,
             (accepted_no_impact, accepted_route_no_impact),
             response,
@@ -825,9 +825,26 @@ def _needed_rows_dropped(
     return kept
 
 
+def _gate_changed_paths(
+    worklist: tuple[dict[str, Any], str | None] | None, census_paths: list[str]
+) -> list[str]:
+    """The changed source paths MIK-R30's gate judges: the worklist's own, when it is complete.
+
+    The gate compares the leaf's base B with its candidate C. The census compares from the recorded
+    closeout's code commit once a leaf has closed out, so for a leaf that continues afterwards its
+    paths are only the newer ones. The response's ``onboardingTrace`` block is computed over the
+    gate's paths, so the block and the gate name the same open traces (L37 carry).
+    """
+
+    document = None if worklist is None else worklist[0]
+    if document is None or document.get("state") != "complete":
+        return census_paths
+    return sorted({str(change["path"]) for change in document.get("changes") or ()})
+
+
 def _onboarding_refresh_gate(
     scope: MemoryScope,
-    changed_paths: list[str],
+    changed: tuple[list[str], list[str]],
     working_paths: list[str],
     no_impact: tuple[frozenset[str], frozenset[str]],
     response: dict[str, object],
@@ -836,16 +853,18 @@ def _onboarding_refresh_gate(
 
     A converted tree (K_B or K_C holds the layout marker) runs MIK-R30's history-file gate: one
     repair finding per missing trace, unnecessary rows report-only, and ``onboardingTrace`` on the
-    response. An unconverted tree runs today's Update History gate, unchanged.
+    response. An unconverted tree runs today's Update History gate, unchanged. ``changed`` is the
+    census's changed paths (the Update History gate's) and the gate's own (MIK-R30's).
     """
 
     contract = scope.contract
     assert contract is not None
+    changed_paths, traced_paths = changed
     memory_tree = scope.onboarding_root.parent
     trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
     if trace_sides is not None:
         trace, findings = onboarding_trace_gate_for_context(
-            scope.quality_context, changed_paths, trace_sides, working_paths=working_paths
+            scope.quality_context, traced_paths, trace_sides, working_paths=working_paths
         )
         response["onboardingTrace"] = trace.brief()
         return list(findings), trace.report_only_findings()

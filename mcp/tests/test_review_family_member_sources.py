@@ -27,18 +27,20 @@ from agents_remember.application.review_family_rosters import (
     open_family_side,
     read_family_roster,
 )
-from agents_remember.memory.knowledge import realizations
-from agents_remember.memory.knowledge.store import open_knowledge_store
-from agents_remember.models.knowledge.graph import RealizationClaimDraft, RealizationRole
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
+from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyMemberSource
 from agents_remember.models.knowledge.source import (
     FileLocator,
-    GitBlobIdentity,
     LineRangeLocator,
-    SourceAnchorDraft,
     SourceLocator,
     SymbolLocator,
+)
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
 )
 from read_scope_test_support import ReadScopeFixture, build_read_scope_fixture
 

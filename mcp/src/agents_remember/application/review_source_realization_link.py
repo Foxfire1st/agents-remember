@@ -58,6 +58,12 @@ from agents_remember.application.review_comparison_generation import (
     read_manifest,
     task_root_for_review,
 )
+from agents_remember.application.review_tree_comparison import (
+    comparison_directory,
+    comparison_records,
+    reopened_trees,
+    tree_resolution,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import fetch_realizations_at_path
@@ -132,23 +138,36 @@ def recorded_realization_link(
                 "not matched to a nearby spelling"
             ),
         )
-    try:
-        namespace = review_namespace(
-            bound.resolution.repository_id, bound.resolution.candidate_database
-        )
-    except KnowledgeStorageError as error:
-        return RealizationLink(
-            linking_sides=(),
-            detail=(
-                f"the namespace of {bound.description} could not be read from the record beside "
-                f"its dataset ({error}), so neither half was read"
-            ),
-            determined=False,
-        )
     readings = tuple(
-        _side_reading(side, database, namespace, request.path) for side, database in _halves(bound)
+        _bound_side_reading(bound, side, database, request.path)
+        for side, database in _halves(bound)
     )
     return _link_of(bound, readings)
+
+
+def _bound_side_reading(
+    bound: _BoundKnowledge, side: KnowledgeSide, database: Path, path: str
+) -> _SideReading:
+    """A positive link survives a lost sibling side; unavailable/partial trees prove no absence."""
+    resolution = bound.resolution
+    for name, state, detail in resolution.knowledge_unavailable:
+        if name == side:
+            return _SideReading(side, "unread", f"the {side} knowledge side is {state}: {detail}")
+    trees = resolution.trees
+    wire = None if trees is None else next(one for one in trees.sides() if one.side == side)
+    if wire is not None and wire.state != "available":
+        return _SideReading(
+            side, "unread", f"the {side} memory tree {wire.tree} is {wire.state}: {wire.detail}"
+        )
+    namespace = review_namespace(resolution.repository_id, database)
+    reading = _side_reading(side, database, namespace, path)
+    if wire is not None and wire.index_state == "partial" and reading.state != "linked":
+        return _SideReading(
+            side,
+            "unread",
+            f"the {side} memory tree {wire.tree} has a partial index: {wire.problems}",
+        )
+    return reading
 
 
 def _link_of(bound: _BoundKnowledge, readings: tuple[_SideReading, ...]) -> RealizationLink:
@@ -201,6 +220,20 @@ def _bound_knowledge(
             description="the knowledge this leaf's review binds to the requested pair",
         )
     task_root = task_root_for_review(config, request.repository_id, request.master)
+    if resolved.contract is not None:
+        for record in reversed(comparison_records(task_root, resolved.leaf_id)):
+            if (record.code_base.commit or record.code_base.tree, record.code_candidate.tree) != (
+                request.before_code_tree_id,
+                request.after_code_tree_id,
+            ):
+                continue
+            trees = reopened_trees(
+                config.coordination_root, record, comparison_directory(task_root, resolved.leaf_id)
+            )
+            return _BoundKnowledge(
+                resolution=tree_resolution(resolved.repository_id, resolved.contract, trees),
+                description=f"the memory trees recorded by comparison {record.number} for exactly the requested source pair",
+            )
     for ref in reversed(read_generation_refs(task_root, resolved.leaf_id)):
         try:
             manifest = read_manifest(ref.directory / COMPARISON_MANIFEST_NAME)

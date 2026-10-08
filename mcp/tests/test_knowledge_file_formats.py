@@ -20,14 +20,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from agents_remember.models.knowledge.facet import (
-    AssumptionPayload,
-    DiagnosticGuidancePayload,
-    FailureModePayload,
-    LimitationPayload,
-    ScenarioPayload,
-    TerminologyPayload,
-)
 from agents_remember.models.knowledge_files import (
     RECORD_MODELS,
     RECORD_PREFIXES,
@@ -53,7 +45,7 @@ from agents_remember.models.knowledge_files.ids import (
     crockford_base32,
 )
 from agents_remember.models.knowledge_files.records import schema_name
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "knowledge_files"
 BLOB = "0" * 40
@@ -293,21 +285,6 @@ def test_every_record_kind_parses_round_trips_and_refuses_a_foreign_prefix(
             link["alternative"] = 0
         with pytest.raises(ValidationError, match="not allowed"):
             parse_document(_record(kind, links=[link]))
-
-
-def test_facet_records_carry_todays_payload_fields_plus_links() -> None:
-    shared = {"schema_", "id", "origin", "links", "revision", "status"}
-    facets: tuple[tuple[RecordKind, type[BaseModel]], ...] = (
-        ("assumption", AssumptionPayload),
-        ("limitation", LimitationPayload),
-        ("failure_mode", FailureModePayload),
-        ("scenario", ScenarioPayload),
-        ("diagnostic", DiagnosticGuidancePayload),
-        ("term", TerminologyPayload),
-    )
-    for kind, payload in facets:
-        record_fields = set(RECORD_MODELS[kind].model_fields) - shared
-        assert record_fields == set(payload.model_fields) - {"facet_kind"}, kind
 
 
 # ------------------------------------------------------------------------------------------------

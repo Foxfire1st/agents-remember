@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from agents_remember.application.review_comparison_generation import ComparisonArtifactReference
 from agents_remember.models.knowledge.detection import DetectionSignalPayload
@@ -47,6 +47,7 @@ from agents_remember.models.knowledge.review_applicability import (
     ReviewContextRecord,
     ReviewDisplayedApplicability,
 )
+from agents_remember.models.knowledge.review_records import evidence_classes_unread
 from agents_remember.models.knowledge.view import ReviewMatrixRow
 from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessment,
@@ -256,7 +257,7 @@ def evidence_pane(
     )
     assessments = assessment_displays(records, subjects, applicability)
     return ReviewEvidencePane(
-        evidence_state="recorded" if links or observations else "none_recorded",
+        evidence_state=_evidence_state(bool(links or observations), records.channels),
         assessment_state="assessed" if assessments else "unassessed",
         evidence_links=links,
         observations=observations,
@@ -266,6 +267,20 @@ def evidence_pane(
         context=applicability.context_of(EVIDENCE_APPLICABILITY_CLASSES),
         applicability=applicability.summaries_of(EVIDENCE_APPLICABILITY_CLASSES),
     )
+
+
+def _evidence_state(
+    displayed: bool, channels: Sequence[ReviewRecordChannel]
+) -> Literal["recorded", "none_recorded", "unavailable"]:
+    """The pane's summary of its evidence classes, in agreement with their channels.
+
+    ``none_recorded`` is a measured zero. A pane that displays no evidence while one of its evidence
+    classes could not be read did not measure one, so it says ``unavailable`` like that channel.
+    """
+
+    if displayed:
+        return "recorded"
+    return "unavailable" if evidence_classes_unread(channels) else "none_recorded"
 
 
 def subject_states(records: ReviewRecordInputs) -> Mapping[str, SubjectAssessmentState]:

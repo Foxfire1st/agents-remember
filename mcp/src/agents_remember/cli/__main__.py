@@ -1,13 +1,13 @@
 """Umbrella command-line entrypoint: ``agents-remember <subcommand>``.
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
-maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter, ``knowledge-convert`` conversion,
-``knowledge-validate`` validator, ``knowledge-index`` derived index, ``knowledge-worklist``
-change-to-knowledge worklist and read-only
+maintenance and migration commands, the knowledge file writer's ``knowledge-ingest`` and its
+**taskless** ``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format``
+formatter, ``knowledge-convert`` conversion, ``knowledge-validate`` validator, ``knowledge-index``
+derived index, ``knowledge-worklist`` change-to-knowledge worklist and read-only
 ``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
-and report, the review plane's ``review-record-comparison`` entry, the Paseo runtime commands,
-and the existing ``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
+and report, ``knowledge-copies`` for retired dataset cleanup, and the Paseo runtime commands,
+as subparsers. The MCP server keeps its own ``agents-remember-mcp``
 console script -- harness configs launch the server by that exact name, so it is never folded in
 here.
 """
@@ -22,6 +22,7 @@ from agents_remember.cli import (
     knowledge_bootstrap,
     knowledge_census,
     knowledge_convert,
+    knowledge_copies,
     knowledge_format,
     knowledge_index,
     knowledge_ingest,
@@ -32,7 +33,6 @@ from agents_remember.cli import (
     memory_backfill,
     memory_citations,
     paseo_runtime,
-    review_comparison_record,
 )
 
 
@@ -57,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = sub.add_parser(
         "knowledge-ingest",
         help=(
-            "Ingest an orchestrator's curator hand-off list into a leaf's candidate; the "
-            "knowledge write plane's production entry point."
+            "Write a curator hand-off list into a leaf's converted memory worktree as knowledge "
+            "files; the knowledge file writer's leaf entry point."
         ),
     )
     knowledge_ingest.add_arguments(ingest)
@@ -66,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap = sub.add_parser(
         "knowledge-bootstrap",
         help=(
-            "Initialize or resume a repository's knowledge foundation without a leaf enclosure; "
-            "the taskless bootstrap's production entry point."
+            "Write a repository's foundation knowledge as a wave of knowledge files, without a "
+            "leaf enclosure; the knowledge file writer's taskless entry point."
         ),
     )
     knowledge_bootstrap.add_arguments(bootstrap)
@@ -114,15 +114,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_census.add_arguments(census)
     census.set_defaults(func=knowledge_census.run)
-    record = sub.add_parser(
-        "review-record-comparison",
+    copies = sub.add_parser(
+        "knowledge-copies",
         help=(
-            "Record one leaf's review comparison as a durable generation; the Intent Reviewer's "
-            "comparison producer."
+            "List the leftover copies of the retired knowledge database under a coordination "
+            "root with the rule that decides each; --apply deletes those MIK-R26 rule 6 names."
         ),
     )
-    review_comparison_record.add_arguments(record)
-    record.set_defaults(func=review_comparison_record.run)
+    knowledge_copies.add_arguments(copies)
+    copies.set_defaults(func=knowledge_copies.run)
     paseo = sub.add_parser(
         "paseo",
         help="Provision, inspect or stop the pinned Paseo runtime the settings describe.",

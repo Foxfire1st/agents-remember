@@ -11,6 +11,8 @@ the tool server ``agents-remember-task``, and the handover says that a server na
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import re
 import tempfile
@@ -31,6 +33,7 @@ from agents_remember.application.skill_resources.capsule import (
     routed_admission_for,
 )
 from agents_remember.cli import role_launch_preparation
+from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.role_launch_preparation import (
     RoleHandoverRequest,
@@ -255,17 +258,19 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "An Architect first delegates coordination to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. A role started from the dashboard has no parent agent and needs none. Existing approvals and rulings remain durable across reconnects and compaction; ask again only for new or changed scope, a real requirement conflict, or an unresolved human-pinned decision.",
             ],
             "roles/curator.md": [
-                "hand-off list, the resolved baseline and `--publish --commit`; and the taskless `agents-remember",
+                "`agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list> --authorization-ref <ref> --commit --json`. It writes files and publishes no dataset;",
                 "knowledge-bootstrap` entry the `c-14-knowledge-bootstrap` skill states, which belongs to a session with **no",
-                "enclosure in scope** — it refuses one (`enclosure_in_scope`) rather than publishing onto a task's line. Those",
-                "two are the write plane's reachable entry points; the mounted `knowledge_change` tool refuses every kind and",
-                "exists only to name the route.",
-                "`../operations/curation.md` § Record the task comparison; it retains the comparison and authors no knowledge.",
+                "the taskless `agents-remember knowledge-bootstrap` entry, which belongs to a session with **no enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not write onto a task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give either an argument list",
+                "Those two are the only knowledge write entry points; no MCP tool writes knowledge.",
+                "The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before the file writer is invoked.",
                 "Enumerate one full-intake worklist of distinct outstanding memory actions in your report:",
                 "Use `role_message` on `agents-remember-task`, addressed by role and this leaf's exact task references",
                 "A Curator started from the dashboard has no parent and needs none.",
                 "A Curator starts no role:",
                 "A harness without sub-agents can do all the same work.",
+            ],
+            "operations/curation.md": [
+                "The reviewer compares the leaf's base and candidate from Git (the code trees and the knowledge files of the two memory trees), so the curator records no separate comparison.",
             ],
         }
         for source, clauses in required.items():
@@ -532,8 +537,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertIn("--authorization-ref <ref> --commit --json", text)
                 self.assertIn("publishes no dataset", text)
                 self.assertIn(
-                    "`--baseline`, `--publish` and `--publish-to` are refused there", text
+                    "The CLI has no `--baseline`, `--publish` or `--publish-to` options", text
                 )
+                self.assertIn("its parser rejects them before the file writer is invoked", text)
                 self.assertIn("source-bound command", text)
                 self.assertIn("Paseo capsule exposes no", text)
                 self.assertIn("report", text)
@@ -547,6 +553,29 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertIn("publish", text)
                 self.assertIn("validate", text)
                 self.assertNotIn("the writer is not available to you on this line", text)
+
+        parser = build_parser()
+        arguments = [
+            "knowledge-ingest",
+            "--contract",
+            "leaf-contract",
+            "--list",
+            "handoff.json",
+            "--authorization-ref",
+            "wording-proof",
+            "--commit",
+            "--json",
+        ]
+        self.assertTrue(callable(parser.parse_args(arguments).func))
+        for option in ("--baseline", "--publish", "--publish-to"):
+            with (
+                self.subTest(unsupported_option=option),
+                contextlib.redirect_stderr(io.StringIO()) as errors,
+            ):
+                with self.assertRaises(SystemExit) as caught:
+                    parser.parse_args([*arguments, option])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn("unrecognized arguments: " + option, errors.getvalue())
 
     def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(self) -> None:
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))

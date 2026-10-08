@@ -1,12 +1,10 @@
 """The file-writer route of ``knowledge-ingest`` and ``knowledge-bootstrap`` (MIK-R12 rule 7).
 
-Both commands keep their one spelling. Which writer runs is decided by the memory tree they write:
-
-* a **converted** memory tree (it holds ``knowledge/layout.json``, MIK-R21 rule 1) is written by the
-  curator file writer, :func:`~agents_remember.application.knowledge_writer.write_knowledge`;
-* an **unconverted** tree keeps the database ingest exactly as before, in a repository that holds
-  no converted memory; once it does, the cutover lock refuses the write and names the crossing sync
-  (MIK-R09 rule 6, MIK-R24 rule 9).
+Both commands write knowledge as files, through the curator file writer
+(:func:`~agents_remember.application.knowledge_writer.write_knowledge`), into a **converted** memory
+tree (one that holds ``knowledge/layout.json``, MIK-R21 rule 1). The canonical knowledge database is
+retired (MIK-R26), so there is no other writer: an **unconverted** tree is refused by name, and the
+refusal says how that tree converts (the crossing sync, or the conversion command).
 
 ``knowledge-ingest --crossing <task-id>-crossing-<n>`` is the route of a master line's crossing sync
 (MIK-R24 rule 8 step 4): with the master's series contract, the curator resolves a record both sides
@@ -14,10 +12,8 @@ changed (the writer sets its revision to one more than the higher side's) and re
 it into the crossing history file the sync opened, in the sync's memory worktree, against the series'
 code work branch as C. Such an owner authors no entry, ruling or new record.
 
-On the file route ``--commit`` is still the commit word (without it the run plans, validates and
-reports, and writes nothing), and ``--json`` prints the whole report. The database-only arguments --
-the candidate directory, baselines and publication -- have no meaning for files in the memory
-worktree and are refused by name rather than ignored.
+``--commit`` is the commit word (without it the run plans, validates and reports, and writes
+nothing), and ``--json`` prints the whole report.
 
 Exit status: 0 when the operation wrote or planned, 1 when it was refused (every problem and
 violation is in the report, and nothing was written), and 2 when the invocation itself is refused.
@@ -53,6 +49,7 @@ from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import load_config, require_config_path
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, history_path
 from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import local_branch_ref
 from agents_remember.worktrees.sync_transaction_authority import side_locations
@@ -62,15 +59,6 @@ EXIT_WRITTEN = 0
 EXIT_WRITE_REFUSED = 1
 EXIT_REFUSED = 2
 
-# The ingest arguments that only mean something for the database candidate.
-_DATABASE_ONLY = (
-    ("candidate_directory", "--candidate-directory"),
-    ("baseline", "--baseline"),
-    ("rebase_baseline", "--rebase-baseline"),
-    ("publish_to", "--publish-to"),
-    ("publish_declared", "--publish"),
-    ("expected_destination", "--expected-destination"),
-)
 _LEAF_SUFFIX = re.compile(r"^(?P<task>.+)-L[0-9]+$")
 _WAVE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _CROSSING_ID = re.compile(r"^(?P<task>[A-Za-z0-9][A-Za-z0-9._-]*)-crossing-[1-9][0-9]*$")
@@ -82,33 +70,39 @@ def is_converted(memory_root: Path | None) -> bool:
     return memory_root is not None and (memory_root / LAYOUT_MARKER_PATH).is_file()
 
 
-def unconverted_write_refusal(contract: WorktreeContract | None) -> str | None:
-    """MIK-R24 rule 9: an unconverted leaf tree is refused once its official line is converted."""
+def unconverted_write_refusal(contract: WorktreeContract) -> str:
+    """Why ``knowledge-ingest`` does not write this contract's unconverted memory, by name.
 
-    if contract is None or contract.memory_worktree is None:
-        return None
+    A leaf whose official line is converted, or whose repository holds converted memory anywhere,
+    converts through the crossing sync (MIK-R24 rule 9, MIK-R09 rule 6). Any other unconverted
+    tree is memory in the legacy format: the database writer is retired (MIK-R26).
+    """
+
+    memory = contract.memory_worktree
+    if memory is None:
+        return (
+            f"knowledge-ingest refuses {contract.contract_path}: the contract names no memory "
+            "worktree, so there is no memory tree to write knowledge files into"
+        )
     return unconverted_line_refusal(
-        memory_worktree=contract.memory_worktree,
+        memory_worktree=memory,
         memory_repository=contract.memory_repo_path,
         official_branch=contract.memory_source_branch,
         operation="knowledge-ingest",
+    ) or legacy_format_refusal(
+        contract.memory_repo_path,
+        operation="knowledge-ingest",
+        subject=f"the memory worktree {memory.as_posix()}",
     )
 
 
-def load_leaf_contract(contract_path: str) -> WorktreeContract | None:
-    """The leaf contract, or ``None`` when it cannot be loaded (the database route reports why)."""
+def load_leaf_contract(contract_path: str) -> WorktreeContract | str:
+    """The contract ``--contract`` names, or why it cannot be loaded."""
 
     try:
         return load_contract(Path(contract_path))
-    except (ValueError, OSError):
-        return None
-
-
-def converted_contract(contract_path: str) -> WorktreeContract | None:
-    """The leaf contract when its memory worktree is converted, else ``None`` (the database route)."""
-
-    contract = load_leaf_contract(contract_path)
-    return contract if contract is not None and is_converted(contract.memory_worktree) else None
+    except (ValueError, OSError) as error:
+        return f"--contract {contract_path} cannot be loaded as a worktree contract: {error}"
 
 
 BLANK_AUTHORIZATION = (
@@ -212,13 +206,6 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     if not str(getattr(args, "authorization_ref", "") or "").strip():
         print(BLANK_AUTHORIZATION)
         return EXIT_REFUSED
-    named = [flag for attribute, flag in _DATABASE_ONLY if getattr(args, attribute, None)]
-    if named:
-        print(
-            f"{', '.join(named)} belong to the database candidate; this leaf's memory worktree is "
-            "converted, so the file writer writes it in place and takes none of them"
-        )
-        return EXIT_REFUSED
     list_path = Path(args.hand_off_list)
     document = _read_document(list_path)
     if isinstance(document, str):
@@ -245,11 +232,11 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     return EXIT_WRITE_REFUSED if report.refused else EXIT_WRITTEN
 
 
-def _crossing_memory_root(contract: WorktreeContract | None, crossing: str) -> Path | str:
+def _crossing_memory_root(contract: WorktreeContract | str, crossing: str) -> Path | str:
     """The sync worktree holding the open crossing history file, or why the run is refused."""
 
-    if contract is None:
-        return "--crossing needs the master's series contract, and --contract cannot be loaded"
+    if isinstance(contract, str):
+        return f"--crossing needs the master's series contract: {contract}"
     if contract.kind != "series":
         return (
             "--crossing records a master line's crossing sync, so --contract names the master's "
@@ -274,7 +261,7 @@ def _crossing_memory_root(contract: WorktreeContract | None, crossing: str) -> P
     return memory_root
 
 
-def run_crossing_write(args: argparse.Namespace, contract: WorktreeContract | None) -> int:
+def run_crossing_write(args: argparse.Namespace, contract: WorktreeContract | str) -> int:
     """``knowledge-ingest --crossing``: a master line's crossing sync records its rows.
 
     The rows go into the ``<task-id>-crossing-<n>.json`` file the sync opened in its memory
@@ -284,12 +271,12 @@ def run_crossing_write(args: argparse.Namespace, contract: WorktreeContract | No
     """
 
     crossing = str(getattr(args, "crossing", "") or "").strip()
-    refusal = _file_route_refusal(args)
-    memory_root = _crossing_memory_root(contract, crossing) if refusal is None else refusal
+    blank = not str(getattr(args, "authorization_ref", "") or "").strip()
+    memory_root = BLANK_AUTHORIZATION if blank else _crossing_memory_root(contract, crossing)
     if isinstance(memory_root, str):
         print(memory_root)
         return EXIT_REFUSED
-    assert contract is not None  # a contract that cannot be loaded is refused above
+    assert not isinstance(contract, str)  # a contract that cannot be loaded is refused above
     list_path = Path(args.hand_off_list)
     document = _read_document(list_path)
     if isinstance(document, str):
@@ -320,20 +307,6 @@ def run_crossing_write(args: argparse.Namespace, contract: WorktreeContract | No
     return EXIT_WRITE_REFUSED if report.refused else EXIT_WRITTEN
 
 
-def _file_route_refusal(args: argparse.Namespace) -> str | None:
-    """The file route's invocation refusals: a blank authorization, or a database-only flag."""
-
-    if not str(getattr(args, "authorization_ref", "") or "").strip():
-        return BLANK_AUTHORIZATION
-    named = [flag for attribute, flag in _DATABASE_ONLY if getattr(args, attribute, None)]
-    if named:
-        return (
-            f"{', '.join(named)} belong to the database candidate; the file writer writes the "
-            "converted memory in place and takes none of them"
-        )
-    return None
-
-
 def run_wave_write(
     args: argparse.Namespace,
     *,
@@ -342,7 +315,7 @@ def run_wave_write(
     task: str,
     coordination_root: Path | None = None,
 ) -> int:
-    """``knowledge-bootstrap`` on a converted memory tree: a wave writes through the file writer.
+    """``knowledge-bootstrap``: a wave writes a converted memory tree through the file writer.
 
     A bootstrap has no leaf, so its judgment rows belong to a wave: ``--wave`` names it, and the
     wave's history file is ``knowledge/history/<wave>.json`` (MIK-R07 rule 8).
@@ -351,7 +324,7 @@ def run_wave_write(
     wave = str(getattr(args, "wave", None) or "").strip()
     if not _WAVE_ID.match(wave):
         print(
-            "this repository's memory is converted, so the bootstrap writes files as a wave: "
+            "the bootstrap writes knowledge files as a wave: "
             "--wave names it with [A-Za-z0-9._-] (its history file is "
             "knowledge/history/<wave>.json)"
         )

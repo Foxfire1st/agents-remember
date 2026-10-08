@@ -7,7 +7,7 @@
 * **Views and comparison.** The view seam and the two-snapshot comparison open the index file as
   their dataset.
 * **Published intent.** The ordinary read's knowledge section selects a converted memory tree and
-  reads it through the index; an unconverted memory root keeps the database selection.
+  reads it through the index; an unconverted memory root names the conversion prerequisite.
 """
 
 from __future__ import annotations
@@ -322,12 +322,19 @@ def test_a_partial_tree_selection_says_it_is_partial(review_tree: Path, tmp_path
     assert page["enumerationComplete"] is False
 
 
-def test_an_unconverted_memory_root_keeps_the_database_selection(tmp_path: Path) -> None:
+def test_an_unconverted_memory_root_refuses_the_retired_database_selection(tmp_path: Path) -> None:
     legacy = tmp_path / "legacy"
     init_repository(legacy)
     (legacy / "onboarding").mkdir()
+    retired = legacy / "knowledge.sqlite"
+    retired.write_bytes(b"a retired canonical dataset is not a readable index\n")
     block = published_intent_block(_context(tmp_path, legacy), [SIBLING_PATHS[0]])
-    assert block["state"] == "not-recorded"
-    assert block["datasetPath"] == str(legacy / "knowledge.sqlite")
+    assert block["state"] == "unusable"
+    assert block["refusalCode"] == "legacy-format"
+    assert "conversion command" in block["refusalDetail"]
+    assert "sync it across the text-storage boundary" in block["refusalDetail"]
+    assert block["datasetPath"] == str(legacy)
     assert "memoryTree" not in block
+    assert block["seeds"] == []
+    assert retired.read_bytes() == b"a retired canonical dataset is not a readable index\n"
     assert not (tmp_path / "coordination" / "runtime" / "knowledge-index").exists()

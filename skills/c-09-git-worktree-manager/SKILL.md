@@ -275,6 +275,17 @@ when competing changes encode a semantic truth the agent cannot derive from curr
 code, tests, and durable decisions. A routine textual, import, fixture, or memory-content conflict
 is not by itself a developer decision.
 
+Converted memory merges structurally in every sync: knowledge records field by field, a card's
+JSON sidecar entry by entry, and a card's Markdown by a three-way text merge. Mechanical anchor
+fields (the blob, the content hash, line numbers) never conflict; the incoming side's are taken.
+An item both lines authored differently is retained: the JSON item holds a `crossing-conflict`
+value with the base, own and incoming values, a card holds Git's conflict markers, and
+`resolution.crossing` names the report that lists each item. Resolve a card and its sidecar
+together in the files. Resolve a knowledge record through the knowledge writer: its `revision`
+becomes one more than the higher side's, and its history row goes to the leaf's history file or,
+on a master line, to the `<task-id>-crossing-<n>` file the sync opened. Stage the result and
+continue; the file validator runs before the merge is committed and refuses an unresolved value.
+
 Closeout invokes this sync automatically when its ancestor check finds a carry it can settle — a
 fast-forward, or a merge where the leaf owns its own commit — so a moved line is not an operator
 step: the sync parks any pending uncommitted candidate, carries the moved source into the leaf's code

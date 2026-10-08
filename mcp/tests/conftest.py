@@ -84,9 +84,14 @@ for name in tuple(os.environ):
 # fails collection with `ScopeError ... fatal: not a git repository` rather than running. Git is
 # already a prerequisite of the delivery path (`code_quality/scope.py` scopes by index and diff,
 # `quality_plan.py` runs in a worktree), and `git init && git add -A` restores an exported tree.
+#
+# `database_retirement_guard` watches every test of every worker process: production code outside
+# its named modules that opens a SQLite connection, or writes, copies or moves a database file,
+# fails that test at teardown. `test_knowledge_database_retired.py` asserts the registration.
 pytest_plugins = (
     "agents_remember_test_support.testing.pytest_bootstrap",
     "agents_remember_test_support.testing.evidence_lanes",
+    "agents_remember_test_support.testing.database_retirement_guard",
 )
 _INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
 

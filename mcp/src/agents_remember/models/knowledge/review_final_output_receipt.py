@@ -1,24 +1,13 @@
-"""The typed record binding one comparison generation to the output a task actually delivered (ICR-R21@v1).
-
-:class:`FinalOutputReceipt` is the value itself: a sealed set of identities -- the generation's own, the
-delivered code commit and its tree, the delivered memory-content commit and its tree, and the published
-knowledge identity read back at the repository's declared location -- beside the two match verdicts that
-say whether the delivered output *is* the reviewed input. Its owner, the selection rule that produced
-the generation, the durable publication and the read-back are all
-:mod:`agents_remember.application.review_final_output_receipt`; this module is the vocabulary alone, so a
-consumer can hold and validate a receipt without importing the operation that produced it.
-
-Every field is a fact an owner produced and none is authored prose, which is what lets a reader compare
-the record's own values instead of trusting a sentence about them. The one sentence the record
-publishes, :meth:`FinalOutputReceipt.statement`, is derived from those values and cannot outrun them.
-"""
+"""Tree-bound final-output receipt v2, plus the read-only v1 decoder for historical receipts."""
 
 from __future__ import annotations
 
+import hashlib
 from typing import Literal
 
 from pydantic import Field, model_validator
 
+from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.models.knowledge.base import (
     GIT_OBJECT_PATTERN,
     LABEL_MAX_LENGTH,
@@ -29,6 +18,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
     "FINAL_OUTPUT_RECEIPT_VERSION",
@@ -36,22 +26,28 @@ __all__ = [
     "FinalOutputPhase",
     "FinalOutputReceipt",
     "FinalOutputVerdict",
+    "LegacyFinalOutputReceipt",
     "MatchState",
     "PublishedKnowledgeState",
     "code_match_state",
     "final_output_verdict",
     "knowledge_match_state",
+    "tree_comparison_digest",
+    "tree_match_state",
+    "tree_output_verdict",
 ]
 
 # The record's own version: a literal of this vocabulary's rather than a package version read at run
 # time, so two receipts produced by different layouts are distinguishable from the receipts.
-FINAL_OUTPUT_RECEIPT_VERSION: Literal["ar-review-final-output-receipt/v1"] = (
-    "ar-review-final-output-receipt/v1"
+FINAL_OUTPUT_RECEIPT_VERSION: Literal["ar-review-final-output-receipt/v2"] = (
+    "ar-review-final-output-receipt/v2"
 )
 
 # The one selection rule the record names. It is a field rather than a comment because "which
 # generation is this?" must travel with the receipt instead of living in whichever reader is asking.
-FINAL_OUTPUT_SELECTION_RULE: Literal["latest-published-generation"] = "latest-published-generation"
+FINAL_OUTPUT_SELECTION_RULE: Literal["latest-recorded-tree-comparison"] = (
+    "latest-recorded-tree-comparison"
+)
 
 # The two phases that record a receipt. Closeout creates the commits; integration lands them on the
 # source branches. Separate records rather than one updated record, because each is a measurement taken
@@ -133,7 +129,7 @@ def final_output_verdict(
     return "bound"
 
 
-class FinalOutputReceipt(KnowledgeModel):
+class LegacyFinalOutputReceipt(KnowledgeModel):
     """One generation bound to the outputs a normal closeout or integration actually delivered.
 
     Every field is a fact an owner produced: the generation's identities come from its sealed manifest,
@@ -151,7 +147,9 @@ class FinalOutputReceipt(KnowledgeModel):
     (:func:`final_output_verdict`, applied by the validator below rather than trusted from a writer).
     """
 
-    receipt_version: Literal["ar-review-final-output-receipt/v1"] = FINAL_OUTPUT_RECEIPT_VERSION
+    receipt_version: Literal["ar-review-final-output-receipt/v1"] = (
+        "ar-review-final-output-receipt/v1"
+    )
     phase: FinalOutputPhase
     recorded_at: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     repository_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
@@ -159,7 +157,7 @@ class FinalOutputReceipt(KnowledgeModel):
     leaf_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     task_root: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
     contract_path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    selection_rule: Literal["latest-published-generation"] = FINAL_OUTPUT_SELECTION_RULE
+    selection_rule: Literal["latest-published-generation"] = "latest-published-generation"
     generation_id: str = Field(pattern=UUID_PATTERN)
     generation_index: int = Field(ge=1)
     # The generation's own seal and the digest of the manifest bytes that carried it. Both carried
@@ -188,7 +186,7 @@ class FinalOutputReceipt(KnowledgeModel):
     state: FinalOutputVerdict
 
     @model_validator(mode="after")
-    def _the_receipt_agrees_with_itself(self) -> FinalOutputReceipt:
+    def _the_receipt_agrees_with_itself(self) -> LegacyFinalOutputReceipt:
         """Refuse a record whose verdicts do not follow from the identities it carries.
 
         Every rule compares two values the record already holds, so an inconsistent record is
@@ -259,62 +257,88 @@ class FinalOutputReceipt(KnowledgeModel):
         return self
 
     def statement(self) -> str:
-        """Return the one sentence this receipt publishes, derived from its own fields.
-
-        One clause per verdict, and each says only what the record measured. ``moved`` names the
-        mismatch and the supersession remedy; ``unmeasured`` says the selected knowledge operand was
-        never compared, which is why the receipt does not cover the delivery, and names the two ways to
-        make it measurable; and ``bound`` -- reachable only when every selected channel was compared and
-        matched, or when the generation selected no knowledge operand at all -- claims coverage.
-        """
-
-        if self.state == "bound":
-            verdict = "every selected input this generation records is the delivered output"
-        elif self.state == "unmeasured":
-            verdict = (
-                "the knowledge operand this generation selected was not compared against any delivered "
-                "dataset, so this generation covers the delivered code and leaves the delivered "
-                "knowledge unmeasured; publish the reviewed dataset at the declared location, or "
-                "publish a successor generation that compares what was delivered"
-            )
-        else:
-            verdict = (
-                "this generation does not cover the delivered output; publish a successor generation "
-                "naming it as its predecessor, or read the review as covering the inputs it recorded"
-            )
         return (
-            f"{self.phase} recorded comparison generation {self.generation_id} "
-            f"(index {self.generation_index}) against the output it delivered: "
-            f"{self._code_clause()}; {self._knowledge_clause()}; {verdict}."
+            f"Historical v1 {self.phase} receipt {self.generation_id} retained reviewed code tree "
+            f"{self.reviewed_candidate_code_tree_id} and delivered code tree "
+            f"{self.delivered_code_tree_id}, with historical verdict {self.state}; "
+            "the exact reviewed memory tree was not recorded, so tree-pair coverage is unavailable."
         )
 
-    def _code_clause(self) -> str:
-        """The code half of the sentence, which names both trees it compared."""
 
-        delivered = f"the code commit {self.delivered_code_commit} carries tree {self.delivered_code_tree_id}"
-        if self.code_match == "matches-reviewed-input":
-            return f"{delivered}, the reviewed candidate tree"
-        return (
-            f"{delivered}, not the reviewed candidate tree {self.reviewed_candidate_code_tree_id}"
+class FinalOutputReceipt(KnowledgeModel):
+    """Exact delivered trees beside the source record the review actually opened (ICR-R21)."""
+
+    receipt_version: Literal["ar-review-final-output-receipt/v2"] = FINAL_OUTPUT_RECEIPT_VERSION
+    phase: FinalOutputPhase
+    recorded_at: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    repository_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    master: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    leaf_id: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    task_root: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    contract_path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    selection_rule: Literal["latest-recorded-tree-comparison"] = FINAL_OUTPUT_SELECTION_RULE
+    comparison: ReviewTreeComparisonRecord
+    comparison_digest: str = Field(pattern=SHA256_PATTERN)
+    delivered_code_commit: str = Field(pattern=GIT_OBJECT_PATTERN)
+    delivered_code_tree_id: str = Field(pattern=GIT_OBJECT_PATTERN)
+    delivered_memory_content_commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    delivered_memory_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    code_match: MatchState
+    memory_match: MatchState
+    state: FinalOutputVerdict
+
+    @model_validator(mode="after")
+    def _validate_tree_binding(self) -> FinalOutputReceipt:
+        if self.leaf_id != self.comparison.leaf_id:
+            raise ValueError("the receipt must name the source comparison's leaf")
+        if self.comparison_digest != tree_comparison_digest(self.comparison):
+            raise ValueError("the comparison digest must describe the complete source record")
+        if (self.delivered_memory_content_commit is None) != (
+            self.delivered_memory_tree_id is None
+        ):
+            raise ValueError("the delivered memory commit and tree are present together")
+        code = tree_match_state(self.comparison.code_candidate.tree, self.delivered_code_tree_id)
+        memory = tree_match_state(
+            self.comparison.memory_candidate.tree, self.delivered_memory_tree_id
         )
+        if (self.code_match, self.memory_match) != (code, memory):
+            raise ValueError("matches must follow from both exact candidate trees")
+        if self.state != tree_output_verdict(code, memory):
+            raise ValueError("coverage requires a measured match on both code and memory trees")
+        return self
 
-    def _knowledge_clause(self) -> str:
-        """The knowledge half of the sentence, which never claims an unmeasured comparison."""
-
-        path = self.published_knowledge_path
-        reviewed = self.reviewed_knowledge_logical_digest
-        if self.published_knowledge is not None:
-            digest = self.published_knowledge.logical_digest
-            if self.knowledge_match == "matches-reviewed-input":
-                return f"the published dataset {digest} at {path} is the reviewed candidate dataset"
-            if self.knowledge_match == "differs-from-reviewed-input":
-                return f"the published dataset {digest} at {path} is not the reviewed candidate {reviewed}"
-        if self.reviewed_knowledge_state != "retained":
-            return (
-                f"generation {self.generation_id} records {self.reviewed_knowledge_state} for its "
-                "knowledge operand, so no published dataset was compared to a reviewed one"
+    def statement(self) -> str:
+        return (
+            f"{self.phase} measured tree comparison {self.comparison.task_id}/"
+            f"{self.comparison.leaf_id}/{self.comparison.number}: reviewed code tree "
+            f"{self.comparison.code_candidate.tree}, delivered {self.delivered_code_tree_id} "
+            f"({self.code_match}); reviewed memory tree {self.comparison.memory_candidate.tree}, "
+            f"delivered {self.delivered_memory_tree_id} ({self.memory_match}); {self.state}. "
+            + (
+                "Record a successor tree comparison for the delivered pair."
+                if self.state != "bound"
+                else "Both delivered trees are exactly the reviewed candidates."
             )
-        return (
-            f"the declared publication location {path} is {self.published_knowledge_state}, so the "
-            f"published dataset was not compared to the reviewed candidate {reviewed}"
         )
+
+
+def tree_comparison_digest(comparison: ReviewTreeComparisonRecord) -> str:
+    """Digest the complete retained source record, including repositories, commits and refs."""
+
+    return hashlib.sha256(
+        canonical_json_bytes(comparison.model_dump(mode="json", by_alias=True))
+    ).hexdigest()
+
+
+def tree_match_state(reviewed: str, observed: str | None) -> MatchState:
+    if observed is None:
+        return "not-comparable"
+    return code_match_state(reviewed, observed)
+
+
+def tree_output_verdict(code: MatchState, memory: MatchState) -> FinalOutputVerdict:
+    if "differs-from-reviewed-input" in (code, memory):
+        return "moved"
+    if "not-comparable" in (code, memory):
+        return "unmeasured"
+    return "bound"

@@ -105,35 +105,6 @@ def begin_git_mutation(
     )
 
 
-def begin_exact_file_git_mutation(
-    args: WorktreeArgs,
-    *,
-    leg: CloseoutMutationLeg,
-    repository: Path,
-    path: Path,
-    intended_text: str,
-) -> GitMutationEvidence:
-    """Persist an exact file-output tree before touching the real worktree/index."""
-
-    _require_mutation_leg_authority(args, leg, repository)
-    before = git_mutation_snapshot(
-        repository, _evidence_index_path(args, leg), memory_cache=leg == "memory"
-    )
-    expected_output_tree = _isolated_file_candidate_tree(
-        repository,
-        before=before,
-        path=path,
-        intended_text=intended_text,
-    )
-    return _publish_mutation_intent(
-        args,
-        leg=leg,
-        repository=repository,
-        before=before,
-        expected_output_tree=expected_output_tree,
-    )
-
-
 def _publish_mutation_intent(
     args: WorktreeArgs,
     *,
@@ -152,58 +123,6 @@ def _publish_mutation_intent(
     )
     _report_evidence(args, evidence)
     return evidence
-
-
-def _isolated_file_candidate_tree(
-    repository: Path,
-    *,
-    before: GitMutationSnapshot,
-    path: Path,
-    intended_text: str,
-) -> str:
-    """Compute an exact candidate tree without touching the repository's mutable state."""
-
-    try:
-        relative = path.resolve().relative_to(repository.resolve()).as_posix()
-    except ValueError as exc:
-        raise RuntimeError("journaled mutation file is outside its accepted repository") from exc
-    common_dir = Path(
-        require_git(
-            repository,
-            ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )
-    )
-    alternate = common_dir / "objects"
-    if (
-        before.indexTree != before.headTree
-        or before.candidateTree != before.headTree
-        or before.statusFingerprint != CLEAN_STATUS_FINGERPRINT
-    ):
-        raise RuntimeError("exact file mutation requires a clean accepted HEAD tree before intent")
-    tree_entry = require_git(repository, ["ls-tree", before.headTree, "--", relative])
-    if not tree_entry:
-        raise RuntimeError("journaled mutation file is absent from the accepted index tree")
-    mode = tree_entry.split(maxsplit=1)[0]
-    with tempfile.TemporaryDirectory(prefix="ar-mutation-tree-") as temp_dir:
-        root = Path(temp_dir)
-        execution = IsolatedGitState(root / "index", root / "objects", alternate)
-        _require_isolated_git(
-            repository,
-            ["read-tree", before.headTree],
-            state=execution,
-        )
-        blob = _require_isolated_git(
-            repository,
-            ["hash-object", "-w", "--stdin"],
-            input_text=intended_text,
-            state=execution,
-        )
-        _require_isolated_git(
-            repository,
-            ["update-index", "--add", "--cacheinfo", f"{mode},{blob},{relative}"],
-            state=execution,
-        )
-        return _require_isolated_git(repository, ["write-tree"], state=execution)
 
 
 def _require_isolated_git(
@@ -241,30 +160,6 @@ def _accepted_prestate(
             evidence = record.mutationEvidence.get(leg)
             return evidence.acceptedBefore if evidence is not None else None
     return None
-
-
-def bind_expected_output_tree(
-    args: WorktreeArgs,
-    evidence: GitMutationEvidence,
-    *,
-    repository: Path,
-) -> GitMutationEvidence:
-    """Bind a prepared output tree after intent, but still before commit launch."""
-    _require_mutation_leg_authority(args, evidence.leg, repository)
-    _require_evidence_repository(evidence, repository)
-    if evidence.state != "mutation-intent" or evidence.expectedOutputTree is not None:
-        raise RuntimeError("closeout mutation output tree can only fill pending intent")
-    updated = evidence.model_copy(
-        update={
-            "expectedOutputTree": worktree_candidate_tree(
-                repository,
-                _evidence_index_path(args, evidence.leg),
-                exclude_paths=("memory.md",) if evidence.leg == "memory" else (),
-            )
-        }
-    )
-    _report_evidence(args, updated)
-    return updated
 
 
 def prove_git_commit(
@@ -382,10 +277,6 @@ def closeout_requires_recovery(record: LifecycleOperationRecord) -> bool:
     )
 
 
-def closeout_cancellable(record: LifecycleOperationRecord) -> bool:
-    return not closeout_requires_recovery(record)
-
-
 def git_mutation_snapshot(
     repository: Path, index_path: Path, *, memory_cache: bool = False
 ) -> GitMutationSnapshot:
@@ -415,7 +306,7 @@ def ephemeral_git_mutation_snapshot(
     status_args = ["status", "--porcelain=v1", "-z"]
     if memory_cache:
         status_args.extend(["--", ".", ":(top,exclude)memory.md"])
-    status_result = run_git(repository, status_args)
+    status_result = run_git(repository, ["--no-optional-locks", *status_args])
     if status_result.returncode != 0:
         raise RuntimeError("Git status mutation evidence is unreadable")
     head_ref = require_git(repository, ["symbolic-ref", "--quiet", "HEAD"])

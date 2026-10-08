@@ -26,25 +26,13 @@ from unittest import mock
 import pytest
 from agents_remember.application import prepared_certification
 from agents_remember.application import published_intent as published_intent_module
-from agents_remember.application import review_final_output_receipt as receipt_module
-from agents_remember.application import review_sync_rebinding as rebinding_module
-from agents_remember.application import review_unchanged_knowledge as unchanged_module
 from agents_remember.application.knowledge_gate import KnowledgeGate
-from agents_remember.application.knowledge_write_admission import (
-    KnowledgeDatabaseFrozen,
-    as_write_admission,
-)
 from agents_remember.application.memory_quality import controller
 from agents_remember.application.published_intent import resolve_published_intent
-from agents_remember.application.review_comparison_freeze import (
-    EMPTY_FREEZE_OPTIONS,
-    tree_comparison_refusal,
-)
+from agents_remember.cli.knowledge_write_route import unconverted_write_refusal
 from agents_remember.errors import CertificationContractError
 from agents_remember.memory.conversion.base import GitBaseConverter
-from agents_remember.memory.knowledge.publication import publish_prepared_snapshot
 from agents_remember.memory_quality.knowledge_validator.commit_route import GitKnowledgeValidation
-from agents_remember.models.knowledge.snapshot import SnapshotDestinationRequest
 from agents_remember.models.knowledge_files.shapes import HandoffOrigin
 from agents_remember.worktrees import cutover_lock, sync_transaction
 from agents_remember.worktrees import direct_landing as route
@@ -70,7 +58,6 @@ from agents_remember.worktrees.services import (
 )
 from test_knowledge_closeout_gate import (
     CODE_A,
-    LEAF,
     A,
     Gated,
     _edit,
@@ -184,24 +171,9 @@ def _sync(probe: _Probe) -> str | None:
 
 
 def _ingest(world: Gated) -> str | None:
-    """What ``knowledge-ingest`` asks on an unconverted leaf (``unconverted_write_refusal``)."""
+    """What ``knowledge-ingest`` answers on an unconverted leaf: the command's own refusal."""
 
-    contract = world.contract
-    assert contract.memory_worktree is not None
-    return unconverted_line_refusal(
-        memory_worktree=contract.memory_worktree,
-        memory_repository=contract.memory_repo_path,
-        official_branch=contract.memory_source_branch,
-        operation="knowledge-ingest",
-    )
-
-
-def _database_writer(probe: _Probe) -> str | None:
-    try:
-        as_write_admission(probe.world.contract)
-    except KnowledgeDatabaseFrozen as error:
-        return str(error)
-    return None
+    return unconverted_write_refusal(world.contract)
 
 
 def _probe(world: Gated) -> _Probe:
@@ -217,7 +189,6 @@ def _probe(world: Gated) -> _Probe:
 
 _ROUTES: dict[str, Callable[[_Probe], str | None]] = {
     "knowledge-ingest": lambda p: _ingest(p.world),
-    "knowledge database writer": _database_writer,
     "memory_quality_check (leaf)": lambda p: controller._unconverted_refusal(
         SimpleNamespace(contract=p.world.contract)
     ),
@@ -257,7 +228,14 @@ def test_every_route_refuses_unconverted_memory_once_the_repository_holds_conver
 
     git(world.memory, "branch", "-D", LINE)  # no converted memory: the lock is inert
     assert converted_memory_location(world.memory) is None
-    assert {name: run(probe) for name, run in _ROUTES.items()} == dict.fromkeys(_ROUTES)
+    answers = {name: run(probe) for name, run in _ROUTES.items()}
+    # MIK-R26: the knowledge writer writes files only, so it still refuses this unconverted tree,
+    # now as memory in the legacy format, and names the conversion command. No other route asks.
+    written = answers.pop("knowledge-ingest")
+    assert written is not None and "legacy format" in written, written
+    assert "agents-remember knowledge-convert" in written and "crossing sync" in written
+    assert "holds no converted memory yet" in written
+    assert answers == dict.fromkeys(answers)
 
 
 def test_the_prepared_closeout_refuses_by_the_lock_at_both_entry_points(tmp_path: Path) -> None:
@@ -396,60 +374,23 @@ def test_the_converting_candidate_is_gated_never_locked(tmp_path: Path, ports: N
     assert integrate._leaf_landing_lock(world.contract, unconverted_landing, sources) is not None
 
 
-def test_the_database_writer_is_frozen_on_a_converted_tree_and_names_the_file_writer(
-    tmp_path: Path,
-) -> None:
-    world = build_gated(tmp_path / "converted")
-    with pytest.raises(KnowledgeDatabaseFrozen, match="knowledge-ingest"):
-        as_write_admission(world.contract)
-    published = publish_prepared_snapshot(
-        cast(Any, None),
-        SnapshotDestinationRequest(destination_path=world.memory / "knowledge.sqlite"),
-    )
-    assert published.state == "refused" and published.refusal is not None
-    assert published.refusal.code == "database_frozen"
-    assert "knowledge-ingest" in published.refusal.next_action
-    assert not (world.memory / "knowledge.sqlite").exists()  # stays where it is; nothing written
-
-    plain = _unconverted(tmp_path / "plain")  # unconverted, in a repository with no converted
-    git(plain.memory, "branch", "-D", LINE)  # memory at all: the database writer admits it
-    assert as_write_admission(plain.contract).memory_worktree == plain.memory
-
-
 def test_no_read_selects_the_database_of_a_converted_tree(tmp_path: Path) -> None:
-    """L23 F8: the receipt and the rebinding read the tree's state, never its frozen database."""
-
     world = build_gated(tmp_path)
-    (world.memory / "knowledge.sqlite").write_bytes(b"frozen at the cutover")
-    location = SimpleNamespace(
-        context=SimpleNamespace(memory_root=world.memory, code_repository_name="agents-remember"),
-        path=world.memory / "knowledge.sqlite",
+    frozen = world.memory / "knowledge.sqlite"
+    frozen.write_bytes(b"frozen at the cutover")
+    context = SimpleNamespace(
+        memory_root=world.memory,
+        coordination_root=tmp_path / "coordination",
+        code_repository_root=world.code,
     )
-    never = mock.Mock(side_effect=AssertionError("the frozen database was read"))
-    with (
-        mock.patch.object(published_intent_module, "read_dataset_identity", never),
-        mock.patch.object(receipt_module, "declared_publication_location", return_value=location),
-        mock.patch.object(rebinding_module, "declared_publication_location", return_value=location),
-    ):
-        resolved = resolve_published_intent(cast(Any, location.context))
-        receipt = receipt_module._published_knowledge(world.contract)
-        rebinding = rebinding_module._resolved_knowledge(world.contract)
-    assert isinstance(resolved, published_intent_module.PublishedIntentUnavailable)
-    assert (receipt.state, receipt.identity) == ("not-recorded", None)
-    assert (rebinding.state, rebinding.dataset) == ("not-recorded", None)
-    assert "converted" in receipt.detail and "converted" in rebinding.detail
-
-    resolution = SimpleNamespace(trees=object(), knowledge_unavailable=(), contract=world.contract)
-    with (
-        mock.patch.object(unchanged_module, "resolve_review_candidate", return_value=resolution),
-        mock.patch.object(unchanged_module, "read_memory_knowledge", never),
-    ):
-        frozen = unchanged_module.freeze_unchanged_knowledge_review(
-            cast(Any, None),
-            cast(Any, SimpleNamespace(repository_id="r", master="m", leaf_id=LEAF)),
-            EMPTY_FREEZE_OPTIONS,
-        )
-    assert (frozen.state, frozen.refusal) == ("refused", tree_comparison_refusal())
+    resolved = resolve_published_intent(cast(Any, context))
+    assert isinstance(resolved, published_intent_module.PublishedIntentSelection)
+    assert resolved.memory_tree is not None
+    assert resolved.database_path != frozen
+    assert (
+        resolved.database_path.parent == context.coordination_root / "runtime" / "knowledge-index"
+    )
+    assert frozen.read_bytes() == b"frozen at the cutover"
 
 
 def test_hand_off_evidence_is_a_list_of_strings() -> None:

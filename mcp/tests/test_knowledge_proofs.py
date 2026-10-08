@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import apsw
 import pytest
 from agents_remember.application.knowledge_proofs import invariants_without_proof
 from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
@@ -34,7 +33,6 @@ from agents_remember.application.memory_quality.controller import (
 )
 from agents_remember.mcp.tools.knowledge import ReadToolRequest, knowledge_read_payload
 from agents_remember.memory.knowledge_index import (
-    INDEX_REPOSITORY_ID,
     KnowledgeIndex,
     build_index,
     directory_snapshot,
@@ -56,7 +54,6 @@ from knowledge_index_test_support import (
     REVIEW_INVARIANT,
     SIBLING_INVARIANT,
     TEST_PATH,
-    build_parity_dataset,
     commit_all,
     init_repository,
     write_review_tree,
@@ -237,7 +234,7 @@ def _review_tree(tmp_path: Path) -> Path:
 
 def _read(root: Path, coordination: Path, **request: Any) -> dict[str, Any]:
     return knowledge_read_payload(
-        ReadToolRequest(database_path=str(root), repository_id=INDEX_REPOSITORY_ID, **request),
+        ReadToolRequest(memory_root=str(root), **request),
         coordination_root=str(coordination),
     )
 
@@ -277,46 +274,11 @@ def test_the_invariant_and_family_views_carry_their_proofs(tmp_path: Path) -> No
     assert [one["id"] for one in family["proofs"]] == ["PRF-T3ST0K"]
 
 
-def test_a_database_read_and_other_views_carry_no_proofs(tmp_path: Path) -> None:
+def test_the_other_views_carry_no_proofs(tmp_path: Path) -> None:
     root = _review_tree(tmp_path)
     queue = _read(root, tmp_path / "coordination", view="curation_queue")
     assert queue["state"] == "view", queue
     assert "proofs" not in queue
-
-    legacy = tmp_path / "legacy"
-    init_repository(legacy)
-    database, repository_id = build_parity_dataset(legacy)
-    commit_all(legacy)
-    connection = apsw.Connection(str(database), flags=apsw.SQLITE_OPEN_READONLY)
-    try:
-        invariant = str(
-            next(iter(connection.execute("SELECT revision_id FROM invariant_revision")))[0]
-        )
-        family = str(next(iter(connection.execute("SELECT revision_id FROM family_revision")))[0])
-    finally:
-        connection.close()
-    for request in (
-        ReadToolRequest(
-            database_path=str(database), repository_id=repository_id, view="curation_queue"
-        ),
-        ReadToolRequest(
-            database_path=str(database),
-            repository_id=repository_id,
-            view="invariant",
-            invariant_revision_id=invariant,
-        ),
-        ReadToolRequest(
-            database_path=str(database),
-            repository_id=repository_id,
-            view="family",
-            family_revision_id=family,
-        ),
-    ):
-        from_database = knowledge_read_payload(
-            request, coordination_root=str(tmp_path / "coordination")
-        )
-        assert from_database["state"] == "view", from_database
-        assert "proofs" not in from_database
 
 
 def test_a_family_whose_members_have_no_proof_shows_an_empty_list(tmp_path: Path) -> None:

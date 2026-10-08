@@ -49,8 +49,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
-import apsw
-
+from agents_remember.application.legacy_dataset_copies import (
+    is_derived_index,
+    is_knowledge_dataset,
+    sqlite_table_names,
+)
 from agents_remember.application.review_artifact_receipts import (
     CLEANUP_REPORT_NAME,
     DELETION_KEYS,
@@ -70,7 +73,6 @@ from agents_remember.application.review_comparison_reclamation import (
 )
 from agents_remember.errors import CodeObjectRetentionError, ComparisonReclamationError
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review_trees import REVIEW_REF_NAMESPACE
@@ -86,9 +88,6 @@ __all__ = [
 ]
 
 _REASON: Final = "the task was archived (MIK-R25 rule 5, D17)"
-_SQLITE_HEADER: Final = b"SQLite format 3\x00"
-# The tables every generation of the knowledge store has had: a file holding both is a dataset.
-_KNOWLEDGE_TABLES: Final = frozenset({"invariant", "invariant_revision"})
 
 
 @dataclass
@@ -602,25 +601,14 @@ def _is_leftover_copy(path: Path, report: _Report) -> bool:
 
 
 def _is_knowledge_dataset(path: Path) -> bool:
-    """Whether a file is SQLite holding the knowledge store's tables, by content, not by name."""
+    """Whether a file is a leftover dataset copy: SQLite holding the knowledge store's tables.
 
-    try:
-        with path.open("rb") as handle:
-            if handle.read(len(_SQLITE_HEADER)) != _SQLITE_HEADER:
-                return False
-        connection = open_read_only_database(path)
-    except (OSError, apsw.Error, KnowledgeStorageError):
-        return False
-    try:
-        names = {
-            str(row[0])
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        }
-    except apsw.Error:
-        return False
-    finally:
-        connection.close()
-    return names >= _KNOWLEDGE_TABLES
+    By content, not by name, through the one content probe (MIK-R26 rule 6), which opens the file
+    read-only and immutable. A derived index (it holds ``ix_*`` tables) is never a copy.
+    """
+
+    tables = sqlite_table_names(path)
+    return is_knowledge_dataset(tables) and not is_derived_index(tables)
 
 
 def _tracked(path: Path) -> bool:

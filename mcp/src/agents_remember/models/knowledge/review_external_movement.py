@@ -1,45 +1,13 @@
-"""What a review can say about an identity a *raw* Git operation moved under it (ICR-R23@v1).
+"""Source-bound raw Git ancestry on retained review trees (ICR-R23).
 
-A comparison generation records the identities a review bound:
-:mod:`agents_remember.application.review_comparison_generation` seals the work-branch head and the
-code-base commit the capture was taken from, and the code tree and knowledge dataset the comparison
-was between. Managed work then moves those identities through exactly one route -- ``worktree_sync``
--- which *measures* what it moved and writes that measurement beside the generation (ICR-R22@v1,
-:mod:`agents_remember.models.knowledge.review_sync_rebinding`).
+Version 2 carries the complete tree comparison and its canonical digest. Candidate/base commits
+can be checked for ancestry; an uncommitted tree pin supplies no observed work-branch head and
+that channel stays not-measured. A missing comparison carries no invented UUID or zero digest.
+Historical v1 shapes retain their required generation identity for read-only evidence decoding.
 
-Nothing obliges a repository to use that route. ``git rebase``, ``git cherry-pick``, ``git revert``
-and a branch or worktree switch are ordinary Git, they rewrite or replace the very refs the sealed
-manifest names, and they leave no rebinding record behind because no managed transaction ran. A
-reader holding only "a generation was frozen" cannot tell that state from an untouched one, which is
-the packet's non-conforming example: attribution that is old is shown as current solely because its
-record still exists on disk.
-
-:class:`ExternalGitMovement` is the value such a boundary reports. It is deliberately **not** an
-attempt to classify the Git command a person ran: Git leaves no such record, and a module that
-guessed one would be inventing a measurement. It reports what *was* measured -- which declared
-identities no longer appear in the repository, and which transition shape that is -- beside the
-reconciliation routes this system does and does not have.
-
-**Four states, and only one of them claims the identities still stand.** ``current`` says every
-declared identity that could be compared is still there, ``stale`` says a declared identity was
-replaced or the worktree left its declared branch, ``not-measured`` says the comparison could not be
-taken at all, and ``unavailable`` says the generation itself could not be read. A movement never
-carries a reason, because it is a measurement; an absence always carries one, because a reader
-otherwise cannot tell an unperformed check from an unaffected repository.
-
-**What is supported is a field, not a tone of voice.** ``reconciliation`` is ``supported`` on exactly
-the transitions whose recovery this system actually performs -- the successor generation
-:mod:`agents_remember.application.review_comparison_freeze` publishes from the reviewed generation --
-and ``unsupported`` on every other one, with ``recovery_action`` naming what a person must do. The
-matrix those labels come from is
-:data:`agents_remember.application.review_external_git_movement.GIT_TRANSITION_SUPPORT`, and it is
-rendered verbatim into ``docs/reference/worktrees-c09.md``; ``moved_identities`` is the field that
-names the exact identity replaced, and ``unsupported`` repeats the matrix's unsupported verdicts so
-that no reader can read this value and conclude that an unsupported transition was handled.
-
-Nothing here writes, reconciles, re-freezes or deletes: the reviewed generation stays exactly where
-it is, which is the packet's boundary example -- an exact historic generation stays inspectable while
-live recovery is pending.
+The report distinguishes current, stale, not-measured and unavailable observations. It does not
+identify which Git command ran or reconcile it. The application owner's support matrix names the
+unsupported transitions and the exact recovery instructions; nothing in this vocabulary writes.
 """
 
 from __future__ import annotations
@@ -52,10 +20,11 @@ from agents_remember.models.knowledge.base import (
     GIT_OBJECT_PATTERN,
     PROSE_MAX_LENGTH,
     SHA256_PATTERN,
-    UUID_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.review_final_output_receipt import tree_comparison_digest
 from agents_remember.models.knowledge.review_staleness import ReviewSyncMovementState
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
     "ExternalGitMovement",
@@ -121,8 +90,7 @@ class ExternalGitMovement(KnowledgeModel):
     ``observed_*`` carry the branch heads the check actually read, and they exist to locate the
     replacement, never to substitute for the recorded identity: a channel that could not be read
     reports ``unavailable`` in ``transition_evidence`` and carries no observed value at all.
-    ``recovery_action`` is the step a person takes -- the successor generation the freeze owner
-    publishes, whose lineage names this one as its predecessor -- and this value performs none of it.
+    ``recovery_action`` is the step a person takes -- a successor live review that records the exact code and memory tree comparison -- and this value performs none of it.
     """
 
     binding_state: ReviewSyncMovementState
@@ -135,9 +103,9 @@ class ExternalGitMovement(KnowledgeModel):
     # report a measurement, so an unreadable generation can never read as an unaffected repository.
     reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    generation_id: str = Field(pattern=UUID_PATTERN)
-    generation_index: int = Field(ge=1)
-    reviewed_binding_digest: str = Field(pattern=SHA256_PATTERN)
+    movement_version: Literal["ar-review-external-movement/v2"] = "ar-review-external-movement/v2"
+    reviewed_binding_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    comparison: ReviewTreeComparisonRecord | None = None
     declared_work_branch: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     observed_code_work_branch_head: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
     observed_declared_source_branch_head: str | None = Field(
@@ -150,6 +118,16 @@ class ExternalGitMovement(KnowledgeModel):
     # documented matrix is the authority on which transitions those are.
     unsupported: tuple[str, ...] = ()
     generation_readable: bool = True
+
+    @model_validator(mode="after")
+    def _validate_source_comparison(self) -> ExternalGitMovement:
+        if self.binding_state != "unavailable" and self.comparison is None:
+            raise ValueError("a measured tree movement carries its source comparison")
+        if self.comparison is not None and self.reviewed_binding_digest != tree_comparison_digest(
+            self.comparison
+        ):
+            raise ValueError("the digest must describe the complete source comparison")
+        return self
 
     @model_validator(mode="after")
     def _the_state_follows_from_what_was_measured(self) -> ExternalGitMovement:

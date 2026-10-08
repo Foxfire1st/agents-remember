@@ -22,11 +22,10 @@ test or a metadata comparison, so there is no second answer to disagree with the
 **Why this is a separate module, and why it imports a private name.** Two boundaries are being kept
 apart on purpose:
 
-* The record group's storage and read surface -- :mod:`…requirement_records`,
-  :mod:`…requirement_views`, and the guards in :mod:`…requirements` -- import **no** task-plane
-  module. A store can record, read and rebuild every revision with the task plane absent, which is
-  what "the two planes stay independently operable" means in practice (requirement 2.5). Only this
-  module crosses, and only when a caller asks it to.
+* The models a requirement reference is stored in (:mod:`agents_remember.models.knowledge.requirement`)
+  import **no** task-plane module. A reference can be recorded and read with the task plane absent,
+  which is what "the two planes stay independently operable" means in practice (requirement 2.5).
+  Only this module crosses, and only when a caller asks it to.
 * The owner exposes no *public* per-reference entry point. Its public projection,
   :func:`…task_intent.task_intent_projection`, resolves a whole task document's requirements at once
   and takes a ``ResolvedTaskDocument``, so consuming it here would make this plane hold a task-plane

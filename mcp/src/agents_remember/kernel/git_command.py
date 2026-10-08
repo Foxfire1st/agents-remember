@@ -895,12 +895,32 @@ def inspect_git_closeout_publication(
         capability.require_authority()
 
 
+def ref_compare_and_swap_args(
+    ref: str, new_commit: str, expected_old_commit: str, *, reason: str | None = None
+) -> list[str]:
+    """The one expected-old ref move every closeout publication uses.
+
+    The queued closeout journals it (:func:`closeout_publication_command`); the ordinary closeout
+    and direct landing run it straight after they build their commit from the judged tree. Git
+    refuses the move when the ref no longer names ``expected_old_commit``.
+    """
+    return [
+        "update-ref",
+        *(() if reason is None else ("-m", reason)),
+        ref,
+        new_commit,
+        expected_old_commit,
+    ]
+
+
 def closeout_publication_command(binding: GitCloseoutPublicationBinding) -> GitCommandPlan:
     """Describe the one expected-old CAS for the caller's durable publication intent."""
     binding.validate()
     if binding.expected_old_commit == binding.prepared_commit:
         raise GitCloseoutPublicationError("existing closeout output is observation-only")
-    args = ["update-ref", binding.logical_ref, binding.prepared_commit, binding.expected_old_commit]
+    args = ref_compare_and_swap_args(
+        binding.logical_ref, binding.prepared_commit, binding.expected_old_commit
+    )
     return GitCommandPlan(
         binding.root, tuple(args), tuple(_git_argv(binding.root, args, binding.root))
     )

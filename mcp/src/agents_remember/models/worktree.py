@@ -13,16 +13,8 @@ from agents_remember.models.closeout.input import (
     CloseoutInvalidField,
     ResolvedCloseoutPlan,
 )
-from agents_remember.models.knowledge.merge import (
-    AuthoredDecision,
-    AuthoredReconciliation,
-    MergeConflict,
-)
-from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
-from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
-from agents_remember.models.lifecycles.operation_wait import LifecycleWaitOutcome
 from agents_remember.models.quality import QualityGateResult
 from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
@@ -89,10 +81,9 @@ SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
 SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
-# ``reconcile`` authors a resolution for one exact conflict the merge engine refused; it is the
-# one action that carries a decided input and the only one that can settle a knowledge
-# dataset's conflict without an outside repair tool.
-SyncResolutionAction = Literal["continue", "cancel", "reconcile"]
+# Knowledge is text in Git (MIK-R26 rule 2): a retained conflict is resolved in the worktree's
+# files and staged, so there is no action that carries a decided input.
+SyncResolutionAction = Literal["continue", "cancel"]
 MemorySyncChoice = Literal["merge-memory", "skip-memory"]
 SyncSide = Literal["code", "memory"]
 SyncPhase = Literal[
@@ -159,9 +150,6 @@ class SyncOperationProjection(StrictResponseModel):
     identityMismatch: bool = False
     side: SyncSide | None = None
     conflictFiles: tuple[str, ...] = ()
-    # The same explanation the sync response carries, so a status read names what the agent would
-    # have to reconcile instead of only which file is unresolved.
-    knowledgeConflict: SyncKnowledgeConflict | None = None
     summary: str
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
@@ -169,38 +157,9 @@ class SyncOperationProjection(StrictResponseModel):
 
 
 class SyncResolutionInput(StrictResponseModel):
-    """One resolution call's inputs, paired so an action and its decided input travel together.
-
-    ``reconcile`` is the only action that carries an authored decision, and the two are refused as a
-    pair when they disagree -- a decision without ``reconcile`` and ``reconcile`` without a decision
-    are both input errors -- so they are one value here rather than two parameters every layer has
-    to pass side by side and keep consistent.
-    """
+    """One resolution call's input: the action the agent chose for a retained conflict."""
 
     action: SyncResolutionAction | None = None
-    knowledge: AuthoredReconciliation | None = None
-
-
-class SyncKnowledgeConflict(StrictResponseModel):
-    """The engine's own explanation of why one conflicted knowledge dataset would not settle.
-
-    This model exists because the explanation used to stop one layer below the agent. The merge
-    engine already reported the exact conflict -- the table, the operation and the row identity it
-    refused -- and the adapter already carried a typed refusal with the action it advertised; the
-    sync asked only *whether* the dataset settled, so all of it was reduced to a boolean and the
-    agent received ``files: ["knowledge.sqlite"]`` and nothing to reconcile.
-
-    Every field is the engine's own value, carried verbatim: ``conflict`` is the attribution,
-    ``refusal`` is the typed explanation, and ``decisions`` names the authored decisions that
-    conflict admits. An empty ``decisions`` means there is nothing an authored decision can settle
-    -- a schema disagreement above all -- and the refusal's own ``next_action`` says so.
-    """
-
-    path: str
-    conflict: MergeConflict | None = None
-    refusal: KnowledgeRefusal | None = None
-    detail: str = ""
-    decisions: list[AuthoredDecision] = Field(default_factory=list)
 
 
 class SyncResolutionProjection(StrictResponseModel):
@@ -219,7 +178,6 @@ class SyncResolutionProjection(StrictResponseModel):
     worktree: str | None = None
     files: list[str] = Field(default_factory=list)
     wipRestore: bool = False
-    knowledge: SyncKnowledgeConflict | None = None
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
@@ -456,39 +414,6 @@ class WorktreeStatusResponse(WorktreeCommandResponse):
     syncOperation: SyncOperationProjection | None = None
 
 
-class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
-    operation: Literal["worktree_enclosure_adopt"] = "worktree_enclosure_adopt"
-    publicationRequestId: str | None = None
-    locatorPath: str | None = None
-    manifestPath: str | None = None
-    contractSha256: str | None = None
-    manifestSha256: str | None = None
-    artifacts: list[dict[str, object]] = Field(default_factory=list)
-    removalCondition: str | None = None
-
-
-class WorktreeStatusWaitResponse(WorktreeCommandResponse):
-    """Read-only bounded wait on lifecycle meaningful-state changes (CCR-R15).
-
-    Addressed by canonical contract, operation kind, expected public generation,
-    and an opaque typed after_revision cursor from a prior snapshot.  On
-    change it returns the compact R18-coherent status plus the next cursor; on
-    timeout it returns the unchanged snapshot and cursor without claiming
-    failure.  Never carries an operation key, PID, or worker/queue/gate
-    authority.
-    """
-
-    operation: Literal["worktree_status_wait"] = "worktree_status_wait"
-    outcome: LifecycleWaitOutcome
-    operationKind: LifecycleOperationKind | None = None
-    successorGeneration: int | None = None
-    meaningfulRevision: int | None = None
-    timeoutSeconds: float | None = None
-    elapsedSeconds: float | None = None
-    lifecycleOperation: LifecycleOperationProjection | None = None
-    nextArgs: dict[str, object] | None = None
-
-
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
     phase: SyncPhase | Literal["quarantined"] | None = None
@@ -501,9 +426,7 @@ class WorktreeSyncResponse(WorktreeCommandResponse):
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
-    invalidField: (
-        Literal["memory_sync_choice", "resolution_action", "knowledge_resolution"] | None
-    ) = None
+    invalidField: Literal["memory_sync_choice", "resolution_action"] | None = None
     manualRepair: dict[str, object] | None = None
 
 
@@ -578,28 +501,6 @@ class WorktreeOperationControlResponse(WorktreeCommandResponse):
         ]
         | None
     ) = None
-    nextArgs: dict[str, object] | None = None
-    developerDecisionRequired: bool = False
-    decisionSurface: str | None = None
-
-
-class WorktreeLegacyOperationResponse(WorktreeCommandResponse):
-    operation: Literal["worktree_legacy_operation"] = "worktree_legacy_operation"
-    lifecycleOperation: LifecycleOperationProjection | None = None
-    operationKind: str | None = None
-    legacyDigest: str | None = None
-    migratable: bool | None = None
-    migrationReason: str | None = None
-    archivable: bool | None = None
-    archiveReason: str | None = None
-    archivePath: str | None = None
-    terminalEvidence: dict[str, object] | None = None
-    removalCondition: str | None = None
-    removalGuard: dict[str, object] | None = None
-    expected: dict[str, object] = Field(default_factory=dict)
-    observed: dict[str, object] = Field(default_factory=dict)
-    nextAction: str = ""
-    nextTool: str | None = None
     nextArgs: dict[str, object] | None = None
     developerDecisionRequired: bool = False
     decisionSurface: str | None = None

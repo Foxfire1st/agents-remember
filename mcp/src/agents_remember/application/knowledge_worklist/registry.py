@@ -42,7 +42,6 @@ __all__ = [
     "item_id",
     "kinds_document",
     "register_item_kind",
-    "registered_kind",
     "satisfying_row",
     "subject_row",
 ]
@@ -143,13 +142,6 @@ register_item_kind(
         owner="MIK-R08",
     )
 )
-
-
-def registered_kind(name: str) -> ItemKind:
-    try:
-        return ITEM_KINDS[name]
-    except KeyError:
-        raise ValueError(f"no worklist item kind {name!r} is registered") from None
 
 
 def kinds_document() -> list[Mapping[str, Any]]:

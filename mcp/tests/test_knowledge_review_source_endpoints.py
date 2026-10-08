@@ -1,30 +1,8 @@
-"""The exact source endpoints a live curator review binds -- production composition, real Git.
+"""Public source endpoints over real four-tree comparisons, capture and changeset routes.
 
-``ICR-R01@v1`` requires a review generation to bind the actual source base and the selected
-candidate to immutable Git object identities *before* it returns source content. These cases measure
-that through the operations the dashboard really calls: a real enclosure contract on disk, a real
-linked Git worktree with staged, unstaged and eligible untracked content, the real
-:func:`~agents_remember.application.knowledge_review.read_knowledge_review` resolution, the real
-capture owner and the real comparison. Nothing here injects a preconstructed resolution, a fake
-index or a hand-built payload.
-
-The load-bearing properties, one case each:
-
-* the resolution binds the contract's **recorded base commit** on one side and the **captured
-  add-all candidate tree** on the other, and leaves the real Git index byte-identical;
-* the rendered review publishes those two ids and reaches the *whole* candidate -- a HEAD-to-unstaged
-  range would silently miss an eligible untracked file, which is the packet's non-conforming example;
-* a capture input that moves before publication is refused **by name** (the exact side, plus the two
-  identities it compared) instead of being published as the candidate's comparison;
-* a moved code HEAD names the head as the side that moved;
-* a committed change-set range binds the two **recorded** commits, and a later commit on the branch
-  does not move it; and
-* a committed range nothing has recorded yet is refused by name while the working view stays
-  available and labelled -- so "what is not committed yet" is never published as what landed.
-
-The attribution-precedence cases that open this same enclosure under different knowledge-half states
-are in ``test_knowledge_review_attribution_precedence.py``, which builds it through
-:func:`build_endpoint_fixture`.
+The tests below use the converted ``World`` enclosure. ``EndpointFixture`` is retained separately
+for composition unit tests that need synthetic row identities; its explicit assembly does not test
+production candidate selection. Both fixtures capture real source trees with the user's index intact.
 """
 
 from __future__ import annotations
@@ -36,17 +14,17 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.knowledge_review import (
+    ReviewRecordInputs,
     compose_review,
     read_knowledge_review,
     resolve_review_candidate,
 )
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
+from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
-from agents_remember.models.knowledge.review import (
-    KnowledgeReviewPayload,
-    ReviewSurfaceRequest,
-)
+from agents_remember.models.knowledge.review import KnowledgeReviewResult, ReviewSurfaceRequest
 from agents_remember.serving.changeset import (
     ChangesetFileRef,
     leaf_changeset,
@@ -87,6 +65,18 @@ from read_scope_test_support import (
     SYNCHRONIZATION_PATH,
     UNPARSED_PATH,
 )
+from test_review_git_trees import (
+    CODE_FILE,
+    CODE_V1,
+    INVARIANT,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    build_world,
+    commit,
+    git,
+)
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -94,9 +84,7 @@ LEAF_ID = "260921-icr-l1"
 WORKTREE_NAME = "icr-r01-l1"
 TASK_NAME = "review-source-endpoints-fixture"
 
-# The content the fixture's worktree holds, per index state. The tracked paths reproduce the diff
-# fixture's own candidate bytes so the recorded anchors in the candidate dataset observe exactly the
-# blobs it recorded -- that is what makes "the source opens" a measurement rather than a claim.
+# Synthetic row tests retain these exact source bytes and opaque identity semantics.
 MODIFIED_PATH = BATCH_PATH
 ELIGIBLE_UNTRACKED_PATH = SUCCESSOR_PATH
 STAGED_ADDITION_PATH = "src/staged_addition.py"
@@ -112,7 +100,11 @@ UNCOMMITTED_TEXT = "# never committed: the working view's own population\n"
 
 @dataclass(frozen=True)
 class EndpointFixture:
-    """One live leaf enclosure: real contract, real worktree, real review datasets."""
+    """Real source enclosure plus synthetic row indexes for composition unit tests.
+
+    Public candidate resolution is covered separately with the converted ``World`` fixture.
+    These rows keep the existing identity semantics of the low-level read fixtures.
+    """
 
     config: McpRuntimeConfig
     contract: WorktreeContract
@@ -154,9 +146,20 @@ class EndpointFixture:
         )
 
     def resolve(self) -> ReviewCandidateResolution:
-        resolved = resolve_review_candidate(self.config, self.repository_id, self.master, LEAF_ID)
-        assert isinstance(resolved, ReviewCandidateResolution), resolved
-        return resolved
+        captured = capture_future_code_candidate(self.contract)
+        root = self.contract.worktree_group / "provider-runtime/dev-ar-coordination/knowledge"
+        return ReviewCandidateResolution(
+            repository_id=self.repository_id,
+            leaf_id=LEAF_ID,
+            baseline_database=root / "baseline/knowledge-candidate.db",
+            candidate_database=root / "candidate/knowledge-candidate.db",
+            baseline_code_root=self.contract.code_repo_path,
+            candidate_code_root=self.contract.code_repo_path,
+            baseline_code_tree_id=self.contract.code_base_commit,
+            candidate_code_tree_id=captured.codeCandidateTree,
+            contract=self.contract,
+            candidate_identity=captured,
+        )
 
     def recorded_range(self, commit: str) -> WorktreeContract:
         """Record one landed commit on the contract, as closeout writes it."""
@@ -207,17 +210,15 @@ def endpoint_fixture(tmp_path: Path) -> EndpointFixture:
 def build_endpoint_fixture(
     directory: Path, *, datasets: bool = True, memory_mode: str = "disabled"
 ) -> EndpointFixture:
-    """Build the diff fixture's two datasets inside a real leaf enclosure with a real worktree.
+    """Build synthetic row indexes beside a real source enclosure for composition unit tests.
 
-    ``datasets=False`` is the never-initialized task: the leaf has a real recorded base, a real
-    worktree and a real captured candidate, and the two knowledge halves simply do not exist. That is
-    the state the packet's "no knowledge at all" exercise is about, and it is a state of the *task*
-    rather than a broken fixture.
+    ``datasets=False`` leaves both row indexes absent. The public resolver treats this enclosure's
+    unconverted memory as legacy-unavailable, independently of whether these test rows are present.
 
     ``memory_mode="external"`` adds the other half of the enclosure a later leaf's cases need: a real
     external-memory repository and its linked worktree, on the same contract. It is a parameter rather
     than a second builder because every other fact about the enclosure -- the recorded base, the
-    captured candidate, the two datasets -- is the same one, and two builders would be two fixtures
+    captured candidate, the two row indexes -- is the same one, and two builders would be two fixtures
     free to drift apart.
     """
 
@@ -361,7 +362,10 @@ def _materialize_candidate(diff: DiffFixture, contract: WorktreeContract) -> Non
 
 
 def _place_datasets(diff: DiffFixture, contract: WorktreeContract) -> None:
-    """Put the two real datasets where the resolution reads them: the leaf's disposable root."""
+    """Place synthetic row indexes for the fixture's direct composition-unit resolution.
+
+    Production resolution never selects these test files.
+    """
 
     root = contract.worktree_group / "provider-runtime" / "dev-ar-coordination" / "knowledge"
     for half, database in (
@@ -369,7 +373,19 @@ def _place_datasets(diff: DiffFixture, contract: WorktreeContract) -> None:
         ("candidate", diff.after.database_path),
     ):
         (root / half).mkdir(parents=True, exist_ok=True)
-        (root / half / "knowledge-candidate.sqlite").write_bytes(database.read_bytes())
+        (root / half / "knowledge-candidate.db").write_bytes(database.read_bytes())
+
+
+def compose_endpoint_review(
+    fixture: EndpointFixture,
+    request: ReviewSurfaceRequest | None = None,
+    records: ReviewRecordInputs | None = None,
+) -> KnowledgeReviewResult:
+    """Compose synthetic row inputs with captured source; this is not a public resolver test."""
+
+    if records is None:
+        return compose_review(fixture.resolve(), request or fixture.request())
+    return compose_review(fixture.resolve(), request or fixture.request(), records)
 
 
 def _index_path(worktree: Path) -> Path:
@@ -415,679 +431,421 @@ def _captured_identity(resolved: ReviewCandidateResolution) -> FutureCodeCandida
     return identity
 
 
-def _changed_paths_of(payload: KnowledgeReviewPayload) -> set[str]:
-    """Every path the published comparison reports as changed, attributed or not."""
-
-    source = payload.source
-    return set(source.attributed_changed_paths) | set(source.unattributed_changed_paths)
+# -- public resolution: a converted memory repository and its real four-tree comparison ---------
 
 
-# -- the bound endpoints -----------------------------------------------------------------------
+@pytest.fixture
+def source_world(tmp_path: Path) -> World:
+    world = build_world(tmp_path / "source")
+    world.code_base = commit(world.code, {SYNCHRONIZATION_PATH: "# removed by the leaf\n"})
+    world.memory_base = commit(world.memory, {}, trailer=world.code_base)
+    git(world.code_worktree, "reset", "--hard", world.code_base)
+    git(world.memory_worktree, "reset", "--hard", world.memory_base)
+    world.contract()
+    world.edit()
+    (world.code_worktree / SYNCHRONIZATION_PATH).unlink()
+    (world.code_worktree / "src").mkdir(exist_ok=True)
+    (world.code_worktree / STAGED_ADDITION_PATH).write_text(STAGED_ADDITION_TEXT)
+    git(world.code_worktree, "add", STAGED_ADDITION_PATH)
+    (world.code_worktree / ELIGIBLE_UNTRACKED_PATH).write_text("# eligible untracked\n")
+    (world.code_worktree / UNMAPPED_PATH).write_text("# unregistered\n")
+    (world.code_worktree / ".gitignore").write_text(IGNORED_RULE)
+    (world.code_worktree / IGNORED_PATH).parent.mkdir()
+    (world.code_worktree / IGNORED_PATH).write_text(_IGNORED_TEXT)
+    return world
+
+
+def _public_resolution(world: World) -> ReviewCandidateResolution:
+    resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    return resolved
+
+
+def _source_app(world: World) -> FastAPI:
+    app = FastAPI()
+    register_review_routes(
+        app,
+        world.config,
+        lambda request: read_knowledge_review(world.config, request),
+        source_content_port=lambda request: read_review_source_content(world.config, request),
+    )
+    return app
+
+
+def _source_params(*, subject: bool = False) -> dict[str, str]:
+    params = {"repo": REPO, "master": MASTER, "leaf": LEAF}
+    if subject:
+        params.update(selectorKind="invariant", selectorId=text_uuid("identity", INVARIANT))
+    return params
 
 
 def test_the_live_candidate_binds_the_recorded_base_and_the_captured_tree(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """The endpoints are the recorded base commit and the captured tree; the real index is untouched.
-
-    The index digest is taken before and after the capture, because "the user's work is unchanged"
-    is a claim about bytes and not about intent: an add-all capture that refreshed or rewrote the
-    real index would leave it different here.
-    """
-
-    fixture = endpoint_fixture
-    index = _index_path(fixture.worktree)
-    before_capture = _digest(index)
-
-    resolved = fixture.resolve()
-
-    assert _digest(index) == before_capture, "the capture rewrote the real Git index"
-    assert resolved.baseline_code_tree_id == fixture.contract.code_base_commit
+    world = source_world
+    index = _index_path(world.code_worktree)
+    before = _digest(index)
+    resolved = _public_resolution(world)
+    assert _digest(index) == before, "capture rewrote the user's Git index"
+    contract = resolved.contract
+    assert contract is not None and resolved.trees is not None
+    assert resolved.baseline_code_tree_id == world.code_base
     assert (
-        resolved.candidate_code_tree_id
-        == capture_future_code_candidate(fixture.contract).codeCandidateTree
+        resolved.candidate_code_tree_id == capture_future_code_candidate(contract).codeCandidateTree
     )
-    # Root and tree travel together on both sides: a tree id with no repository is unresolvable, and
-    # a repository with no tree id would be a licence to read a working tree. Both roots name the
-    # **repository** the objects live in, which is the root a durable comparison generation records
-    # (ICR-R12): the candidate tree is written through the linked worktree's private index into the
-    # repository's shared object store, so it resolves there, and this is measured rather than
-    # assumed -- `git cat-file -e` in the repository the resolution named.
-    assert resolved.baseline_code_root == fixture.contract.code_repo_path
-    assert resolved.candidate_code_root == fixture.contract.code_repo_path
-    candidate_root = resolved.candidate_code_root
-    assert candidate_root is not None
-    for tree_id in (resolved.baseline_code_tree_id, resolved.candidate_code_tree_id):
-        assert tree_id is not None
-        # `_git` refuses a non-zero exit, so this is the measurement that both bound objects really
-        # resolve in the repository the resolution named as their root.
-        assert _git(candidate_root, ["cat-file", "-t", tree_id]) in {"tree", "commit"}
-    candidate_paths = _tree_paths(fixture.contract.code_repo_path, _captured_tree(resolved))
-    assert {STAGED_ADDITION_PATH, ELIGIBLE_UNTRACKED_PATH, UNMAPPED_PATH} <= candidate_paths
-    assert MODIFIED_PATH in candidate_paths
-    assert SYNCHRONIZATION_PATH not in candidate_paths
-    # The packet's boundary example: ignored files stay excluded by the existing policy.
-    assert IGNORED_PATH not in candidate_paths
+    assert resolved.baseline_code_root == resolved.candidate_code_root == world.code
+    for tree in (resolved.baseline_code_tree_id, resolved.candidate_code_tree_id):
+        assert tree is not None and git(world.code, "cat-file", "-t", tree) in {"tree", "commit"}
+    paths = _tree_paths(world.code, _captured_tree(resolved))
+    assert {STAGED_ADDITION_PATH, ELIGIBLE_UNTRACKED_PATH, UNMAPPED_PATH, CODE_FILE} <= paths
+    assert SYNCHRONIZATION_PATH not in paths and IGNORED_PATH not in paths
 
 
 def test_the_rendered_review_publishes_the_endpoints_and_reaches_the_whole_candidate(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """The payload names both ids and its source half covers staged, unstaged and untracked content.
-
-    The untracked addition is the falsifier for the packet's non-conforming example: a review opened
-    against ``HEAD``-to-unstaged -- whatever it was labelled -- cannot reach a file that is in no
-    commit and no index entry, so its presence in the published changed paths is what distinguishes
-    the bound candidate from that range.
-    """
-
-    fixture = endpoint_fixture
-    resolved = fixture.resolve()
-
-    result = read_knowledge_review(fixture.config, fixture.request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    assert payload.comparison is not None
-    assert payload.comparison.before_code_tree_id == fixture.contract.code_base_commit
-    assert payload.comparison.after_code_tree_id == resolved.candidate_code_tree_id
-    changed = _changed_paths_of(payload)
-    assert ELIGIBLE_UNTRACKED_PATH in changed
-    assert UNMAPPED_PATH in changed
-    assert STAGED_ADDITION_PATH in changed
-    assert SYNCHRONIZATION_PATH in changed
-    assert IGNORED_PATH not in changed
-    # The non-conforming range is measured here rather than merely asserted: the same worktree's
-    # HEAD-to-unstaged diff cannot reach the untracked addition the published expansion reaches, so
-    # the two ranges are demonstrably not the same population.
-    head_to_unstaged = set(_git(fixture.worktree, ["diff", "--name-only", "HEAD"]).split())
-    assert ELIGIBLE_UNTRACKED_PATH not in head_to_unstaged
-    assert MODIFIED_PATH in head_to_unstaged
-    # Source content is openable against the captured tree, and the published command names it.
-    opened = [location for location in payload.source.locations if location.path == SUCCESSOR_PATH]
-    assert opened, [location.path for location in payload.source.locations]
-    assert {location.resolution for location in opened} == {"exact_recorded_blob"}
-    assert _captured_tree(resolved) in (payload.source.expansion_command or "")
-    # Displayed, not only returned: the same payload the route serializes to the browser carries
-    # the two bound ids, read back out of the JSON body the client receives.
-    served = FastAPI()
-    register_review_routes(
-        served, fixture.config, lambda request: read_knowledge_review(fixture.config, request)
-    )
-    with TestClient(served) as client:
-        body = client.get(
-            "/api/review/intent",
+    world = source_world
+    resolved = _public_resolution(world)
+    with TestClient(_source_app(world)) as client:
+        response = client.get("/api/review/intent", params=_source_params(subject=True))
+        expanded = client.get(
+            "/api/review/intent/source-content",
             params={
-                "repo": fixture.repository_id,
-                "master": fixture.master,
-                "leaf": LEAF_ID,
-                "selectorKind": "invariant",
-                "selectorId": fixture.diff.retry_invariant_id,
+                **_source_params(),
+                "path": ELIGIBLE_UNTRACKED_PATH,
+                "beforeCodeTreeId": world.code_base,
+                "afterCodeTreeId": _captured_tree(resolved),
             },
         )
-    assert body.status_code == 200, body.text
-    shown = body.json()["payload"]["comparison"]
-    assert shown["before_code_tree_id"] == fixture.contract.code_base_commit
-    assert shown["after_code_tree_id"] == _captured_tree(resolved)
-
-
-# -- a moved input is a named state ------------------------------------------------------------
+    assert response.status_code == 200, response.text
+    payload = response.json()["payload"]
+    comparison = payload["comparison"]
+    assert comparison["before_code_tree_id"] == world.code_base
+    assert comparison["after_code_tree_id"] == _captured_tree(resolved)
+    inventory = payload["source"]["inventory"]
+    changed = {entry["path"] for entry in inventory["entries"]}
+    assert {
+        CODE_FILE,
+        ELIGIBLE_UNTRACKED_PATH,
+        UNMAPPED_PATH,
+        STAGED_ADDITION_PATH,
+        SYNCHRONIZATION_PATH,
+    } <= changed
+    assert IGNORED_PATH not in changed
+    assert sorted(changed) == sorted(
+        independent_changed_records(world.code, world.code_base, _captured_tree(resolved))
+    )
+    head_to_unstaged = set(git(world.code_worktree, "diff", "--name-only", "HEAD").splitlines())
+    assert ELIGIBLE_UNTRACKED_PATH not in head_to_unstaged and CODE_FILE in head_to_unstaged
+    assert expanded.status_code == 200, expanded.text
+    source = expanded.json()["expansion"]
+    assert source["admission"] == "changed" and source["before"]["state"] == "absent"
+    assert source["after_code_tree_id"] == _captured_tree(resolved)
+    assert source["after"]["text"] == "# eligible untracked\n"
 
 
 def test_a_capture_input_that_moves_before_publication_is_refused_by_name(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """A worktree edit between capture and publication refuses, naming the side and both ids."""
-
-    fixture = endpoint_fixture
-    resolved = fixture.resolve()
-    (fixture.worktree / MODIFIED_PATH).write_text(
-        "# batch\nedited while the review was being composed\n", encoding="utf-8"
-    )
-    moved_tree = capture_future_code_candidate(fixture.contract).codeCandidateTree
-    assert moved_tree != _captured_tree(resolved)
-
-    result = compose_review(resolved, fixture.request())
-
-    assert result.state == "refused"
-    assert result.payload is None
+    world = source_world
+    resolved = _public_resolution(world)
+    (world.code_worktree / CODE_FILE).write_text("# moved while composing\n")
+    assert resolved.contract is not None
+    moved = capture_future_code_candidate(resolved.contract).codeCandidateTree
+    result = compose_review(resolved, world.review())
+    assert result.state == "refused" and result.payload is None
     refusal = result.refusal
-    assert refusal is not None
-    assert refusal.code == "candidate_unresolved"
+    assert refusal is not None and refusal.code == "candidate_unresolved"
     assert refusal.offending_input == "the captured candidate tree"
-    assert refusal.expected is not None
-    assert _captured_tree(resolved) in refusal.expected
-    assert refusal.observed is not None and moved_tree in refusal.observed
-    assert refusal.next_action
+    assert _captured_tree(resolved) in (refusal.expected or "")
+    assert moved in (refusal.observed or "") and refusal.next_action
 
 
 def test_a_capture_that_detects_a_moved_head_refuses_instead_of_publishing_a_stale_tree(
-    endpoint_fixture: EndpointFixture, monkeypatch: pytest.MonkeyPatch
+    source_world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The capture owner's own mid-capture head check becomes the surface's named refusal.
-
-    The head really moves while the capture runs -- the wrapper commits between the isolated index's
-    ``write-tree`` and the owner's re-read of ``HEAD`` -- so the state this case measures is produced
-    by the shipped detection rather than asserted from a raised fixture. What is protected is that
-    the failure arrives as a typed refusal naming the candidate side and the retry action: an
-    unhandled capture error escaping the review route, and a tree captured under a head that has
-    already moved, are the two states this refusal exists to prevent.
-    """
-
-    fixture = endpoint_fixture
+    world = source_world
     original = capture_owner.worktree_candidate_tree
 
     def capture_then_move(repo: Path, index_path: Path, **kwargs: object) -> str:
         tree = original(repo, index_path, **kwargs)  # type: ignore[arg-type]
-        _commit(fixture.worktree, "a commit made while the capture was running")
+        _commit(world.code_worktree, "commit during capture")
         return tree
 
     monkeypatch.setattr(capture_owner, "worktree_candidate_tree", capture_then_move)
-
-    outcome = resolve_review_candidate(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID
-    )
-
+    outcome = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
     assert not isinstance(outcome, ReviewCandidateResolution)
-    assert outcome.code == "candidate_unresolved"
-    assert outcome.offending_input == "candidate"
-    assert "future-code-candidate-head-moved" in outcome.detail
-    assert outcome.next_action
+    assert outcome.code == "candidate_unresolved" and outcome.offending_input == "candidate"
+    assert "future-code-candidate-head-moved" in outcome.detail and outcome.next_action
 
 
-def test_a_moved_code_head_names_the_head_as_the_side_that_moved(
-    endpoint_fixture: EndpointFixture,
-) -> None:
-    """Committing the captured content moves HEAD, and HEAD is what the refusal names."""
-
-    fixture = endpoint_fixture
-    resolved = fixture.resolve()
+def test_a_moved_code_head_names_the_head_as_the_side_that_moved(source_world: World) -> None:
+    world = source_world
+    resolved = _public_resolution(world)
     captured = _captured_identity(resolved)
-    landed = _commit(fixture.worktree, "commit the captured candidate")
-    assert landed != captured.observedCodeHead
-
-    result = compose_review(resolved, fixture.request())
-
-    assert result.state == "refused"
+    landed = _commit(world.code_worktree, "land captured content")
+    result = compose_review(resolved, world.review())
     refusal = result.refusal
-    assert refusal is not None
+    assert result.state == "refused" and refusal is not None
     assert refusal.offending_input == "the leaf worktree's code HEAD"
-    assert refusal.expected is not None
-    assert captured.observedCodeHead in refusal.expected
-    assert refusal.observed is not None and landed in refusal.observed
-    # The tree the commit produced is the tree that was captured, so no other side is reported: the
-    # refusal names what moved and not what happened to stay the same.
-    assert capture_future_code_candidate(fixture.contract).codeCandidateTree == _captured_tree(
+    assert captured.observedCodeHead in (refusal.expected or "")
+    assert landed in (refusal.observed or "")
+    assert resolved.contract is not None
+    assert capture_future_code_candidate(resolved.contract).codeCandidateTree == _captured_tree(
         resolved
     )
 
 
-# -- the committed range binds recorded endpoints -----------------------------------------------
-
-
 def test_a_committed_range_binds_the_recorded_commit_and_a_later_commit_does_not_move_it(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """``committed`` is the recorded base -> recorded landed commit, for paths and for content."""
-
-    fixture = endpoint_fixture
-    landed = _commit(fixture.worktree, "land the candidate")
-    recorded = fixture.recorded_range(landed)
-
-    committed = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
-    )
+    world = source_world
+    landed = _commit(world.code_worktree, "land the candidate")
+    world.contract(code_commit=landed)
+    committed = leaf_changeset(world.config, REPO, MASTER, LEAF, "committed")
     assert committed["mode"] == "committed"
     assert {entry["path"] for entry in committed["code"]} >= {
-        MODIFIED_PATH,
+        CODE_FILE,
         ELIGIBLE_UNTRACKED_PATH,
         STAGED_ADDITION_PATH,
         SYNCHRONIZATION_PATH,
     }
     diff = leaf_file_diff(
-        fixture.config,
+        world.config,
         ChangesetFileRef(
-            repo=fixture.repository_id,
-            path=MODIFIED_PATH,
-            kind="code",
-            master=fixture.master,
-            leaf=LEAF_ID,
-            mode="committed",
+            repo=REPO, path=CODE_FILE, kind="code", master=MASTER, leaf=LEAF, mode="committed"
         ),
     )
-    assert diff["before"] == {"content": "# batch\none transaction\n"}
-    assert diff["after"] == {"content": BATCH_PATH_CANDIDATE_TEXT}
-
-    # A later commit on the branch moves HEAD; the recorded range is a task fact and does not move.
-    (fixture.worktree / LOCAL_COMMIT_PATH).write_text(LOCAL_COMMIT_TEXT, encoding="utf-8")
-    later_commit = _commit(fixture.worktree, "a later local commit")
-    assert later_commit != landed
-    later = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
-    )
-    assert later == committed
-    assert LOCAL_COMMIT_PATH not in {entry["path"] for entry in later["code"]}
-    assert recorded.code_commit == landed
-
-    # The uncommitted view is its own, explicitly labelled population: the dirty file only.
-    (fixture.worktree / UNCOMMITTED_PATH).write_text(UNCOMMITTED_TEXT, encoding="utf-8")
-    working = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "working"
-    )
+    assert diff["before"] == {"content": CODE_V1}
+    assert diff["after"] == {"content": CODE_V1.replace("return value", "return value + 0")}
+    (world.code_worktree / LOCAL_COMMIT_PATH).write_text(LOCAL_COMMIT_TEXT)
+    assert _commit(world.code_worktree, "later local commit") != landed
+    assert leaf_changeset(world.config, REPO, MASTER, LEAF, "committed") == committed
+    (world.code_worktree / UNCOMMITTED_PATH).write_text(UNCOMMITTED_TEXT)
+    working = leaf_changeset(world.config, REPO, MASTER, LEAF, "working")
     assert working["mode"] == "working"
     assert {entry["path"] for entry in working["code"]} == {UNCOMMITTED_PATH}
 
 
 def test_an_unrecorded_committed_endpoint_is_answered_with_its_own_state_rather_than_read_from_head(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """A live leaf with commits but no recorded endpoint has no committed range, and says so.
-
-    It says so IN THE BODY, not as a 404. An unrecorded endpoint is a state of the task's progress
-    rather than a missing resource, and the change-set bar probes this view as soon as a leaf
-    document is opened -- so a 404 here is a browser console error on the page whose accepted
-    criterion is zero console errors (register B6). What the case protects is unchanged and is the
-    reason the state is explicit rather than an empty list: ``HEAD`` is never substituted for the
-    missing endpoint, and the answer never reads as a range that was measured empty.
-    """
-
-    fixture = endpoint_fixture
-    head = _commit(fixture.worktree, "a commit nothing has recorded yet")
-    assert fixture.contract.code_commit == ""
-
-    view = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
-    )
-
+    world = source_world
+    head = _commit(world.code_worktree, "unrecorded commit")
+    view = leaf_changeset(world.config, REPO, MASTER, LEAF, "committed")
     assert view["state"] == "unrecorded"
-    detail = view["stateDetail"]
-    assert "no committed code range yet" in detail
-    assert "mode=working" in detail
-    # The unrecorded endpoint's own commit is not named, and it is not the range: one named endpoint
-    # is not a range, so no list may be published as one.
-    assert head not in detail
-    assert view["code"] == []
-    assert view["counters"] == {
-        "code": {"files": 0, "insertions": 0, "deletions": 0},
-        "memory": {"files": 0, "insertions": 0, "deletions": 0},
-    }
-    # A recorded range answers its own state, so "unrecorded" is a discriminator and not a constant.
-    fixture.recorded_range(head)
-    recorded = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
-    )
-    assert recorded["state"] == "recorded"
-    assert recorded["stateDetail"] == ""
-    # The working view keeps working and keeps its own name, so the uncommitted delta stays readable.
     assert (
-        leaf_changeset(fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "working")[
-            "mode"
-        ]
-        == "working"
+        "no committed code range yet" in view["stateDetail"]
+        and "mode=working" in view["stateDetail"]
     )
+    assert head not in view["stateDetail"] and view["code"] == []
+    assert view["counters"] == {
+        side: {"files": 0, "insertions": 0, "deletions": 0} for side in ("code", "memory")
+    }
+    world.contract(code_commit=head)
+    recorded = leaf_changeset(world.config, REPO, MASTER, LEAF, "committed")
+    assert recorded["state"] == "recorded" and recorded["stateDetail"] == ""
+    assert leaf_changeset(world.config, REPO, MASTER, LEAF, "working")["mode"] == "working"
 
 
 def test_the_route_answers_an_unrecorded_committed_view_without_a_status_error(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """The HTTP layer publishes the unrecorded state as a 200, which is the whole of B6.
-
-    The pure function answering ``state="unrecorded"`` is not enough: the defect was that the ROUTE
-    turned it into a 404, and a 404 is what the browser logs as a console error on the page whose
-    accepted criterion is zero. So the status is asserted here, on the served route, together with
-    the two things that keep the answer honest -- the state discriminator survives serialization, and
-    the body still refuses to name ``HEAD`` as the range.
-    """
-
-    fixture = endpoint_fixture
-    _commit(fixture.worktree, "a commit nothing has recorded yet")
-    assert fixture.contract.code_commit == ""
-
-    served = FastAPI()
-    register_changeset_routes(served, fixture.config)
-    with TestClient(served, raise_server_exceptions=False) as client:
+    world = source_world
+    _commit(world.code_worktree, "unrecorded commit")
+    app = FastAPI()
+    register_changeset_routes(app, world.config)
+    with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get(
-            "/api/changeset/task",
-            params={
-                "repo": fixture.repository_id,
-                "master": fixture.master,
-                "leaf": LEAF_ID,
-                "mode": "committed",
-            },
+            "/api/changeset/task", params={**_source_params(), "mode": "committed"}
         )
-
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["state"] == "unrecorded"
-    assert "no committed code range yet" in body["stateDetail"]
-    assert body["code"] == []
-    assert body["counters"]["code"] == {"files": 0, "insertions": 0, "deletions": 0}
-    # An unknown leaf is still a named 404: the state is an answer for a leaf that exists, and it
-    # must not have been bought by turning every absent thing into a 200.
-    with TestClient(served, raise_server_exceptions=False) as client:
         missing = client.get(
             "/api/changeset/task",
-            params={
-                "repo": fixture.repository_id,
-                "master": fixture.master,
-                "leaf": "260921-ICR-NOPE",
-                "mode": "committed",
-            },
+            params={**_source_params(), "leaf": "260101-NOPE", "mode": "committed"},
         )
-    assert missing.status_code == 404, missing.text
-    assert missing.json()["status"] == "not-found"
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["state"] == "unrecorded" and "no committed code range yet" in body["stateDetail"]
+    assert body["code"] == [] and body["counters"]["code"] == {
+        "files": 0,
+        "insertions": 0,
+        "deletions": 0,
+    }
+    assert missing.status_code == 404 and missing.json()["status"] == "not-found"
 
 
 def test_an_unrecorded_memory_half_empties_only_itself_and_keeps_the_code_half(
-    endpoint_fixture: EndpointFixture,
+    source_world: World,
 ) -> None:
-    """One side's unrecorded endpoint never discards the other side's resolved range.
-
-    The contract records the code landed commit and runs an external memory leg whose landed commit
-    nothing has written yet. The memory half must degrade to "nothing to show" with its counters at
-    zero -- the degradation this side has always published for a leaf whose memory leg is not run --
-    because the code half was resolved from its own recorded commit and a whole-view refusal would
-    throw that result away. The code side answers ``state="recorded"`` here (the unrecorded-endpoint
-    case above is its own, and the state is what tells the two apart), and nothing here is answered
-    from the worktree's ``HEAD``.
-    """
-
-    fixture = endpoint_fixture
-    landed = _commit(fixture.worktree, "land the candidate")
-    recorded = fixture.record_code_with_unrecorded_memory(landed)
-    assert recorded.code_commit == landed
-    assert recorded.memory_content_commit == ""
-
-    view = leaf_changeset(
-        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
-    )
-
+    world = source_world
+    world.contract(code_commit=_commit(world.code_worktree, "land code without memory"))
+    view = leaf_changeset(world.config, REPO, MASTER, LEAF, "committed")
     assert view["mode"] == "committed"
     assert {entry["path"] for entry in view["code"]} >= {
-        MODIFIED_PATH,
+        CODE_FILE,
         ELIGIBLE_UNTRACKED_PATH,
         STAGED_ADDITION_PATH,
         SYNCHRONIZATION_PATH,
     }
     assert view["counters"]["code"]["files"] == len(view["code"])
-    assert view["memory"] == []
-    assert view["counters"]["memory"] == {"files": 0, "insertions": 0, "deletions": 0}
-
-
-# --- the task-context entry and the complete source inventory (ICR-R02) --------------------------
-#
-# The entry is the task context. Every case below opens the review the way the dashboard does -- the
-# task's own context, no reviewed subject -- through the real resolution, the real capture and the
-# real route, and compares the inventory it returns against an independent Git observation of the
-# same bound pair rather than against a list written here.
-
-UNUSUAL_PATH = "src/tab\tnewline\nname.py"
-BINARY_ADDITION_PATH = "assets/blob.dat"
+    assert view["memory"] == [] and view["counters"]["memory"] == {
+        "files": 0,
+        "insertions": 0,
+        "deletions": 0,
+    }
 
 
 def test_a_task_context_review_lists_the_complete_source_inventory_with_no_knowledge_at_all(
-    tmp_path: Path,
+    source_world: World,
 ) -> None:
-    """The packet's entry case: a never-initialized task still opens its complete source review.
-
-    The leaf has a recorded base, a live worktree and a captured candidate, and neither knowledge half
-    exists. The inventory must be the *whole* change set of the bound pair -- compared here against an
-    independent Git observation of those two exact objects -- and the knowledge pane must state that
-    no operand was compared rather than rendering an empty one. The subject route keeps its own
-    missing-dataset refusal, so nothing here softens an existing named state.
-    """
-
-    fixture = build_endpoint_fixture(tmp_path / "task-context", datasets=False)
-    resolved = fixture.resolve()
-    candidate_tree = _captured_tree(resolved)
-
-    result = read_knowledge_review(fixture.config, fixture.task_request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    # No comparison identity is published, because none was made, and the staleness state says so in
-    # its own word rather than borrowing "current".
-    assert payload.comparison is None
-    assert payload.staleness.state == "not_compared"
-    assert payload.knowledge.selection_state == "task_context"
-    assert "absent" in (payload.knowledge.selection_detail or "")
-    assert payload.knowledge.before_statement.state == "unresolved"
-    assert payload.source.inventory.state == "measured"
-    assert payload.source.inventory.partial is False
-
-    expected = independent_changed_records(
-        fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
-    )
-    listed = [entry.path for entry in payload.source.inventory.entries]
-    assert sorted(listed) == sorted(expected)
-    assert payload.source.inventory.listed_total == len(listed) == len(expected)
-    assert {
-        MODIFIED_PATH,
-        SYNCHRONIZATION_PATH,
-        STAGED_ADDITION_PATH,
-        ELIGIBLE_UNTRACKED_PATH,
-        UNMAPPED_PATH,
-    } <= set(listed)
-    assert IGNORED_PATH not in listed
-    assert payload.source.inventory.before_code_tree_id == fixture.contract.code_base_commit
-    assert payload.source.inventory.after_code_tree_id == candidate_tree
-    assert "limitation:no_knowledge_subject_selected" in payload.limitations
-    assert "limitation:source_inventory_unavailable" not in payload.limitations
-
-    # The entry is reachable through the real transport with NO selector parameters, which is what
-    # makes "the task context is the entry" a served behaviour rather than an internal one.
-    served = FastAPI()
-    register_review_routes(
-        served, fixture.config, lambda request: read_knowledge_review(fixture.config, request)
-    )
-    with TestClient(served) as client:
-        body = client.get(
-            "/api/review/intent",
-            params={
-                "repo": fixture.repository_id,
-                "master": fixture.master,
-                "leaf": LEAF_ID,
-            },
-        )
-    assert body.status_code == 200, body.text
-    served_payload = body.json()["payload"]
-    assert served_payload["staleness"]["state"] == "not_compared"
-    assert "comparison" not in served_payload
-    assert sorted(
-        entry["path"] for entry in served_payload["source"]["inventory"]["entries"]
-    ) == sorted(expected)
-
-    # The subject route is untouched: a named subject with no datasets is still refused by name.
-    named = read_knowledge_review(fixture.config, fixture.request())
-    assert named.state == "refused"
-    assert named.refusal is not None and named.refusal.code == "candidate_dataset_absent"
-
-
-def test_the_production_inventory_keeps_an_unusual_filename_as_the_address_it_expands_by(
-    tmp_path: Path,
-) -> None:
-    """A tab and a newline inside a name survive the capture, the resolution and the payload.
-
-    The file is written into the leaf's real worktree and reaches the candidate through the shipped
-    capture owner, so the path the payload publishes is the address of a file the leaf really holds
-    -- and the line-oriented Git question about the same pair is shown losing it.
-    """
-
-    fixture = build_endpoint_fixture(tmp_path / "unusual-name")
-    (fixture.worktree / UNUSUAL_PATH).write_text(
-        "a name that is not a separator\n", encoding="utf-8"
-    )
-    resolved = fixture.resolve()
-    candidate_tree = _captured_tree(resolved)
-
-    result = read_knowledge_review(fixture.config, fixture.task_request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    listed = [entry.path for entry in payload.source.inventory.entries]
-    assert UNUSUAL_PATH in listed
-    assert "\\t" not in listed
+    world = source_world
+    for root in (world.memory, world.memory_worktree):
+        git(root, "rm", "-q", "-r", "-f", "knowledge", "onboarding")
+        git(root, "commit", "-q", "-m", "unconverted memory")
+    resolved = _public_resolution(world)
+    assert resolved.trees is None
+    assert {state for _, state, _ in resolved.knowledge_unavailable} == {"legacy-unavailable"}
+    with TestClient(_source_app(world)) as client:
+        response = client.get("/api/review/intent", params=_source_params())
+        named = client.get("/api/review/intent", params=_source_params(subject=True))
+    assert response.status_code == 200, response.text
+    payload = response.json()["payload"]
+    assert "comparison" not in payload and payload["staleness"]["state"] == "not_compared"
+    assert payload["knowledge"]["selection_state"] == "task_context"
+    assert payload["knowledge"]["before_statement"]["state"] == "unresolved"
+    inventory = payload["source"]["inventory"]
+    assert inventory["state"] == "measured" and not inventory["partial"]
+    listed = {entry["path"] for entry in inventory["entries"]}
     assert sorted(listed) == sorted(
-        independent_changed_records(
-            fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
-        )
+        independent_changed_records(world.code, world.code_base, _captured_tree(resolved))
     )
-    unusual = next(
-        entry for entry in payload.source.inventory.entries if entry.path == UNUSUAL_PATH
+    assert {CODE_FILE, STAGED_ADDITION_PATH, ELIGIBLE_UNTRACKED_PATH, UNMAPPED_PATH} <= listed
+    assert IGNORED_PATH not in listed and inventory["listed_total"] == len(listed)
+    assert inventory["before_code_tree_id"] == world.code_base
+    assert inventory["after_code_tree_id"] == _captured_tree(resolved)
+    assert (
+        named.status_code == 404 and named.json()["refusal"]["code"] == "candidate_dataset_absent"
     )
-    assert unusual.status == "added"
-    assert unusual.content == "text"
-    # The same address reaches the file the leaf holds, which is what "used for file expansion" means.
-    assert (fixture.worktree / unusual.path).is_file()
-    line_oriented = _git(
-        fixture.contract.code_repo_path,
-        ["diff", "--name-only", "--no-renames", fixture.contract.code_base_commit, candidate_tree],
-    )
-    assert UNUSUAL_PATH not in line_oriented.splitlines()
+    assert "legacy-unavailable" in named.json()["refusal"]["detail"]
 
 
-def test_the_production_inventory_lists_non_text_and_mode_changed_paths_it_cannot_render(
-    tmp_path: Path,
-) -> None:
-    """A binary addition and a mode-only change stay listed, each with the fact that says so."""
-
-    fixture = build_endpoint_fixture(tmp_path / "non-text")
-    (fixture.worktree / BINARY_ADDITION_PATH).parent.mkdir(parents=True, exist_ok=True)
-    (fixture.worktree / BINARY_ADDITION_PATH).write_bytes(b"binary\x00content\n")
-    (fixture.worktree / MODIFIED_PATH).chmod(0o755)
-    resolved = fixture.resolve()
-    candidate_tree = _captured_tree(resolved)
-
-    result = read_knowledge_review(fixture.config, fixture.task_request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    entries = {entry.path: entry for entry in payload.source.inventory.entries}
-    assert sorted(entries) == sorted(
-        independent_changed_records(
-            fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
-        )
-    )
-    assert entries[BINARY_ADDITION_PATH].content == "binary"
-    assert entries[BINARY_ADDITION_PATH].status == "added"
-    assert entries[MODIFIED_PATH].mode_change is True
-    assert entries[MODIFIED_PATH].status == "modified"
-    assert "limitation:source_inventory_partial" not in payload.limitations
-
-
+UNUSUAL_PATH = "src/tab\tnewline\nname.py"
+BINARY_ADDITION_PATH = "assets/blob.dat"
 NON_UTF8_ADDITION = b"src/caf\xe9-latin1.py"
 NON_UTF8_BYTE_FORM = "b'src/caf\\xe9-latin1.py'"
 
 
+def test_the_production_inventory_keeps_an_unusual_filename_as_the_address_it_expands_by(
+    source_world: World,
+) -> None:
+    world = source_world
+    (world.code_worktree / UNUSUAL_PATH).write_text("a name is not a separator\n")
+    resolved = _public_resolution(world)
+    result = read_knowledge_review(world.config, world.review())
+    assert result.payload is not None, result.refusal
+    inventory = result.payload.source.inventory
+    listed = [entry.path for entry in inventory.entries]
+    assert UNUSUAL_PATH in listed
+    assert sorted(listed) == sorted(
+        independent_changed_records(world.code, world.code_base, _captured_tree(resolved))
+    )
+    unusual = next(entry for entry in inventory.entries if entry.path == UNUSUAL_PATH)
+    assert unusual.status == "added" and unusual.content == "text"
+    assert (world.code_worktree / unusual.path).is_file()
+    assert (
+        UNUSUAL_PATH
+        not in git(
+            world.code,
+            "diff",
+            "--name-only",
+            "--no-renames",
+            world.code_base,
+            _captured_tree(resolved),
+        ).splitlines()
+    )
+
+
+def test_the_production_inventory_lists_non_text_and_mode_changed_paths_it_cannot_render(
+    source_world: World,
+) -> None:
+    world = source_world
+    (world.code_worktree / BINARY_ADDITION_PATH).parent.mkdir()
+    (world.code_worktree / BINARY_ADDITION_PATH).write_bytes(b"binary\x00content\n")
+    (world.code_worktree / CODE_FILE).chmod(0o755)
+    resolved = _public_resolution(world)
+    result = read_knowledge_review(world.config, world.review())
+    assert result.state == "review", result.refusal
+    assert result.payload is not None
+    entries = {entry.path: entry for entry in result.payload.source.inventory.entries}
+    assert sorted(entries) == sorted(
+        independent_changed_records(world.code, world.code_base, _captured_tree(resolved))
+    )
+    # A binary addition and a mode-only change stay listed, each with the fact that says so.
+    assert entries[BINARY_ADDITION_PATH].content == "binary"
+    assert entries[BINARY_ADDITION_PATH].status == "added"
+    assert entries[BINARY_ADDITION_PATH].mode_change is False
+    assert entries[CODE_FILE].mode_change is True
+    assert entries[CODE_FILE].status == "modified"
+    assert entries[CODE_FILE].content == "text"
+    assert "limitation:source_inventory_partial" not in result.payload.limitations
+    assert result.payload.source.inventory.partial is False
+
+
 def _write_non_utf8_addition(worktree: Path) -> None:
-    """Create the leaf's one changed file whose name is not valid UTF-8.
-
-    A Python ``str`` path cannot express this name -- the filesystem encoding would turn it into valid
-    UTF-8 bytes -- so the file is created through the exact bytes, which is what makes the case real
-    rather than simulated.
-    """
-
     with open(os.fsencode(worktree) + b"/" + NON_UTF8_ADDITION, "wb") as handle:
         handle.write(b"# a name that is not text\n")
 
 
 def test_a_non_utf8_pathname_leaves_the_review_openable_and_states_why_it_is_partial(
-    tmp_path: Path,
+    source_world: World,
 ) -> None:
-    """A name that is not text is carried by its bytes; the route answers 200, never a crash.
-
-    The runner preserves the change (``surrogateescape``), and this surface's text fields refuse the
-    value that decoding produces. The packet's failure behaviour is a *stated* unknown: the review
-    stays openable, the changed path is listed by its exact byte form, the renderable remainder is
-    listed in full, and the response declares itself partial at the top level. The real route is
-    exercised because "the review is openable" is a claim about the served behaviour: the same request
-    raised a validation error and answered 500 before this boundary stated the fact.
-    """
-
-    fixture = build_endpoint_fixture(tmp_path / "non-utf8")
-    _write_non_utf8_addition(fixture.worktree)
-    resolved = fixture.resolve()
-    candidate_tree = _captured_tree(resolved)
-
-    result = read_knowledge_review(fixture.config, fixture.task_request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    inventory = payload.source.inventory
-    assert inventory.state == "measured"
-    assert inventory.partial is True
-    assert [entry.path_bytes for entry in inventory.unrepresentable_paths] == [NON_UTF8_BYTE_FORM]
-    assert inventory.unrepresentable_paths[0].status == "added"
-    assert NON_UTF8_BYTE_FORM in inventory.detail
-    assert "limitation:source_inventory_partial" in payload.limitations
-    # The renderable remainder is the whole independent observation minus the one uncarried path, so
-    # the odd name costs exactly one entry and never the review.
-    observed = independent_changed_records(
-        fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
+    world = source_world
+    _write_non_utf8_addition(world.code_worktree)
+    resolved = _public_resolution(world)
+    with TestClient(_source_app(world), raise_server_exceptions=False) as client:
+        response = client.get("/api/review/intent", params=_source_params())
+    assert response.status_code == 200, response.text
+    payload = response.json()["payload"]
+    inventory = payload["source"]["inventory"]
+    assert inventory["state"] == "measured" and inventory["partial"] is True
+    assert [entry["path_bytes"] for entry in inventory["unrepresentable_paths"]] == [
+        NON_UTF8_BYTE_FORM
+    ]
+    assert inventory["unrepresentable_paths"][0]["status"] == "added"
+    assert (
+        NON_UTF8_BYTE_FORM in inventory["detail"]
+        and "limitation:source_inventory_partial" in payload["limitations"]
     )
-    listed = [entry.path for entry in inventory.entries]
-    assert inventory.listed_total == len(listed) == len(observed) - 1
-    assert {
-        MODIFIED_PATH,
-        SYNCHRONIZATION_PATH,
-        STAGED_ADDITION_PATH,
-        ELIGIBLE_UNTRACKED_PATH,
-        UNMAPPED_PATH,
-    } <= set(listed)
-
-    served = FastAPI()
-    register_review_routes(
-        served, fixture.config, lambda request: read_knowledge_review(fixture.config, request)
-    )
-    with TestClient(served, raise_server_exceptions=False) as client:
-        body = client.get(
-            "/api/review/intent",
-            params={"repo": fixture.repository_id, "master": fixture.master, "leaf": LEAF_ID},
-        )
-    assert body.status_code == 200, body.text
-    shown = body.json()["payload"]["source"]["inventory"]
-    assert shown["partial"] is True
-    assert [entry["path_bytes"] for entry in shown["unrepresentable_paths"]] == [NON_UTF8_BYTE_FORM]
+    expected = independent_changed_records(world.code, world.code_base, _captured_tree(resolved))
+    assert inventory["listed_total"] == len(inventory["entries"]) == len(expected) - 1
+    assert {CODE_FILE, STAGED_ADDITION_PATH, ELIGIBLE_UNTRACKED_PATH, UNMAPPED_PATH} <= {
+        entry["path"] for entry in inventory["entries"]
+    }
 
 
 def test_a_task_context_review_states_a_damaged_half_and_still_lists_the_source_inventory(
-    tmp_path: Path,
+    source_world: World,
 ) -> None:
-    """The pair's preflight runs on the task-context route too, and is stated there rather than raised.
+    world = source_world
+    app = FastAPI()
 
-    This is the cross-leaf seam between two obligations that are both true at once: a half that is
-    present and cannot be read as a dataset is a **named refusal** where a comparison would be made
-    (asserted here on the subject route), and a **stated reason** where none is (this review reads no
-    dataset at all, so refusing would take the whole source review with it -- the failure the
-    task-context entry exists to remove). Both facts come from the same preflight, so neither route
-    can answer for the pair while the other skips it.
-    """
+    def damaged_between_resolution_and_composition(
+        request: ReviewSurfaceRequest,
+    ) -> KnowledgeReviewResult:
+        resolved = _public_resolution(world)
+        resolved.baseline_database.write_bytes(b"this is not an index\n")
+        return compose_review(resolved, request)
 
-    fixture = build_endpoint_fixture(tmp_path / "damaged-half")
-    resolved = fixture.resolve()
-    resolved.baseline_database.write_bytes(b"this is not a database\n")
-
-    result = read_knowledge_review(fixture.config, fixture.task_request())
-
-    assert result.state == "review", result.refusal
-    payload = result.payload
-    assert payload is not None
-    assert payload.source.inventory.state == "measured"
-    assert payload.source.inventory.listed_total > 0
-    assert "limitation:knowledge_half_unreadable" in payload.limitations
-    detail = payload.knowledge.selection_detail or ""
-    assert "present but cannot be read" in detail
-    assert str(resolved.baseline_database) in detail
-
-    refused = read_knowledge_review(fixture.config, fixture.request())
-
-    assert refused.state == "refused"
-    assert refused.refusal is not None
-    assert refused.refusal.code == "candidate_dataset_absent"
-    assert "baseline" in refused.refusal.detail
-    assert "present but cannot be read" in refused.refusal.detail
+    register_review_routes(app, world.config, damaged_between_resolution_and_composition)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/review/intent", params=_source_params())
+        named = client.get("/api/review/intent", params=_source_params(subject=True))
+    assert response.status_code == 200, response.text
+    payload = response.json()["payload"]
+    assert payload["source"]["inventory"]["state"] == "measured"
+    assert payload["source"]["inventory"]["listed_total"] > 0
+    assert "limitation:knowledge_half_unreadable" in payload["limitations"]
+    assert "baseline" in payload["knowledge"]["selection_detail"]
+    assert (
+        named.status_code == 404 and named.json()["refusal"]["code"] == "candidate_dataset_absent"
+    )

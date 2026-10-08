@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
 from agents_remember.kernel import filesystem
-from agents_remember.kernel.git_command import copy_git_index, run_git, run_git_with_index
+from agents_remember.kernel.git_command import (
+    GitRunnerOptions,
+    copy_git_index,
+    ref_compare_and_swap_args,
+    run_git,
+    run_git_with_index,
+)
 from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH, MEMORY_CACHE_EXCLUDE
+from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # This module used to define its own `run_git` -- the kernel's function with the
@@ -319,15 +330,132 @@ def stage_worktree_content(repo: Path, *, exclude_paths: tuple[str, ...] = ()) -
     require_git(repo, args)
 
 
-def stage_tree(repo: Path, tree: str) -> None:
-    """Make the index exactly ``tree``, reading nothing from the working tree.
+@dataclass(frozen=True)
+class _IndexShape:
+    """An index as a publication found it: where it lives, its tree, and what no tree records.
 
-    A commit staged this way records ``tree`` whatever was written to the working tree since the
-    tree was read from it; such a file stays an uncommitted change. The index keeps no stat data,
-    so Git's next comparison with the working tree reads every file once.
+    ``tags`` holds the ``git ls-files -v`` letter of every entry: a lower-case letter is an
+    assume-unchanged entry, ``S`` or ``s`` a skip-worktree one. A path listed here that ``tree``
+    does not hold is an intent-to-add entry, because ``git write-tree`` leaves those out.
     """
 
-    require_git(repo, ["read-tree", tree])
+    top: Path
+    tree: str
+    tags: dict[str, str]
+
+
+def _index_shape(repo: Path) -> _IndexShape:
+    """Read the index's shape. It runs in the top-level directory, where ``ls-files`` lists all."""
+
+    top = Path(require_git(repo, ["rev-parse", "--show-toplevel"]))
+    listing = _nul_records(_nul_git(top, ["ls-files", "-v", "-z"]))
+    return _IndexShape(
+        top, require_git(top, ["write-tree"]), {row[2:]: row[0] for row in listing if len(row) > 2}
+    )
+
+
+def _index_edit(top: Path, args: list[str], records: list[str]) -> None:
+    """One Git command that writes the index from NUL-terminated records on its standard input."""
+
+    if not records:
+        return
+    text = "".join(f"{record}\0" for record in records)
+    result = run_git(top, args, GitRunnerOptions(input_text=text))
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(_transport_safe_git_diagnostic(detail))
+
+
+def _retarget_index(shape: _IndexShape, tree: str) -> None:
+    """Replace exactly the index entries that differ from ``tree``, reading no working file.
+
+    ``git diff-index --cached`` names the differing paths. An intent-to-add entry is invisible to
+    it, as it is to ``git write-tree``, so one that ``tree`` does not hold stays in the index.
+    ``git update-index --index-info`` then writes ``tree``'s entry for each of those paths (mode 0
+    removes the path). Every other entry keeps its file times and its flags. A replaced entry loses
+    its assume-unchanged and skip-worktree flags, so both are set again from ``shape``.
+    """
+
+    diff = ["diff-index", "--cached", "--raw", "-z", "--no-renames", "--ita-invisible-in-index"]
+    raw = _nul_records(_nul_git(shape.top, [*diff, tree, "--"]))
+    # A raw record is ``:<tree mode> <index mode> <tree blob> <index blob> <status>``, then a path.
+    changes = [
+        (header.split()[0].lstrip(":"), header.split()[2], path)
+        for header, path in zip(raw[::2], raw[1::2], strict=True)
+    ]
+    _index_edit(
+        shape.top,
+        ["update-index", "-z", "--index-info"],
+        [f"{mode} {blob}\t{path}" for mode, blob, path in changes],
+    )
+    _set_index_flags(shape, [path for mode, _, path in changes if int(mode, 8)])
+
+
+def _set_index_flags(shape: _IndexShape, paths: list[str]) -> None:
+    """Set on ``paths`` the assume-unchanged and skip-worktree flags ``shape`` recorded for them."""
+
+    flags = {"--assume-unchanged": str.islower, "--skip-worktree": lambda tag: tag in "Ss"}
+    for option, flagged in flags.items():
+        # One flag per command: ``update-index`` applies only the last of several such options.
+        _index_edit(
+            shape.top,
+            ["update-index", "-z", option, "--stdin"],
+            [path for path in paths if flagged(shape.tags.get(path, "H"))],
+        )
+
+
+def stage_tree(repo: Path, tree: str) -> None:
+    """Make the index record exactly ``tree``, reading nothing from the working tree.
+
+    A commit staged this way records ``tree`` whatever was written to the working tree since the
+    tree was read from it; such a file stays an uncommitted change. Only the entries that differ
+    from ``tree`` are replaced (:func:`_retarget_index`), so afterwards ``git write-tree`` answers
+    ``tree``, an entry keeps its assume-unchanged and skip-worktree flags, an intent-to-add entry
+    that ``tree`` does not hold is still there, and a sparse checkout shows no file outside its
+    cone as deleted.
+    """
+
+    _retarget_index(_index_shape(repo), tree)
+
+
+def unstage_bound_tree(repo: Path, staged_tree: str, before_index: str | _IndexShape) -> bool:
+    """Give the index back when it still holds exactly ``staged_tree``.
+
+    An index someone else changed meanwhile is left alone and ``False`` is returned, so no edit of
+    theirs is overwritten. ``before_index`` is the tree the index held before, or the shape a
+    publication recorded of it; with the shape the entries that were intent-to-add come back too
+    (:func:`_give_index_back`). Entries keep their flags either way (:func:`stage_tree`).
+    """
+
+    current = run_git(repo, ["write-tree"])
+    if current.returncode != 0 or current.stdout.strip() != staged_tree:
+        return False
+    if isinstance(before_index, str):
+        stage_tree(repo, before_index)
+    else:
+        _give_index_back(before_index)
+    return True
+
+
+def _give_index_back(shape: _IndexShape) -> None:
+    """Make the index what ``shape`` recorded: its tree, its flags and its intent-to-add entries.
+
+    A path ``shape`` lists that the index no longer holds once its tree is back was an
+    intent-to-add entry (no tree records those), which the staging replaced. Git has no plumbing
+    that writes such an entry, so the path is entered as an empty file and ``git reset -N`` turns
+    it into one. Git records the regular file mode for it until the path is added.
+    """
+
+    _retarget_index(shape, shape.tree)
+    listed = set(_nul_records(_nul_git(shape.top, ["ls-files", "-z"])))
+    intended = sorted(shape.tags.keys() - listed)
+    if intended:
+        empty = require_git(shape.top, ["hash-object", "-w", "--stdin"])
+        entries = [f"100644 {empty}\t{path}" for path in intended]
+        _index_edit(shape.top, ["update-index", "-z", "--index-info"], entries)
+        reset = ["--literal-pathspecs", "reset", "-q", "-N", shape.tree]
+        _index_edit(shape.top, [*reset, "--pathspec-from-file=-", "--pathspec-file-nul"], intended)
+        _set_index_flags(shape, intended)
 
 
 def commit_if_dirty(repo: Path, message: str, *, exclude_paths: tuple[str, ...] = ()) -> str:
@@ -351,22 +479,420 @@ def run_pre_commit_hook_if_configured(repo: Path) -> bool:
     return True
 
 
-def commit_verified_staged(repo: Path, message: str, *, exclude_paths: tuple[str, ...] = ()) -> str:
-    """Commit exactly the staged tree without invoking repository hooks.
+class CommitPublicationRefusal(RuntimeError):
+    """The commit was not published: the admitted branch, its tip or the worktree state differs."""
 
-    The caller has already staged and verified the intended index. In particular, this
-    helper must neither restage the working tree nor rerun a hook after the caller's
-    transaction or quality preparation.
+
+try:  # POSIX advisory locks; where they do not exist publications are not serialized
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
+
+_PUBLICATION_LOCK_SECONDS = 30.0
+_UNFINISHED_ACTIONS = (
+    ("MERGE_HEAD", "a merge"),
+    ("CHERRY_PICK_HEAD", "a cherry-pick"),
+    ("REVERT_HEAD", "a revert"),
+    ("rebase-merge", "a rebase"),
+    ("rebase-apply", "a rebase or an am session"),
+)
+
+
+@contextmanager
+def _publication_lock(repo: Path) -> Iterator[None]:
+    """Serialize publications that share one worktree index (the lock is per worktree git dir).
+
+    Only "would block" means that another publication holds the lock, and only that is waited
+    for. Any other error of the lock file (a file system without locks, a file that cannot be
+    opened) is refused at once and named, because waiting does not cure it.
     """
-    if exclude_paths:
-        require_git(repo, ["update-index", "--force-remove", "--", *exclude_paths])
-    diff_args = ["diff", "--cached", "--quiet"]
-    if exclude_paths:
-        diff_args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
-    if run_git(repo, diff_args).returncode == 0:
-        return head_commit(repo)
-    require_git(repo, ["commit", "--no-verify", "-m", message])
-    return head_commit(repo)
+
+    if _fcntl is None:
+        yield
+        return
+    path = Path(require_git(repo, ["rev-parse", "--absolute-git-dir"])) / "ar-publication.lock"
+    try:
+        handle = path.open("a")
+    except OSError as error:
+        raise _lock_refusal(path, error) from error
+    with handle:
+        deadline = time.monotonic() + _PUBLICATION_LOCK_SECONDS
+        while True:
+            try:
+                _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                break
+            except BlockingIOError as busy:
+                if time.monotonic() > deadline:
+                    raise CommitPublicationRefusal(
+                        "another publication in this worktree did not finish within "
+                        f"{_PUBLICATION_LOCK_SECONDS:.0f} seconds, so nothing was published; "
+                        "rerun the closeout"
+                    ) from busy
+                time.sleep(0.05)
+            except OSError as error:
+                raise _lock_refusal(path, error) from error
+        try:
+            yield
+        finally:
+            _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
+
+
+def _lock_refusal(path: Path, error: OSError) -> CommitPublicationRefusal:
+    return CommitPublicationRefusal(
+        f"the publication lock {path} cannot be taken ({error}), so nothing was published; "
+        "repair the lock file or its file system and rerun the closeout"
+    )
+
+
+def _refuse_unfinished_action(repo: Path) -> None:
+    """A commit made while a merge, pick, revert or rebase is unfinished would break that action."""
+
+    for name, action in _UNFINISHED_ACTIONS:
+        marker = Path(
+            require_git(repo, ["rev-parse", "--path-format=absolute", "--git-path", name])
+        )
+        if marker.exists():
+            raise CommitPublicationRefusal(
+                f"{marker.name} exists in {marker.parent}: {action} is unfinished in this "
+                "worktree, so nothing was published; finish or abort it and rerun the closeout"
+            )
+
+
+_CLEANUP_MODES = ("default", "whitespace", "scissors", "strip", "verbatim")
+_SCISSORS = " ------------------------ >8 ------------------------\n"
+_AUTO_COMMENT_CANDIDATES = "#;@!$%^&|:"
+_AS_GIT_COMMIT = "so nothing was published (git commit refuses it too)"
+
+
+def _cleaned_message(repo: Path, message: str) -> str:
+    """The message as ``git commit -m`` stores it, or a refusal where that command aborts.
+
+    These are the steps of ``git commit -m`` in Git 2.54 (``builtin/commit.c``), and the tests
+    compare the result with a real ``git commit -m`` for every mode and comment setting. The
+    message ends with a newline. Unless ``commit.cleanup`` is ``verbatim`` its whitespace is
+    cleaned (:func:`_stripspace`); without an editor ``default`` and ``scissors`` do no more than
+    ``whitespace``. A true ``commit.verbose`` cuts the message at the scissors line. ``strip``
+    drops the lines that begin with the comment string: ``core.commentChar`` or
+    ``core.commentString``, whichever is set last, and for ``auto`` the character Git selects
+    (:func:`_auto_comment_character`).
+
+    Git aborts the commit for an invalid mode, for a message that is empty after these steps (only
+    blank and ``Signed-off-by`` lines; under ``verbatim`` only a message of no bytes) and for an
+    ``auto`` with no free character. Each of them is refused here, before anything is touched.
+    """
+
+    settings = _message_settings(repo)
+    mode = settings.get("cleanup", "default")
+    if mode not in _CLEANUP_MODES:
+        raise CommitPublicationRefusal(
+            f"Invalid cleanup mode {mode} (commit.cleanup), {_AS_GIT_COMMIT}"
+        )
+    cleaning = mode != "verbatim"
+    text = message if not message or message.endswith("\n") else f"{message}\n"
+    if cleaning:
+        text = _stripspace(text)
+    comment = settings.get("comment", "#")
+    if comment.lower() == "auto":
+        comment = _auto_comment_character(text)
+    if _commit_verbose(repo):
+        text = text[: _scissors_start(text, comment)]
+    if cleaning:
+        text = _stripspace(text, comment if mode == "strip" else None)
+    lines = text.split("\n")
+    if not text or (
+        cleaning and all(line.startswith("Signed-off-by: ") or not line for line in lines)
+    ):
+        raise CommitPublicationRefusal(f"the commit message is empty, {_AS_GIT_COMMIT}")
+    return text
+
+
+def _message_settings(repo: Path) -> dict[str, str]:
+    """``commit.cleanup`` and the comment string as Git reads them: the value set last wins."""
+
+    pattern = r"^(commit\.cleanup|core\.comment(char|string))$"
+    found = run_git(repo, ["config", "-z", "--get-regexp", pattern])
+    settings: dict[str, str] = {}
+    for entry in _nul_records(found.stdout):
+        key, _, value = entry.partition("\n")
+        settings["cleanup" if key == "commit.cleanup" else "comment"] = value
+    return settings
+
+
+def _commit_verbose(repo: Path) -> bool:
+    """Whether ``commit.verbose`` is on, which makes ``git commit`` cut at the scissors line."""
+
+    found = run_git(repo, ["config", "--type=bool-or-int", "--get", "commit.verbose"])
+    if found.returncode not in (0, 1):
+        detail = _transport_safe_git_diagnostic(found.stderr.strip())
+        raise CommitPublicationRefusal(f"{detail}, {_AS_GIT_COMMIT}")
+    value = found.stdout.strip()
+    return value == "true" or (value.isdigit() and int(value) > 0)
+
+
+def _stripspace(text: str, comment: str | None = None) -> str:
+    """Git's ``strbuf_stripspace``: the cleaning ``git commit`` and ``git stripspace`` share.
+
+    Trailing whitespace leaves every line (Git counts space, tab, carriage return and newline),
+    runs of empty lines become one, empty lines at both ends go, and the text ends with a newline.
+    With ``comment`` the lines that begin with it are dropped. It is done here and not by
+    ``git stripspace`` because the shared runner reads Git's output as text, which would turn a
+    carriage return inside a line into a newline.
+    """
+
+    lines: list[str] = []
+    gap = False
+    for raw in text.removesuffix("\n").split("\n") if text else []:
+        if comment is not None and raw.startswith(comment):
+            continue
+        line = raw.rstrip(" \t\r")
+        if line and gap and lines:
+            lines.append("")
+        gap = not line
+        if line:
+            lines.append(line)
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _scissors_start(text: str, comment: str) -> int:
+    """Where Git cuts ``text`` at the scissors line of ``comment`` (``wt_status_locate_end``)."""
+
+    cut = f"{comment}{_SCISSORS}"
+    if text.startswith(cut):
+        return 0
+    found = text.find(f"\n{cut}")
+    return len(text) if found < 0 else found + 1
+
+
+def _auto_comment_character(text: str) -> str:
+    """The character ``core.commentChar=auto`` selects for ``text`` (``adjust_comment_line_char``).
+
+    ``#`` when the message holds none. Otherwise the first of Git's candidates that begins no line
+    before the tail Git ignores (:func:`_ignored_tail_start`). Git aborts the commit when every
+    candidate is in use.
+    """
+
+    if "#" not in text:
+        return "#"
+    end = _ignored_tail_start(text)
+    used = {text[0]} | {text[at + 1] for at in range(end - 1) if text[at] in "\n\r"}
+    free = [candidate for candidate in _AUTO_COMMENT_CANDIDATES if candidate not in used]
+    if not free:
+        raise CommitPublicationRefusal(
+            "core.commentChar is auto and every character Git could select begins a line of the "
+            f"commit message, {_AS_GIT_COMMIT}"
+        )
+    return free[0]
+
+
+def _ignored_tail_start(text: str) -> int:
+    """Where the tail begins that Git ignores when it selects (``ignored_log_message_bytes``).
+
+    The tail is the trailing run of ``#`` lines and empty lines, with an old ``Conflicts:`` block
+    and its tab-indented paths, and everything from a ``#`` scissors line on. The branches follow
+    Git's function one for one, including that a run beginning at the first byte is not a tail.
+    """
+
+    end = _scissors_start(text, "#")
+    tail, line, conflicts = 0, 0, False
+    while line < end:
+        if text.startswith("#", line, end) or text[line] == "\n":
+            tail = tail or line
+        elif text.startswith("Conflicts:\n", line):
+            tail, conflicts = tail or line, True
+        elif conflicts and text[line] == "\t":
+            pass
+        elif tail:
+            tail, conflicts = 0, False
+        line = text.find("\n", line) + 1 or len(text)
+    return tail or end
+
+
+def _write_commit(repo: Path, message: str, tree: str, parent: str) -> tuple[str, str]:
+    """The commit object (not yet on any ref) and the reflog subject."""
+
+    signing = run_git(repo, ["config", "--type=bool", "--get", "commit.gpgsign"])
+    sign = ["-S"] if signing.stdout.strip() == "true" else []
+    written = run_git(
+        repo,
+        ["commit-tree", tree, "-p", parent, *sign],
+        GitRunnerOptions(input_text=message),
+    )
+    commit = written.stdout.strip()
+    if written.returncode != 0 or not commit:
+        raise RuntimeError(_transport_safe_git_diagnostic(written.stderr.strip()))
+    subject = next((line.strip() for line in message.splitlines() if line.strip()), "")
+    return commit, subject
+
+
+def _move_admitted_ref(repo: Path, commit: str, subject: str, before: GitMutationSnapshot) -> None:
+    """Publish ``commit`` with one expected-old move of the admitted branch.
+
+    Guarantees. The branch moves only from the admitted tip (Git's compare-and-swap), so no
+    other writer's commit is ever overwritten. ``HEAD`` is checked before the move and again after
+    it. Git's ``update-ref --stdin`` can verify a symbolic ref (``symref-verify``, tested on Git
+    2.54), but not together with an update of the branch ``HEAD`` points at: it refuses the pair as
+    "multiple updates for 'HEAD'". So the check after the move is the guarantee for a ``HEAD``
+    switched between the first check and the move: the move is taken back with a compare-and-swap
+    to the admitted tip, and the publication is refused. Between those two ref updates the branch
+    briefly names the new commit; a reader in that window sees it, and no other writer can lose a
+    commit to it.
+
+    What a failed move says. Git refuses a move for more than one reason, so the branch is read
+    again: "the branch moved" is said only when it names another commit now, and otherwise the
+    refusal carries Git's own text (a refusing ``reference-transaction`` hook, a ref that cannot
+    be locked). A take-back that Git refuses is reported with Git's text too, and whether the new
+    commit is still on the branch is read from the branch, not assumed.
+    """
+
+    moved = run_git(
+        repo,
+        ref_compare_and_swap_args(before.headRef, commit, before.head, reason=f"commit: {subject}"),
+    )
+    if moved.returncode != 0:
+        detail = _transport_safe_git_diagnostic(moved.stderr.strip())
+        if _ref_commit(repo, before.headRef) != before.head:
+            raise CommitPublicationRefusal(
+                f"{before.headRef} moved while this closeout published, so nothing was published; "
+                f"rerun the closeout ({detail})"
+            )
+        raise CommitPublicationRefusal(
+            f"Git refused to move {before.headRef}, which is still at {before.head}, so nothing "
+            f"was published: {detail}"
+        )
+    head_now = run_git(repo, ["symbolic-ref", "--quiet", "HEAD"]).stdout.strip()
+    if head_now == before.headRef:
+        return
+    undone = run_git(
+        repo,
+        ref_compare_and_swap_args(
+            before.headRef, before.head, commit, reason="commit: taken back, HEAD switched"
+        ),
+    )
+    where = head_now or "no branch (it is detached)"
+    if undone.returncode != 0:
+        kept = "is still on" if is_ancestor(repo, commit, before.headRef) else "is no longer on"
+        raise RuntimeError(
+            f"HEAD switched to {where} while this closeout published, and the new commit {commit} "
+            f"could not be taken back ({_transport_safe_git_diagnostic(undone.stderr.strip())}); "
+            f"it {kept} {before.headRef}: check that branch, then rerun the closeout"
+        )
+    raise CommitPublicationRefusal(
+        f"HEAD switched to {where} while this closeout published; the new commit was taken back "
+        f"and {before.headRef} is at {before.head} again, so nothing was published; return to "
+        f"{before.headRef} and rerun the closeout"
+    )
+
+
+@dataclass(frozen=True)
+class PublicationHooks:
+    """What a caller adds to the shared publication: how to stage, and a stricter condition.
+
+    ``stage`` returns the tree it staged (needed when the tree is not known beforehand);
+    ``confirm`` runs after staging and before the commit object is written, and whatever it
+    raises leaves nothing published (direct landing: nothing changed since its judged snapshot).
+    """
+
+    stage: Callable[[], str] | None = None
+    confirm: Callable[[], None] | None = None
+
+
+def publish_tree_commit(
+    repo: Path,
+    message: str,
+    *,
+    tree: str | None,
+    before: GitMutationSnapshot,
+    hooks: PublicationHooks | None = None,
+) -> str:
+    """Stage ``tree`` and publish it as one commit on the branch ``before`` admitted, or neither.
+
+    The message is settled first (:func:`_cleaned_message`), so an empty message refuses before
+    anything is read. Then, under one per-worktree lock (so two publishers never interleave their
+    index writes): refuse an unfinished merge, pick, revert or rebase, before the index is asked
+    for its tree; refuse a ``HEAD`` that is not the admitted branch or a tip that moved; stage; run
+    ``confirm``; write the commit object with ``git commit-tree`` from the staged tree and the
+    admitted tip as its only parent; move the branch with the shared expected-old move
+    (:func:`_move_admitted_ref`). Any refusal or failure after staging gives the index back as this
+    call found it (only while it still holds exactly what this call staged), and no ref names the
+    new commit.
+
+    ``tree`` is the tree to publish; it is staged by :func:`stage_tree` unless ``hooks.stage`` is
+    given, and ``hooks.stage`` must be given when ``tree`` is ``None``. The commit is the tree
+    itself, so a working-tree or index edit made after the tree was judged cannot enter it; such a
+    file stays an uncommitted change. The index keeps what no tree records, after a publication
+    and after a refusal alike: the assume-unchanged and skip-worktree flags (so a sparse checkout
+    shows no file outside its cone as deleted) and the intent-to-add entries that are not part of
+    the commit.
+
+    Compared with the porcelain commit this replaces: author, committer and ``commit.gpgsign``
+    behave as before (``commit-tree`` ignores that setting, so ``-S`` is passed when it is true),
+    and the message is the one ``git commit -m`` stores in the same configuration.
+
+    This function writes through ``commit-tree`` and runs no Git commit hook. The knowledge gate
+    and validator have run before it is called. This describes the ordinary closeout and direct
+    landing callers of this primitive, not the prepared closeout's independent policies. Prepared
+    code commits use ``--no-verify``: ``pre-commit`` and ``commit-msg`` are skipped, while
+    ``prepare-commit-msg`` and ``post-commit`` still run. Prepared memory commits use ordinary Git
+    hook behavior. No policy of those routes is changed here. The ``reference-transaction`` hook
+    still runs for this primitive's ref transaction, and its refusal retains Git's own text.
+    """
+
+    hooks = hooks or PublicationHooks()
+    stage, confirm = hooks.stage, hooks.confirm
+    cleaned = _cleaned_message(repo, message)
+    if tree is None and stage is None:
+        raise ValueError("publish_tree_commit needs a tree or a stage function")
+    with _publication_lock(repo):
+        _refuse_unfinished_action(repo)
+        head_ref = run_git(repo, ["symbolic-ref", "--quiet", "HEAD"]).stdout.strip()
+        if head_ref != before.headRef:
+            raise CommitPublicationRefusal(
+                f"HEAD names {head_ref or 'no branch (it is detached)'}, not the branch "
+                f"{before.headRef} this closeout admitted, so nothing was published; return to "
+                f"{before.headRef} and rerun the closeout"
+            )
+        tip = _ref_commit(repo, before.headRef)
+        if tip != before.head:
+            raise CommitPublicationRefusal(
+                f"{before.headRef} moved from {before.head} to {tip or 'nothing'} after this "
+                "closeout admitted it, so nothing was published; rerun the closeout"
+            )
+        if tree is not None and tree == before.headTree:
+            return before.head
+        found = _index_shape(repo)
+        staged: str | None = None
+        try:
+            staged = (stage or _read_tree_stage(repo, tree))()
+            if staged == before.headTree:
+                unstage_bound_tree(repo, staged, found)
+                return before.head
+            if confirm is not None:
+                confirm()
+            commit, subject = _write_commit(repo, cleaned, staged, before.head)
+            _move_admitted_ref(repo, commit, subject, before)
+            return commit
+        except BaseException:
+            if staged is not None:
+                unstage_bound_tree(repo, staged, found)
+            else:  # staging itself failed part-way: this call holds the lock, so put the index back
+                with suppress(RuntimeError):
+                    _give_index_back(found)
+            raise
+
+
+def _ref_commit(repo: Path, ref: str) -> str:
+    """The commit ``ref`` names now, or nothing when it names none."""
+
+    return run_git(repo, ["rev-parse", "--verify", f"{ref}^{{commit}}"]).stdout.strip()
+
+
+def _read_tree_stage(repo: Path, tree: str | None) -> Callable[[], str]:
+    def stage() -> str:
+        assert tree is not None
+        stage_tree(repo, tree)
+        return tree
+
+    return stage
 
 
 def commit_date(repo: Path, commit: str) -> str:
@@ -389,11 +915,6 @@ def commit_text_or_none(repo: Path, ref: str, relative_path: str) -> str | None:
     """Text of relative_path at ref in the repo, or None when absent at that ref."""
     result = run_git(repo, ["show", f"{ref}:{relative_path}"])
     return result.stdout if result.returncode == 0 else None
-
-
-def head_text_or_none(repo: Path, relative_path: str) -> str | None:
-    """Text of relative_path at the repo's HEAD, or None when absent at HEAD."""
-    return commit_text_or_none(repo, "HEAD", relative_path)
 
 
 def _nul_git(repo: Path, args: list[str]) -> str:

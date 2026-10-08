@@ -5,9 +5,9 @@ tree. A review comparison is therefore four trees -- code base B, code candidate
 and memory candidate K_C -- and nothing is copied:
 
 * **Sides.** B is the contract's code base commit. C is the leaf's code worktree captured as a tree
-  (the shipped private-index capture the dataset review already binds). K_B is the memory commit the
-  worklist pairs with B (:func:`paired_memory_commit`, MIK-R08), so the reviewer and the worklist
-  compare the same sides. K_C is the leaf's memory worktree captured the same way.
+  (the shipped private-index capture every review binds its candidate with). K_B is the memory
+  commit the worklist pairs with B (:func:`paired_memory_commit`, MIK-R08), so the reviewer and the
+  worklist compare the same sides. K_C is the leaf's memory worktree captured the same way.
 * **Pinning (rule 1).** An uncommitted candidate is pinned by ``refs/ar/review/<task-id>/<leaf-id>/<n>``
   in its own repository, pointing at the tree itself, before the comparison is published; a side
   that the durable source line already holds is committed and needs no ref. If a pin cannot be
@@ -168,8 +168,9 @@ def official_line_converted(memory_repository: Path | None, official_line: str) 
 def memory_converted(contract: WorktreeContract) -> bool:
     """Whether a leaf's review is a tree review: its memory worktree or its official line converted.
 
-    Before the cutover (MIK-R37) neither holds for any production leaf, so the dataset review runs
-    exactly as before.
+    A leaf for which neither holds has unconverted memory. Its review compares no knowledge: it
+    reads the source identities of its code pair, and reports each knowledge side as
+    ``legacy-unavailable``, because the canonical datasets are retired.
     """
 
     worktree = contract.memory_worktree

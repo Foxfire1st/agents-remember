@@ -15,8 +15,8 @@ and decision records carry ``admission``.
 * decision, incident and facet records own their outgoing ``links``, whose relations are the
   closed per-kind vocabulary :data:`RELATIONS_BY_KIND`.
 
-Facet records other than decisions and incidents carry the fields of today's facet payload models
-(:mod:`agents_remember.models.knowledge.facet`) under the same names, plus ``links``. Content rules
+Facet records other than decisions and incidents carry the payload fields the retired database's
+facet models held, under the same names, plus ``links``. Content rules
 (two alternatives with one chosen, when ``reconsider_when`` is required, what an admission criterion
 means) belong to MIK-R13 and MIK-R27, not here.
 """
@@ -222,7 +222,7 @@ class IncidentRecord(_FacetRecord):
 
 
 class AssumptionRecord(_FacetRecord):
-    """``ar-assumption/v1``: fields of ``AssumptionPayload``."""
+    """``ar-assumption/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "assumption"
 
@@ -232,7 +232,7 @@ class AssumptionRecord(_FacetRecord):
 
 
 class LimitationRecord(_FacetRecord):
-    """``ar-limitation/v1``: fields of ``LimitationPayload``."""
+    """``ar-limitation/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "limitation"
 
@@ -243,7 +243,7 @@ class LimitationRecord(_FacetRecord):
 
 
 class FailureModeRecord(_FacetRecord):
-    """``ar-failure-mode/v1``: fields of ``FailureModePayload``."""
+    """``ar-failure-mode/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "failure_mode"
 
@@ -254,7 +254,7 @@ class FailureModeRecord(_FacetRecord):
 
 
 class ScenarioRecord(_FacetRecord):
-    """``ar-scenario/v1``: fields of ``ScenarioPayload``."""
+    """``ar-scenario/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "scenario"
 
@@ -265,7 +265,7 @@ class ScenarioRecord(_FacetRecord):
 
 
 class DiagnosticRecord(_FacetRecord):
-    """``ar-diagnostic/v1``: fields of ``DiagnosticGuidancePayload``."""
+    """``ar-diagnostic/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "diagnostic"
 
@@ -277,7 +277,7 @@ class DiagnosticRecord(_FacetRecord):
 
 
 class TermRecord(_FacetRecord):
-    """``ar-term/v1``: fields of ``TerminologyPayload``."""
+    """``ar-term/v1``: a facet record with its own payload fields and ``links``."""
 
     record_kind: ClassVar[RecordKind] = "term"
 

@@ -32,6 +32,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.memory import baseline, carryover
 from agents_remember.memory.conversion import card_authoring
+from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.memory_quality import reference_state
 from agents_remember.memory_quality.converted_cards import card_sidecar_path
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
@@ -48,6 +49,8 @@ from agents_remember.memory_quality.style.citations.exclusion_register import (
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.records import RECORD_MODELS
+from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
 from agents_remember.worktrees.integration.configured_contract_authority import (
     require_configured_contract_repositories,
 )
@@ -468,19 +471,42 @@ def _knowledge_foundation_state(config: McpRuntimeConfig, repo_id: str) -> dict[
             "datasetPath": resolved.dataset_path.as_posix(),
             "code": resolved.code,
             "detail": resolved.detail,
-            "nextAction": KNOWLEDGE_BOOTSTRAP_ROUTE,
+            "nextAction": (
+                legacy_format_refusal(
+                    admitted.context.memory_root,
+                    operation="knowledge-bootstrap",
+                    subject="this memory root",
+                )
+                if resolved.code == LEGACY_FORMAT_CODE
+                else KNOWLEDGE_BOOTSTRAP_ROUTE
+            ),
         }
+    tree = resolved.memory_tree
+    assert tree is not None
+    with KnowledgeIndex(resolved.database_path, expected_key=tree.tree_key) as index:
+        has_records = any(index.record_ids(kind).value for kind in RECORD_MODELS)
+    state = (
+        "unusable"
+        if tree.index_state == "partial"
+        else "recorded"
+        if has_records
+        else "not-recorded"
+    )
     return {
-        "state": "recorded",
+        "state": state,
         "datasetPath": resolved.database_path.as_posix(),
-        "code": None,
+        "code": "snapshot_unavailable" if state == "unusable" else None,
         "detail": (
-            f"the repository's published knowledge dataset {resolved.logical_digest} is recorded "
-            f"at the location the ordinary read route selects, bound to {resolved.repository_id}"
+            f"the memory tree {tree.tree_key} has a partial index: {tree.problems[:3]}"
+            if state == "unusable"
+            else f"text knowledge records at {admitted.context.memory_root} are indexed for memory tree {tree.tree_key}"
+            if has_records
+            else f"the complete memory tree {tree.tree_key} records no authored knowledge at {admitted.context.memory_root}"
         ),
         "nextAction": (
-            "resume or extend it through the ordinary curator ingest: agents-remember "
-            "knowledge-ingest, or knowledge-bootstrap for a taskless run"
+            "repair the named knowledge files, then rebuild their derived index"
+            if state == "unusable"
+            else KNOWLEDGE_BOOTSTRAP_ROUTE
         ),
     }
 

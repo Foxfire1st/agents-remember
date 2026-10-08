@@ -24,7 +24,10 @@ A decision target never triggers: a change to a decision -- including the ``rais
 status -- never chains on to other decisions (rule 3, one hop). A ``route:<dir>`` target fires
 through the ``history_row`` trigger only (ruling Q1, 2026-09-30T04:37:56): a row of this leaf whose
 subject is the route, or a family row about a family whose routes (in K_B or K_C) include it, with
-the disposition ``rerouted``, ``retired`` or ``deleted``; no directory-absence trigger exists.
+the disposition ``rerouted``, ``retired`` or ``deleted``; or a ``changed`` row about such a family
+whose routes differ between K_B and K_C, because a family's one governing row is ``changed`` when
+the leaf changes its guarantee together with its routes (erratum to rule 1). No directory-absence
+trigger exists.
 A decision that is superseded (derived, MIK-R13 rule 2) raises nothing: its links are listed in the
 summary as ``skipped: superseded`` (ruling Q5). Nothing reads ``reconsider_when``: the prose is never
 evaluated (Exclusions).
@@ -90,6 +93,8 @@ __all__ = [
 ABSENT: Final = "absent"
 ROUTE_PREFIX: Final = "route:"
 ROUTE_TRIGGERING_DISPOSITIONS: Final = frozenset({"rerouted", "retired", "deleted"})
+# The disposition of a family's governing row when the leaf changed its guarantee (MIK-R07).
+_CHANGED: Final = "changed"
 SUPERSEDED: Final = "superseded"
 _DECISION_PREFIX: Final = f"{RECORD_PREFIXES['decision']}-"
 
@@ -254,7 +259,14 @@ class _Evaluation:
         }
 
     def _route_trigger(self, target: str) -> dict[str, Any] | None:
-        """Ruling Q1: a row of this leaf that reroutes, retires or deletes the route."""
+        """Ruling Q1: a row of this leaf that reroutes, retires or deletes the route.
+
+        A family has one governing row, and a leaf that changes a family's guarantee and its
+        routes writes that row as ``changed`` (MIK-R07): the row answers the route conditions
+        too. So a ``changed`` row about a family that has the route also fires when the family's
+        routes differ between K_B and K_C (L37 review R6; erratum to MIK-R14 rule 1). A
+        ``changed`` row about a family whose routes are the same on both sides does not.
+        """
 
         history = self._history()
         if history is None:
@@ -267,9 +279,11 @@ class _Evaluation:
             if route in record.routes
         }
         for row in sorted(history.rows, key=lambda one: one.subject):
-            if row.disposition not in ROUTE_TRIGGERING_DISPOSITIONS:
-                continue
-            if row.subject == target or row.subject in governing:
+            rerouting = row.disposition in ROUTE_TRIGGERING_DISPOSITIONS
+            if (rerouting and row.subject == target) or (
+                row.subject in governing
+                and (rerouting or self._rerouted_by_a_changed_row(row.subject, row.disposition))
+            ):
                 return {
                     "trigger": HISTORY_ROW,
                     "row": row.id,
@@ -278,6 +292,18 @@ class _Evaluation:
                     "identity": [row.id, row.subject, row.disposition],
                 }
         return None
+
+    def _rerouted_by_a_changed_row(self, family_id: str, disposition: str) -> bool:
+        """Whether a ``changed`` row about ``family_id`` stands for a change of its routes."""
+
+        if disposition != _CHANGED:
+            return False
+        base, candidate = (
+            side.families.get(family_id) for side in (self.inputs.base, self.inputs.candidate)
+        )
+        return (None if base is None else sorted(base.routes)) != (
+            None if candidate is None else sorted(candidate.routes)
+        )
 
     def _anchor_trigger(
         self, link: ReconsiderLink, target: Anchor

@@ -41,6 +41,13 @@ refuses the landing by name (review R2). An
 exact retry of an in-flight generation reaches the existing-generation check before
 the gate: that generation was gated when it was admitted, over the inputs its
 fingerprint binds.
+
+A generation stays in flight only when something irreversible has happened or cannot be
+ruled out (L26 rulings of 2026-10-05, findings 1 and 4). A refusal after admission that
+published nothing (a refused publication, the stricter check finding the memory checkout
+changed since it was judged) cancels its generation in the same call and restores the
+closing, the ignore rule and the index; the same request then starts a fresh generation,
+any number of times, and that generation judges the memory checkout as it is then.
 """
 
 from __future__ import annotations
@@ -48,10 +55,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.memory_cache import prepare_memory_cache
+from agents_remember.kernel.memory_cache import ignore_memory_cache
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
+from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
     LifecycleOperationRecord,
@@ -77,6 +85,9 @@ from agents_remember.worktrees.integration.direct_landing.direct_landing_operati
     direct_landing_record,
     direct_landing_store,
 )
+from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    cancelled_unpublished,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
     LifecycleOperationCandidate,
     LifecycleOperationCandidateBinding,
@@ -101,6 +112,7 @@ from agents_remember.worktrees.knowledge_gate import (
     HistoryClosing,
     checkout_memory_converted,
     close_owner_history,
+    direct_gate_source,
     direct_gate_verdict,
     forget_direct_closing,
     keep_direct_closing,
@@ -142,6 +154,18 @@ class _DirectRequestIdentity:
     effective_input: EffectiveCloseoutInput
     code_commit: str
     candidate_tree: str
+
+
+@dataclass(frozen=True)
+class _JudgedHistoryClosing(HistoryClosing):
+    """The closed candidate's exact Git state and reversible pre-admission preparation."""
+
+    judged: GitMutationSnapshot
+    ignore_before: HistoryClosing
+
+    def restore(self) -> None:
+        super().restore()
+        self.ignore_before.restore()
 
 
 def direct_landing(
@@ -368,13 +392,12 @@ def _direct_memory_admission_snapshot(contract: WorktreeContract):
             observed={"branch": observed_branch},
         )
     try:
-        if require_git(memory_repo, ["status", "--porcelain", "--", ".", ":(exclude)memory.md"]):
-            prepare_memory_cache(memory_repo)
-        return git_mutation_snapshot(
+        if require_git(
             memory_repo,
-            contract.worktree_group / "reports" / ".direct-admission.index",
-            memory_cache=True,
-        )
+            ["--no-optional-locks", "status", "--porcelain", "--", ".", ":(exclude)memory.md"],
+        ):
+            ignore_memory_cache(memory_repo)
+        return _retained_memory_snapshot(contract, ".direct-admission.index")
     except (OSError, RuntimeError) as exc:
         raise DirectLandingError(
             "direct-landing-memory-git-unreadable",
@@ -430,12 +453,16 @@ def _start_or_observe_direct_landing(
             "direct-landing-contract-changed",
             "series contract changed before direct landing admission",
         )
-    _settle_kept_closing(contract, store.read())
-    retry = _in_flight_retry(store.read(), identity)
-    operation_input, candidate, closing = _prepare_direct_landing_candidate(
-        identity, gated=not retry
-    )
-    record, created = _admit_direct_landing(contract, store, (operation_input, candidate), closing)
+    current = store.read()
+    _settle_kept_closing(contract, current)
+    if _in_flight_retry(current, identity):
+        assert current is not None
+        record, created = current, False
+    else:
+        operation_input, candidate, closing = _prepare_direct_landing_candidate(identity)
+        record, created = _admit_direct_landing(
+            contract, store, (operation_input, candidate), closing
+        )
     if record.status == "completed" and record.result is not None:
         _settle_kept_closing(contract, record)
         return _with_lifecycle_operation(dict(record.result), contract, record)
@@ -512,7 +539,12 @@ def _admit_direct_landing(
     fingerprint = prepared[1].fingerprint
     kept = False
     try:
-        kept = keep_direct_closing(contract, closing, fingerprint)
+        kept = keep_direct_closing(
+            contract,
+            closing,
+            fingerprint,
+            closing.ignore_before if isinstance(closing, _JudgedHistoryClosing) else None,
+        )
         record, created = _create_direct_landing(contract, store, prepared)
     except ClosingReceiptError as exc:  # the closing could not be recorded: nothing is admitted
         _undo_closing(contract, closing, None)
@@ -550,22 +582,55 @@ def _with_lifecycle_operation(
 
 
 def _prepare_direct_landing_candidate(
-    identity: _DirectRequestIdentity, *, gated: bool = True
+    identity: _DirectRequestIdentity,
 ) -> tuple[DirectLandingOperationInput, LifecycleOperationCandidate, HistoryClosing | None]:
     """The exact operation input and candidate, and the gate's closing of the leaf's file.
 
-    ``gated`` is False only for an exact retry of the in-flight generation (see the module).
+    An exact in-flight retry reuses the journal's already-judged input instead of preparing again.
+    The snapshot the generation is admitted on must be the tree the gate judged: the closed tree
+    when it closed the leaf's file, and the memory head's own tree when the gate found the landing
+    to be a replay that commits nothing.
     """
     contract = identity.contract
     code_tree = _verify_code_commit(contract, identity.code_commit, identity.candidate_tree)
-    closing = _close_gated_leaf(contract, identity.code_commit) if gated else None
+    closing = _close_gated_leaf(contract, identity.code_commit)
+    replayed = _replayed_head_tree(contract) if closing is None else None
     try:
         operation_input, candidate = _operation_candidate(identity, code_tree)
+        judged = closing.judged if isinstance(closing, _JudgedHistoryClosing) else None
+        if (judged is not None and operation_input.memoryBefore != judged) or (
+            replayed is not None and operation_input.memoryBefore.candidateTree != replayed
+        ):
+            raise DirectLandingError(
+                "direct-landing-memory-candidate-changed",
+                "memory worktree or index changed while the invariant gate ran; nothing was "
+                "admitted or committed, retry to judge the current tree",
+                expected=(
+                    judged.model_dump(mode="json") if judged else {"candidateTree": replayed}
+                ),
+                observed=operation_input.memoryBefore.model_dump(mode="json"),
+            )
     except BaseException:
         if closing is not None:
             closing.restore()
         raise
     return operation_input, candidate, closing
+
+
+def _replayed_head_tree(contract: WorktreeContract) -> str | None:
+    """The memory head's tree when converted memory was gated as a replay, else ``None``.
+
+    On converted memory the gate leaves no closing only when the landing is a replay that commits
+    nothing (``direct_gate_source`` found the head already paired with this code commit and holding
+    the candidate tree). The generation must then be admitted on that very tree: a later edit would
+    otherwise be committed by the replay without ever being judged.
+    """
+
+    memory_repo = contract.memory_repo_path
+    assert memory_repo is not None
+    if not checkout_memory_converted(memory_repo):
+        return None
+    return require_git(memory_repo, ["rev-parse", "HEAD^{tree}"])
 
 
 def _operation_candidate(
@@ -618,6 +683,24 @@ def _memory_content_tree(contract: WorktreeContract) -> str:
         ) from exc
 
 
+def _retained_memory_snapshot(contract: WorktreeContract, index_name: str) -> GitMutationSnapshot:
+    """Retain the candidate objects and bind the same tree to the disposable Git snapshot."""
+    memory_repo = contract.memory_repo_path
+    assert memory_repo is not None
+    retained_tree = _memory_content_tree(contract)
+    snapshot = git_mutation_snapshot(
+        memory_repo,
+        contract.worktree_group / "reports" / index_name,
+        memory_cache=True,
+    )
+    if snapshot.candidateTree != retained_tree:
+        raise DirectLandingError(
+            "direct-landing-memory-candidate-changed",
+            "memory changed while its exact candidate tree was retained; nothing lands",
+        )
+    return snapshot
+
+
 def _direct_gate_owner(contract: WorktreeContract, code_commit: str) -> str | None:
     """MIK-R09 rule 3 over the candidate; the leaf whose history file this landing closes.
 
@@ -645,33 +728,70 @@ def _direct_gate_owner(contract: WorktreeContract, code_commit: str) -> str | No
 
 
 def _close_gated_leaf(contract: WorktreeContract, code_commit: str) -> HistoryClosing | None:
-    """Gate, then close the leaf's history file and validate the exact tree it will commit.
+    """Select an exact history source, prepare the final closed tree, then judge that tree once.
 
-    ``None`` for unconverted memory (nothing is written). A refusal after the closing restores the
-    file's bytes, so a refused landing leaves the memory checkout as it found it.
+    ``None`` for unconverted memory (nothing is written) and for a replay that commits nothing (the
+    head already holds this code commit's memory output; see :func:`_replayed_head_tree`). A refusal
+    after the closing restores the file's bytes, so a refused landing leaves the memory checkout as
+    it found it.
     """
 
-    owner = _direct_gate_owner(contract, code_commit)
-    if owner is None:
-        return None
     memory_repo = contract.memory_repo_path
     assert memory_repo is not None
-    closing = close_owner_history(memory_repo, owner)
     try:
+        converted = checkout_memory_converted(memory_repo)
+    except RuntimeError as exc:
+        raise DirectLandingError("direct-landing-knowledge-gate-refused", str(exc)) from exc
+    if not converted:
+        _direct_gate_owner(contract, code_commit)
+        return None
+    ignore = memory_repo / ".gitignore"
+    ignore_previous = ignore.read_bytes() if ignore.is_file() else None
+    ignore_before = HistoryClosing(ignore, ignore_previous, ignore_previous)
+    closing = None
+    try:
+        selected = direct_gate_source(
+            contract, code_commit=code_commit, memory_tree=_memory_content_tree(contract)
+        )
+        if selected.refusal is not None:
+            raise DirectLandingError("direct-landing-knowledge-gate-refused", selected.refusal)
+        if not selected.applies:
+            return None
+        assert selected.source is not None and selected.owner is not None
+        ignore_memory_cache(memory_repo)
+        ignore_before = HistoryClosing(ignore, ignore_previous, ignore.read_bytes())
+        closing = close_owner_history(memory_repo, selected.owner)
+        if closing.path.relative_to(memory_repo).as_posix() != selected.source.history_path:
+            raise DirectLandingError(
+                "direct-landing-knowledge-gate-refused",
+                "the selected open history is not the leaf's latest history source; nothing lands",
+            )
+        judged = _retained_memory_snapshot(contract, ".direct-judged.index")
+        verdict = direct_gate_verdict(
+            contract,
+            code_commit=code_commit,
+            memory_tree=judged.candidateTree,
+            source=selected.source,
+        )
+        if verdict.refusal is not None:
+            raise DirectLandingError("direct-landing-knowledge-gate-refused", verdict.refusal)
         refusal = memory_commit_refusal(
             memory_repository=memory_repo,
-            candidate_tree=_memory_content_tree(contract),
+            candidate_tree=judged.candidateTree,
             bases=(require_git(memory_repo, ["rev-parse", "HEAD"]),),
             paired_code=PairedCode(repository=Path(contract.code_repo_path), commit=code_commit),
             leaf_publication=True,
         )
+        if refusal is not None:
+            raise DirectLandingError("direct-landing-knowledge-validation-refused", refusal)
+        return _JudgedHistoryClosing(
+            closing.path, closing.previous, closing.written, judged, ignore_before
+        )
     except BaseException:
-        closing.restore()
+        if closing is not None:
+            closing.restore()
+        ignore_before.restore()
         raise
-    if refusal is not None:
-        closing.restore()
-        raise DirectLandingError("direct-landing-knowledge-validation-refused", refusal)
-    return closing
 
 
 def _create_direct_landing(
@@ -692,6 +812,12 @@ def _create_direct_landing(
     current = store.read()
     if current is None:
         return store.create(queued)
+    if cancelled_unpublished(current):
+        # Its own refusal cancelled it before anything was published and restored its closing:
+        # the next request, the same one included, starts a fresh generation instead of
+        # observing the cancelled one. No other terminal generation is replaced by its own
+        # fingerprint: a completed one is replayed, one cancelled by control is observed.
+        return store.replace_terminal(queued), True
     if current.fingerprint == queued.fingerprint:
         return current, False
     if current.status in {"completed", "cancelled"} and current.generationDisposition in {

@@ -23,7 +23,7 @@ from agents_remember.application.knowledge_writer import (
 )
 from agents_remember.cli import knowledge_bootstrap, knowledge_write_route
 from agents_remember.cli.__main__ import main
-from agents_remember.cli.knowledge_write_route import converted_contract, run_wave_write
+from agents_remember.cli.knowledge_write_route import run_wave_write
 from agents_remember.memory_quality.knowledge_validator import (
     CodeDirectory,
     KnowledgeValidationError,
@@ -287,6 +287,16 @@ def test_the_command_line_round_trips_every_kind(
     assert rows[BASE_FAMILY]["examined"] == [{"id": BASE_INVARIANT, "revision": 1}]
     assert _ingest(world, listed, "--commit") == 0
     capsys.readouterr()
+    # MIK-R26 rule 3: the leaf's ingest, run twice, made no dataset. The writer works on the files
+    # of the memory tree, so no SQLite file lies anywhere in the world, and the retired per-leaf
+    # baseline and candidate directory does not exist.
+    datasets = [
+        path.relative_to(tmp_path).as_posix()
+        for path in sorted(tmp_path.rglob("*"))
+        if path.is_file() and path.read_bytes()[:16] == b"SQLite format 3\x00"
+    ]
+    assert datasets == []
+    assert not list(tmp_path.rglob("provider-runtime"))
 
 
 def test_a_rerun_of_the_same_list_writes_the_same_files_with_the_same_ids(tmp_path: Path) -> None:
@@ -467,13 +477,27 @@ def test_a_planning_run_writes_nothing_and_unconverted_memory_is_not_this_route(
     planned = _write(world, _conforming(), commit=False)
     assert planned.state == "planned" and planned.written, planned.render()
     assert tree_bytes(world.memory) == before
+    # L37 carry: IDs are minted at random per run, so a plan says the ones it shows are provisional.
+    assert planned.to_document()["provisionalIds"] is True
+    assert "the IDs (and the file names holding them)" in planned.render()
+    committed = _write(world, _conforming())
+    assert committed.state == "written" and committed.to_document()["provisionalIds"] is False
+    assert "provisional" not in committed.render()
+    assert {one.id for one in planned.records} != {one.id for one in committed.records}
+    before = tree_bytes(world.memory)
     listed = world.task_root / "handoff.json"
     listed.write_text(json.dumps(_conforming()), encoding="utf-8")
-    assert _ingest(world, listed, "--baseline", str(listed)) == 2
-    assert "--baseline belong to the database candidate" in capsys.readouterr().out
-    assert converted_contract(str(world.contract)) is not None
+    # The database candidate's arguments are retired with the database (MIK-R26): not accepted.
+    with pytest.raises(SystemExit) as exited:
+        _ingest(world, listed, "--baseline", str(listed))
+    assert exited.value.code == 2 and "--baseline" in capsys.readouterr().err
     (world.memory / "knowledge/layout.json").unlink()
-    assert converted_contract(str(world.contract)) is None
+    # An unconverted worktree has no writer: the command refuses by name and writes nothing.
+    before = tree_bytes(world.memory)
+    assert _ingest(world, listed, "--commit") == 2
+    printed = capsys.readouterr().out
+    assert "knowledge-ingest refuses the unconverted memory tree" in printed
+    assert "worktree_sync" in printed and tree_bytes(world.memory) == before
     refused = _write(world, _conforming())
     assert refused.state == "refused"
     assert "unconverted" in refused.render()
@@ -908,33 +932,28 @@ def test_a_decision_that_breaks_a_content_rule_is_refused_and_nothing_is_written
 # --------------------------------------------------------------------------------------------------
 
 
-class _Reached(Exception):
-    """The run passed the lock and reached the database ingest."""
-
-
 def _bootstrap(world: World, memory: Path) -> str:
-    """One ``knowledge-bootstrap`` run on ``memory``: the lock's refusal, or "reached"."""
+    """One ``knowledge-bootstrap`` run on the unconverted ``memory``: the refusal it prints."""
 
     admitted = SimpleNamespace(
         admission=SimpleNamespace(memory_worktree=memory, code_worktree=world.code, scope="t"),
         authority=SimpleNamespace(coordination_root=world.root),
     )
     args = argparse.Namespace(hand_off_list="list.json", authorization_ref="a", commit=True)
-    with (
-        mock.patch.object(knowledge_bootstrap, "bootstrap_knowledge", side_effect=_Reached),
-        mock.patch("builtins.print") as printed,
-    ):
-        try:
-            assert knowledge_bootstrap._run(args, cast(Any, admitted)) == 2
-        except _Reached:
-            return "reached"
+    with mock.patch("builtins.print") as printed:
+        assert knowledge_bootstrap._run(args, cast(Any, admitted)) == 2
     return str(printed.call_args.args[0])
 
 
 def test_knowledge_bootstrap_refuses_unconverted_memory_once_the_repository_holds_converted_memory(
     tmp_path: Path,
 ) -> None:
-    """MIK-R09 rule 6 / MIK-R24 rule 9: the taskless database route is locked, naming the crossing."""
+    """MIK-R09 rule 6 / MIK-R24 rule 9: an unconverted root is refused, naming how it converts.
+
+    In a repository that holds converted memory the cutover lock names the crossing sync. In one
+    that holds none the root is memory in the legacy format: the database writer is retired
+    (MIK-R26), and the refusal names the conversion command.
+    """
 
     world = build_world(tmp_path)  # its main branch holds the layout marker
     plain = tmp_path / "plain"
@@ -944,14 +963,19 @@ def test_knowledge_bootstrap_refuses_unconverted_memory_once_the_repository_hold
     refused = _bootstrap(world, plain)
     assert "knowledge-bootstrap refuses" in refused and "crossing sync" in refused
 
-    other = tmp_path / "other"  # a repository that holds no converted memory: unchanged
+    other = tmp_path / "other"  # a repository that holds no converted memory
     other.mkdir()
     git(other, "init", "-q", "-b", "main")
     git(other, "config", "user.email", "fixture@example.invalid")
     git(other, "config", "user.name", "writer fixture")
     write(other, {"onboarding/a.py.md": "# a\n"})
     commit_all(other, "unconverted")
-    assert _bootstrap(world, other) == "reached"
+    before = tree_bytes(other)
+    legacy = _bootstrap(world, other)
+    assert "knowledge-bootstrap refuses the memory root" in legacy and "legacy format" in legacy
+    assert "agents-remember knowledge-convert" in legacy and "worktree_sync" in legacy
+    assert "holds no converted memory yet" in legacy
+    assert tree_bytes(other) == before and not list(other.rglob("*.sqlite"))
 
 
 def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Path) -> None:
@@ -986,7 +1010,6 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
             commit=True,
             as_json=False,
             crossing=name,
-            **dict.fromkeys(key for key, _flag in knowledge_write_route._DATABASE_ONLY),
         )
         for key, value in fields.items():
             setattr(args, key, value)
@@ -1000,8 +1023,8 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
         assert run(leaf, f"{leaf.task_id}-crossing-1") == refused  # a leaf contract, its own id
     assert "names the master's series contract" in str(printed.call_args.args[0])
     assert run(series, f"{series.task_id}-crossing-2") == refused  # no such open file
-    assert run(series, crossing, baseline="b.sqlite") == refused  # a database-only flag
-    assert run(None, crossing) == refused  # an unreadable contract
+    assert run(series, crossing, authorization_ref=" ") == refused  # a blank authorization
+    assert run("no such contract", crossing) == refused  # an unreadable contract
     wraps = mock.patch.object(knowledge_write_route, "write_knowledge", wraps=write_knowledge)
     with wraps as wrote:
         assert run(series, crossing) == written

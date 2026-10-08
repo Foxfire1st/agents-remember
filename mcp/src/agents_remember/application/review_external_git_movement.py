@@ -1,39 +1,10 @@
-"""Identity movement caused *outside* managed sync, and the recovery routes that exist for it (ICR-R23@v1).
+"""Read raw Git ancestry against the retained review tree record (ICR-R23).
 
-``worktree_sync`` is the one route that moves a leaf's declared identities under measurement: it
-merges the official line into the work branch, re-captures the candidate and writes a rebinding record
-naming what it moved (ICR-R22@v1). Everything else that can move those identities is ordinary Git --
-``git rebase``, ``git cherry-pick``, ``git revert``, ``git checkout``, ``git switch`` -- and none of it
-leaves the repository a record of having done so. A reader that only knows "a comparison generation was
-frozen" therefore cannot tell a rewritten branch from an untouched one, which is the packet's
-non-conforming example: old attribution shown as current solely because its database file and its
-manifest still exist.
-
-This module is the boundary measurement that closes that gap. It resolves the generation the leaf
-published -- through the owner that already selects and reads it -- and asks the repository the three
-questions a Git history can answer about the identities the sealed manifest declared: is the code
-worktree on the branch the contract declared, and is the recorded work-branch head still an ancestor of
-its tip; is the code-base commit the capture used still an ancestor of the declared source branch; and
-is the memory work branch's recorded base still an ancestor of that branch?
-
-**It measures; it decides nothing.** No verdict about a comparison, no clearance, no refusal to work.
-The value states which declared identities were replaced and what recovery exists; the review surface
-carries it, and the successor generation remains the freeze owner's act.
-
-**Every shape is named by what was measured, and none implies support by silence.**
-:data:`GIT_TRANSITION_SUPPORT` is the support matrix -- one row per shape, its measured Git signature,
-the state it renders in, whether this system reconciles it, and the step a person takes instead.
-``rebase`` is the one an ancestry check distinguishes by itself; a ``cherry-pick`` or a ``revert``
-moves the branch forward while the recorded commit stays in its history, so **no ancestry check
-identifies either** and no record already on disk measures it; ``unchanged`` is the measured absence
-of any shape; ``branch-switch`` is the checkout leaving the declared branch, which makes the
-work-branch comparison unmeasurable.
-
-**Nothing here runs a Git command that writes.** The reads are the shared guarded runner's, through the
-worktree module's existing helpers; the reviewed generation keeps every byte it had, which is the
-packet's boundary example -- an exact historic generation stays inspectable while live recovery is
-pending. No state invents an identity either: an absence names its reason, and a channel that could not
-be read carries no observed value rather than a favourable default.
+The boundary compares recorded candidate/base commits where they exist. An uncommitted candidate
+contains a tree pin without an observed work-branch head; that ancestry channel is not measured.
+No current checkout supplies missing historical proof. Recorded code and memory bases remain exact,
+and changed ancestry is reported beside the unsupported raw-operation recovery routes.
+The boundary reads Git and retained JSON only; it never changes a checkout or records a comparison.
 """
 
 from __future__ import annotations
@@ -44,12 +15,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
-from agents_remember.application.review_comparison_generation import (
-    COMPARISON_MANIFEST_NAME,
-    ComparisonGenerationManifest,
-    read_manifest,
+from agents_remember.application.review_final_output_receipt import (
+    require_comparison_repositories,
+    select_review_comparison,
 )
-from agents_remember.application.review_final_output_receipt import select_review_generation
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review_external_movement import (
     ExternalGitMovement,
@@ -58,6 +27,8 @@ from agents_remember.models.knowledge.review_external_movement import (
     GitMovementEvidence,
     GitTransitionReconciliation,
 )
+from agents_remember.models.knowledge.review_final_output_receipt import tree_comparison_digest
+from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -80,8 +51,8 @@ _MovementState = Literal["current", "stale", "not-measured", "unavailable"]
 # The recovery a boundary that could not read the generation at all names, which is a different
 # step from a successor generation: there is nothing to succeed until the record can be read.
 _GENERATION_UNREADABLE_RECOVERY = (
-    "restore the readable comparison generation this leaf published under "
-    "<task_root>/notes/reports/comparison-generations, then read the boundary again; no identity was "
+    "restore the readable tree comparison this leaf published under "
+    "<task_root>/notes/reports/review-comparisons, then read the boundary again; no identity was "
     "compared, so no movement is claimed"
 )
 
@@ -91,7 +62,7 @@ _GENERATION_UNREADABLE_RECOVERY = (
 # publish an empty recovery clause.
 _UNCOMPARED_RECOVERY = (
     "restore the checkout, branch or repository the boundary could not read, then read the boundary "
-    "again; where the recorded identity itself no longer exists, publish a successor generation from "
+    "again; where the recorded identity itself no longer exists, record a successor tree comparison from "
     "the history the branch does hold. Nothing about a channel that was not compared is claimed here"
 )
 
@@ -144,60 +115,58 @@ GIT_TRANSITION_SUPPORT: tuple[GitTransitionSupport, ...] = (
     GitTransitionSupport(
         transition="unchanged",
         measured_signature=(
-            "every declared identity is still exactly the identity the generation recorded: the "
-            "work-branch head, the code-base commit and the memory work branch's base are all at "
+            "every declared identity is still exactly the identity the comparison recorded: the "
+            "candidate commit, the code-base commit and the memory work branch's base are all at "
             "their recorded values, so nothing was observed to move"
         ),
         state="current",
         reconciliation="supported",
         recovery_action=(
             "none required for the declared identities; this boundary compared all of them and found "
-            "each still exactly where the reviewed generation recorded it, so no shape was observed "
+            "each still exactly where the reviewed tree comparison recorded it, so no shape was observed "
             "to reconcile"
         ),
     ),
     GitTransitionSupport(
         transition="ordinary-append",
         measured_signature=(
-            "the recorded work-branch head is still an ancestor of the branch tip and the tip has "
-            "moved past it: the branch advanced without replacing anything the generation recorded"
+            "the recorded candidate commit is still an ancestor of the branch tip and the tip has "
+            "moved past it: the branch advanced without replacing anything the comparison recorded"
         ),
         state="current",
         reconciliation="supported",
         recovery_action=(
-            "none required for the recorded identities; the branch moved forward from the recorded "
-            "head without replacing it, which is the ordinary shape of work continuing under an "
-            "already-frozen generation"
+            "none required for the recorded identities; the branch moved forward from the recorded candidate "
+            "commit without replacing it, which is the ordinary shape of work continuing under an "
+            "already-recorded tree comparison"
         ),
     ),
     GitTransitionSupport(
         transition="rebase",
         measured_signature=(
-            "the recorded work-branch head is a readable commit object that is not an ancestor of "
+            "the recorded candidate commit is a readable commit object that is not an ancestor of "
             "the branch tip, so the branch was rewritten"
         ),
         state="stale",
         reconciliation="unsupported",
         recovery_action=(
-            "publish a successor generation from the rebased tip with "
-            "freeze_review_comparison, naming the reviewed generation as its predecessor; the "
-            "reviewed generation is kept and remains inspectable, and this system does not replay or "
-            "reverse a rebase"
+            "open a new live review from the rebased tip to record the exact successor tree comparison; "
+            "the previous comparison remains inspectable, and this system does not replay or reverse a rebase"
         ),
     ),
     GitTransitionSupport(
         transition="cherry-pick",
         measured_signature=(
-            "the branch tip differs from the recorded head while the recorded head is still an "
-            "ancestor, or the tree and dataset differ while both commits still resolve"
+            "the branch tip differs from the recorded candidate commit while the recorded candidate commit is still an "
+            "ancestor, or the code and memory trees differ while both commits still resolve"
         ),
         state="current",
         reconciliation="unsupported",
         recovery_action=(
-            "publish a successor generation from the advanced tip -- the pick is never identified "
+            "record a successor tree comparison from the advanced tip -- the pick is never identified "
             "from an ancestry check alone, and no record that already exists measures it: the "
             "managed-sync rebinding exists only once a sync has carried the official line and "
-            "resolved a pair, the reopen channel reports the recorded generation's availability "
+            "resolved a pair, the reopen channel reports the recorded comparison's availability "
             "rather than the pick, and this boundary's own state stays 'current'. A sync that "
             "carries nothing resolves no pair and records no rebinding, so it is not a measurement "
             "of the pick either"
@@ -206,14 +175,14 @@ GIT_TRANSITION_SUPPORT: tuple[GitTransitionSupport, ...] = (
     GitTransitionSupport(
         transition="revert",
         measured_signature=(
-            "the branch advances by exactly the commits that undo earlier ones: the recorded head "
+            "the branch advances by exactly the commits that undo earlier ones: the recorded candidate commit "
             "stays an ancestor and no ancestry check can tell the undo from any other new commit"
         ),
         state="current",
         reconciliation="unsupported",
         recovery_action=(
-            "publish a successor generation from the branch as it now stands; a revert is never "
-            "inferred from an ancestry check, and the code tree and knowledge dataset this boundary "
+            "record a successor tree comparison from the branch as it now stands; a revert is never "
+            "inferred from an ancestry check, and the code tree and memory candidate tree this boundary "
             "does not compare are the existing owners' measurements to take"
         ),
     ),
@@ -343,7 +312,11 @@ def external_git_movement(
     """
 
     enclosure = contract if contract is not None else resolved.contract
-    if enclosure is None or resolved.closed_leaf is not None:
+    if (
+        enclosure is None
+        or resolved.closed_leaf is not None
+        or (resolved.trees is not None and not resolved.trees.live)
+    ):
         return None
     return external_git_movement_for_contract(enclosure)
 
@@ -371,7 +344,7 @@ def _measure_contract(contract: WorktreeContract) -> ExternalGitMovement | _Boun
     if contract.kind != "leaf":
         return _BoundaryAbsence(
             f"this contract records kind {contract.kind!r} rather than a leaf enclosure, so no leaf's "
-            "published comparison generation resolves under it"
+            "published tree comparison resolves under it"
         )
     if not contract.code_work_branch:
         return _BoundaryAbsence(
@@ -389,12 +362,13 @@ def _measure_generation(contract: WorktreeContract) -> ExternalGitMovement | _Bo
     """
 
     try:
-        selection = select_review_generation(contract.task_root, contract.leaf_id)
-        if selection.state in {"unreadable", "ambiguous"}:
+        selection = select_review_comparison(contract.task_root, contract.leaf_id)
+        if selection.state in {"unreadable", "ambiguous", "legacy-limit"}:
             return _unavailable(contract, selection.detail)
-        if selection.state != "selected" or selection.ref is None:
+        if selection.state != "selected" or selection.comparison is None:
             return _BoundaryAbsence(selection.detail)
-        manifest = read_manifest(selection.ref.directory / COMPARISON_MANIFEST_NAME)
+        manifest = selection.comparison
+        require_comparison_repositories(contract, manifest)
     except (KnowledgeStorageError, OSError, RuntimeError, ValueError) as error:
         return _unavailable(contract, str(error) or error.__class__.__name__)
     try:
@@ -473,19 +447,16 @@ def _unavailable(contract: WorktreeContract, detail: str) -> ExternalGitMovement
     """The state a generation that could not be read earns: no generation identity is claimed."""
 
     reason = (
-        f"the leaf's published comparison generation could not be read, so no declared identity was "
+        f"the retained comparison cannot provide an exact tree-bound boundary measurement, so no declared identity was "
         f"compared -- no boundary measurement exists to report ({detail})"
     )
     return ExternalGitMovement(
         binding_state="unavailable",
         reason=reason,
         statement=f"{reason}; {_GENERATION_UNREADABLE_RECOVERY}",
-        # No generation identity is available, and none is invented for the reader: the empty
-        # digest and uuid are this value's own "not read" markers, and the validator refuses them
-        # beside a state that claims a measurement.
-        generation_id="00000000-0000-0000-0000-000000000000",
-        generation_index=1,
-        reviewed_binding_digest="0" * 64,
+        movement_version="ar-review-external-movement/v2",
+        comparison=None,
+        reviewed_binding_digest=None,
         declared_work_branch=contract.code_work_branch,
         successor_action=_GENERATION_UNREADABLE_RECOVERY,
         unsupported=unsupported_transitions(),
@@ -495,7 +466,7 @@ def _unavailable(contract: WorktreeContract, detail: str) -> ExternalGitMovement
 
 def _report(
     contract: WorktreeContract,
-    manifest: ComparisonGenerationManifest,
+    manifest: ReviewTreeComparisonRecord,
     findings: Sequence[_Finding],
 ) -> ExternalGitMovement:
     """Compose the report from the findings, taking its state from what was measured."""
@@ -513,9 +484,9 @@ def _report(
         ),
         reason=reason,
         statement=_statement(state, findings, reason, transitions, recovery),
-        generation_id=manifest.generation_id,
-        generation_index=manifest.generation_index,
-        reviewed_binding_digest=manifest.binding_digest,
+        movement_version="ar-review-external-movement/v2",
+        comparison=manifest,
+        reviewed_binding_digest=tree_comparison_digest(manifest),
         declared_work_branch=contract.code_work_branch,
         observed_code_work_branch_head=_observed(findings, _CODE_CHANNEL),
         observed_declared_source_branch_head=_observed(findings, _SOURCE_CHANNEL),
@@ -564,7 +535,7 @@ def _state(findings: Sequence[_Finding]) -> _MovementState:
 
 
 def _findings(
-    contract: WorktreeContract, manifest: ComparisonGenerationManifest
+    contract: WorktreeContract, manifest: ReviewTreeComparisonRecord
 ) -> tuple[_Finding, ...]:
     """Ask every channel the contract declares, in a fixed order.
 
@@ -573,12 +544,41 @@ def _findings(
     questions rather than reporting a third answer it never measured.
     """
 
-    capture = manifest.source.candidate_capture
-    findings = [
-        _work_branch_finding(contract, recorded=capture.observedCodeHead),
-        _source_finding(contract, recorded=manifest.source.baseline_code_tree_id),
-    ]
-    memory = _memory_finding(contract, recorded=contract.memory_base_commit)
+    candidate = manifest.code_candidate
+    if candidate.commit is None:
+        work = _unreadable(
+            _CODE_CHANNEL,
+            declared=contract.code_work_branch,
+            recorded=candidate.tree,
+            detail="the retained uncommitted candidate records a tree pin, not an observed work-branch head; work-head ancestry cannot be measured",
+            branch_left=_text(lambda: current_branch(contract.code_worktree))
+            != contract.code_work_branch,
+        )
+    else:
+        work = _work_branch_finding(contract, recorded=candidate.commit)
+    base = manifest.code_base
+    source = (
+        _source_finding(contract, recorded=base.commit)
+        if base.commit is not None
+        else _unreadable(
+            _SOURCE_CHANNEL,
+            declared=contract.code_source_branch,
+            recorded=base.tree,
+            detail="the retained code base carries no commit for an ancestry check",
+        )
+    )
+    findings = [work, source]
+    memory_base = manifest.memory_base
+    memory = (
+        _memory_finding(contract, recorded=memory_base.commit)
+        if memory_base.commit is not None
+        else _unreadable(
+            _MEMORY_CHANNEL,
+            declared=contract.memory_work_branch,
+            recorded=memory_base.tree,
+            detail="the retained memory base carries no commit for an ancestry check",
+        )
+    )
     if memory is not None:
         findings.append(memory)
     return tuple(findings)
@@ -597,7 +597,7 @@ def _work_branch_finding(contract: WorktreeContract, *, recorded: str) -> _Findi
             recorded=recorded,
             detail=(
                 f"the code worktree is on {shown}, not on the declared work branch {branch}, so the "
-                "recorded work-branch head was not compared against it"
+                "recorded candidate commit was not compared against it"
             ),
             branch_left=True,
         )
@@ -817,8 +817,8 @@ def _statement(
 
     if state == "not-measured":
         return (
-            "this boundary did not compare every declared identity of the reviewed generation: "
-            f"{reason}. {_compared_clause(findings)}The reviewed generation is kept exactly where it "
+            "this boundary did not compare every declared identity of the reviewed tree comparison: "
+            f"{reason}. {_compared_clause(findings)}The reviewed tree comparison is kept exactly where it "
             f"is and stays inspectable; {recovery}"
         )
     if state == "current":
@@ -856,12 +856,12 @@ def _agreement_statement(
     measured = "; ".join(finding.detail for finding in findings if finding.state != "unavailable")
     if tuple(transitions) == ("unchanged",):
         return (
-            "no raw Git operation moved a declared identity of the reviewed generation, and this "
+            "no raw Git operation moved a declared identity of the reviewed tree comparison, and this "
             f"boundary observed no transition: every declared identity still stands exactly where "
-            f"the generation recorded it -- {measured}. {recovery}"
+            f"the comparison recorded it -- {measured}. {recovery}"
         )
     return (
-        "no raw Git operation replaced a declared identity of the reviewed generation: a declared "
+        "no raw Git operation replaced a declared identity of the reviewed tree comparison: a declared "
         f"branch advanced from its recorded identity without replacing it -- {measured}. {recovery}"
     )
 
@@ -875,7 +875,7 @@ def _movement_statement(findings: Sequence[_Finding], recovery: str) -> str:
     untouched = "; ".join(finding.detail for finding in findings if finding.state == "current")
     suffix = f"{untouched}; " if untouched else ""
     return (
-        "a raw Git operation replaced a declared identity of the reviewed generation without a "
+        "a raw Git operation replaced a declared identity of the reviewed tree comparison without a "
         f"managed sync: {replaced}. {suffix}{recovery}"
     )
 

@@ -14,8 +14,7 @@ this one:
 * A detection signal and a detection run are *typed records*, and ``KS-R10@v1`` already built the
   envelope they live in: ``knowledge_record`` carries the kind, the authority home, the lifecycle
   and the governing route, and ``record_revision`` carries the frozen payload and its content
-  digest. Their payload shapes are registered in
-  :data:`agents_remember.memory.knowledge.record_envelope.PAYLOAD_MODELS` under
+  digest. Their canonical payload shapes used the retired envelope registry under
   ``(detection_signal, detection-signal/v1)`` and ``(detection_run, detection-run/v1)``, exactly as
   the eight authored-judgment subtypes are, so the signal's own fields are declared once, in the
   generation-1/2 envelope, rather than restated as columns here.

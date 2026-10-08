@@ -1,101 +1,6 @@
 schema_version = "ar-test-evidence-lifecycle/v3"
 large_fixture_bytes = 25000
 
-[[contract]]
-id = "ar-durable-store/1.0-process-race-evidence"
-owner = "mcp/src/agents_remember/controlplane/durable_store.py"
-evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
-
-[[contract]]
-id = "candidate-batch-case-harness"
-owner = "mcp/tests/candidate_batch_test_support.py"
-evidence_node = "mcp/tests/test_candidate_batch_transaction.py::test_a_late_invalid_command_rolls_back_every_earlier_insert_in_the_batch"
-
-[[contract]]
-id = "common-base-merge-cases"
-owner = "mcp/tests/merge_case_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_guarded_merge.py::test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate"
-
-[[contract]]
-id = "conversation-control-public-route-contract"
-owner = "mcp/src/agents_remember/serving/conversation/control/api.py"
-evidence_node = "mcp/tests/test_conversation_control_api.py::ControlApiTests::test_interrupt_ack_settle_replay_and_single_write"
-
-[[contract]]
-id = "knowledge-diff-cases"
-owner = "mcp/tests/diff_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
-
-[[contract]]
-id = "knowledge-evidence-cases"
-owner = "mcp/tests/evidence_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
-
-[[contract]]
-id = "knowledge-facet-cases"
-owner = "mcp/tests/facet_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_facets.py::test_the_seam_registry_is_exactly_the_eight_declared_subtypes"
-
-[[contract]]
-id = "knowledge-generation-cases"
-owner = "mcp/tests/generation_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_schema_generations.py::test_a_generation_1_dataset_keeps_its_own_body_under_generation_1"
-
-[[contract]]
-id = "knowledge-graph-case-support"
-owner = "mcp/tests/knowledge_graph_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_family_revision.py::test_the_family_lineage_rule_matches_the_invariant_rule"
-
-[[contract]]
-id = "knowledge-identity-branching-fixture"
-owner = "mcp/tests/knowledge_fixture_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
-
-[[contract]]
-id = "knowledge-read-scope-cases"
-owner = "mcp/tests/read_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
-
-[[contract]]
-id = "knowledge-snapshot-lifecycle-cases"
-owner = "mcp/tests/snapshot_lifecycle_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_snapshot_publication.py::test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not"
-
-[[contract]]
-id = "migration-census-cases"
-owner = "mcp/tests/migration_census_test_support.py"
-evidence_node = "mcp/tests/test_migration_census.py::test_the_seed_writes_every_census_record_kind_through_the_shipped_batch_operation"
-
-[[contract]]
-id = "next-supported-pi-rpc-activity-recording"
-owner = "mcp/src/agents_remember/serving/pi_rpc_events.py"
-evidence_node = "mcp/tests/test_pi_rpc_adapter_ops_2.py::PiRpcAdapterTests2::test_get_state_drives_stream_compaction_and_pending_activity"
-
-[[contract]]
-id = "paseo-launch-given-to-agent-cases"
-owner = "mcp/tests/paseo_launch_test_support.py"
-evidence_node = "mcp/tests/test_paseo_launch.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
-
-[[contract]]
-id = "paseo-runtime-command-cases"
-owner = "mcp/tests/paseo_runtime_test_support.py"
-evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
-
-[[contract]]
-id = "pnt-sandbox-process-cases"
-owner = "mcp/tests/pnt_sandbox_test_support.py"
-evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
-
-[[contract]]
-id = "synthetic-test-evidence-candidate"
-owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
-evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
-
-[[contract]]
-id = "tool-refusal-census-cases"
-owner = "mcp/tests/tool_refusal_census_support.py"
-evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
-
 [[artifact]]
 path = "mcp/tests/_adapter_event_scripts.py"
 kind = "shared-support"
@@ -252,26 +157,68 @@ consumers = [
 ]
 
 [[artifact]]
-path = "mcp/tests/candidate_batch_test_support.py"
+path = "mcp/tests/anchor_fixture_models.py"
 kind = "shared-support"
 authority = "internal-canonical"
-owner = "candidate-batch-case-harness"
+owner = "mcp/tests/anchor_fixture_models.py"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "an admitted destination built through initialize_knowledge_namespace plus contexts resolved through resolve_candidate_context"
-introduced_by = "260915-KS-L3"
+source_version_or_generator = "the request models of the fixture row writer, moved text-identical from models/knowledge/source.py and graph.py"
+introduced_by = "260928-MIK-L26"
 lifetime = "permanent"
-permanence_rationale = "Every candidate-batch case needs one admitted candidate and one measured before/after dataset; a per-module copy would let the two modules disagree about how a refusal is measured, and the measurement is the evidence the requirement asks for."
-replacement_contract = "contract:candidate-batch-case-harness"
+permanence_rationale = "The fixture row writer of the read, comparison and review cases takes these anchor and realization drafts. No production code constructs them since the canonical writers were retired (MIK-R26), so they live with the tests that need them."
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_candidate_batch_commands.py",
-  "mcp/tests/test_candidate_batch_transaction.py",
-  "mcp/tests/test_knowledge_change_sets.py",
-  "mcp/tests/test_knowledge_curator_ingest.py",
-  "mcp/tests/test_knowledge_effect_claims.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_copy_cleanup.py",
+  "mcp/tests/test_knowledge_diff_attribution.py",
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_reuse.py",
+  "mcp/tests/test_knowledge_index_surfaces.py",
+  "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_read_scope.py",
+  "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_review_attributed_source_content.py",
+  "mcp/tests/test_knowledge_review_attribution_precedence.py",
+  "mcp/tests/test_knowledge_review_one_sided_statements.py",
+  "mcp/tests/test_knowledge_review_relationship_line.py",
+  "mcp/tests/test_knowledge_review_relationship_movement.py",
+  "mcp/tests/test_knowledge_review_relationship_reach.py",
+  "mcp/tests/test_knowledge_review_resolution_and_route.py",
+  "mcp/tests/test_knowledge_review_revision_selection.py",
+  "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_revision_seals.py",
+  "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_knowledge_store.py",
+  "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_family_context.py",
+  "mcp/tests/test_review_family_context_population.py",
+  "mcp/tests/test_review_family_member_sources.py",
+  "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
+  "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_candidate_capture.py",
 ]
 
 [[artifact]]
@@ -313,6 +260,8 @@ consumers = [
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
 ]
 
 [[artifact]]
@@ -355,6 +304,7 @@ consumers = [
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
@@ -458,8 +408,9 @@ consumers = [
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
   "mcp/tests/test_retired_door_publication_fields.py",
-  "mcp/tests/test_review_assessment_history.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_role_handover_binding.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_series_finalize_rules.py",
@@ -472,6 +423,7 @@ consumers = [
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_untyped_sprint_rows.py",
@@ -498,37 +450,24 @@ permanence_rationale = "The comparison is decided by what changed between two sn
 replacement_contract = "contract:knowledge-diff-cases"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_curator_candidate_progression.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
-  "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
-  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
-  "mcp/tests/test_knowledge_review_comparison_generation.py",
-  "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_resolution_and_route.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
-  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_review_surface.py",
-  "mcp/tests/test_review_assessment_history.py",
-  "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_bounded_pagination.py",
-  "mcp/tests/test_review_external_git_movement_read.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
-  "mcp/tests/test_review_final_output_receipt.py",
-  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
-  "mcp/tests/test_review_sync_movement_read.py",
-  "mcp/tests/test_review_sync_rebinding.py",
-  "mcp/tests/test_review_unchanged_knowledge.py",
 ]
 
 [[artifact]]
@@ -608,45 +547,6 @@ replacement_contract = "node:mcp/tests/eve_fixture_model.py::serve"
 consumer_scope = "exact-source"
 consumers = [
   "mcp/tests/live_eve_native_fixture.py",
-]
-
-[[artifact]]
-path = "mcp/tests/evidence_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "knowledge-evidence-cases"
-category = "unit-regression"
-fidelity = "in-process"
-cadence = "affected"
-source_version_or_generator = "one admitted candidate namespace built through the production application seam, holding two invariant revisions, a standalone source anchor, two realization claims, one decision facet with its revision, and a local artifact directory with a real file under it"
-introduced_by = "260915-KS-L12"
-lifetime = "permanent"
-permanence_rationale = "An evidence claim resolves four links -- a subject, an evidence anchor and every claimed-coverage endpoint -- and the refusal cases assert which identity is which; there are two subject kinds and two claimed-coverage kinds, so a per-module copy would let the two modules disagree about which identity is the facet revision and which is the invariant revision, which is exactly the property those assertions protect. The artifact file is part of the same fixture because a digest checked against bytes at write time is only meaningful against real bytes."
-replacement_contract = "contract:knowledge-evidence-cases"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_knowledge_evidence_claims.py",
-  "mcp/tests/test_knowledge_evidence_observations.py",
-]
-
-[[artifact]]
-path = "mcp/tests/facet_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "knowledge-facet-cases"
-category = "unit-regression"
-fidelity = "in-process"
-cadence = "affected"
-source_version_or_generator = "one admitted candidate namespace built through the production application seam, plus one recorded generation-2 dataset built through generation 2's own recorded DDL with fixed identities and a fixed authorship instant, so the serialized page it produces is a function of the substrate rather than of a UUID draw"
-introduced_by = "260915-KS-L11"
-lifetime = "permanent"
-permanence_rationale = "The facet cases need two things no single case can own: an admitted candidate whose provenance comes from the admission, and a byte-reproducible dataset whose shipped-seed page can be compared against a digest measured before this leaf existed. A per-module copy would let the copies disagree about what the recorded fixture is, which is exactly what the byte-identity evidence rests on."
-replacement_contract = "contract:knowledge-facet-cases"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_knowledge_facets.py",
-  "mcp/tests/test_knowledge_family_composition.py",
-  "mcp/tests/test_knowledge_family_composition_boundaries.py",
 ]
 
 [[artifact]]
@@ -1052,8 +952,6 @@ consumers = [
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_benchmark_analysis.py",
-  "mcp/tests/test_candidate_batch_commands.py",
-  "mcp/tests/test_candidate_batch_transaction.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_capsule_serving.py",
@@ -1080,8 +978,8 @@ consumers = [
   "mcp/tests/test_closeout_projection_member_helpers.py",
   "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
-  "mcp/tests/test_closeout_queue_store.py",
   "mcp/tests/test_closeout_queue_abandoned_rows.py",
+  "mcp/tests/test_closeout_queue_store.py",
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_code_quality_check.py",
   "mcp/tests/test_code_quality_check_scope.py",
@@ -1116,14 +1014,10 @@ consumers = [
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_cross_store_lock_order.py",
-  "mcp/tests/test_curator_candidate_progression.py",
+  "mcp/tests/test_curator_coherence_judgment_evidence.py",
   "mcp/tests/test_curator_coherence_publication_discoverability.py",
-  "mcp/tests/test_curator_family_authoring.py",
-  "mcp/tests/test_curator_family_retention.py",
-  "mcp/tests/test_curator_ingest_write_and_retention.py",
-  "mcp/tests/test_curator_realization_authoring.py",
+  "mcp/tests/test_curator_realization_refusals.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
-  "mcp/tests/test_curator_scope.py",
   "mcp/tests/test_dagger_registry_lock.py",
   "mcp/tests/test_dagger_runtime_authority.py",
   "mcp/tests/test_dashboard_host.py",
@@ -1179,68 +1073,39 @@ consumers = [
   "mcp/tests/test_knowledge_anchor_content.py",
   "mcp/tests/test_knowledge_bootstrap.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
-  "mcp/tests/test_knowledge_candidate_workspace.py",
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
-  "mcp/tests/test_knowledge_change_sets.py",
-  "mcp/tests/test_knowledge_citation_bindings.py",
-  "mcp/tests/test_knowledge_citation_boundaries.py",
   "mcp/tests/test_knowledge_closeout_gate.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_copy_cleanup.py",
   "mcp/tests/test_knowledge_crossing.py",
-  "mcp/tests/test_knowledge_curator_ingest.py",
-  "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_currentness.py",
   "mcp/tests/test_knowledge_cutover.py",
+  "mcp/tests/test_knowledge_database_retired.py",
   "mcp/tests/test_knowledge_decisions.py",
-  "mcp/tests/test_knowledge_detection_runs.py",
-  "mcp/tests/test_knowledge_detection_signals.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
-  "mcp/tests/test_knowledge_effect_claims.py",
-  "mcp/tests/test_knowledge_evidence_claims.py",
-  "mcp/tests/test_knowledge_evidence_observations.py",
-  "mcp/tests/test_knowledge_facets.py",
-  "mcp/tests/test_knowledge_family_composition.py",
-  "mcp/tests/test_knowledge_family_composition_boundaries.py",
-  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
-  "mcp/tests/test_knowledge_family_review.py",
-  "mcp/tests/test_knowledge_family_revision.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_canonical.py",
   "mcp/tests/test_knowledge_file_formats.py",
   "mcp/tests/test_knowledge_gate_routes.py",
-  "mcp/tests/test_knowledge_graph_reads.py",
-  "mcp/tests/test_knowledge_guarded_merge.py",
-  "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
   "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
-  "mcp/tests/test_knowledge_ingest_comparison_generation.py",
-  "mcp/tests/test_knowledge_ingest_failure_windows.py",
-  "mcp/tests/test_knowledge_ingest_publication_route.py",
-  "mcp/tests/test_knowledge_label_operations.py",
   "mcp/tests/test_knowledge_leaf_read.py",
-  "mcp/tests/test_knowledge_merge_generations_and_envelope.py",
-  "mcp/tests/test_knowledge_merge_right_side_writes.py",
   "mcp/tests/test_knowledge_paging.py",
-  "mcp/tests/test_knowledge_portable_boundaries.py",
-  "mcp/tests/test_knowledge_portable_roundtrip.py",
-  "mcp/tests/test_knowledge_projection_vault_safety.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_reader.py",
   "mcp/tests/test_knowledge_reader_tree_coverage.py",
-  "mcp/tests/test_knowledge_registered_scope.py",
-  "mcp/tests/test_knowledge_relation_rules.py",
   "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_requirement_reference_contract.py",
-  "mcp/tests/test_knowledge_requirement_revisions.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
   "mcp/tests/test_knowledge_review_comparison_generation.py",
@@ -1257,13 +1122,10 @@ consumers = [
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_route_chain.py",
-  "mcp/tests/test_knowledge_routes.py",
-  "mcp/tests/test_knowledge_schema_generations.py",
-  "mcp/tests/test_knowledge_snapshot_publication.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
-  "mcp/tests/test_knowledge_views_and_projection.py",
+  "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_knowledge_worklist.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
@@ -1283,6 +1145,10 @@ consumers = [
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_lifecycle_turn_truth_doctrine.py",
   "mcp/tests/test_master_net_generation.py",
+  "mcp/tests/test_master_retirement.py",
+  "mcp/tests/test_master_retirement_readiness.py",
+  "mcp/tests/test_master_retirement_refusals.py",
+  "mcp/tests/test_master_retirement_state_machine.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
@@ -1300,12 +1166,6 @@ consumers = [
   "mcp/tests/test_memory_quality_is_independent_of_the_closeout_plane.py",
   "mcp/tests/test_memory_quality_runs.py",
   "mcp/tests/test_memory_scope_task_derivation.py",
-  "mcp/tests/test_migration_census.py",
-  "mcp/tests/test_master_retirement.py",
-  "mcp/tests/test_master_retirement_readiness.py",
-  "mcp/tests/test_master_retirement_refusals.py",
-  "mcp/tests/test_master_retirement_state_machine.py",
-  "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
   "mcp/tests/test_next_step_address_binding.py",
@@ -1364,6 +1224,7 @@ consumers = [
   "mcp/tests/test_read_anchor_memo.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_reconsideration_route_trigger.py",
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
@@ -1379,6 +1240,9 @@ consumers = [
   "mcp/tests/test_review_assessments.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_change_kinds.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_comparison_reclamation_real.py",
+  "mcp/tests/test_review_detection_models.py",
   "mcp/tests/test_review_external_git_movement_read.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
@@ -1388,14 +1252,15 @@ consumers = [
   "mcp/tests/test_review_git_trees.py",
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_read_latency.py",
-  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_review_route_refusals.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_state.py",
   "mcp/tests/test_review_subject_catalogue.py",
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_sync_rebinding.py",
-  "mcp/tests/test_review_unchanged_knowledge.py",
   "mcp/tests/test_review_unexplained_lane.py",
+  "mcp/tests/test_review_verification_observation_model.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_role_capsule_admission.py",
@@ -1409,6 +1274,7 @@ consumers = [
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_series_finalize_rules.py",
+  "mcp/tests/test_series_refusal_texts.py",
   "mcp/tests/test_serving.py",
   "mcp/tests/test_serving_files.py",
   "mcp/tests/test_serving_notifier_handoff.py",
@@ -1466,16 +1332,18 @@ consumers = [
   "mcp/tests/test_terminal_observer_health.py",
   "mcp/tests/test_terminal_paste.py",
   "mcp/tests/test_terminal_preview_expectation.py",
+  "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_tool_response_budgets.py",
   "mcp/tests/test_tool_response_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_unexplained_change_disposition.py",
+  "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_wire_contract.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
-  "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
   "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_workflow_chain_guidance.py",
@@ -1488,6 +1356,7 @@ consumers = [
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
 
 [[artifact]]
@@ -1521,6 +1390,7 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -1554,6 +1424,7 @@ consumers = [
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
@@ -1568,31 +1439,15 @@ owner = "knowledge-generation-cases"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "one knowledge database per observed generation, created through that generation's own recorded DDL and recorded PRAGMA user_version and then opened through the production open path, plus the ordinary creation path named for the generation it creates"
+source_version_or_generator = "the one declared schema's name and version, read from the production declaration, and the pair a dataset file declares"
 introduced_by = "260915-KS-L10"
 lifetime = "permanent"
-permanence_rationale = "Each registered generation makes the created store that newest generation, so a case that must observe an earlier generation's fact cannot use the ordinary creation path and every such case needs the same thing -- a genuine dataset of that generation rather than a downgraded newer file -- and a per-module copy would let the modules disagree about what a version-1 or version-2 dataset is while all of them assert that the earlier generation keeps its own identity."
+permanence_rationale = "A read context must state the schema the dataset file declares; the cases that build one read the name here instead of spelling it, so a deliberate change of the declared schema moves one place and a per-module literal cannot silently become another schema's name."
 replacement_contract = "contract:knowledge-generation-cases"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_knowledge_candidate_workspace.py",
-  "mcp/tests/test_knowledge_citation_boundaries.py",
-  "mcp/tests/test_knowledge_crossing.py",
-  "mcp/tests/test_knowledge_effect_claims.py",
-  "mcp/tests/test_knowledge_family_composition.py",
-  "mcp/tests/test_knowledge_family_composition_boundaries.py",
-  "mcp/tests/test_knowledge_guarded_merge.py",
-  "mcp/tests/test_knowledge_merge_generations_and_envelope.py",
-  "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
-  "mcp/tests/test_knowledge_requirement_reference_contract.py",
-  "mcp/tests/test_knowledge_requirement_revisions.py",
-  "mcp/tests/test_knowledge_schema_generations.py",
-  "mcp/tests/test_knowledge_store.py",
-  "mcp/tests/test_knowledge_validator_routes.py",
-  "mcp/tests/test_sync_parked_candidate.py",
-  "mcp/tests/test_worktree_sync.py",
 ]
 
 [[artifact]]
@@ -1613,6 +1468,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
@@ -1673,6 +1529,8 @@ consumers = [
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
+  "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
 
 [[artifact]]
@@ -1690,38 +1548,8 @@ permanence_rationale = "Every fixture built outside the public operation would p
 replacement_contract = "contract:knowledge-identity-branching-fixture"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_knowledge_citation_bindings.py",
-  "mcp/tests/test_knowledge_citation_boundaries.py",
-  "mcp/tests/test_knowledge_family_revision.py",
-  "mcp/tests/test_knowledge_graph_reads.py",
-  "mcp/tests/test_knowledge_label_operations.py",
-  "mcp/tests/test_knowledge_portable_boundaries.py",
-  "mcp/tests/test_knowledge_portable_roundtrip.py",
-  "mcp/tests/test_knowledge_relation_rules.py",
-  "mcp/tests/test_knowledge_requirement_reference_contract.py",
-  "mcp/tests/test_knowledge_requirement_revisions.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_store.py",
-]
-
-[[artifact]]
-path = "mcp/tests/knowledge_graph_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "knowledge-graph-case-support"
-category = "unit-regression"
-fidelity = "in-process"
-cadence = "affected"
-source_version_or_generator = "the seeded request builders plus the raw family-revision and family-predecessor writes the graph cases need"
-introduced_by = "260915-KS-L2"
-lifetime = "permanent"
-permanence_rationale = "Three focused graph modules build the same requests and need the same two probes; a per-module copy would let one module's fixture drift from the others, and the raw write is the only way to construct the cyclic state the lineage rule is exercised against."
-replacement_contract = "contract:knowledge-graph-case-support"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_knowledge_family_revision.py",
-  "mcp/tests/test_knowledge_graph_reads.py",
-  "mcp/tests/test_knowledge_relation_rules.py",
 ]
 
 [[artifact]]
@@ -1739,6 +1567,7 @@ permanence_rationale = "The index parity cases compare the same authored dataset
 replacement_contract = "node:mcp/tests/test_knowledge_index.py::test_a_working_tree_and_its_git_tree_index_to_the_same_key_and_answers"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
@@ -1746,10 +1575,145 @@ consumers = [
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_candidate_capture.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_row_codec_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_row_codec_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the row encoders of the retired canonical writers, moved text-identical from memory/knowledge/records.py"
+introduced_by = "260928-MIK-L26"
+lifetime = "permanent"
+permanence_rationale = "Production decodes index rows and never encodes one; the fixture row writer and the comparison fixtures encode typed columns, authorship and claim digests with these functions."
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_copy_cleanup.py",
+  "mcp/tests/test_knowledge_diff_attribution.py",
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_reuse.py",
+  "mcp/tests/test_knowledge_index_surfaces.py",
+  "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_read_scope.py",
+  "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_review_attributed_source_content.py",
+  "mcp/tests/test_knowledge_review_attribution_precedence.py",
+  "mcp/tests/test_knowledge_review_one_sided_statements.py",
+  "mcp/tests/test_knowledge_review_relationship_line.py",
+  "mcp/tests/test_knowledge_review_relationship_movement.py",
+  "mcp/tests/test_knowledge_review_relationship_reach.py",
+  "mcp/tests/test_knowledge_review_resolution_and_route.py",
+  "mcp/tests/test_knowledge_review_revision_selection.py",
+  "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_revision_seals.py",
+  "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_knowledge_store.py",
+  "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_family_context.py",
+  "mcp/tests/test_review_family_context_population.py",
+  "mcp/tests/test_review_family_member_sources.py",
+  "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
+  "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_candidate_capture.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_rows_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_rows_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "raw row inserts into the schema production declares (the schema of a memory tree's derived index), with each revision's seal computed by the production digest function the readers verify"
+introduced_by = "260928-MIK-L26"
+lifetime = "permanent"
+permanence_rationale = "The canonical database's writers are retired (MIK-R26), and the read code that remains runs over index-shaped rows a text tree cannot always express (several revisions of one invariant, a membership present in one dataset and absent in the next). The fixtures of the read, comparison and review cases insert those rows through this one builder, so no production writer survives for the tests' sake and no two fixtures disagree about what a row is."
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_copy_cleanup.py",
+  "mcp/tests/test_knowledge_diff_attribution.py",
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_reuse.py",
+  "mcp/tests/test_knowledge_index_surfaces.py",
+  "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_read_scope.py",
+  "mcp/tests/test_knowledge_reopen.py",
+  "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_review_attributed_source_content.py",
+  "mcp/tests/test_knowledge_review_attribution_precedence.py",
+  "mcp/tests/test_knowledge_review_one_sided_statements.py",
+  "mcp/tests/test_knowledge_review_relationship_line.py",
+  "mcp/tests/test_knowledge_review_relationship_movement.py",
+  "mcp/tests/test_knowledge_review_relationship_reach.py",
+  "mcp/tests/test_knowledge_review_resolution_and_route.py",
+  "mcp/tests/test_knowledge_review_revision_selection.py",
+  "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_revision_seals.py",
+  "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_knowledge_store.py",
+  "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_family_context.py",
+  "mcp/tests/test_review_family_context_population.py",
+  "mcp/tests/test_review_family_member_sources.py",
+  "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
+  "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
 
@@ -1790,8 +1754,12 @@ permanence_rationale = "The writer cases need one real enclosure shape rather th
 replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision_a_realization_and_a_tested_evidence_produce_validated_files"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_database_retired.py",
   "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_read_ar_files.py",
 ]
 
 [[artifact]]
@@ -1850,53 +1818,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_eve_adapter.py",
   "mcp/tests/test_eve_product_integration.py",
-]
-
-[[artifact]]
-path = "mcp/tests/merge_case_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "common-base-merge-cases"
-category = "unit-regression"
-fidelity = "in-process"
-cadence = "affected"
-source_version_or_generator = "one repository namespace authored through the real store operations, two sides derived from one base state, and a temporary Git repository whose base commit and two child commits hold those datasets"
-introduced_by = "260915-KS-L5"
-lifetime = "permanent"
-permanence_rationale = "Every merge case needs the same four things -- an authored dataset, a real three-commit branching scenario with its ancestry evidence, the measurements a refusal is judged by, and one explicit way to shape an unusual side state before the commits are built -- and a per-module copy would let the four modules disagree about what a base, a side or an input-preservation check is measured against, which is exactly what the requirement asks to be shown."
-replacement_contract = "contract:common-base-merge-cases"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_knowledge_crossing.py",
-  "mcp/tests/test_knowledge_guarded_merge.py",
-  "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
-  "mcp/tests/test_knowledge_merge_right_side_writes.py",
-  "mcp/tests/test_knowledge_portable_boundaries.py",
-  "mcp/tests/test_knowledge_portable_roundtrip.py",
-  "mcp/tests/test_knowledge_validator_routes.py",
-  "mcp/tests/test_review_external_git_movement_read.py",
-  "mcp/tests/test_review_sync_movement_read.py",
-  "mcp/tests/test_review_sync_rebinding.py",
-  "mcp/tests/test_sync_parked_candidate.py",
-  "mcp/tests/test_worktree_sync.py",
-]
-
-[[artifact]]
-path = "mcp/tests/migration_census_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "migration-census-cases"
-category = "unit-regression"
-fidelity = "local-composition"
-cadence = "affected"
-source_version_or_generator = "the shipped candidate batch operation over one initialized candidate dataset: the route writer for the fixture's recorded scope, and census inventory-row, claim and disposition commands written through change_knowledge_candidate so every identity is one the real write path produced"
-introduced_by = "260915-KS-L21"
-lifetime = "permanent"
-permanence_rationale = "The census is a read over records the one candidate write path produced, and the states its accounting has to separate -- a claim with no assessment, a curator's recorded verdict, a piece outside the cohort, one claim text recorded twice, an artifact that did not parse and a card whose declared source is absent -- cannot be produced by inserting rows: a fixture that did would test arithmetic against a state the real write path refuses. It is shared rather than local because the census record kinds, their relations and the cutover artifacts are asserted from more than one module."
-replacement_contract = "contract:migration-census-cases"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_migration_census.py",
 ]
 
 [[artifact]]
@@ -1998,25 +1919,16 @@ permanence_rationale = "The selective read is decided by one exact topology -- I
 replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_curator_candidate_progression.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
-  "mcp/tests/test_knowledge_curator_ingest.py",
-  "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
-  "mcp/tests/test_knowledge_family_composition_boundaries.py",
-  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
-  "mcp/tests/test_knowledge_projection_vault_safety.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
-  "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
-  "mcp/tests/test_knowledge_review_comparison_generation.py",
-  "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
@@ -2024,23 +1936,15 @@ consumers = [
   "mcp/tests/test_knowledge_review_resolution_and_route.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
-  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_review_assessment_history.py",
-  "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_bounded_pagination.py",
-  "mcp/tests/test_review_external_git_movement_read.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
-  "mcp/tests/test_review_final_output_receipt.py",
-  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
-  "mcp/tests/test_review_sync_movement_read.py",
-  "mcp/tests/test_review_sync_rebinding.py",
-  "mcp/tests/test_review_unchanged_knowledge.py",
 ]
 
 [[artifact]]
@@ -2074,6 +1978,7 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -2119,39 +2024,10 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
-]
-
-[[artifact]]
-path = "mcp/tests/snapshot_lifecycle_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "knowledge-snapshot-lifecycle-cases"
-category = "unit-regression"
-fidelity = "in-process"
-cadence = "affected"
-source_version_or_generator = "one admitted candidate created through the lifecycle operation, records authored through the candidate-change batch, closed snapshots published through the publication operation, and one real crash child interpreter"
-introduced_by = "260915-KS-L4"
-lifetime = "permanent"
-permanence_rationale = "Both snapshot modules measure the same four things -- one admitted candidate, the write boundary it publishes, the file-level durability facts, and one real process crash -- and a per-module copy would let the two disagree about how isolation, closure or recovery is measured, which is exactly what the requirement asks to be shown."
-replacement_contract = "contract:knowledge-snapshot-lifecycle-cases"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_curator_candidate_progression.py",
-  "mcp/tests/test_curator_family_authoring.py",
-  "mcp/tests/test_curator_family_retention.py",
-  "mcp/tests/test_curator_ingest_write_and_retention.py",
-  "mcp/tests/test_curator_realization_authoring.py",
-  "mcp/tests/test_curator_scope.py",
-  "mcp/tests/test_knowledge_candidate_workspace.py",
-  "mcp/tests/test_knowledge_curator_ingest_list.py",
-  "mcp/tests/test_knowledge_ingest_comparison_generation.py",
-  "mcp/tests/test_knowledge_ingest_failure_windows.py",
-  "mcp/tests/test_knowledge_ingest_publication_route.py",
-  "mcp/tests/test_knowledge_portable_boundaries.py",
-  "mcp/tests/test_knowledge_snapshot_publication.py",
 ]
 
 [[artifact]]
@@ -2186,6 +2062,7 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -2245,6 +2122,28 @@ lifetime = "permanent"
 permanence_rationale = "The manifest removes the unmarked-unit fallback and binds selection, cadence, retry, and reporting to one explicit population."
 replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegistryTests::test_incomplete_or_ambiguous_registry_is_refused"
 consumer_scope = "all-tests"
+
+[[artifact]]
+path = "mcp/tests/tool_entry_point_world.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/tool_entry_point_world.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the hermetic repository pair, coordination root and server the tool entry-point sweep runs in, moved text-identical out of test_tool_entry_point_sweep.py"
+introduced_by = "260928-MIK-L26"
+lifetime = "permanent"
+permanence_rationale = "The sweep, its controls and the refusal census all drive the same world; keeping it in one module keeps the sweep module under the file-size limit."
+replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPointProbeTests::test_every_public_tool_answers_in_the_products_own_vocabulary"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_entry_point_controls.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
 
 [[artifact]]
 path = "mcp/tests/tool_refusal_census_support.py"
@@ -2457,8 +2356,6 @@ consumers = [
   "mcp/tests/repository_profile_test_support.py",
   "mcp/tests/source_selection_test_support.py",
   "mcp/tests/test_agents_remember_quality.py",
-  "mcp/tests/test_knowledge_citation_bindings.py",
-  "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
 
 [[artifact]]
@@ -2576,3 +2473,63 @@ consumers = [
   "mcp/tests/test_agents_remember_quality.py",
   "scripts/e2e_harness/run.py",
 ]
+
+[[contract]]
+id = "ar-durable-store/1.0-process-race-evidence"
+owner = "mcp/src/agents_remember/controlplane/durable_store.py"
+evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "conversation-control-public-route-contract"
+owner = "mcp/src/agents_remember/serving/conversation/control/api.py"
+evidence_node = "mcp/tests/test_conversation_control_api.py::ControlApiTests::test_interrupt_ack_settle_replay_and_single_write"
+
+[[contract]]
+id = "knowledge-diff-cases"
+owner = "mcp/tests/diff_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
+
+[[contract]]
+id = "knowledge-generation-cases"
+owner = "mcp/tests/generation_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_boundaries.py::test_a_context_declaring_another_schema_generation_is_refused_before_a_page_is_built"
+
+[[contract]]
+id = "knowledge-identity-branching-fixture"
+owner = "mcp/tests/knowledge_fixture_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+
+[[contract]]
+id = "knowledge-read-scope-cases"
+owner = "mcp/tests/read_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[contract]]
+id = "next-supported-pi-rpc-activity-recording"
+owner = "mcp/src/agents_remember/serving/pi_rpc_events.py"
+evidence_node = "mcp/tests/test_pi_rpc_adapter_ops_2.py::PiRpcAdapterTests2::test_get_state_drives_stream_compaction_and_pending_activity"
+
+[[contract]]
+id = "paseo-launch-given-to-agent-cases"
+owner = "mcp/tests/paseo_launch_test_support.py"
+evidence_node = "mcp/tests/test_paseo_launch.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+
+[[contract]]
+id = "paseo-runtime-command-cases"
+owner = "mcp/tests/paseo_runtime_test_support.py"
+evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
+
+[[contract]]
+id = "pnt-sandbox-process-cases"
+owner = "mcp/tests/pnt_sandbox_test_support.py"
+evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
+
+[[contract]]
+id = "synthetic-test-evidence-candidate"
+owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
+evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
+
+[[contract]]
+id = "tool-refusal-census-cases"
+owner = "mcp/tests/tool_refusal_census_support.py"
+evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"

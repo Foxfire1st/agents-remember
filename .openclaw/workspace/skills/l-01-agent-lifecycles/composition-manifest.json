@@ -407,10 +407,8 @@
       "tools": [
         "context_packet",
         "curator_coherence",
-        "knowledge_change",
         "knowledge_diff",
         "knowledge_integrity_check",
-        "knowledge_project",
         "knowledge_read",
         "memory_quality_check",
         "read_ar_files",

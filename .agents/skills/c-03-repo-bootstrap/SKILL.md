@@ -1100,8 +1100,8 @@ baseline, not a later one. Whether it is removed before adoption is the develope
 and adoption excludes it either way.
 
 **Onboarding is not the repository's knowledge foundation, and this skill produces no knowledge
-records.** The foundation - the authored invariants, families, source realizations and external
-sources in the knowledge database - is a separate step owned by `c-14-knowledge-bootstrap` and carried
+records.** The foundation - the authored invariants, families and source realizations, stored as
+text files in the memory repository - is a separate step owned by `c-14-knowledge-bootstrap` and carried
 by the curator. Onboarding is **one optional input** to it: the foundation needs no onboarding file to
 start, and this skill neither requires the foundation to exist first nor claims it as its own output.
 Name it in the handoff, with the state of the repository's knowledge location where that state is
@@ -1260,7 +1260,7 @@ The orchestrator remains thin throughout.
 | `c-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to the `c-03-repo-bootstrap` skill. The `c-03-repo-bootstrap` skill creates cards/waves and delegates file output rules to the `c-05-create-or-update-onboarding-files` skill. |
 | `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
 | `c-10-adopt-memory-baseline`                      | The next step on a newly scaffolded memory repo: commits this skill's output as the first attributed memory baseline and computes the ledger cache. It owns the drift check and the adoption procedure. |
-| `c-14-knowledge-bootstrap`                        | Owns the repository's **knowledge foundation** - the authored records in the knowledge database - as a step separate from onboarding. This skill's handoff names it; onboarding is optional input to it, and this skill neither produces it nor substitutes for it. |
+| `c-14-knowledge-bootstrap`                        | Owns the repository's **knowledge foundation** - the authored records under `knowledge/` in the memory repository - as a step separate from onboarding. This skill's handoff names it; onboarding is optional input to it, and this skill neither produces it nor substitutes for it. |
 | `c-02-memory-quality-control`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |

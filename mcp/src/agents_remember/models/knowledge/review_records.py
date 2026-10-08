@@ -13,6 +13,7 @@ there is no state in this vocabulary that could be read as a favourable default.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -24,9 +25,11 @@ from agents_remember.models.knowledge.base import (
 )
 
 __all__ = [
+    "EVIDENCE_RECORD_CLASSES",
     "ReviewRecordChannel",
     "ReviewRecordChannelState",
     "ReviewRecordClassName",
+    "evidence_classes_unread",
 ]
 
 ReviewRecordClassName = Literal[
@@ -63,6 +66,15 @@ them.
 """
 
 _COUNTED_CHANNEL_STATES: frozenset[str] = frozenset({"recorded", "none_recorded"})
+
+EVIDENCE_RECORD_CLASSES: frozenset[ReviewRecordClassName] = frozenset(
+    {"verification_observations", "evidence_claims"}
+)
+"""The two record classes the evidence pane's summary state counts.
+
+The pane's ``evidence_state`` is a roll-up of these classes and of nothing else: assessments have
+their own summary, and detection signals are displayed in the knowledge pane.
+"""
 
 
 class ReviewRecordChannel(KnowledgeModel):
@@ -121,3 +133,17 @@ class ReviewRecordChannel(KnowledgeModel):
                 "what would produce one; a state a reader cannot act on is a silent gap"
             )
         return self
+
+
+def evidence_classes_unread(channels: Iterable[ReviewRecordChannel]) -> bool:
+    """Whether a class the evidence summary counts could not be read.
+
+    A summary of no evidence is a measured zero only when every class it counts answered; one
+    ``unavailable`` class makes the summary ``unavailable`` too, so the roll-up never says less than
+    the channels beside it.
+    """
+
+    return any(
+        channel.records in EVIDENCE_RECORD_CLASSES and channel.state == "unavailable"
+        for channel in channels
+    )

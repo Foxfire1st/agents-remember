@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents_remember.models.knowledge.merge import AuthoredReconciliation
-from agents_remember.models.worktree import SyncKnowledgeConflict, SyncSide
+from agents_remember.models.worktree import SyncSide
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, cutover_lock_refusal
-from agents_remember.worktrees.knowledge_conflict import RefusedKnowledgeStage
 from agents_remember.worktrees.knowledge_crossing import CrossingSyncError, merge_base
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
@@ -40,7 +38,6 @@ from agents_remember.worktrees.sync_transaction_git import (
     ensure_temporary_worktree,
     merge_head,
     park_worktree_wip,
-    reconcile_side_merge,
     require_side_checkout,
     side_branch_head,
     side_merge_completed,
@@ -61,7 +58,6 @@ from agents_remember.worktrees.sync_transaction_results import (
     memory_choice_required,
     parked_wip_validation_preview,
     quarantine_replay,
-    reconcile_preview,
     resolution_required,
     resolution_validation_preview,
     sync_preview,
@@ -200,30 +196,14 @@ def sync_input_refusal(
             fetch,
             invalidField="memory_sync_choice",
         )
-    if args.resolution_action not in {None, "continue", "cancel", "reconcile"}:
+    if args.resolution_action not in {None, "continue", "cancel"}:
         return command_result(
             2,
             "sync-input-invalid",
-            "resolution_action must be exactly 'continue', 'cancel' or 'reconcile'.",
+            "resolution_action must be exactly 'continue' or 'cancel'. Knowledge is text: a "
+            "conflicted knowledge file is resolved in the worktree and staged, then continued.",
             fetch,
             invalidField="resolution_action",
-        )
-    if args.resolution_action == "reconcile" and args.knowledge_resolution is None:
-        return command_result(
-            2,
-            "sync-input-invalid",
-            "resolution_action='reconcile' authors one decision, so knowledge_resolution is "
-            "required. The conflict's own diagnosis names the record and the decisions it admits.",
-            fetch,
-            invalidField="knowledge_resolution",
-        )
-    if args.resolution_action != "reconcile" and args.knowledge_resolution is not None:
-        return command_result(
-            2,
-            "sync-input-invalid",
-            "knowledge_resolution is read only with resolution_action='reconcile'.",
-            fetch,
-            invalidField="knowledge_resolution",
         )
     return None
 
@@ -518,8 +498,6 @@ def _active_preview(
 ) -> WorktreeCommandResult:
     if args.resolution_action == "cancel":
         return cancel_preview(record, fetch)
-    if args.resolution_action == "reconcile":
-        return _reconcile_preview(record, fetch)
     if args.resolution_action != "continue":
         return active_preview(record, fetch)
     if record.phase in {"code-resolution-required", "memory-resolution-required"}:
@@ -535,22 +513,6 @@ def _active_preview(
     )
 
 
-def _reconcile_preview(
-    record: SyncOperationRecord, fetch: dict[str, object]
-) -> WorktreeCommandResult:
-    """Preview the authored decision against the conflict the journal actually holds."""
-
-    side = _retained_side(record)
-    if side.knowledgeConflict is None:
-        return manual_repair_result(
-            "sync-resolution-not-active",
-            "The active transaction retains no knowledge conflict to reconcile.",
-            record,
-            fetch,
-        )
-    return reconcile_preview(side, fetch)
-
-
 def _resume_live(
     contract: WorktreeContract,
     args: WorktreeArgs,
@@ -560,8 +522,8 @@ def _resume_live(
 ) -> WorktreeCommandResult:
     if args.resolution_action == "cancel" or record.phase == "cancelling":
         return cancel_sync(contract, store, record, fetch)
-    if args.resolution_action in {"continue", "reconcile"}:
-        return _continue_resolution(contract, args, store, record, fetch)
+    if args.resolution_action == "continue":
+        return _continue_resolution(contract, store, record, fetch)
     if record.phase in {"code-resolution-required", "memory-resolution-required"}:
         return resolution_required(record, fetch)
     return _run_automatic(contract, store, record, fetch)
@@ -623,7 +585,6 @@ def _run_side(
             update={
                 "state": "resolution-required",
                 "conflictFiles": outcome.conflicts,
-                "knowledgeConflict": _knowledge_conflict(outcome.refused),
                 "crossingReport": outcome.crossing_report,
             }
         )
@@ -671,7 +632,6 @@ def _paired_code(record: SyncOperationRecord) -> PairedCode | None:
 
 def _continue_resolution(
     contract: WorktreeContract,
-    args: WorktreeArgs,
     store: SyncOperationStore,
     record: SyncOperationRecord,
     fetch: dict[str, object],
@@ -683,8 +643,6 @@ def _continue_resolution(
             record,
             fetch,
         )
-    if args.resolution_action == "reconcile":
-        return _reconcile_knowledge_resolution(contract, args, store, record, fetch)
     side = _retained_side(record)
     if side.wipState == "restore-conflict":
         return _continue_parked_wip_restore(contract, store, record, fetch)
@@ -705,13 +663,7 @@ def _finish_retained_merge(
     record: SyncOperationRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    """Validate and commit a retained merge whose conflicts are all settled.
-
-    This is the one continuation both a hand-staged resolution and an authored reconciliation end
-    in, so a reconciled sync is a normal sync with one authored input rather than a second route
-    through the transaction. The journaled diagnosis is cleared with the conflict: the agent was
-    told what to reconcile, and the state that carried it is gone.
-    """
+    """Validate and commit a retained merge whose conflicts are all resolved and staged."""
 
     side_name: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
     side = _retained_side(record)
@@ -729,8 +681,6 @@ def _finish_retained_merge(
             "state": "completed",
             "resultHead": result_head,
             "conflictFiles": (),
-            "knowledgeConflict": None,
-            "knowledgeReconciliations": (),
         }
     )
     record, completed, conflicted = restore_parked_wip(store, record, side_name, completed)
@@ -738,201 +688,6 @@ def _finish_retained_merge(
         return resolution_required(record, fetch)
     record = _advance_after_side(store, record, side_name, completed)
     return _run_automatic(contract, store, record, fetch)
-
-
-def _reconcile_knowledge_resolution(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    store: SyncOperationStore,
-    record: SyncOperationRecord,
-    fetch: dict[str, object],
-) -> WorktreeCommandResult:
-    """Author the caller's decision for the exact conflict the engine reported, then continue.
-
-    The decision is checked against the journaled diagnosis *before* the merge is entered: the record
-    it names must be the record the engine refused, and the decision must be one that conflict
-    admits. A decision naming another row, or an overwrite on a conflict with no row, is refused
-    here with the reason instead of being carried into a merge that would ignore it and hand back the
-    same conflict.
-
-    **Accepted decisions persist.** A decision that settles this conflict may reveal the next one, and
-    the attempt that answers the next one carries every decision this side has already accepted --
-    the journaled ones plus the one just authored. Each attempt therefore starts from the conflict
-    the previous attempt actually reached rather than from the first one again. Without that, a merge
-    with two conflicts alternated between the same two rows forever: the attempt answering the second
-    re-refused the first, and the caller was offered a decision it had already made and that had
-    already had its effect.
-
-    **Progress or an actionable refusal.** A conflict that survives the attempt is compared against
-    the decisions already accepted for it. A row a decision has already answered and that comes back
-    anyway means the retraction could not hold this conflict, so the operation stops with the reason
-    and the exact row instead of journaling the same decision a second time -- see
-    :func:`_reconcile_progress_refusal`.
-    """
-
-    side = _retained_side(record)
-    served: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
-    refused = side.knowledgeConflict
-    invalid = _reconcile_refusal(served, refused, args.knowledge_resolution, fetch)
-    if invalid is not None:
-        return invalid
-    assert refused is not None and args.knowledge_resolution is not None
-    accepted = (*side.knowledgeReconciliations, args.knowledge_resolution)
-    try:
-        remaining = reconcile_side_merge(side, refused.path, accepted)
-    except SyncGitProofError as error:
-        return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
-    if remaining is not None:
-        cycling = _reconcile_progress_refusal(remaining, side.knowledgeReconciliations)
-        if cycling is not None:
-            refreshed = side.model_copy(
-                update={"knowledgeConflict": _knowledge_conflict(remaining)}
-            )
-            record = update_record(store, record, phase=record.phase, side=refreshed)
-            return manual_repair_result("sync-resolution-cycling", cycling, record, fetch)
-        refreshed = side.model_copy(
-            update={
-                "conflictFiles": content_conflicts(side),
-                "knowledgeConflict": _knowledge_conflict(remaining),
-                "knowledgeReconciliations": accepted,
-            }
-        )
-        record = update_record(store, record, phase=record.phase, side=refreshed)
-        return resolution_required(record, fetch)
-    return _finish_retained_merge(contract, store, record, fetch)
-
-
-def _reconcile_progress_refusal(
-    remaining: RefusedKnowledgeStage, accepted: tuple[AuthoredReconciliation, ...]
-) -> str | None:
-    """The refusal for a conflict an already-accepted decision answered and that came back anyway.
-
-    ``accepted`` is what this side held **before** the attempt, so a row in it is a row a decision has
-    already been applied to. Finding it here means the retraction did not hold -- the arriving change
-    it retracted is required by another arriving change, so removing one re-exposes the other -- and
-    the honest answer is to say that rather than to offer the same decision again. A row no accepted
-    decision named is ordinary progress: the merge moved on to a conflict nobody has answered yet.
-    """
-
-    conflict = remaining.conflict
-    if conflict is None or conflict.table is None or conflict.record_id is None:
-        return None
-    answered = {
-        (one.table, one.record_id)
-        for one in accepted
-        if one.table is not None and one.record_id is not None
-    }
-    if (conflict.table, conflict.record_id) not in answered:
-        return None
-    return (
-        f"The decision this merge already accepted for {conflict.table} {conflict.record_id} does "
-        f"not settle it: the engine reports {conflict.code} on that row again after the authored "
-        "decision was applied and retracted the arriving change, so retracting it re-exposes another "
-        "arriving change that needs the same row. No further authored decision will make this merge "
-        "converge; resolve the row in the worktree, stage it, then continue, or cancel the sync. The "
-        "retained dataset is unchanged."
-    )
-
-
-def _reconcile_refusal(
-    side_name: SyncSide,
-    refused: SyncKnowledgeConflict | None,
-    decision: AuthoredReconciliation | None,
-    fetch: dict[str, object],
-) -> WorktreeCommandResult | None:
-    """Refuse an authored decision that does not answer the conflict this side retained."""
-
-    problem = _reconcile_problem(side_name, refused, decision)
-    if problem is None:
-        return None
-    state, detail = problem
-    return command_result(2, state, detail, fetch, invalidField="knowledge_resolution")
-
-
-def _reconcile_problem(
-    side_name: SyncSide,
-    refused: SyncKnowledgeConflict | None,
-    decision: AuthoredReconciliation | None,
-) -> tuple[str, str] | None:
-    """Why this authored decision does not answer the retained conflict, or ``None``.
-
-    Both facts the caller could get wrong are named in the answer: which record the engine actually
-    refused -- carried in the journal, never re-derived from the databases -- and which decisions
-    that conflict admits.
-    """
-
-    if side_name != "memory":
-        return (
-            "sync-input-invalid",
-            "resolution_action='reconcile' settles a retained memory knowledge conflict; the code "
-            "side merges text and carries no knowledge dataset.",
-        )
-    if refused is None or decision is None:
-        return (
-            "sync-resolution-not-active",
-            "No retained knowledge conflict with a journaled diagnosis exists for this contract, so "
-            "there is nothing to reconcile.",
-        )
-    if decision.decision not in refused.decisions:
-        admitted = ", ".join(refused.decisions) if refused.decisions else "no authored decision"
-        return (
-            "sync-input-invalid",
-            f"The conflict {refused.path} reports {_conflict_code(refused)} and admits {admitted}.",
-        )
-    if not _decision_matches(refused, decision):
-        return (
-            "sync-input-invalid",
-            f"The decision must name the record the engine refused: {_refused_record(refused)}.",
-        )
-    return None
-
-
-def _conflict_code(refused: SyncKnowledgeConflict) -> str:
-    """The engine's own name for the conflict, or the seam's detail when there is no conflict."""
-
-    if refused.conflict is not None:
-        return refused.conflict.code
-    return refused.refusal.code if refused.refusal is not None else "no attributed conflict"
-
-
-def _refused_record(refused: SyncKnowledgeConflict) -> str:
-    """Render the record the engine refused, as the diagnosis rendered it."""
-
-    conflict = refused.conflict
-    if conflict is None or conflict.table is None:
-        return "the engine reported this conflict without a row, so it is decided with an empty row"
-    return f"table {conflict.table}, record {conflict.record_id}"
-
-
-def _decision_matches(refused: SyncKnowledgeConflict, decision: AuthoredReconciliation) -> bool:
-    """Whether the decision answers exactly the conflict the engine reported for this side."""
-
-    conflict = refused.conflict
-    if conflict is None:
-        return False
-    if decision.record_id is None:
-        return conflict.record_id is None and conflict.table is None
-    return decision.table == conflict.table and decision.record_id == conflict.record_id
-
-
-def _knowledge_conflict(refused: RefusedKnowledgeStage | None) -> SyncKnowledgeConflict | None:
-    """Project the adapter's explanation into the journal and the public response.
-
-    Every field is copied from the engine's own values; the decisions are read from the conflict the
-    engine attributed, so the response offers exactly what that conflict admits. A path that never
-    reached the adapter still carries this layer's reason, because "nothing settled" is not
-    something an agent can act on.
-    """
-
-    if refused is None:
-        return None
-    return SyncKnowledgeConflict(
-        path=refused.path,
-        conflict=refused.conflict,
-        refusal=refused.refusal,
-        detail=refused.detail,
-        decisions=list(refused.decisions),
-    )
 
 
 def _continue_parked_wip_restore(

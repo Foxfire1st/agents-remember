@@ -14,8 +14,7 @@ Why five tables and not two:
 * ``evidence_claim`` and ``verification_observation`` are **typed records**, and ``KS-R10@v1``
   already built the envelope they live in: ``knowledge_record`` carries the kind, the authority home,
   the lifecycle and the governing route, and ``record_revision`` carries the frozen payload and its
-  content digest. Their payload shapes are registered in
-  :data:`agents_remember.memory.knowledge.record_envelope.PAYLOAD_MODELS` under
+  content digest. Their canonical payload shapes used the retired envelope registry under
   ``(evidence_claim, evidence-claim/v1)`` and
   ``(verification_observation, verification-observation/v1)``, so each record's own fields are
   declared once, in the envelope, rather than restated as columns.

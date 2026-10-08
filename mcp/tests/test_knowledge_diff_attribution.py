@@ -22,7 +22,6 @@ from uuid import uuid4
 
 import pytest
 from agents_remember.application.review_source_inventory import review_inventory, source_tree_side
-from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.diff_display import (
     MappingFact,
     SideInspection,
@@ -33,18 +32,17 @@ from agents_remember.memory.knowledge.diff_display import (
 )
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
 from agents_remember.memory.knowledge.read_queries import fetch_realizations_at_path
-from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.diff import SourceAttribution
-from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import FamilyIdentitySeed
-from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
-from agents_remember.models.knowledge.source import (
-    FileLocator,
-    GitBlobIdentity,
-    SourceAnchorDraft,
-    SymbolLocator,
-)
+from agents_remember.models.knowledge.source import FileLocator, SymbolLocator
+from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from diff_scope_test_support import DiffFixture, build_diff_fixture
+from knowledge_rows_test_support import (
+    NewAnchor,
+    RealizationClaimRequest,
+    open_knowledge_store,
+    realizations,
+)
 from pydantic import ValidationError
 from test_knowledge_diff_scope import diff_seed, run_diff
 
