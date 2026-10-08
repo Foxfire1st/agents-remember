@@ -17,6 +17,7 @@ AgentRole = Literal[
     "manager",
     "worker",
     "reviewer",
+    "investigator",
     "system-specialist",
     "architect",
     "curator",

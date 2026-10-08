@@ -182,7 +182,7 @@ to the developer.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and
-  system-specialist.
+  investigator.
 - Cleanup: `worktree_integrate` auto-closes a completed leaf's worker/reviewer/curator seats
   (config-gated, default ON) only after each exact session has posted its durable turn report for
   that exact leaf. Retirement kills tmux but preserves reports and transcripts; missing-report

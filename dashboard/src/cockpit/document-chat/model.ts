@@ -23,7 +23,7 @@ export interface DocumentAgent {
 export function documentChatBinding(
   ref: TaskDocumentRef | undefined, docs: TaskDocNode[], series: SeriesNode[],
 ): DocumentChatBinding {
-  if (!ref) return { selection: { role: "architect" }, roles: ["architect", "system-specialist"] };
+  if (!ref) return { selection: { role: "architect" }, roles: ["architect", "investigator"] };
   const matches = (doc: TaskDocNode) => sameTaskDocumentRef(taskDocumentRefForDoc(doc), ref);
   for (const sprint of sprintOptionsForDocs(docs)) {
     if (matches(sprint.doc)) return {
@@ -49,6 +49,7 @@ export function documentChatAgent(ref: TaskDocumentRef | undefined, agents: Docu
   return agents.filter((agent) => {
     if (agent.archivedAt || !agent.workspaceId) return false;
     const labels = agent.labels;
+    if (["investigator", "system-specialist"].includes(labels["ar.role"])) return false;
     if (!key) return labels["ar.role"] === "architect" &&
       !labels["ar.task-ref"] && !labels["ar.master-ref"] && !labels["ar.sprint-ref"];
     return (labels["ar.task-ref"] ?? labels["ar.master-ref"] ?? labels["ar.sprint-ref"]) === key;
@@ -75,4 +76,10 @@ export function documentAgents(value: unknown): DocumentAgent[] | null {
   if (!Array.isArray(value)) return null;
   const agents = value.map(agentRecord);
   return agents.every((agent): agent is DocumentAgent => agent !== null) ? agents : null;
+}
+
+/** Investigator is an explicit launcher choice; it never participates in the primary chat binding. */
+export function documentLauncherRoles(binding: DocumentChatBinding): LauncherRole[] {
+  return ["orchestrator", "manager"].includes(binding.selection.role)
+    ? [...binding.roles, "investigator"] : binding.roles;
 }

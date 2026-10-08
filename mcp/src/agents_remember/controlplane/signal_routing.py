@@ -21,6 +21,7 @@ from agents_remember.controlplane.seats import (
     current_seat_occupant,
 )
 from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 _LEAF_ROLES = frozenset({"worker", "curator"})
@@ -50,6 +51,7 @@ def _current_occupant(
     document: TaskDocumentRef,
     role: AgentRole,
 ) -> RoutedOwner:
+    role = cast(AgentRole, canonical_role(role))
     try:
         occupant = current_seat_occupant(catalog.list(), document=document, role=role)
     except SeatOccupancyError as exc:
@@ -132,6 +134,7 @@ def _structural_parent_owner(
 ) -> RoutedOwner | None:
     """Resolve the structural parent of one role/document binding, if it has one."""
 
+    role = canonical_role(role)
     if role in _LEAF_ROLES:
         return derive_manager_owner(catalog, hierarchy, task_document_ref=document)
     if role == "reviewer":
@@ -149,7 +152,7 @@ def _structural_parent_owner(
         )
     if role in {"orchestrator", "strategist", "designer"}:
         return _current_occupant(catalog, document=document, role="architect")
-    if role == "system-specialist":
+    if role == "investigator":
         return _current_occupant(catalog, document=document, role="orchestrator")
     return None
 

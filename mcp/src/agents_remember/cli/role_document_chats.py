@@ -6,10 +6,12 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from agents_remember.application.role_launch_context import resolve_role_launch_context
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
     _receipt_address_matches,
@@ -26,12 +28,15 @@ class DocumentChatsRequest(RoleSelection):
 
 
 def register_document_chat_route(app: FastAPI, config: McpRuntimeConfig) -> None:
-    def endpoint(request: DocumentChatsRequest) -> dict[str, Any]:
+    def endpoint(request: DocumentChatsRequest) -> JSONResponse:
         selection = RoleSelection.model_validate(
             request.model_dump(exclude={"offset", "request_id"})
         )
         resolve_role_launch_context(config, selection)
-        return document_chats(config, selection, request.offset, request.request_id)
+        return alias_response(
+            request,
+            JSONResponse(document_chats(config, selection, request.offset, request.request_id)),
+        )
 
     app.add_api_route("/api/role-launch/document-chats", endpoint, methods=["POST"])
 
@@ -44,7 +49,7 @@ def _records(
             {**selection.model_dump(), "request_id": request_id}
         )
         path = _receipt_path(
-            config, scope, request_id if scope.role in {"architect", "system-specialist"} else None
+            config, scope, request_id if scope.role in {"architect", "investigator"} else None
         )
         receipt = _read_receipt(path)
         if receipt is None:

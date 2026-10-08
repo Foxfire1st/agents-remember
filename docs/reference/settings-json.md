@@ -510,7 +510,8 @@ model turn was used to establish that metadata. Unknown choices still refuse on 
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
-`system-specialist`, `reviewer`).
+`investigator`, `reviewer`).
+The earlier key `orchestration.roles.system-specialist` applies to the Investigator with one notice per load naming the key, file and new ID. Equal entries under both IDs load; conflicting entries are refused with both keys named. Stored settings are not rewritten.
 Precedence: role-file defaults < global settings < repo-local settings. These
 settings are the sole developer-controlled spend surface for ordinary dispatched
 seats. Agent callers submit a canonical child task document and role to the structural
@@ -665,7 +666,7 @@ argv is definable only in the explicit `orchestration.harnesses` family.
     "orchestrator": { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
     "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
     "reviewer":     { "harness": "claude", "model": "claude-sonnet-5", "effort": "high" },
-    "system-specialist": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
+    "investigator": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
     "curator":      { "harness": "codex", "model": "gpt-5.6-luna", "effort": "medium" },
     "worker":       { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" }
   },

@@ -51,7 +51,7 @@ def test_leaf_roles_receive_exact_sibling_addresses_without_agent_ids(handovers)
 
 
 def test_other_roles_and_leafless_contexts_receive_no_sibling_value(handovers) -> None:
-    for role in ("architect", "orchestrator", "manager", "system-specialist"):
+    for role in ("architect", "orchestrator", "manager", "investigator"):
         _, handover = handovers.compiled(role, None)
         assert "leafSeats" not in handover
     context, workspace = handovers.launch_of("manager")

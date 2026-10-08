@@ -45,6 +45,7 @@ from agents_remember.kernel.authority import require_repo, require_within_coordi
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.operator_inbox import AgentRole
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
     RenameChildRequest,
@@ -304,7 +305,7 @@ def _spawn_dispatch_child(
             task_document_ref=document,
             level=_level_for_document(TaskDocumentTopology(config.coordination_root), document),
             label=request.label,
-            env={"AR_SPAWN_ROLE": request.role},
+            env={"AR_SPAWN_ROLE": canonical_role(request.role)},
         ),
         retired=RetiredSpawnInputs(),
         spawned_by=spawned_by,

@@ -69,6 +69,7 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES, CapsuleOperation
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember.serving.launch_capsule import (
@@ -318,7 +319,7 @@ def compile_launch_capsule(
     serving-rank route can decide and record its instruction mode without importing this tier.
     """
 
-    role = (request.role or "").strip()
+    role = canonical_role((request.role or "").strip())
     if role not in CAPSULE_ROLES:
         return refused_launch_capsule(
             request.role,
@@ -457,16 +458,20 @@ def _compile_project_task(
     The task document remains the seat identity and supplies the admitted content digest. Projects
     is the execution workspace, so no task branch or enclosure is invented for this admission.
     """
-    expected_altitude = {"orchestrator": "sprint", "manager": "master"}.get(role)
+    expected_altitude = (
+        TaskDocumentTopology(config.coordination_root).altitude(resolved.ref)
+        if role == "investigator"
+        else {"orchestrator": "sprint", "manager": "master"}.get(role)
+    )
     if (
-        expected_altitude is None
+        expected_altitude not in {"sprint", "master"}
         or request.workspace_root.resolve() != config.workspace_root.resolve()
         or resolved.document.kind != "master"
     ):
         return refused_launch_capsule(
             role,
             "project-task-binding-invalid",
-            "Projects-scope task binding is limited to canonical orchestrator/sprint and manager/master launches.",
+            "Projects-scope task binding is limited to canonical sprint/master Investigator, orchestrator/sprint and manager/master launches.",
         )
     try:
         altitude = TaskDocumentTopology(config.coordination_root).validate_role(resolved.ref, role)

@@ -817,6 +817,7 @@ class RoleMessageTests(RoleToolsTestCase):
                 "recipient-archived",
                 "recipient-ambiguous",
                 "recipient-cannot-be-resumed",
+                "investigator-capacity",
                 "scope-check-failed",
                 "caller-has-no-binding",
                 "no-paseo-runtime-configured",

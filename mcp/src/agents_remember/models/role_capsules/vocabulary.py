@@ -42,7 +42,7 @@ type CapsuleRole = Literal[
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 ]
 
@@ -88,7 +88,7 @@ CAPSULE_ROLES: tuple[CapsuleRole, ...] = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 

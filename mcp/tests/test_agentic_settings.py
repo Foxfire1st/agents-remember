@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar, cast
@@ -197,6 +198,85 @@ class TypedModelTests(unittest.TestCase):
     def test_human_pinned_gate_kind_cannot_be_delegated(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "human-pinned"):
             self._load({"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}})
+
+    def test_investigator_settings_aliases_and_equal_dual_keys_preserve_file(self) -> None:
+        for family in ("roles", "rolesPerLevel"):
+            for equal_dual_keys in (False, True):
+                with self.subTest(family=family, equal_dual_keys=equal_dual_keys):
+                    roles = {"system-specialist": {"harness": "codex", "model": "selected"}}
+                    if equal_dual_keys:
+                        roles["investigator"] = dict(roles["system-specialist"])
+                    value = roles if family == "roles" else {"portfolio": roles}
+                    path = write_settings(
+                        self.coordination_root, {"orchestration": {family: value}}
+                    )
+                    before = path.read_bytes()
+                    with warnings.catch_warnings(record=True) as notices:
+                        warnings.simplefilter("always")
+                        settings = load_agentic_settings(self.coordination_root)
+                    self.assertEqual(len(notices), 1)
+                    notice = str(notices[0].message)
+                    owner = (
+                        "orchestration.roles"
+                        if family == "roles"
+                        else "orchestration.rolesPerLevel.portfolio"
+                    )
+                    self.assertIn(f"{owner}.system-specialist", notice)
+                    self.assertIn(str(path), notice)
+                    self.assertIn("investigator", notice)
+                    for role in ("investigator", "system-specialist"):
+                        self.assertEqual(
+                            settings.resolved_role_knobs(role, "portfolio"),
+                            RoleKnobs(harness="codex", model="selected"),
+                        )
+                    self.assertEqual(path.read_bytes(), before)
+
+    def test_different_dual_role_keys_refuse_with_both_keys_and_source(self) -> None:
+        for family in ("roles", "rolesPerLevel"):
+            with self.subTest(family=family):
+                roles = {"system-specialist": {"model": "old"}, "investigator": {"model": "new"}}
+                value = roles if family == "roles" else {"master": roles}
+                path = write_settings(self.coordination_root, {"orchestration": {family: value}})
+                with self.assertRaises(AgenticSettingsError) as refused:
+                    load_agentic_settings(self.coordination_root)
+                owner = (
+                    "orchestration.roles"
+                    if family == "roles"
+                    else "orchestration.rolesPerLevel.master"
+                )
+                for text in (f"{owner}.system-specialist", f"{owner}.investigator", str(path)):
+                    self.assertIn(text, str(refused.exception))
+
+    def test_alias_layers_merge_by_knob_with_one_notice_per_load(self) -> None:
+        repo_root = self.coordination_root.parent / "repo"
+        global_path = write_settings(
+            self.coordination_root,
+            {
+                "orchestration": {
+                    "roles": {"system-specialist": {"harness": "codex", "model": "global"}}
+                }
+            },
+        )
+        local_path = write_settings(
+            repo_root,
+            {
+                "orchestration": {
+                    "roles": {"investigator": {"model": "local"}},
+                    "rolesPerLevel": {"portfolio": {"system-specialist": {"effort": "high"}}},
+                }
+            },
+        )
+        with warnings.catch_warnings(record=True) as notices:
+            warnings.simplefilter("always")
+            settings = load_agentic_settings(self.coordination_root, repo_root)
+        self.assertEqual(len(notices), 1)
+        self.assertIn(str(global_path), str(notices[0].message))
+        self.assertIn(str(local_path), str(notices[0].message))
+        self.assertEqual(set(settings.roles), {"investigator"})
+        self.assertEqual(
+            settings.resolved_role_knobs("system-specialist", "portfolio"),
+            RoleKnobs(harness="codex", model="local", effort="high"),
+        )
 
 
 class RolesPerLevelTests(unittest.TestCase):

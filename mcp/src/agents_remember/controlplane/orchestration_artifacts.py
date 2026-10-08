@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from agents_remember.models.role_identity import canonical_role
 
 OrchestrationRole = Literal[
     "architect",
@@ -17,6 +19,7 @@ OrchestrationRole = Literal[
     "worker",
     "curator",
     "reviewer",
+    "investigator",
     "system-specialist",
 ]
 EscalationReason = Literal["blocked", "plan-delta", "quality-failure", "missing-artifact"]
@@ -30,7 +33,7 @@ _ROLE_ESCALATION: dict[OrchestrationRole, OrchestrationRole | Literal["developer
     "strategist": "orchestrator",
     "curator": "manager",
     "reviewer": "orchestrator",
-    "system-specialist": "orchestrator",
+    "investigator": "orchestrator",
 }
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -106,6 +109,7 @@ def escalation_packet(
     artifact_path: str | None = None,
 ) -> EscalationPacket:
     """Route an escalation exactly one rung up the ladder."""
+    from_role = cast(OrchestrationRole, canonical_role(from_role))
     return EscalationPacket(
         fromRole=from_role,
         toRole=_ROLE_ESCALATION[from_role],

@@ -15,17 +15,33 @@ from agents_remember.cli import (
 )
 from agents_remember.errors import RolePreparationError
 from agents_remember.models.role_launcher import RoleSelection
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from test_paseo_role_tools import RoleToolsTestCase
 from test_paseo_status import StatusTestCase
 
 
 class DocumentChatReadTests(StatusTestCase):
+    def test_old_id_route_answers_canonically_with_one_notice(self) -> None:
+        request = self.launched("investigator")
+        app = FastAPI()
+        role_document_chats.register_document_chat_route(app, self.config)
+        response = TestClient(app).post(
+            "/api/role-launch/document-chats",
+            json={"role": "system-specialist", "requestId": str(request.request_id)},
+        )
+        self.assertEqual(response.status_code, 200)
+        answer = response.json()
+        self.assertEqual(answer["role"], "investigator")
+        self.assertEqual(answer["warning"].count("Role 'system-specialist' was supplied"), 1)
+        self.assertEqual(answer["agents"][0]["agentId"], self.receipt(request)["agentId"])
+
     def test_exact_started_projects_request_is_read_without_substituting_an_architect(self) -> None:
-        request = self.launched("system-specialist")
-        selection = RoleSelection(role="system-specialist")
+        request = self.launched("investigator")
+        selection = RoleSelection(role="investigator")
         result = role_document_chats.document_chats(self.config, selection, 0, request.request_id)
         self.assertEqual(result["agents"][0]["agentId"], self.receipt(request)["agentId"])
-        self.assertEqual(result["agents"][0]["labels"]["ar.role"], "system-specialist")
+        self.assertEqual(result["agents"][0]["labels"]["ar.role"], "investigator")
         self.runtime.agents[self.receipt(request)["agentId"]]["archivedAt"] = "today"
         self.assertEqual(
             role_document_chats.document_chats(self.config, selection, 0, request.request_id)[
@@ -108,7 +124,9 @@ class FirstStartPreparationTests(RoleToolsTestCase):
                 self.assertIn(remedy, result["nextAction"])
                 self.assertIn(self.enclosures.start_result["summary"], result["detail"])
                 self.assertFalse(self.enclosures.started)
-                self.assertIsNone(json.loads(role_launch_progress.read(uuid.uuid4()).body)["phase"])
+                self.assertIsNone(
+                    json.loads(bytes(role_launch_progress.read(uuid.uuid4()).body))["phase"]
+                )
         error = role_launch_workspace._preparation_refusal(
             {
                 "ok": False,
@@ -124,7 +142,7 @@ class FirstStartPreparationTests(RoleToolsTestCase):
         self.assertIn('repair({"exact": "args"})', str(error))
 
     def test_masterless_starts_report_opened_without_a_creation_guess(self) -> None:
-        for role in ("system-specialist", "orchestrator"):
+        for role in ("investigator", "orchestrator"):
             with self.subTest(role=role):
                 result = self.start(self.architect, role)
                 self.assertTrue(result["ok"], result)
@@ -143,11 +161,11 @@ class FirstStartPreparationTests(RoleToolsTestCase):
         request_id = uuid.uuid4()
         role_launch_progress.begin(request_id)
         self.assertEqual(
-            json.loads(role_launch_progress.read(request_id).body)["phase"], "preparing"
+            json.loads(bytes(role_launch_progress.read(request_id).body))["phase"], "preparing"
         )
         role_launch_progress.starting()
         self.assertEqual(
-            json.loads(role_launch_progress.read(request_id).body)["phase"], "starting"
+            json.loads(bytes(role_launch_progress.read(request_id).body))["phase"], "starting"
         )
         role_launch_progress.finish()
-        self.assertIsNone(json.loads(role_launch_progress.read(request_id).body)["phase"])
+        self.assertIsNone(json.loads(bytes(role_launch_progress.read(request_id).body))["phase"])

@@ -33,6 +33,15 @@ const TREE: TaskTreeNode[] = [
 const TID = "attach-leaf-picker";
 
 describe("LeafAttachPicker drill-down", () => {
+  it("shows an old-bound specialist as Investigator and emits the canonical role for a new attachment", () => {
+    const onPick = vi.fn();
+    const { getByTestId, queryByTestId } = render(<LeafAttachPicker tree={TREE} contextMaster="ops" seatRole="system-specialist" onPick={onPick} />);
+    fireEvent.click(getByTestId(TID));
+    expect(getByTestId(`${TID}-role-investigator`).getAttribute("aria-pressed")).toBe("true");
+    expect(queryByTestId(`${TID}-role-system-specialist`)).toBeNull();
+    fireEvent.click(getByTestId(`${TID}-leaf`));
+    expect(onPick).toHaveBeenCalledWith("repo/ops/L5", "investigator");
+  });
   it("lists top-level masters first, then drills into a master to reveal its leaves and nested masters", () => {
     const onPick = vi.fn();
     const { getByTestId, queryByTestId, getAllByTestId } = render(

@@ -73,7 +73,7 @@ ALL_ROLES = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 ALL_OPERATIONS = (
@@ -96,7 +96,7 @@ ROLE_ALTITUDES = {
     "worker": "leaf",
     "curator": "leaf",
     "reviewer": "leaf",
-    "system-specialist": "leaf",
+    "investigator": "leaf",
     "bootstrap": "free-agent",
 }
 OPERATIONS_BY_ROLE = {
@@ -122,7 +122,7 @@ OPERATIONS_BY_ROLE = {
     "worker": ("orientation", "implementation", "recovery"),
     "curator": ("orientation", "curation", "recovery"),
     "reviewer": ("orientation", "review"),
-    "system-specialist": ("orientation", "recovery"),
+    "investigator": ("orientation", "recovery"),
     "bootstrap": ("orientation", "bootstrap", "recovery"),
 }
 CORE_BLOCKS = ("authority", "invariants")

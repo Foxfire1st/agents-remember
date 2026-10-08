@@ -5,7 +5,7 @@ import type { SeriesNode, TaskDocNode } from "../types/projection";
 
 import { readRoleReport, type RoleReportContent } from "../data/roleReport";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
-import { boundTasklessRequest, isTasklessRole, isUncertainRoleExecution, launchSelectionComplete, mergeRoleAgentInventory, roleDocumentScope, roleOptionsScope, readTasklessActiveRequests, roleDefaultsCacheKey, sameRoleDocumentScope, sameRoleLaunchSelection, sameRoleOptionsScope, tasklessRequestStorageKey, type RoleAction, type RoleAgentInventory, type RoleDocumentScope, type RoleExecutionReceipt, type RoleLaunchSelection, type RoleLauncherOptions, type RoleOptionsScope, type LauncherRole, type RoleDefaults, type RoleTasklessActiveRequest } from "./roleLaunchModel";
+import { boundTasklessRequest, isTasklessRole, usesRequestReceipts, roleRequestKey, roleRequestStorageKey, readSelectedRoleRequest, isUncertainRoleExecution, launchSelectionComplete, mergeRoleAgentInventory, roleDocumentScope, roleOptionsScope, readTasklessActiveRequests, roleDefaultsCacheKey, sameRoleDocumentScope, sameRoleLaunchSelection, sameRoleOptionsScope, type RoleAction, type RoleAgentInventory, type RoleDocumentScope, type RoleExecutionReceipt, type RoleLaunchSelection, type RoleLauncherOptions, type RoleOptionsScope, type LauncherRole, type RoleDefaults, type RoleTasklessActiveRequest } from "./roleLaunchModel";
 import { PaseoChatFrame } from "./PaseoChatFrame";
 import { paseoAgentTarget } from "./paseoFrameModel";
 
@@ -26,13 +26,13 @@ const rolePane = css({
 const LAUNCH_REREAD_MS = 1500;
 
 function adoptBoundRequest(
-  bound: boolean, role: LauncherRole, executions: RoleExecutionReceipt[],
+  bound: boolean, scope: RoleDocumentScope, executions: RoleExecutionReceipt[],
   active: RoleTasklessActiveRequest | undefined,
-  update: (role: LauncherRole, request: RoleTasklessActiveRequest | undefined) => void,
+  update: (scope: RoleDocumentScope, request: RoleTasklessActiveRequest | undefined) => void,
 ) {
-  if (!bound) return active;
-  const request = boundTasklessRequest(executions, active);
-  if (request?.requestId !== active?.requestId) update(role, request);
+  if (!bound && isTasklessRole(scope)) return active;
+  const request = boundTasklessRequest(executions, active, !isTasklessRole(scope));
+  if (request) update(scope, request);
   return request;
 }
 
@@ -84,13 +84,13 @@ export function RoleChatsPane({
   const [busyScope, setBusyScope] = useState<RoleLaunchSelection | null>(null);
   const rereadTimer = useRef<number | undefined>(undefined);
   const failureExecutionRef = useRef<{ scope: RoleDocumentScope; value: RoleExecutionReceipt } | null>(null);
-  const [tasklessActiveRequests, setTasklessActiveRequests] = useState(readTasklessActiveRequests);
+  const [activeRequests, setActiveRequests] = useState<Record<string, RoleTasklessActiveRequest | undefined>>(readTasklessActiveRequests);
   const sentCatalogRefresh = useRef(0);
   const explicitOptionsRefresh = useRef(false);
   const currentSelectionRef = useRef(selection);
   currentSelectionRef.current = selection;
-  const tasklessActiveRequestsRef = useRef(tasklessActiveRequests);
-  tasklessActiveRequestsRef.current = tasklessActiveRequests;
+  const activeRequestsRef = useRef(activeRequests);
+  activeRequestsRef.current = activeRequests;
   const currentDocumentScope = useMemo(
     () => roleDocumentScope(selection),
     [
@@ -113,26 +113,27 @@ export function RoleChatsPane({
   );
   const isCurrentExecutionTarget = useCallback((scope: RoleDocumentScope, requestId?: string) => {
     if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), scope)) return false;
-    return !isTasklessRole(scope.role) || tasklessActiveRequestsRef.current[scope.role]?.requestId === requestId;
+    return !usesRequestReceipts(scope) || activeRequestsRef.current[roleRequestKey(scope)]?.requestId === requestId;
   }, []);
-  const updateTasklessActiveRequest = useCallback((
-    role: LauncherRole,
+  const updateActiveRequest = useCallback((
+    scope: RoleDocumentScope,
     request: RoleTasklessActiveRequest | undefined,
   ) => {
-    if (!isTasklessRole(role)) return;
-    const current = tasklessActiveRequestsRef.current;
+    if (!usesRequestReceipts(scope)) return;
+    const key = roleRequestKey(scope);
+    const current = activeRequestsRef.current;
     const next = { ...current };
     if (request) {
-      next[role] = request;
-      sessionStorage.setItem(tasklessRequestStorageKey(role), JSON.stringify(request));
+      next[key] = request;
+      sessionStorage.setItem(roleRequestStorageKey(scope), JSON.stringify(request));
     } else {
-      delete next[role];
-      sessionStorage.removeItem(tasklessRequestStorageKey(role));
+      delete next[key];
+      sessionStorage.removeItem(roleRequestStorageKey(scope));
     }
-    tasklessActiveRequestsRef.current = next;
-    setTasklessActiveRequests(next);
-    if (current[role]?.requestId !== request?.requestId) {
-      setExecutionErrorState((error) => error?.scope.role === role ? null : error);
+    activeRequestsRef.current = next;
+    setActiveRequests(next);
+    if (current[key]?.requestId !== request?.requestId) {
+      setExecutionErrorState((error) => error && sameRoleDocumentScope(error.scope, scope) ? null : error);
     }
   }, []);
   const options = optionsState && sameRoleOptionsScope(optionsState.scope, currentOptionsScope)
@@ -151,46 +152,46 @@ export function RoleChatsPane({
   const optionsError = optionsErrorState && sameRoleOptionsScope(optionsErrorState.scope, currentOptionsScope)
     ? optionsErrorState.message
     : null;
-  const activeTasklessRequest = isTasklessRole(selection.role)
-    ? tasklessActiveRequests[selection.role]
+  const activeRequest = usesRequestReceipts(selection)
+    ? activeRequests[roleRequestKey(selection)]
     : undefined;
-  const savedTasklessExecution = isTasklessRole(selection.role) && activeTasklessRequest
-    ? options?.executions?.find((execution) => execution.requestId === activeTasklessRequest.requestId)
+  const savedRequestExecution = usesRequestReceipts(selection) && activeRequest
+    ? options?.executions?.find((execution) => execution.requestId === activeRequest.requestId)
     : undefined;
   const executionReceipt = executionState && sameRoleDocumentScope(executionState.scope, currentDocumentScope) &&
-    (!isTasklessRole(selection.role) || executionState.value.requestId === activeTasklessRequest?.requestId)
+    (!usesRequestReceipts(selection) || executionState.value.requestId === activeRequest?.requestId)
     ? executionState.value
     : null;
-  const pendingTasklessExecution = activeTasklessRequest?.pending && !executionReceipt && !savedTasklessExecution
+  const pendingRequestExecution = activeRequest?.pending && !executionReceipt && !savedRequestExecution
     ? {
         status: busy ? "starting" : "unknown",
         detail: busy ? undefined : "The saved request has not returned a receipt yet.",
-        requestId: activeTasklessRequest.requestId,
-        retryPayload: activeTasklessRequest.retryPayload,
+        requestId: activeRequest.requestId,
+        retryPayload: activeRequest.retryPayload,
         canStart: false,
         canRevive: false,
-        canRetry: !busy && Boolean(activeTasklessRequest.retryPayload),
+        canRetry: !busy && Boolean(activeRequest.retryPayload),
       }
     : undefined;
-  const selectedTasklessExecution = executionReceipt ?? savedTasklessExecution;
+  const selectedRequestExecution = executionReceipt ?? savedRequestExecution;
   const executionError = executionErrorState && sameRoleDocumentScope(executionErrorState.scope, currentDocumentScope)
     ? executionErrorState.message
     : null;
-  const currentScopedExecution = !optionsLoading && isTasklessRole(selection.role)
-    ? selectedTasklessExecution
+  const currentScopedExecution = !optionsLoading && usesRequestReceipts(selection)
+    ? selectedRequestExecution
       ? {
-          ...selectedTasklessExecution,
-          ...(selectedTasklessExecution.retryPayload ?? activeTasklessRequest?.retryPayload
-            ? { retryPayload: selectedTasklessExecution.retryPayload ?? activeTasklessRequest?.retryPayload }
+          ...selectedRequestExecution,
+          ...(selectedRequestExecution.retryPayload ?? activeRequest?.retryPayload
+            ? { retryPayload: selectedRequestExecution.retryPayload ?? activeRequest?.retryPayload }
             : {}),
         }
-      : pendingTasklessExecution
+      : pendingRequestExecution
     : !optionsLoading ? executionReceipt ?? options?.execution ?? undefined : undefined;
   const lastFailureExecution = failureExecutionRef.current;
   const failureExecution = lastFailureExecution && isCurrentExecutionTarget(lastFailureExecution.scope, lastFailureExecution.value.requestId)
     ? lastFailureExecution.value : currentScopedExecution;
   const retryRequestId = currentScopedExecution?.canRetry &&
-    (!isTasklessRole(selection.role) || Boolean(currentScopedExecution.retryPayload))
+    (!usesRequestReceipts(selection) || Boolean(currentScopedExecution.retryPayload))
     ? currentScopedExecution.requestId
     : undefined;
   const selectionComplete = launchSelectionComplete(selection);
@@ -199,7 +200,7 @@ export function RoleChatsPane({
   // read from the receipt itself (for a taskless role the options answer puts the saved
   // execution of the active request there), else from the options answer of a task-bound role.
   const frameScope = useMemo(() => JSON.stringify(currentDocumentScope), [currentDocumentScope]);
-  const frameTarget = paseoAgentTarget(executionReceipt ?? options?.execution);
+  const frameTarget = paseoAgentTarget(currentScopedExecution);
 
   useEffect(() => {
     if (!active || !selectionComplete) return;
@@ -256,17 +257,16 @@ export function RoleChatsPane({
         requestScope.agentId ?? value.roleDefaults.agent,
         refreshAgentCatalog,
       ));
-      if (isTasklessRole(requestScope.role)) {
-        const role = requestScope.role;
+      if (usesRequestReceipts(requestScope)) {
         const executions = value.executions ?? [];
-        const activeRequest = adoptBoundRequest(Boolean(boundSelection), role, executions,
-          tasklessActiveRequestsRef.current[role], updateTasklessActiveRequest);
+        const activeRequest = adoptBoundRequest(Boolean(boundSelection), requestScope, executions,
+          activeRequestsRef.current[roleRequestKey(requestScope)] ?? readSelectedRoleRequest(requestScope), updateActiveRequest);
         const savedExecution = activeRequest
           ? executions.find((execution) => execution.requestId === activeRequest?.requestId)
           : undefined;
         if (savedExecution?.requestId) {
           const pending = isUncertainRoleExecution(savedExecution);
-          updateTasklessActiveRequest(role, pending
+          updateActiveRequest(requestScope, pending
             ? {
                 requestId: savedExecution.requestId,
                 pending: true,
@@ -277,8 +277,8 @@ export function RoleChatsPane({
             : { requestId: savedExecution.requestId });
           rememberExecution(requestScope, savedExecution);
         }
-        const activeRequestId = tasklessActiveRequestsRef.current[role]?.requestId;
-        if (activeRequestId) void fetchExecutionResult({ role }, false, activeRequestId);
+        const activeRequestId = activeRequestsRef.current[roleRequestKey(requestScope)]?.requestId;
+        if (activeRequestId) void fetchExecutionResult(roleDocumentScope(requestScope), false, activeRequestId);
       }
     }).catch((reason: unknown) => {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -305,7 +305,7 @@ export function RoleChatsPane({
     reportNotFound: boolean,
     requestId?: string,
   ): Promise<RoleExecutionReceipt | undefined> {
-    if (isTasklessRole(requestScope.role) && !requestId) return;
+    if (usesRequestReceipts(requestScope) && !requestId) return;
     try {
       const response = await fetch("/api/role-launch/result", {
         method: "POST",
@@ -314,8 +314,8 @@ export function RoleChatsPane({
       });
       if (response.status === 404) {
         if (!isCurrentExecutionTarget(requestScope, requestId)) return;
-        const activeRequest = isTasklessRole(requestScope.role)
-          ? tasklessActiveRequestsRef.current[requestScope.role]
+        const activeRequest = usesRequestReceipts(requestScope)
+          ? activeRequestsRef.current[roleRequestKey(requestScope)]
           : undefined;
         if (activeRequest?.pending && activeRequest.requestId === requestId) {
           const retryPayload = activeRequest.retryPayload;
@@ -368,10 +368,10 @@ export function RoleChatsPane({
         return;
       }
       rememberExecution(requestScope, receipt);
-      if (isTasklessRole(requestScope.role) && receipt.requestId) {
-        const current = tasklessActiveRequestsRef.current[requestScope.role];
+      if (usesRequestReceipts(requestScope) && receipt.requestId) {
+        const current = activeRequestsRef.current[roleRequestKey(requestScope)];
         const pending = isUncertainRoleExecution(receipt);
-        updateTasklessActiveRequest(requestScope.role, pending
+        updateActiveRequest(requestScope, pending
           ? {
               requestId: receipt.requestId,
               pending: true,
@@ -425,10 +425,10 @@ export function RoleChatsPane({
     if (!selectionComplete || busy || optionsLoading) return;
     const selected = selection;
     const requestScope = roleDocumentScope(selected);
-    const requestId = isTasklessRole(selected.role)
-      ? tasklessActiveRequestsRef.current[selected.role]?.requestId
+    const requestId = usesRequestReceipts(selected)
+      ? activeRequestsRef.current[roleRequestKey(selected)]?.requestId
       : currentScopedExecution?.requestId;
-    if (isTasklessRole(selected.role) && !requestId) return;
+    if (usesRequestReceipts(selected) && !requestId) return;
     setBusyScope(selected);
     try {
       await openExecutionReport(requestScope, requestId, await fetchExecutionResult(requestScope, true, requestId));
@@ -443,21 +443,21 @@ export function RoleChatsPane({
     replayRequestId?: string,
   ): Promise<void> {
     if (!active || busy || !options || !launchSelectionComplete(launchSelection)) return;
-    const tasklessRole = isTasklessRole(launchSelection.role);
-    const activeTasklessRequest = tasklessRole
-      ? tasklessActiveRequestsRef.current[launchSelection.role]
+    const perRequest = usesRequestReceipts(launchSelection);
+    const activeRequest = perRequest
+      ? activeRequestsRef.current[roleRequestKey(launchSelection)]
       : undefined;
     const currentStatus = currentScopedExecution?.status.toLowerCase();
-    if (action === "start" && tasklessRole) {
+    if (action === "start" && perRequest) {
       if (replayRequestId) {
-        if (activeTasklessRequest?.requestId !== replayRequestId || currentScopedExecution?.canRetry !== true) return;
+        if (activeRequest?.requestId !== replayRequestId || currentScopedExecution?.canRetry !== true) return;
       } else if (["starting", "unknown"].includes(currentStatus ?? "")) {
         return;
       }
     }
-    if (action === "start" && !tasklessRole && currentScopedExecution?.canStart === false && !replayRequestId) return;
+    if (action === "start" && !perRequest && currentScopedExecution?.canStart === false && !replayRequestId) return;
     if (action === "revive" && currentScopedExecution?.canRevive !== true) return;
-    if (action === "revive" && tasklessRole && (!replayRequestId || currentScopedExecution?.requestId !== replayRequestId)) return;
+    if (action === "revive" && perRequest && (!replayRequestId || currentScopedExecution?.requestId !== replayRequestId)) return;
     const selected = launchSelection;
     const requestScope = roleDocumentScope(selected);
     const requestId = replayRequestId ?? crypto.randomUUID();
@@ -465,8 +465,8 @@ export function RoleChatsPane({
       ...requestScope,
       ...(selected.agentOverride ? { agentOverride: selected.agentOverride } : {}),
     };
-    if (tasklessRole && action === "start" && !replayRequestId) {
-      updateTasklessActiveRequest(selected.role, {
+    if (perRequest && action === "start" && !replayRequestId) {
+      updateActiveRequest(requestScope, {
         requestId,
         pending: true,
         retryPayload: savedLaunchSelection,
@@ -476,7 +476,7 @@ export function RoleChatsPane({
       requestId,
       action,
       ...requestScope,
-      ...(selected.agentOverride && !(tasklessRole && action === "revive")
+      ...(selected.agentOverride && !(perRequest && action === "revive")
         ? { agentOverride: selected.agentOverride }
         : {}),
     };
@@ -499,20 +499,20 @@ export function RoleChatsPane({
         });
       } else if ("status" in value && typeof value.status === "string") {
         const receipt = value as RoleExecutionReceipt;
-        if (tasklessRole && receipt.requestId !== requestId) {
+        if (perRequest && receipt.requestId !== requestId) {
           setExecutionErrorState({ scope: requestScope, message: "The role execution receipt did not match this request." });
           return;
         }
         rememberExecution(requestScope, receipt);
         notifyStarted(response.ok, receipt, requestScope, executionCallback.current);
-        if (tasklessRole && receipt.requestId) {
+        if (perRequest && receipt.requestId) {
           const pending = isUncertainRoleExecution(receipt);
-          updateTasklessActiveRequest(selected.role, pending
+          updateActiveRequest(requestScope, pending
             ? {
                 requestId: receipt.requestId,
                 pending: true,
-                ...(receipt.retryPayload ?? tasklessActiveRequestsRef.current[selected.role]?.retryPayload
-                  ? { retryPayload: receipt.retryPayload ?? tasklessActiveRequestsRef.current[selected.role]?.retryPayload }
+                ...(receipt.retryPayload ?? activeRequestsRef.current[roleRequestKey(selected)]?.retryPayload
+                  ? { retryPayload: receipt.retryPayload ?? activeRequestsRef.current[roleRequestKey(selected)]?.retryPayload }
                   : {}),
               }
             : { requestId: receipt.requestId });
@@ -533,7 +533,7 @@ export function RoleChatsPane({
         rememberExecution(requestScope, {
             status,
             detail: "HTTP " + response.status,
-            ...(tasklessRole
+            ...(perRequest
               ? {
                   requestId,
                   retryPayload: savedLaunchSelection,
@@ -550,7 +550,7 @@ export function RoleChatsPane({
             : "The role handover was rejected (HTTP " + response.status + ").",
         });
       }
-      await fetchExecutionResult(requestScope, false, tasklessRole ? requestId : undefined);
+      await fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
     } catch {
       if (!sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) return;
       rememberExecution(requestScope, {
@@ -566,7 +566,7 @@ export function RoleChatsPane({
         scope: requestScope,
         message: "The role launch request did not return. Its state is unknown; refresh the AR result before retrying.",
       });
-      await fetchExecutionResult(requestScope, false, tasklessRole ? requestId : undefined);
+      await fetchExecutionResult(requestScope, false, perRequest ? requestId : undefined);
     } finally {
       if (sameRoleDocumentScope(roleDocumentScope(currentSelectionRef.current), requestScope)) {
         setBusyScope(null);
@@ -588,7 +588,7 @@ export function RoleChatsPane({
   const onRevive = (launchSelection: RoleLaunchSelection) => dispatch(
     "revive",
     launchSelection,
-    isTasklessRole(launchSelection.role) ? currentScopedExecution?.requestId : undefined,
+    usesRequestReceipts(launchSelection) ? currentScopedExecution?.requestId : undefined,
   );
   const onRetry = (launchSelection: RoleLaunchSelection, requestId: string) =>
     dispatch("start", launchSelection, requestId);

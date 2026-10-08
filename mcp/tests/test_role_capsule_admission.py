@@ -84,7 +84,7 @@ SHIPPED_ROLES = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 

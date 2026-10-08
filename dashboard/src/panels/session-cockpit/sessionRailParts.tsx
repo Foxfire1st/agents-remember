@@ -1019,6 +1019,6 @@ const ROLE_CHIP_TONES = {
   MGR: true,
   WKR: true,
   CUR: true,
-  SYS: true,
+  INV: true,
   REV: true,
 } as const;

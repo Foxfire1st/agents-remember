@@ -40,7 +40,7 @@ ROLE_ORDER = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 
@@ -537,7 +537,9 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
     "consolidated into `core/`: `authority.md`, `invariants.md`, …" form resolves). A
     **coordination-root** anchor and a **context-dependent symbolic name** are skipped and listed in
     `SYMBOLIC_FILE_NAMES` — their resident tree is task-local or route-local, which this checkout
-    cannot contain. Everything else is reported, so the check is real for the class it claims.
+    cannot contain. The historical ruling's annotated ``system-specialist`` source resolves to
+    its explicitly named ``investigator`` replacement only in ``reference/rulings.md`` and only
+    while that replacement exists. Everything else is reported.
     """
 
     skills_root = lifecycle_root.parent
@@ -555,7 +557,18 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
                 if directory.endswith("/") and f"`{directory}" in line
             ]
             context_dirs = named or context_dirs
-            for candidate in cited_paths(line):
+            reference_line = line
+            # R98 preserves the historical ruling's words beside its explicitly renamed home.
+            # This exact annotation is valid only here, and only while the new home exists.
+            if (
+                path.relative_to(lifecycle_root).as_posix() == "reference/rulings.md"
+                and (lifecycle_root / "roles/investigator.md").is_file()
+            ):
+                reference_line = line.replace(
+                    "`roles/system-specialist.md` (now `roles/investigator.md`)",
+                    "`roles/investigator.md`",
+                )
+            for candidate in cited_paths(reference_line):
                 token = candidate.strip()
                 if any(marker in token for marker in ("<", ">", "{", "}", " ", "*", "|", "…")):
                     continue
@@ -645,6 +658,26 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 
     # A coordination-root anchor is skipped by design, not reported as a false alarm.
     healthy.write_text(original + "\nSee `system/tools.md`.\n", encoding="utf-8")
+    assert unresolved_references(staged_root) == []
+
+    # A renamed historical anchor must carry its exact annotation and a real new home.
+    rulings = staged_root / "reference/rulings.md"
+    historical = rulings.read_text(encoding="utf-8")
+    annotated = "`roles/system-specialist.md` (now `roles/investigator.md`)"
+    assert annotated in historical
+    rulings.write_text(
+        historical.replace(annotated, "`roles/system-specialist.md`"), encoding="utf-8"
+    )
+    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
+    rulings.write_text(historical, encoding="utf-8")
+    replacement = staged_root / "roles/investigator.md"
+    replacement_text = replacement.read_text(encoding="utf-8")
+    replacement.unlink()
+    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
+    replacement.write_text(replacement_text, encoding="utf-8")
+    healthy.write_text(original + f"\nSee {annotated}.\n", encoding="utf-8")
+    assert any("roles/system-specialist.md" in item for item in unresolved_references(staged_root))
+    healthy.write_text(original, encoding="utf-8")
     assert unresolved_references(staged_root) == []
 
 
@@ -864,7 +897,12 @@ class CurationGuardTeethTests:
     def test_a_statement_is_reported_only_on_a_surface_that_shipped_it(self) -> None:
         """The registry is a census of surfaces, not a single-file check."""
 
-        fragment_one = RETIRED_CURATION_STATEMENTS[0]
+        fragment_one = next(
+            row
+            for row in RETIRED_CURATION_STATEMENTS
+            if row.reason.startswith("fragment 1:")
+            and row.sources == ("skills/l-01-agent-lifecycles/templates/curator-brief.md",)
+        )
         assert retired_statement_findings(
             normalize_statement(fragment_one.statement),
             "l-01-agent-lifecycles/templates/curator-brief.md",

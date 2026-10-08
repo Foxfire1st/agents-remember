@@ -23,6 +23,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 from agents_remember.kernel.primitives.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
 )
+from agents_remember.models.role_identity import canonical_role
 
 
 class AgenticSettingsError(AgentsRememberError):
@@ -89,7 +90,7 @@ KNOWN_ROLES = frozenset(
         "worker",
         "curator",
         "reviewer",
-        "system-specialist",
+        "investigator",
         "bootstrap",
     }
 )
@@ -295,7 +296,7 @@ class AgenticSettings:
     sources: tuple[Path, ...] = ()
 
     def role_knobs(self, role: str) -> RoleKnobs:
-        return self.roles.get(role, RoleKnobs())
+        return self.roles.get(canonical_role(role), RoleKnobs())
 
     def resolved_role_knobs(self, role: str, level: str = "leaf") -> RoleKnobs:
         """The effective knobs for ``role`` dispatched at ``level`` (260703-L16).
@@ -307,6 +308,7 @@ class AgenticSettings:
         dispatch chain: repo-local level override > global level override > repo-local role
         default > global role default.
         """
+        role = canonical_role(role)
         base = self.roles.get(role, RoleKnobs())
         override = self.roles_per_level.get(level, {}).get(role)
         if override is None:

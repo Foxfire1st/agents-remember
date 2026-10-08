@@ -337,7 +337,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             {"orchestrator-1", "manager-1"},
         )
         responses = {entry.recipientRole: entry.response for entry in inbox_entries}
-        self.assertIn("system-specialist", responses["orchestrator"])
+        self.assertIn("investigator", responses["orchestrator"])
         self.assertIn("no provider kill authority", responses["manager"])
 
     def test_critical_stop_failure_still_records_event_inbox_and_state(self) -> None:

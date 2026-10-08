@@ -21,12 +21,18 @@ from agents_remember.cli.role_launch_receipts import (
     _now_iso,
     _public_execution,
     _read_receipt,
+    _request_digest,
     _write_receipt,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
 
 _CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
+
+
+def execution_is_closed(status: object) -> bool:
+    """Whether the existing execution state permits a replacement start."""
+    return status in _CLOSED_STATUSES or status == "rejected"
 
 
 class HostUnreachableRefusal(HTTPException):
@@ -53,7 +59,12 @@ def _reconcile_prior_execution(
     if current is None:
         return None
     if current.get("requestId") == str(request.request_id):
-        if current.get("requestDigest") != request_digest:
+        legacy_digest = (
+            _request_digest(request, request, role_name="system-specialist")
+            if current.get("role") == "system-specialist" and request.role == "investigator"
+            else request_digest
+        )
+        if current.get("requestDigest") not in {request_digest, legacy_digest}:
             raise HTTPException(
                 status_code=409,
                 detail="This request id is already bound to different AR task or agent-selection content.",
@@ -72,7 +83,7 @@ def _reconcile_prior_execution(
             f"{status['status']}); nothing was started or archived. "
             f"{status['hostUnreachableReason']}"
         )
-    if status["status"] not in {"completed", "failed", "stopped", "rejected"}:
+    if not execution_is_closed(status["status"]):
         raise HTTPException(
             status_code=409,
             detail=(

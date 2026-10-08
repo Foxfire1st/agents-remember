@@ -1,6 +1,6 @@
 # Operation — Orientation
 
-Start from the role and exact canonical assignment supplied by the launcher. Projects altitude is an execution location, not a repository identity. A taskless Architect or System Specialist uses the developer's request and asks for a missing outcome/repository/concern; do not invent a task or trust packet.
+Start from the role and exact canonical assignment supplied by the launcher. Projects altitude is an execution location, not a repository identity. A taskless Architect uses the developer's request and asks for a missing outcome/repository; an Investigator uses its parent's first message for the concern and asks that parent for missing scope, or uses the developer's request without a parent; do not invent a task or trust packet.
 
 For existing work, recover canonical task status, decision log and rulings, approved requirement versions, prior approvals, role agent IDs, and reports before planning or acting. Continue inside that recorded authority without requesting the same approval because a session restarted or compacted. Only new scope, a changed requirement, or an actual human-pinned decision returns to the developer.
 

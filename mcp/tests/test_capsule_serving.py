@@ -123,7 +123,7 @@ ALL_ROLES = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 #: Which seat each role occupies, as the task layer spells it.
@@ -136,7 +136,7 @@ ROLE_ALTITUDES = {
     "worker": "leaf",
     "curator": "leaf",
     "reviewer": "leaf",
-    "system-specialist": "leaf",
+    "investigator": "leaf",
     "bootstrap": "free-agent",
 }
 #: Each role's applicable operations; the manifest declares all nine and narrows
@@ -164,7 +164,7 @@ OPERATIONS_BY_ROLE = {
     "worker": ("orientation", "implementation", "recovery"),
     "curator": ("orientation", "curation", "recovery"),
     "reviewer": ("orientation", "review"),
-    "system-specialist": ("orientation", "recovery"),
+    "investigator": ("orientation", "recovery"),
     "bootstrap": ("orientation", "bootstrap", "recovery"),
 }
 #: Roles that declare the served skill, so the reference plane is exercised.
@@ -1444,7 +1444,7 @@ def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses
         "designer",
         "strategist",
         "manager",
-        "system-specialist",
+        "investigator",
         "bootstrap",
     ]
     # A role outside the frozen ten is refused as unsupported, not as a wrong altitude.
@@ -1543,3 +1543,40 @@ def test_a_nested_skill_is_published_flat_like_any_other(world: World) -> None:
         read_served_file(catalog, nested_file.uri).content
         == (world.corpus / "shared" / "nested" / "inner-skill" / "SKILL.md").read_bytes()
     )
+
+
+def test_old_role_compile_input_returns_the_canonical_investigator_with_one_notice(
+    world: World,
+) -> None:
+    contract = world.master_dir / "series-contract.md"
+    text = _contract_text(
+        ContractSpec("", world.master_dir, world.code, "ar/master", contract),
+        coordination_root=world.coord,
+    )
+    text = (
+        text.replace("kind: leaf", "kind: series")
+        .replace("task_id: SPRINT-ID", "task_id: MASTER-ID")
+        .replace("task_name: SPRINT", f"task_name: {MASTER_DIR}")
+        .replace("  leaf_id: \n", "")
+    )
+    contract.write_text(text)
+    request = world.request(
+        role="system-specialist",
+        operation="orientation",
+        task_path=f"{MASTER_DIR}/task.json",
+        contract=contract,
+    )
+    old = world.response(request).to_payload()
+    assert old["ok"], old["explanation"]
+    assert old["role"] == "investigator"
+    assert old["explanation"].count("Role 'system-specialist' was supplied") == 1
+    new = world.response(
+        world.request(
+            role="investigator",
+            operation="orientation",
+            task_path=f"{MASTER_DIR}/task.json",
+            contract=contract,
+        )
+    ).to_payload()
+    assert old["semanticDigest"] == new["semanticDigest"]
+    assert old["instructions"] == new["instructions"]

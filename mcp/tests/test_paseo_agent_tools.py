@@ -57,7 +57,7 @@ SHA = "a" * 64
 # The references each role class carries.
 ROLE_REFERENCES: dict[str, tuple[TaskDocumentRef, ...]] = {
     "architect": (),
-    "system-specialist": (),
+    "investigator": (),
     "orchestrator": (SPRINT,),
     "manager": (SPRINT, MASTER),
     "worker": (SPRINT, MASTER, LEAF),
@@ -865,7 +865,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 self.assertEqual(self.dispatch(request)[1]["status"], "running")
                 self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
         with self.subTest("a taskless retry writes a lost artifact again"):
-            request = self.request("system-specialist")
+            request = self.request("investigator")
             self.runtime.fail("agent-create", "paseo_bridge_timeout")
             self.dispatch(request)
             artifact = Path(self.artifact(request)["path"])

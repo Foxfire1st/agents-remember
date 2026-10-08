@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agents_remember.application.role_capsules import (
@@ -69,6 +69,7 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES, CapsuleOperation
+from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.store import capture_task_doc_source
@@ -121,6 +122,7 @@ class CapsuleCompileOutcome:
     refusal: CapsuleCompilationError | None
     binding: CapsuleBinding | None = None
     projection: TaskProjection | None = None
+    used_role_alias: bool = False
 
     @property
     def ok(self) -> bool:
@@ -148,9 +150,11 @@ class CapsuleCompileOutcome:
         """One operator-facing line: the digest, or the refusal and its remedy."""
 
         if self.refusal is not None:
-            return self.refusal.render()
-        assert self.compilation is not None
-        return self.compilation.render_explanation()
+            message = self.refusal.render()
+        else:
+            assert self.compilation is not None
+            message = self.compilation.render_explanation()
+        return message + (" " + ROLE_ALIAS_NOTICE if self.used_role_alias else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +186,9 @@ class CapsuleSeatAddress:
     role: str
     operation: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "role", canonical_role(self.role))
+
 
 @dataclass(frozen=True, slots=True)
 class AdmittedEnclosure:
@@ -203,6 +210,17 @@ class AdmittedEnclosure:
 
 
 def compile_task_capsule(
+    config: McpRuntimeConfig,
+    request: CapsuleCompileRequest,
+    *,
+    sources: CapsuleSourceSelectionRequest | None = None,
+) -> CapsuleCompileOutcome:
+    canonical = replace(request, role=canonical_role(request.role))
+    outcome = _compile_task_capsule(config, canonical, sources=sources)
+    return replace(outcome, used_role_alias=request.role == "system-specialist")
+
+
+def _compile_task_capsule(
     config: McpRuntimeConfig,
     request: CapsuleCompileRequest,
     *,

@@ -14,6 +14,7 @@ from pydantic import Field
 from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
+from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_launch_preparation import REPORTS_DIRECTORY
 from agents_remember.cli.role_launch_receipts import (
     REPORT_ACCESS_LINK,
@@ -77,6 +78,14 @@ def read_role_report(config: McpRuntimeConfig, request: RoleReportRequest) -> JS
             409,
         )
 
+    recorded_role = str(receipt["role"])
+    if recorded_role != request.role:
+        if context.effective_task:
+            expected_name = (
+                f"{context.effective_task.document.id}-{recorded_role}-{request.request_id}.md"
+            )
+        else:
+            root = root.parent / recorded_role
     path = _recorded_report_path(root, expected_name, receipt.get("report"))
     return path if isinstance(path, JSONResponse) else _read_report_file(path)
 
@@ -165,6 +174,6 @@ def _read_report_file(path: Path) -> JSONResponse:
 
 def register_role_report_route(app: FastAPI, config: McpRuntimeConfig) -> None:
     def endpoint(request: RoleReportRequest) -> JSONResponse:
-        return read_role_report(config, request)
+        return alias_response(request, read_role_report(config, request))
 
     app.add_api_route("/api/role-launch/report", endpoint, methods=["POST"])

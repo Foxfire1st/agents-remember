@@ -11,7 +11,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agents_remember.application.agent_binding import TOOL_SERVER_NAME
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
@@ -19,7 +19,6 @@ from agents_remember.application.role_capsules.launch import compile_launch_caps
 from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     ROLE_LEVELS,
-    TASKLESS_ROLES,
     RoleLaunchContext,
     resolve_role_launch_context,
     selection_binding,
@@ -43,6 +42,7 @@ from agents_remember.cli.role_launch_workspace import _leaf_contract_path, _reso
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import (
     LauncherRole,
     RoleAgentOverride,
@@ -55,7 +55,7 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument
 
 ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
-    "system-specialist": "orientation",
+    "investigator": "orientation",
     "orchestrator": "coordination",
     "manager": "coordination",
     "worker": "implementation",
@@ -109,7 +109,7 @@ _AR_TOOL_SERVER_USAGE = (
 def role_start_operation(role: LauncherRole) -> CapsuleOperation:
     """Select the one existing operation appropriate to a manually selected role."""
 
-    return ROLE_START_OPERATIONS[role]
+    return ROLE_START_OPERATIONS[cast(LauncherRole, canonical_role(role))]
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,7 +363,7 @@ def _compile_handover(
         workspace_root=Path(workspace["path"]),
         task_document_ref=task_ref,
         allow_project_task_binding=(
-            context.role in {"orchestrator", "manager"}
+            context.role in {"orchestrator", "manager", "investigator"}
             and Path(workspace["path"]).resolve() == role_config.workspace_root.resolve()
         ),
     )
@@ -387,7 +387,7 @@ def _compile_handover(
             ContextPacketRequest(repo_id=primary.ref.repository, include_providers=False),
         )
     repository_context = None
-    if context.role in TASKLESS_ROLES:
+    if context.effective_task is None:
         repository_context = {
             "selectedRepository": None,
             "availableRegisteredRepositoryIds": sorted(config.repositories),
@@ -419,7 +419,7 @@ def _compile_handover(
         "requestId": str(request_id),
         "role": context.role,
         "operation": operation,
-        "assignment": _role_assignment(context, report_path),
+        "assignment": _role_assignment(context, report_path, started_by=started_by),
         "agent": agent_id,
         "selection": selection_binding(context),
         "documents": task_reads,
@@ -678,7 +678,9 @@ def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> 
     }
 
 
-def _role_assignment(context: RoleLaunchContext, report_path: str) -> str:
+def _role_assignment(
+    context: RoleLaunchContext, report_path: str, *, started_by: StartingAgent | None = None
+) -> str:
     selected = context.effective_task
     if context.role == "architect":
         return (
@@ -690,8 +692,13 @@ def _role_assignment(context: RoleLaunchContext, report_path: str) -> str:
             f"repository's existing AR task portfolio. Do not invent a sprint or task identity. "
             f"Write this session's report to {report_path}."
         )
-    if context.role == "system-specialist":
-        return f"Project-scoped system-specialist launch. Ask the developer to identify the provider degradation or system concern and the desired investigation scope before acting. Preserve the role's provider-only and report-first boundaries. Write the report to {report_path}. Do not invent a degradation event or task identity."
+    if context.role == "investigator":
+        concern = (
+            "The concern arrives in the parent's first role_message. Ask that parent once for a missing concern or scope and wait; do not invent one."
+            if started_by
+            else "Ask the developer for the scoped concern before acting."
+        )
+        return f"Investigator launch: investigate one scoped concern of any kind. {concern} Write one report to {report_path}. Change no code checkout or leaf enclosure, memory, task document or status; make no commit, closeout or integration and start no role. Change provider or system state only after the report and an explicit authorized order."
     assert selected is not None
     return (
         f"Perform the {context.role} role for canonical AR document "
@@ -706,7 +713,7 @@ def _role_report_path(
     *,
     request_id: uuid.UUID | None = None,
 ) -> str:
-    if context.role in TASKLESS_ROLES:
+    if context.effective_task is None:
         if request_id is None:
             raise ValueError("A taskless role report requires its durable requestId.")
         report_root = (

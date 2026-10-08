@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from agents_remember.controlplane.seats import current_seat_occupant
 from agents_remember.errors import SeatOccupancyError
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.ports import TerminalCatalogPort
@@ -31,6 +32,7 @@ class StructuralSeatResolver:
     def current(self, document: TaskDocumentRef, role: str) -> TerminalCatalogEntry:
         """Resolve exactly one current occupant, preferring the bound incumbent over a staged heir."""
 
+        role = canonical_role(role)
         try:
             self.topology.validate_role(document, role)
         except TaskDocumentRefError as exc:
@@ -51,14 +53,14 @@ class StructuralSeatResolver:
         document = caller.binding_task_document_ref
         if document is None:
             raise StructuralSeatError("ambient-seat-unbound", "caller has no task document")
-        role = caller.binding_role
+        role = canonical_role(caller.binding_role)
         if role == "reviewer":
             return self._reviewer_parent_address(caller, document)
         if role in {"worker", "curator"}:
             return self._parent_document(document), "manager"
         if role == "manager":
             return self._parent_document(document), "orchestrator"
-        if role == "system-specialist":
+        if role == "investigator":
             return document, "orchestrator"
         if role in {"orchestrator", "strategist", "designer"}:
             return document, "architect"
@@ -76,7 +78,7 @@ class StructuralSeatResolver:
         """Return an authorized canonical child address even while its seat is vacant."""
 
         self.authorize_child(caller, document=document, role=role)
-        return document, role
+        return document, canonical_role(role)
 
     def parent(self, caller: TerminalCatalogEntry) -> TerminalCatalogEntry:
         """Resolve the caller's current structural parent without spawn ancestry."""
@@ -105,6 +107,7 @@ class StructuralSeatResolver:
     ) -> None:
         """Prove a direct-child binding without requiring that the child exists yet."""
 
+        role = canonical_role(role)
         caller_document = caller.binding_task_document_ref
         if caller_document is None:
             raise StructuralSeatError("ambient-seat-unbound", "caller has no task document")
@@ -126,7 +129,7 @@ class StructuralSeatResolver:
                 )
         elif caller.binding_role == "orchestrator":
             same_sprint_child = document == caller_document and role in {
-                "system-specialist",
+                "investigator",
                 "reviewer",
             }
             master_manager = (
@@ -135,7 +138,7 @@ class StructuralSeatResolver:
             if not same_sprint_child and not master_manager:
                 raise StructuralSeatError(
                     "structural-child-refused",
-                    "orchestrator children are its sprint specialists, its super-exit reviewer, "
+                    "orchestrator children are its sprint investigators, its super-exit reviewer, "
                     "and managers on direct masters",
                 )
         elif caller.binding_role == "manager":

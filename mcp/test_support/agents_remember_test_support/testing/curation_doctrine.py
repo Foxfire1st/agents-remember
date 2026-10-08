@@ -83,6 +83,114 @@ class RetiredCurationStatement:
 
 RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
     RetiredCurationStatement(
+        statement="When a System Specialist is needed, start it with `role_start` on `agents-remember-task`; you may start that role. Give the returned agent ID, report path, handover artifact path and status to the Manager or Orchestrator coordinating the work; neither gains permission to start that role.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="When a System Specialist is needed, start it with `role_start` on `agents-remember-task`; you may start that role. Give the returned agent ID, report path, handover artifact path and status to the Manager or Orchestrator coordinating the work; neither gains permission to start that role.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="under developer-chosen direct coordination, assign it to a leaf's Worker or Reviewer, including a job that belongs to no leaf.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="under developer-chosen direct coordination, assign it to a leaf's Worker or Reviewer, including a job that belongs to no leaf.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="You may start Manager, Worker, Reviewer, and Curator.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="You may start Manager, Worker, Reviewer, and Curator.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="Never start that role yourself. The Architect may start a needed System Specialist and supply its returned agent ID, report path, handover artifact path and status so you can coordinate its work.",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="Never start that role yourself. The Architect may start a needed System Specialist and supply its returned agent ID, report path, handover artifact path and status so you can coordinate its work.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="You may start Worker, Reviewer and Curator; none of them starts a role.",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe="You may start Worker, Reviewer and Curator; none of them starts a role.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="Assign a check or investigation that belongs to no leaf to the Worker or Reviewer of the nearest leaf.",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe="Assign a check or investigation that belongs to no leaf to the Worker or Reviewer of the nearest leaf.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement=" Never start that role yourself. The Architect may start a needed System Specialist and supply its returned agent ID, report path, handover artifact path and status to you or the Orchestrator above you.",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe=" Never start that role yourself. The Architect may start a needed System Specialist and supply its returned agent ID, report path, handover artifact path and status to you or the Orchestrator above you.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="an Orchestrator Manager, Worker, Reviewer, and Curator under its own sprint; a Manager Worker, Reviewer, and Curator under its own master;",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="an Orchestrator Manager, Worker, Reviewer, and Curator under its own sprint; a Manager Worker, Reviewer, and Curator under its own master;",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="A taskless Architect or System Specialist uses the developer's request and asks for a missing outcome/repository/concern; do not invent a task or trust packet.",
+        sources=("skills/l-01-agent-lifecycles/operations/orientation.md",),
+        probe="A taskless Architect or System Specialist uses the developer's request and asks for a missing outcome/repository/concern; do not invent a task or trust packet.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/SKILL.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/roles/investigator.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/roles/orchestrator.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/roles/manager.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/operations/orientation.md",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="System Specialist",
+        sources=("skills/l-01-agent-lifecycles/composition-manifest.json",),
+        probe="System Specialist",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="Keep work within the stated provider/system scope.",
+        sources=("skills/l-01-agent-lifecycles/roles/investigator.md",),
+        probe="Keep work within the stated provider/system scope.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
+        statement="No repository-wide redesign, code changes, onboarding writes, task status changes, closeout, or self-approval unless a separate explicit assignment grants that role.",
+        sources=("skills/l-01-agent-lifecycles/roles/investigator.md",),
+        probe="No repository-wide redesign, code changes, onboarding writes, task status changes, closeout, or self-approval unless a separate explicit assignment grants that role.",
+        reason="MIK-R98@v1: Investigator name, scoped investigation and start/report authority replace the earlier role restriction",
+    ),
+    RetiredCurationStatement(
         statement='An explicitly requested narrow `memory_quality_check` or `curator_coherence` diagnostic, always with `contract_path="<enclosure-contract-path>"`; these are never routine closeout/integration prerequisites.',
         sources=("skills/l-01-agent-lifecycles/templates/curator-brief.md",),
         probe="An explicitly requested narrow",
@@ -341,7 +449,7 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
     ),
     RetiredCurationStatement(
         statement="Return the report and ask questions in your own chat; when a parent agent started you, also tell it",
-        sources=("skills/l-01-agent-lifecycles/roles/system-specialist.md",),
+        sources=("skills/l-01-agent-lifecycles/roles/investigator.md",),
         probe="Return the report and ask questions in your own chat; when a parent agent started you, also tell it",
         reason="MIK-R93@v1: developer questions follow the parent chain, and only a parentless or unreachable-parent case uses the own chat",
     ),

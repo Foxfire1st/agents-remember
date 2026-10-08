@@ -1174,6 +1174,7 @@ consumers = [
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_instrument_discipline.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_investigator.py",
   "mcp/tests/test_kernel_pure_regressions.py",
   "mcp/tests/test_knowledge_anchor_content.py",
   "mcp/tests/test_knowledge_bootstrap.py",
@@ -1913,6 +1914,7 @@ permanence_rationale = "What a launch gives an agent is asserted for every role 
 replacement_contract = "contract:paseo-launch-given-to-agent-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_investigator.py",
   "mcp/tests/test_paseo_agent_tools.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
@@ -1940,6 +1942,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_host_release_contract.py",
+  "mcp/tests/test_investigator.py",
   "mcp/tests/test_paseo_agent_tools.py",
   "mcp/tests/test_paseo_bridge.py",
   "mcp/tests/test_paseo_bridge_agents.py",

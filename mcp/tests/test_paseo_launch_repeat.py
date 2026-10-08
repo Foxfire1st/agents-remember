@@ -168,7 +168,7 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 # The rules that protect a request id still hold after the change.
                 changed = self.request(role, request.request_id, agentId="codex", effortId="high")
                 self.assertIn("already bound to different", str(self.refused(changed).detail))
-                other = "system-specialist" if role == "architect" else "reviewer"
+                other = "investigator" if role == "architect" else "reviewer"
                 elsewhere = self.refused(self.request(other, request.request_id))
                 self.assertIn("already bound to another AR role selection", str(elsewhere.detail))
                 self.close_execution(request, "completed")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from agents_remember.models.role_identity import canonical_role, role_spellings
 from agents_remember.models.terminal_catalog import (
     LEGACY_CHAT_SEAT_ROLE,
     TERMINAL_SEAT_ROLE,
@@ -24,7 +25,7 @@ PIPELINE_SEAT_ROLES = (
     "worker",
     "reviewer",
     "curator",
-    "system-specialist",
+    "investigator",
     "agent",
 )
 
@@ -38,7 +39,7 @@ def attach_seat_role(
         return TERMINAL_SEAT_ROLE
     explicit = _clean(requested)
     if explicit is not None:
-        return explicit
+        return canonical_role(explicit)
     spawned = _clean(spawn_role)
     if spawned is not None:
         return spawned
@@ -57,8 +58,9 @@ def role_suffixed_leaf_base(
 
     lowered = leaf_ref.lower()
     for role in roles:
-        for separator in ("-", "/", ":"):
-            suffix = f"{separator}{role}"
-            if lowered.endswith(suffix) and len(leaf_ref) > len(suffix):
-                return leaf_ref[: -len(suffix)], role
+        for spelling in role_spellings(role):
+            for separator in ("-", "/", ":"):
+                suffix = f"{separator}{spelling}"
+                if lowered.endswith(suffix) and len(leaf_ref) > len(suffix):
+                    return leaf_ref[: -len(suffix)], canonical_role(role)
     return None

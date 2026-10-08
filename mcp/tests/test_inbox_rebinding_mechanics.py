@@ -17,6 +17,7 @@ from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
+    InboxOwner,
     InboxPoster,
     InboxRouting,
     OperatorInboxEntry,
@@ -73,6 +74,29 @@ class TransitionIdempotenceTests(unittest.TestCase):
             poster=InboxPoster(created_by="system", created_via="cli"),
         )
         self.store.append(self.entry)
+
+    def test_new_role_fields_are_canonical_while_legacy_rows_keep_raw_values(self) -> None:
+        entry = create_operator_inbox_entry(
+            InboxMessage(ask="Investigate", response="Concern"),
+            entry_id="investigation",
+            now=NOW.isoformat(),
+            routing=InboxRouting(
+                address=InboxAddress(recipient_role="system-specialist"),
+                owner=InboxOwner(role="system-specialist"),
+            ),
+            poster=InboxPoster(
+                created_by="agent", created_via="cli", sender_role="system-specialist"
+            ),
+        )
+        role_fields = ("senderRole", "recipientRole", "ownerRole")
+        for name in role_fields:
+            self.assertEqual(getattr(entry, name), "investigator")
+        legacy_payload = entry.model_dump(by_alias=True)
+        legacy_payload.update(dict.fromkeys(role_fields, "system-specialist"))
+        self.assertEqual(
+            OperatorInboxEntry.model_validate(legacy_payload).model_dump(by_alias=True),
+            legacy_payload,
+        )
 
     def test_landed_superseded_unresolved_expired_and_rebind_are_idempotent(self) -> None:
         transitions = (

@@ -75,7 +75,7 @@ def config(tmp_path: Path) -> McpRuntimeConfig:
 
 def recorded(config: McpRuntimeConfig, role: str = "architect"):
     body: dict[str, Any] = {"role": role, "requestId": str(uuid.uuid4())}
-    if role not in {"architect", "system-specialist"}:
+    if role not in {"architect", "investigator"}:
         body["sprintDocumentRef"] = {"repository": "demo", "path": "sprint/task.json"}
     if role in {"manager", "worker", "reviewer", "curator"}:
         body["masterDocumentRef"] = {"repository": "demo", "path": "master/task.json"}
@@ -129,12 +129,12 @@ def tree_snapshot(root: Path):
 
 @pytest.mark.parametrize(
     "role",
-    ["architect", "system-specialist", "orchestrator", "manager", "worker", "reviewer", "curator"],
+    ["architect", "investigator", "orchestrator", "manager", "worker", "reviewer", "curator"],
 )
 def test_report_of_every_launchable_role_is_read_only(config, role):
     client, body, report, _address, receipt = recorded(config, role)
     report.write_text("# The selected report\n")
-    if role in {"architect", "system-specialist"}:
+    if role in {"architect", "investigator"}:
         legacy = _legacy_receipt_path(config, RoleReportRequest.model_validate(body))
         legacy.write_text(json.dumps({**receipt, "requestId": str(uuid.uuid4())}))
     before = tree_snapshot(config.workspace_root.parent)
@@ -353,7 +353,7 @@ def test_a_recorded_path_in_another_role_or_parent_folder_is_refused(config, rol
     client, body, report, address, receipt = recorded(config, role)
     root = report.resolve().parent
     other_root = (
-        (config.workspace_root / ".agents-remember/reports/role-launch/system-specialist")
+        (config.workspace_root / ".agents-remember/reports/role-launch/investigator")
         if location == "other-role"
         else root.parent
     )

@@ -179,6 +179,7 @@ class SignalRoutingTests(unittest.TestCase):
             ("orchestrator", "architect"),
             ("strategist", "architect"),
             ("designer", "architect"),
+            ("investigator", "orchestrator"),
             ("system-specialist", "orchestrator"),
         ):
             with self.subTest(role=role):

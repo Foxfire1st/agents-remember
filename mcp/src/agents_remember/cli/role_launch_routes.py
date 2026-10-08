@@ -24,6 +24,10 @@ from agents_remember.application.role_launch_context import (
     selection_binding,
 )
 from agents_remember.cli import role_launch_progress
+from agents_remember.cli.investigator_receipts import (
+    investigator_listing,
+    investigator_start_capacity,
+)
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_TIMEOUT,
     RUNTIME_NOT_CONFIGURED,
@@ -39,6 +43,7 @@ from agents_remember.cli.paseo_launch import (
     build_launch_call,
     mint_agent_id,
 )
+from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.cli.role_launch_liveness import (
@@ -140,21 +145,21 @@ def _bind_frame_endpoint(config: McpRuntimeConfig):
 
 def _bind_options_endpoint(config: McpRuntimeConfig):
     def endpoint(request: RoleLauncherOptionsRequest) -> JSONResponse:
-        return _role_launch_options_endpoint(config, request)
+        return alias_response(request, _role_launch_options_endpoint(config, request))
 
     return endpoint
 
 
 def _bind_dispatch_endpoint(config: McpRuntimeConfig):
     def endpoint(request: RoleDispatchRequest) -> JSONResponse:
-        return _role_launch_dispatch_endpoint(config, request)
+        return alias_response(request, _role_launch_dispatch_endpoint(config, request))
 
     return endpoint
 
 
 def _bind_result_endpoint(config: McpRuntimeConfig):
     def endpoint(request: RoleResultRequest) -> JSONResponse:
-        return _role_launch_result_endpoint(config, request)
+        return alias_response(request, _role_launch_result_endpoint(config, request))
 
     return endpoint
 
@@ -171,10 +176,17 @@ def _role_launch_options_endpoint(
         try:
             if request.role in TASKLESS_ROLES:
                 _migrate_taskless_legacy_receipt(config, request)
-                response["executions"] = [
-                    _public_execution(receipt)
-                    for _path, receipt in _taskless_execution_receipts(config, request)
-                ]
+                if request.role == "investigator":
+                    listing = investigator_listing(config, request)
+                    response["executions"] = [
+                        _public_execution(receipt) for _, receipt in listing.records
+                    ]
+                    response["omittedCount"] = listing.omitted_count
+                else:
+                    response["executions"] = [
+                        _public_execution(receipt)
+                        for _, receipt in _taskless_execution_receipts(config, request)
+                    ]
             else:
                 receipt_path = _receipt_path(config, request)
                 receipt = _read_receipt(receipt_path)
@@ -213,7 +225,8 @@ def _role_launch_dispatch_endpoint(
     try:
         if request.action == "revive":
             return _revive_execution(config, request)
-        return _start_execution(config, request, started_by)
+        with investigator_start_capacity(config, request):
+            return _start_execution(config, request, started_by)
     except HostUnreachableRefusal as refusal:
         return JSONResponse({"detail": refusal.detail, "hostUnreachable": True}, status_code=409)
     except (OSError, ValueError, TaskDocumentRefError, PaseoBridgeFailure) as error:

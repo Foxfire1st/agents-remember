@@ -301,7 +301,7 @@ export const roleChip = cva({
       },
       WKR: { color: "cyan" },
       CUR: { color: "cyan" },
-      SYS: { color: "cyan" },
+      INV: { color: "cyan" },
       REV: { color: "amber" },
     },
   },

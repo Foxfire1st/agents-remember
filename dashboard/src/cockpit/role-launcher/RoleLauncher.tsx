@@ -5,7 +5,7 @@ import { sameTaskDocumentRef } from "../../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "../RoleExecutionStatus";
 
 
-import { EMPTY_ROLE_EFFORTS, EMPTY_ROLE_MODELS, LAUNCHER_ROLES, isTasklessRole, launchChoiceProblem, launchSelectionComplete, masterOptionsForSprint, optionIndex, roleAgentOverrideFor, roleDocumentScope, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sameRoleDocumentScope, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleScopedExecution } from "../roleLaunchModel";
+import { EMPTY_ROLE_EFFORTS, EMPTY_ROLE_MODELS, LAUNCHER_ROLES, isTasklessRole, usesRequestReceipts, launchChoiceProblem, launchSelectionComplete, masterOptionsForSprint, optionIndex, roleAgentOverrideFor, roleDocumentScope, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sameRoleDocumentScope, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleScopedExecution } from "../roleLaunchModel";
 
 
 
@@ -255,7 +255,7 @@ export function RoleLauncher({
   const retrySelection = currentScopedExecution?.retryPayload ?? launchSelection;
   const canRetrySelection = sameRoleDocumentScope(roleDocumentScope(retrySelection), roleDocumentScope(launchSelection));
   const choiceProblem = optionsReady ? launchChoiceProblem(roleDefaults, agents, selection.agentOverride) : null;
-  const canStart = !choiceProblem && (isTasklessRole(role)
+  const canStart = !choiceProblem && (usesRequestReceipts(selection)
     ? optionsReady && complete && !busy && !["starting", "unknown"].includes(status ?? "")
     : optionsReady && complete && !busy && !liveOccupant && !canRetry && currentScopedExecution?.canStart !== false);
   // Every refresh re-reads the agent, so Result is offered for any execution, closed ones included.
@@ -295,7 +295,7 @@ export function RoleLauncher({
           id="launcher-role"
           title={LAUNCHER_ROLES.find((option) => option.id === role)?.label ?? role}
           value={role}
-          disabled={busy || optionsLoading || (!isTasklessRole(role) && currentScopedExecution?.canRetry === true)}
+          disabled={busy || optionsLoading || (!usesRequestReceipts(selection) && currentScopedExecution?.canRetry === true)}
           onChange={(event) => onSelectionChange(boundRoles ? { ...roleDocumentScope(selection), role: event.target.value as LauncherRole } : { role: event.target.value as LauncherRole })}
         >
           {LAUNCHER_ROLES.filter((option) => !boundRoles || boundRoles.includes(option.id)).map((option) => <option key={option.id} value={option.id}>{boundRoleLabel(option.label, option.id === role, Boolean(boundRoles), status)}</option>)}
@@ -464,7 +464,7 @@ export function RoleLauncher({
             {"Speed: " + (selectedAgentId === roleDefaults.agent ? (roleDefaults.serviceTier === "fast" ? "Fast" : roleDefaults.serviceTier) : "provider default")}
           </span>
         ) : null}
-        <button className={roleLauncherButton({ tone: "primary" })} type="button" aria-label="Start role" title="Start role" disabled={!boundCanStart(canStart, Boolean(boundRoles), liveOccupant)} onClick={() => void onLaunch(launchSelection)}>{row.startLabel}</button>
+        <button className={roleLauncherButton({ tone: "primary" })} type="button" aria-label="Start role" title="Start role" disabled={!boundCanStart(canStart, Boolean(boundRoles) && (!usesRequestReceipts(selection) || isTasklessRole(selection)), liveOccupant)} onClick={() => void onLaunch(launchSelection)}>{row.startLabel}</button>
         {canRetry && canRetrySelection && retryRequestId ? (
           <button className={roleLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry role launch" title="Retry the same saved launch request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
         ) : null}

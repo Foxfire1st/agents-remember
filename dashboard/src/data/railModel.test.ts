@@ -62,6 +62,10 @@ const byId = (id: string) => {
 describe('role codes (R6 — RULED three-letter chips)', () => {
   it('maps the six ruled roles and derives the rest; absent without a spawn role', () => {
     expect(roleCode(byId('architect'))).toBe('ARC');
+    const oldInvestigator = { ...byId('architect'), spawnRole: 'system-specialist' };
+    expect(roleCode(oldInvestigator)).toBe('INV');
+    expect(roleCode({ ...oldInvestigator, spawnRole: 'investigator' })).toBe('INV');
+    expect(oldInvestigator.spawnRole).toBe('system-specialist');
     expect(roleCode(byId('orchestrator'))).toBe('ORC');
     expect(roleCode(byId('manager-l4'))).toBe('MGR');
     expect(roleCode(byId('worker-l4'))).toBe('WKR');

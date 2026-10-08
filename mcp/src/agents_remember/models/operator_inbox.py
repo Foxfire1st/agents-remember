@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.role_identity import canonical_role
 
 # The operator-inbox wire vocabulary (moved from controlplane.operator_inbox_records).
 OperatorInboxState = Literal[
@@ -28,6 +29,7 @@ AgentRole = Literal[
     "manager",
     "worker",
     "reviewer",
+    "investigator",
     "system-specialist",
     "architect",
     "curator",
@@ -100,6 +102,11 @@ class OperatorInboxPostResponse(ToolResponse):
     # on, instead of a bare tool error. Absent on a queued post.
     detail: str | None = Field(default=None, max_length=8192)
 
+    @field_validator("senderRole", "recipientRole", "ownerRole")
+    @classmethod
+    def _canonical_role(cls, value: AgentRole | None) -> AgentRole | None:
+        return cast(AgentRole, canonical_role(value)) if value is not None else None
+
     @model_validator(mode="after")
     def _require_the_queued_projection_when_ok(self) -> OperatorInboxPostResponse:
         """A post that reports success must name the entry it queued and how it landed."""
@@ -124,6 +131,11 @@ class OperatorInboxPollResponse(ToolResponse):
     recipientRole: AgentRole | None = None
     entryCount: int
     entries: list[dict[str, Any]]
+
+    @field_validator("recipientRole")
+    @classmethod
+    def _canonical_role(cls, value: AgentRole | None) -> AgentRole | None:
+        return cast(AgentRole, canonical_role(value)) if value is not None else None
 
 
 class OperatorInboxConsumeResponse(ToolResponse):

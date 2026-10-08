@@ -94,6 +94,7 @@ unit-regression = [
   "mcp/tests/test_inbox_arrival_guarantee.py",
   "mcp/tests/test_inbox_rebinding_mechanics.py",
   "mcp/tests/test_install_runtime.py",
+  "mcp/tests/test_investigator.py",
   "mcp/tests/test_kernel_pure_regressions.py",
   "mcp/tests/test_knowledge_anchor_content.py",
   "mcp/tests/test_knowledge_bootstrap.py",

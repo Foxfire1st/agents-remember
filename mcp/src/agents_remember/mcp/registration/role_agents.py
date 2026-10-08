@@ -40,15 +40,16 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
 
         Only a role agent that AR launched can call this: the caller is the agent this tool
         server was started for. An architect may start every role except architect; an
-        orchestrator may start manager, worker, reviewer and curator, and a manager worker,
-        reviewer and curator, each only on selections under its own sprint or master; worker,
-        reviewer, curator and system-specialist may start none.
+        orchestrator may start manager, worker, reviewer, curator and investigator, and a manager
+        worker, reviewer, curator and investigator, each only under its own sprint or master;
+        worker, reviewer, curator and investigator may start none.
 
-        Give the task references the role's class requires: none for system-specialist, the
-        sprint for orchestrator, sprint and master for manager, sprint, master and leaf for
-        worker, reviewer and curator. request_id is a UUID the caller chooses: the same id with
+        An investigator accepts no task reference, a sprint, or a sprint and master; never a leaf.
+        Give the other roles their required references: sprint for orchestrator, sprint and
+        master for manager, sprint, master and leaf for worker, reviewer and curator. request_id is a UUID the caller chooses: the same id with
         the same selection reconciles the same agent and never creates a second; a new id is a
-        new start, which a task-bound selection with an open execution refuses. agent, model and
+        new start. A selected investigator admits at most eight open request-addressed executions;
+        the other task-bound roles refuse a new start while an execution is open. agent, model and
         effort override the role default and are checked against the host's catalog at the time
         of the call.
 
@@ -106,7 +107,10 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         permission with a denial: the developer answers it in the recipient's chat, then send
         again. A recipient whose start has not finished is refused as recipient-busy as well.
         A recipient whose session is closed is resumed first; an archived or missing recipient
-        is refused and stays as it is. An address by role never means the caller itself.
+        is refused and stays as it is. A new turn on a completed task-bound Investigator
+        needs one of that selection's eight open slots before delivery or resume; a full selection
+        refuses with the eight request IDs and the close/archive remedy. An address by role
+        never means the caller itself.
 
         Without wait the call returns status accepted once the host accepted the message. With
         wait it returns when the turn that consumed the message ends: turn-finished with its
@@ -117,7 +121,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         without a text and detail says that the reply must be read later. A reply to a message
         delivered during a turn can be the running turn's text; detail says so then.
         Refusals: recipient-busy, recipient-not-found, recipient-archived, recipient-ambiguous,
-        recipient-cannot-be-resumed, scope-check-failed, caller-has-no-binding,
+        recipient-cannot-be-resumed, investigator-capacity, scope-check-failed, caller-has-no-binding,
         no-paseo-runtime-configured, host-unreachable. A finished turn is a fact about the
         recipient's turn, never AR acceptance of a requirement.
         """

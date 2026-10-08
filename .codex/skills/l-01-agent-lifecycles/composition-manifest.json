@@ -12,7 +12,7 @@
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap"
   ],
   "routing_conditions": [
@@ -28,11 +28,11 @@
     },
     {
       "id": "manual-taskless-projects-role",
-      "condition": "Architect or System Specialist is explicitly selected for a manual Projects launch with no task binding.",
+      "condition": "Architect or Investigator is explicitly selected for a manual Projects launch with no task binding.",
       "selects": "the supplied role and one applicable operation",
       "role_from": "the explicit launcher selection",
       "task_from": "none; no synthetic task reference is created",
-      "requires": "ask only for a missing outcome/repository or system concern/report scope"
+      "requires": "ask only for a missing outcome/repository or concern/report scope; an Investigator asks its parent when it has one"
     }
   ],
   "operations": {
@@ -48,7 +48,7 @@
         "worker",
         "curator",
         "reviewer",
-        "system-specialist",
+        "investigator",
         "bootstrap"
       ]
     },
@@ -114,7 +114,7 @@
         "manager",
         "worker",
         "curator",
-        "system-specialist",
+        "investigator",
         "bootstrap",
         "reviewer"
       ]
@@ -486,20 +486,29 @@
         "plan-review.md"
       ]
     },
-    "system-specialist": {
-      "file": "roles/system-specialist.md",
+    "investigator": {
+      "file": "roles/investigator.md",
       "altitude": "sprint",
       "tools": [
         "context_packet",
         "provider_diagnostics",
         "provider_status",
         "read_ar_files",
-        "role_message"
+        "role_message",
+        "cgc_callees",
+        "cgc_callers",
+        "cgc_dependencies",
+        "cgc_symbol_search",
+        "grepai_search",
+        "knowledge_diff",
+        "knowledge_read",
+        "task_doc",
+        "worktree_status"
       ],
       "skills": [
         "l-01-agent-lifecycles"
       ],
-      "seat": "Taskless Projects provider/system investigator; reports before authorized remediation.",
+      "seat": "Projects investigator for one scoped concern, taskless or selected on a sprint/master; reports before authorized provider/system remediation.",
       "core": [
         "authority",
         "invariants",

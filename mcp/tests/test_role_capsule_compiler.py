@@ -74,7 +74,7 @@ FIXTURE_ROLES = (
     "worker",
     "curator",
     "reviewer",
-    "system-specialist",
+    "investigator",
     "bootstrap",
 )
 
@@ -106,7 +106,7 @@ FIXTURE_APPLICABILITY = {
         "manager",
         "worker",
         "curator",
-        "system-specialist",
+        "investigator",
     ),
     "bootstrap": ("bootstrap",),
 }
@@ -120,7 +120,7 @@ FIXTURE_ROLE_CORE = {
     "worker": ("authority", "invariants", "lifecycle-frame", "acceptance"),
     "curator": ("authority", "invariants", "acceptance"),
     "reviewer": ("authority", "invariants", "loop", "acceptance"),
-    "system-specialist": ("authority", "invariants", "acceptance"),
+    "investigator": ("authority", "invariants", "acceptance"),
     "bootstrap": ("authority", "invariants", "acceptance"),
 }
 

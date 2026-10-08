@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.application.role_launch_context import LEAF_ROLES, ROLE_LEVELS, TASKLESS_ROLES
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # The name under which every launched agent is given the tool server of the launching build.
@@ -109,7 +110,7 @@ def read_agent_binding(environment: Mapping[str, str] | None = None) -> AgentBin
         return None
     binding = AgentBinding(
         agent_id=_minted_id(source, AGENT_ID_VARIABLE),
-        role=_text(source, ROLE_VARIABLE),
+        role=canonical_role(_text(source, ROLE_VARIABLE)),
         request_id=_minted_id(source, REQUEST_ID_VARIABLE),
         report_path=_text(source, REPORT_PATH_VARIABLE),
         sprint_ref=_reference(source, SPRINT_REF_VARIABLE),
@@ -129,7 +130,12 @@ def read_agent_binding(environment: Mapping[str, str] | None = None) -> AgentBin
         binding.master_ref is not None,
         binding.task_ref is not None,
     )
-    if given != _references_of(binding.role):
+    valid = (
+        given in {(False, False, False), (True, False, False), (True, True, False)}
+        if binding.role == "investigator"
+        else given == _references_of(binding.role)
+    )
+    if not valid:
         raise ValueError(
             f"The agent binding of this tool server does not carry the task references of "
             f"a {binding.role}: {SPRINT_REF_VARIABLE}, {MASTER_REF_VARIABLE}, {TASK_REF_VARIABLE}."
@@ -140,6 +146,7 @@ def read_agent_binding(environment: Mapping[str, str] | None = None) -> AgentBin
 def _references_of(role: str) -> tuple[bool, bool, bool]:
     """Which of sprint, master and task reference a role's class carries."""
 
+    role = canonical_role(role)
     return (role not in TASKLESS_ROLES, role == "manager" or role in LEAF_ROLES, role in LEAF_ROLES)
 
 

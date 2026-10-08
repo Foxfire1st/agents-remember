@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "Route explicit role capsules for canonical AR work or taskless Projects Architect and System Specialist launches on the Paseo host."
+description: "Route explicit role capsules for canonical AR work or taskless Projects Architect and Investigator launches on the Paseo host."
 ---
 
 # Role-capsule router
@@ -9,11 +9,11 @@ This is a thin router. It does not define a shared lifecycle or inject shared co
 
 ## Select the supplied role and operation
 
-The role launcher supports these seven role IDs: `architect`, `system-specialist`, `orchestrator`, `manager`, `worker`, `reviewer`, and `curator`. The manifest retains other registry entries, but this router does not launch them. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
+The role launcher supports these seven role IDs: `architect`, `investigator`, `orchestrator`, `manager`, `worker`, `reviewer`, and `curator`. `system-specialist` is the earlier ID of the same Investigator role. The manifest retains other registry entries, but this router does not launch them. If the handover lacks a supported role or one applicable operation, report the exact missing or unsupported field in your own chat and stop. Do not infer a role, operation, task, repository, or owner from a chat title, runtime directory, or nearby document.
 
 For a task-bound launch, use only the canonical task reference and paired workspace supplied in the handover. Follow that role and operation's exact task-read arguments. Do not manufacture task IDs or parent relationships. Projects is a shared execution workspace, not a repository identity; leaf roles use the selected AR-paired task enclosure already bound by the launcher.
 
-Architect and System Specialist may be started manually at Projects altitude without task references. A taskless Architect asks only for missing outcome or registered repository details. A taskless System Specialist asks only for the missing provider/system concern or report scope. Neither creates a fake sprint, master, or task. Put those questions in your own chat.
+Architect and Investigator may be started manually at Projects altitude without task references. A taskless Architect asks only for missing outcome or registered repository details. An Investigator takes any scoped concern from its parent's first message and asks that parent for missing scope; without a parent it asks the developer in its own chat. It may also be selected on a sprint or on a sprint and master, never on a leaf. Neither role creates a fake sprint, master, or task.
 
 ## Host, tools and decisions
 

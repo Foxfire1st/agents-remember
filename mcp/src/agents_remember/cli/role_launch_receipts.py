@@ -26,10 +26,17 @@ from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     selection_binding,
 )
+from agents_remember.cli.investigator_receipts import (
+    investigator_receipt_path,
+    investigator_receipts,
+    matches_selection,
+)
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
+from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
     RoleResultRequest,
@@ -213,7 +220,7 @@ def _publish_launch_outcome(
 def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
     """What becomes of an agent that can never be given its first message, by role class."""
 
-    if receipt.get("role") in TASKLESS_ROLES:
+    if canonical_role(str(receipt.get("role", ""))) in TASKLESS_ROLES:
         # A taskless role keeps one receipt per request, and no later start archives an agent.
         return (
             "Start the role again; a start of this role archives no agent, so archive agent "
@@ -313,6 +320,10 @@ def _receipt_path(
     selection: RoleSelection,
     request_id: uuid.UUID | None = None,
 ) -> Path:
+    if selection.role == "investigator":
+        if request_id is None:
+            raise ValueError("An Investigator receipt requires its exact requestId.")
+        return investigator_receipt_path(config, selection, request_id)
     if selection.role in TASKLESS_ROLES:
         if request_id is None:
             raise ValueError("A taskless role execution receipt requires its durable requestId.")
@@ -342,7 +353,7 @@ def _legacy_receipt_path(config: McpRuntimeConfig, selection: RoleSelection) -> 
 
 
 def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
-    if role not in TASKLESS_ROLES:
+    if canonical_role(role) not in TASKLESS_ROLES:
         raise ValueError(
             "Per-request role execution receipts are reserved for taskless project roles."
         )
@@ -448,7 +459,7 @@ def _existing_message_binding_projection_matches(path: Path, expected: bytes) ->
 
 def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: RoleSelection) -> None:
     """Move the bounded old taskless receipt set to request-ID addresses once."""
-    if selection.role not in TASKLESS_ROLES:
+    if selection.role != "architect":
         return
     legacy = _legacy_receipt_path(config, selection)
     sources = _legacy_taskless_receipt_sources(legacy)
@@ -556,47 +567,10 @@ def _move_taskless_legacy_receipts(pending: list[tuple[Path, Path]]) -> None:
 def _taskless_execution_receipts(
     config: McpRuntimeConfig, selection: RoleSelection
 ) -> list[tuple[Path, dict[str, Any]]]:
-    directory = _taskless_session_directory(config, selection.role)
-    try:
-        mode = directory.lstat().st_mode
-    except FileNotFoundError:
-        return []
-    except OSError as error:
-        raise HTTPException(
-            status_code=409, detail="Taskless role executions cannot be inspected safely."
-        ) from error
-    if not stat.S_ISDIR(mode):
-        raise HTTPException(
-            status_code=409, detail="The taskless role execution store is not a directory."
-        )
-    expected_selection = selection_binding(selection)
-    records: list[tuple[Path, dict[str, Any]]] = []
-    for path in directory.glob("*.json"):
-        receipt = _read_receipt(path)
-        if receipt is None:
-            continue
-        try:
-            request_id = uuid.UUID(str(receipt.get("requestId")))
-        except (ValueError, TypeError, AttributeError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail="A saved taskless role execution receipt has no valid requestId.",
-            ) from error
-        if (
-            path.name != f"{request_id}.json"
-            or receipt.get("requestId") != str(request_id)
-            or receipt.get("role") != selection.role
-            or receipt.get("selection") != expected_selection
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="A saved taskless role execution receipt does not match its request address and role selection.",
-            )
-        records.append((path, receipt))
-    return sorted(
-        records,
-        key=lambda row: (str(row[1].get("createdAt", "")), str(row[1].get("requestId", ""))),
-        reverse=True,
+    return (
+        investigator_receipts(config, selection)
+        if selection.role == "investigator"
+        else taskless_execution_receipts(config, selection)
     )
 
 
@@ -610,10 +584,15 @@ def _receipt_address_matches(
         request_matches = True
     else:
         request_matches = request_id is None or receipt.get("requestId") == str(request_id)
-    return receipt.get("selection") == selection_binding(selection) and request_matches
+    return matches_selection(receipt, selection) and request_matches
 
 
-def _request_digest(context: RoleLaunchContext, request: RoleDispatchRequest) -> str:
+def _request_digest(
+    context: RoleLaunchContext | RoleSelection,
+    request: RoleDispatchRequest,
+    *,
+    role_name: str | None = None,
+) -> str:
     override = (
         request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
         if request.agent_override
@@ -621,7 +600,10 @@ def _request_digest(context: RoleLaunchContext, request: RoleDispatchRequest) ->
     )
     return digest(
         {
-            "selection": selection_binding(context),
+            "selection": {
+                **selection_binding(context),
+                **({"role": role_name} if role_name else {}),
+            },
             "agentOverride": override,
         }
     )
@@ -650,7 +632,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
         )
         if key in receipt
     }
-    if receipt.get("role") in TASKLESS_ROLES:
+    if canonical_role(str(receipt.get("role", ""))) in TASKLESS_ROLES:
         # Taskless roles admit a fresh deliberate session under a new requestId; unresolved requests remain guarded.
         public["canStart"] = status in {
             "running",
@@ -676,6 +658,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
                 "canonicalPath": canonical_path,
                 "available": Path(canonical_path).is_file(),
             }
+    public["role"] = canonical_role(str(receipt.get("role", "")))
     if public["canRetry"]:
         selection = receipt.get("selection")
         if isinstance(selection, dict):

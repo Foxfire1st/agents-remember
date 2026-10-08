@@ -66,7 +66,7 @@ from test_paseo_status import StatusTestCase
 
 ROLES = (
     "architect",
-    "system-specialist",
+    "investigator",
     "orchestrator",
     "manager",
     "worker",
@@ -225,14 +225,17 @@ class MayStartRuleTests(unittest.TestCase):
     def test_each_role_may_start_exactly_the_roles_the_rule_names(self) -> None:
         allowed = {
             "architect": set(ROLES) - {"architect"},
-            "orchestrator": {"manager", "worker", "reviewer", "curator"},
-            "manager": {"worker", "reviewer", "curator"},
+            "orchestrator": {"manager", "worker", "reviewer", "curator", "investigator"},
+            "manager": {"worker", "reviewer", "curator", "investigator"},
         }
         self.assertEqual({role: set(started) for role, started in MAY_START.items()}, allowed)
         for caller in ROLES:
             for role in ROLES:
                 with self.subTest(caller=caller, starts=role):
-                    selection = RoleSelection.model_validate({"role": role, **ROLE_REFS[role]})
+                    refs = ROLE_REFS[role]
+                    if role == "investigator" and caller in {"orchestrator", "manager"}:
+                        refs = ROLE_REFS[caller]
+                    selection = RoleSelection.model_validate({"role": role, **refs})
                     violated = start_rule_violation(binding(caller), selection)
                     if role in allowed.get(caller, set()):
                         self.assertIsNone(violated)
@@ -493,10 +496,10 @@ class RoleStartTests(RoleToolsTestCase):
             "a taskless role: the same request id is the same agent, a new id another"
         ):
             request_id = uuid.uuid4()
-            first = self.start(self.architect, "system-specialist", request_id=request_id)
+            first = self.start(self.architect, "investigator", request_id=request_id)
             self.master = self.changed(self.master)
-            repeat = self.start(self.architect, "system-specialist", request_id=request_id)
-            other = self.start(self.architect, "system-specialist")
+            repeat = self.start(self.architect, "investigator", request_id=request_id)
+            other = self.start(self.architect, "investigator")
             self.assertEqual(repeat["agentId"], first["agentId"])
             self.assertNotEqual(other["agentId"], first["agentId"])
         with self.subTest("a receipt that is still starting is not answered as running"):
@@ -583,9 +586,9 @@ class RoleStartTests(RoleToolsTestCase):
             self.assertEqual(self.dispatch(dashboard)[1]["status"], "running")
         with self.subTest("a taskless execution of another agent"):
             taskless = uuid.uuid4()
-            self.start(self.architect, "system-specialist", request_id=taskless)
+            self.start(self.architect, "investigator", request_id=taskless)
             refused = self.refusal(
-                self.start(binding("architect"), "system-specialist", request_id=taskless),
+                self.start(binding("architect"), "investigator", request_id=taskless),
                 "launch-refused",
             )
             self.assertIn("did not start it and cannot repeat it", refused["detail"])
@@ -695,12 +698,12 @@ class RoleStartTests(RoleToolsTestCase):
         for state, leave in gone.items():
             with self.subTest(state):
                 request_id = uuid.uuid4()
-                first = self.start(self.architect, "system-specialist", request_id=request_id)
+                first = self.start(self.architect, "investigator", request_id=request_id)
                 leave(first["agentId"])
                 self.runtime.calls.clear()
 
                 result = self.refusal(
-                    self.start(self.architect, "system-specialist", request_id=request_id),
+                    self.start(self.architect, "investigator", request_id=request_id),
                     "launch-refused",
                 )
 
@@ -713,9 +716,9 @@ class RoleStartTests(RoleToolsTestCase):
                 self.assertEqual({command for command, _p in self.runtime.calls}, {"agent-state"})
         with self.subTest("a live agent whose last turn was cancelled is answered as before"):
             request_id = uuid.uuid4()
-            first = self.start(self.architect, "system-specialist", request_id=request_id)
+            first = self.start(self.architect, "investigator", request_id=request_id)
             self.runtime.agents[first["agentId"]].update(CLOSING_STATES["stopped"])
-            repeat = self.start(self.architect, "system-specialist", request_id=request_id)
+            repeat = self.start(self.architect, "investigator", request_id=request_id)
             self.assertEqual(
                 (repeat["ok"], repeat["status"], repeat["executionStatus"], repeat["agentId"]),
                 (True, "running", "stopped", first["agentId"]),
@@ -724,7 +727,7 @@ class RoleStartTests(RoleToolsTestCase):
                 unread = AgentReading(reachable=False, unreachable_reason="connection refused")
                 self.replace(paseo_role_tools, "read_agent", return_value=unread)
                 result = self.refusal(
-                    self.start(self.architect, "system-specialist", request_id=request_id),
+                    self.start(self.architect, "investigator", request_id=request_id),
                     "host-unreachable",
                 )
                 self.assertIn("connection refused", result["detail"])
@@ -902,12 +905,12 @@ class ReusedRequestIdTests(RoleToolsTestCase):
         self.assertEqual(list(self.runtime.agents), [first["agentId"]])
         with self.subTest("the id of a taskless execution reused on a leaf"):
             taskless = uuid.uuid4()
-            self.start(self.architect, "system-specialist", request_id=taskless)
+            self.start(self.architect, "investigator", request_id=taskless)
             before = self.state()
             result = self.refusal(
                 self.start(self.architect, "reviewer", request_id=taskless), "launch-refused"
             )
-            self.assertIn("another AR role selection (system-specialist)", result["detail"])
+            self.assertIn("another AR role selection (investigator)", result["detail"])
             self.assertEqual((self.compiled, self.state()), (2, before))
 
 

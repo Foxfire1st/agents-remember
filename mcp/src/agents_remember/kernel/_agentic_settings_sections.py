@@ -164,8 +164,7 @@ def _parse_roles(
 ) -> dict[str, RoleKnobs]:
     if raw is None:
         return {}
-    roles = _require_object(raw, owner, source)
-    _refuse_unknown(roles, KNOWN_ROLES, owner, source)
+    roles = _resolve_role_keys(raw, owner=owner, source=source)
     parsed: dict[str, RoleKnobs] = {}
     for role, value in roles.items():
         knobs = _require_object(value, f"{owner}.{role}", source)
@@ -217,6 +216,22 @@ def _parse_roles(
             session_commands=session_commands,
         )
     return parsed
+
+
+def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any]:
+    """Admit the earlier role key without rewriting the settings file."""
+    roles = _require_object(raw, owner, source)
+    _refuse_unknown(roles, KNOWN_ROLES | {"system-specialist"}, owner, source)
+    if "system-specialist" not in roles:
+        return roles
+    if "investigator" in roles and roles["investigator"] != roles["system-specialist"]:
+        raise AgenticSettingsError(
+            f"{owner}.system-specialist and {owner}.investigator have different content; "
+            f"keep one key or make their content equal: {source}"
+        )
+    normalized = dict(roles)
+    normalized["investigator"] = normalized.pop("system-specialist")
+    return normalized
 
 
 def _parse_service_tier(knobs: dict[str, Any], owner: str, source: str) -> str | None:

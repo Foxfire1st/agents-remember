@@ -17,7 +17,7 @@ ROLES = (
     "orchestrator",
     "reviewer",
     "strategist",
-    "system-specialist",
+    "investigator",
     "worker",
 )
 

@@ -36,6 +36,10 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
+from agents_remember.cli.investigator_receipts import (
+    investigator_message_capacity,
+    open_investigator_receipts,
+)
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     BRIDGE_TIMEOUT,
@@ -67,6 +71,7 @@ from agents_remember.models.role_agents import (
     RoleMessageCall,
     RoleStartCall,
 )
+from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
@@ -87,9 +92,9 @@ _PROJECTS = "Projects"
 
 # Who may start what (PNT-R06 item 4); a role that is not listed may start none.
 MAY_START: dict[str, tuple[str, ...]] = {
-    "architect": ("system-specialist", "orchestrator", "manager", "worker", "reviewer", "curator"),
-    "orchestrator": ("manager", "worker", "reviewer", "curator"),
-    "manager": ("worker", "reviewer", "curator"),
+    "architect": ("investigator", "orchestrator", "manager", "worker", "reviewer", "curator"),
+    "orchestrator": ("manager", "worker", "reviewer", "curator", "investigator"),
+    "manager": ("worker", "reviewer", "curator", "investigator"),
 }
 
 
@@ -187,15 +192,15 @@ def sender_line(sender: StartingAgent) -> str:
 def start_rule_violation(binding: AgentBinding, selection: RoleSelection) -> tuple[str, str] | None:
     """The rule a start would violate, as (refusal, the rule in words); ``None`` when allowed."""
 
-    allowed = MAY_START.get(binding.role, ())
+    allowed = MAY_START.get(canonical_role(binding.role), ())
     if selection.role not in allowed:
         offered = ", ".join(allowed) if allowed else "no role"
         return (
             "role-may-not-start-role",
             f"A {binding.role} may start {offered}; it may not start a {selection.role}. "
             "(An architect may start every role except architect; an orchestrator may start "
-            "manager, worker, reviewer and curator; a manager may start worker, reviewer and "
-            "curator; worker, reviewer, curator and system-specialist may start none.)",
+            "manager, worker, reviewer, curator and investigator; a manager may start worker, reviewer, "
+            "curator and investigator; worker, reviewer, curator and investigator may start none.)",
         )
     if binding.role == "orchestrator" and selection.sprint_document_ref != binding.sprint_ref:
         return (
@@ -231,9 +236,16 @@ def start_role(
     """Start one role agent for the selection, as the launcher's Start does, with a parent."""
 
     try:
-        return _start_role(config, call, _caller(config, environment))
+        result = _start_role(config, call, _caller(config, environment))
     except _Refused as refused:
-        return {**refused.payload(), "requestId": str(call.request_id), "role": call.role}
+        result = {
+            **refused.payload(),
+            "requestId": str(call.request_id),
+            "role": canonical_role(call.role),
+        }
+    if call.role == "system-specialist":
+        result["detail"] = str(result.get("detail", "")) + " " + ROLE_ALIAS_NOTICE
+    return result
 
 
 def _start_role(
@@ -463,9 +475,12 @@ def send_role_message(
         binding = _caller(config, environment)
         sender = starting_agent(config, binding)
         recipient = _resolve_recipient(config, call, binding)
-        return _deliver(config, call, sender, recipient)
+        result = _deliver(config, call, sender, recipient)
     except _Refused as refused:
-        return refused.payload()
+        result = refused.payload()
+    if call.role == "system-specialist":
+        result["warning"] = ROLE_ALIAS_NOTICE
+    return result
 
 
 def _resolve_recipient(
@@ -663,6 +678,8 @@ def _live_agents(
 def _selection_receipts(config: McpRuntimeConfig, selection: RoleSelection) -> list[dict[str, Any]]:
     """The selection's executions, the current one first, then earlier ones newest first."""
 
+    if selection.role == "investigator" and selection.sprint_document_ref is not None:
+        return open_investigator_receipts(config, selection)
     if selection.role in TASKLESS_ROLES:
         return [receipt for _path, receipt in _taskless_execution_receipts(config, selection)]
     path = _receipt_path(config, selection)
@@ -692,16 +709,24 @@ def _deliver(
         "text": f"{line}\n{call.text}",
         "messageId": message_id,
     }
-    delivery = _send(config, payload)
     resumed = False
-    if delivery.get("refused") == "closed":
-        _resume(config, recipient)
-        resumed = True
-        # A session that was just opened starts its tool servers anew: the send waits for them,
-        # as a launch does before the first message, when the recipient was given a tool server.
-        tool_server = recipient.receipt.get("toolServer")
-        waits = isinstance(tool_server, dict) and tool_server.get("applied") is True
-        delivery = _send(config, {**payload, "afterResume": True} if waits else payload)
+    try:
+        with investigator_message_capacity(config, recipient.receipt):
+            delivery = _send(config, payload)
+            if delivery.get("refused") == "closed":
+                _resume(config, recipient)
+                resumed = True
+                # A resumed session waits for its tool servers, as its first launch does.
+                tool_server = recipient.receipt.get("toolServer")
+                waits = isinstance(tool_server, dict) and tool_server.get("applied") is True
+                delivery = _send(config, {**payload, "afterResume": True} if waits else payload)
+    except HTTPException as error:
+        raise _Refused(
+            "investigator-capacity",
+            str(error.detail),
+            "Close or archive one Investigator execution on this selection before starting another turn.",
+            recipientAgentId=recipient.agent_id,
+        ) from error
     if delivery.get("delivered") is not True:
         raise _undelivered(recipient.agent_id, delivery)
     taken = delivery.get("taken")

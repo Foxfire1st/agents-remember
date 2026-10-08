@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SeriesNode, TaskDocNode } from "../../types/projection";
 import type { TaskDocumentRef } from "../../types/terminalCatalog";
-import type { RoleDocumentScope, RoleExecutionReceipt } from "../roleLaunchModel";
+import { canonicalLauncherRole, type RoleDocumentScope, type RoleExecutionReceipt } from "../roleLaunchModel";
 import { documentChatAgent, documentChatBinding, type DocumentAgent } from "./model";
 import { useDocumentAgents } from "./useDocumentAgents";
 
@@ -33,6 +33,13 @@ export function useDocumentChat({ taskDocumentRef, taskDocuments, series, active
   const target = agentTarget(agent);
   const { showLauncher, hideFrame, hasControl } = chatPresentation(scope, available, agents !== null, Boolean(target), launcherScope);
   const onExecution = (receipt: RoleExecutionReceipt, selection: RoleDocumentScope) => {
+    // The explicit Investigator request stays in the launcher/host tabs; the document's primary
+    // conversation remains its Manager or Orchestrator even after a successful launch (R98).
+    if (canonicalLauncherRole(selection.role) === "investigator" &&
+        ["manager", "orchestrator"].includes(binding.selection.role)) {
+      setRevision((current) => current + 1);
+      return;
+    }
     const next = launchedRequest(receipt, selection, scope, currentScope.current);
     if (next) { setLaunched(next); setLauncherScope(null); setRevision((current) => current + 1); }
   };

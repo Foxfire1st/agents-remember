@@ -32,7 +32,7 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
         "Silence is no approval",
         "Only the developer can answer a harness permission prompt",
     )
-    for role in ("orchestrator", "manager", "worker", "reviewer", "curator", "system-specialist"):
+    for role in ("orchestrator", "manager", "worker", "reviewer", "curator", "investigator"):
         text = role_text(role)
         for clause in clauses:
             assert clause in text, (role, clause)

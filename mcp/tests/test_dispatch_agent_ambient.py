@@ -14,9 +14,10 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application.structural.agent_tools import (
     StructuralAgentRuntime,
+    _spawn_dispatch_child,
     dispatch_agent_tool,
 )
-from agents_remember.application.terminal_tools import SpawnOverrides
+from agents_remember.application.terminal_tools import SpawnedBy, SpawnOverrides
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.kernel.primitives.observer_paths import observer_root
@@ -204,6 +205,24 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         self.config = _config(self.root)
         self.catalog = TerminalCatalog(terminal_catalog_path(self.root))
 
+    def test_earlier_role_id_emits_canonical_spawn_environment(self) -> None:
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
+            return_value={"ok": True},
+        ) as spawn:
+            _spawn_dispatch_child(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="investigator",
+                    brief="Investigate the concern.",
+                ),
+                StructuralAgentRuntime(),
+                spawned_by=SpawnedBy(),
+                document=self.sprint,
+            )
+        self.assertEqual(spawn.call_args.kwargs["seat"].env, {"AR_SPAWN_ROLE": "investigator"})
+
     def test_ambient_dispatch_refuses_unknown_task_reference_before_spawn(self) -> None:
         with mock.patch(
             "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
@@ -365,7 +384,7 @@ class DispatchAgentAmbientTests(unittest.TestCase):
                 self.config,
                 DispatchAgentRequest(
                     task_document_ref=self.sprint,
-                    role="system-specialist",
+                    role="investigator",
                     brief="Investigate the sprint.",
                 ),
                 StructuralAgentRuntime(

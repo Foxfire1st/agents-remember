@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document import (
     LEAF_ROLES,
@@ -261,8 +262,11 @@ class TaskDocumentTopology:
         raise TaskDocumentRefError(status, f"cannot resolve one parent for {ref.key}")
 
     def validate_role(self, ref: TaskDocumentRef, role: str) -> TaskAltitude:
+        role = canonical_role(role)
         expected = (
-            REVIEWER_ALTITUDES
+            frozenset({"sprint", "master"})
+            if role == "investigator"
+            else REVIEWER_ALTITUDES
             if role == "reviewer"
             else frozenset({"sprint"})
             if role in SPRINT_ROLES

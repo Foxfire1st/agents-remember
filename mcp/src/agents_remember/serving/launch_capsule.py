@@ -35,6 +35,7 @@ from enum import Enum
 from pathlib import Path
 
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.capsule_delivery import CodexCapsuleDelivery
 from agents_remember.serving.harness_launch import ResolvedLaunch
@@ -108,7 +109,7 @@ class LaunchCapsuleRequest:
     def is_role_configured(self) -> bool:
         """Whether this session is an agent seat the capsule vocabulary admits."""
 
-        return isinstance(self.role, str) and self.role.strip() in CAPSULE_ROLES
+        return isinstance(self.role, str) and canonical_role(self.role.strip()) in CAPSULE_ROLES
 
 
 @dataclass(frozen=True, slots=True)

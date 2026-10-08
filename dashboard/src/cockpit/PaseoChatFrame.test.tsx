@@ -637,7 +637,7 @@ describe("Chats pane wiring", () => {
 
     // Another selection without an execution leaves the frame; choosing the first selection
     // again asks for its agent again, although it is the agent that was shown last.
-    fireEvent.change(getByLabelText("Role"), { target: { value: "system-specialist" } });
+    fireEvent.change(getByLabelText("Role"), { target: { value: "investigator" } });
     await settle();
     expect(posts).toHaveBeenCalledTimes(1);
     fireEvent.change(getByLabelText("Role"), { target: { value: "architect" } });

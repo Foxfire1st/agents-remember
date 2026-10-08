@@ -14,14 +14,14 @@ from agents_remember.tasks.document_refs import (
 
 ROLE_LEVELS = {
     "architect": "portfolio",
-    "system-specialist": "portfolio",
+    "investigator": "portfolio",
     "orchestrator": "portfolio",
     "manager": "master",
     "worker": "leaf",
     "reviewer": "leaf",
     "curator": "leaf",
 }
-TASKLESS_ROLES = frozenset({"architect", "system-specialist"})
+TASKLESS_ROLES = frozenset({"architect", "investigator"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 
 
@@ -39,6 +39,10 @@ def resolve_role_launch_context(
 ) -> RoleLaunchContext:
     """Resolve the selected sprint/master/leaf chain from canonical task documents."""
 
+    if selection.role == "investigator" and selection.task_document_ref is not None:
+        raise ValueError(
+            "An investigator does not accept a leaf selection; start it on the master and name the leaf in the first message."
+        )
     needs_sprint = selection.role not in TASKLESS_ROLES
     needs_master = selection.role in {"manager", *LEAF_ROLES}
     needs_task = selection.role in LEAF_ROLES
@@ -47,7 +51,15 @@ def resolve_role_launch_context(
         selection.master_document_ref,
         selection.task_document_ref,
     )
-    required = (needs_sprint, needs_master, needs_task)
+    required = (
+        (
+            bool(selection.sprint_document_ref or selection.master_document_ref),
+            bool(selection.master_document_ref),
+            False,
+        )
+        if selection.role == "investigator"
+        else (needs_sprint, needs_master, needs_task)
+    )
     for label, ref, needed in zip(("sprint", "master", "task"), refs, required, strict=True):
         if needed and ref is None:
             raise ValueError(f"{selection.role} requires a canonical {label} selection.")

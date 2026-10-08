@@ -69,6 +69,7 @@ RoleMessageStatus = Literal[
     "refused",
 ]
 RoleMessageRefusal = Literal[
+    "investigator-capacity",
     "recipient-busy",
     "recipient-not-found",
     "recipient-archived",

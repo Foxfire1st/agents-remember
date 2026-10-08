@@ -33,7 +33,7 @@ boundary; they do not restate the whole of it.
 | curator | the structured coherence record and its generated projection | Reviewer for memory; Manager for the gate |
 | strategist | the orchestration-task draft | the architect (who rules it) |
 | designer | the task_doc + the designer-limits note | the architect |
-| system-specialist | the investigation report | the orchestrator |
+| investigator | the investigation report | the parent that started it, or the developer |
 | manager | the master-handover packet | the orchestrator |
 | orchestrator | the super-exit packet and demo notes | the architect |
 

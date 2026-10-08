@@ -143,7 +143,7 @@ export const ATTACH_SEAT_ROLES = [
   "worker",
   "reviewer",
   "curator",
-  "system-specialist",
+  "investigator",
   "agent",
   "chat",
 ] as const;
@@ -256,7 +256,7 @@ function useLeafAttachMenu({
   const [open, setOpen] = useState(false);
   // The drilled path of master nodes (breadcrumb). Current level = the last node's children, or the roots.
   const [path, setPath] = useState<TaskTreeNode[]>([]);
-  const [selectedRole, setSelectedRole] = useState<string | undefined>(seatRole);
+  const [selectedRole, setSelectedRole] = useState<string | undefined>(seatRole === "system-specialist" ? "investigator" : seatRole);
   // The fixed-position anchor for the portaled menu, measured from the trigger (null until opened).
   const [coords, setCoords] = useState<{
     top?: number;
@@ -274,7 +274,7 @@ function useLeafAttachMenu({
     if (!open) {
       // Opening pre-drills to the in-context master so its leaves show first ("pre-selection via master").
       setPath(contextMaster ? findMasterPath(tree, contextMaster) : []);
-      setSelectedRole(seatRole);
+      setSelectedRole(seatRole === "system-specialist" ? "investigator" : seatRole);
       measure();
     }
     setOpen((value) => !value);

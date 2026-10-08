@@ -122,7 +122,7 @@ contract is imported, never re-implemented.
 """
 
 ORCHESTRATOR_DEGRADATION_INSTRUCTION = (
-    "Dispatch AR_SPAWN_ROLE=system-specialist to investigate this provider degradation "
+    "Dispatch AR_SPAWN_ROLE=investigator to investigate this provider degradation "
     "event and write a report. Read that report before ordering a fix. If the report says "
     "the issue is not fixable in-session, stop providers through provider_watchers stop."
 )

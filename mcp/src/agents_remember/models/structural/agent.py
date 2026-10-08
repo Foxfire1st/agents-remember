@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import field_validator
+
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.operator_inbox import AdapterDeliveryState, InboxDeliveryState
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 StructuralRole = Literal[
@@ -14,6 +17,7 @@ StructuralRole = Literal[
     "orchestrator",
     "strategist",
     "designer",
+    "investigator",
     "system-specialist",
     "manager",
     "worker",
@@ -85,6 +89,11 @@ class StructuralTargetResponse(ToolResponse):
     # own producer can emit is the D53 shape, and there is no fourth consumer to fall through.
     deliveryState: InboxDeliveryState | None = None
     adapterDeliveryState: AdapterDeliveryState | None = None
+
+    @field_validator("role")
+    @classmethod
+    def _canonical_role(cls, value: str) -> str:
+        return canonical_role(value)
 
 
 class DispatchAgentResponse(StructuralTargetResponse):

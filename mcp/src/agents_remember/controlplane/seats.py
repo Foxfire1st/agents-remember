@@ -33,6 +33,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from agents_remember.errors import SeatOccupancyError
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
@@ -126,7 +127,7 @@ def _seat_claimants[SeatRowT: SeatRow](
         row
         for row in rows
         if row.status == "running"
-        and row.binding_role == role
+        and canonical_role(row.binding_role) == canonical_role(role)
         and (
             row.replacement_for_task_document_ref == document
             if replacement

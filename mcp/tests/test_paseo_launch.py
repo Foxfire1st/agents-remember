@@ -56,7 +56,7 @@ MASTER_REF = TaskDocumentRef(repository=REPO, path="master/task.json")
 LEAF_REF = TaskDocumentRef(repository=REPO, path="master/01_leaf.json")
 ROLE_REFS: dict[str, dict[str, TaskDocumentRef]] = {
     "architect": {},
-    "system-specialist": {},
+    "investigator": {},
     "orchestrator": {"sprintDocumentRef": SPRINT_REF},
     "manager": {"sprintDocumentRef": SPRINT_REF, "masterDocumentRef": MASTER_REF},
     **{
@@ -676,7 +676,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
         titles = {
             role: agent_title(self.context(self.config, self.request(role))) for role in ROLE_REFS
         }
-        self.assertEqual(titles["system-specialist"], "System specialist · Projects")
+        self.assertEqual(titles["investigator"], "Investigator · Projects")
         self.assertEqual(
             {titles[role] for role in ("reviewer", "curator")},
             {"Reviewer · 01_LEAF", "Curator · 01_LEAF"},

@@ -258,7 +258,7 @@ class RoleExecutionResultTests(unittest.TestCase):
             set(ROLE_START_OPERATIONS),
             {
                 "architect",
-                "system-specialist",
+                "investigator",
                 "orchestrator",
                 "manager",
                 "worker",
@@ -268,7 +268,7 @@ class RoleExecutionResultTests(unittest.TestCase):
         )
         expected_altitudes = {
             "architect": "sprint",
-            "system-specialist": "sprint",
+            "investigator": "sprint",
             "orchestrator": "sprint",
             "manager": "master",
             "worker": "leaf",
@@ -317,10 +317,10 @@ class RoleExecutionResultTests(unittest.TestCase):
                     ]
                 )
         for status in ("starting", "unknown"):
-            with self.subTest(role="system-specialist", status=status):
+            with self.subTest(role="investigator", status=status):
                 self.assertFalse(
                     role_launch_receipts._public_execution(
-                        {"role": "system-specialist", "status": status}
+                        {"role": "investigator", "status": status}
                     )["canStart"]
                 )
         self.assertFalse(
@@ -532,7 +532,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
             system_id = uuid.uuid4()
             role_launch_receipts._write_receipt(
                 history / f"{system_id}.json",
-                receipt(system_id, role="system-specialist"),
+                receipt(system_id, role="investigator"),
             )
 
             role_launch_receipts._migrate_taskless_legacy_receipt(config, selection)

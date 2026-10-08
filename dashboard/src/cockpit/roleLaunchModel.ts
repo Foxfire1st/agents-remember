@@ -8,12 +8,12 @@ import { sameTaskDocumentRef, taskDocSelectionKey, taskDocumentRefForDoc } from 
 import type { SeriesNode, TaskDocNode } from "../types/projection";
 import type { TaskDocumentRef } from "../types/terminalCatalog";
 
-export type LauncherRole = "architect" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
+export type LauncherRole = "architect" | "investigator" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
 export type RoleAction = "start" | "revive";
 
 export const LAUNCHER_ROLES: { id: LauncherRole; label: string }[] = [
   { id: "architect", label: "Architect" },
-  { id: "system-specialist", label: "System specialist" },
+  { id: "investigator", label: "Investigator" },
   { id: "orchestrator", label: "Orchestrator" },
   { id: "manager", label: "Manager" },
   { id: "worker", label: "Worker" },
@@ -138,12 +138,13 @@ export function isUncertainRoleExecution(execution: RoleScopedExecution): boolea
   return execution.canRetry === true || ["starting", "unknown"].includes(execution.status.toLowerCase());
 }
 
-/** A bound Projects row follows a saved open request, while uncertain requests keep their identity. */
+/** Projects follows its open request; selected tasks keep their exact saved request, including closed ones. */
 export function boundTasklessRequest(
-  executions: RoleExecutionReceipt[], current: RoleTasklessActiveRequest | undefined,
+  executions: RoleExecutionReceipt[], current: RoleTasklessActiveRequest | undefined, selectedTask = false,
 ): RoleTasklessActiveRequest | undefined {
-  if (current?.pending) return current;
-  const execution = executions.find((row) => ["accepted", "running", "starting", "unknown"].includes(row.status.toLowerCase()));
+  if (current && (current.pending || selectedTask)) return current;
+  const execution = selectedTask ? executions[0]
+    : executions.find((row) => ["accepted", "running", "starting", "unknown"].includes(row.status.toLowerCase()));
   if (!execution?.requestId) return current;
   return { requestId: execution.requestId,
     ...(isUncertainRoleExecution(execution) ? { pending: true } : {}),
@@ -206,20 +207,52 @@ export function taskRefIdentity(ref: TaskDocumentRef | undefined): string | unde
 }
 
 export function roleNeedsSprint(role: LauncherRole): boolean {
-  return role !== "architect" && role !== "system-specialist";
+  return role !== "architect" && role !== "investigator" && role !== "system-specialist";
 }
 
-export function isTasklessRole(role: LauncherRole): boolean {
-  return role === "architect" || role === "system-specialist";
+export function isTasklessRole(selection: LauncherRole | RoleDocumentScope): boolean {
+  const scope = typeof selection === "string" ? { role: selection } : selection;
+  return scope.role === "architect" ||
+    ((scope.role === "investigator" || scope.role === "system-specialist") &&
+      !scope.sprintDocumentRef && !scope.masterDocumentRef && !scope.taskDocumentRef);
+}
+
+/** Investigator receipts are per request at both Projects and selected-task scope. */
+export function usesRequestReceipts(scope: RoleDocumentScope): boolean {
+  return isTasklessRole(scope) || canonicalLauncherRole(scope.role) === "investigator";
+}
+
+export function roleRequestKey(scope: RoleDocumentScope): string {
+  const role = canonicalLauncherRole(scope.role);
+  return isTasklessRole(scope) ? role : JSON.stringify({ ...roleDocumentScope(scope), role });
+}
+
+export function roleRequestStorageKey(scope: RoleDocumentScope): string {
+  return isTasklessRole(scope) ? tasklessRequestStorageKey(canonicalLauncherRole(scope.role))
+    : "ar-role-request-v1:" + roleRequestKey(scope);
+}
+
+export function readSelectedRoleRequest(scope: RoleDocumentScope): RoleTasklessActiveRequest | undefined {
+  const stored = sessionStorage.getItem(roleRequestStorageKey(scope));
+  if (!stored) return undefined;
+  try {
+    const request = JSON.parse(stored) as RoleTasklessActiveRequest;
+    if (typeof request.requestId !== "string" || !request.requestId) return undefined;
+    if (request.retryPayload && !sameRoleDocumentScope(request.retryPayload, scope)) return undefined;
+    return request;
+  } catch {
+    return undefined;
+  }
 }
 
 export function tasklessRequestStorageKey(role: LauncherRole): string {
-  return "ar-role-taskless-request-v1:" + role;
+  // R98 preserves the old browser request slot: rename must not rewrite stored request identity.
+  return "ar-role-taskless-request-v1:" + (role === "investigator" ? "system-specialist" : role);
 }
 
 export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleTasklessActiveRequest>> {
   const active: Partial<Record<LauncherRole, RoleTasklessActiveRequest>> = {};
-  for (const role of ["architect", "system-specialist"] as const) {
+  for (const role of ["architect", "investigator"] as const) {
     const stored = sessionStorage.getItem(tasklessRequestStorageKey(role));
     if (!stored) continue;
     try {
@@ -233,10 +266,10 @@ export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleT
       active[role] = {
         requestId: value.requestId,
         ...(value.pending === true ? { pending: true } : {}),
-        ...(payload?.role === role
+        ...(payload && canonicalLauncherRole(payload.role) === role
           ? {
               retryPayload: {
-                role,
+                role: payload.role,
                 ...(payload.agentOverride ? { agentOverride: payload.agentOverride } : {}),
               },
             }
@@ -258,15 +291,16 @@ export function roleNeedsTask(role: LauncherRole): boolean {
 }
 
 export function roleDocumentScope(selection: RoleLaunchSelection): RoleDocumentScope {
+  const investigator = canonicalLauncherRole(selection.role) === "investigator";
   return {
     role: selection.role,
-    ...(roleNeedsSprint(selection.role) && selection.sprintDocumentRef
+    ...((investigator || roleNeedsSprint(selection.role)) && selection.sprintDocumentRef
       ? { sprintDocumentRef: selection.sprintDocumentRef }
       : {}),
-    ...(roleNeedsMaster(selection.role) && selection.masterDocumentRef
+    ...((investigator || roleNeedsMaster(selection.role)) && selection.masterDocumentRef
       ? { masterDocumentRef: selection.masterDocumentRef }
       : {}),
-    ...(roleNeedsTask(selection.role) && selection.taskDocumentRef
+    ...((investigator || roleNeedsTask(selection.role)) && selection.taskDocumentRef
       ? { taskDocumentRef: selection.taskDocumentRef }
       : {}),
   };
@@ -320,8 +354,12 @@ export function sameOptionalTaskDocumentRef(
   return left && right ? sameTaskDocumentRef(left, right) : left === right;
 }
 
+export function canonicalLauncherRole(role: LauncherRole): LauncherRole {
+  return role === "system-specialist" ? "investigator" : role;
+}
+
 export function sameRoleDocumentScope(left: RoleDocumentScope, right: RoleDocumentScope): boolean {
-  return left.role === right.role &&
+  return canonicalLauncherRole(left.role) === canonicalLauncherRole(right.role) &&
     sameOptionalTaskDocumentRef(left.sprintDocumentRef, right.sprintDocumentRef) &&
     sameOptionalTaskDocumentRef(left.masterDocumentRef, right.masterDocumentRef) &&
     sameOptionalTaskDocumentRef(left.taskDocumentRef, right.taskDocumentRef);

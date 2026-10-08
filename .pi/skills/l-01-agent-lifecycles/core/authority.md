@@ -118,8 +118,7 @@ for the missing document or role authority — never improvise an exact-id attac
 
 ## Escalation ladder
 
-**worker → manager → orchestrator → architect → developer.** A system-specialist escalates to the
-orchestrator. **No rung is skipped, ever.** Each role file states only its own rung.
+**worker → manager → orchestrator → architect → developer.** An Investigator escalates to the parent that started it, or asks the developer without one. **No rung is skipped, ever.** Each role file states only its own rung.
 
 A question is developer-worthy when it is a **high-blast-radius truth** — answered wrong it means
 big rewrites later (architecture direction, security posture, doctrine contradictions, irreversible

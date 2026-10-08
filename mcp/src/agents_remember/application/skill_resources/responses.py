@@ -21,6 +21,7 @@ from agents_remember.models.role_capsule_resources import (
     SkillCatalogReadResponse,
     UnreadableSkillPayload,
 )
+from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.skill_resources import (
     SKILL_INDEX_URI,
     SkillResourceCatalog,
@@ -39,7 +40,9 @@ def role_capsule_response(outcome: CapsuleCompileOutcome) -> RoleCapsuleResponse
     response = RoleCapsuleResponse(
         ok=outcome.ok,
         explanation=outcome.explanation(),
-        role=None if admitted is None else admitted.seat.role,
+        role=None
+        if admitted is None or admitted.seat.role is None
+        else canonical_role(admitted.seat.role),
         seatAltitude=None if admitted is None else getattr(admitted.seat, "altitude", None),
         operationName=None if binding is None else binding.operation,
         taskReference=None if admitted is None else admitted.task_reference,
@@ -51,6 +54,8 @@ def role_capsule_response(outcome: CapsuleCompileOutcome) -> RoleCapsuleResponse
     if outcome.refusal is not None:
         response.refusalStatus = outcome.refusal.status
         response.refusalNextAction = outcome.refusal.next_action
+    if admitted is not None and admitted.seat.role == "system-specialist":
+        response.explanation += " " + ROLE_ALIAS_NOTICE
     _fill_manifest(response, outcome)
     return response
 

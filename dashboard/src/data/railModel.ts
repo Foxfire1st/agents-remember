@@ -30,7 +30,8 @@ const ROLE_CODES: Record<string, string> = {
   curator: 'CUR',
   strategist: 'STR',
   designer: 'DSG',
-  'system-specialist': 'SYS',
+  investigator: 'INV',
+  'system-specialist': 'INV',
 };
 
 /** The rail chip code for a seat's spawn role — absent when the seat has no spawn role (R6). */
@@ -47,6 +48,7 @@ const SPRINT_RANK: Record<string, number> = {
   orchestrator: 1,
   strategist: 2,
   designer: 3,
+  investigator: 4,
   'system-specialist': 4,
   reviewer: 5,
 };
@@ -495,7 +497,7 @@ export function railRowTooltip(session: OpenSession, taskLabel?: string): string
   const visual = seatVisualState(session);
   const parts = [session.label];
   const role = session.spawnRole ?? session.seatRole;
-  if (role) parts.push(`role: ${role}`);
+  if (role) parts.push(`role: ${role === 'system-specialist' ? 'investigator' : role}`);
   parts.push(`state: ${visual.word}`);
   if (taskLabel) parts.push(`task: ${taskLabel}`);
   if (session.landedReason) parts.push(`landed: ${session.landedReason}`);

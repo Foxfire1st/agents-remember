@@ -129,6 +129,7 @@ from agents_remember.kernel._agentic_settings_sections import (
     _parse_roles_per_level,
     _parse_spawn,
     _require_agent_notifier_floor_seconds,
+    _resolve_role_keys,
 )
 
 __all__ = [
@@ -217,6 +218,7 @@ def load_agentic_settings(
     into the typed models. Absent files contribute nothing (defaults apply).
     """
     layers: list[tuple[Path, dict[str, Any]]] = []
+    role_alias_notices: list[str] = []
     for layer, root in (("global", coordination_root), ("local", repo_root)):
         if root is None:
             continue
@@ -224,7 +226,8 @@ def load_agentic_settings(
         data = _read_settings_file(path)
         if data is None:
             continue
-        orchestration = _validated_orchestration_block(data, path)
+        orchestration, aliases = _validated_orchestration_block(data, path)
+        role_alias_notices.extend(f"{path}: {key}" for key in aliases)
         if layer == "local" and "gateDelegation" in orchestration:
             # Gate posture is workspace-wide enforcement state: the boot snapshot
             # reads the GLOBAL file only, so a repo-local value would validate and
@@ -241,7 +244,15 @@ def load_agentic_settings(
         merged = merge_settings(merged, orchestration)
     sources = tuple(path for path, _ in layers)
     source = _source_label(sources)
-    return _parse_orchestration(merged, source=source, sources=sources)
+    settings = _parse_orchestration(merged, source=source, sources=sources)
+    if role_alias_notices:
+        warnings.warn(
+            "system-specialist is the earlier id of investigator; settings keys apply to "
+            "investigator: " + "; ".join(role_alias_notices),
+            UserWarning,
+            stacklevel=2,
+        )
+    return settings
 
 
 def _read_settings_file(path: Path) -> dict[str, Any] | None:
@@ -261,7 +272,7 @@ def _read_settings_file(path: Path) -> dict[str, Any] | None:
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/agentic_settings.py:179).
 def _validated_orchestration_block(
     data: dict[str, Any], path: Path
-) -> dict[str, Any]:  # pragma: no cover
+) -> tuple[dict[str, Any], list[str]]:  # pragma: no cover
     """One file's ``orchestration`` block, fully validated so errors name ``path``.
 
     Top-level keys other than ``orchestration`` are tolerated-not-parsed (other
@@ -269,18 +280,36 @@ def _validated_orchestration_block(
     """
     raw = data.get("orchestration")
     if raw is None:
-        return {}
+        return {}, []
     source = str(path)
     if not isinstance(raw, dict):
         raise AgenticSettingsError(f"orchestration settings must be an object: {source}")
     _refuse_null_families(raw, source)
     raw = _resolve_agent_notifier_alias(raw, source)
+    # Normalize each layer before deep merge, so the two spellings share precedence.
+    raw = dict(raw)
+    aliases: list[str] = []
+    if "roles" in raw:
+        roles = _require_object(raw["roles"], "orchestration.roles", source)
+        if "system-specialist" in roles:
+            aliases.append("orchestration.roles.system-specialist")
+        raw["roles"] = _resolve_role_keys(roles, owner="orchestration.roles", source=source)
+    if "rolesPerLevel" in raw:
+        levels = _require_object(raw["rolesPerLevel"], "orchestration.rolesPerLevel", source)
+        normalized_levels = {}
+        for level, value in levels.items():
+            owner = f"orchestration.rolesPerLevel.{level}"
+            roles = _require_object(value, owner, source)
+            if "system-specialist" in roles:
+                aliases.append(f"{owner}.system-specialist")
+            normalized_levels[level] = _resolve_role_keys(roles, owner=owner, source=source)
+        raw["rolesPerLevel"] = normalized_levels
     # strict=False: one LAYER may legitimately be partial (a repo-local file overriding a single
     # leaf of a globally-defined harness entry, or referencing a harness id the OTHER layer
     # declares), so per-file validation checks shapes/keys only; cross-reference and completeness
     # rules run on the MERGED block in load_agentic_settings.
     _parse_orchestration(raw, source=source, sources=(path,), strict=False)
-    return raw
+    return raw, aliases
 
 
 def _resolve_agent_notifier_alias(raw: dict[str, Any], source: str) -> dict[str, Any]:

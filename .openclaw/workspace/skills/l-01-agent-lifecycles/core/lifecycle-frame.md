@@ -33,7 +33,7 @@ Rules:
 | Seat | Lifecycle use |
 | --- | --- |
 | Developer-facing seats (architect) and portfolio/coordination seats (orchestrator, manager) | run their own lifecycle; the manager's is promoted to persistent by `worktree_start` on a leaf |
-| Build/report seats (worker, curator, reviewer, strategist, designer, system-specialist) | a short-lived seat that never touches a mutating AR tool never instantiates one; where it does mutate, it runs its own |
+| Build/report seats (worker, curator, reviewer, strategist, designer, investigator) | a short-lived seat that never touches a mutating AR tool never instantiates one; where it does mutate, it runs its own |
 | Ambient launcher | a launcher, not a seat: condition 3 of `../SKILL.md` routes it, and `core/launcher.md` owns its obligations |
 
 ## The trust checkpoint
@@ -64,7 +64,7 @@ A `degradation-alert` event pauses provider **starting**, not the seats.
   Continue providerless/native-read work that remains valid and report provider-dependent blockers
   upward. **No provider kill authority**: no docker-kill, no container stop, no provider teardown.
 - The orchestrator owns investigation dispatch, the remediation order, and the provider stop
-  (through the system-specialist protocol).
+  (through the investigator protocol).
 - This iteration is providers-only. Sentry or a future system monitor may feed the detector later;
   that does not change the response protocol: detect → report → explicit orchestrator order →
   fix or stop.

@@ -37,6 +37,7 @@ from agents_remember.models.knowledge_files.planned import (
     DECLARED_SUBJECT_PATTERN,
     REQUIREMENT_REF_PATTERN,
 )
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_execution_edges import (
@@ -73,9 +74,7 @@ DocKind = Literal["light", "subTask", "master"]
 # The structural task altitude per role. Reviewer is deliberately polymorphic across the three
 # review seams; SprintSeat admits it in addition to the ordinary sprint roles. ``document_refs``
 # re-exports these constants for its altitude checks, so their canonical home is here.
-SPRINT_ROLES = frozenset(
-    {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
-)
+SPRINT_ROLES = frozenset({"architect", "orchestrator", "strategist", "designer", "investigator"})
 MASTER_ROLES = frozenset({"manager"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 REVIEWER_ALTITUDES = frozenset({"sprint", "master", "leaf"})
@@ -585,7 +584,7 @@ class SprintSeat(_Doc):
     def _check_sprint_role(cls, value: str) -> str:
         role = value.strip()
         allowed = SPRINT_ROLES | {"reviewer"}
-        if role not in allowed:
+        if canonical_role(role) not in allowed:
             raise ValueError(f"sprint seat role must be one of {sorted(allowed)}")
         return role
 
@@ -825,7 +824,7 @@ class TaskDocument(_Doc):
             return
         if not self.is_sprint:
             raise ValueError("seats belong only to an orchestration sprint")
-        live_roles = [seat.role for seat in self.seats if seat.state != "retired"]
+        live_roles = [canonical_role(seat.role) for seat in self.seats if seat.state != "retired"]
         if len(set(live_roles)) != len(live_roles):
             raise ValueError("sprint seat roles must be unique among planned/active seats")
 

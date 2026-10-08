@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, cast
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -17,6 +17,7 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxState,
     OperatorInboxVia,
 )
+from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v2"
@@ -267,8 +268,16 @@ def create_operator_inbox_entry(
         agentId=address.agent_id,
         taskDocumentRef=address.task_document_ref,
         senderAgentId=poster.sender_agent_id,
-        senderRole=poster.sender_role,
-        recipientRole=address.recipient_role,
+        senderRole=(
+            cast(AgentRole, canonical_role(poster.sender_role))
+            if poster.sender_role is not None
+            else None
+        ),
+        recipientRole=(
+            cast(AgentRole, canonical_role(address.recipient_role))
+            if address.recipient_role is not None
+            else None
+        ),
         gateId=message.gate_id,
         messageKind=message.message_kind,
         artifactPath=message.artifact_path,
@@ -280,7 +289,7 @@ def create_operator_inbox_entry(
         createdAt=now,
         createdBy=poster.created_by,
         createdVia=poster.created_via,
-        ownerRole=owner.role,
+        ownerRole=cast(AgentRole, canonical_role(owner.role)) if owner.role is not None else None,
         ownerTaskDocumentRef=owner.task_document_ref,
         ownerAgentId=owner.agent_id,
         ownerLifecycleId=owner.lifecycle_id,
