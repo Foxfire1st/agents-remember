@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agents_remember.application.agent_binding import read_agent_binding
+from agents_remember.application.tool_caller import snapshot_tool_caller
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
+from agents_remember.observer.tool_events import ToolEventWriter, install_tool_writer
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.control_plane_identity_migration import (
     migrate_control_plane_identity_logs,
@@ -25,6 +28,28 @@ def initialize_mcp_application(config: McpRuntimeConfig) -> None:
         config.coordination_root, include_agent_notifier_signals=False
     )
     install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
+    install_tool_writer(build_tool_event_writer(config))
+
+
+def build_tool_event_writer(config: McpRuntimeConfig) -> ToolEventWriter:
+    """Snapshot this server's caller once and build its workspace-river writer.
+
+    The binding the launch started this server with is read here, with the task
+    document it names, so an event row is whole without another read. A binding
+    that cannot be read changes nothing about how the server starts (the packet's
+    failure rule): the writer then names a chat without a role, and the server
+    starts as it does today.
+    """
+    try:
+        binding = read_agent_binding()
+    except ValueError:
+        binding = None
+    caller = snapshot_tool_caller(
+        binding,
+        coordination_root=config.coordination_root,
+        config_path=config.config_path,
+    )
+    return ToolEventWriter(EventStore(observer_root(config)), caller)
 
 
 def mcp_serving_build_payload() -> ServingBuildPayload:

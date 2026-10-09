@@ -129,12 +129,24 @@ export function connectState(base = ""): () => void {
 export function connectEvents(
   onLine: (line: string) => void,
   base = "",
-  onReady?: () => void,
+  onReady?: (ready?: { lastEventTs?: string }) => void,
   onInterrupt?: () => void,
 ): () => void {
   const source = new EventSource(`${base}/api/events`);
   source.addEventListener("event", (event) => onLine((event as MessageEvent).data));
-  source.addEventListener("ready", () => onReady?.());
+  source.addEventListener("ready", (event) => onReady?.(parseReady((event as MessageEvent).data)));
   source.addEventListener("error", () => onInterrupt?.());
   return () => source.close();
+}
+
+/** The /api/events `ready` marker, carrying the last feed when the store has one. */
+function parseReady(data: string): { lastEventTs?: string } | undefined {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const lastEventTs = (parsed as { lastEventTs?: unknown }).lastEventTs;
+    return typeof lastEventTs === "string" ? { lastEventTs } : undefined;
+  } catch {
+    return undefined; // an unreadable marker still opens the gate; never break the feed
+  }
 }

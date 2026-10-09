@@ -205,6 +205,10 @@ class StreamReadyMarker(WireResponse):
     """
 
     ready: Literal[True]
+    # MIK-R114 rule 8: the newest event timestamp across every source, which may be
+    # older than the replay window, so the panel can name the last feed on a silent
+    # river. Absent when the store holds no event at all.
+    last_event_ts: str | None = None
 
 
 # --- /api/actions/{action} ------------------------------------------------------------------

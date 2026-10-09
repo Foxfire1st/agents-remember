@@ -52,9 +52,30 @@ const meta = css({ fontSize: "0.68rem", color: "muted", letterSpacing: "0" });
 
 const ROW_ESTIMATE = 40;
 
+// The newest valid event timestamp across the window and the store's last
+// feed, or null when neither names one. Malformed or absent timestamps never
+// veto a readable one, and an older late arrival never moves the head back.
+export function newestFedTs(events: ObserverEvent[], eventsLastTs: string | null): string | null {
+  let best: string | null = null;
+  let bestTime = NaN;
+  const consider = (raw: string | null | undefined) => {
+    if (typeof raw !== "string" || raw.length === 0) return;
+    const time = Date.parse(raw);
+    if (Number.isNaN(time)) return;
+    if (best === null || time > bestTime) {
+      best = raw;
+      bestTime = time;
+    }
+  };
+  consider(eventsLastTs);
+  for (const event of events) consider(event.ts);
+  return best;
+}
+
 function EventRiverImpl() {
   const events = useDashboard((s) => s.events);
   const eventsHydrated = useDashboard((s) => s.eventsHydrated || s.events.length > 0);
+  const eventsLastTs = useDashboard((s) => s.eventsLastTs);
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
@@ -85,16 +106,31 @@ function EventRiverImpl() {
   });
 
   const titleCount = eventsHydrated ? events.length : "syncing";
+  // The head names when the river was last fed: the newest event timestamp
+  // across the window and the store's last feed -- never arrival position, so
+  // a source-order replay or a late older arrival cannot move it backwards
+  // (MIK-R114 rule 8).
+  const lastFedTs = newestFedTs(events, eventsLastTs);
   return (
     <Panel testid="event-river" title={`Event river · ${titleCount}`} className={sizing} fill>
       {!eventsHydrated ? (
         <p className="muted">Syncing event history.</p>
       ) : events.length === 0 ? (
-        <p className="muted">No events yet.</p>
+        lastFedTs ? (
+          <p className="muted">No events in the last hour. Last event {formatEventTime(lastFedTs)}.</p>
+        ) : (
+          <p className="muted">No events yet.</p>
+        )
       ) : displayEvents.length === 0 ? (
         <p className="muted">No displayable events.</p>
       ) : (
-        <div ref={setScrollEl} className={scroller} data-testid="event-river-scroll">
+        <>
+          {lastFedTs ? (
+            <p className="muted" data-testid="event-river-last-fed">
+              Last event {formatEventTime(lastFedTs)}.
+            </p>
+          ) : null}
+          <div ref={setScrollEl} className={scroller} data-testid="event-river-scroll">
           <ul className={list} style={{ height: `${virtualizer.getTotalSize()}px` }}>
             {virtualizer.getVirtualItems().map((item) => {
               const { event, summary } = displayEvents[item.index];
@@ -111,6 +147,7 @@ function EventRiverImpl() {
             })}
           </ul>
         </div>
+        </>
       )}
     </Panel>
   );

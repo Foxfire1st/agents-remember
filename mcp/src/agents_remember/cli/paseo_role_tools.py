@@ -74,6 +74,7 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.observer.tool_events import call_target_role
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 # How long a start waits for another start of the same tool server to end: one agent issues
@@ -475,12 +476,30 @@ def send_role_message(
         binding = _caller(config, environment)
         sender = starting_agent(config, binding)
         recipient = _resolve_recipient(config, call, binding)
+        _carry_resolved_target_role(call, recipient)
         result = _deliver(config, call, sender, recipient)
     except _Refused as refused:
         result = refused.payload()
     if call.role == "system-specialist":
         result["warning"] = ROLE_ALIAS_NOTICE
     return result
+
+
+def _carry_resolved_target_role(call: RoleMessageCall, recipient: _Recipient) -> None:
+    """Name the addressed role for the river from the resolved recipient.
+
+    The payload builder only sees the call, whose ``role`` is absent when the
+    recipient is addressed by agent id. The durable receipt that resolved the
+    recipient already records its role, so the completed event carries that
+    actual role for both addressing forms. Nothing is guessed: when the
+    receipt names no role and the call names none, the event stays literal
+    (no ``targetRole``). Refused calls never reach this point.
+    """
+    role = recipient.receipt.get("role")
+    if not isinstance(role, str) or not role:
+        role = call.role
+    if isinstance(role, str) and role:
+        call_target_role.set(role)
 
 
 def _resolve_recipient(

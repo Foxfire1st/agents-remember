@@ -378,9 +378,9 @@ export function Cockpit() {
         gate.onLine(line);
       },
       "",
-      () => {
+      (ready) => {
         gate.onReady();
-        dashboardStore.getState().markEventsHydrated();
+        dashboardStore.getState().markEventsHydrated(ready?.lastEventTs);
       },
       gate.onInterrupt,
     );

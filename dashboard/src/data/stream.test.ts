@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "./store";
-import { STATE_STREAM_OPEN_DEADLINE_MS, connectState } from "./stream";
+import { STATE_STREAM_OPEN_DEADLINE_MS, connectEvents, connectState } from "./stream";
 
 // connectState shares the sleep/wake half-open-corpse class with the conversation stream
 // (data/streamLiveness.ts): after an OS sleep the open EventSource never fires `error`, so the
@@ -115,6 +115,42 @@ describe("connectState liveness (260723 sleep/wake)", () => {
     // The re-attempt can still recover honestly: a fresh instance that opens restores "live".
     ControlledSource.instances[2].fire("open");
     expect(dashboardStore.getState().conn).toBe("live");
+    dispose();
+  });
+});
+
+describe("connectEvents ready marker (MIK-R114 rule 8)", () => {
+  it("hands the ready marker's last feed to the opener", () => {
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const seen: Array<{ lastEventTs?: string } | undefined> = [];
+    const dispose = connectEvents(
+      () => {},
+      "",
+      (ready) => {
+        seen.push(ready);
+      },
+    );
+    ControlledSource.instances[0].fire("ready", {
+      data: JSON.stringify({ ready: true, lastEventTs: "2026-06-23T09:00:00+00:00" }),
+    });
+    expect(seen).toEqual([{ lastEventTs: "2026-06-23T09:00:00+00:00" }]);
+    dispose();
+  });
+
+  it("still opens the gate on an unreadable ready marker", () => {
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const seen: Array<{ lastEventTs?: string } | undefined> = [];
+    const dispose = connectEvents(
+      () => {},
+      "",
+      (ready) => {
+        seen.push(ready);
+      },
+    );
+    ControlledSource.instances[0].fire("ready", { data: "not json" });
+    expect(seen).toEqual([undefined]);
     dispose();
   });
 });

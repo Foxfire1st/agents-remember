@@ -44,12 +44,16 @@ export interface DashboardState {
   agentNotifierHeartbeat: AgentNotifierHeartbeat | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
   eventsHydrated: boolean;
+  // The newest event timestamp the store knows, from the /api/events `ready`
+  // marker -- which names the last feed even when the replay window holds
+  // nothing (MIK-R114 rule 8: the panel says when the river was last fed).
+  eventsLastTs: string | null;
   suppressedAttentionIds: Record<string, true>;
   setConn: (conn: ConnState) => void;
   applySnapshot: (projection: WorkspaceProjection) => void;
   applyDelta: (event: string, data: unknown) => void;
   pushEvent: (line: string) => void;
-  markEventsHydrated: () => void;
+  markEventsHydrated: (lastEventTs?: string | null) => void;
   suppressAttention: (ids: readonly string[]) => void;
   releaseAttention: (ids: readonly string[]) => void;
   reset: () => void;
@@ -341,6 +345,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   agentNotifierHeartbeat: null,
   events: [],
   eventsHydrated: false,
+  eventsLastTs: null,
   suppressedAttentionIds: {},
   setConn: (conn) => {
     if (get().conn !== conn) set({ conn });
@@ -365,7 +370,14 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
         return {}; // ignore malformed lines; never break the feed
       }
     }),
-  markEventsHydrated: () => set({ eventsHydrated: true }),
+  markEventsHydrated: (lastEventTs) =>
+    set((state) => ({
+      eventsHydrated: true,
+      eventsLastTs:
+        typeof lastEventTs === "string"
+          ? lastEventTs
+          : (state.events.at(-1)?.ts ?? state.eventsLastTs),
+    })),
   suppressAttention: (ids) =>
     set((state) => ({
       suppressedAttentionIds: {
@@ -396,6 +408,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
       agentNotifierHeartbeat: null,
       events: [],
       eventsHydrated: false,
+      eventsLastTs: null,
       suppressedAttentionIds: {},
     })),
 }));

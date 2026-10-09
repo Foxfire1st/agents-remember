@@ -15,8 +15,10 @@ directory. So nothing ever appends to a lifecycle file it does not own.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -35,22 +37,78 @@ HEARTBEAT_SIDECAR_FILE = "heartbeat.json"
 
 
 @contextmanager
-def workspace_river_lock(root: Path) -> Iterator[None]:
+def workspace_river_lock(root: Path, *, timeout: float | None = None) -> Iterator[None]:
     """Cross-process exclusive lock for workspace-river append and physical compaction.
 
     The workspace river has multiple process writers (serving + MCP tools), and live compaction
     physically rewrites the file. A POSIX lock on a sibling lockfile is therefore the one defensive
     mechanism this path needs: without it, a writer can append into the file while another process
     is replacing it, which is exactly the F3 tear risk.
+
+    ``timeout`` bounds the wait: ``None`` waits as long as it takes (the historical
+    behavior every existing caller keeps); a number of seconds raises
+    ``TimeoutError`` -- an ``OSError``, so existing ``except OSError`` containment
+    keeps working -- when the lock is still held then. The tool-event writer uses a
+    timeout so a stuck lock is a counted dropped event, never a hung tool call.
     """
     path = root / WORKSPACE_SOURCE / WORKSPACE_LOCK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if timeout is None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"workspace river lock still held after {timeout} seconds: {path}"
+                        ) from None
+                    time.sleep(0.01)
         try:
             yield
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def workspace_river_read(root: Path) -> Iterator[bool]:
+    """Hold the river lock for reading without creating any observer file.
+
+    MIK-R114 rule 7: a connected browser changes no file under
+    ``logs/observer/``. The writer lock opens its lockfile with ``a+b`` (which
+    creates it), so a reader must not take it: this helper opens the existing
+    lockfile read-only under a shared lock instead. When no lockfile exists --
+    an event file without one -- the read proceeds without the lock rather
+    than creating anything; readers only consume complete newline-terminated
+    rows, so a concurrent rewrite costs at most a delayed row, never a torn
+    one, and the virtual cursor still maps through the base-offset sidecar.
+
+    The yielded value says whether the shared lock is held: true only after
+    ``flock(LOCK_SH)`` has returned on the opened lockfile; false where the
+    lockfile could not be opened or the lock could not be taken, whatever the
+    error. Callers return rows only on true; anything else is not a pair.
+    """
+    path = root / WORKSPACE_SOURCE / WORKSPACE_LOCK_FILE
+    try:
+        handle = path.open("rb")
+    except OSError:
+        yield False
+        return
+    with handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            with contextlib.suppress(OSError):
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def workspace_base_offset(root: Path) -> int:
@@ -116,8 +174,18 @@ class EventStore:
             return self._root / "lifecycles" / lifecycle_id / "events.jsonl"
         return self._root / WORKSPACE_SOURCE / "events.jsonl"
 
-    def append(self, event: Event) -> None:
-        """Append one event to its log, creating parent dirs on first write."""
+    def append(self, event: Event, *, lock_timeout: float | None = None) -> None:
+        """Append one event to its log, creating parent dirs on first write.
+
+        ``lock_timeout`` bounds the workspace-river lock wait (``None`` waits as
+        long as it takes); a lifecycle log never takes the lock either way.
+
+        A lifecycle-less event goes to the shared workspace river through the
+        same admission every writer obeys (MIK-R114 rule 5): over the ceiling
+        the oldest rows are cut first, under the same lock. A row that cannot
+        fit even after the cut is not written -- the bound holds; the
+        lifecycle-specific append and heartbeat branches are unchanged.
+        """
         if event.lifecycleId and event.kind == HEARTBEAT_KIND:
             self._write_heartbeat_sidecar(event)
             return
@@ -125,8 +193,15 @@ class EventStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         line = event.model_dump_json(by_alias=True, exclude_none=True)
         if event.lifecycleId is None:
-            with workspace_river_lock(self._root), path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
+            # Deferred: event_retention imports this module for the river lock,
+            # so a top-level import would be circular.
+            from agents_remember.observer import event_retention  # noqa: PLC0415
+
+            event_retention.admit_workspace_river_row(
+                self._root,
+                line.encode("utf-8"),
+                timeout=lock_timeout,
+            )
             return
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")

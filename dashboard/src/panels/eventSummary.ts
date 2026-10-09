@@ -80,6 +80,8 @@ const TOOL_LABELS: Record<string, string> = {
   lifecycle_start: "Started lifecycle",
   memory_quality_check: "Checked memory quality",
   read_ar_files: "Read source with onboarding",
+  role_message: "Sent message",
+  role_start: "Started agent",
   route_index_refresh: "Checked route indexes",
   task_doc: "Updated task document",
   worktree_attach: "Attached to task",
@@ -201,14 +203,92 @@ function summarizeToolCompleted(
   const ok = typeof data.ok === "boolean" ? data.ok : undefined;
   const tokens = typeof data.tokens === "number" ? data.tokens : undefined;
   const label = `${toolLabel(tool)}${ok === false ? " failed" : ""}`;
+  // Earlier-kind rows carry no caller facts and keep their base outcome
+  // labels (ok/failed); rows with caller facts use the host-path outcome.
+  const hasCallerFacts = stringField(data, "role") !== undefined;
   return {
-    context: lifecycleContext(event, context).label,
+    context: toolCallerContext(event) ?? lifecycleContext(event, context).label,
     diagnosticKind: event.kind,
     label,
-    meta: compact([ok === undefined ? undefined : ok ? "ok" : "failed", tokenLabel(tokens)]),
+    meta: compact([
+      hasCallerFacts ? toolOutcome(data, ok) : legacyOutcome(ok),
+      hasCallerFacts ? toolTargetRole(data) : undefined,
+      tokenLabel(tokens),
+    ]),
     title: rawDiagnosticTitle(event),
     visibility: "normal",
   };
+}
+
+function legacyOutcome(ok: boolean | undefined): string | undefined {
+  if (ok === undefined) return undefined;
+  return ok ? "ok" : "failed";
+}
+
+// MIK-R114 rule 8: a row of a host-path tool event shows who called -- the
+// role and the task -- with the tool and its outcome. Lifecycle-owned rows of
+// the earlier kind carry no caller facts and keep their lifecycle context. A
+// role or a task the panel does not know is shown as it is: known roles keep
+// their friendly labels, unknown role values are shown verbatim.
+const KNOWN_ROLES = new Set([
+  "architect",
+  "curator",
+  "manager",
+  "orchestrator",
+  "reviewer",
+  "system-specialist",
+  "worker",
+]);
+
+function roleLabel(value: string): string {
+  return KNOWN_ROLES.has(value) ? humanizeIdentifier(value) : value;
+}
+
+function toolCallerContext(event: ObserverEvent): string | undefined {
+  const data = event.data ?? {};
+  const role = stringField(data, "role");
+  if (!role) return undefined;
+  if (role === "chat") return chatCallerContext(data);
+  const task = firstPresent([data.taskTitle, data.taskId, data.taskPath]);
+  const who = roleLabel(role);
+  return task ? `${who} · ${task}` : who;
+}
+
+function chatCallerContext(data: Record<string, unknown>): string {
+  const harness = stringField(data, "harness");
+  return harness ? `chat without a role · ${harness}` : "chat without a role";
+}
+
+function firstPresent(values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+// The outcome of a tool with its result: done, refused with its code, or the
+// state the answer reached.
+function toolOutcome(data: Record<string, unknown>, ok: boolean | undefined): string | undefined {
+  const outcome = baseOutcome(data, ok);
+  if (outcome === undefined) return undefined;
+  const code = stringField(data, "code");
+  if (code && (outcome === "refused" || ok === false)) return `refused (${code})`;
+  return outcome;
+}
+
+function baseOutcome(data: Record<string, unknown>, ok: boolean | undefined): string | undefined {
+  const state = stringField(data, "state");
+  if (state) return state;
+  if (ok === true) return "done";
+  if (ok === false) return "refused";
+  return undefined;
+}
+
+// For role_start and role_message: the role of the agent started or addressed.
+// Known roles keep their friendly labels; an unknown value is shown verbatim.
+function toolTargetRole(data: Record<string, unknown>): string | undefined {
+  const target = typeof data.targetRole === "string" ? data.targetRole : undefined;
+  return target && target.length > 0 ? roleLabel(target) : undefined;
 }
 
 function summarizePhaseChanged(

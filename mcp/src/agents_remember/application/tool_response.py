@@ -43,6 +43,7 @@ from agents_remember.models.tools.tool_answer import (
 )
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
+from agents_remember.observer.tool_events import record_tool_completed
 from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_staleness_banner
 
 _RESPONSE_PATH_FIELDS = ("contractPath", "enclosurePath")
@@ -395,8 +396,18 @@ def complete_tool_response(
         answer, delivered_tokens, _line_guard_cut = _write_delivered_line(
             lined, logged, answer, delivered_tokens, log_error
         )
-    if amb is not None:
+    if amb is not None and amb.current is not None:
+        # The earlier-kind active lifecycle owns this call: its event is written
+        # as it is today, and no second one goes to the workspace river. (This
+        # case ends when MIK-R113 removes the session lifecycle.)
         amb.emit_tool(tool_name, finalized, answer_tokens=delivered_tokens)
+    else:
+        # MIK-R114 rule 1: every other call is written to the workspace river,
+        # with no active lifecycle and no call before it. The writer counts a
+        # failed write instead of breaking the call. The count the completed
+        # answer carries moved here to this leaf's delivered-answer count
+        # (`delivered_tokens`).
+        record_tool_completed(tool_name, finalized, delivered_tokens=delivered_tokens)
     return answer
 
 
