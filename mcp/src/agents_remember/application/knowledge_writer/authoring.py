@@ -12,9 +12,9 @@ Everything else is mechanical and filled here (MIK-R12 rule 2):
   (MIK-R07 rule 3: ``admission``, ``origin`` and the slug carry none);
 * **origin** names the task, the leaf or wave, the hand-off list and entry, and the entry's evidence
   (MIK-R12 rule 3: evidence is never dropped);
-* **history rows** get their ID, the invariant's revision, each examined member's revision, and each
-  covered entry's ``before`` (its anchor in the base) and ``after`` anchor, which is written into the
-  entry in the same operation (MIK-R07 rule 4).
+* **history rows** get their ID, the invariant's or family's own revision, each examined member's
+  revision, and each covered entry's ``before`` (its anchor in the base) and ``after`` anchor,
+  which is written into the entry in the same operation (MIK-R07 rule 4).
 
 Nothing here judges meaning, and nothing is written to disk: the writer validates the result first.
 """

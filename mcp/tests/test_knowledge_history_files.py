@@ -280,7 +280,7 @@ def test_family_row_dispositions_and_examined_members() -> None:
     _refused(_history(_family_row(examined=[{"id": INV, "revision": 1}] * 2)), "repeat")
     _refused(_history(_family_row(examined=[{"id": FAM, "revision": 1}])), "pattern")
     _refused(_history(_family_row(examined=[{"id": INV}])), "Field required")
-    _refused(_history(_family_row(effect="clarify")), "Extra inputs")
+    _refused(_history(_family_row(effect="clarify")), "its no_impact row")
 
 
 # ------------------------------------------------------------------------------------------------

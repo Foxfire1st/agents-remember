@@ -509,6 +509,13 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   - `assigned` or `rerouted` when only the routes change;
   - `no_impact` when the record is as it was.
 
+  A `changed` family row needs your judgment of its effect: give it `effect`, one of `restore`,
+  `clarify`, `introduce`, `strengthen`, `weaken`, `replace`, `split`, `merge`, `retire` — the same
+  label vocabulary as an invariant's `changed` row. The writer refuses a `changed` family row
+  without it, and refuses an `effect` on an `assigned`, `rerouted`, `no_impact` or `retired`
+  family row. You never write the family's `revision`: the writer records the family's own
+  revision from the record it just wrote, next to the revision of each examined member.
+
   While the family's guarantee differs from the parent line's (the item's facts say
   `guarantee-changed`), a row of another disposition does not answer the family: the gate holds
   its `reached_family` item open, and once the leaf has closed out without being integrated the
@@ -578,13 +585,18 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - `revision` goes up by one when a record's meaning differs from the memory base. `admission`,
   `status` and `origin` are not meaning.
 - `origin` records the task, the leaf or wave, the list, the entry and the evidence.
-- Each history row gets its row ID and the invariant's revision. It also gets each examined member's
-  revision and each cover's `before` anchor (from the memory base) and `after` anchor. The `after`
+- Each history row gets its row ID and the revision of the invariant or family the row is about.
+  It also gets each examined member's revision and each cover's `before` anchor (from the memory
+  base) and `after` anchor. The `after`
   anchor is written into the entry in the same run.
 - Every file is written in the canonical formatting.
 - Every row of the leaf's history file must still agree with the result: covered anchors, the
-  invariant's revision and each examined member's revision. A row a later run contradicts refuses
-  the run until the row is named again in `history`, so the writer rewrites it.
+  invariant's or family's own revision and each examined member's revision. A row a later run
+  contradicts refuses the run until the row is named again in `history`, so the writer rewrites
+  it. When the family
+  record changes again (also by a sync that brings in another leaf's family change), name the
+  family row again — a `changed` row with its `effect` again — so the writer records the current
+  revision.
 
 **What the writer checks.**
 

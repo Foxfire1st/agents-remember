@@ -1039,6 +1039,7 @@ consumers = [
   "mcp/tests/test_evidence_catalog_canonical_form.py",
   "mcp/tests/test_evidence_catalog_gate_boundaries.py",
   "mcp/tests/test_evidence_lanes.py",
+  "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
   "mcp/tests/test_file_size_detector.py",
   "mcp/tests/test_final_catalog_plan_attestation.py",
@@ -1754,6 +1755,7 @@ permanence_rationale = "The writer cases need one real enclosure shape rather th
 replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision_a_realization_and_a_tested_evidence_produce_validated_files"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_database_retired.py",
   "mcp/tests/test_knowledge_proofs.py",

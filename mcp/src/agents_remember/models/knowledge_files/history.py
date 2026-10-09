@@ -21,7 +21,10 @@ only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided b
   ``retire`` on ``deleted``) and ``because[]`` (decision IDs and requirement references);
 * **family rows** (subject ``FAM-…``): ``changed`` | ``rerouted`` | ``assigned`` | ``retired`` |
   ``no_impact``, with ``examined[]``: ``{ id, revision }`` of every member examined, at its K_C
-  revision (D7).
+  revision (D7), their own target ``revision`` and the curator's ``effect`` on ``changed``.
+  Historical rows may omit both own revision and effect; new changed judgments require both at
+  writing and publication. Other dispositions gain own revision through the writer. Historical
+  omissions are never filled or rewritten.
 
 The other registered item kinds add their row kinds to :data:`HISTORY_ROW_KINDS` when they land
 (MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10 ``hunk:…``/``file:…``, MIK-R14
@@ -261,10 +264,23 @@ class FamilyRow(HistoryRow):
     dispositions: ClassVar[tuple[str, ...]] = FAMILY_DISPOSITIONS
 
     examined: tuple[ExaminedMember, ...]
+    revision: Revision | None = None
+    effect: EffectLabel | None = None
 
     @model_validator(mode="after")
     def _require_distinct_members(self) -> FamilyRow:
         require_unique(tuple(member.id for member in self.examined), what="examined member ids")
+        if self.disposition == "changed" and (self.revision is None) != (self.effect is None):
+            raise ValueError(
+                f"family {self.subject}: its changed row {self.id} records only one of its own "
+                "revision and its effect; the writer records both, so name the family in the "
+                "curator hand-off's 'history' as a changed row with an 'effect'"
+            )
+        if self.disposition != "changed" and self.effect is not None:
+            raise ValueError(
+                f"family {self.subject}: its {self.disposition} row {self.id} carries an effect, "
+                "which only a changed row has; remove 'effect' from the row"
+            )
         return self
 
 

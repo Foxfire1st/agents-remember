@@ -14,8 +14,9 @@ with the MIK-R07 writer-support checks:
   restates the revision step of the leaf's governing ``changed`` row in an earlier, frozen attempt
   (:func:`_restated_revision`): the leaf closed out, was not integrated, and corrects that row's
   effect, because or reason;
+* a family row's recorded own revision is its actual candidate family revision;
 * :func:`stale_examined_members` -- a family row examined each member at its candidate revision,
-  rule 5.
+  rule 5. Historical rows that recorded no own revision remain absent.
 
 The remedy is always the same: name the row again in ``history`` so the writer rewrites it.
 """
@@ -39,6 +40,7 @@ from agents_remember.models.knowledge_files.history import (
     HistoryFile,
     InvariantRow,
     invariant_revision_violation,
+    is_closed_history,
     reanchor_mismatches,
     sidecar_entry_anchors,
     stale_examined_members,
@@ -48,6 +50,10 @@ from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
 
 _REMEDY = "name this row again in 'history' so the writer rewrites it"
+REOPEN_STEP = (
+    '; no base holds this file closed, so it is still the leaf\'s own: set "closed": false in it '
+    "(the one hand edit allowed), then name the rows in 'history' again"
+)
 _FROZEN = (
     "this history file is closed and frozen (MIK-R07 rule 7), so the row cannot be rewritten; "
     "a correction belongs to a new leaf's rows"
@@ -65,7 +71,10 @@ def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
         history = HistoryFile.model_validate(document)
     except ValidationError:
         return []  # the render step reports the file's shape
-    remedy = _FROZEN if history.closed else _REMEDY
+    frozen = state.base is not None and is_closed_history(state.base.get(path))
+    remedy = _FROZEN if frozen else _REMEDY
+    if history.closed and not frozen:
+        remedy += REOPEN_STEP
     problems = [
         Problem(path, f"a row's subject {subject} names no record of the candidate; {remedy}")
         for subject in unknown_subjects(history, set(state.records))
@@ -137,6 +146,14 @@ def _row_messages(
             if violation is not None:
                 yield f"{violation}; {_REMEDY}"
     elif isinstance(row, FamilyRow):
+        revision = _revision(state, row.subject)
+        if row.revision is not None and row.revision != revision:
+            yield (
+                f"family row records own revision {row.revision}, but {row.subject} is at "
+                f"revision {revision} in the candidate"
+                f"{' (a changed row names its effect again)' if row.disposition == 'changed' else ''}"
+                f"; {_REMEDY}"
+            )
         revisions = {
             member.id: revision
             for member in row.examined

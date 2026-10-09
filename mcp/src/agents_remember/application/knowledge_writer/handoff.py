@@ -19,10 +19,12 @@ nothing.
 ``id``, ``schema``, ``origin`` and ``revision`` and refuses them there.
 
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
-examined?}``. The writer mints the row ID, fills the invariant's revision and each examined member's
-revision, and writes each covered entry's ``before`` and ``after`` anchor. A cover of a ``moved`` row
-may name another source ``path``: the entry moves there and is re-anchored at C. A cover may carry a
-``rationale``: the covered realization entry keeps its ID and gets that rationale in place.
+examined?}``. The writer mints the row ID, fills the invariant's or family's own revision and each
+examined member's revision, and writes each covered entry's ``before`` and ``after`` anchor.
+A changed family row requires its authored effect; other family dispositions refuse that field.
+A cover of a ``moved`` row may name another source ``path``: the entry moves there and is
+re-anchored at C. A cover may carry a ``rationale``: the covered realization entry keeps its ID
+and gets that rationale in place.
 
 A string ``"handoff:<key>"`` names the record the same document authors under that key (an entry's
 ``id``, or a record's ``key``) wherever an ID is expected. Reading never resolves anything: it checks
@@ -34,13 +36,14 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 from agents_remember.application.curator_realization_authoring import (
     EntryRealization,
     realization_refusal,
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
+from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
 from agents_remember.models.knowledge_files.shapes import require_repository_path
 
@@ -234,6 +237,7 @@ class RowRequest:
     items: tuple[str, ...] = ()
     covers: tuple[CoverRequest, ...] = ()
     effect: str | None = None
+    effect_supplied: bool = False
     because: tuple[Any, ...] = ()
     examined: tuple[str, ...] = ()
     ref: Mapping[str, Any] | None = None
@@ -645,6 +649,23 @@ def _cover_rationale(
     return True, rationale
 
 
+def family_effect_refusal(request: RowRequest, subject: str) -> str | None:
+    """Why a family row's effect input is refused, or ``None``: only a changed row carries one."""
+
+    if request.disposition == "changed" and request.effect is None:
+        return (
+            f"family {subject}: a changed row records the curator's judgment of the meaning "
+            "change, so it needs an 'effect', one of "
+            f"{', '.join(get_args(EffectLabel))}; add it to this 'history' entry"
+        )
+    if request.disposition != "changed" and request.effect_supplied:
+        return (
+            f"family {subject}: a {request.disposition} row records no effect (only a changed row "
+            "does); remove 'effect' from this 'history' entry, or make it a changed row"
+        )
+    return None
+
+
 def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
     where = f"history[{position}]"
     if not isinstance(raw, Mapping):
@@ -682,6 +703,7 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         items=_identifiers(raw.get("items")),
         covers=tuple(covers),
         effect=_text(raw.get("effect")),
+        effect_supplied="effect" in raw,
         because=tuple(because) if isinstance(because, list) else (),
         examined=_identifiers(raw.get("examined")),
         ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,

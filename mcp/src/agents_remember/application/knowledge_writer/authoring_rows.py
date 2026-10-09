@@ -24,7 +24,9 @@ from agents_remember.application.knowledge_writer.code_anchors import (
 from agents_remember.application.knowledge_writer.handoff import (
     CoverRequest,
     RowRequest,
+    family_effect_refusal,
 )
+from agents_remember.application.knowledge_writer.history_check import REOPEN_STEP
 from agents_remember.application.knowledge_writer.memory_state import (
     EntryLocation,
     MemoryState,
@@ -47,12 +49,14 @@ from agents_remember.application.knowledge_writer.report import (
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
+    FamilyRow,
     HistoryFile,
     InvariantRow,
     OnboardingTraceRow,
     PlannedEffectRow,
     ReconsiderationRow,
     UnexplainedChangeRow,
+    is_closed_history,
 )
 from agents_remember.models.knowledge_files.ids import (
     EntryKind,
@@ -114,7 +118,13 @@ class HistoryRowAuthoring:
         path, attempt = self.state.history_target(self.owner)
         stored = self.state.document(path)
         if stored is not None and stored.get("closed") is True:
-            self.problem(path, "this history file is closed and frozen (MIK-R07 rule 7)")
+            base = self.state.base
+            if base is not None and is_closed_history(base.get(path)):
+                self.problem(path, "this history file is closed and frozen (MIK-R07 rule 7)")
+            else:
+                self.problem(
+                    path, f"this history file is closed and frozen (MIK-R07 rule 7){REOPEN_STEP}"
+                )
             return
         document = (
             deep_copy(stored)
@@ -202,7 +212,7 @@ class HistoryRowAuthoring:
         if found[1] == "invariant":
             return self._invariant_row(request, row, found[2], where)
         if found[1] == "family":
-            return self._family_row(request, row, where)
+            return self._family_row(request, row, found[2], where)
         self.problem(where, f"no registered history row kind has a {found[1]} subject")
         return None
 
@@ -540,8 +550,12 @@ class HistoryRowAuthoring:
         return row
 
     def _family_row(
-        self, request: RowRequest, row: dict[str, Any], where: str
+        self, request: RowRequest, row: dict[str, Any], record: Mapping[str, Any], where: str
     ) -> dict[str, Any] | None:
+        refusal = family_effect_refusal(request, row["subject"])
+        if refusal is not None:
+            self.problem(f"{where}.effect", refusal)
+            return None
         if not request.examined:
             self.problem(where, "a family row names every member the curator examined")
             return None
@@ -554,6 +568,14 @@ class HistoryRowAuthoring:
                 continue
             examined.append({"id": member, "revision": found[2].get("revision")})
         row["examined"] = examined
+        row["revision"] = record.get("revision")
+        if request.effect is not None:
+            row["effect"] = request.effect
+        try:
+            FamilyRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, f"family {row['subject']}: {_first_error(error)}")
+            return None
         return row
 
     def _covers(

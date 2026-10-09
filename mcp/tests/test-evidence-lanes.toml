@@ -68,6 +68,7 @@ unit-regression = [
   "mcp/tests/test_eve_protocol.py",
   "mcp/tests/test_evidence_catalog_canonical_form.py",
   "mcp/tests/test_evidence_catalog_gate_boundaries.py",
+  "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
   "mcp/tests/test_final_catalog_plan_attestation.py",
   "mcp/tests/test_final_codex_certificate.py",

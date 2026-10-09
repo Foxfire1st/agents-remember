@@ -501,11 +501,12 @@ def test_carrying_never_edits_another_owners_row_or_a_closed_history_file(leaf: 
     git(leaf.memory, "checkout", "-q", "--", f"onboarding/{LINES_FILE}.json")
     closed_bytes = (leaf.memory / own).read_bytes()
     refused = _carry(leaf)
-    # The closed file is frozen: the carry does not rewrite its row, so the row now contradicts
-    # the candidate and the writer refuses, naming the freeze, and writes nothing.
+    # The file is only hand-closed (no base holds it closed): the carry does not rewrite its row,
+    # so the row now contradicts the candidate and the writer refuses with the reopen way out.
     assert (leaf.memory / own).read_bytes() == closed_bytes
     assert refused.state == "refused"
-    assert any("closed and frozen" in problem.message for problem in refused.problems)
+    assert any("no base holds this file closed" in problem.message for problem in refused.problems)
+    assert any('set "closed": false' in problem.message for problem in refused.problems)
 
 
 def test_a_proof_authored_through_the_writer_raises_its_invariant_when_its_test_changes(

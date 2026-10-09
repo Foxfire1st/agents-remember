@@ -221,6 +221,12 @@ def invariant_row_open(item: Mapping[str, Any], context: GateContext) -> str | N
 # --------------------------------------------------------------------------------------------------
 
 
+def _again(disposition: str) -> str:
+    """What naming a stale family row again needs: a changed row carries its effect again."""
+
+    return "a changed row with its effect" if disposition == "changed" else f"a {disposition} row"
+
+
 def family_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
     """Rule 2's family-row currentness for a ``reached_family`` item."""
 
@@ -228,6 +234,14 @@ def family_row_open(item: Mapping[str, Any], context: GateContext) -> str | None
     row = None if context.history is None else context.history.row_about(subject)
     if not isinstance(row, FamilyRow):
         return f"the leaf's history file holds no family row about {subject}"
+    revision = context.candidate.revision(subject)
+    if row.revision is not None and row.revision != revision:
+        return (
+            f"row {row.id} records own family revision {row.revision}, but {subject} is at "
+            f"revision {revision} in K_C; the family changed after that judgment, so name "
+            f"{subject} again in the hand-off's 'history' ({_again(row.disposition)}) and "
+            "let the writer record the current revision"
+        )
     facts = item.get("facts") or {}
     members = _ids(facts.get("members") or ())
     return (

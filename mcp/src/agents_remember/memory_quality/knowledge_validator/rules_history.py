@@ -11,6 +11,9 @@ commit route (carried from the L12 review):
   filled in, and ``absent`` means the entry is gone (:func:`reanchor_mismatches` over
   :func:`sidecar_entry_anchors`, MIK-R07 rule 4).
 
+MIK-R48 adds ``R48-family-judgment`` (:func:`check_family_judgments`): a new or edited ``changed``
+family row in a file this route publishes records its own revision and an authored effect.
+
 **Which files (L09 review R1, finding 1; review R2-1).**
 
 * Every row of **every** history file, open or closed, at every route, must name a record of the
@@ -95,8 +98,10 @@ from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import FileSidecar
 
 __all__ = [
+    "FAMILY_JUDGMENTS_RULE",
     "HISTORY_ROWS_MERGED_RULE",
     "HISTORY_ROWS_RULE",
+    "check_family_judgments",
     "check_history_rows",
     "checked_history_files",
 ]
@@ -287,6 +292,72 @@ def check_merged_history_rows(context: ValidationContext) -> Iterator[Finding]:
             )
 
 
+def _recorded_family_rows(context: ValidationContext, path: str) -> set[FamilyRow]:
+    """The actual family judgments at this path in comparison bases or frozen history.
+
+    Equality includes row identity and all authored fields. A reused ID, a copied row at another
+    path or a candidate's own closed flag cannot turn a new judgment into a historical omission.
+    """
+
+    recorded: set[FamilyRow] = set()
+    authorities = (*context.bases, *(t for t in context.frozen if is_closed_history(t.get(path))))
+    for tree in authorities:
+        data = tree.get(path)
+        if data is None:
+            continue
+        try:
+            history = parse_history_document(path, data.decode("utf-8"))
+        except (UnicodeDecodeError, CanonicalFormatError, ValueError):
+            continue  # an unreadable authority cannot establish a recorded judgment
+        recorded.update(row for row in history.rows if isinstance(row, FamilyRow))
+    return recorded
+
+
+def check_family_judgments(context: ValidationContext) -> Iterator[Finding]:
+    """New or edited family judgments bind their own actual revision and authored effect.
+
+    Only the history files this route publishes are judged (:func:`checked_history_files`): an open
+    file always, and at a leaf's publication also a file not closed in a base. A closed file at a
+    master or checkpoint landing, or in a validation without a base, was judged when its leaf
+    published it or predates this rule, so its rows are never judged again. Within a judged file, a
+    row equal to one in a base or in a closed frozen file is already published and is not judged.
+    Existing judgments may become stale later; currentness remains the governing gate's check.
+    """
+
+    revisions = {record.record.id: record.record.revision for record in context.parsed.records}
+    for path, history in checked_history_files(context):
+        rows = [row for row in history.rows if isinstance(row, FamilyRow)]
+        if not rows:
+            continue
+        recorded = _recorded_family_rows(context, path)
+        for row in rows:
+            if row in recorded:
+                continue
+            if row.disposition == "changed" and (row.revision is None or row.effect is None):
+                yield Finding(
+                    path,
+                    f"rows.{row.id}.revision/effect",
+                    f"family {row.subject}: its changed row {row.id} is new or edited in this "
+                    "commit but records no own revision or no effect, which only rows frozen "
+                    "before MIK-R48 may lack; name the family in the curator hand-off's "
+                    "'history' as a changed row with an 'effect' and let the writer rewrite it; if this "
+                    'file is closed here but in no base, first set "closed": false in it',
+                )
+            elif (
+                row.revision is not None
+                and row.subject in revisions
+                and row.revision != revisions[row.subject]
+            ):
+                yield Finding(
+                    path,
+                    f"rows.{row.id}.revision",
+                    f"family {row.subject}: its row {row.id} is new or edited in this commit and "
+                    f"records own revision {row.revision}, but the family is at revision "
+                    f"{revisions[row.subject]} in the candidate; name the family again in the "
+                    "curator hand-off's 'history' and let the writer rewrite the row",
+                )
+
+
 HISTORY_ROWS_RULE = register_rule(
     ValidationRule(
         "R09-history-rows",
@@ -303,5 +374,13 @@ HISTORY_ROWS_MERGED_RULE = register_rule(
         "a row the merge itself moved an entry under is reported, and re-checked at the gate",
         check_merged_history_rows,
         report_only=True,
+    )
+)
+FAMILY_JUDGMENTS_RULE = register_rule(
+    ValidationRule(
+        "R48-family-judgment",
+        "MIK-R48",
+        "new and edited family judgments retain authored effect and actual own revision",
+        check_family_judgments,
     )
 )

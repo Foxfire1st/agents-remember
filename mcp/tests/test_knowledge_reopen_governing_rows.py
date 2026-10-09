@@ -106,7 +106,7 @@ def test_a_changed_record_is_governed_by_its_changed_row_in_every_attempt(
 
     _edit(world, CODE_A.replace("return value", "return -value"))
     unchanged, family, *traces = _rows_for_the_edit()["history"]
-    family = {**family, "disposition": "changed"}
+    family = {**family, "disposition": "changed", "effect": "clarify"}
     changed = {**unchanged, "disposition": "changed", "effect": "clarify"}
     first = _restating("Values land negated.", "Landing holds, negated.")
     _write(world, {**first, "history": [changed, family, *traces]})
@@ -179,7 +179,7 @@ def test_a_change_on_the_parent_line_may_be_answered_by_any_later_row(
 
     _edit(world, CODE_A.replace("return value", "return -value"))
     unchanged, family, *traces = _rows_for_the_edit()["history"]
-    family = {**family, "disposition": "changed"}
+    family = {**family, "disposition": "changed", "effect": "clarify"}
     rows = [{**unchanged, "disposition": "changed", "effect": "clarify"}, family, *traces]
     _write(
         world, {**_restating("Values land negated.", "Landing holds, negated."), "history": rows}
@@ -239,7 +239,7 @@ def test_a_family_whose_guarantee_the_leaf_changed_is_governed_by_its_changed_ro
     assert "guarantee-changed" in reached["facts"]["reachedBy"]
     opened = _open(result)["reached_family FAM-F00001"]
     assert "a no_impact row governs a family whose guarantee this leaf changed" in opened
-    _write(world, _handoff({**family, "disposition": "changed"}))
+    _write(world, _handoff({**family, "disposition": "changed", "effect": "clarify"}))
     assert world.gate().ok, world.gate().refusal()
     closed = _public_closeout(world).payload
     world.closed_out = (closed["code_commit"], closed["memory_content_commit"])
@@ -254,7 +254,9 @@ def test_a_family_whose_guarantee_the_leaf_changed_is_governed_by_its_changed_ro
         refusal = _refused(world, world.closed_out[0])
         assert "R09-history-rows" in refusal and "(the family's own change)" in refusal
         assert f"the {disposition} row about FAM-F00001 replaces this leaf's changed row" in refusal
-    _write(world, _handoff({**family, "disposition": "changed"}))  # named again: it governs
+    _write(
+        world, _handoff({**family, "disposition": "changed", "effect": "clarify"})
+    )  # named again: it governs
     assert world.gate().ok, world.gate().refusal()
     assert _closeout(world, world.closed_out[0]).memory_commit != world.closed_out[1]
 

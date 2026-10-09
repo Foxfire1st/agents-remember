@@ -137,7 +137,9 @@ response — it must be this leaf's memory worktree — and preview any write wi
    its admission. An obligation may belong to **several** families, and several obligations to one. Nothing is
    grouped by directory, route, label or shared anchor. A member or membership change **prompts a fresh look at
    the affected recorded guarantee**: update the stored family record only where that is justified, and answer
-   the family's worklist item with a history row that says what you examined. An implementation change never
+   the family's worklist item with a history row that says what you examined. When you restate a family's
+guarantee, name the family in `history` as a `changed` row with your `effect`; the writer fills the
+family's own revision. An implementation change never
    rewrites member intent or family meaning by itself. Place the family's routes as the hand-off template's
    "Family routes (MIK-R04)" section states. Then **read the result back**: the writer's report lists every
    record and entry it wrote, and `knowledge_read` with `view="family"` over this leaf's memory worktree

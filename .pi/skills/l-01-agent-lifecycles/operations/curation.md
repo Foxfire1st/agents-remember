@@ -121,7 +121,9 @@ normal authoring pass complete; that pass retains all the full-operation obligat
    guarantee text, its members, its routes and its admission — one obligation may belong to several families.
    Nothing is grouped by directory, route, label or shared anchor. A member or membership change **prompts a fresh
    look at the affected recorded guarantee**: update the stored family record only where that is justified, answer
-   the family's worklist item with a history row that says what was examined, and never let an implementation
+   the family's worklist item with a history row that says what was examined. When you restate a family's
+guarantee, name the family in `history` as a `changed` row with your `effect`; the writer fills the
+family's own revision. Never let an implementation
    change rewrite member intent or family meaning by itself. An external document a card rests on is cited as an
    `external` reference target in the card's sidecar, never as a repository path with a Git blob. Read the result
    back — the writer's report, and `knowledge_read` with `view="family"` over this leaf's memory worktree — and
