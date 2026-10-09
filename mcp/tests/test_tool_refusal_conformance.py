@@ -60,7 +60,10 @@ REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus")
 # shapes (the model says so in its docstring), so it is a reason key here rather than a
 # tolerated exception -- refusing without one still fails the axis.
 REASON_KEYS = ("detail", "summary", "message", "explanation")
-NAVIGATION_KEYS = ("nextStep", "nextTool", "nextAction", "nextArgs")
+# MIK-R108: the lifecycle next-step hint rides the answer as ``next``
+# ({summary, tool, args}) instead of ``nextStep``; it still counts as the
+# machine-readable next action a refusal names.
+NAVIGATION_KEYS = ("next", "nextStep", "nextTool", "nextAction", "nextArgs")
 
 # ---------------------------------------------------------------------------------------
 # The fourth shape: a refusal reported as a STATE of a successful call.
@@ -398,12 +401,23 @@ class FailurePathCensusTests:
             if not (isinstance(detail, str) and detail.strip()):
                 failures.append(f"{tool}: refused as a state without a refusalDetail")
                 continue
+            # MIK-R108: the model contract belongs to the whole result the
+            # function computed (read back from the answer's detail file);
+            # the answer holds what the caller needs next, without the
+            # four envelope fields.
+            whole = row.get("whole") or {}
+            if not whole:
+                failures.append(f"{tool}: no whole result behind the answer's log")
+                continue
+            for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
+                if field in payload:
+                    failures.append(f"{tool}: answer holds envelope field {field!r}")
             model = registered_response_model(tool)
             try:
-                model.model_validate(payload)
+                model.model_validate(whole)
             except ValidationError as invalid:
                 failures.append(
-                    f"{tool}: {model.__name__} refused its own payload: "
+                    f"{tool}: {model.__name__} refused its own whole result: "
                     f"{' | '.join(str(invalid).splitlines()[:2])}"
                 )
         assert failures == [], "stateful refusals that do not name themselves:\n" + "\n".join(

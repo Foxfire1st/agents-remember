@@ -402,13 +402,21 @@ class AmbientLifecycle:
 
     # --- ambient attribution ----------------------------------------------
 
-    def emit_tool(self, tool_name: str, payload: dict[str, Any]) -> None:
+    def emit_tool(
+        self, tool_name: str, payload: dict[str, Any], *, answer_tokens: int | None = None
+    ) -> None:
         """Emit one ``observed`` ``tool.completed`` for the active lifecycle.
 
         A lifecycle-less call is *dropped*, never attributed to a lifecycle it
         does not belong to (the same honesty rule as "never pretend declared is
         observed"). Emission must never break the tool it observes, so a
         validation or disk error is contained here.
+
+        ``answer_tokens`` is the token count of the answer the agent received
+        (MIK-R108): answers no longer carry the envelope count, so the
+        application boundary passes the count explicitly instead of this
+        reader reading it off the answer. When absent, the whole result's
+        stamped count is used as before.
         """
         with self._lock:
             if self.current is None:
@@ -419,7 +427,7 @@ class AmbientLifecycle:
                     "observed",
                     "model",
                     tool=tool_name,
-                    tokens=payload.get("tokens"),
+                    tokens=(answer_tokens if answer_tokens is not None else payload.get("tokens")),
                     ok=payload.get("ok"),
                 )
 

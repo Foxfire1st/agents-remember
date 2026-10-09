@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import shutil
 import subprocess
 import tempfile
@@ -52,6 +53,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.worktree_tools import _worktree_result
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -728,12 +730,22 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         self.assertTrue(control["ok"])
         self.assertNotIn("steps", control)
 
-        payload = task_doc_payload(coord, target, operation="read_steps")
+        with tool_call_context(
+            "task_doc", {"operation": "read_steps", "slug": "l4_demo"}, config=coord
+        ):
+            payload = task_doc_payload(coord, target, operation="read_steps")
         self.assertIn("steps", payload, "fixture did not reach the emitting branch")
         self.assertEqual(["S1"], [step["id"] for step in payload["steps"]])
         self.assertEqual(["C1"], [sub["id"] for sub in payload["steps"][0]["substeps"]])
-        response = TaskDocResponse.model_validate(payload)
+        # MIK-R108: the model contract belongs to the whole result (read back
+        # from the answer's detail file); the answer carries the checklist
+        # without the four envelope fields.
+        self.assertIn("log", payload)
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        response = TaskDocResponse.model_validate(whole)
         self.assertEqual("task_doc.read_steps", response.operation)
+        for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
+            self.assertNotIn(field, payload)
 
     def test_task_doc_description_and_refusal_name_the_same_kind_vocabulary(self) -> None:
         """T43 / T50's class: a description that advertises what the mechanism refuses.
@@ -856,13 +868,25 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         self.assertEqual("sprint-owner-required", produced["status"], "refusal branch did not fire")
         self.assertFalse(produced["ok"])
 
-        payload = operator_inbox_post_payload(
-            coord, address=InboxAddress(), message=decision, poster=poster
-        )
-        response = OperatorInboxPostResponse.model_validate(payload)
+        with tool_call_context(
+            "operator_inbox_post",
+            {"address": {}, "message_kind": "decision-item"},
+            config=coord,
+        ):
+            payload = operator_inbox_post_payload(
+                coord, address=InboxAddress(), message=decision, poster=poster
+            )
+        # MIK-R108: the model contract belongs to the whole result (read back
+        # from the answer's detail file); the answer carries the refusal
+        # without the four envelope fields.
+        self.assertIn("log", payload)
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        response = OperatorInboxPostResponse.model_validate(whole)
         self.assertEqual("sprint-owner-required", response.status)
         self.assertIsNone(response.entryId)
         self.assertEqual("decision-item", response.messageKind)
+        for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
+            self.assertNotIn(field, payload)
 
     def test_a_queued_operator_inbox_post_still_must_report_its_entry(self) -> None:
         """The conditional requirement's other half, so the refusal cannot hollow it out.

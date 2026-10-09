@@ -1,6 +1,106 @@
 schema_version = "ar-test-evidence-lifecycle/v3"
 large_fixture_bytes = 25000
 
+[[contract]]
+id = "ar-durable-store/1.0-process-race-evidence"
+owner = "mcp/src/agents_remember/controlplane/durable_store.py"
+evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "candidate-batch-case-harness"
+owner = "mcp/tests/candidate_batch_test_support.py"
+evidence_node = "mcp/tests/test_candidate_batch_transaction.py::test_a_late_invalid_command_rolls_back_every_earlier_insert_in_the_batch"
+
+[[contract]]
+id = "common-base-merge-cases"
+owner = "mcp/tests/merge_case_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_guarded_merge.py::test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate"
+
+[[contract]]
+id = "conversation-control-public-route-contract"
+owner = "mcp/src/agents_remember/serving/conversation/control/api.py"
+evidence_node = "mcp/tests/test_conversation_control_api.py::ControlApiTests::test_interrupt_ack_settle_replay_and_single_write"
+
+[[contract]]
+id = "knowledge-diff-cases"
+owner = "mcp/tests/diff_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
+
+[[contract]]
+id = "knowledge-evidence-cases"
+owner = "mcp/tests/evidence_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
+
+[[contract]]
+id = "knowledge-facet-cases"
+owner = "mcp/tests/facet_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_facets.py::test_the_seam_registry_is_exactly_the_eight_declared_subtypes"
+
+[[contract]]
+id = "knowledge-generation-cases"
+owner = "mcp/tests/generation_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_schema_generations.py::test_a_generation_1_dataset_keeps_its_own_body_under_generation_1"
+
+[[contract]]
+id = "knowledge-graph-case-support"
+owner = "mcp/tests/knowledge_graph_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_family_revision.py::test_the_family_lineage_rule_matches_the_invariant_rule"
+
+[[contract]]
+id = "knowledge-identity-branching-fixture"
+owner = "mcp/tests/knowledge_fixture_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+
+[[contract]]
+id = "knowledge-read-scope-cases"
+owner = "mcp/tests/read_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[contract]]
+id = "knowledge-snapshot-lifecycle-cases"
+owner = "mcp/tests/snapshot_lifecycle_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_snapshot_publication.py::test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not"
+
+[[contract]]
+id = "migration-census-cases"
+owner = "mcp/tests/migration_census_test_support.py"
+evidence_node = "mcp/tests/test_migration_census.py::test_the_seed_writes_every_census_record_kind_through_the_shipped_batch_operation"
+
+[[contract]]
+id = "next-supported-pi-rpc-activity-recording"
+owner = "mcp/src/agents_remember/serving/pi_rpc_events.py"
+evidence_node = "mcp/tests/test_pi_rpc_adapter_ops_2.py::PiRpcAdapterTests2::test_get_state_drives_stream_compaction_and_pending_activity"
+
+[[contract]]
+id = "paseo-launch-given-to-agent-cases"
+owner = "mcp/tests/paseo_launch_test_support.py"
+evidence_node = "mcp/tests/test_paseo_launch.py::RoleFolderAndIdentityTests::test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels"
+
+[[contract]]
+id = "paseo-runtime-command-cases"
+owner = "mcp/tests/paseo_runtime_test_support.py"
+evidence_node = "mcp/tests/test_paseo_runtime.py::PaseoRuntimeTests::test_fresh_provision_then_a_repeat_that_touches_nothing"
+
+[[contract]]
+id = "pnt-sandbox-process-cases"
+owner = "mcp/tests/pnt_sandbox_test_support.py"
+evidence_node = "mcp/tests/test_pnt_sandbox_processes.py::StartAndStopTests::test_stop_signals_only_the_process_start_recorded"
+
+[[contract]]
+id = "synthetic-test-evidence-candidate"
+owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
+evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
+
+[[contract]]
+id = "tool-log-sandbox-witness"
+owner = "mcp/tests/tool_log_witness.py"
+evidence_node = "mcp/tests/tool_log_witness.py::main"
+
+[[contract]]
+id = "tool-refusal-census-cases"
+owner = "mcp/tests/tool_refusal_census_support.py"
+evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
+
 [[artifact]]
 path = "mcp/tests/_adapter_event_scripts.py"
 kind = "shared-support"
@@ -1337,6 +1437,9 @@ consumers = [
   "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_log_budgets.py",
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_tool_response_budgets.py",
   "mcp/tests/test_tool_response_conformance.py",
@@ -1347,6 +1450,7 @@ consumers = [
   "mcp/tests/test_wire_contract.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
+  "mcp/tests/test_witness_driver_helpers.py",
   "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_workflow_chain_guidance.py",
   "mcp/tests/test_worktree_candidate_capture.py",
@@ -2142,10 +2246,30 @@ replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPoin
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_refusal_conformance.py",
+  "mcp/tests/test_witness_driver_helpers.py",
+]
+
+[[artifact]]
+path = "mcp/tests/tool_log_witness.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "tool-log-sandbox-witness"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "one hermetic EntryPointWorld with a real leaf enclosure opened through the real worktree_start, the ambient lifecycle promoted onto its contract, and worker/controller/terminating calls through the production MCP entry: `main` is the driver that records timestamped before/after directory snapshots, every call's outcome and log location, and the repository state"
+introduced_by = "260928-MIK-L108"
+lifetime = "permanent"
+permanence_rationale = "The enclosure/terminating routing of the tool log is only observable where the production entry meets a real enclosure and a real removal; the driver must be the production call rather than a private-function probe. It is shared rather than local because the witness run is reproduced by hand from the frozen evidence file, and a second copy of the driver would let the two readings of the same surface disagree."
+replacement_contract = "contract:tool-log-sandbox-witness"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_witness_driver_helpers.py",
 ]
 
 [[artifact]]
@@ -2164,6 +2288,7 @@ replacement_contract = "contract:tool-refusal-census-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 

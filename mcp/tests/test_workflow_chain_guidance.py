@@ -251,6 +251,26 @@ def classify_call(tool: str, kind: str, payload: dict[str, Any] | None) -> str:
     return "raised"
 
 
+def emitted_next_step(payload: dict[str, Any]) -> NextStep | None:
+    """The lifecycle guidance one answer emitted, in the model's shape.
+
+    MIK-R108: the answer carries the hint as ``next`` ({summary, tool, args})
+    instead of ``nextStep``; the observation translates it back so the
+    address binding below measures the same guidance content.
+    """
+
+    emitted = payload.get("nextStep")
+    if emitted is None:
+        following = payload.get("next")
+        if isinstance(following, dict):
+            emitted = {
+                "summary": following.get("summary", ""),
+                "nextTool": following.get("tool"),
+                "nextArgs": following.get("args"),
+            }
+    return NextStep.model_validate(emitted) if isinstance(emitted, dict) else None
+
+
 def missing_required_args(kind: str, payload: dict[str, Any] | None) -> frozenset[str]:
     """The fields a tool's own argument model named as required and absent."""
 
@@ -724,7 +744,6 @@ class WorkflowChainObservation:
         payload = payload or {}
         current = ambient()
         raw = next_step_for(current, tool) if current is not None else None
-        emitted = payload.get("nextStep")
         contract = load_contract(Path(target))
         hop = Hop(
             tool=tool,
@@ -736,7 +755,7 @@ class WorkflowChainObservation:
             payload=payload,
             phase=str(lifecycle_guidance(contract).get("phase", "")),
             raw_next=raw,
-            emitted_next=NextStep.model_validate(emitted) if isinstance(emitted, dict) else None,
+            emitted_next=emitted_next_step(payload),
         )
         if record_in_walk:
             self.hops.append(hop)
@@ -832,7 +851,6 @@ class WorkflowChainObservation:
         payload = payload or {}
         current = ambient()
         raw = next_step_for(current, tool) if current is not None else None
-        emitted = payload.get("nextStep")
         self.sibling_hop = Hop(
             tool=tool,
             source="declared",
@@ -843,7 +861,7 @@ class WorkflowChainObservation:
             payload=payload,
             phase="",
             raw_next=raw,
-            emitted_next=NextStep.model_validate(emitted) if isinstance(emitted, dict) else None,
+            emitted_next=emitted_next_step(payload),
         )
 
     def _stale_base_arrangement(self) -> None:

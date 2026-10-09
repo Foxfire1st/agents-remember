@@ -33,6 +33,7 @@ from agents_remember.cli import (
     memory_backfill,
     memory_citations,
     paseo_runtime,
+    tool_log_stats,
 )
 
 
@@ -129,6 +130,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paseo_runtime.add_arguments(paseo)
     paseo.set_defaults(func=paseo_runtime.run)
+    stats = sub.add_parser(
+        "tool-log-stats",
+        help="Print per-tool answer sizes from a tool-call log folder (read-only).",
+    )
+    tool_log_stats.add_arguments(stats)
+    stats.set_defaults(func=tool_log_stats.run)
     return parser
 
 

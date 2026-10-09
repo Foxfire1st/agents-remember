@@ -73,6 +73,9 @@ KNOWN_RETIREMENT_FIELDS = frozenset(
         "autoRetireOnFinalize",
     }
 )
+# MIK-R108 rule 3: the tool-call log keeping. Unknown keys fail loud, like
+# every other settings family.
+KNOWN_TOOL_LOG_FIELDS = frozenset({"keepDays", "maxBytes", "enclosureMaxBytes"})
 # The agentic orchestration family moved to the coordinator's global settings
 # file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
 # legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
@@ -133,6 +136,32 @@ class RetirementSettings:
     auto_close_completed_seats: bool = True
 
 
+# MIK-R108 rule 3: the tool-call log keeping. 14 days when absent.
+TOOL_LOG_KEEP_DAYS_DEFAULT = 14
+# MIK-R108 rule 3: the log-folder budgets in bytes (D1-D4). 256 MiB for the
+# transcript root, 64 MiB for the logs/ of one enclosure, when absent.
+TOOL_LOG_MAX_BYTES_DEFAULT = 268435456
+TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT = 67108864
+
+
+@dataclass(frozen=True)
+class ToolLogSettings:
+    """The optional ``toolLog`` settings object (MIK-R108 rule 3).
+
+    ``keepDays`` bounds the coordination-root tool log: the first call of a
+    day removes the log files and detail folders older than it (14 when
+    absent). In an enclosure, no age-based removal happens before cleanup.
+    ``maxBytes`` bounds the transcript-root log folder in bytes (256 MiB
+    when absent); ``enclosureMaxBytes`` bounds the ``logs/`` of one
+    enclosure (64 MiB when absent). In an enclosure the budget is the only
+    removal before cleanup.
+    """
+
+    keep_days: int = TOOL_LOG_KEEP_DAYS_DEFAULT
+    max_bytes: int = TOOL_LOG_MAX_BYTES_DEFAULT
+    enclosure_max_bytes: int = TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT
+
+
 @dataclass(frozen=True)
 class McpRuntimeConfig:
     config_path: Path
@@ -154,6 +183,7 @@ class McpRuntimeConfig:
         default_factory=ProviderDegradationSettings
     )
     retirement: RetirementSettings = field(default_factory=RetirementSettings)
+    tool_log: ToolLogSettings = field(default_factory=ToolLogSettings)
 
     @property
     def paseo_runtime(self) -> PaseoRuntimeSettings | None:
@@ -309,6 +339,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         config_path=config_path,
     )
     retirement = parse_retirement_settings(data.get("retirement"))
+    tool_log = parse_tool_log_settings(data.get("toolLog"))
     warn_per_harness_paseo(data, config_path, coordination_root)
 
     return McpRuntimeConfig(
@@ -326,6 +357,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         orchestration=orchestration,
         provider_degradation=provider_degradation,
         retirement=retirement,
+        tool_log=tool_log,
     )
 
 
@@ -619,6 +651,34 @@ def parse_retirement_settings(raw: object) -> RetirementSettings:
         auto_land_on_integration=auto_land_on_integration,
         auto_land_on_finalize=auto_land_on_finalize,
         auto_close_completed_seats=raw.get("autoCloseCompletedSeats", True),
+    )
+
+
+def parse_tool_log_settings(raw: object) -> ToolLogSettings:
+    if raw is None:
+        return ToolLogSettings()
+    if not isinstance(raw, dict):
+        raise ConfigError("toolLog settings must be an object")
+    unknown = sorted(set(raw) - KNOWN_TOOL_LOG_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_TOOL_LOG_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(f"unsupported toolLog setting(s): {unknown_text}; allowed: {allowed}")
+    keep_days = raw.get("keepDays", TOOL_LOG_KEEP_DAYS_DEFAULT)
+    if isinstance(keep_days, bool) or not isinstance(keep_days, int) or keep_days < 1:
+        raise ConfigError("toolLog.keepDays must be an integer of at least 1")
+    max_bytes = raw.get("maxBytes", TOOL_LOG_MAX_BYTES_DEFAULT)
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ConfigError("toolLog.maxBytes must be an integer of at least 1")
+    enclosure_max_bytes = raw.get("enclosureMaxBytes", TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT)
+    if (
+        isinstance(enclosure_max_bytes, bool)
+        or not isinstance(enclosure_max_bytes, int)
+        or enclosure_max_bytes < 1
+    ):
+        raise ConfigError("toolLog.enclosureMaxBytes must be an integer of at least 1")
+    return ToolLogSettings(
+        keep_days=keep_days, max_bytes=max_bytes, enclosure_max_bytes=enclosure_max_bytes
     )
 
 

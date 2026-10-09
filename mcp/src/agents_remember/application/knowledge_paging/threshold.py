@@ -2,10 +2,11 @@
 
 The bound is counted in ``tiktoken:o200k_base`` tokens over the canonical compact JSON a response
 is measured in everywhere else (:func:`agents_remember.models.tokens.count_response_tokens`), so the
-number a page is cut to and the ``tokens`` figure the response choke point stamps are the same
-measurement. It is declared once, here; every surface that pages a memory tree reads this constant,
-every page states it, and a continuation binds it, so a resumed read uses the same bound on
-whichever surface it resumes.
+number a page is cut to and the ``tokens`` figure the whole result carries are the same
+measurement (MIK-R108: answers no longer carry the count; the log line does). It is declared
+once, here; every surface that pages a memory tree reads this constant, every page states it,
+and a continuation binds it, so a resumed read uses the same bound on whichever surface it
+resumes.
 """
 
 from __future__ import annotations
@@ -27,9 +28,12 @@ __all__ = [
 KNOWLEDGE_PAGE_THRESHOLD_TOKENS = 8000
 KNOWLEDGE_PAGE_TOKENIZER = DEFAULT_TOKEN_COUNTER.name
 
-# What the mounted response choke point adds after a page is cut: ``ok``, ``operation`` and the
-# three token-accounting fields. A page is cut to the threshold less this reserve, so the response
-# a caller receives -- not only the body this module measured -- stays within the threshold.
+# What the mounted response choke point adds after a page is cut: ``ok`` and the
+# whole-result envelope (``operation`` and the three token-accounting fields --
+# the answer carries ``ok`` and, under MIK-R108, ``next``/``log`` instead of the
+# envelope). A page is cut to the threshold less this reserve, so the response
+# a caller receives -- not only the body this module measured -- stays within
+# the threshold.
 ENVELOPE_RESERVE_TOKENS = 64
 
 

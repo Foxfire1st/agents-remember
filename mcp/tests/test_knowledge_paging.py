@@ -39,7 +39,9 @@ from agents_remember.application.published_intent import (
     published_intent_block,
     select_knowledge_dataset,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.kernel.coordination_context.models import CoordinationContext
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.knowledge import (
     ReadToolRequest,
     knowledge_read_payload,
@@ -174,11 +176,32 @@ def _context(tmp_path: Path, memory_root: Path) -> CoordinationContext:
 def _read(
     tmp_path: Path, root: Path, *, workspace: Path | None = None, **arguments: Any
 ) -> dict[str, Any]:
-    return knowledge_read_payload(
-        ReadToolRequest(memory_root=str(root), **arguments),
-        workspace_root=None if workspace is None else str(workspace),
-        coordination_root=str(tmp_path / "coordination"),
+    # MIK-R108: the threshold guarantee belongs to the whole result the
+    # producer computed (its stamped token count is unchanged), read back
+    # from the answer's detail file. The hermetic coordination root keeps
+    # the log writes inside the fixture.
+    coord = tmp_path / "coordination"
+    config = McpRuntimeConfig(
+        config_path=coord / "settings.json",
+        coordination_root=coord,
+        workspace_root=coord,
+        transcript_root=coord / "logs" / "mcp",
     )
+    call_arguments: dict[str, Any] = {
+        "memoryRoot": str(root),
+        **arguments,
+    }
+    with tool_call_context("knowledge_read", call_arguments, config=config):
+        answer = knowledge_read_payload(
+            ReadToolRequest(memory_root=str(root), **arguments),
+            workspace_root=None if workspace is None else str(workspace),
+            coordination_root=str(tmp_path / "coordination"),
+        )
+    log = answer.get("log")
+    assert isinstance(log, str) and log, "paging fixture: no detail file behind the answer"
+    whole = json.loads(Path(log).read_text(encoding="utf-8"))
+    assert isinstance(whole, dict) and whole, "paging fixture: unreadable whole result"
+    return whole
 
 
 def _statements(count: int, words: int = 60) -> list[str]:

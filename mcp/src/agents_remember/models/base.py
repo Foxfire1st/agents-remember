@@ -83,6 +83,17 @@ class ResponseModel(StrictResponseModel):
     # Legacy alias emitted alongside the current key during the rename window; the choke
     # point writes both, and consumers may read either. Removed with the window.
     supervisorBanner: str | None = None
+    # The lifecycle next move the answer carries (MIK-R108): the producers keep writing
+    # ``nextStep`` onto the validated response, and the choke point translates it onto the
+    # answer as ``next``. Optional (``exclude_none``) so calls outside a lifecycle stay
+    # unchanged.
+    next: dict[str, Any] | None = None
+    # The tool-log detail location (MIK-R108) and a one-sentence writer failure. The choke
+    # point writes the detail file path onto the answer so the caller holds what it needs
+    # next; declared here for the same reason ``nextStep`` is: a key the choke point writes
+    # is a key of THIS envelope. Optional -- an answer with no detail file emits neither.
+    log: str | None = None
+    logError: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -109,6 +120,12 @@ class FlexibleResponseEnvelope(FlexibleResponseModel):
     agentNotifierBanner: str | None = None
     # Legacy alias during the rename window (same value as ``agentNotifierBanner``).
     supervisorBanner: str | None = None
+    # Same answer-carried lifecycle next move as the strict envelope (MIK-R108).
+    next: dict[str, Any] | None = None
+    # Same tool-log detail location and writer failure as the strict envelope: a
+    # tolerated-drift surface tolerates the PROVIDER's fields, not ours.
+    log: str | None = None
+    logError: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)

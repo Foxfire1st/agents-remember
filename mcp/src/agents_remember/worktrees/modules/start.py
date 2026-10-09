@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from agents_remember.application.memory_mode_refusal import (
     memory_mode_refusal_evidence,
     memory_mode_refusal_payload,
 )
+from agents_remember.application.tool_answer_log import ensure_enclosure_logs_dir
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_mode import (
@@ -803,6 +805,12 @@ def _materialize_start_enclosure(
     except LifecycleOperationLocationError as error:
         return _location_refusal(error)
     _clear_start_block(context, planned_contract, args)
+    # MIK-R108 rule 3: <enclosure>/logs/ is made with the enclosure. It lies
+    # outside both worktrees and outside Git; the tool-call log writer makes
+    # it again if it is removed by hand. A start that cannot make it still
+    # starts: logging that failure is the log writer's job, not the start's.
+    with suppress(Exception):
+        ensure_enclosure_logs_dir(planned_contract.worktree_group)
     return _PreparedStartEnclosure(
         planned_contract,
         code_state,

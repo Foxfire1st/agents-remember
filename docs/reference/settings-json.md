@@ -314,6 +314,21 @@ ids. It must be absolute.
 `transcriptRoot` is optional. If omitted, MCP logs default to
 `<coordinationRoot>/logs/mcp`.
 
+`toolLog.keepDays` is optional. It bounds the coordination-root tool-call log
+(MIK-R108 rule 3): the first call of a day removes the `ar-tools-<YYYY-MM-DD>`
+log files and detail folders older than it. When absent, 14 days are kept. In
+an enclosure, no age-based removal happens before cleanup.
+
+`toolLog.maxBytes` is optional. It bounds the transcript-root tool-call log
+folder in bytes (MIK-R108 rule 3, D1-D4): before a write that would take the
+folder over its budget, the server removes earlier days whole, oldest first;
+a write that still does not fit is dropped and counted, and the call still
+succeeds. When absent, 268435456 bytes (256 MiB) apply.
+
+`toolLog.enclosureMaxBytes` is optional. It bounds the `logs/` of one
+enclosure in bytes (MIK-R108 rule 3, D1-D4), the only removal there before
+cleanup. When absent, 67108864 bytes (64 MiB) apply.
+
 `harnessSkillRoot` is optional. It is only needed for the `skills_install`
 maintenance/manual tool. By default, when the MCP settings file lives under
 `<registration-root>/mcp/`, `skills_install` copies packaged skills into

@@ -20,6 +20,8 @@ tool's own refusal logic rather than a missing fixture.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -268,12 +270,35 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
     }
 
 
+def whole_result_for(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read back the whole result one answer's ``log`` names (MIK-R108).
+
+    The answer that leaves the server holds what the caller needs next; the
+    whole result the function computed lies in the detail file beside the
+    daily log. An answer with no readable detail file yields {}.
+    """
+
+    log = payload.get("log")
+    if not isinstance(log, str) or not log:
+        return {}
+    try:
+        whole = json.loads(Path(log).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return whole if isinstance(whole, dict) else {}
+
+
 def drive_census(world) -> dict[str, dict[str, Any]]:
     """Invoke one failure path per public tool and read back what arrived.
 
     ``lifecycle_start`` is arranged last-first: the census begins a lifecycle so that
     ``lifecycle_start``'s own failure path (one is already active) is the one measured, and
     ``lifecycle_resume``'s unprepared state is the one the pin already records.
+
+    Each row carries the answer (``payload``: what the caller acts on) and the
+    whole result (``whole``: what the function computed, read back from the
+    answer's detail file). Model validation belongs to the whole; the
+    refusal axes belong to the answer.
     """
 
     arguments = failure_invocations(world)
@@ -291,5 +316,6 @@ def drive_census(world) -> dict[str, dict[str, Any]]:
     results: dict[str, dict[str, Any]] = {}
     for tool in PUBLIC_TOOLS:
         kind, payload = world.call(tool, arguments[tool])
-        results[tool] = {"kind": kind, "payload": payload or {}}
+        answer = payload or {}
+        results[tool] = {"kind": kind, "payload": answer, "whole": whole_result_for(answer)}
     return results

@@ -52,6 +52,9 @@ from agents_remember.worktrees.worktree_contract import (
 
 type TerminalItems = dict[str, dict[str, object]]
 ENCLOSURE_REPORTS_DIRECTORY = "reports"
+# MIK-R108 rule 3: the tool-call log lives here, outside both worktrees and
+# outside Git. A closeout preview never lists it; cleanup removes it.
+ENCLOSURE_LOGS_DIRECTORY = "logs"
 type CleanupOutputs = tuple[
     dict[str, object],
     TerminalItems,
@@ -575,6 +578,12 @@ def _removed_directories(
         lifecycle_path,
         dry_run=dry_run,
     )
+    # MIK-R108 rule 3: cleanup removes <enclosure>/logs/ with the enclosure.
+    logs_path = contract.worktree_group / ENCLOSURE_LOGS_DIRECTORY
+    logs = worktree_services().provider_lifecycle.remove_tree(
+        logs_path,
+        dry_run=dry_run,
+    )
     if contract.kind == "series":
         return {"reports": reports, "lifecycle": lifecycle}
     planned = set(planned_removed or ())
@@ -582,9 +591,12 @@ def _removed_directories(
         planned.add(reports_path.resolve())
     if lifecycle.get("removed") or lifecycle.get("would_remove"):
         planned.add(lifecycle_path.resolve())
+    if logs.get("removed") or logs.get("would_remove"):
+        planned.add(logs_path.resolve())
     directories = {
         "reports": reports,
         "lifecycle": lifecycle,
+        "logs": logs,
         "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned),
     }
     if contract.worktree_group.parent.exists():
