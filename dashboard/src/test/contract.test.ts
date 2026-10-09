@@ -546,13 +546,12 @@ describe('projection contract fixture', () => {
       expect(typeof lifecycle.id).toBe('string');
       expect(typeof lifecycle.fleeting).toBe('boolean');
       expect(Array.isArray(lifecycle.actions)).toBe(true);
-      expect(Array.isArray(lifecycle.tokenSeries)).toBe(true);
     }
   });
 });
 
 // The bucket rollup: `Metrics` counted three states while the vocabulary declared six, so an
-// `awaiting-developer` lifecycle was inside `lifecycleCount` and `totalTokens` and inside no
+// `awaiting-developer` lifecycle was inside `lifecycleCount` and inside no
 // bucket — the rollup could not show it at all. Every assertion reads `ACTIVE_STATES`, so it
 // measures the vocabulary rather than a seventh copy of the bucket list.
 describe('metrics bucket every live lifecycle state', () => {
@@ -571,13 +570,11 @@ describe('metrics bucket every live lifecycle state', () => {
       state,
       phase: 'build',
       fleeting: false,
-      tokens: 0,
       startedAt: '2026-06-14T09:00:00+00:00',
       lastEventTs: '2026-06-14T09:00:00+00:00',
       stateEnteredAt: '2026-06-14T09:00:00+00:00',
       inferred: false,
       actions: [],
-      tokenSeries: [],
     }));
     const metrics = metricsFor(lifecycles) as unknown as Record<string, number>;
     for (const state of ACTIVE_STATES) {

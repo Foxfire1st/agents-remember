@@ -5,7 +5,6 @@ import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
 import {
-  masterDocWithSeriesTokens,
   seriesAsMasterDoc,
   seriesSliceDocs,
   sliceForSlug,
@@ -34,9 +33,8 @@ function TaskDocBody({
   openDoc: TaskDocNode | undefined;
   sliceDocs: TaskDocNode[];
 } & PanelCallbacks) {
-  const { fullTaskDoc, analytics, taskDocumentBodyState, jump, setOpenSlug, docPathForRef } =
+  const { fullTaskDoc, taskDocumentBodyState, jump, setOpenSlug, docPathForRef } =
     state;
-  const seriesList = analytics?.series ?? [];
   if (selectedTaskDoc.kind === "master" && openDoc) {
     return (
       <TaskReader
@@ -50,7 +48,7 @@ function TaskDocBody({
   if (selectedTaskDoc.kind === "master") {
     return (
       <MasterOverview
-        doc={masterDocWithSeriesTokens(fullTaskDoc(selectedTaskDoc), seriesList)}
+        doc={fullTaskDoc(selectedTaskDoc)}
         bodyState={taskDocumentBodyState}
         sliceDocs={sliceDocs}
         onOpen={setOpenSlug}
@@ -139,7 +137,7 @@ export function EmptyDetailPanel() {
   return (
     <Panel testid="detail-panel" title="Detail" className={sizing} fill>
       <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4" opacity={0.18}>
-        Select a task to inspect its phase, gate, and tokens.
+        Select a task to inspect its phase and gate.
       </EmptyStateBackdrop>
     </Panel>
   );
@@ -155,7 +153,6 @@ export function SeriesDetailPanel({
   const {
     selectedSeries,
     allDocs,
-    analytics,
     openSlug,
     setOpenSlug,
     fullTaskDoc,
@@ -166,10 +163,7 @@ export function SeriesDetailPanel({
     (doc) => doc.docPath === selectedSeries.docPath,
   );
   const seriesDoc = selectedSeriesTaskDoc
-    ? masterDocWithSeriesTokens(
-        fullTaskDoc(selectedSeriesTaskDoc),
-        analytics?.series ?? [],
-      )
+    ? fullTaskDoc(selectedSeriesTaskDoc)
     : seriesAsMasterDoc(selectedSeries);
   const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
   const openDoc = openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;

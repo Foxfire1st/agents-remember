@@ -66,8 +66,6 @@ function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): Life
     startedAt: "2026-06-23T10:00:00+00:00",
     stateEnteredAt: "2026-06-23T10:00:00+00:00",
     state: "running",
-    tokenSeries: [],
-    tokens: 0,
     ...rest,
   };
 }

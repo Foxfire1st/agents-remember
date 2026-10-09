@@ -10,13 +10,11 @@ const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): Lifecyc
     state: "running",
     phase,
     fleeting: false,
-    tokens: 0,
     startedAt: "t",
     lastEventTs: "t",
     stateEnteredAt: "t",
     inferred: false,
     actions: [],
-    tokenSeries: [],
   };
   return repoId === undefined ? base : { ...base, repoId };
 };

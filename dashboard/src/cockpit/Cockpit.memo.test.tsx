@@ -133,13 +133,11 @@ function seedDrillableMaster() {
     phase: "build",
     fleeting: false,
     repoId: "repo-a",
-    tokens: 0,
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
     stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
   };
   const master = taskDoc({
     id: "master-x",

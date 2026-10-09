@@ -34,13 +34,11 @@ export function lifecycle(over: Partial<LifecycleProjection> & Pick<LifecyclePro
     state: "paused",
     phase: "build",
     fleeting: false,
-    tokens: 0,
     startedAt: "2026-06-24T06:00:00+00:00",
     lastEventTs: "2026-06-24T06:00:30+00:00",
     stateEnteredAt: "2026-06-24T06:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
     ...over,
   } satisfies LifecycleProjection;
 }
@@ -105,7 +103,6 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     doneCount: 0,
     totalCount: 0,
     abandonedCount: 0,
-    seriesTokenTotal: 0,
     sections: [],
     decisions: [],
     docPath: "/tasks/260610_browser-dashboard/task.json",

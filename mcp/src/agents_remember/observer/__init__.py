@@ -57,7 +57,6 @@ from agents_remember.observer.projection import (
     SetupSummaryNode,
     SidecarStaleNode,
     TaskDocNode,
-    TokenSample,
     ToolReportNode,
     WorkspaceProjection,
 )
@@ -67,7 +66,6 @@ from agents_remember.observer.reducer import (
     project_lifecycle,
     project_workspace,
     staleness_histogram,
-    token_series,
 )
 from agents_remember.observer.served_store import (
     SERVED_RECORD_SCHEMA,
@@ -120,7 +118,6 @@ __all__ = [
     "SidecarStaleNode",
     "State",
     "TaskDocNode",
-    "TokenSample",
     "ToolReportNode",
     "Trust",
     "WorkspaceProjection",
@@ -136,5 +133,4 @@ __all__ = [
     "reset_ambient",
     "served_key",
     "staleness_histogram",
-    "token_series",
 ]

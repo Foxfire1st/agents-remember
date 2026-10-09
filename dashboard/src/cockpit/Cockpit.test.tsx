@@ -66,13 +66,11 @@ function seedDrillableMaster() {
     phase: "build",
     fleeting: false,
     repoId: "repo-a",
-    tokens: 0,
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
     stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
   };
   const master = taskDoc({
     id: "master-x",
@@ -173,13 +171,11 @@ function taskReaderProjection(): WorkspaceProjection {
     fleeting: false,
     repoId: "repo-a",
     enclosure: `/contracts/${enclosure}`,
-    tokens: 0,
     startedAt: "2026-07-12T10:00:00+00:00",
     lastEventTs: "2026-07-12T10:00:30+00:00",
     stateEnteredAt: "2026-07-12T10:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
   });
   const master = taskDoc({
     id: "ops-master",
@@ -257,7 +253,6 @@ function taskReaderProjection(): WorkspaceProjection {
           doneCount: 0,
           totalCount: 1,
           abandonedCount: 0,
-          seriesTokenTotal: 0,
           sections: [],
           decisions: [],
           docPath: master.docPath,
@@ -444,8 +439,8 @@ describe("Operations click-to-detail body hydration", () => {
 
 describe("workspace rollup — the handoff reaches the header", () => {
   // The served rollup grew an `awaitingDeveloperCount` bucket, but the header read only
-  // running/blocked/tokens. A lifecycle that had stopped and handed the turn back was inside
-  // `lifecycleCount` and `totalTokens` and inside none of the numbers on the bar — the workflow's
+  // running/blocked. A lifecycle that had stopped and handed the turn back was inside
+  // `lifecycleCount` and inside none of the numbers on the bar — the workflow's
   // own handoff surface was countable on the wire and invisible in the UI.
   const withStates = (...states: LifecycleProjection["state"][]): WorkspaceProjection => {
     const fixture = GALLERY.find((entry) => entry.name === "calm");
@@ -861,13 +856,11 @@ describe("the left rail shows lifecycle states and attention severities at the s
       phase: "build",
       fleeting: false,
       repoId: "repo-a",
-      tokens: 0,
       startedAt: "2026-06-20T09:00:00+00:00",
       lastEventTs: "2026-06-20T09:00:30+00:00",
       stateEnteredAt: "2026-06-20T09:00:00+00:00",
       inferred: false,
       actions: [],
-      tokenSeries: [],
     };
     return {
       version: 2,

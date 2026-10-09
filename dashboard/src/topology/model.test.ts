@@ -58,13 +58,11 @@ const lifecycle = (overrides: Partial<LifecycleProjection> = {}): LifecycleProje
   state: "running",
   phase: "build",
   fleeting: false,
-  tokens: 0,
   startedAt: "2026-06-28T00:00",
   lastEventTs: "2026-06-28T00:00",
   stateEnteredAt: "2026-06-28T00:00",
   inferred: false,
   actions: [],
-  tokenSeries: [],
   ...overrides,
 });
 

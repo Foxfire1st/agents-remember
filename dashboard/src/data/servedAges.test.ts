@@ -28,8 +28,8 @@ describe("VOLATILE_AGE_FIELDS", () => {
 
 describe("stableEquals", () => {
   it("treats nodes differing only in volatile ages as equal", () => {
-    const a = { id: "L1", tokens: 3, staleSeconds: 1.5 };
-    const b = { id: "L1", tokens: 3, staleSeconds: 99.5 };
+    const a = { id: "L1", count: 3, staleSeconds: 1.5 };
+    const b = { id: "L1", count: 3, staleSeconds: 99.5 };
     expect(stableEquals(a, b)).toBe(true);
   });
 
@@ -46,7 +46,7 @@ describe("stableEquals", () => {
   });
 
   it("detects real changes", () => {
-    expect(stableEquals({ id: "L1", tokens: 3 }, { id: "L1", tokens: 4 })).toBe(false);
+    expect(stableEquals({ id: "L1", count: 3 }, { id: "L1", count: 4 })).toBe(false);
     expect(stableEquals({ items: [1, 2] }, { items: [1, 2, 3] })).toBe(false);
     expect(stableEquals({ a: 1 }, { a: 1, b: 2 })).toBe(false);
     expect(stableEquals({ gate: null }, { gate: { id: "g" } })).toBe(false);

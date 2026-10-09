@@ -551,7 +551,6 @@ function lifecycleStateCounts(
 METRICS_FACTORY = """export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
   return {
     lifecycleCount: lifecycles.length,
-    totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
     stalenessHistogram: {},
     ...lifecycleStateCounts(lifecycles),
   };

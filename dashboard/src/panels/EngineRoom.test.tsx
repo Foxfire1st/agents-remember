@@ -28,13 +28,11 @@ function seedGateRoom() {
     state: "blocked",
     phase: "close",
     fleeting: false,
-    tokens: 0,
     startedAt: "2026-06-23T10:00:00+00:00",
     lastEventTs: "2026-06-23T10:01:00+00:00",
     stateEnteredAt: "2026-06-23T10:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
     gate: {
       id: "G1",
       kind: "cleanup-approval",

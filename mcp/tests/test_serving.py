@@ -81,7 +81,9 @@ def _config(tmp: Path) -> McpRuntimeConfig:
     )
 
 
-def _lifecycle(ident: str, *, tokens: int = 0, state: State = "running") -> LifecycleProjection:
+def _lifecycle(
+    ident: str, *, stateEnteredAt: str = "", state: State = "running"
+) -> LifecycleProjection:
     return LifecycleProjection(
         id=ident,
         state=state,
@@ -89,7 +91,7 @@ def _lifecycle(ident: str, *, tokens: int = 0, state: State = "running") -> Life
         fleeting=False,
         startedAt=_TS,
         lastEventTs=_TS,
-        tokens=tokens,
+        stateEnteredAt=stateEnteredAt,
     )
 
 
@@ -223,12 +225,14 @@ class StateEtagTests(unittest.TestCase):
             self.assertEqual(still.headers["etag"], etag)
 
             # A real content change mints a new revision: 200 with a fresh ETag + fresh body.
-            held[0] = _projection(lifecycles=(_lifecycle("L1", tokens=9),))
+            held[0] = _projection(
+                lifecycles=(_lifecycle("L1", stateEnteredAt="2026-06-14T11:00:00Z"),)
+            )
             changed = self._get_until(client, etag=etag, want_status=200)
             self.assertEqual(changed.status_code, 200)
             self.assertNotEqual(changed.headers["etag"], etag)
             body = changed.json()
-            self.assertEqual(body["lifecycles"][0]["tokens"], 9)
+            self.assertEqual(body["lifecycles"][0]["stateEnteredAt"], "2026-06-14T11:00:00Z")
 
 
 class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):

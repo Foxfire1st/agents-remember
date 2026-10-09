@@ -1031,15 +1031,14 @@ const TopBar = memo(function TopBar() {
             tasks {metrics.runningCount} running · {metrics.blockedCount} blocked
             {/* The NOTIFY-AND-CONTINUE handoff, appended only while something is actually handed
                 back. Without it a lifecycle that has stopped and given the developer the turn is
-                in `lifecycleCount` and `totalTokens` and in none of the numbers on this bar —
+                in `lifecycleCount` and in none of the numbers on this bar —
                 the rollup bucket exists on the wire but nothing reads it. It follows the chip
                 above rather than the running/blocked pair: those two are the workspace's standing
                 rhythm and read fine at zero, while a permanent `0 awaiting you` is the same
                 reassurance-zero lie the caution chip refuses to tell. */}
             {metrics.awaitingDeveloperCount > 0
               ? ` · ${metrics.awaitingDeveloperCount} awaiting you`
-              : ""}{" "}
-            · {metrics.totalTokens} tok
+              : ""}
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}

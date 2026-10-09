@@ -63,13 +63,11 @@ function lifecycle(id: string, enclosure: string): LifecycleProjection {
     fleeting: false,
     repoId: "repo-a",
     enclosure: `/contracts/${enclosure}`,
-    tokens: 0,
     startedAt: "2026-07-12T10:00:00+00:00",
     lastEventTs: "2026-07-12T10:00:30+00:00",
     stateEnteredAt: "2026-07-12T10:00:00+00:00",
     inferred: false,
     actions: [],
-    tokenSeries: [],
   };
 }
 

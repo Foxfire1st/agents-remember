@@ -56,7 +56,6 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     doneCount: 0,
     totalCount: 0,
     abandonedCount: 0,
-    seriesTokenTotal: 0,
     createdAt: "2026-06-20T09:00:00+00:00",
     sections: [],
     decisions: [],
@@ -91,20 +90,17 @@ const SERIES_LIFECYCLE: LifecycleProjection = {
   state: "running",
   phase: "build",
   fleeting: false,
-  tokens: 0,
   startedAt: "2026-06-20T09:00:00+00:00",
   lastEventTs: "2026-06-20T09:00:30+00:00",
   stateEnteredAt: "2026-06-20T09:00:00+00:00",
   inferred: false,
   actions: [],
-  tokenSeries: [],
 };
 
 const SERIES_MASTER = seriesNode({
   seriesId: "series",
   title: "My Series",
   objective: "Series objective text",
-  seriesTokenTotal: 1500,
   docPath: "/tasks/repo-a/series/task.json",
   subTasks: [
     {
@@ -315,13 +311,11 @@ const PROMOTED_LIFECYCLE: LifecycleProjection = {
   fleeting: false,
   enclosure: "/contracts/16",
   repoId: "agents-remember",
-  tokens: 0,
   startedAt: "2026-06-24T06:00:00+00:00",
   lastEventTs: "2026-06-24T06:00:30+00:00",
   stateEnteredAt: "2026-06-24T06:00:00+00:00",
   inferred: false,
   actions: [],
-  tokenSeries: [],
 };
 
 const PROMOTED_DOC = taskDoc({

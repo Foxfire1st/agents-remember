@@ -5,6 +5,7 @@ import { RoleChatsPane } from "./RoleChats";
 import { HOST_UNREACHABLE_LINE, RoleExecutionStatus, RoleReviveControl } from "./RoleExecutionStatus";
 import { tasklessRequestStorageKey, type RoleScopedExecution } from "./roleLaunchModel";
 import type { TaskDocNode } from "../types/projection";
+import { taskDoc } from "../test/fixtures/wire";
 
 
 const REQUEST_ID = "5f0c1f6e-8a53-4d5b-9d53-6f0f1f6f2a10";
@@ -190,7 +191,7 @@ describe("launcher bar and the execution's state", () => {
   });
 
   it("clears a task-bound host failure on the next successful Result", async () => {
-    const sprint = { kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" } as unknown as TaskDocNode;
+    const sprint = taskDoc({ kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" });
     const lastKnown = execution({ status: "completed", canStart: true, hostUnreachable: true });
     results = [execution({})];
     const { getByLabelText, findByLabelText, findByTestId, getByTestId, getByRole, queryByTestId } = renderLauncher(lastKnown, [sprint]);
@@ -237,7 +238,7 @@ describe("launcher bar and the execution's state", () => {
     const completed = execution({ status: "completed", canStart: true });
     results = [completed];
     dispatchReply = { status: 409, body: { detail: "The selected role already has an open execution." } };
-    const sprint = { kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" } as unknown as TaskDocNode;
+    const sprint = taskDoc({ kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" });
     const { getByRole, getByTestId, getByLabelText, findByLabelText, findByRole } = renderLauncher(completed, [sprint]);
     fireEvent.change(getByLabelText("Role"), { target: { value: "orchestrator" } });
     fireEvent.change(await findByLabelText("AR sprint"), { target: { value: "0" } });
@@ -300,7 +301,7 @@ describe("launcher bar and the execution's state", () => {
   });
 
   it("clears a task-bound report error after Retry launch options succeeds", async () => {
-    const sprint = { kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" } as unknown as TaskDocNode;
+    const sprint = taskDoc({ kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" });
     const saved = execution({ status: "completed", canStart: true });
     results = [saved];
     const { getByRole, getByTestId, getByLabelText, findByLabelText, findByRole } = renderLauncher(saved, [sprint]);
@@ -389,7 +390,7 @@ describe("launcher bar and the execution's state", () => {
   });
 
   it("preserves the base controls when a task-bound dispatch and its options read fail", async () => {
-    const sprint = { kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" } as unknown as TaskDocNode;
+    const sprint = taskDoc({ kind: "master", orchestrates: ["sbx-m1"], repository: "sandbox-app", docPath: "/coordination/tasks/sandbox-app/sbx-sprint/task.json", id: "SBX-SPRINT", title: "Sandbox sprint" });
     const saved = execution({ status: "completed", canStart: true });
     results = [saved];
     const { getByRole, getByTestId, getByLabelText, findByLabelText, queryByRole } = renderLauncher(saved, [sprint]);

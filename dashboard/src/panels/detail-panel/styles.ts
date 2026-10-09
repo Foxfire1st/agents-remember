@@ -201,7 +201,6 @@ export const entryStateBody = css({
   overflowWrap: "anywhere",
 });
 
-export const tokensRow = css({ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" });
 export const label = css({
   fontSize: "0.72rem",
   letterSpacing: "0.08em",
@@ -256,8 +255,6 @@ export const taskdoc = css({ display: "grid", gap: "0.75rem" });
 export const taskdocHead = css({ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" });
 export const taskdocTitle = css({ fontWeight: "600" });
 export const taskdocStatus = css({ color: "cyan", fontSize: "0.8rem" });
-export const masterTokens = css({ display: "flex", alignItems: "center", gap: "0.5rem", color: "cyan", fontSize: "0.78rem" });
-export const masterTokenValue = css({ fontWeight: "600" });
 export const taskdocSection = css({ display: "grid", gap: "0.3rem" });
 export const taskdocH = css({
   margin: "0",

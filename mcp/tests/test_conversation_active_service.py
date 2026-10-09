@@ -317,9 +317,11 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         # Any further live evidence marks the native tip dirty; the next page re-walks thread/read.
+        # Usage/rate evidence is routed by the presence of the tokenUsage key (it never
+        # becomes a timeline row); the key carries no figures here.
         bridge.push_evidence(
             "codex-notification",
-            {"threadId": "vendor-1", "turnId": "turn-2", "tokenUsage": {"totalTokens": 1}},
+            {"threadId": "vendor-1", "turnId": "turn-2", "tokenUsage": {}},
         )
         await projector.poll_once()
         settled = await projector.page(before_ordinal=None, limit=50)

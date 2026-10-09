@@ -2246,18 +2246,6 @@
           "default": "",
           "title": "Stateenteredat",
           "type": "string"
-        },
-        "tokenSeries": {
-          "items": {
-            "$ref": "#/$defs/TokenSample"
-          },
-          "title": "Tokenseries",
-          "type": "array"
-        },
-        "tokens": {
-          "default": 0,
-          "title": "Tokens",
-          "type": "integer"
         }
       },
       "required": [
@@ -2510,7 +2498,7 @@
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Workspace rollups: 3a point counts + the 3b derived aggregates.\n\nThe ``*Count`` fields below are not a free-form list: they are exactly\n:data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,\nthe all-states total. They stay written out because they are the served contract the\ndashboard reads by name and pyright checks by name; what makes them non-drifting is that\nthe reducer fills them from the vocabulary and a test asserts this declaration equals it.\n\n``stalenessHistogram`` buckets every onboarding sidecar by the age of its\n``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free\nverification-age distribution note 03 wanted, computed without classifying\ndrift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these\nare the workspace-wide rollups.",
+      "description": "Workspace rollups: 3a point counts + the 3b derived aggregates.\n\nThe ``*Count`` fields below are not a free-form list: they are exactly\n:data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,\nthe all-states total. They stay written out because they are the served contract the\ndashboard reads by name and pyright checks by name; what makes them non-drifting is that\nthe reducer fills them from the vocabulary and a test asserts this declaration equals it.\n\n``stalenessHistogram`` buckets every onboarding sidecar by the age of its\n``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free\nverification-age distribution note 03 wanted, computed without classifying\ndrift.",
       "properties": {
         "awaitingDeveloperCount": {
           "default": 0,
@@ -2543,11 +2531,6 @@
           },
           "title": "Stalenesshistogram",
           "type": "object"
-        },
-        "totalTokens": {
-          "default": 0,
-          "title": "Totaltokens",
-          "type": "integer"
         }
       },
       "title": "Metrics",
@@ -2992,11 +2975,6 @@
         "seriesId": {
           "title": "Seriesid",
           "type": "string"
-        },
-        "seriesTokenTotal": {
-          "default": 0,
-          "title": "Seriestokentotal",
-          "type": "integer"
         },
         "status": {
           "title": "Status",
@@ -4380,26 +4358,6 @@
         "status"
       ],
       "title": "TaskSubTaskRefNode",
-      "type": "object"
-    },
-    "TokenSample": {
-      "additionalProperties": false,
-      "description": "One point on a lifecycle's cumulative-token fuel gauge (slice 3b, §2.4).\n\nDerived from the event log: every ``tool.completed`` event carries the tokens\nthat call cost, so the running total over event timestamps is the time series\nnote 03 gap #2 (\"no token-spend persistence\") wanted -- now derivable because\nthe event substrate (slice 02) persists it.",
-      "properties": {
-        "cumulative": {
-          "title": "Cumulative",
-          "type": "integer"
-        },
-        "ts": {
-          "title": "Ts",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ts",
-        "cumulative"
-      ],
-      "title": "TokenSample",
       "type": "object"
     },
     "ToolReportNode": {

@@ -191,7 +191,7 @@ export type MasterDocView = Pick<
 
   | "docPath"
   | "repository"
-> & { subTasks: SubTaskRow[]; seriesTokenTotal?: number };
+> & { subTasks: SubTaskRow[] };
 
 
 export const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
@@ -210,13 +210,6 @@ export const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   discardedSubTasks: seriesNode.discardedSubTasks,
   docPath: seriesNode.docPath,
   repository: seriesNode.repository,
-  seriesTokenTotal: seriesNode.seriesTokenTotal,
-});
-
-
-export const masterDocWithSeriesTokens = (doc: TaskDocNode, seriesList: SeriesNode[]): MasterDocView => ({
-  ...doc,
-  seriesTokenTotal: seriesList.find((seriesNode) => seriesNode.docPath === doc.docPath)?.seriesTokenTotal,
 });
 
 // The lifecycle's bound task documents. A `master` (contract-paired, no lifecycleId of its

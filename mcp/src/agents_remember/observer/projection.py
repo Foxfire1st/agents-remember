@@ -67,21 +67,6 @@ class ActionAvailability(BaseModel):
     nextSafeAction: str | None = None
 
 
-class TokenSample(BaseModel):
-    """One point on a lifecycle's cumulative-token fuel gauge (slice 3b, §2.4).
-
-    Derived from the event log: every ``tool.completed`` event carries the tokens
-    that call cost, so the running total over event timestamps is the time series
-    note 03 gap #2 ("no token-spend persistence") wanted -- now derivable because
-    the event substrate (slice 02) persists it.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    ts: str
-    cumulative: int
-
-
 class GateNode(BaseModel):
     """A durable gate materialized into the projection (slice 6c): the dashboard's
     review surface for a decision point on a lifecycle.
@@ -122,7 +107,6 @@ class LifecycleProjection(BaseModel):
     enclosure: str | None = None
     repoId: str | None = None
     scope: str | None = None
-    tokens: int = 0
     startedAt: str
     lastEventTs: str
     # When the lifecycle last *entered its current written state* (seeded at
@@ -143,8 +127,6 @@ class LifecycleProjection(BaseModel):
     # review surface. None when the lifecycle has no open gate.
     gate: GateNode | None = None
     actions: list[ActionAvailability] = Field(default_factory=list)
-    # The cumulative-token fuel gauge, folded from the log's tool.completed events.
-    tokenSeries: list[TokenSample] = Field(default_factory=list)
 
 
 class EnclosureNode(BaseModel):
@@ -213,12 +195,12 @@ class ProviderNode(BaseModel):
 
 
 # The states :class:`Metrics` buckets: the LIVE half of the vocabulary, verbatim.
-# ``lifecycleCount`` already counts every lifecycle and ``totalTokens`` sums every one, so what
+# ``lifecycleCount`` already counts every lifecycle, so what
 # the per-state buckets add is the live workload -- a ``completed``/``abandoned`` lifecycle is
 # history, not work in flight. This is the live half itself and not a subtraction: a set
 # difference re-derives the answer from a second list (``TERMINAL_STATES``) that could be wrong,
 # and a hand-written bucket list is exactly what let ``awaiting-developer`` inflate
-# ``lifecycleCount`` and ``totalTokens`` while landing in no bucket at all -- the rollup could
+# ``lifecycleCount`` while landing in no bucket at all -- the rollup could
 # not show a lifecycle that had handed the turn back. A seventh state must join
 # ``LiveState`` or ``TerminalState`` to exist at all (``check_state_partition``); joining the
 # live half grows a bucket here, a count in the reducer, and (via ``extra="forbid"``) a loud
@@ -306,8 +288,7 @@ class Metrics(BaseModel):
     ``stalenessHistogram`` buckets every onboarding sidecar by the age of its
     ``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free
     verification-age distribution note 03 wanted, computed without classifying
-    drift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these
-    are the workspace-wide rollups.
+    drift.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -319,7 +300,6 @@ class Metrics(BaseModel):
     # The NOTIFY-AND-CONTINUE turn end: the model stopped and the developer holds the turn.
     # Non-terminal, so it belongs in the live rollup rather than in history.
     awaitingDeveloperCount: int = 0
-    totalTokens: int = 0
     stalenessHistogram: dict[str, int] = Field(default_factory=dict)
 
 
@@ -855,7 +835,6 @@ class SeriesNode(BaseModel):
     doneCount: int = 0
     totalCount: int = 0
     abandonedCount: int = 0
-    seriesTokenTotal: int = 0
     sections: list[SeriesSectionNode] = Field(default_factory=list)
     decisions: list[TaskDecisionNode] = Field(default_factory=list)
     docPath: str

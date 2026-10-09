@@ -678,7 +678,6 @@
           }
         ],
         "seriesId": "SIM",
-        "seriesTokenTotal": 1200,
         "status": "in-progress",
         "subTasks": [
           {
@@ -1833,14 +1832,7 @@
       "staleSeconds": 20.0,
       "startedAt": "2026-06-14T09:00:00+00:00",
       "state": "blocked",
-      "stateEnteredAt": "2026-06-14T09:00:35+00:00",
-      "tokenSeries": [
-        {
-          "cumulative": 1200,
-          "ts": "2026-06-14T09:00:30+00:00"
-        }
-      ],
-      "tokens": 1200
+      "stateEnteredAt": "2026-06-14T09:00:35+00:00"
     },
     {
       "actions": [],
@@ -1851,9 +1843,7 @@
       "phase": "reframe-research",
       "startedAt": "2026-06-14T09:00:50+00:00",
       "state": "running",
-      "stateEnteredAt": "2026-06-14T09:00:50+00:00",
-      "tokenSeries": [],
-      "tokens": 0
+      "stateEnteredAt": "2026-06-14T09:00:50+00:00"
     },
     {
       "actions": [],
@@ -1865,9 +1855,7 @@
       "staleSeconds": 540.0,
       "startedAt": "2026-06-14T08:40:00+00:00",
       "state": "paused",
-      "stateEnteredAt": "2026-06-14T08:52:00+00:00",
-      "tokenSeries": [],
-      "tokens": 300
+      "stateEnteredAt": "2026-06-14T08:52:00+00:00"
     },
     {
       "actions": [],
@@ -1878,9 +1866,7 @@
       "phase": "trust-checkpoint",
       "startedAt": "2026-06-14T08:30:00+00:00",
       "state": "awaiting-developer",
-      "stateEnteredAt": "2026-06-14T08:58:00+00:00",
-      "tokenSeries": [],
-      "tokens": 450
+      "stateEnteredAt": "2026-06-14T08:58:00+00:00"
     },
     {
       "actions": [],
@@ -1909,9 +1895,7 @@
       "phase": "decide",
       "startedAt": "2026-06-14T07:00:00+00:00",
       "state": "completed",
-      "stateEnteredAt": "2026-06-14T08:10:00+00:00",
-      "tokenSeries": [],
-      "tokens": 800
+      "stateEnteredAt": "2026-06-14T08:10:00+00:00"
     },
     {
       "actions": [],
@@ -1922,9 +1906,7 @@
       "phase": "close",
       "startedAt": "2026-06-14T06:00:00+00:00",
       "state": "abandoned",
-      "stateEnteredAt": "2026-06-14T06:04:00+00:00",
-      "tokenSeries": [],
-      "tokens": 50
+      "stateEnteredAt": "2026-06-14T06:04:00+00:00"
     }
   ],
   "metrics": {
@@ -1936,8 +1918,7 @@
     "stalenessHistogram": {
       "aging": 2,
       "fresh": 10
-    },
-    "totalTokens": 2800
+    }
   },
   "providers": [
     {

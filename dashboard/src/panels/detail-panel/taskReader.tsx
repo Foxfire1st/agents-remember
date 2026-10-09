@@ -44,13 +44,10 @@ import {
   SUBSTEP,
   badge,
   crossButton,
-  label,
   lane,
   laneMeta,
   laneRepo,
   laneTitle,
-  masterTokenValue,
-  masterTokens,
   series,
   skippedDisposition,
   skippedWord,
@@ -181,7 +178,6 @@ function MasterOverviewHeader({
           onOpen={onOpenChangeSet}
         />
       ) : null}
-      <MasterTokenSummary total={doc.seriesTokenTotal} />
     </>
   );
 }
@@ -275,16 +271,6 @@ function SprintGraphSection({ doc }: { doc: MasterDocView }) {
     </Section>
   );
 }
-export function MasterTokenSummary({ total }: { total: number | undefined }) {
-  if (total === undefined) return null;
-  return (
-    <div className={masterTokens} aria-label={`${total} aggregate series tokens`}>
-      <span className={label}>series tokens</span>
-      <span className={masterTokenValue}>{total.toLocaleString()} tok</span>
-    </div>
-  );
-}
-
 export function MasterSection({
   section,
   doc,

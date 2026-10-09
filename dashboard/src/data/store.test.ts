@@ -92,8 +92,8 @@ describe("dashboard store", () => {
 
   it("replaces metrics / analytics wholesale", () => {
     dashboardStore.getState().applySnapshot(projection);
-    dashboardStore.getState().applyDelta("metrics", { ...projection.metrics, totalTokens: 9999 });
-    expect(dashboardStore.getState().metrics?.totalTokens).toBe(9999);
+    dashboardStore.getState().applyDelta("metrics", { ...projection.metrics, lifecycleCount: 9999 });
+    expect(dashboardStore.getState().metrics?.lifecycleCount).toBe(9999);
   });
 
   it("marks the connection signal-lost", () => {
@@ -221,12 +221,12 @@ describe("dashboard store change gate (260703-L15)", () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
     const node = JSON.parse(JSON.stringify(before.lifecycles["sim-replay-lifecycle"]));
-    node.tokens = 999999;
+    node.stateEnteredAt = "2026-06-14T09:09:09+00:00";
     node.staleSeconds = 1; // fresh ages ride along with real changes
     dashboardStore.getState().applyDelta("lifecycle", node);
     const after = dashboardStore.getState();
     expect(after).not.toBe(before);
-    expect(after.lifecycles["sim-replay-lifecycle"].tokens).toBe(999999);
+    expect(after.lifecycles["sim-replay-lifecycle"].stateEnteredAt).toBe("2026-06-14T09:09:09+00:00");
   });
 
   it("reuses unchanged nodes by identity when a snapshot carries one real change", () => {
@@ -235,10 +235,10 @@ describe("dashboard store change gate (260703-L15)", () => {
     const next = volatileBump(projection, 7);
     const changed = next.lifecycles.find((x) => x.id === "sim-replay-lifecycle");
     if (!changed) throw new Error("fixture lifecycle missing");
-    changed.tokens = 424242;
+    changed.stateEnteredAt = "2026-06-14T09:09:09+00:00";
     dashboardStore.getState().applySnapshot(next);
     const state = dashboardStore.getState();
-    expect(state.lifecycles["sim-replay-lifecycle"].tokens).toBe(424242);
+    expect(state.lifecycles["sim-replay-lifecycle"].stateEnteredAt).toBe("2026-06-14T09:09:09+00:00");
     expect(state.lifecycles["fleeting-001"]).toBe(untouched); // identity preserved
   });
 
@@ -249,7 +249,7 @@ describe("dashboard store change gate (260703-L15)", () => {
     expect(first).toEqual(build);
     const next = volatileBump({ ...projection, servingBuild: { ...build } }, 3);
     const changed = next.lifecycles[0];
-    changed.tokens = 111; // force a real apply
+    changed.stateEnteredAt = "2026-06-14T09:09:09+00:00"; // force a real apply
     dashboardStore.getState().applySnapshot(next);
     expect(dashboardStore.getState().servingBuild).toBe(first); // equal stamp -> same object
   });

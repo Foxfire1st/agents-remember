@@ -4,7 +4,6 @@ import {
 } from "../../data/taskIdentity";
 import { parentTaskLinkForDoc } from "../../data/taskHierarchy";
 import { Panel } from "../../grammar/Panel";
-import { TokenGauge } from "../../grammar/TokenGauge";
 import type {
   Analytics,
   EnclosureNode,
@@ -18,7 +17,6 @@ import { GateResponder } from "../GateResponder";
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
 import { ChangeSetButton } from "./changeSetBar";
 import {
-  masterDocWithSeriesTokens,
   seriesAsMasterDoc,
   seriesSliceDocs,
   sliceForSlug,
@@ -27,14 +25,12 @@ import type { useDetailPanelState } from "./state";
 import {
   changeSetBar,
   crumb,
-  label,
   lanes,
   sizing,
   spine,
   spineHead,
   step,
   stepper,
-  tokensRow,
   where,
 } from "./styles";
 import {
@@ -72,7 +68,6 @@ function resolveMasterAndSlices(docs: TaskDocNode[], allDocs: TaskDocNode[]) {
 function resolveSeriesView(
   selectedSeries: SeriesNode | undefined,
   allDocs: TaskDocNode[],
-  analytics: Analytics | null | undefined,
   fullTaskDoc: (doc: TaskDocNode) => TaskDocNode,
 ) {
   if (!selectedSeries) return { seriesDoc: undefined, seriesSlices: [] };
@@ -80,10 +75,7 @@ function resolveSeriesView(
     (doc) => doc.docPath === selectedSeries.docPath,
   );
   const seriesDoc = selectedSeriesTaskDoc
-    ? masterDocWithSeriesTokens(
-        fullTaskDoc(selectedSeriesTaskDoc),
-        analytics?.series ?? [],
-      )
+    ? fullTaskDoc(selectedSeriesTaskDoc)
     : seriesAsMasterDoc(selectedSeries);
   const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
   return { seriesDoc, seriesSlices };
@@ -127,7 +119,6 @@ function useLifecycleDetail(
   const { seriesDoc, seriesSlices } = resolveSeriesView(
     selectedSeries,
     allDocs,
-    analytics,
     fullTaskDoc,
   );
   const contentSlices = seriesDoc ? seriesSlices : slices;
@@ -240,7 +231,6 @@ function DetailBody({
   const {
     setOpenSlug,
     fullTaskDoc,
-    analytics,
     taskDocumentBodyState,
     jump,
   } = state;
@@ -272,10 +262,7 @@ function DetailBody({
   if (master) {
     return (
       <MasterOverview
-        doc={masterDocWithSeriesTokens(
-          fullTaskDoc(master),
-          analytics?.series ?? [],
-        )}
+        doc={fullTaskDoc(master)}
         bodyState={taskDocumentBodyState}
         sliceDocs={slices}
         onOpen={setOpenSlug}
@@ -358,15 +345,6 @@ function WorktreeSpine({
   );
 }
 
-function TokenRow({ lifecycle }: { lifecycle: LifecycleProjection }) {
-  return (
-    <div className={tokensRow}>
-      <span className={label}>tokens</span>
-      <TokenGauge series={lifecycle.tokenSeries} />
-    </div>
-  );
-}
-
 export function LifecycleDetailBody({
   state,
   lifecycle,
@@ -408,8 +386,6 @@ export function LifecycleDetailBody({
         taskDocumentBodyState={state.taskDocumentBodyState}
         onOpenChangeSet={onOpenChangeSet}
       />
-
-      <TokenRow lifecycle={lifecycle} />
     </Panel>
   );
 }

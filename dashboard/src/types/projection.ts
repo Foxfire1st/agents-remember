@@ -378,8 +378,6 @@ export interface LifecycleProjection {
   startedAt: string;
   state: State;
   stateEnteredAt: string;
-  tokenSeries: TokenSample[];
-  tokens: number;
 }
 
 export interface LifecycleProjectionComponentBindings {
@@ -460,13 +458,11 @@ function lifecycleStateCounts(
 export interface Metrics extends LifecycleStateCounts {
   lifecycleCount: number;
   stalenessHistogram: Record<string, number>;
-  totalTokens: number;
 }
 
 export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
   return {
     lifecycleCount: lifecycles.length,
-    totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
     stalenessHistogram: {},
     ...lifecycleStateCounts(lifecycles),
   };
@@ -545,7 +541,6 @@ export interface SeriesNode {
   repository: string;
   sections: SeriesSectionNode[];
   seriesId: string;
-  seriesTokenTotal: number;
   status: string;
   subTasks: SeriesSubTaskNode[];
   title: string;
@@ -822,11 +817,6 @@ export interface TerminalObserverHealth {
   /** JSON Schema refinements: {"minimum":0} */
   staleCutoffSeconds: number;
   status: "initializing" | "degraded" | "healthy" | "stale";
-}
-
-export interface TokenSample {
-  cumulative: number;
-  ts: string;
 }
 
 export interface ToolReportNode {

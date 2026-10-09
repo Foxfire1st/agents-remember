@@ -1,15 +1,14 @@
-"""Analytical rollups: token series, staleness histogram, and workspace metrics.
+"""Analytical rollups: staleness histogram and workspace metrics.
 
-The reducer's slice-3b rollups: the bounded cumulative token series, the
-verification-age histogram, the workspace metrics rollup, and the analytics
-assembly. All remain pure functions of already-read inputs.
+The reducer's slice-3b rollups: the verification-age histogram, the workspace
+metrics rollup, and the analytics assembly. All remain pure functions of
+already-read inputs.
 """
 
 from __future__ import annotations
 
 from collections import Counter
 
-from agents_remember.observer.events import Event
 from agents_remember.observer.projection import (
     STATE_COUNT_FIELDS,
     Analytics,
@@ -19,7 +18,6 @@ from agents_remember.observer.projection import (
     Metrics,
     SeriesNode,
     SidecarStaleNode,
-    TokenSample,
 )
 from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 
@@ -32,8 +30,8 @@ def _metrics(
 
     The buckets come from :data:`STATE_COUNT_FIELDS`, not from a line per state. Three
     hand-written ``sum(1 for lc in lifecycles if lc.state == ...)`` lines are what made a
-    lifecycle that had handed the turn back count towards ``lifecycleCount`` and
-    ``totalTokens`` and towards nothing else. Counting by vocabulary also makes the next gap
+    lifecycle that had handed the turn back count towards ``lifecycleCount``
+    and towards nothing else. Counting by vocabulary also makes the next gap
     impossible to ship quietly: ``Metrics`` is ``extra="forbid"``, so a state whose bucket
     field was never declared raises here instead of vanishing into a zero.
 
@@ -44,57 +42,12 @@ def _metrics(
     counts = Counter(lc.state for lc in lifecycles)
     return Metrics(
         lifecycleCount=len(lifecycles),
-        totalTokens=sum(lc.tokens for lc in lifecycles),
         stalenessHistogram=staleness_histogram(sidecars) if sidecars else {},
         **{bucket: counts[state] for state, bucket in STATE_COUNT_FIELDS.items()},
     )
 
 
 # --- analytical rollups (slice 3b) -------------------------------------------
-
-
-# The served fuel-gauge bound (260703-L15): one sample per token-bearing ``tool.completed``
-# event is UNBOUNDED over a long lifecycle (~60 wire bytes/sample), and the lifecycle node
-# re-emits on every real change while its agent works -- an uncapped series multiplies into
-# the serving hot path (10k tool calls ≈ 600 KB riding every lifecycle delta). The gauge is
-# a chart, so the bound decimates: the newest TOKEN_SERIES_RECENT samples stay exact and the
-# older history thins uniformly (first sample always kept) to TOKEN_SERIES_MAX total. The
-# observer LOG keeps every event -- this bounds only the served projection.
-TOKEN_SERIES_MAX = 512
-TOKEN_SERIES_RECENT = 256
-
-
-def _decimate_token_series(samples: list[TokenSample]) -> list[TokenSample]:
-    """Bound the series: uniform-thin the older history, keep the newest window exact."""
-    if len(samples) <= TOKEN_SERIES_MAX:
-        return samples
-    history = samples[:-TOKEN_SERIES_RECENT]
-    budget = TOKEN_SERIES_MAX - TOKEN_SERIES_RECENT
-    step = len(history) / budget
-    thinned = [history[int(index * step)] for index in range(budget)]
-    return thinned + samples[-TOKEN_SERIES_RECENT:]
-
-
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_metrics.py:78).
-def token_series(events: list[Event]) -> list[TokenSample]:  # pragma: no cover
-    """Cumulative token spend over time, from the log's ``tool.completed`` events (§2.4).
-
-    The per-lifecycle fuel gauge: gap #2 ("no token-spend persistence") is closed by
-    the event substrate, so the running total is a pure fold of the log. Served bounded
-    (260703-L15): past :data:`TOKEN_SERIES_MAX` points the older history is decimated
-    (shape- and total-preserving -- ``cumulative`` stays exact per retained sample) while
-    the newest :data:`TOKEN_SERIES_RECENT` samples stay complete.
-    """
-    total = 0
-    samples: list[TokenSample] = []
-    for event in events:
-        if event.kind != "tool.completed":
-            continue
-        tokens = event.data.get("tokens")
-        if isinstance(tokens, int):
-            total += tokens
-            samples.append(TokenSample(ts=event.ts, cumulative=total))
-    return _decimate_token_series(samples)
 
 
 # Upper bound (exclusive, seconds) per verification-age bucket; the final bucket is
@@ -136,7 +89,7 @@ def build_analytics(
     """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard.
 
     ``series``, ``attention_queue`` and ``engine_processes`` are DERIVED surfaces the caller
-    computed from the same inputs (series carries token totals the raw nodes lack), so they
+    computed from the same inputs, so they
     override what ``given`` holds rather than being read out of it.
     """
     return Analytics(

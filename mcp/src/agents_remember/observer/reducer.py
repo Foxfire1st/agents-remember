@@ -59,15 +59,11 @@ from agents_remember.observer.reducer_impl._attention import (
 )
 from agents_remember.observer.reducer_impl._metrics import (
     _STALENESS_BUCKETS,
-    TOKEN_SERIES_MAX,
-    TOKEN_SERIES_RECENT,
-    _decimate_token_series,
     _metrics,
     _staleness_bucket,
     _stalest,
     build_analytics,
     staleness_histogram,
-    token_series,
 )
 from agents_remember.observer.reducer_impl._processes import (
     _DECISIVE_SETUP_EDGE_STATES,
@@ -107,7 +103,6 @@ from agents_remember.observer.reducer_impl._processes import (
     build_engine_processes,
 )
 from agents_remember.observer.reducer_impl._types import AnalyticalInputs, WorkspaceStructure
-from agents_remember.observer.series_tokens import attach_series_token_totals
 from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS
 
 # The whole vocabulary, as strings. Taken from :data:`STATES` rather than from
@@ -142,9 +137,7 @@ def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProject
             proj = proj.model_copy(update={"stateEnteredAt": event.ts})
     proj = proj.model_copy(update={"lastEventTs": events[-1].ts})
     proj = _project_inferred(proj, events, now)
-    return proj.model_copy(
-        update={"actions": _lifecycle_actions(proj), "tokenSeries": token_series(events)}
-    )
+    return proj.model_copy(update={"actions": _lifecycle_actions(proj)})
 
 
 def project_workspace(
@@ -185,7 +178,7 @@ def project_workspace(
         given.setup_progress,
         given.engine_start_progress,
     )
-    series_nodes = attach_series_token_totals(given.series, given.task_documents, lifecycles)
+    series_nodes = given.series
     analytics = build_analytics(
         given,
         series=series_nodes,
@@ -385,14 +378,9 @@ def _ended_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
     return {"state": coerce_end_outcome(event.data.get("outcome"))}
 
 
-def _tool_completed_updates(proj: LifecycleProjection, event: Event) -> dict[str, Any]:
-    tokens = event.data.get("tokens")
-    return {"tokens": proj.tokens + tokens} if isinstance(tokens, int) else {}
-
-
 # Each kind owns the projection fields it writes. A kind absent from this table --
-# lifecycle.heartbeat and any unknown kind -- is liveness only: staleness is taken from
-# events[-1].ts, so no projection field changes for it.
+# lifecycle.heartbeat, tool.completed and any unknown kind -- is liveness only: staleness is
+# taken from events[-1].ts, so no projection field changes for it.
 _KIND_UPDATES: dict[str, Callable[[LifecycleProjection, Event], dict[str, Any]]] = {
     "lifecycle.phase-changed": _phase_changed_updates,
     "lifecycle.blocked": _blocked_updates,
@@ -401,7 +389,6 @@ _KIND_UPDATES: dict[str, Callable[[LifecycleProjection, Event], dict[str, Any]]]
     "lifecycle.paused": _paused_updates,
     "lifecycle.promoted": _promoted_updates,
     "lifecycle.ended": _ended_updates,
-    "tool.completed": _tool_completed_updates,
 }
 
 
@@ -500,8 +487,6 @@ def _cleanup_action(enclosure: EnclosureNode) -> ActionAvailability:
 
 
 __all__ = [
-    "TOKEN_SERIES_MAX",
-    "TOKEN_SERIES_RECENT",
     "_DECISIVE_SETUP_EDGE_STATES",
     "_DISMISSABLE_REPO_KINDS",
     "_ENGINE_DOWN",
@@ -526,7 +511,6 @@ __all__ = [
     "_await_summary",
     "_bool_or_none",
     "_code_refs",
-    "_decimate_token_series",
     "_drift_attention",
     "_drift_attention_detail",
     "_engine_process",
@@ -567,5 +551,4 @@ __all__ = [
     "project_lifecycle",
     "project_workspace",
     "staleness_histogram",
-    "token_series",
 ]

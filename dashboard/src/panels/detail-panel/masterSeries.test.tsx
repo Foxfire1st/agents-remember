@@ -3,6 +3,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DetailPanel } from "./DetailPanel";
+import { dashboardStore } from "../../data/store";
 import type { LifecycleProjection } from "../../types/projection";
 import {
   nestedProgressSteps,
@@ -135,13 +136,11 @@ describe("DetailPanel master series navigation (6g)", () => {
       state: "running",
       phase: "build",
       fleeting: false,
-      tokens: 0,
       startedAt: "2026-06-20T09:00:00+00:00",
       lastEventTs: "2026-06-20T09:00:30+00:00",
       stateEnteredAt: "2026-06-20T09:00:00+00:00",
       inferred: false,
       actions: [],
-      tokenSeries: [],
     };
     const master = taskDoc({
       lifecycleId: "ROOT",
@@ -490,13 +489,40 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(queryByText(/\| Slice \| Status \|/)).toBeNull(); // raw markdown is gone
   });
 
-  it("renders aggregate series tokens on the master reader", () => {
+  it("shows no token total on the master reader", () => {
     seedSeries();
-    const { getByLabelText, getByText } = render(<DetailPanel selectedId="series" />);
+    const { container, queryByText } = render(<DetailPanel selectedId="series" />);
 
-    expect(getByText("series tokens")).toBeTruthy();
-    expect(getByText("1,500 tok")).toBeTruthy();
-    expect(getByLabelText("1500 aggregate series tokens")).toBeTruthy();
+    expect(queryByText("series tokens")).toBeNull();
+    expect(container.querySelector("[aria-label$='aggregate series tokens']")).toBeNull();
+  });
+
+  it("shows no token number when the read snapshot still holds the removed fields", () => {
+    // Expected Evidence 2 (MIK-R115): a stored latest-state.json that still holds the
+    // removed fields reads as any removed field does — nothing fails, and the views
+    // show none of it. The JSON round-trip keeps the old keys at runtime, past the types.
+    seedSeries();
+    const one = dashboardStore.getState().lifecycles["LC-SER"];
+    const aged = JSON.parse(
+      JSON.stringify({
+        ...one,
+        tokens: 1500,
+        tokenSeries: [{ at: "2026-06-20T09:00:00+00:00", tokens: 1500 }],
+      }),
+    );
+    const metrics = JSON.parse(
+      JSON.stringify({ ...dashboardStore.getState().metrics, totalTokens: 1500 }),
+    );
+    dashboardStore.getState().applyDelta("lifecycle", aged);
+    dashboardStore.getState().applyDelta("metrics", metrics);
+
+    const detail = render(<DetailPanel selectedId="LC-SER" />);
+    const master = render(<DetailPanel selectedId="series" />);
+    for (const view of [detail, master]) {
+      const text = view.container.textContent ?? "";
+      expect(view.queryByText("series tokens")).toBeNull();
+      expect(text).not.toMatch(/[0-9][,0-9]* tok/);
+    }
   });
 
   it("orders master leaves by creation time and displays task-specific numbers", () => {

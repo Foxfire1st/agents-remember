@@ -157,7 +157,6 @@ def _lifecycle() -> LifecycleProjection:
         fleeting=False,
         startedAt="2026-08-31T12:00:00Z",
         lastEventTs="2026-08-31T12:00:00Z",
-        tokens=0,
     )
 
 

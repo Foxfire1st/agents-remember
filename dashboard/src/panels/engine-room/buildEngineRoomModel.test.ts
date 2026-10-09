@@ -47,13 +47,11 @@ const lifecycle = (
   state: "running",
   phase: "build",
   fleeting: false,
-  tokens: 0,
   startedAt: "",
   lastEventTs: "",
   stateEnteredAt: "",
   inferred: false,
   actions: [],
-  tokenSeries: [],
   ...over,
 });
 

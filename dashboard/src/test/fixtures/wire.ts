@@ -97,13 +97,11 @@ const BASE_LIFECYCLE: LifecycleProjection = {
   state: SERVED_LIFECYCLE.state,
   phase: SERVED_LIFECYCLE.phase,
   fleeting: SERVED_LIFECYCLE.fleeting,
-  tokens: SERVED_LIFECYCLE.tokens,
   startedAt: SERVED_LIFECYCLE.startedAt,
   lastEventTs: SERVED_LIFECYCLE.lastEventTs,
   stateEnteredAt: SERVED_LIFECYCLE.stateEnteredAt,
   inferred: SERVED_LIFECYCLE.inferred,
   actions: [],
-  tokenSeries: [],
 };
 
 const BASE_GATE: GateNode = {
