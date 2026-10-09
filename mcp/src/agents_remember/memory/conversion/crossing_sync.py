@@ -278,6 +278,12 @@ def cross(
         "markersNotMoved": not_moved,
         "taken": dict(sorted(merged.taken.items())),
         "cards": _card_counts(converted, merged.files, merged.conflicted_paths),
+        "alignment": {
+            "alignedCards": merged.alignment.aligned_cards,
+            "renumberedReferences": merged.alignment.renumbered_references,
+            "evidenceLinesKept": merged.alignment.evidence_lines_kept,
+            "skippedCards": [dict(one) for one in merged.alignment.skipped_cards],
+        },
         "conflicts": [one.to_document() for one in merged.conflicts],
         "recordConflictHistoryOwner": record_owner,
     }

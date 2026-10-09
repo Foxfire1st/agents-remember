@@ -13,6 +13,7 @@ have a reference, so the validator reports it and names the two ways to write it
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -139,6 +140,32 @@ def _paragraph_marker_offsets(paragraph: list[tuple[int, str]]) -> list[tuple[in
     return found
 
 
+def find_marker_positions(text: str) -> list[tuple[int, int, str]]:
+    """Every unescaped marker as (1-based line number, offset in line, number).
+
+    The same grammar as :func:`find_markers`, with the in-line position kept so a
+    caller can tell whether the bracket at an exact position is a real marker.
+    """
+
+    found: list[tuple[int, int, str]] = []
+    for paragraph in _paragraphs(text):
+        joined = "\n".join(line for _, line in paragraph)
+        begins: list[tuple[int, int]] = []
+        cursor = 0
+        for number, line in paragraph:
+            begins.append((cursor, number))
+            cursor += len(line) + 1
+        for start, end in _prose_spans(joined):
+            for match in _MARKER.finditer(joined, start, end):
+                if _escaped(joined, match.start()):
+                    continue
+                begin, number = next(
+                    (begin, number) for begin, number in reversed(begins) if begin <= match.start()
+                )
+                found.append((number, match.start() - begin, match.group(1)))
+    return found
+
+
 def escape_markers(text: str) -> str:
     """Return ``text`` with every marker escaped as ``\\[n]``, so :func:`find_markers` finds none.
 
@@ -159,4 +186,34 @@ def escape_markers(text: str) -> str:
     ]
     for position in sorted(positions, reverse=True):
         text = f"{text[:position]}\\{text[position:]}"
+    return text
+
+
+def remap_markers(text: str, mapping: Mapping[str, str]) -> str:
+    """Return ``text`` with the markers of :func:`find_markers` renumbered (MIK-R66 rule 4).
+
+    Every marker whose digits are a key of ``mapping`` becomes ``[<value>]``; any
+    other marker keeps its digits. Markers in code spans and escaped markers are
+    not touched, because the positions come from the same paragraph walk.
+    """
+
+    if not mapping:
+        return text
+    lines = text.splitlines(keepends=True)
+    starts: list[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line)
+    moves: list[tuple[int, str, str]] = []
+    for paragraph in _paragraphs(text):
+        for number, at in _paragraph_marker_offsets(paragraph):
+            match = _MARKER.match(lines[number - 1], at)
+            if match is None:  # pragma: no cover - the offset walk found this marker
+                continue
+            digits = match.group(1)
+            if digits in mapping and mapping[digits] != digits:
+                moves.append((starts[number - 1] + at, digits, mapping[digits]))
+    for position, digits, fresh in sorted(moves, reverse=True):
+        text = f"{text[:position]}[{fresh}]{text[position + len(digits) + 2 :]}"
     return text

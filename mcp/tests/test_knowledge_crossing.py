@@ -10,6 +10,7 @@ from __future__ import annotations
 import gzip
 import json
 import shutil
+import time
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -30,7 +31,14 @@ from agents_remember.memory.conversion import base as base_module
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import MemoryInput, convert_memory
-from agents_remember.memory.conversion.crossing import _ABSENT, merge_item, merge_trees
+from agents_remember.memory.conversion.crossing import (
+    _ABSENT,
+    ReferencePairing,
+    _assign_numbers,
+    _pair_with_base,
+    merge_item,
+    merge_trees,
+)
 from agents_remember.memory.conversion.crossing_sync import (
     MARKER_ROW_REASON,
     CrossingError,
@@ -49,7 +57,11 @@ from agents_remember.memory_quality.knowledge_validator.validator import validat
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.history import HistoryFile
 from agents_remember.models.knowledge_files.ids import derived_record_id
-from agents_remember.worktrees.knowledge_crossing import apply_crossing, close_crossing_history
+from agents_remember.worktrees.knowledge_crossing import (
+    apply_crossing,
+    close_crossing_history,
+    crossing_summary,
+)
 from agents_remember.worktrees.services import CrossingPlanView, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
 from agents_remember.worktrees.sync_transaction_state import sync_operation_path
@@ -131,9 +143,11 @@ def _sidecar(references: dict) -> bytes:
     ).encode("utf-8")
 
 
-def test_a_reference_number_both_sides_added_conflicts_even_when_the_markdown_merges(
+def test_a_marker_incomplete_card_merges_without_alignment_exactly_as_today(
     tmp_path: Path,
 ) -> None:
+    """MIK-R66 rule 7: own would be renumbered but cites no [1], so no alignment happens."""
+
     git(tmp_path, "init", "-q")
     card = "onboarding/src/pkg/app.py.md"
     sidecar = "onboarding/src/pkg/app.py.json"
@@ -158,7 +172,52 @@ def test_a_reference_number_both_sides_added_conflicts_even_when_the_markdown_me
     assert merged.files[card] == b"# app\n\nA, see [2].\n\nB.\n\nC, see [2].\n"
     assert [(one.path, one.item) for one in merged.conflicts] == [(sidecar, "references.2")]
     assert "renumber one side" in merged.conflicts[0].reason
+    assert merged.alignment.aligned_cards == 0
+    assert merged.alignment.skipped_cards == [
+        {
+            "path": sidecar,
+            "reason": "the own side would be renumbered but has a reference without a marker ([1])",
+        }
+    ]
     reference_one = json.loads(merged.files[sidecar] or b"{}")["references"]["1"]
+    assert reference_one["targets"][0]["anchor"]["blob"] == "e" * 40  # mechanical-only: incoming
+
+
+def test_a_reference_number_both_sides_added_aligns_when_the_card_is_complete(
+    tmp_path: Path,
+) -> None:
+    """MIK-R66: the same new number for two different references is aligned, not a conflict."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    one = _reference("Adds.", _anchor("a", "1"))
+    base = {card: b"# app\n\nA [1].\n\nB.\n\nC.\n", sidecar: _sidecar({"1": one})}
+    ours = {
+        card: b"# app\n\nA [1], see [2].\n\nB.\n\nC.\n",
+        sidecar: _sidecar({"1": one, "2": _reference("Ours.", _anchor("d", "4"))}),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n\nB.\n\nC, see [2].\n",
+        sidecar: _sidecar(
+            {
+                "1": _reference("Adds.", _anchor("e", "5")),
+                "2": _reference("Theirs.", _anchor("f", "6")),
+            }
+        ),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    assert merged.alignment.aligned_cards == 1
+    assert merged.alignment.renumbered_references == 1  # only own [2] moves to [3]
+    assert merged.files[card] == b"# app\n\nA [1], see [3].\n\nB.\n\nC, see [2].\n"
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert sorted(references) == ["1", "2", "3"]
+    assert references["3"]["note"] == "Ours."
+    assert references["2"]["note"] == "Theirs."
+    reference_one = references["1"]
     assert reference_one["targets"][0]["anchor"]["blob"] == "e" * 40  # mechanical-only: incoming
 
 
@@ -783,3 +842,820 @@ def test_a_crossing_leaves_overlapping_edits_to_the_curator_and_a_failed_step_ch
     resolved = fixture.sync(resolution_action="continue")
     assert resolved.payload["state"] == "synced", resolved.payload
     assert (worktree / "knowledge/layout.json").is_file()
+
+
+# MIK-R66: the structural merge aligns reference numbers. Fixture cards below are complete:
+# every side's markers name its own references, so rule 7 never fires unless named.
+
+
+def _aligned_card(note: str, blob: str) -> dict:
+    return _reference(note, _anchor(blob, note))
+
+
+def _converted_sides(
+    label_files: tuple[dict[str, bytes], dict[str, bytes], dict[str, bytes]],
+) -> tuple[MemoryInput, MemoryInput, MemoryInput]:
+    """Three already-converted trees sharing one layout marker version."""
+
+    layout = canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}).encode()
+    sides = tuple(
+        MemoryInput(label=label, files={**files, "knowledge/layout.json": layout}, database=None)
+        for label, files in zip(("base", "own", "incoming"), label_files, strict=True)
+    )
+    base_in, own_in, incoming_in = sides
+    return base_in, own_in, incoming_in
+
+
+def test_fresh_numbers_follow_own_order_then_base_order() -> None:
+    """MIK-R66 rules 2 and 3: own groups in own order, then base-only groups."""
+
+    base = {
+        "1": _aligned_card("A.", "a"),
+        "2": _aligned_card("B.", "b"),
+        "3": _aligned_card("C.", "c"),
+    }
+    own = {"1": _aligned_card("A.", "a"), "4": _aligned_card("X.", "x")}
+    incoming = {"3": _aligned_card("C.", "c")}
+    base_to_own = _pair_with_base(base, own)
+    base_to_incoming = _pair_with_base(base, incoming)
+    assert base_to_own == {"1": "1"}  # content only; the same-number test adds nothing
+    assert base_to_incoming == {"3": "3"}
+    assigned = _assign_numbers(
+        base, own, incoming, ReferencePairing(base_to_own, base_to_incoming, {})
+    )
+    assert assigned is not None
+    base_map, own_map = assigned
+    assert base_map == {"1": "5", "2": "7", "3": "3"}
+    assert own_map == {"1": "5", "4": "6"}
+    assert incoming.keys() == {"3"}  # incoming is never renumbered
+
+
+def test_alignment_pairs_content_and_freshens_only_what_has_no_partner(
+    tmp_path: Path,
+) -> None:
+    """MIK-R66 rules 2a and 3: shifted references take the incoming numbers; X survives fresh."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\nB [2].\n\nC [3].\n",
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "3": _aligned_card("C.", "c"),
+            }
+        ),
+    }
+    ours = {
+        card: b"# app\n\nA [1].\n\nX [4].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "4": _aligned_card("X.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\nC [3].\n",
+        sidecar: _sidecar({"3": _aligned_card("C.", "c")}),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.alignment.aligned_cards == 1
+    assert merged.alignment.renumbered_references == 4
+    assert [(one.path, one.item) for one in merged.conflicts] == [(card, "(lines)")]
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert sorted(references) == ["6"]  # A and B deleted on a side, C deleted by own
+    assert references["6"]["note"] == "X."
+    markdown = (merged.files[card] or b"").decode()
+    assert "[5]" in markdown and "[6]" in markdown  # own's markers moved with the map
+
+
+def test_alignment_pairs_same_numbers_when_content_moved(tmp_path: Path) -> None:
+    """MIK-R66 rule 2b: a replaced note under the same number pairs by number, not content."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {card: b"# app\n\nA [1].\n", sidecar: _sidecar({"1": _aligned_card("A.", "a")})}
+    ours = {card: b"# app\n\nB [1].\n", sidecar: _sidecar({"1": _aligned_card("B.", "b")})}
+    theirs = {card: b"# app\n\nA [1].\n", sidecar: _sidecar({"1": _aligned_card("A.", "a")})}
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    assert merged.alignment.aligned_cards == 0  # identity maps: nothing moved
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert sorted(references) == ["1"] and references["1"]["note"] == "B."
+
+
+def test_alignment_pairs_the_singleton_between_paired_neighbours(tmp_path: Path) -> None:
+    """MIK-R66 rule 2c: the changed row between two paired neighbours follows them."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\nB [2].\n\nC [5].\n",
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "5": _aligned_card("C.", "c"),
+            }
+        ),
+    }
+    ours = {
+        card: b"# app\n\nA [1].\n\nB, twice [3].\n\nC [5].\n",
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "3": _aligned_card("B, twice.", "b"),
+                "5": _aligned_card("C.", "c"),
+            }
+        ),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n\nB [2].\n\nC, thrice [5].\n",
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "5": _aligned_card("C, thrice.", "c"),
+            }
+        ),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    assert merged.alignment.aligned_cards == 1
+    assert merged.alignment.renumbered_references == 1  # only own [3] takes incoming [2]
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A.",
+        "2": "B, twice.",
+        "5": "C, thrice.",
+    }
+    assert merged.files[card] == b"# app\n\nA [1].\n\nB, twice [2].\n\nC, thrice [5].\n"
+
+
+def test_pairing_prefers_content_over_the_same_number(tmp_path: Path) -> None:
+    """MIK-R66 rule 2 order: test a wins over test b for the same base reference."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {card: b"# app\n\nA [1].\n", sidecar: _sidecar({"1": _aligned_card("A.", "a")})}
+    ours = {
+        card: b"# app\n\nB [1].\n\nA [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("B.", "b"), "2": _aligned_card("A.", "a")}),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n\nC [3].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "3": _aligned_card("C.", "c")}),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A.",
+        "3": "C.",
+        "4": "B.",
+    }
+    assert b"B [4]." in (merged.files[card] or b"")
+
+
+def test_alignment_keeps_a_reference_incoming_deleted_deleted(tmp_path: Path) -> None:
+    """MIK-R66 rule 3: a base reference without an incoming partner is numbered, then merged."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\nB [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    ours = {
+        card: b"# app\n\nA, edited [1].\n\nB [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("A, edited.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a")}),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A, edited."
+    }
+    assert merged.alignment.aligned_cards == 1
+    assert merged.alignment.renumbered_references == 2  # B takes a fresh number, then merges away
+    assert [(one.path, one.item) for one in merged.conflicts] == [(card, "(lines)")]
+
+
+def test_markers_follow_references_but_code_and_escapes_do_not(tmp_path: Path) -> None:
+    """MIK-R66 rule 4: prose markers move with the map; code spans and escapes do not."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    tail = b"\n\n`[7]` and \\[6].\n"
+    base = {card: b"# app\n\nA [1]." + tail, sidecar: _sidecar({"1": _aligned_card("A.", "a")})}
+    ours = {
+        card: b"# app\n\nA [1].\n\n- X [2]." + tail,
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("X.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\nA, edited [1]." + tail,
+        sidecar: _sidecar({"1": _aligned_card("A, edited.", "a")}),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    assert merged.files[card] == b"# app\n\nA, edited [1].\n\n- X [3]." + tail
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A, edited.",
+        "3": "X.",
+    }
+
+
+def test_a_true_conflict_stays_one_item_at_the_incoming_number(tmp_path: Path) -> None:
+    """MIK-R66 rule 5: what both lines really changed differently is still one conflict item."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\nB [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    ours = {
+        card: b"# app\n\nA, ours [1].\n\nB [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("A, ours.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    theirs = {
+        card: b"# app\n\nA, theirs [1].\n\nB [2].\n",
+        sidecar: _sidecar({"1": _aligned_card("A, theirs.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    sidecar_conflicts = [one for one in merged.conflicts if one.path == sidecar]
+    assert [(one.item, one.reason) for one in sidecar_conflicts] == [
+        ("references.1", "authored fields changed differently on both sides")
+    ]
+
+
+def test_evidence_lines_both_sides_added_are_kept_in_order(tmp_path: Path) -> None:
+    """MIK-R66 rule 6: an empty-base region of evidence lines only is incoming first, then own."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\n## Evidence\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a")}),
+    }
+    ours = {
+        card: b"# app\n\nA [1].\n\n## Evidence\n\n- Own finding. [2]\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("Own finding.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n\n## Evidence\n\n- Incoming finding. [2]\n",
+        sidecar: _sidecar(
+            {"1": _aligned_card("A.", "a"), "2": _aligned_card("Incoming finding.", "y")}
+        ),
+    }
+
+    merged = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert merged.conflicts == []
+    assert merged.alignment.evidence_lines_kept == 2
+    assert merged.files[card] == (
+        b"# app\n\nA [1].\n\n## Evidence\n\n- Incoming finding. [2]\n- Own finding. [3]\n"
+    )
+    references = json.loads(merged.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A.",
+        "2": "Incoming finding.",
+        "3": "Own finding.",
+    }
+
+
+def test_a_repeated_number_refuses_alignment() -> None:
+    """MIK-R66 rule 7: the pairing must never give one number to two references of a side.
+
+    The pairing keeps every side injective, so this guard is defensive: it fails
+    closed on a colliding map instead of writing two references under one number.
+    """
+
+    base = {
+        "1": _aligned_card("A.", "a"),
+        "2": _aligned_card("B.", "b"),
+    }
+    assert (
+        _assign_numbers(
+            base,
+            {},
+            {"5": _aligned_card("C.", "c")},
+            ReferencePairing({}, {"1": "5", "2": "5"}, {}),
+        )
+        is None
+    )
+
+
+def test_the_crossing_report_counts_alignment(tmp_path: Path) -> None:
+    """MIK-R66 rule 8: the report counts aligned cards, moved references and rule 7 skips."""
+
+    git(tmp_path, "init", "-q")
+    app = "onboarding/src/pkg/app.py"
+    other = "onboarding/src/pkg/other.py"
+    base = {
+        f"{app}.md": b"# app\n\nA [1].\n",
+        f"{app}.json": _sidecar({"1": _aligned_card("A.", "a")}),
+        f"{other}.md": b"# other\n\nOther.\n",
+        f"{other}.json": _sidecar({"1": _aligned_card("Other.", "o")}),
+    }
+    ours = {
+        f"{app}.md": b"# app\n\nA [1].\n\n- Own finding. [2]\n",
+        f"{app}.json": _sidecar(
+            {"1": _aligned_card("A.", "a"), "2": _aligned_card("Own finding.", "x")}
+        ),
+        f"{other}.md": b"# other\n\nOther, with an uncited addition.\n",
+        f"{other}.json": _sidecar(
+            {"1": _aligned_card("Other.", "o"), "2": _aligned_card("Silent.", "s")}
+        ),
+    }
+    theirs = {
+        f"{app}.md": b"# app\n\nA, edited [1].\n\n- Incoming finding. [2]\n",
+        f"{app}.json": _sidecar(
+            {"1": _aligned_card("A, edited.", "a"), "2": _aligned_card("Incoming finding.", "y")}
+        ),
+        f"{other}.md": b"# other\n\nOther, edited.\n",
+        f"{other}.json": _sidecar({"1": _aligned_card("Other, edited.", "o")}),
+    }
+    base_in, own_in, incoming_in = _converted_sides((base, ours, theirs))
+
+    plan = cross(
+        (base_in, own_in, incoming_in),
+        CodeObjects(tmp_path),
+        own_paired_commit="0" * 40,
+        repository=tmp_path,
+        owner=HistoryOwner(kind="leaf", id="260928-MIK-L66"),
+    )
+
+    assert plan.report["converted"] == []
+    assert plan.report["alignment"] == {
+        "alignedCards": 1,
+        "renumberedReferences": 1,
+        "evidenceLinesKept": 0,
+        "skippedCards": [
+            {
+                "path": f"{other}.json",
+                "reason": "the own side would be renumbered but has a reference without a marker ([1], [2])",
+            }
+        ],
+    }
+
+
+def test_an_ordinary_converted_sync_aligns_through_the_same_merge(tmp_path: Path) -> None:
+    """MIK-R66 rule 9: two converted leaves adding the same number merge without conflict."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {card: b"# app\n\nA [1].\n", sidecar: _sidecar({"1": _aligned_card("A.", "a")})}
+    ours = {
+        card: b"# app\n\nA [1].\n\n- Own finding. [2]\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("Own finding.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\nA [1].\n\n- Incoming finding. [2]\n",
+        sidecar: _sidecar(
+            {"1": _aligned_card("A.", "a"), "2": _aligned_card("Incoming finding.", "y")}
+        ),
+    }
+    base_in, own_in, incoming_in = _converted_sides((base, ours, theirs))
+
+    plan = cross(
+        (base_in, own_in, incoming_in),
+        CodeObjects(tmp_path),
+        own_paired_commit="0" * 40,
+        repository=tmp_path,
+        owner=HistoryOwner(kind="leaf", id="260928-MIK-L66"),
+    )
+
+    assert plan.report["converted"] == []  # nothing to convert: the ordinary route
+    assert plan.conflicts == []
+    assert plan.report["alignment"]["renumberedReferences"] == 1
+    references = json.loads(plan.files[sidecar] or b"{}")["references"]
+    assert {number: reference["note"] for number, reference in references.items()} == {
+        "1": "A.",
+        "2": "Incoming finding.",
+        "3": "Own finding.",
+    }
+
+
+def test_the_crossing_summary_carries_the_alignment_counts(tmp_path: Path) -> None:
+    """MIK-R66 rule 8: the sync result's summary surfaces what the report counted."""
+
+    report = {
+        "conflicts": [],
+        "cards": {},
+        "converted": [],
+        "markerRows": 0,
+        "alignment": {
+            "alignedCards": 2,
+            "renumberedReferences": 3,
+            "evidenceLinesKept": 4,
+            "skippedCards": [{"path": "onboarding/x.py.json", "reason": "rule 7"}],
+        },
+    }
+    target = tmp_path / "report.json"
+    target.write_text(json.dumps(report), encoding="utf-8")
+
+    summary = crossing_summary(target.as_posix())
+
+    assert summary["alignment"] == report["alignment"]
+
+
+def test_the_same_three_trees_merge_to_identical_bytes(tmp_path: Path) -> None:
+    """MIK-R66 preservation: the merge is a function of the three trees only."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\nA [1].\n\nB [2].\n\nC [3].\n",
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "3": _aligned_card("C.", "c"),
+            }
+        ),
+    }
+    ours = {
+        card: b"# app\n\nA [1].\n\nX [4].\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "4": _aligned_card("X.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\nC [3].\n",
+        sidecar: _sidecar({"3": _aligned_card("C.", "c")}),
+    }
+
+    first = merge_trees(base, ours, theirs, repository=tmp_path)
+    second = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert first.files == second.files
+    assert [(one.path, one.item) for one in first.conflicts] == [
+        (one.path, one.item) for one in second.conflicts
+    ]
+
+
+def _no_base_trees(
+    own_refs: dict, incoming_refs: dict, own_lines: list[str], incoming_lines: list[str]
+) -> tuple[dict, dict, dict]:
+    """Three trees for a card both sides added: no base, different sides."""
+
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    head = "# app\n\n"
+    return (
+        {},
+        {
+            sidecar: _sidecar(own_refs),
+            card: (head + "".join(f"{line}\n" for line in own_lines)).encode("utf-8"),
+        },
+        {
+            sidecar: _sidecar(incoming_refs),
+            card: (head + "".join(f"{line}\n" for line in incoming_lines)).encode("utf-8"),
+        },
+    )
+
+
+def test_both_added_cards_align_distinct_references_without_collision(
+    tmp_path: Path,
+) -> None:
+    """MIK-R66 rules 1-2 with no base: two distinct [1] become incoming [1] and own [2]."""
+
+    git(tmp_path, "init", "-q")
+    base, ours, theirs = _no_base_trees(
+        {"1": _aligned_card("Own.", "o")},
+        {"1": _aligned_card("Incoming.", "i")},
+        ["- Own [1]"],
+        ["- Incoming [1]"],
+    )
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == []
+    merged_bytes = result.files["onboarding/src/pkg/app.py.json"]
+    assert merged_bytes is not None
+    merged = json.loads(merged_bytes)
+    assert {number: reference["note"] for number, reference in merged["references"].items()} == {
+        "1": "Incoming.",
+        "2": "Own.",
+    }
+    assert result.files["onboarding/src/pkg/app.py.md"] == (b"# app\n\n- Incoming [1]\n- Own [2]\n")
+    assert result.alignment.aligned_cards == 1
+    assert result.alignment.renumbered_references == 1
+    assert result.alignment.evidence_lines_kept == 2
+
+
+def test_both_added_identical_cards_merge_clean(tmp_path: Path) -> None:
+    """MIK-R66 rule 1 with no base: the same addition on both sides stays one card."""
+
+    git(tmp_path, "init", "-q")
+    base, ours, theirs = _no_base_trees(
+        {"1": _aligned_card("Same.", "s")},
+        {"1": _aligned_card("Same.", "s")},
+        ["- Same [1]"],
+        ["- Same [1]"],
+    )
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == []
+    assert (
+        result.files["onboarding/src/pkg/app.py.json"] == theirs["onboarding/src/pkg/app.py.json"]
+    )
+
+
+def test_partnerless_incoming_pairs_directly_with_partnerless_own(tmp_path: Path) -> None:
+    """MIK-R66 rule 2a: incoming B1 with no own partner pairs with own B4, not freshened."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    base = {
+        card: b"# app\n\n- A [1]\n",
+        sidecar: _sidecar({"1": _aligned_card("A.", "a")}),
+    }
+    ours = {
+        card: b"# app\n\n- B [4]\n- X [5]\n",
+        sidecar: _sidecar({"4": _aligned_card("B.", "b"), "5": _aligned_card("X.", "x")}),
+    }
+    theirs = {
+        card: b"# app\n\n- B [1]\n- Y [2]\n",
+        sidecar: _sidecar({"1": _aligned_card("B.", "b"), "2": _aligned_card("Y.", "y")}),
+    }
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts if one.path.endswith(".json")] == []
+    merged_bytes = result.files[sidecar]
+    assert merged_bytes is not None
+    merged = json.loads(merged_bytes)
+    assert {number: reference["note"] for number, reference in merged["references"].items()} == {
+        "1": "B.",
+        "2": "Y.",
+        "6": "X.",
+    }
+
+
+def test_rule_2b_moves_content_only_through_alignment(tmp_path: Path) -> None:
+    """MIK-R66 rule 2b discriminator: all three sidecars differ, so only alignment merges clean.
+
+    Without the pairing pass the both-added ``references.3`` (C versus D) stays a
+    reference collision; with it, incoming keeps ``[3]`` and own takes fresh ``[4]``.
+    """
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    head = "# app\n\nA [1].\n\nB [2].\n"
+    base = {
+        card: head.encode("utf-8"),
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    ours = {
+        card: (head + "\nC [3].\n").encode("utf-8"),
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "3": _aligned_card("C.", "c"),
+            }
+        ),
+    }
+    theirs = {
+        card: (head + "\nD [3].\n").encode("utf-8"),
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("B.", "b"),
+                "3": _aligned_card("D.", "d"),
+            }
+        ),
+    }
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts if one.path.endswith(".json")] == []
+    merged_bytes = result.files[sidecar]
+    assert merged_bytes is not None
+    merged = json.loads(merged_bytes)
+    assert {number: reference["note"] for number, reference in merged["references"].items()} == {
+        "1": "A.",
+        "2": "B.",
+        "3": "D.",
+        "4": "C.",
+    }
+    assert result.alignment.renumbered_references == 1
+
+
+def test_fenced_code_lines_never_resolve_evidence_conflicts(tmp_path: Path) -> None:
+    """MIK-R66 rule 6: marker-shaped lines inside fenced blocks stay a conflict."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    head = "# app\n\n## Evidence\n"
+    base = {card: head.encode("utf-8")}
+    ours = {card: (head + "\n```\n- Own [1]\n```\n").encode("utf-8")}
+    theirs = {card: (head + "\n```\n- Incoming [2]\n```\n").encode("utf-8")}
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == [(card, "(lines)")]
+    assert result.alignment.evidence_lines_kept == 0
+
+
+def test_escaped_trailing_brackets_never_resolve_evidence_conflicts(tmp_path: Path) -> None:
+    """MIK-R66 rule 6: a line whose trailing bracket is escaped stays a conflict."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    head = "# app\n\n- Real [2]\n"
+    base = {card: head.encode("utf-8")}
+    ours = {card: (head + "\n- Own [3] \\[1]\n").encode("utf-8")}
+    theirs = {card: (head + "\n- Incoming [2] \\[2]\n").encode("utf-8")}
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == [(card, "(lines)")]
+    assert result.alignment.evidence_lines_kept == 0
+
+
+def test_real_trailing_markers_still_resolve_with_shared_context(tmp_path: Path) -> None:
+    """MIK-R66 rule 6 control: real evidence lines resolve around identical context."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    head = "# app\n\n## Evidence\n"
+    base = {card: head.encode("utf-8")}
+    ours = {card: (head + "\n- Own [1]\n").encode("utf-8")}
+    theirs = {card: (head + "\n- Incoming [2]\n").encode("utf-8")}
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == []
+    assert result.files[card] == b"# app\n\n## Evidence\n\n- Incoming [2]\n- Own [1]\n"
+    assert result.alignment.evidence_lines_kept == 2
+
+
+def test_gap_pairing_scales_near_linearly_on_fully_paired_inputs() -> None:
+    """MIK-R66 pairing: two thousand fully paired references pair fast and exactly."""
+
+    references = {
+        str(number): _aligned_card(f"Note {number}.", f"blob-{number}") for number in range(1, 2001)
+    }
+    started = time.perf_counter()
+    pairs = _pair_with_base(references, dict(references))
+    elapsed = time.perf_counter() - started
+
+    assert pairs == {str(number): str(number) for number in range(1, 2001)}
+    assert elapsed < 10, f"pairing 2000 references took {elapsed:.2f}s"
+
+
+def test_gap_pairing_scales_on_crossed_fully_paired_inputs() -> None:
+    """MIK-R66 pairing: reordered fully paired numbers stay sorting-dominated, not quadratic."""
+
+    count = 2000
+    base = {
+        str(number): _aligned_card(f"Note {number}.", f"blob-{number}")
+        for number in range(1, count + 1)
+    }
+    order = [1]
+    low, high = 2, count
+    while low <= high:
+        order.append(high)
+        if low != high:
+            order.append(low)
+        low += 1
+        high -= 1
+    side = {
+        str(side_number): _aligned_card(f"Note {base_number}.", f"blob-{base_number}")
+        for base_number, side_number in enumerate(order, start=1)
+    }
+
+    started = time.perf_counter()
+    pairs = _pair_with_base(base, side)
+    elapsed = time.perf_counter() - started
+
+    assert pairs == {
+        str(base_number): str(side_number) for base_number, side_number in enumerate(order, start=1)
+    }
+    assert elapsed < 10, f"pairing 2000 crossed references took {elapsed:.2f}s"
+
+
+def test_gap_pairing_accounts_live_unpaired_numbers_per_interval() -> None:
+    """MIK-R66 rule 2c: a side number paired by an earlier gap is gone for later gaps."""
+
+    base = {
+        number: {"note": note}
+        for number, note in (
+            ("1", "A"),
+            ("2", "X"),
+            ("4", "B"),
+            ("7", "C"),
+            ("8", "Y"),
+            ("10", "D"),
+        )
+    }
+    side = {
+        number: {"note": note}
+        for number, note in (
+            ("1", "A"),
+            ("2", "C"),
+            ("3", "U"),
+            ("4", "B"),
+            ("5", "V"),
+            ("6", "D"),
+        )
+    }
+
+    assert _pair_with_base(base, side) == {
+        "1": "1",
+        "4": "4",
+        "7": "2",
+        "10": "6",
+        "2": "3",
+        "8": "5",
+    }
+
+
+def test_multiline_code_spans_never_resolve_evidence_conflicts(tmp_path: Path) -> None:
+    """MIK-R66 rule 6: marker-shaped lines inside a multiline code span stay a conflict."""
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    head = "# app\n\n`open\n"
+    tail = "closed`\n"
+    base = {card: (head + tail).encode("utf-8")}
+    ours = {card: (head + "- Own [1]\n" + tail).encode("utf-8")}
+    theirs = {card: (head + "- Incoming [2]\n" + tail).encode("utf-8")}
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == [(card, "(lines)")]
+    assert result.alignment.evidence_lines_kept == 0
+
+
+def test_rule_2b_pairs_same_numbers_when_content_cannot(tmp_path: Path) -> None:
+    """MIK-R66 rule 2b discriminator: same-number pairing alone produces the clean merge.
+
+    The duplicated own content defeats unique-content test a, and the gap test c
+    never sees a singleton on both sides; only the same-number test b pairs base
+    2 with own 2 and incoming 2, so incoming keeps [2] and the duplicated own
+    reference takes fresh [4]. Without test b the merge keeps both [4] and [5]
+    and the Markdown stays conflicted.
+    """
+
+    git(tmp_path, "init", "-q")
+    card = "onboarding/src/pkg/app.py.md"
+    sidecar = "onboarding/src/pkg/app.py.json"
+    head = "# app\n\nA [1].\n"
+    base = {
+        card: head.encode("utf-8"),
+        sidecar: _sidecar({"1": _aligned_card("A.", "a"), "2": _aligned_card("B.", "b")}),
+    }
+    ours = {
+        card: (head + "\n- X [2]\n\n- X [3]\n").encode("utf-8"),
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("X.", "x"),
+                "3": _aligned_card("X.", "x"),
+            }
+        ),
+    }
+    theirs = {
+        card: (head + "\n- X [2]\n").encode("utf-8"),
+        sidecar: _sidecar(
+            {
+                "1": _aligned_card("A.", "a"),
+                "2": _aligned_card("X.", "x"),
+            }
+        ),
+    }
+    result = merge_trees(base, ours, theirs, repository=tmp_path)
+
+    assert [(one.path, one.item) for one in result.conflicts] == []
+    merged_bytes = result.files[sidecar]
+    assert merged_bytes is not None
+    merged = json.loads(merged_bytes)
+    assert {number: reference["note"] for number, reference in merged["references"].items()} == {
+        "1": "A.",
+        "2": "X.",
+        "4": "X.",
+    }
+    assert result.files[card] == b"# app\n\nA [1].\n\n- X [2]\n\n- X [4]\n"
+    assert result.alignment.renumbered_references == 1

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.worktree import SyncSide
+from agents_remember.worktrees.knowledge_crossing import crossing_summary
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
@@ -127,6 +128,21 @@ def recompute_knowledge_worklist(contract: WorktreeContract) -> dict[str, object
         return None
 
 
+def successful_crossings(record: SyncOperationRecord) -> list[dict[str, object]]:
+    """The journaled crossing summaries of a completed sync's sides, in side order.
+
+    The same :func:`crossing_summary` view the resolution response carries, so a
+    successful sync reports its report identity and alignment counts too
+    (MIK-R66 rules 7-9). Sides with no journaled report contribute nothing.
+    """
+
+    summaries: list[dict[str, object]] = []
+    for side in (record.code, record.memory):
+        if side is not None and side.crossingReport:
+            summaries.append(crossing_summary(side.crossingReport))
+    return summaries
+
+
 def completed_sync_result(
     contract: WorktreeContract,
     record: SyncOperationRecord,
@@ -160,6 +176,7 @@ def completed_sync_result(
         if moved_again
         else "synced"
     )
+    crossings = successful_crossings(record)
     return WorktreeCommandResult(
         0,
         {
@@ -178,6 +195,11 @@ def completed_sync_result(
             "codeBaseCommit": record.code.sourceCommit,
             "memoryBaseCommit": memory_to,
             "fetch": fetch,
+            **(
+                {"crossing": crossings[0] if len(crossings) == 1 else crossings}
+                if crossings
+                else {}
+            ),
             **(
                 recovery_guidance(
                     "sync_source_lineage",

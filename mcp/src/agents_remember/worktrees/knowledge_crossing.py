@@ -282,8 +282,10 @@ HOW_TO_RESOLVE: Final = (
     "base, own and incoming values; the knowledge validator refuses the file until the marker is "
     "replaced by the resolved item. Markdown conflicts carry Git conflict markers. Resolve a card's "
     "Markdown and its sidecar together: resolving only one side leaves [n] markers and references "
-    "that disagree, which R22.3-markers refuses for the card. Resolve every listed item, stage, "
-    "then continue."
+    "that disagree, which R22.3-markers refuses for the card. Reference numbers are aligned by the "
+    "merge itself -- the syncing line's references take the incoming numbers where they match, and "
+    "fresh numbers otherwise -- so never renumber a reference by hand to clear a conflict. "
+    "Resolve every listed item, stage, then continue."
 )
 _PAYLOAD_CONFLICT_LIMIT: Final = 100
 
@@ -334,6 +336,15 @@ def crossing_summary(report_path: str) -> dict[str, object]:
         "conflictsTruncated": len(conflicts) > _PAYLOAD_CONFLICT_LIMIT,
         "cards": document.get("cards", {}),
         "converted": document.get("converted", []),
+        "alignment": document.get(
+            "alignment",
+            {
+                "alignedCards": 0,
+                "renumberedReferences": 0,
+                "evidenceLinesKept": 0,
+                "skippedCards": [],
+            },
+        ),
         "markerRows": document.get("markerRows", 0),
         "recordConflictHistoryOwner": document.get("recordConflictHistoryOwner"),
         "howToResolve": HOW_TO_RESOLVE,

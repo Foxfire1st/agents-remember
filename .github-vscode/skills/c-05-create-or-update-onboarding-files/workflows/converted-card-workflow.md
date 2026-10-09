@@ -107,6 +107,14 @@ Nothing is renumbered: the remaining references keep their numbers. A new row ge
 highest one the sidecar holds. The sidecar keeps no record of removed numbers, so when the removed reference
 was the highest, a later new row gets its number again.
 
+## Merges renumber references automatically
+
+A managed sync aligns a both-changed card's reference numbers before it merges (MIK-R66): a reference the
+incoming line kept stays on the incoming number, and the syncing line's references take those numbers where
+they match, or fresh numbers above every side's highest otherwise. The prose `[n]` markers move with the same
+map. A curator never renumbers a reference by hand to clear a sync conflict: resolve the conflicted card's
+Markdown and its sidecar together through the sync's `continue` route.
+
 ## A source file moved
 
 Do the entries first, then the card.

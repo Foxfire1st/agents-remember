@@ -462,6 +462,24 @@ def start_side_merge(
     )
 
 
+def _needs_crossing_report(plan: CrossingPlanView) -> bool:
+    """Whether the structural plan leaves something for the curator to read.
+
+    An item for the curator, a converted side, a renumbered reference, a kept
+    evidence line, or a skipped card (MIK-R66 rules 7-9): every nonzero alignment
+    diagnostic persists a report, even with no conflict.
+    """
+
+    alignment = plan.report.get("alignment") or {}
+    return bool(
+        plan.conflict_versions
+        or plan.report.get("converted")
+        or alignment.get("renumberedReferences")
+        or alignment.get("evidenceLinesKept")
+        or alignment.get("skippedCards")
+    )
+
+
 def _apply_knowledge_merge(
     side: SyncSideRecord,
     plan: CrossingPlanView,
@@ -471,7 +489,9 @@ def _apply_knowledge_merge(
     """Replace the started merge's knowledge and onboarding paths with the structural plan.
 
     The report is written when the merge leaves something to read: an item for the curator, or a
-    side it converted (a crossing). A clean merge of converted lines writes none.
+    side it converted (a crossing). A clean merge of converted lines writes none, unless the
+    reference alignment left diagnostics (MIK-R66 rules 7-9): renumbered references, kept
+    evidence lines, or skipped cards are reported too.
     """
 
     worktree = Path(side.worktree)
@@ -482,7 +502,7 @@ def _apply_knowledge_merge(
     report = ""
     try:
         apply_crossing(worktree, plan)
-        if plan.conflict_versions or plan.report.get("converted"):
+        if _needs_crossing_report(plan):
             report = write_crossing_report(
                 worktree, side.preSyncHead, side.sourceCommit, plan
             ).as_posix()

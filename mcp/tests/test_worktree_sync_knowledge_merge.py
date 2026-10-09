@@ -24,9 +24,11 @@ two invariants and a family), converted on the official line and fast-forwarded 
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest import mock
 
 import pytest
@@ -38,14 +40,21 @@ from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.ids import derived_record_id
+from agents_remember.worktrees import sync_transaction_git as seam
 from agents_remember.worktrees.knowledge_crossing import (
     apply_crossing,
     crossing_plan,
+    crossing_summary,
     merge_base,
     merge_structure,
 )
-from agents_remember.worktrees.services import bind_worktree_services
+from agents_remember.worktrees.services import CrossingPlanView, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
+from agents_remember.worktrees.sync_transaction_git import (
+    SideMergeOutcome,
+    _needs_crossing_report,
+)
+from agents_remember.worktrees.sync_transaction_recovery import successful_crossings
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
     SyncOperationStore,
@@ -346,18 +355,22 @@ def test_two_authored_changes_are_left_marked_and_refused_until_resolved(tmp_pat
     ]
 
 
-def test_a_reference_number_both_lines_added_conflicts_though_the_markdown_merges(
+def test_a_reference_number_both_lines_added_is_aligned_to_a_fresh_number(
     tmp_path: Path,
 ) -> None:
-    """Both lines added ``[n]`` with different targets in different paragraphs: a conflict.
+    """Both lines added ``[n]`` with different targets in different paragraphs: aligned.
 
-    Catches a merge that kept one side's reference under a number the other side's text cites.
+    MIK-R66 rules 1-2: the incoming line keeps ``[n]`` and the syncing line's
+    reference takes a fresh number above every side's highest, so no reference
+    collision reaches the curator. Catches a merge that kept one side's reference
+    under a number the other side's text cites.
     """
 
     lines = _converted_lines(tmp_path)
     base = _sidecar(lines.leaf)
     card = (lines.leaf / APP_CARD).read_text(encoding="utf-8")
     number = str(max(int(key) for key in base["references"]) + 1)
+    fresh = str(int(number) + 1)
     first, last = card.index("\n\n") + 2, card.rstrip("\n").rindex("\n") + 1
 
     def added(note: str, at: int) -> dict[str, bytes | None]:
@@ -374,16 +387,19 @@ def test_a_reference_number_both_lines_added_conflicts_though_the_markdown_merge
     lines.on_leaf(added("The leaf's reference.", first))
     lines.on_line(added("The line's reference.", last))
 
-    conflicted = lines.merge()
+    merged = lines.merge()
 
-    assert conflicted["state"] == "sync-resolution-required", conflicted
-    crossing = conflicted["resolution"]["crossing"]
-    assert [(one["path"], one["item"]) for one in crossing["conflicts"]] == [
-        (APP_SIDECAR, f"references.{number}")
-    ]
-    assert "renumber one side" in crossing["conflicts"][0]["reason"]
+    assert merged["state"] == "synced", merged
+    sidecar = lines.read(APP_SIDECAR)
+    assert sidecar["references"][number]["note"] == "The line's reference."
+    assert sidecar["references"][fresh]["note"] == "The leaf's reference."
     merged_card = (lines.leaf / APP_CARD).read_text(encoding="utf-8")
-    assert merged_card.count(f"See [{number}].") == 2 and "<<<<<<<" not in merged_card
+    assert merged_card.count(f"See [{number}].") == 1
+    assert merged_card.count(f"See [{fresh}].") == 1
+    assert "<<<<<<<" not in merged_card
+    crossing = merged["crossing"]
+    assert crossing["reportPath"]
+    assert crossing["alignment"]["renumberedReferences"] == 1
 
 
 def test_a_record_both_lines_changed_is_resolved_through_the_writer(tmp_path: Path) -> None:
@@ -599,3 +615,156 @@ def test_the_retired_reconcile_action_is_refused_as_an_input_error(tmp_path: Pat
     assert refused["state"] == "sync-input-invalid", refused
     assert refused["invalidField"] == "resolution_action"
     assert "continue" in str(refused["summary"]) and "cancel" in str(refused["summary"])
+
+
+def _crossing_plan(
+    alignment: dict[str, Any] | None = None,
+    conflicts: bool = False,
+    converted: bool = False,
+) -> Any:
+    """A structural plan carrying one alignment population for the report seam."""
+
+    return CrossingPlanView(
+        files={},
+        conflicts=(("onboarding/card.md", "references.1", "a reason"),) if conflicts else (),
+        conflict_versions={"onboarding/card.md": (None, None, None)} if conflicts else {},
+        report={
+            "conflicts": [],
+            "cards": {},
+            "converted": ["memory"] if converted else [],
+            "alignment": alignment
+            or {
+                "alignedCards": 0,
+                "renumberedReferences": 0,
+                "evidenceLinesKept": 0,
+                "skippedCards": [],
+            },
+        },
+    )
+
+
+def test_the_report_seam_keeps_every_nonzero_alignment_population() -> None:
+    """MIK-R66 rules 7-9: renumber, evidence-only, skip-only and conflicted plans report."""
+
+    renumbered = _crossing_plan(
+        {"alignedCards": 1, "renumberedReferences": 1, "evidenceLinesKept": 0, "skippedCards": []}
+    )
+    evidence_only = _crossing_plan(
+        {"alignedCards": 1, "renumberedReferences": 0, "evidenceLinesKept": 2, "skippedCards": []}
+    )
+    skipped_only = _crossing_plan(
+        {
+            "alignedCards": 0,
+            "renumberedReferences": 0,
+            "evidenceLinesKept": 0,
+            "skippedCards": [{"path": "onboarding/card.json", "reason": "a rule 7 reason"}],
+        }
+    )
+
+    assert _needs_crossing_report(renumbered) is True
+    assert _needs_crossing_report(evidence_only) is True
+    assert _needs_crossing_report(skipped_only) is True
+    assert _needs_crossing_report(_crossing_plan(conflicts=True)) is True
+    assert _needs_crossing_report(_crossing_plan(converted=True)) is True
+    assert _needs_crossing_report(_crossing_plan()) is False
+
+
+def _hermetic_side(**fields: Any) -> Any:
+    """A memory side record with the journaled report under test."""
+
+    commit = "a" * 40
+    values = {
+        "side": "memory",
+        "repository": "/repo",
+        "worktree": "/worktree",
+        "sourceBranch": "main",
+        "workBranch": "sync",
+        "sourceCommit": commit,
+        "preSyncHead": commit,
+        "backupRef": "refs/agents-remember/sync/backup",
+        "sourceBackupRef": "refs/agents-remember/sync/source",
+        "baseBackupRef": "refs/agents-remember/sync/base",
+        "plan": "merge",
+    }
+    values.update(fields)
+    return SyncSideRecord.model_validate(values)
+
+
+def test_apply_writes_a_report_for_evidence_only_and_skip_only_plans(tmp_path: Path) -> None:
+    """MIK-R66 rules 7-9 at the operation seam: diagnostics persist with no conflict."""
+
+    side = _hermetic_side(worktree=tmp_path.as_posix())
+    completed = subprocess.CompletedProcess(args=["merge"], returncode=0, stdout="", stderr="")
+    outcome = SideMergeOutcome(state="completed")
+
+    for plan in (
+        _crossing_plan(
+            {
+                "alignedCards": 1,
+                "renumberedReferences": 0,
+                "evidenceLinesKept": 2,
+                "skippedCards": [],
+            }
+        ),
+        _crossing_plan(
+            {
+                "alignedCards": 0,
+                "renumberedReferences": 0,
+                "evidenceLinesKept": 0,
+                "skippedCards": [{"path": "onboarding/card.json", "reason": "a rule 7 reason"}],
+            }
+        ),
+    ):
+        written = tmp_path / "reports" / "crossing-report.json"
+        with (
+            mock.patch.object(seam, "merge_head", return_value=side.sourceCommit),
+            mock.patch.object(seam, "apply_crossing") as applied,
+            mock.patch.object(seam, "write_crossing_report", return_value=written) as reported,
+            mock.patch.object(seam, "_continue_memory_merge", return_value=outcome),
+        ):
+            updated = seam._apply_knowledge_merge(side, plan, completed, None)
+        applied.assert_called_once()
+        reported.assert_called_once()
+        assert updated.crossing_report == written.as_posix()
+
+    with (
+        mock.patch.object(seam, "merge_head", return_value=side.sourceCommit),
+        mock.patch.object(seam, "apply_crossing"),
+        mock.patch.object(seam, "write_crossing_report") as reported,
+        mock.patch.object(seam, "_continue_memory_merge", return_value=outcome),
+    ):
+        updated = seam._apply_knowledge_merge(side, _crossing_plan(), completed, None)
+    reported.assert_not_called()
+    assert updated.crossing_report == ""
+
+
+def test_successful_sync_carries_the_journaled_report_and_counts(tmp_path: Path) -> None:
+    """MIK-R66 rules 7-9: the success payload holds the same report view as resolution."""
+
+    report = {
+        "conflicts": [],
+        "cards": {"taken": 1},
+        "converted": [],
+        "alignment": {
+            "alignedCards": 1,
+            "renumberedReferences": 1,
+            "evidenceLinesKept": 0,
+            "skippedCards": [{"path": "onboarding/card.json", "reason": "a rule 7 reason"}],
+        },
+    }
+    target = tmp_path / "crossing-report.json"
+    target.write_text(json.dumps(report), encoding="utf-8")
+    record = SimpleNamespace(
+        code=SimpleNamespace(crossingReport=""),
+        memory=SimpleNamespace(crossingReport=target.as_posix()),
+    )
+
+    assert successful_crossings(cast(Any, record)) == [crossing_summary(target.as_posix())]
+    summary = cast(dict[str, Any], successful_crossings(cast(Any, record))[0])
+    assert summary["alignment"]["skippedCards"] == [
+        {"path": "onboarding/card.json", "reason": "a rule 7 reason"}
+    ]
+    empty = SimpleNamespace(
+        code=SimpleNamespace(crossingReport=""), memory=SimpleNamespace(crossingReport="")
+    )
+    assert successful_crossings(cast(Any, empty)) == []
