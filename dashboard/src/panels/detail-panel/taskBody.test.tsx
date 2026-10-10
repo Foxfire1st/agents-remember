@@ -57,16 +57,36 @@ describe("DetailPanel on-demand task body (task 11)", () => {
       vi.fn((url: string): Promise<Response> => {
         requested.push(url);
         if (url.startsWith("/api/task-document")) return pendingBody;
-        if (url.startsWith("/api/notes/list")) {
+        if (url.startsWith("/api/notes/folder")) {
           return Promise.resolve({
             ok: true,
             status: 200,
             json: async () => ({
               repo: "repo-a",
               master: "260712_reader-priority",
-              notes: [],
-              truncated: false,
+              path: "",
+              entries: [],
+              total: 0,
+              offset: 0,
+              limit: 200,
+              remaining: 0,
+              exists: true,
+              reason: null,
             }),
+          } as unknown as Response);
+        }
+        if (url.startsWith("/api/notes/resolve")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ repo: "repo-a", master: "m", resolutions: [] }),
+          } as unknown as Response);
+        }
+        if (url.startsWith("/api/role-launch/reports")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ repo: "repo-a", master: "m", doc: "", reports: [], total: 0, explorer: null }),
           } as unknown as Response);
         }
         return Promise.resolve({
@@ -94,7 +114,7 @@ describe("DetailPanel on-demand task body (task 11)", () => {
     await waitFor(() => expect(requested).toHaveLength(1));
     expect(requested[0]).toContain("/api/task-document");
     expect(requested.some((url) => url.startsWith("/api/changeset/"))).toBe(false);
-    expect(requested.some((url) => url.startsWith("/api/notes/list"))).toBe(false);
+    expect(requested.some((url) => url.startsWith("/api/notes/folder"))).toBe(false);
 
     resolveBody({
       ok: true,
@@ -106,7 +126,7 @@ describe("DetailPanel on-demand task body (task 11)", () => {
     expect(queryByText("Loading complete task document…")).toBeNull();
     await waitFor(() => {
       expect(requested.some((url) => url.startsWith("/api/changeset/"))).toBe(true);
-      expect(requested.some((url) => url.startsWith("/api/notes/list"))).toBe(true);
+      expect(requested.some((url) => url.startsWith("/api/notes/folder"))).toBe(true);
     });
   });
 

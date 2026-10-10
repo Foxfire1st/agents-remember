@@ -637,6 +637,7 @@ export interface TaskCodeExampleNode {
 export interface TaskDecisionNode {
   at: string;
   decision: string;
+  product_record: boolean;
   rationale: string;
 }
 

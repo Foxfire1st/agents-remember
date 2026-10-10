@@ -541,7 +541,13 @@ function useCockpitShellActions(
   const closeChangeSet = useCallback(() => setChangeSet(null), [setChangeSet]);
   const closeNotes = useCallback(() => setNotesOpen(false), [setNotesOpen]);
   const selectNote = useCallback(
-    (path: string) => setNotes((cur) => (cur ? { ...cur, path } : cur)),
+    (path: string) =>
+      setNotes((cur) => {
+        // A note selection leaves the folder-open state: the reader shows the note.
+        if (cur?.kind === "notes") return { ...cur, path, folder: false };
+        if (cur?.kind === "requirements") return { ...cur, path };
+        return cur;
+      }),
     [setNotes],
   );
   const showSentSession = useCallback((sessionId: string) => {
@@ -623,7 +629,15 @@ function NotesTakeover({
     >
       <main
         className={cx(viewport, "viewport")}
-        data-view={target.kind === "notes" ? "notes-reader" : "requirements-reader"}
+        data-view={
+          target.kind === "notes"
+            ? "notes-reader"
+            : target.kind === "requirements"
+              ? "requirements-reader"
+              : target.kind === "decisions"
+                ? "decisions-reader"
+                : "report-reader"
+        }
       >
         <NotesReaderViewer
           {...target}

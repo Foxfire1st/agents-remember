@@ -625,6 +625,7 @@
           {
             "at": "2026-06-14T08:46:00+00:00",
             "decision": "derive the bucket fields from the vocabulary",
+            "product_record": false,
             "rationale": "a hand-written bucket list is what dropped awaiting-developer"
           }
         ],
@@ -745,6 +746,7 @@
           {
             "at": "2026-06-14T08:55:00+00:00",
             "decision": "keep the fixture as the server stand-in",
+            "product_record": false,
             "rationale": "schema codegen owns the TypeScript contract; this sampled fixture remains hand-maintained"
           }
         ],

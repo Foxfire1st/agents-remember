@@ -34,6 +34,7 @@ import { DocChangeSetBar } from "./changeSetBar";
 import {
   dirName,
   labelWithId,
+  orderDecisionsNewestFirst,
   sliceForRef,
   sliceSlug,
   subTaskKey,
@@ -243,6 +244,7 @@ export function MasterOverview({
           sliceDocs={sliceDocs}
           onOpen={onOpen}
           onJump={onJump}
+          onOpenNotes={onOpenNotes}
           docPathForRef={docPathForRef}
         />
       ))}
@@ -252,7 +254,7 @@ export function MasterOverview({
         <TaskNotes
           repo={doc.repository}
           master={dirName(doc.docPath)}
-          references={[]}
+          references={doc.references}
           onOpenNotes={onOpenNotes}
         />
       ) : null}
@@ -277,6 +279,7 @@ export function MasterSection({
   sliceDocs,
   onOpen,
   onJump,
+  onOpenNotes,
   docPathForRef,
 }: {
   section: TaskSectionNode;
@@ -284,6 +287,7 @@ export function MasterSection({
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
   docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   return (
@@ -299,7 +303,15 @@ export function MasterSection({
           docPathForRef={docPathForRef}
         />
       ) : null}
-      {section.kind === "sharedDecisions" ? <DecisionList items={doc.decisions} /> : null}
+      {section.kind === "sharedDecisions" ? (
+        <DecisionPreview
+          items={doc.decisions}
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          title={doc.title}
+          onOpenNotes={onOpenNotes}
+        />
+      ) : null}
     </Section>
   );
 }
@@ -594,7 +606,13 @@ function TaskReaderSections({
       ) : null}
       {doc.decisions.length > 0 ? (
         <Section title="Decision log">
-          <DecisionList items={doc.decisions} />
+          <DecisionPreview
+            items={doc.decisions}
+            repo={doc.repository}
+            master={dirName(doc.docPath)}
+            title={doc.title}
+            onOpenNotes={onOpenNotes}
+          />
         </Section>
       ) : null}
       {doc.openQuestions.length > 0 ? (
@@ -613,6 +631,7 @@ function TaskReaderSections({
         <TaskNotes
           repo={doc.repository}
           master={dirName(doc.docPath)}
+          docPath={doc.docPath}
           references={doc.references}
           onOpenNotes={onOpenNotes}
         />
@@ -768,5 +787,49 @@ export function DecisionList({ items }: { items: TaskDecisionNode[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// The decision log front page (MIK-R126 rule 6 under the lifecycle-records ruling): the
+// five newest authored decisions, newest first. Product-written records — marked by the
+// server from the writers' own constants — count toward nothing and are not drawn here.
+// The link opens the whole log on a page of its own; it appears whenever at least one
+// entry is omitted from this page and names both counts where they differ. No link when
+// every entry is visible.
+export function DecisionPreview({
+  items,
+  repo,
+  master,
+  title,
+  onOpenNotes,
+}: {
+  items: TaskDecisionNode[];
+  repo: string;
+  master: string;
+  title: string;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+}) {
+  const authored = items.filter((item) => !item.product_record);
+  const newest = orderDecisionsNewestFirst(authored).slice(0, 5);
+  const omitted = items.length - newest.length;
+  const linkLabel =
+    authored.length !== items.length
+      ? `all ${items.length} entries, ${authored.length} decision${authored.length === 1 ? "" : "s"}`
+      : `all ${items.length} decision${items.length === 1 ? "" : "s"}`;
+  return (
+    <>
+      <DecisionList items={newest} />
+      {omitted > 0 ? (
+        <button
+          type="button"
+          className={crossButton}
+          onClick={() => onOpenNotes?.({ kind: "decisions", repo, master, title, decisions: items })}
+          data-testid="decision-log-all-link"
+          title="open the whole decision log"
+        >
+          <span>→ {linkLabel}</span>
+        </button>
+      ) : null}
+    </>
   );
 }

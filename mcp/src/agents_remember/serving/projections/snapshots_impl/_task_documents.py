@@ -59,6 +59,7 @@ from agents_remember.tasks import (
     TaskDocument,
     build_graph_titles,
     current_step,
+    is_product_record_decision,
     series_abandoned,
     series_done,
     series_total,
@@ -552,7 +553,12 @@ def _reader_fields(doc: TaskDocument, *, include_body: bool) -> _TaskDocReaderFi
             for example in doc.codeExamples
         ],
         decisions=[
-            TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
+            TaskDecisionNode(
+                at=item.at,
+                decision=item.decision,
+                rationale=item.rationale,
+                product_record=is_product_record_decision(item.decision),
+            )
             for item in doc.decisions
         ],
         openQuestions=[_question_reader_text(item) for item in doc.openQuestions],

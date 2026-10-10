@@ -462,7 +462,7 @@ export function stubNotes(
     sha256: string;
   }> = [],
 ) {
-  const fn = vi.fn(async (url: string) => {
+  const fn = vi.fn(async (url: string, init?: { body?: unknown }) => {
     if (url.startsWith("/api/task-document")) {
       const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
       const docPath = params.get("path") ?? "";
@@ -471,8 +471,60 @@ export function stubNotes(
         taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
       return { ok: true, status: 200, json: async () => doc } as unknown as Response;
     }
-    if (url.startsWith("/api/notes/list")) {
-      const payload = { repo: "agents-remember", master: "m", notes, truncated: false };
+    if (url.startsWith("/api/notes/folder")) {
+      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+      const folder = params.get("path") ?? "";
+      const offset = Number(params.get("offset") ?? "0");
+      const prefix = folder ? `${folder}/` : "";
+      const level = notes.filter(
+        (note) => note.path.startsWith(prefix) && !note.path.slice(prefix.length).includes("/"),
+      );
+      const entries = level.map((note) => ({
+        name: note.name,
+        path: note.path,
+        kind: "file" as const,
+        size: note.size,
+        language: note.language,
+      }));
+      const payload = {
+        repo: "agents-remember",
+        master: "m",
+        path: folder,
+        entries: entries.slice(offset, offset + 200),
+        total: entries.length,
+        offset,
+        limit: 200,
+        remaining: Math.max(0, entries.length - offset - 200),
+        exists: true,
+        reason: null,
+      };
+      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+    }
+    if (url.startsWith("/api/notes/resolve")) {
+      // The test double mirrors the server rule: a token naming a seeded notes-relative
+      // path (with or without the notes/ prefix) or a root-level bare name resolves.
+      const body = JSON.parse((typeof init?.body === "string" ? init.body : "{}")) as { references?: string[] };
+      const paths = notes.map((note) => note.path);
+      const resolutions = (body.references ?? []).map((reference: string) => {
+        let found: string | null = null;
+        for (const token of reference.match(/[\w./-]+\.[A-Za-z0-9]+/g) ?? []) {
+          const relative = token.startsWith("notes/") ? token.slice("notes/".length) : token;
+          if (paths.includes(relative)) {
+            found = relative;
+            break;
+          }
+          if (!token.includes("/") && notes.some((note) => note.path === token)) {
+            found = token;
+            break;
+          }
+        }
+        return { reference, path: found };
+      });
+      const payload = { repo: "agents-remember", master: "m", resolutions };
+      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+    }
+    if (url.startsWith("/api/role-launch/reports")) {
+      const payload = { repo: "agents-remember", master: "m", doc: "", reports: [], total: 0, explorer: null };
       return { ok: true, status: 200, json: async () => payload } as unknown as Response;
     }
     if (url.startsWith("/api/notes/read")) {

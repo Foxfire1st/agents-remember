@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agents_remember.tasks import Step, SubStep
+from agents_remember.tasks.document import REMOVED_STEP_DECISION_PREFIX, SKIP_STEP_DECISION_PREFIX
 
 from .task_doc_route_review import TaskDocError
 
@@ -217,7 +218,7 @@ def remove_step(
     decisions.append(
         {
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "decision": f"Removed step {qualified_id}.",
+            "decision": f"{REMOVED_STEP_DECISION_PREFIX}{qualified_id}.",
             "rationale": reason,
         }
     )
@@ -255,7 +256,7 @@ def skip_step(
     decisions.append(
         {
             "at": recorded_at,
-            "decision": f"Intentionally skip step {qualified_id}.",
+            "decision": f"{SKIP_STEP_DECISION_PREFIX}{qualified_id}.",
             "rationale": reason,
         }
     )

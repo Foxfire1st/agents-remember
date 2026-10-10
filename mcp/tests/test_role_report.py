@@ -273,6 +273,69 @@ def test_another_execution_or_selection_cannot_read_the_report(config, role):
     assert response.json()["status"] == "report-execution-mismatch"
 
 
+def test_a_task_page_target_opens_current_and_archived_role_starts(config):
+    """The task page emits {role, requestId, taskDocumentRef} only: the read route
+    completes the canonical sprint/master selection itself and opens both the live and
+    the archived receipt's report (L126-CODE-10)."""
+    client, body, report, address, receipt = recorded(config, "worker")
+    report.write_text("the live worker report")
+    task_only = {
+        "role": "worker",
+        "requestId": body["requestId"],
+        "taskDocumentRef": {"repository": "demo", "path": "master/leaf.json"},
+    }
+    live = client.post("/api/role-launch/report", json=task_only)
+    assert live.status_code == 200
+    assert live.json()["content"] == "the live worker report"
+    # A newer start supersedes this one: the old receipt moves to history, the live
+    # address holds the newer execution, and the old report must still open.
+    history = address.parent / "history" / f"{body['requestId']}.json"
+    history.parent.mkdir(parents=True, exist_ok=True)
+    address.replace(history)
+    newer_body = {**body, "requestId": str(uuid.uuid4())}
+    newer_request = RoleReportRequest.model_validate(newer_body)
+    newer_address = _receipt_path(config, newer_request, newer_request.request_id)
+    newer_address.parent.mkdir(parents=True, exist_ok=True)
+    newer_address.write_text(
+        json.dumps({**receipt, "requestId": newer_body["requestId"], "createdAt": "2026-10-11"})
+    )
+    archived = client.post("/api/role-launch/report", json=task_only)
+    assert archived.status_code == 200
+    assert archived.json()["content"] == "the live worker report"
+
+
+def test_a_task_page_target_keeps_exact_request_identity_refusals(config):
+    """Wrong task, wrong request, escaping paths and unavailable reports still refuse
+    through the task-only target (L126-CODE-10)."""
+    client, body, report, _address, _receipt = recorded(config, "worker")
+    report.write_text("the live worker report")
+    task_only = {
+        "role": "worker",
+        "requestId": body["requestId"],
+        "taskDocumentRef": {"repository": "demo", "path": "master/leaf.json"},
+    }
+    wrong_task = client.post(
+        "/api/role-launch/report",
+        json={**task_only, "taskDocumentRef": {"repository": "demo", "path": "master/other.json"}},
+    )
+    assert wrong_task.status_code == 409
+    assert wrong_task.json()["status"] == "report-selection-invalid"
+    wrong_request = client.post(
+        "/api/role-launch/report", json={**task_only, "requestId": str(uuid.uuid4())}
+    )
+    assert wrong_request.status_code in {404, 409}
+    escape = client.post(
+        "/api/role-launch/report",
+        json={**task_only, "taskDocumentRef": {"repository": "demo", "path": "../leaf.json"}},
+    )
+    # Pydantic refuses the malformed reference before selection even runs.
+    assert escape.status_code in {400, 409, 422}
+    report.unlink()
+    gone = client.post("/api/role-launch/report", json=task_only)
+    assert gone.status_code == 404
+    assert gone.json()["status"] == "report-not-written"
+
+
 @pytest.mark.parametrize("size", [32, 2 * 1024 * 1024 + 64])
 def test_report_read_is_bounded(config, size):
     client, body, report, _, _ = recorded(config)

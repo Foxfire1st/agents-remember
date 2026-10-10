@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CockpitShell } from "../../cockpit/Cockpit";
 import { dashboardStore } from "../../data/store";
-import type { NoteContent, NoteEntry } from "../../data/notes";
+import type { FolderEntry, NoteContent } from "../../data/notes";
 import { metricsFor } from "../../types/projection";
 import type { TaskDocNode, WorkspaceProjection } from "../../types/projection";
 import { NotesReaderViewer } from "./NotesReaderViewer";
@@ -18,18 +18,39 @@ vi.mock("../file-viewer/FilePane", () => ({
 const REPO = "agents-remember";
 const MASTER = "260703_agent-orchestration";
 
-function entry(path: string, over: Partial<NoteEntry> = {}): NoteEntry {
-  return { name: path.split("/").pop() ?? path, path, size: 100, language: "markdown", ...over };
+function entry(path: string, over: Partial<FolderEntry> = {}): FolderEntry {
+  const isDir = path.endsWith("/");
+  const clean = isDir ? path.slice(0, -1) : path;
+  return {
+    name: clean.split("/").pop() ?? clean,
+    path: clean,
+    kind: isDir ? "dir" : "file",
+    size: isDir ? null : 100,
+    language: isDir ? "" : "markdown",
+    ...over,
+  };
 }
 function content(path: string, over: Partial<NoteContent> = {}): NoteContent {
   return { repo: REPO, master: MASTER, path, language: "markdown", size: 100, truncated: false, content: `# ${path}`, ...over };
 }
 
-// /api/notes/list → the seeded listing; /api/notes/read → the seeded per-path content (404 otherwise).
-function stubNotesApi(notes: NoteEntry[], contents: Record<string, NoteContent> = {}, truncated = false) {
+// /api/notes/folder → the seeded level in parts of two (so the next-part row is exercised);
+// /api/notes/read → the seeded per-path content (404 otherwise); /api/notes/resolve and
+// /api/role-launch/reports answer empty so task surfaces stay inert.
+// opts.gone answers exists:false with the given reason for those folders; opts.vanish
+// answers exists:false from the given offset on (a folder disappearing mid-pagination);
+// opts.pageSize overrides the part size.
+function stubNotesApi(
+  folders: Record<string, FolderEntry[]>,
+  contents: Record<string, NoteContent> = {},
+  opts: { gone?: Record<string, string>; vanish?: { folder: string; fromOffset: number; reason: string }; pageSize?: number } = {},
+) {
+  const urls: string[] = [];
+  const pageSize = opts.pageSize ?? 2;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
+      urls.push(url);
       const params = new URLSearchParams(url.split("?")[1] ?? "");
       if (url.startsWith("/api/task-document")) {
         const docPath = params.get("path") ?? "";
@@ -38,20 +59,66 @@ function stubNotesApi(notes: NoteEntry[], contents: Record<string, NoteContent> 
           masterDoc();
         return { ok: true, status: 200, json: async () => doc } as unknown as Response;
       }
-      if (url.startsWith("/api/notes/list")) {
-        const payload = { repo: params.get("repo"), master: params.get("master"), notes, truncated };
-        return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+      if (url.startsWith("/api/notes/folder")) {
+        const folder = params.get("path") ?? "";
+        const offset = Number(params.get("offset") ?? "0");
+        const goneReason = opts.gone?.[folder];
+        if (goneReason !== undefined) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              repo: REPO, master: MASTER, path: folder, entries: [], total: 0, offset,
+              limit: 200, remaining: 0, exists: false, reason: goneReason,
+            }),
+          } as unknown as Response;
+        }
+        if (opts.vanish && opts.vanish.folder === folder && offset >= opts.vanish.fromOffset) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              repo: REPO, master: MASTER, path: folder, entries: [], total: 0, offset,
+              limit: 200, remaining: 0, exists: false, reason: opts.vanish!.reason,
+            }),
+          } as unknown as Response;
+        }
+        const all = folders[folder] ?? [];
+        const page = all.slice(offset, offset + pageSize);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            repo: REPO,
+            master: MASTER,
+            path: folder,
+            entries: page,
+            total: all.length,
+            offset,
+            limit: 200,
+            remaining: Math.max(0, all.length - offset - page.length),
+            exists: true,
+            reason: null,
+          }),
+        } as unknown as Response;
       }
       if (url.startsWith("/api/notes/read")) {
         const body = contents[params.get("path") ?? ""];
         if (body) return { ok: true, status: 200, json: async () => body } as unknown as Response;
         return { ok: false, status: 404, json: async () => ({ status: "not-found" }) } as unknown as Response;
       }
+      if (url.startsWith("/api/notes/resolve")) {
+        return { ok: true, status: 200, json: async () => ({ repo: REPO, master: MASTER, resolutions: [] }) } as unknown as Response;
+      }
+      if (url.startsWith("/api/role-launch/reports")) {
+        return { ok: true, status: 200, json: async () => ({ repo: REPO, master: MASTER, doc: "", reports: [], total: 0, explorer: null }) } as unknown as Response;
+      }
       // Unrelated cockpit fetches (e.g. the hidden File Viewer layer's repo catalog) — a `{repos:[]}`
       // shape keeps that panel happy without a network hit.
       return { ok: true, status: 200, json: async () => ({ repos: [] }) } as unknown as Response;
     }),
   );
+  return urls;
 }
 
 function stubRequirementsApi(path: string, contentBody: string) {
@@ -101,56 +168,241 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("NotesReaderViewer rail", () => {
-  it("lists the master's notes tree (reports/ included) with the open note highlighted", async () => {
+describe("NotesReaderViewer tree rail (the shared ExplorerTree)", () => {
+  it("shows one level at a time with the open note highlighted", async () => {
     stubNotesApi(
-      [entry("friction-ledger.md"), entry("reports/260703-L1-worker-report.md")],
+      { "": [entry("friction-ledger.md"), entry("reports/")] },
       { "friction-ledger.md": content("friction-ledger.md") },
     );
     const view = render(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="friction-ledger.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
     );
-    const first = await view.findByTestId("note-rail-1");
-    expect(first.textContent).toContain("friction-ledger.md");
-    // reports/ subfolder entries are listed, honestly showing their path.
-    expect(view.getByText("reports/260703-L1-worker-report.md")).toBeTruthy();
-    // The open note is highlighted in the rail; the other row is not.
-    expect(first.getAttribute("data-active")).toBe("true");
-    expect(view.getByTestId("note-rail-2").getAttribute("data-active")).toBe("false");
+    const row = await view.findByTitle("friction-ledger.md");
+    expect(row.textContent).toContain("friction-ledger.md");
+    // The nested level is not fetched until its folder opens: no second-level row, one folder call.
+    expect(view.queryByTitle("260703-L1-worker-report.md")).toBeNull();
+    expect(row.getAttribute("aria-selected")).toBe("true");
+    expect(view.getByTitle("reports").getAttribute("aria-selected")).toBe("false");
   });
 
   it("moves the highlight to follow the open note when the selection changes", async () => {
     stubNotesApi(
-      [entry("a.md"), entry("b.md")],
+      { "": [entry("a.md"), entry("b.md")] },
       { "a.md": content("a.md"), "b.md": content("b.md") },
     );
     const view = render(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
     );
-    await view.findByTestId("note-rail-1");
-    expect(view.getByTestId("note-rail-1").getAttribute("data-active")).toBe("true");
+    await view.findByTitle("a.md");
+    expect(view.getByTitle("a.md").getAttribute("aria-selected")).toBe("true");
     view.rerender(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="b.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
     );
-    expect(view.getByTestId("note-rail-1").getAttribute("data-active")).toBe("false");
-    expect(view.getByTestId("note-rail-2").getAttribute("data-active")).toBe("true");
+    expect(view.getByTitle("a.md").getAttribute("aria-selected")).toBe("false");
+    expect(view.getByTitle("b.md").getAttribute("aria-selected")).toBe("true");
     await view.findByTestId("sidecar-pane"); // flush the b.md content fetch
   });
 
-  it("asks the parent to switch the open note when a rail row is clicked (switch in place)", async () => {
-    stubNotesApi([entry("a.md"), entry("b.md")], { "a.md": content("a.md") });
+  it("asks the parent to switch the open note when a file row is clicked (switch in place)", async () => {
+    stubNotesApi({ "": [entry("a.md"), entry("b.md")] }, { "a.md": content("a.md") });
     const onSelectNote = vi.fn();
     const view = render(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
     );
-    fireEvent.click(await view.findByTestId("note-rail-2"));
+    fireEvent.click(await view.findByTitle("b.md"));
     expect(onSelectNote).toHaveBeenCalledWith("b.md");
+  });
+
+  it("opens a closed folder on click and shows its children", async () => {
+    stubNotesApi(
+      {
+        "": [entry("reports/")],
+        reports: [entry("reports/r.md")],
+      },
+      { "reports/r.md": content("reports/r.md") },
+    );
+    const onSelectNote = vi.fn();
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="reports/r.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    // The folders on the way to the open note are open and the note is marked.
+    const row = await view.findByTitle("r.md");
+    expect(row.getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(row);
+    expect(onSelectNote).toHaveBeenCalledWith("reports/r.md");
+  });
+
+  it("keeps folders closed until opened, except on the way to the open note", async () => {
+    stubNotesApi({ "": [entry("a.md"), entry("reports/")], reports: [entry("reports/r.md")] });
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("a.md");
+    // reports/ is present but its children are not loaded until it opens.
+    expect(view.getByTitle("reports")).toBeTruthy();
+    expect(view.queryByTitle("r.md")).toBeNull();
+  });
+
+  it("shows a row that loads the next part of a large folder", async () => {
+    stubNotesApi({ "": [entry("a.md"), entry("b.md"), entry("c.md")] });
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("b.md");
+    expect(view.queryByTitle("c.md")).toBeNull();
+    const more = await view.findByTestId("notes-more");
+    expect(more.textContent).toContain("1 more");
+    fireEvent.click(more);
+    expect(await view.findByTitle("c.md")).toBeTruthy();
+    expect(view.queryByTestId("notes-more")).toBeNull();
+  });
+
+  it("opens a note below the old depth cap with its ancestor folders open", async () => {
+    const deep = "reports/deep/d2/note.md";
+    stubNotesApi(
+      {
+        "": [entry("reports/")],
+        reports: [entry("reports/deep/")],
+        "reports/deep": [entry("reports/deep/d2/")],
+        "reports/deep/d2": [entry(deep)],
+      },
+      { [deep]: content(deep) },
+    );
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path={deep} onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    const row = await view.findByTitle("note.md");
+    expect(row.getAttribute("aria-selected")).toBe("true");
+    await view.findByTestId("sidecar-pane"); // the deep note reads through the same read route
+  });
+
+  it("opens at a folder with the tree and a selection placeholder, reading nothing", async () => {
+    const urls = stubNotesApi({ "": [entry("a.md")] });
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} folder onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("a.md");
+    expect(view.getByTestId("note-status").textContent).toContain("Select a note from the tree.");
+    expect(urls.some((url) => url.startsWith("/api/notes/read"))).toBe(false);
+  });
+
+  it("marks an open note living beyond the first part, loading only its folder", async () => {
+    const notes = ["n0.md", "n1.md", "n2.md", "n3.md", "n4.md"].map((name) => entry(name));
+    const urls = stubNotesApi(
+      { "": [entry("unrelated/"), ...notes] },
+      { "n4.md": content("n4.md") },
+    );
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="n4.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    // The note's row is loaded and marked even though it lives in the third part.
+    const row = await view.findByTitle("n4.md");
+    expect(row.getAttribute("aria-selected")).toBe("true");
+    // Only the open note's own folder was paged through; the unrelated folder stayed closed.
+    const folderUrls = urls.filter((url) => url.startsWith("/api/notes/folder"));
+    expect(folderUrls).toHaveLength(3);
+    expect(folderUrls.every((url) => url.includes("path=&") || url.includes("path=") && !url.includes("unrelated"))).toBe(true);
+    expect(view.queryByTitle("unrelated")).toBeTruthy(); // the folder row exists, unopened
+    expect(view.queryByTitle("inner.md")).toBeNull();
+  });
+
+  it("empties a vanished folder and shows the server reason, keeping the rest usable", async () => {
+    stubNotesApi(
+      { "": [entry("gone/"), entry("ok/")], ok: [entry("ok/kept.md")] },
+      { "ok/kept.md": content("ok/kept.md") },
+      { gone: { gone: "that folder is not there" } },
+    );
+    const onSelectNote = vi.fn();
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="gone/old.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    // The vanished folder shows the server's reason and no stale rows.
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toContain("that folder is not there");
+    // A sibling folder still opens and its note still selects.
+    fireEvent.click(await view.findByTitle("ok"));
+    const kept = await view.findByTitle("kept.md");
+    fireEvent.click(kept);
+    expect(onSelectNote).toHaveBeenCalledWith("ok/kept.md");
+  });
+
+  it("clears stale rows when a folder vanishes before its next part", async () => {
+    const notes = ["n0.md", "n1.md", "n2.md"].map((name) => entry(name));
+    stubNotesApi(
+      { "": notes },
+      {},
+      { vanish: { folder: "", fromOffset: 2, reason: "that folder cannot be read" } },
+    );
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} folder onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("n1.md");
+    fireEvent.click(await view.findByTestId("notes-more"));
+    // The 200-scale stale rows are gone and the server reason is shown instead.
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toContain("that folder cannot be read");
+    expect(view.queryByTitle("n0.md")).toBeNull();
+    expect(view.queryByTitle("n1.md")).toBeNull();
+  });
+
+  it.each([40, 70])("evicts least-recently-used folders past the stated cap (%i visited)", async (count) => {
+    // Every folder holds one note except the last, which holds 250 (so only it has a
+    // next-part row); the root lists all folders in one part.
+    const folders: Record<string, FolderEntry[]> = { "": [] };
+    for (let index = 0; index < count; index++) {
+      const name = `f${String(index).padStart(2, "0")}`;
+      folders[""]!.push(entry(`${name}/`));
+      folders[name] =
+        index === count - 1
+          ? Array.from({ length: 250 }, (_, note) => entry(`${name}/n${String(note).padStart(3, "0")}.md`))
+          : [entry(`${name}/only.md`)];
+    }
+    const last = `f${String(count - 1).padStart(2, "0")}`;
+    const urls = stubNotesApi(folders, {}, { pageSize: 200 });
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} folder onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    // Visit every folder in order; each expansion fetches exactly once.
+    for (let index = 0; index < count; index++) {
+      fireEvent.click(await view.findByTitle(`f${String(index).padStart(2, "0")}`));
+    }
+    const folderFetches = (name: string) =>
+      urls.filter((url) => url.startsWith("/api/notes/folder") && url.includes(`path=${name}`)).length;
+    expect(folderFetches("f00")).toBe(1);
+    // Paging the last folder bumps the revision, so the tree re-asks every loaded
+    // parent: folders evicted past the cap of 32 refetch on demand, proving bounded
+    // reclamation instead of unbounded retention.
+    fireEvent.click(await view.findByTestId("notes-more"));
+    await view.findByTitle(`${last}/n249.md`.split("/").pop()!);
+    expect(folderFetches("f00")).toBe(2);
+  });
+
+  it("never evicts the folders on the way to the open note", async () => {
+    const folders: Record<string, FolderEntry[]> = { "": [entry("keep/")] };
+    for (let index = 0; index < 40; index++) folders[""]!.push(entry(`f${String(index).padStart(2, "0")}/`));
+    folders["keep"] = [entry("keep/open.md")];
+    const urls = stubNotesApi(folders, { "keep/open.md": content("keep/open.md") }, { pageSize: 200 });
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="keep/open.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("open.md");
+    for (let index = 0; index < 40; index++) {
+      fireEvent.click(await view.findByTitle(`f${String(index).padStart(2, "0")}`));
+    }
+    // keep/ survived 40 further visits: collapsing and reopening it does not refetch.
+    fireEvent.click(view.getByTitle("keep")); // collapse
+    fireEvent.click(view.getByTitle("keep")); // expand again
+    await view.findByTitle("open.md");
+    const keepFetches = urls.filter(
+      (url) => url.startsWith("/api/notes/folder") && url.includes("path=keep"),
+    ).length;
+    expect(keepFetches).toBe(1);
   });
 });
 
 describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () => {
   it("renders an opened markdown note formatted (not raw) via the shared Markdown", async () => {
-    stubNotesApi([entry("friction-ledger.md")], {
+    stubNotesApi({ "": [entry("friction-ledger.md")] }, {
       "friction-ledger.md": content("friction-ledger.md", { content: "The **F-M** row." }),
     });
     const view = render(
@@ -162,7 +414,7 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
   });
 
   it("renders a non-markdown text note through the shared file pane (the text fallback)", async () => {
-    stubNotesApi([entry("trace.txt", { language: "text" })], {
+    stubNotesApi({ "": [entry("trace.txt", { language: "text" })] }, {
       "trace.txt": content("trace.txt", { language: "text", content: "line one\nline two" }),
     });
     const view = render(
@@ -172,7 +424,7 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
   });
 
   it("degrades a binary note to a byte-count placeholder instead of raw bytes", async () => {
-    stubNotesApi([entry("scan.png", { language: "text" })], {
+    stubNotesApi({ "": [entry("scan.png", { language: "text" })] }, {
       "scan.png": content("scan.png", { language: "binary", size: 2048, content: "" }),
     });
     const view = render(
@@ -187,7 +439,7 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
     // Markdown is the dominant note type but takes DualPane's partnerless-markdown path, which has
     // no banner (only CodeSide does) -- so without this a truncated markdown note would silently drop
     // the "showing the first 2 MiB" contract. The banner renders here, above the rendered markdown.
-    stubNotesApi([entry("big.md")], {
+    stubNotesApi({ "": [entry("big.md")] }, {
       "big.md": content("big.md", { truncated: true, size: 2_097_162, content: "# big\n\nlots" }),
     });
     const view = render(
@@ -200,7 +452,7 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
   });
 
   it("shows no truncation banner for a normal (untruncated) markdown note", async () => {
-    stubNotesApi([entry("small.md")], { "small.md": content("small.md") });
+    stubNotesApi({ "": [entry("small.md")] }, { "small.md": content("small.md") });
     const view = render(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="small.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
     );
@@ -209,7 +461,7 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
   });
 
   it("calls onBack when the back control is clicked", async () => {
-    stubNotesApi([entry("a.md")], { "a.md": content("a.md") });
+    stubNotesApi({ "": [entry("a.md")] }, { "a.md": content("a.md") });
     const onBack = vi.fn();
     const view = render(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={vi.fn()} onBack={onBack} />,
@@ -302,7 +554,7 @@ function seedMaster() {
 
 describe("Cockpit notes reader takeover", () => {
   it("does not show the notes reader initially and keeps the Operations rails", () => {
-    stubNotesApi([entry("a.md")]);
+    stubNotesApi({ "": [entry("a.md")] });
     seedMaster();
     const { container } = render(<CockpitShell initialView="operations" />);
     expect(container.querySelector('[data-testid="notes-reader-viewer"]')).toBeNull();
@@ -310,27 +562,31 @@ describe("Cockpit notes reader takeover", () => {
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
   });
 
-  it("opens the reader from the notes list and keeps it MOUNTED across back (state survives back/forward, like the File Viewer)", async () => {
-    stubNotesApi([entry("a.md"), entry("b.md")], { "a.md": content("a.md"), "b.md": content("b.md") });
+  it("opens the reader from the Notes line and keeps it MOUNTED across back (state survives back/forward, like the File Viewer)", async () => {
+    stubNotesApi({ "": [entry("a.md"), entry("b.md")] }, { "a.md": content("a.md"), "b.md": content("b.md") });
     seedMaster();
     const view = render(<CockpitShell initialView="operations" />);
 
-    // Select the master in the sidebar, then open a note from its compact Series-notes list.
+    // Select the master in the sidebar, then open the notes explorer from its Notes line.
     fireEvent.click(view.getByText("Agent Orchestration"));
-    fireEvent.click(await view.findByTestId("note-open-1"));
+    fireEvent.click(await view.findByTestId("notes-root-link"));
 
     // The takeover shows the notes reader; the railed body is hidden (not unmounted).
     const reader = await view.findByTestId("notes-reader-viewer");
     const railedBody = reader.closest(".shell__body")!.parentElement!.querySelector('[aria-hidden="true"].shell__body');
     expect(railedBody).not.toBeNull();
 
-    // Back hides the takeover but does NOT unmount it — the SAME node persists (its listing/selection
+    // A tree row opens its note in place.
+    fireEvent.click(await view.findByTitle("a.md"));
+    await view.findByTestId("sidecar-pane");
+
+    // Back hides the takeover but does NOT unmount it — the SAME node persists (its tree/selection
     // survive), exactly like the File Viewer's hidden-not-unmounted layer.
     fireEvent.click(view.getByTestId("notes-reader-back"));
     expect(view.getByTestId("notes-reader-viewer")).toBe(reader);
 
     // Re-opening surfaces the SAME mounted reader instance (never a fresh remount).
-    fireEvent.click(await view.findByTestId("note-open-1"));
+    fireEvent.click(await view.findByTestId("notes-root-link"));
     expect(view.getByTestId("notes-reader-viewer")).toBe(reader);
   });
 });
@@ -343,7 +599,7 @@ describe("role report in the existing reader", () => {
     const onBack = vi.fn();
     const view = render(<NotesReaderViewer kind="role-report" report={{ path: "role.md", language: "markdown", content: "The **report**.", size: 15, truncated: false }} onBack={onBack} />);
     expect((await view.findByText("report")).tagName.toLowerCase()).toBe("strong");
-    expect(view.queryByTestId("notes-rail")).toBeNull();
+    expect(view.queryByTestId("notes-tree")).toBeNull();
     expect(view.container.querySelectorAll('[data-testid="dual-pane"]')).toHaveLength(1);
     expect(view.getByTestId("notes-reader-open").textContent).toBe("role.md");
     expect(view.getByText("Report")).toBeTruthy();
@@ -361,4 +617,86 @@ it("retains the supplied role report body, name and truncation notice in the sha
   expect(view.getByTestId("notes-trunc-banner").textContent).toBe("Showing the first 2 MiB of 2,097,216 bytes");
   expect(view.container.querySelectorAll('[data-testid="dual-pane"]')).toHaveLength(1);
   expect(view.getByTestId("sidecar-pane").textContent).toBe("A bounded report.");
+});
+
+describe("decision whole-log page", () => {
+  const decisions = [
+    { at: "2026-10-01T00:00:00+00:00", decision: "first decision", rationale: "why one", product_record: false },
+    { at: "2026-10-02T00:00:00+00:00", decision: "Finalize task lifecycle.", rationale: "record", product_record: true },
+    { at: "2026-10-03T00:00:00+00:00", decision: "latest decision", rationale: "why three", product_record: false },
+  ];
+  it("shows every entry newest first with product records muted, and goes back", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const onBack = vi.fn();
+    const view = render(
+      <NotesReaderViewer kind="decisions" repo={REPO} master={MASTER} title="leaf" decisions={decisions} onSelectNote={vi.fn()} onBack={onBack} />,
+    );
+    const list = await view.findByTestId("decision-log-whole");
+    const rows = Array.from(list.querySelectorAll("li")).map((row) => row.textContent);
+    expect(rows[0]).toContain("latest decision");
+    expect(rows[2]).toContain("first decision");
+    expect(view.getByTestId("notes-reader-open").textContent).toBe("decisions/");
+    // The product-written record is present but muted; nothing is fetched for this page.
+    expect(rows[1]).toContain("Finalize task lifecycle.");
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(view.getByTestId("notes-reader-back"));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("orders an unsorted log by time, including a prepended finalizer record", async () => {
+    // Storage order carries no invariant: the finalizer's newest record is prepended and
+    // the oldest authored decision sits last. Time order must still win (L126-CODE-06).
+    const unsorted = [
+      { at: "2026-10-09T00:00:00+00:00", decision: "Finalize task lifecycle.", rationale: "record", product_record: true },
+      { at: "2026-10-01T00:00:00+00:00", decision: "first decision", rationale: "why one", product_record: false },
+      { at: "2026-10-08T00:00:00+00:00", decision: "latest decision", rationale: "why eight", product_record: false },
+    ];
+    vi.stubGlobal("fetch", vi.fn());
+    const view = render(
+      <NotesReaderViewer kind="decisions" repo={REPO} master={MASTER} title="leaf" decisions={unsorted} onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    const list = await view.findByTestId("decision-log-whole");
+    const rows = Array.from(list.querySelectorAll("li")).map((row) => row.textContent);
+    expect(rows[0]).toContain("Finalize task lifecycle.");
+    expect(rows[1]).toContain("latest decision");
+    expect(rows[2]).toContain("first decision");
+  });
+});
+
+describe("task report target", () => {
+  it("fetches the recorded report for its role scope and renders it", async () => {
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      if (url === "/api/role-launch/report") {
+        const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+        expect(body).toEqual({
+          role: "worker",
+          taskDocumentRef: { repository: REPO, path: `${MASTER}/09_x.json` },
+          requestId: "req-1",
+        });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ path: "req-1.md", language: "markdown", content: "The **report**.", size: 15, truncated: false }),
+        } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetch);
+    const view = render(
+      <NotesReaderViewer
+        kind="task-report"
+        repo={REPO}
+        master={MASTER}
+        role="worker"
+        requestId="req-1"
+        taskRepository={REPO}
+        taskPath={`${MASTER}/09_x.json`}
+        onSelectNote={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    expect((await view.findByText("report")).tagName.toLowerCase()).toBe("strong");
+    expect(view.getByTestId("notes-reader-open").textContent).toBe("req-1");
+  });
 });

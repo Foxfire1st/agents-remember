@@ -15,6 +15,9 @@ from agents_remember.models.task_intent import (
 )
 
 from .document import (
+    FINALIZE_TASK_LIFECYCLE_DECISION,
+    REMOVED_STEP_DECISION_PREFIX,
+    SKIP_STEP_DECISION_PREFIX,
     TASK_DOCUMENT_SCHEMA,
     CodeExample,
     Decision,
@@ -48,6 +51,7 @@ from .document import (
     TaskExecutionRegistration,
     current_step,
     derived_leaf_placement,
+    is_product_record_decision,
     leaf_placement_facts,
     numbering_drift_hints,
     resolve_graph_endpoint,
@@ -86,6 +90,9 @@ from .store import (
 )
 
 __all__ = [
+    "FINALIZE_TASK_LIFECYCLE_DECISION",
+    "REMOVED_STEP_DECISION_PREFIX",
+    "SKIP_STEP_DECISION_PREFIX",
     "TASK_DOCUMENT_SCHEMA",
     "AcceptanceObligationQuestion",
     "ApprovedRequirementPacketRef",
@@ -133,6 +140,7 @@ __all__ = [
     "current_task_doc_source",
     "derived_leaf_placement",
     "doc_stem",
+    "is_product_record_decision",
     "json_path_for",
     "leaf_placement_facts",
     "markdown_path_for",

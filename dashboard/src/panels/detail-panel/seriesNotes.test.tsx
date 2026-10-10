@@ -8,10 +8,10 @@ import {
   taskDoc,
 } from "./test-utils";
 
-describe("DetailPanel series notes (L9)", () => {
+describe("DetailPanel task notes (L126)", () => {
   const leafPath = "/tasks/agents-remember/260703_agent-orchestration/09_notes-dashboard.json";
 
-  it("lists the master's notes on a leaf reader and resolves a notes reference to a link", async () => {
+  it("shows the Notes line for the doc's OWN series and resolves a notes reference to a link", async () => {
     const fn = stubNotes(
       [
         { name: "friction-ledger.md", path: "friction-ledger.md", size: 10, language: "markdown" },
@@ -40,16 +40,20 @@ describe("DetailPanel series notes (L9)", () => {
     const onOpenNotes = vi.fn();
     const view = render(<DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenNotes={onOpenNotes} />);
 
-    // The list is fetched for the doc's OWN series (repo + master derived from the doc node).
-    await view.findByText("Series notes");
+    // The folder is fetched for the doc's OWN series (repo + master derived from the doc node);
+    // one resolution request carries the doc's references. No list is ever drawn.
+    await view.findByTestId("notes-root-count");
     const urls = (fn.mock.calls as unknown as string[][]).map((c) => c[0]);
-    expect(urls).toContain(
-      "/api/notes/list?repo=agents-remember&master=260703_agent-orchestration",
-    );
-    expect(view.getByText("reports/260703-L1-worker-report.md")).toBeTruthy();
+    expect(
+      urls.some(
+        (url) =>
+          url === "/api/notes/folder?repo=agents-remember&master=260703_agent-orchestration&path=&offset=0",
+      ),
+    ).toBe(true);
+    expect(view.queryByText("reports/260703-L1-worker-report.md")).toBeNull();
 
-    // The notes-file reference is an openable link into the L17 reader; the code-path reference stays
-    // plain text. Reading itself now happens in the reader takeover, so the click opens it (no inline pane).
+    // The notes-file reference is an openable link into the reader; the code-path reference stays
+    // plain text. Reading itself happens in the reader takeover, so the click opens it.
     fireEvent.click(await view.findByTestId("note-ref-1"));
     expect(onOpenNotes).toHaveBeenCalledWith({
       kind: "notes",
@@ -60,7 +64,7 @@ describe("DetailPanel series notes (L9)", () => {
     expect(view.queryByTestId("note-ref-2")).toBeNull();
   });
 
-  it("shows the series notes on a master overview", async () => {
+  it("shows the Notes line with the doc's own references on a master overview", async () => {
     stubNotes([{ name: "design.md", path: "design.md", size: 10, language: "markdown" }]);
     const master = taskDoc({
       lifecycleId: undefined,
@@ -74,7 +78,8 @@ describe("DetailPanel series notes (L9)", () => {
     const view = render(
       <DetailPanel selectedId="taskdoc:/tasks/agents-remember/260703_agent-orchestration/task.json" />,
     );
-    await view.findByText("Series notes");
-    expect((await view.findByTestId("note-open-1")).textContent).toContain("design.md");
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("1 entry in the top folder");
+    // A master page shows no report list.
+    expect(view.queryByTestId("task-reports-empty")).toBeNull();
   });
 });

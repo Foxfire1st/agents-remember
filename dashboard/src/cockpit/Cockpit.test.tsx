@@ -316,12 +316,12 @@ function stubTaskReaderFetch(
         }),
       } as Response;
     }
-    if (url.startsWith("/api/notes/list")) {
+    if (url.startsWith("/api/notes/folder")) {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ repo: "repo-a", master: "ops", notes: [], truncated: false }),
-      } as Response;
+        json: async () => ({ repo: "repo-a", master: "ops", path: "", entries: [], total: 0, offset: 0, limit: 200, remaining: 0, exists: true, reason: null }),
+      } as unknown as Response;
     }
     return { ok: true, status: 200, json: async () => ({}) } as Response;
   });
@@ -350,14 +350,16 @@ describe("Operations click-to-detail body hydration", () => {
       await waitFor(() =>
         expect(
           fetchMock.mock.calls.filter(([url]) =>
-            String(url).includes(encodeURIComponent(path)),
+            String(url).startsWith("/api/task-document") && String(url).includes(encodeURIComponent(path)),
           ),
         ).toHaveLength(1),
       );
       act(refreshTaskSummaries);
       await Promise.resolve();
       expect(
-        fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(path))),
+        fetchMock.mock.calls.filter(([url]) =>
+          String(url).startsWith("/api/task-document") && String(url).includes(encodeURIComponent(path)),
+        ),
       ).toHaveLength(1);
       gates.get(path)?.resolve();
       await waitFor(() => expect(view.getByText(completeObjective.get(path) ?? "")).toBeTruthy());
@@ -373,13 +375,17 @@ describe("Operations click-to-detail body hydration", () => {
     const drilledPath = "/tasks/repo-a/ops/02_drilled.json";
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(drilledPath))),
+        fetchMock.mock.calls.filter(([url]) =>
+          String(url).startsWith("/api/task-document") && String(url).includes(encodeURIComponent(drilledPath)),
+        ),
       ).toHaveLength(1),
     );
     act(refreshTaskSummaries);
     await Promise.resolve();
     expect(
-      fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(drilledPath))),
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).startsWith("/api/task-document") && String(url).includes(encodeURIComponent(drilledPath)),
+      ),
     ).toHaveLength(1);
     gates.get(drilledPath)?.resolve();
     await waitFor(() =>
@@ -409,7 +415,9 @@ describe("Operations click-to-detail body hydration", () => {
     const taskAPath = "/tasks/repo-a/ops/01_direct-leaf.json";
     const taskBPath = "/tasks/repo-a/ops/03_lifecycle-bound.json";
     const requestsFor = (path: string) =>
-      fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(path)));
+      fetchMock.mock.calls.filter(
+        ([url]) => String(url).startsWith("/api/task-document") && String(url).includes(encodeURIComponent(path)),
+      );
 
     fireEvent.click(view.getByText("Direct Leaf Reader"));
     await waitFor(() => expect(requestsFor(taskAPath)).toHaveLength(1));

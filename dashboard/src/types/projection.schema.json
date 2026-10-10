@@ -3470,6 +3470,11 @@
           "title": "Decision",
           "type": "string"
         },
+        "product_record": {
+          "default": false,
+          "title": "Product Record",
+          "type": "boolean"
+        },
         "rationale": {
           "title": "Rationale",
           "type": "string"

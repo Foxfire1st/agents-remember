@@ -552,6 +552,10 @@ class TaskDecisionNode(BaseModel):
     at: str
     decision: str
     rationale: str
+    # True when the product wrote the entry itself (a record of an act, not a
+    # decision — MIK-R126 rule 6 under the lifecycle-records ruling). The server marks
+    # it from the writers' own constants; the stored entry keeps its shape.
+    product_record: bool = False
 
 
 class TaskCodeExampleNode(BaseModel):

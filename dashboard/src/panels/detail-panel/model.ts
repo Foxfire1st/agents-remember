@@ -16,11 +16,31 @@ import type {
   LifecycleProjection,
   SeriesNode,
   SubTaskRow,
+  TaskDecisionNode,
   TaskDocNode,
   TaskDocumentRef,
 } from "../../types/projection";
 
 export const dirName = (docPath: string): string => pathDir(docPath).split("/").filter(Boolean).pop() ?? "";
+
+// Decisions newest-first by their recorded times (MIK-R126 rule 6 under the time-order
+// ruling): writers stamp `at` as ISO-8601, the finalizer prepends its newest record, and
+// storage order carries no invariant — so both the preview and the whole-log page order
+// by parsed time. An unparseable stamp keeps its input position among its peers (stable),
+// never inventing an order.
+export function orderDecisionsNewestFirst<T extends Pick<TaskDecisionNode, "at">>(items: T[]): T[] {
+  const stamped = items.map((item, index) => ({ item, index, time: Date.parse(item.at) }));
+  stamped.sort((left, right) => {
+    const leftBad = Number.isNaN(left.time);
+    const rightBad = Number.isNaN(right.time);
+    if (leftBad && rightBad) return left.index - right.index;
+    if (leftBad) return 1;
+    if (rightBad) return -1;
+    if (right.time !== left.time) return right.time - left.time;
+    return left.index - right.index;
+  });
+  return stamped.map((entry) => entry.item);
+}
 
 // The change-set bar shown on a task-document READER (master or leaf), with identity taken from
 // the doc node — so it appears with NO active enclosure (previously the change-set buttons only
@@ -184,6 +204,7 @@ export type MasterDocView = Pick<
   | "objective"
   | "sections"
   | "decisions"
+  | "references"
   | "discardedCount"
   | "discardedSubTasks"
   | "masterLifecycleId"
@@ -206,6 +227,8 @@ export const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   subTasks: orderedByCreation(seriesNode.subTasks),
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
+  // A series without a task document models no references; the master page then shows none.
+  references: [],
   discardedCount: seriesNode.discardedCount,
   discardedSubTasks: seriesNode.discardedSubTasks,
   docPath: seriesNode.docPath,

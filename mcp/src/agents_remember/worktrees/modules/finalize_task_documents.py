@@ -9,6 +9,7 @@ from typing import Any
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
+    FINALIZE_TASK_LIFECYCLE_DECISION,
     SubTaskRef,
     TaskDocSourceReadError,
     TaskDocSourceSnapshot,
@@ -407,7 +408,7 @@ def _finalized_decisions(data: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
             "at": datetime.now().astimezone().isoformat(timespec="minutes"),
-            "decision": "Finalize task lifecycle.",
+            "decision": FINALIZE_TASK_LIFECYCLE_DECISION,
             "rationale": "The finalizer proved the task commit landed on the parent target branch, cleanup completed, and task documents could be reconciled.",
         },
         *data.get("decisions", []),

@@ -145,6 +145,24 @@ class Decision(_Doc):
     rationale: str
 
 
+# Entries the product writes itself into a document's decision log: records of an act,
+# not decisions (MIK-R126 rule 6 under the lifecycle-records ruling). The projection
+# marks them from these same constants; the page matches no text and the stored entry
+# keeps its shape.
+FINALIZE_TASK_LIFECYCLE_DECISION = "Finalize task lifecycle."
+REMOVED_STEP_DECISION_PREFIX = "Removed step "
+SKIP_STEP_DECISION_PREFIX = "Intentionally skip step "
+PRODUCT_RECORD_DECISION_EXACT = frozenset({FINALIZE_TASK_LIFECYCLE_DECISION})
+PRODUCT_RECORD_DECISION_PREFIXES = (REMOVED_STEP_DECISION_PREFIX, SKIP_STEP_DECISION_PREFIX)
+
+
+def is_product_record_decision(decision: str) -> bool:
+    """True when a decision-log entry is a product-written record, not an authored decision."""
+    return decision in PRODUCT_RECORD_DECISION_EXACT or decision.startswith(
+        PRODUCT_RECORD_DECISION_PREFIXES
+    )
+
+
 class CodeExample(_Doc):
     id: str
     title: str

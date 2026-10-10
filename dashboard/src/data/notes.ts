@@ -1,23 +1,34 @@
-// Same-origin client for the L9 read-only coordination-notes API (mcp/.../serving/notes.py).
+// Same-origin client for the read-only coordination-notes API (mcp/.../serving/notes.py).
 // House style mirrors data/files.ts: a `base` arg (same-origin default), typed results, the
 // shared getJson error mapping, and NO store mutation — the task reader's notes view owns its
-// own component state. Endpoints (all GET, camelCase JSON):
-//   /api/notes/list?repo&master        -> every note file under tasks/<repo>/<master>/notes/
-//   /api/notes/read?repo&master&path   -> one note: content + language (binary-tolerant, size-capped)
+// own component state. Endpoints (all camelCase JSON):
+//   /api/notes/folder?repo&master&path&offset -> one folder: entries in a stable order, in parts
+//   /api/notes/read?repo&master&path          -> one note: content + language (binary-tolerant, size-capped)
+//   POST /api/notes/resolve {repo, master, references} -> each reference resolved to a notes path or null
+//
+// MIK-R126: no call here fetches the whole tree. Reference resolution is one request
+// holding the document's references; folder answers never grow with the tree.
 
 import { getJson, qs } from "./files";
 
-export interface NoteEntry {
+export interface FolderEntry {
   name: string;
-  path: string; // posix path relative to the series' notes/ root (e.g. "reports/…-report.md")
-  size: number;
-  language: string;
+  path: string; // posix path relative to the series' notes/ root (e.g. "reports/r.md")
+  kind: "dir" | "file";
+  size: number | null; // files only
+  language: string; // files only
 }
-export interface NotesListing {
+export interface NotesFolder {
   repo: string;
   master: string;
-  notes: NoteEntry[];
-  truncated: boolean; // the server's walk depth cap pruned something — the list is honest about it
+  path: string;
+  entries: FolderEntry[];
+  total: number;
+  offset: number;
+  limit: number;
+  remaining: number;
+  exists: boolean;
+  reason: string | null;
 }
 export interface NoteContent {
   repo: string;
@@ -28,9 +39,19 @@ export interface NoteContent {
   truncated: boolean;
   content: string;
 }
+export interface NoteResolution {
+  reference: string;
+  path: string | null;
+}
 
-export const listNotes = (repo: string, master: string, base = ""): Promise<NotesListing> =>
-  getJson<NotesListing>(`${base}/api/notes/list?${qs({ repo, master })}`);
+export const listFolder = (
+  repo: string,
+  master: string,
+  path = "",
+  offset = 0,
+  base = "",
+): Promise<NotesFolder> =>
+  getJson<NotesFolder>(`${base}/api/notes/folder?${qs({ repo, master, path, offset: String(offset) })}`);
 
 export const readNote = (
   repo: string,
@@ -40,26 +61,24 @@ export const readNote = (
 ): Promise<NoteContent> =>
   getJson<NoteContent>(`${base}/api/notes/read?${qs({ repo, master, path })}`);
 
-// A task-doc reference is free prose that may NAME a notes file — "notes/friction-ledger.md
-// (F-M — the finding this leaf closes)". Path-like tokens: contiguous path characters ending
-// in a dotted extension, so surrounding prose never bleeds into the candidate.
-const PATH_TOKEN = /[\w./-]+\.[A-Za-z0-9]+/g;
-
-// Resolve a reference string against the series' note paths: the first token that names an
-// existing notes file — by notes-relative path (with or without the "notes/" prefix) or by an
-// UNAMBIGUOUS bare filename — wins. Anything else resolves to undefined, so a non-matching
-// reference stays plain text (never a dead link, never a guessed one).
-export function resolveNoteReference(
-  reference: string,
-  notePaths: readonly string[],
-): string | undefined {
-  for (const token of reference.match(PATH_TOKEN) ?? []) {
-    const relative = token.startsWith("notes/") ? token.slice("notes/".length) : token;
-    if (notePaths.includes(relative)) return relative;
-    if (!token.includes("/")) {
-      const byName = notePaths.filter((path) => path.split("/").pop() === token);
-      if (byName.length === 1) return byName[0];
-    }
+export const resolveNoteReferences = async (
+  repo: string,
+  master: string,
+  references: string[],
+  base = "",
+): Promise<Map<string, string>> => {
+  const response = await fetch(`${base}/api/notes/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo, master, references }),
+  });
+  const value = (await response.json().catch(() => null)) as {
+    resolutions?: NoteResolution[];
+  } | null;
+  if (!response.ok || !value || !Array.isArray(value.resolutions)) throw new Error(`resolve ${response.status}`);
+  const resolved = new Map<string, string>();
+  for (const row of value.resolutions) {
+    if (row.path) resolved.set(row.reference, row.path);
   }
-  return undefined;
-}
+  return resolved;
+};

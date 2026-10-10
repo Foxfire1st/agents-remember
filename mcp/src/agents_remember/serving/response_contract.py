@@ -735,22 +735,50 @@ half the route's traffic."""
 # --- notes ----------------------------------------------------------------------------------
 
 
-class NoteRow(WireResponse):
-    """One note file under ``tasks/<repo>/<master>/notes/``."""
+class FolderEntry(WireResponse):
+    """One entry of one notes folder: a file (with size and language) or a folder."""
 
     name: str
     path: str
-    size: int
-    language: str
+    kind: str
+    size: int | None
+    language: str = ""
 
 
-class NotesListing(WireResponse):
-    """``GET /api/notes/list``: a series' notes; ``truncated`` when the depth cap pruned."""
+class NotesFolder(WireResponse):
+    """``GET /api/notes/folder``: one folder's entries in a stable order, in parts.
+
+    ``total`` counts every entry of the folder; ``entries`` holds this part;
+    ``remaining`` says how many the next ``offset`` still owes. ``exists`` is false
+    (with ``reason``) when the master has no notes folder or the folder is gone —
+    both are empty, never an error.
+    """
 
     repo: str
     master: str
-    notes: list[NoteRow]
-    truncated: bool
+    path: str
+    entries: list[FolderEntry]
+    total: int
+    offset: int
+    limit: int
+    remaining: int
+    exists: bool
+    reason: str | None
+
+
+class NoteResolution(WireResponse):
+    """One reference string resolved to a notes path, or null (plain text, never a guess)."""
+
+    reference: str
+    path: str | None
+
+
+class NotesResolutions(WireResponse):
+    """``POST /api/notes/resolve``: each reference of one request, resolved or null."""
+
+    repo: str
+    master: str
+    resolutions: list[NoteResolution]
 
 
 class NoteContents(WireResponse):
@@ -763,6 +791,38 @@ class NoteContents(WireResponse):
     size: int
     truncated: bool
     content: str
+
+
+class TaskReportRow(WireResponse):
+    """One role start recorded for a task document, newest first.
+
+    ``path``/``canonical_path`` are null until the product records the report; a row
+    without them is a start with no readable report, never a guessed file.
+    """
+
+    role: str
+    request_id: str
+    created_at: str
+    status: str | None
+    path: str | None
+    canonical_path: str | None
+    available: bool
+
+
+class TaskReports(WireResponse):
+    """``GET /api/role-launch/reports``: a task's recorded role starts, at most twenty.
+
+    ``total`` counts every recorded start; ``explorer`` names the notes-relative
+    folder holding the task's report files, and is set only when more starts exist
+    than the rows show.
+    """
+
+    repo: str
+    master: str
+    doc: str
+    reports: list[TaskReportRow]
+    total: int
+    explorer: str | None
 
 
 # --- task-local requirements ----------------------------------------------------------------

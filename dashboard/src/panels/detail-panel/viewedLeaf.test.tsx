@@ -51,5 +51,6 @@ describe("DetailPanel viewed-task reporting", () => {
   });
 });
 
-// The L9 notes API stub: /api/notes/list answers a fixed listing, /api/notes/read a fixed body.
+// The notes API stub lives in ./test-utils (stubNotes): /api/notes/folder answers one folder,
+// /api/notes/resolve answers the seeded resolutions, /api/notes/read a fixed body.
 // Everything else (e.g. change-set counters) answers a bare ok so unrelated fetches stay inert.

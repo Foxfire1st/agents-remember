@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FilesApiError } from "./files";
-import { listNotes, readNote, resolveNoteReference } from "./notes";
+import { listFolder, readNote, resolveNoteReferences } from "./notes";
 
-function stubFetch(payload: unknown, ok = true, status = 200) {
-  const fn = vi.fn(
-    async () => ({ ok, status, statusText: "", json: async () => payload }) as unknown as Response,
-  );
+function stubFetch(handler: (url: string, init?: unknown) => unknown) {
+  const fn = vi.fn(async (url: string, init?: unknown) => ({
+    ok: true,
+    status: 200,
+    statusText: "",
+    json: async () => handler(url, init),
+  }) as unknown as Response);
   vi.stubGlobal("fetch", fn);
   return fn;
 }
@@ -14,70 +17,41 @@ function stubFetch(payload: unknown, ok = true, status = 200) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("data/notes client", () => {
-  it("builds the list / read URLs", async () => {
-    const fn = stubFetch({});
-    await listNotes("agents-remember", "260703_agent-orchestration");
+  it("builds the folder / read URLs", async () => {
+    const fn = stubFetch(() => ({}));
+    await listFolder("agents-remember", "260703_agent-orchestration", "reports", 200);
     await readNote("agents-remember", "260703_agent-orchestration", "reports/260703-L1.md");
     const urls = (fn.mock.calls as unknown as string[][]).map((c) => c[0]);
-    expect(urls[0]).toBe("/api/notes/list?repo=agents-remember&master=260703_agent-orchestration");
+    expect(urls[0]).toBe(
+      "/api/notes/folder?repo=agents-remember&master=260703_agent-orchestration&path=reports&offset=200",
+    );
     expect(urls[1]).toBe(
       "/api/notes/read?repo=agents-remember&master=260703_agent-orchestration&path=reports%2F260703-L1.md",
     );
   });
 
+  it("posts the document's references for resolution and keeps the resolved map", async () => {
+    const fn = stubFetch(() => ({
+      repo: "r",
+      master: "m",
+      resolutions: [
+        { reference: "notes/a.md", path: "a.md" },
+        { reference: "missing.md", path: null },
+      ],
+    }));
+    const resolved = await resolveNoteReferences("r", "m", ["notes/a.md", "missing.md"]);
+    expect(resolved).toEqual(new Map([["notes/a.md", "a.md"]]));
+    const [url, init] = fn.mock.calls[0] as unknown as [string, { method: string; body: string }];
+    expect(url).toBe("/api/notes/resolve");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ repo: "r", master: "m", references: ["notes/a.md", "missing.md"] });
+  });
+
   it("throws the shared FilesApiError on a non-ok response", async () => {
-    stubFetch({ status: "bad-path" }, false, 400);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 400, statusText: "", json: async () => ({ status: "bad-path" }) }) as unknown as Response),
+    );
     await expect(readNote("r", "m", "../escape.md")).rejects.toBeInstanceOf(FilesApiError);
-  });
-});
-
-describe("resolveNoteReference", () => {
-  const notePaths = [
-    "design-agent-orchestration.md",
-    "friction-ledger.md",
-    "reports/260703-L1-worker-report.md",
-  ];
-
-  it("resolves a notes/-prefixed reference with trailing prose", () => {
-    expect(
-      resolveNoteReference("notes/friction-ledger.md (F-M — the finding this leaf closes)", notePaths),
-    ).toBe("friction-ledger.md");
-  });
-
-  it("resolves a nested notes-relative path with or without the notes/ prefix", () => {
-    expect(resolveNoteReference("notes/reports/260703-L1-worker-report.md", notePaths)).toBe(
-      "reports/260703-L1-worker-report.md",
-    );
-    expect(resolveNoteReference("reports/260703-L1-worker-report.md", notePaths)).toBe(
-      "reports/260703-L1-worker-report.md",
-    );
-  });
-
-  it("resolves an unambiguous bare filename", () => {
-    expect(resolveNoteReference("see friction-ledger.md for the row", notePaths)).toBe(
-      "friction-ledger.md",
-    );
-  });
-
-  it("does not resolve an ambiguous bare filename", () => {
-    const ambiguous = ["a/summary.md", "b/summary.md"];
-    expect(resolveNoteReference("summary.md", ambiguous)).toBeUndefined();
-  });
-
-  it("leaves a code-path reference unresolved", () => {
-    expect(
-      resolveNoteReference(
-        "mcp/src/agents_remember/serving/files.py (the confinement idiom to reuse)",
-        notePaths,
-      ),
-    ).toBeUndefined();
-    expect(
-      resolveNoteReference("dashboard/src/panels/DetailPanel.tsx (task reader home)", notePaths),
-    ).toBeUndefined();
-  });
-
-  it("leaves plain prose and empty note lists unresolved", () => {
-    expect(resolveNoteReference("the doctrine chapter on gates", notePaths)).toBeUndefined();
-    expect(resolveNoteReference("notes/friction-ledger.md", [])).toBeUndefined();
   });
 });
