@@ -414,6 +414,18 @@ class WorktreeStatusResponse(WorktreeCommandResponse):
     syncOperation: SyncOperationProjection | None = None
 
 
+class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_enclosure_adopt"] = "worktree_enclosure_adopt"
+    publicationRequestId: str | None = None
+    locatorPath: str | None = None
+    manifestPath: str | None = None
+    contractSha256: str | None = None
+    manifestSha256: str | None = None
+    artifacts: list[dict[str, object]] = Field(default_factory=list)
+    recordsFoundInPlace: bool | None = None
+    removalCondition: str | None = None
+
+
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
     phase: SyncPhase | Literal["quarantined"] | None = None

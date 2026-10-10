@@ -5,14 +5,24 @@
 MIK-R26 rule 6. Without ``--apply`` this is the dry run: every SQLite file under ``ROOT`` that holds
 the knowledge schema is listed with the rule that decides it, and nothing is changed. With
 ``--apply`` the copies rule 6 names are deleted -- those in ``provider-runtime`` directories, in
-worktrees that no longer exist, and under the notes of archived tasks -- together with the receipt,
-origin and lock files the database route wrote beside them. The apply is bound to a reviewed dry
+worktrees that no longer exist, under the notes of archived tasks, and (MIK-R82 rule 2) under the
+notes of tasks whose document says ``Completed`` or ``abandoned`` -- together with the receipt,
+origin and lock files the database route wrote beside them. A completed task's retained
+comparison snapshots are released through their generation's deletion owner, so a later reopen
+of that generation says its history was deleted and why; the task's review refs and
+retained-code refs stay until its archive. The apply is bound to a reviewed dry
 run: ``--reviewed`` names the ``--report`` file of that dry run, and when the scan now differs from
 it (``reviewDigest``) nothing is deleted and the command refuses with exit status 2.
 
+The same dry run also lists every citation source index outside the managed root
+(``temp/citation-source-index/managed``) with its slot directory, under the rule
+``unmanaged-citation-source-index`` (MIK-R82 rule 3); the apply deletes those slot directories.
+A Git-tracked index is listed and kept, never deleted.
+
 Git-tracked files and derived index caches are skipped by construction, and copies under the notes
-of a task that is not archived are left for that task's archive hook (D17). ``--report`` writes the
-same document the command prints with ``--json``: every copy, its rule, and the counts and sizes
+of a task that is not archived and not completed are left for that task's archive hook (D17).
+``--report`` writes the same document the command prints with ``--json``: every copy, its rule,
+every citation cache with its slot directory, and the counts and sizes
 before and after, by rule and by task.
 
 Exit status: 0 when the run did what its reviewed dry run listed (a companion that dry run listed as
@@ -44,7 +54,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Delete the copies MIK-R26 rule 6 names. Without it nothing is changed (dry run).",
+        help="Delete the copies MIK-R26 rule 6 names (including completed-task notes and "
+        "unmanaged citation source indexes, MIK-R82 rules 2-3). Without it nothing is "
+        "changed (dry run).",
     )
     parser.add_argument(
         "--reviewed",
@@ -81,13 +93,28 @@ def _summary(document: dict[str, Any]) -> str:
         lines.append(f"  {rule}: {row['files']} files, {_megabytes(row['bytes'])}")
     for owner, row in before["byOwner"].items():
         lines.append(f"  task or group {owner}: {row['files']} files, {_megabytes(row['bytes'])}")
+    caches = document["citationCaches"]
+    if caches:
+        lines.append(
+            f"citation source indexes outside the managed root "
+            f"({'deleting their slot directories' if applied else 'dry run: nothing is changed'}):"
+        )
+        for cache in caches:
+            lines.append(
+                f"  [{cache['rule']}] {cache['path']} ({cache['bytes']} bytes): {cache['ruleText']}"
+            )
     if not applied:
         lines.append(
             f"review digest (pass its report to --apply --reviewed): {document['reviewDigest']}"
         )
     if applied:
         lines.append(f"deleted: {len(document['deleted'])} copies")
+        lines.append(f"deleted caches: {len(document['deletedCaches'])} slot directories")
         lines.extend(f"  also removed: {path}" for path in document["removedWithThem"])
+        lines.extend(f"  cache removed: {path}" for path in document["deletedCaches"])
+        lines.extend(
+            f"  cache kept: {entry['path']}: {entry['detail']}" for entry in document["keptCaches"]
+        )
         lines.extend(
             f"  kept, as reviewed: {entry['path']}: {entry['detail']}"
             for entry in document["keptCompanions"]

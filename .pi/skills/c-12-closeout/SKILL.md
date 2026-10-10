@@ -263,11 +263,18 @@ result says the archive was skipped because that sprint commands it, naming the 
 that commands the master without a typed row does not refuse: the one legacy seat row that
 correlates with the master is completed, and otherwise the result reports the sprint row as
 skipped with the linkage fact. When no sprint commands the master, the folder also stays, and the
-result says a master is archived only by `task_doc(operation="retire_master")`.
+result says an individual master is archived by `task_doc(operation="retire_master")`,
+while a whole sprint -- its folder and every moving commanded master's folder -- is archived
+together by `task_doc(operation="archive_sprint")`.
 
-`retire_master` is the one operation that archives a master. It has one route and writes one
+`retire_master` is the one operation that archives an individual master. It has one route and writes one
 record, and it finds out itself whether a sprint commands the master or has recorded its
 retirement. A request sent to the wrong document is refused and names the right one.
+`archive_sprint` is the companion whole-sprint authority: `task_doc(operation="archive_sprint",
+task_name="<sprint>", fields={"reason": "<reason>"}, dry_run=true)` archives a Completed sprint as
+a whole -- the sprint folder moves first, then every moving commanded master's folder, all under
+`tasks/<repository>/0_archive/`, with the sprint-archive record written before the first move. A
+master also commanded by another live sprint stays and the result names that sprint.
 - A master that a sprint commands is retired on that sprint: `task_doc(operation="retire_master",
   task_name="<sprint>", fields={"masterRef": {"repository": "<repo>", "path":
   "<master>/task.json"}, "reason": "<reason>"}, dry_run=true)` first. The preview lists the

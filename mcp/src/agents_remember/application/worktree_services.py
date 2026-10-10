@@ -204,10 +204,12 @@ class CitationGuardAdapter:
         contract: WorktreeContract,
         *,
         requested_contract_path: Path,
+        completed_contract_with_remains: bool = False,
     ) -> AbstractContextManager[TerminalGuard]:
         return citation_cache_api.terminal_namespace_guard(
             contract,
             requested_contract_path=requested_contract_path,
+            completed_contract_with_remains=completed_contract_with_remains,
         )
 
 

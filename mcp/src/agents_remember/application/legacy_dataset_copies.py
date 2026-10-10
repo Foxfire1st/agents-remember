@@ -18,9 +18,27 @@ and :func:`run_cleanup` deletes those rule 6 names:
 * ``provider-runtime``: deleted. A copy under a ``provider-runtime`` directory.
 * ``worktree-gone``: deleted. A copy under ``worktrees/`` whose worktree no longer exists.
 * ``archived-task-notes``: deleted. A copy under the notes of a task in ``0_archive``.
+* ``completed-task-notes``: deleted. A copy under the notes of a task that is not archived
+  but whose task document (``task.json``) says ``Completed`` or ``abandoned`` (MIK-R82 rule 2).
 * ``unarchived-task-notes``: left for that task's archive hook (D17).
 * ``other``: left, and named, because rule 6 names no category for it.
 * ``undetermined``: left, and named: Git could not say whether the file is tracked.
+
+A ``completed-task-notes`` copy that is a comparison generation's retained snapshot is not
+unlinked directly: it is released through its deletion owner
+(:func:`agents_remember.application.review_comparison_reclamation.discard_comparison_snapshots`),
+which removes the verified snapshot bytes before writing each half's unavailable-history
+record, so a later reopen of that generation says its history was deleted and why. Only a
+snapshot whose manifest reads back and names this exact file is routed that way; anything
+else under completed notes is an ordinary leftover and is unlinked. The task's review refs
+and retained-code refs stay until its archive: this command never touches refs.
+
+Citation source indexes outside the exact managed root are listed and deleted through the
+citation cache census (:mod:`agents_remember.application.citation_cache_census`), which owns
+that population end to end: every publisher-owned slot anywhere under the root -- the
+``temp/citation-source-index`` tree, task and enclosure ``ar-cache-*`` placements -- each
+with its slot directory, under the rule ``unmanaged-citation-source-index`` (MIK-R82
+rule 3).
 
 Derived index caches are skipped by construction, twice: nothing under
 ``<root>/runtime/knowledge-index`` is examined, and a file with ``ix_*`` tables is never a copy.
@@ -39,38 +57,43 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
 
-import apsw
-
-from agents_remember.kernel.git_command import run_git
-from agents_remember.tasks.task_paths import ARCHIVE_DIR
+from agents_remember.application.citation_cache_census import (
+    CitationCache,
+    delete_citation_caches,
+    scan_citation_caches,
+)
+from agents_remember.application.dataset_copy_survey import (
+    _NOTES,
+    _PROVIDER_RUNTIME,
+    _TASKS,
+    _WORKTREES,
+    _census_generation_manifests,
+    _census_task_documents,
+    _classify,
+    _record_unreadable,
+    _release_snapshot_groups,
+    _snapshot_generation,
+    _tracking,
+    _UnreadableControl,
+    _walk,
+    is_derived_index,
+    is_knowledge_dataset,
+    sqlite_table_names,
+)
 
 __all__ = [
     "CLEANUP_SCHEMA",
     "Copy",
     "CopyRule",
-    "is_derived_index",
-    "is_knowledge_dataset",
     "plan_cleanup",
     "run_cleanup",
-    "sqlite_table_names",
 ]
 
 CLEANUP_SCHEMA: Final = "ar-knowledge-copy-cleanup/v1"
-_SQLITE_HEADER: Final = b"SQLite format 3\x00"
-# The tables every generation of the knowledge store has had: a file holding both is a dataset.
-_KNOWLEDGE_TABLES: Final = frozenset({"invariant", "invariant_revision"})
-_INDEX_TABLE_PREFIX: Final = "ix_"
-_INDEX_CACHE: Final = ("runtime", "knowledge-index")
-_PROVIDER_RUNTIME: Final = "provider-runtime"
-_TASKS: Final = "tasks"
-_WORKTREES: Final = "worktrees"
-_NOTES: Final = "notes"
 # What the database route wrote beside a dataset; removed with it, and nothing else is.
 _COMPANION_NAMES: Final = frozenset(
     {"candidate-receipt.json", "baseline-origin.json", "baseline-generation.json"}
@@ -82,64 +105,28 @@ CopyRule = Literal[
     "provider-runtime",
     "worktree-gone",
     "archived-task-notes",
+    "completed-task-notes",
     "unarchived-task-notes",
     "other",
     "undetermined",
 ]
-_DELETED_RULES: Final = frozenset({"provider-runtime", "worktree-gone", "archived-task-notes"})
+_DELETED_RULES: Final = frozenset(
+    {"provider-runtime", "worktree-gone", "archived-task-notes", "completed-task-notes"}
+)
 _RULE_TEXT: Final[dict[str, str]] = {
     "git-tracked": "skipped: Git tracks it, so it leaves with its branch or at archive",
     "provider-runtime": "deleted: a copy in a provider-runtime directory",
     "worktree-gone": "deleted: a copy in a worktree that no longer exists",
     "archived-task-notes": "deleted: a copy under the notes of an archived task",
+    "completed-task-notes": (
+        "deleted: a copy under the notes of a task whose document says Completed or abandoned"
+    ),
     "unarchived-task-notes": (
         "left: under the notes of a task that is not archived; its archive hook deletes it (D17)"
     ),
     "other": "left: MIK-R26 rule 6 names no category for this location",
     "undetermined": "left: Git could not say whether the file is tracked",
 }
-
-
-def sqlite_table_names(path: Path) -> frozenset[str] | None:
-    """The table names of the SQLite file at ``path``, or ``None`` when it is not one.
-
-    The one content probe: ``mode=ro`` and ``immutable=1``, so SQLite creates no journal, WAL or
-    lock file beside it and cannot write it. A symbolic link is not probed.
-    """
-
-    try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        with path.open("rb") as handle:
-            if handle.read(len(_SQLITE_HEADER)) != _SQLITE_HEADER:
-                return None
-        connection = apsw.Connection(
-            f"{path.resolve().as_uri()}?mode=ro&immutable=1",
-            flags=apsw.SQLITE_OPEN_READONLY | apsw.SQLITE_OPEN_URI,
-        )
-    except (OSError, apsw.Error):
-        return None
-    try:
-        rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        return frozenset(str(row[0]) for row in rows)
-    except apsw.Error:
-        return None
-    finally:
-        connection.close()
-
-
-def is_knowledge_dataset(tables: frozenset[str] | None) -> bool:
-    """Whether a file's tables are the knowledge store's (a dataset, or an index of one)."""
-
-    return tables is not None and tables >= _KNOWLEDGE_TABLES
-
-
-def is_derived_index(tables: frozenset[str] | None) -> bool:
-    """Whether a knowledge dataset is a derived index: it holds the index's own ``ix_*`` tables."""
-
-    return is_knowledge_dataset(tables) and any(
-        name.startswith(_INDEX_TABLE_PREFIX) for name in tables or ()
-    )
 
 
 @dataclass(frozen=True)
@@ -171,6 +158,12 @@ class Copy:
 class _Plan:
     root: Path
     copies: list[Copy] = field(default_factory=list)
+    # ``relative copy path -> (task root, leaf id, generation id)`` for completed-task copies
+    # that are a generation's retained snapshot: the owner release they are deleted through.
+    snapshot_owners: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+    caches: list[CitationCache] = field(default_factory=list)
+    # The slot directories an apply deleted; the dry run leaves this empty.
+    deleted_caches: list[str] = field(default_factory=list)
     derived_indexes: int = 0
     derived_index_bytes: int = 0
     unreadable: list[dict[str, str]] = field(default_factory=list)
@@ -187,158 +180,14 @@ def _require_coordination_root(root: Path) -> Path:
     return resolved
 
 
-def _walk(plan: _Plan) -> list[Path]:
-    """Every regular file under the root, links never followed, the index cache never entered."""
-
-    index_cache = plan.root.joinpath(*_INDEX_CACHE)
-    found: list[Path] = []
-    stack = [plan.root]
-    while stack:
-        directory = stack.pop()
-        if directory == index_cache:
-            continue
-        try:
-            entries = list(os.scandir(directory))
-        except OSError as error:
-            plan.unreadable.append({"path": directory.as_posix(), "detail": str(error)})
-            continue
-        for entry in entries:
-            if entry.is_symlink():
-                continue
-            if entry.is_dir(follow_symlinks=False):
-                if entry.name != ".git":
-                    stack.append(Path(entry.path))
-            elif entry.is_file(follow_symlinks=False):
-                found.append(Path(entry.path))
-    return sorted(found)
-
-
-def _enclosing_checkout(root: Path, path: Path) -> Path | None:
-    """The nearest directory below ``root`` that holds a ``.git`` entry, or ``None``."""
-
-    directory = path.parent
-    while directory != root and root in directory.parents:
-        if (directory / ".git").exists():
-            return directory
-        directory = directory.parent
-    return None
-
-
-def _git_dir_gone(checkout: Path) -> bool:
-    """Whether a linked worktree's ``.git`` file names a Git directory that no longer exists."""
-
-    marker = checkout / ".git"
-    if not marker.is_file():
-        return False
-    try:
-        text = marker.read_text(encoding="utf-8").strip()
-    except OSError:
-        return False
-    if not text.startswith("gitdir:"):
-        return False
-    target = Path(text.removeprefix("gitdir:").strip())
-    if not target.is_absolute():
-        target = checkout / target
-    return not target.exists()
-
-
-def _tracking(root: Path, path: Path) -> tuple[str, str]:
-    """``(state, detail)``: ``tracked``, ``untracked``, ``no-checkout``, ``gone`` or ``unknown``."""
-
-    checkout = _enclosing_checkout(root, path)
-    if checkout is None:
-        return "no-checkout", ""
-    if _git_dir_gone(checkout):
-        return "gone", f"the worktree {checkout.relative_to(root).as_posix()} is pruned"
-    relative = path.relative_to(checkout).as_posix()
-    try:
-        listed = run_git(checkout, ["ls-files", "--error-unmatch", "--", relative])
-    except (OSError, subprocess.SubprocessError) as error:
-        return "unknown", str(error)
-    if listed.returncode == 0:
-        return "tracked", ""
-    answered = run_git(checkout, ["rev-parse", "--is-inside-work-tree"])
-    if answered.returncode == 0 and answered.stdout.strip() == "true":
-        return "untracked", ""
-    return "unknown", (listed.stderr or answered.stderr).strip()
-
-
-def _group_has_live_worktree(group: Path) -> bool:
-    try:
-        return any(
-            (child / ".git").exists() and not _git_dir_gone(child)
-            for child in group.iterdir()
-            if child.is_dir() and not child.is_symlink()
-        )
-    except OSError:
-        return True
-
-
-def _owner(parts: tuple[str, ...]) -> str:
-    """The task folder or worktree group a path belongs to, or ``-``."""
-
-    if len(parts) > 3 and parts[0] == _TASKS:
-        return parts[3] if parts[2] == ARCHIVE_DIR and len(parts) > 4 else parts[2]
-    if len(parts) > 2 and parts[0] == _WORKTREES:
-        return parts[2]
-    return "-"
-
-
-def _task_rule(parts: tuple[str, ...]) -> tuple[CopyRule, str]:
-    """A copy under ``tasks/<project>/``: archived or not, and whether it is under the notes.
-
-    ``tasks/<project>/0_archive/<task>/notes/…`` is the notes of an archived task, whether the
-    task was archived before this run or after an earlier one: the folder's place decides.
-    """
-
-    archived = parts[2] == ARCHIVE_DIR
-    inside = parts[4:] if archived else parts[3:]
-    if len(inside) > 1 and inside[0] == _NOTES:
-        return ("archived-task-notes" if archived else "unarchived-task-notes"), ""
-    return "other", "under a task folder, outside its notes"
-
-
-def _worktree_rule(
-    root: Path, parts: tuple[str, ...], state: str, detail: str
-) -> tuple[CopyRule, str]:
-    """A copy under ``worktrees/<project>/<group>/``: is its worktree gone."""
-
-    if state == "gone":
-        return "worktree-gone", detail
-    if state == "no-checkout" and not _group_has_live_worktree(root.joinpath(*parts[:3])):
-        return "worktree-gone", "its worktree group holds no worktree any more"
-    if state == "untracked":
-        return "other", "untracked inside a worktree that still exists"
-    return "other", "beside worktrees that still exist"
-
-
-def _classify(root: Path, path: Path) -> tuple[CopyRule, str, str]:
-    """The rule that decides ``path``, the task or worktree group it belongs to, and a detail.
-
-    Tracking is asked first, so a Git-tracked file is skipped wherever it lies; a
-    ``provider-runtime`` directory is next, wherever it lies; then the task and worktree places.
-    """
-
-    parts = path.relative_to(root).parts
-    owner = _owner(parts)
-    state, detail = _tracking(root, path)
-    if state == "tracked":
-        return "git-tracked", owner, ""
-    if state == "unknown":
-        return "undetermined", owner, detail
-    if _PROVIDER_RUNTIME in parts[:-1]:
-        return "provider-runtime", owner, ""
-    if len(parts) > 3 and parts[0] == _TASKS:
-        rule, why = _task_rule(parts)
-        return rule, owner, why
-    if len(parts) > 3 and parts[0] == _WORKTREES:
-        rule, why = _worktree_rule(root, parts, state, detail)
-        return rule, owner, why
-    return "other", owner, ""
-
-
 def plan_cleanup(coordination_root: Path) -> dict[str, Any]:
-    """The dry run: every copy under the root with the rule that decides it. Nothing is changed."""
+    """The dry run: every copy under the root with the rule that decides it. Nothing is changed.
+
+    Citation source indexes outside the exact managed root are listed the same way, with
+    their slot directories. A present control document that cannot be read -- a task
+    ``task.json``, or a comparison generation manifest -- is listed under ``unreadable``
+    instead of being classified past; the apply refuses while any is listed.
+    """
 
     plan = _scan(_require_coordination_root(coordination_root))
     return _document(plan, mode="dry-run", deleted=[], removed=[], failures=[])
@@ -348,11 +197,16 @@ def run_cleanup(coordination_root: Path, reviewed_digest: str) -> dict[str, Any]
     """Delete exactly what the reviewed dry run listed; refuse, deleting nothing, if the scan differs.
 
     ``reviewed_digest`` is the ``reviewDigest`` of a dry run. Eligible copies and removable
-    companions are deleted. A companion the review listed as kept is kept and reported as kept;
-    any other refusal is a failure, because the run then did not do what was reviewed.
+    companions are deleted, and untracked citation caches go with their slot directories.
+    A completed-task copy that is a retained snapshot is released through its generation's
+    deletion owner instead of being unlinked, so the reopen reads why its history is gone.
+    A companion the review listed as kept is kept and reported as kept; any other refusal
+    is a failure, because the run then did not do what was reviewed. A scan that found a
+    present control document it could not read refuses before any effect, naming it.
     """
 
     plan = _scan(_require_coordination_root(coordination_root))
+    _refuse_unreadable(plan)
     review = _review_list(plan)
     current = _review_digest(review)
     if current != reviewed_digest:
@@ -360,40 +214,126 @@ def run_cleanup(coordination_root: Path, reviewed_digest: str) -> dict[str, Any]
             f"the scan differs from the reviewed dry run (reviewed {reviewed_digest}, now {current});"
             " nothing was deleted: run the dry run again and review its list"
         )
+    return _apply_plan(plan, current, review)
+
+
+def _apply_plan(plan: _Plan, current: str, review: dict[str, Any]) -> dict[str, Any]:
+    """Delete the reviewed population: owner releases, direct unlinks, then cache slots."""
+
     reviewed_kept = {entry["path"] for entry in review["companionsKept"]}
-    deleted: list[Copy] = []
+    owner_removed, owner_failed = _release_snapshot_groups(plan)
+    state = _ApplyState(
+        reviewed_kept=reviewed_kept,
+        owner_removed=owner_removed,
+        owner_failed=owner_failed,
+    )
+    for relative in sorted(state.owner_failed):
+        state.failures.append({"path": relative, "detail": state.owner_failed[relative]})
+    for copy in plan.copies:
+        _apply_one_copy(plan, copy, state)
+    plan.deleted_caches = delete_citation_caches(
+        plan.root, plan.caches, state.failures, tracking=_tracking
+    )
+    document = _document(
+        plan,
+        mode="apply",
+        deleted=state.deleted,
+        removed=state.removed,
+        failures=state.failures,
+    )
+    document["reviewDigest"] = current
+    document["keptCompanions"] = state.kept
+    return document
+
+
+@dataclass
+class _ApplyState:
+    """The accumulators one apply threads through every planned copy."""
+
+    reviewed_kept: set[str]
+    owner_removed: set[str]
+    owner_failed: dict[str, str]
+    deleted: list[Copy] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    kept: list[dict[str, str]] = field(default_factory=list)
+    failures: list[dict[str, str]] = field(default_factory=list)
+    gone: set[Path] = field(default_factory=set)
+
+
+def _apply_one_copy(plan: _Plan, copy: Copy, state: _ApplyState) -> None:
+    """Delete one planned copy: an owner release, a rechecked unlink, or a named refusal."""
+
+    if not copy.deleted_by_rule:
+        return
+    if copy.relative in state.owner_failed:
+        return
+    if copy.relative in state.owner_removed:
+        state.deleted.append(copy)
+        state.gone.add(copy.path)
+        try:
+            fresh = _remove_companions(
+                plan.root, _companions(copy.path, state.gone), state.reviewed_kept
+            )
+            state.removed.extend(fresh[0])
+            state.kept.extend(fresh[1])
+            state.failures.extend(fresh[2])
+            state.removed.extend(_remove_empty_parents(plan.root, copy.path.parent))
+        except OSError as error:
+            state.failures.append({"path": copy.relative, "detail": str(error)})
+        return
+    refusal = _recheck(plan.root, copy)
+    if refusal is not None:
+        state.failures.append({"path": copy.relative, "detail": refusal})
+        return
+    try:
+        companions = _companions(copy.path, state.gone)
+        copy.path.unlink()
+        state.gone.add(copy.path)
+        state.deleted.append(copy)
+        fresh = _remove_companions(plan.root, companions, state.reviewed_kept)
+        state.removed.extend(fresh[0])
+        state.kept.extend(fresh[1])
+        state.failures.extend(fresh[2])
+        state.removed.extend(_remove_empty_parents(plan.root, copy.path.parent))
+    except OSError as error:
+        state.failures.append({"path": copy.relative, "detail": str(error)})
+
+
+def _refuse_unreadable(plan: _Plan) -> None:
+    """Refuse an apply whose scan found a present control document it could not read."""
+
+    if plan.unreadable:
+        listing = "; ".join(f"{entry['path']}: {entry['detail']}" for entry in plan.unreadable)
+        raise ValueError(
+            f"the scan found {len(plan.unreadable)} unreadable control document(s) "
+            f"({listing}); nothing was deleted: repair or remove the unreadable "
+            "file(s), run the dry run again and review its list"
+        )
+
+
+def _remove_companions(
+    root: Path, companions: list[Path], reviewed_kept: set[str]
+) -> tuple[list[str], list[dict[str, str]], list[dict[str, str]]]:
+    """Remove each companion the database route wrote beside a deleted copy.
+
+    Returns ``(removed, kept, failures)``: a companion the review listed as kept is kept
+    and reported as kept; any other refusal is a failure, because the run then did not do
+    what was reviewed.
+    """
+
     removed: list[str] = []
     kept: list[dict[str, str]] = []
     failures: list[dict[str, str]] = []
-    gone: set[Path] = set()
-    for copy in plan.copies:
-        if not copy.deleted_by_rule:
-            continue
-        refusal = _recheck(plan.root, copy)
+    for companion in companions:
+        relative = companion.relative_to(root).as_posix()
+        refusal = _companion_refusal(root, companion)
         if refusal is not None:
-            failures.append({"path": copy.relative, "detail": refusal})
+            outcome = kept if relative in reviewed_kept else failures
+            outcome.append({"path": relative, "detail": refusal})
             continue
-        try:
-            companions = _companions(copy.path, gone)
-            copy.path.unlink()
-            gone.add(copy.path)
-            deleted.append(copy)
-            for companion in companions:
-                relative = companion.relative_to(plan.root).as_posix()
-                refusal = _companion_refusal(plan.root, companion)
-                if refusal is not None:
-                    outcome = kept if relative in reviewed_kept else failures
-                    outcome.append({"path": relative, "detail": refusal})
-                    continue
-                companion.unlink()
-                removed.append(relative)
-            removed.extend(_remove_empty_parents(plan.root, copy.path.parent))
-        except OSError as error:
-            failures.append({"path": copy.relative, "detail": str(error)})
-    document = _document(plan, mode="apply", deleted=deleted, removed=removed, failures=failures)
-    document["reviewDigest"] = current
-    document["keptCompanions"] = kept
-    return document
+        companion.unlink()
+        removed.append(relative)
+    return removed, kept, failures
 
 
 def _review_list(plan: _Plan) -> dict[str, Any]:
@@ -415,7 +355,23 @@ def _review_list(plan: _Plan) -> dict[str, Any]:
             else:
                 keeps.append({"path": relative, "detail": refusal})
         gone.add(copy.path)
-    return {"copies": copies, "companionsRemoved": removes, "companionsKept": keeps}
+    caches = [
+        {"path": cache.relative, "rule": cache.rule, "bytes": cache.size}
+        for cache in plan.caches
+        if cache.deleted_by_rule
+    ]
+    caches_kept = [
+        {"path": cache.relative, "detail": cache.detail or "Git tracks the slot"}
+        for cache in plan.caches
+        if not cache.deleted_by_rule
+    ]
+    return {
+        "copies": copies,
+        "companionsRemoved": removes,
+        "companionsKept": keeps,
+        "caches": caches,
+        "cachesKept": caches_kept,
+    }
 
 
 def _review_digest(review: dict[str, Any]) -> str:
@@ -424,27 +380,52 @@ def _review_digest(review: dict[str, Any]) -> str:
 
 def _scan(root: Path) -> _Plan:
     plan = _Plan(root=root)
-    for path in _walk(plan):
-        tables = sqlite_table_names(path)
-        if not is_knowledge_dataset(tables):
-            continue
-        size = path.stat().st_size
-        if is_derived_index(tables):
-            plan.derived_indexes += 1
-            plan.derived_index_bytes += size
-            continue
-        rule, owner, detail = _classify(root, path)
-        plan.copies.append(
-            Copy(
-                path=path,
-                relative=path.relative_to(root).as_posix(),
-                size=size,
-                rule=rule,
-                owner=owner,
-                detail=detail,
-            )
-        )
+    found = _walk(plan)
+    for path in found:
+        try:
+            _scan_one(plan, root, path)
+        except _UnreadableControl as unreadable:
+            _record_unreadable(plan, root, unreadable.path, unreadable.detail)
+    _census_task_documents(root, plan)
+    _census_generation_manifests(root, plan, found)
+    scan_citation_caches(plan.root, plan.caches, plan.unreadable, tracking=_tracking)
     return plan
+
+
+def _scan_one(plan: _Plan, root: Path, path: Path) -> None:
+    tables = sqlite_table_names(path)
+    if not is_knowledge_dataset(tables):
+        return
+    size = path.stat().st_size
+    if is_derived_index(tables):
+        plan.derived_indexes += 1
+        plan.derived_index_bytes += size
+        return
+    rule, owner, detail = _classify(root, path)
+    relative = path.relative_to(root).as_posix()
+    if rule == "completed-task-notes":
+        release = _snapshot_generation(root, path)
+        if release is not None:
+            task_root, leaf_id, generation_id = release
+            detail = (
+                f"{detail}; a retained comparison snapshot, released through "
+                "discard_comparison_snapshots"
+            )
+            plan.snapshot_owners[relative] = (
+                task_root.as_posix(),
+                leaf_id,
+                generation_id,
+            )
+    plan.copies.append(
+        Copy(
+            path=path,
+            relative=relative,
+            size=size,
+            rule=rule,
+            owner=owner,
+            detail=detail,
+        )
+    )
 
 
 def _recheck(root: Path, copy: Copy) -> str | None:
@@ -456,7 +437,10 @@ def _recheck(root: Path, copy: Copy) -> str | None:
     tables = sqlite_table_names(path)
     if not is_knowledge_dataset(tables) or is_derived_index(tables):
         return "the file is no longer a knowledge dataset copy"
-    rule, _owner, _detail = _classify(root, path)
+    try:
+        rule, _owner, _detail = _classify(root, path)
+    except _UnreadableControl as unreadable:
+        return f"its deletion was refused: {unreadable.detail}"
     if rule != copy.rule:
         return f"the file now falls under {rule}"
     return None
@@ -551,6 +535,15 @@ def _document(
     gone = {copy.relative for copy in deleted}
     review = _review_list(plan) if mode == "dry-run" else None
     remaining = [copy for copy in plan.copies if copy.relative not in gone]
+    kept_caches = (
+        review["cachesKept"]
+        if review
+        else [
+            {"path": cache.relative, "detail": cache.detail or "Git tracks the slot"}
+            for cache in plan.caches
+            if not cache.deleted_by_rule
+        ]
+    )
     return {
         "schema": CLEANUP_SCHEMA,
         "mode": mode,
@@ -567,6 +560,15 @@ def _document(
         "before": _totals(plan.copies),
         "after": _totals(remaining if mode == "apply" else plan.copies),
         "afterApply": _totals([copy for copy in plan.copies if not copy.deleted_by_rule]),
+        "citationCaches": [cache.document() for cache in plan.caches],
+        "wouldDeleteCaches": [entry["path"] for entry in review["caches"]] if review else [],
+        "wouldKeepCaches": review["cachesKept"] if review else [],
+        "deletedCaches": plan.deleted_caches,
+        "keptCaches": kept_caches,
+        "cacheTotals": {
+            "slots": len(plan.caches),
+            "bytes": sum(cache.size for cache in plan.caches),
+        },
         "derivedIndexes": {
             "skipped": "by construction: the index cache directory is never entered, and a file "
             "with ix_* tables is never a copy",

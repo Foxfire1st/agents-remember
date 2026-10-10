@@ -31,7 +31,10 @@ from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write
 CLEANUP_REPORT_NAME: Final = "review-artifact-cleanup.json"
 IN_PROGRESS: Final = "in-progress"
 # Receipt keys whose entries name one deleted artifact each, by ``ref`` or by ``path``.
-_ARTIFACT_KEYS: Final = ("reviewRefs", "retainedCodeRefs", "datasetCopies")
+# ``arCaches`` entries carry ``path``/``bytes`` like ``datasetCopies``: the class belongs here so
+# every shared consumer -- planned receipts, already-absent replay, remainder counts, deleted
+# names, preview accounting -- treats cache deletions exactly like the older classes.
+_ARTIFACT_KEYS: Final = ("reviewRefs", "retainedCodeRefs", "datasetCopies", "arCaches")
 DELETION_KEYS: Final = (*_ARTIFACT_KEYS, "releasedGenerations")
 _NUMBERED: Final = re.compile(r"\.attempt-(\d+)$")
 

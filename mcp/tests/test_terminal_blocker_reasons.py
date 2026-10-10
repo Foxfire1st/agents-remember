@@ -82,8 +82,14 @@ class _NoManagedCitationCache:
     is a double, and it is the same value production yields.
     """
 
-    def guard(self, contract: WorktreeContract, *, requested_contract_path: Path):
-        del contract, requested_contract_path
+    def guard(
+        self,
+        contract: WorktreeContract,
+        *,
+        requested_contract_path: Path,
+        completed_contract_with_remains: bool = False,
+    ):
+        del contract, requested_contract_path, completed_contract_with_remains
         return nullcontext(TerminalNamespaceGuard(None, None, None))
 
 

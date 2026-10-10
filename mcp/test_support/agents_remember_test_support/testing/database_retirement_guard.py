@@ -97,9 +97,9 @@ ALLOWED_MODULES: Final[dict[str, tuple[str, str]]] = {
         WRITE,
         "the legacy reader's scratch copy of an unconverted tree's database",
     ),
-    "application/legacy_dataset_copies.py": (
+    "application/dataset_copy_survey.py": (
         CONNECT_READ_ONLY,
-        "the cleanup's read-only content probe",
+        "the cleanup survey's read-only content probe",
     ),
     "memory_quality/style/citations/source_index_database.py": (
         CONNECT,

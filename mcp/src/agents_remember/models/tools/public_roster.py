@@ -53,6 +53,7 @@ PUBLIC_TOOLS = (
     "cgc_complexity",
     "cgc_visualize",
     "worktree_start",
+    "worktree_enclosure_adopt",
     "worktree_attach",
     "worktree_status",
     "worktree_sync",

@@ -40,17 +40,26 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
     _terminal_mutation_authority,
-    _TerminalMutationAuthority,
     _with_terminal_archive,
-    delete_branch_force,
-    delete_branch_if_merged,
-    local_branch_presence,
     remove_empty_dir,
     remove_registered_worktree,
 )
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
+from agents_remember.worktrees.modules.terminal_branch_retirement import (
+    _TerminalMutationAuthority,
+    delete_branch_force,
+    delete_branch_if_merged,
+)
+from agents_remember.worktrees.modules.terminal_inventory import (
+    _absent_branch_entries,
+    _absent_worktree_entries,
+    _mark_without_remains,
+    _require_terminal_note_readback,
+    local_branch_presence,
+    terminal_without_remains_reason,
+)
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     TerminalResult,
@@ -131,6 +140,13 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
+    without_remains = terminal_without_remains_reason(contract, operation="worktree_abandon")
+    if without_remains is not None:
+        return with_terminal_atomic_series_release(
+            contract,
+            _finish_abandon_without_remains(args, contract, without_remains),
+            dry_run=args.dry_run,
+        )
     preflight = terminal_preflight(contract, mode="abandon", force=args.force)
     if preflight.blockers and not args.dry_run:
         return WorktreeCommandResult(
@@ -198,6 +214,76 @@ def _terminal_archive_observation(
     )
 
 
+def _finish_abandon_without_remains(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    reason: str,
+) -> WorktreeCommandResult:
+    """Finish a remains-free abandon: publish ``cleanup=abandoned`` with the reason."""
+
+    assert args.contract_path is not None
+    try:
+        guard_context = worktree_services().citation_guard.guard(
+            contract,
+            requested_contract_path=args.contract_path,
+        )
+        guard = guard_context.__enter__()
+    except CitationCacheError as error:
+        cause = "live-lease-timeout" if "live lease" in str(error) else str(error)
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                "state": "abandon-blocked",
+                "summary": "Abandon could not reserve exact terminal citation cache authority.",
+                "citation_source_index": {
+                    "removed": False,
+                    "reason": cause,
+                    "detail": str(error),
+                },
+                "blockers": [],
+            },
+        )
+    try:
+        providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
+            contract, dry_run=args.dry_run
+        )
+        removed_worktrees = _absent_worktree_entries(contract)
+        branches = _absent_branch_entries(contract)
+        directories = _abandon_directories(
+            contract,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
+        preflight = TerminalPreflight(
+            worktrees=dict(removed_worktrees),
+            branches=dict(branches),
+            blockers=(),
+        )
+        result = _abandon_outputs_result(
+            args,
+            contract,
+            preflight,
+            guard,
+            (providers, removed_worktrees, branches, directories),
+            terminal_note=reason,
+        )
+    finally:
+        guard_context.__exit__(None, None, None)
+    if args.dry_run:
+        summary = (
+            "Abandon preview: no locator, worktree folder, or work branches remain; "
+            "approving would record the abandonment with nothing to archive and "
+            "nothing to delete."
+        )
+    else:
+        summary = (
+            "Worktree abandoned: no locator, worktree folder, or work branches "
+            "remained; there was nothing to archive and nothing to delete."
+        )
+    return _mark_without_remains(result, reason, summary=summary)
+
+
 def _already_abandoned(
     contract: WorktreeContract,
     *,
@@ -228,12 +314,14 @@ def _already_abandoned(
     )
 
 
-def _abandon_outputs_result(
+def _abandon_outputs_result(  # noqa: PLR0913 -- terminal_note rides the no-remains publish path
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
     guard: TerminalGuard,
     outputs: AbandonOutputs,
+    *,
+    terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, directories = outputs
     blockers = terminal_result_blockers(
@@ -277,16 +365,21 @@ def _abandon_outputs_result(
                 "blockers": list(preflight.blockers),
             },
         )
-    return _publish_abandon(contract, guard, outputs)
+    return _publish_abandon(contract, guard, outputs, terminal_note=terminal_note)
 
 
 def _publish_abandon(
     contract: WorktreeContract,
     guard: TerminalGuard,
     outputs: AbandonOutputs,
+    *,
+    terminal_note: str | None = None,
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, directories = outputs
-    updated = amend_contract(contract, ContractCells(cleanup="abandoned"))
+    updated = amend_contract(
+        contract,
+        ContractCells(cleanup="abandoned", terminal_note=terminal_note),
+    )
     try:
         citation_cache = guard.complete(
             outcome="abandoned",
@@ -306,6 +399,21 @@ def _publish_abandon(
                 "blockers": [{"publication": "contract/cache", "reason": str(error)}],
             },
         )
+    if terminal_note is not None:
+        readback_error = _require_terminal_note_readback(contract.contract_path, terminal_note)
+        if readback_error is not None:
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": "abandon-blocked",
+                    **status_payload(contract),
+                    "summary": "Abandon contract/cache publication failed and was rolled back.",
+                    "citation_source_index": _preserved_cache(
+                        guard.preview(), "terminal-publication-failed"
+                    ),
+                    "blockers": [{"publication": "contract/cache", "reason": readback_error}],
+                },
+            )
     return WorktreeCommandResult(
         0,
         {
@@ -426,29 +534,59 @@ def _abandon_branches(
     force: bool,
     authority: _TerminalMutationAuthority,
 ) -> dict[str, dict[str, object]]:
-    branches = {
-        "code": _abandon_branch(
-            _AbandonBranchTarget(
-                contract.code_repo_path,
-                contract.code_work_branch,
-                contract.code_source_branch,
-            ),
-            dry_run=dry_run,
-            force=force,
-            authority=authority,
-        ),
+    targets = {
+        "code": _AbandonBranchTarget(
+            contract.code_repo_path,
+            contract.code_work_branch,
+            contract.code_source_branch,
+        )
     }
     if (
         contract.memory_mode == "external"
         and contract.memory_repo_path is not None
         and contract.memory_work_branch
     ):
+        targets["memory"] = _AbandonBranchTarget(
+            contract.memory_repo_path,
+            contract.memory_work_branch,
+            contract.memory_source_branch,
+        )
+    if not dry_run:
+        # Guard phase (read-only): prove every branch may go before the first deletion.
+        # A sibling whose guard refuses withholds the whole stage; nothing is deleted.
+        refusals = {
+            key: _abandon_branch_refusal(target, force=force) for key, target in targets.items()
+        }
+        refused = {key: entry for key, entry in refusals.items() if entry is not None}
+        if refused:
+            withheld: dict[str, dict[str, object]] = {}
+            for key, target in targets.items():
+                if key in refused:
+                    entry = refused[key]
+                    assert entry is not None
+                    withheld[key] = entry
+                else:
+                    first_key, first_entry = next(iter(refused.items()))
+                    assert first_entry is not None
+                    withheld[key] = {
+                        "branch": target.branch,
+                        "deleted": False,
+                        "reason": "withheld-sibling-branch-refused",
+                        "sibling": first_key,
+                        "siblingReason": first_entry.get("reason"),
+                    }
+            return withheld
+    branches = {
+        "code": _abandon_branch(
+            targets["code"],
+            dry_run=dry_run,
+            force=force,
+            authority=authority,
+        ),
+    }
+    if "memory" in targets:
         branches["memory"] = _abandon_branch(
-            _AbandonBranchTarget(
-                contract.memory_repo_path,
-                contract.memory_work_branch,
-                contract.memory_source_branch,
-            ),
+            targets["memory"],
             dry_run=dry_run,
             force=force,
             authority=authority,
@@ -456,13 +594,16 @@ def _abandon_branches(
     return branches
 
 
-def _abandon_branch(
+def _abandon_branch_refusal(
     target: _AbandonBranchTarget,
     *,
-    dry_run: bool,
     force: bool,
-    authority: _TerminalMutationAuthority,
-) -> dict[str, object]:
+) -> dict[str, object] | None:
+    """The read-only guard for one abandon branch target: a refusal entry, or None.
+
+    The guard phase runs for every target before the first deletion, so a refused
+    abandon changes nothing.
+    """
     repo = target.repository
     branch = target.branch
     base_branch = target.source_branch
@@ -483,7 +624,7 @@ def _abandon_branch(
     if branch_refusal is not None:
         return branch_refusal
     if force:
-        return delete_branch_force(repo, branch, dry_run, authority=authority)
+        return None
     try:
         unmerged = _unmerged_commits(repo, base_branch, branch)
     except RuntimeError as error:
@@ -496,6 +637,23 @@ def _abandon_branch(
             "unmergedCommits": unmerged,
             "hint": "re-run abandon with force=true to discard these commits",
         }
+    return None
+
+
+def _abandon_branch(
+    target: _AbandonBranchTarget,
+    *,
+    dry_run: bool,
+    force: bool,
+    authority: _TerminalMutationAuthority,
+) -> dict[str, object]:
+    repo = target.repository
+    branch = target.branch
+    refusal = _abandon_branch_refusal(target, force=force)
+    if refusal is not None:
+        return refusal
+    if force:
+        return delete_branch_force(repo, branch, dry_run, authority=authority)
     return delete_branch_if_merged(repo, branch, dry_run, authority=authority)
 
 

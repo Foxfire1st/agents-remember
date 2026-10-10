@@ -134,7 +134,7 @@ def _require_graph_keeps_a_node(
     graph = sprint.executionGraph
     if graph is not None and all(node.ref == master_ref for node in graph.nodes):
         raise SprintLinkageError(
-            f"master {master_ref.key} is the only node of sprint {sprint_ref.key}'s executionGraph, and a graph cannot be empty, so it cannot be retired from this sprint; attach another master to the sprint with task_doc.attach_master first, or keep this master in place"
+            f"master {master_ref.key} is the only node of sprint {sprint_ref.key}'s executionGraph, and a graph cannot be empty, so it cannot be retired from this sprint; attach another master to the sprint with task_doc.attach_master first, keep this master in place, or archive the whole sprint with task_doc.archive_sprint called on the sprint with a reason"
         )
 
 

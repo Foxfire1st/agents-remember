@@ -654,6 +654,12 @@ class EntryPointWorld:
                 "task_name": f"{MASTER}-absent",
                 "worktree_name": WORKTREE_NAME,
             },
+            "worktree_enclosure_adopt": {
+                "contract_path": contract,
+                "expected_worktree_group": self.enclosure.as_posix(),
+                "rationale": "entry-point sweep",
+                "dry_run": True,
+            },
             "worktree_status": {
                 "repo_id": REPO,
                 "task_name": MASTER,

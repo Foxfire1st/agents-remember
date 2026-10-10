@@ -21,6 +21,7 @@ from .core import (
 )
 from .curator_coherence import curator_coherence_payload
 from .direct_landing import direct_landing_payload
+from .enclosure_adoption import worktree_enclosure_adopt_payload
 from .gates import (
     gate_create_payload,
     gate_decide_payload,
@@ -196,6 +197,7 @@ __all__ = [
     "worktree_cleanup_payload",
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
+    "worktree_enclosure_adopt_payload",
     "worktree_integrate_payload",
     "worktree_operation_control_payload",
     "worktree_pause_payload",

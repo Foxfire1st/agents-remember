@@ -183,7 +183,8 @@ class TaskDocResponse(ToolResponse):
     nextTool: str | None = None
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
     # Sprint-linkage and execution-graph authoring surfaces (260815-DAG L14/L13). The special
-    # ops (attach_master, detach_master, linkage_report, author_execution_graph) return raw
+    # ops (attach_master, detach_master, linkage_report, author_execution_graph, retire_master,
+    # archive_sprint) return raw
     # operation payloads that carry these keys; without declaration the extra=forbid envelope
     # REJECTED the real payloads after their writes, exactly the remove_subtask bug class
     # above. Present only on those ops; every other operation leaves them None (excluded by
@@ -212,6 +213,14 @@ class TaskDocResponse(ToolResponse):
     wouldWrite: list[str] | None = Field(default=None, max_length=16)
     removedEdges: list[dict[str, Any]] | None = None
     taskArchive: dict[str, Any] | None = None
+    # archive_sprint: the whole-sprint archive record, the state the request found or reached,
+    # every commanded master with its archive location, every staying master and why, and what
+    # a dry run would still change.
+    archiveState: str | None = None
+    archiveResumed: bool | None = None
+    archivedMasters: list[dict[str, Any]] | None = Field(default=None, max_length=2048)
+    stayedMasters: list[dict[str, Any]] | None = Field(default=None, max_length=1024)
+    sprintArchive: dict[str, Any] | None = None
     # linkage_report + get on a sprint: the read-only drift facts.
     linkageFacts: list[dict[str, Any]] | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.

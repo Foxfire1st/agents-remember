@@ -479,6 +479,20 @@ or ambiguous journals are never collectable. After deletion, deliberate root abs
 only through the exact external receipt plus the surviving contract state; accidental absence
 remains a typed failure.
 
+Bounded no-remains exception (MIK-R82 rule 5): when no locator was ever published for the
+enclosure and its worktree folder and work branches do not exist, there is nothing to adopt
+and nothing to delete. `worktree_cleanup` (integration completed) or `worktree_abandon`
+(never integrated) then finishes directly: the surviving contract records its terminal state
+(`cleanup=completed` / `cleanup=abandoned`) together with the durable why, and the result
+reports `nothingToArchive` / `nothingToDelete` with that reason. A dry run changes no
+contract bytes; repeating the exact accepted call is idempotent. Any remaining folder, work
+branch (code or external-memory), or wrong integration state stays outside this exception
+and keeps the adoption-first refusal above, and no adoption or archive evidence is invented
+for the empty case. `worktree_status` observes the surviving contract truth afterwards; if
+the finish did not complete, retry the exact accepted call with its original arguments
+(`teardown_providers` for cleanup, `force` for abandon) -- the `nextArgs` the conflict
+payload returns.
+
 Finalization separately proves the current parent-child branch edge and updates task documents.
 Task completion is not the evidence that authorizes enclosure deletion, and deletion is not allowed
 to erase the evidence that proves task completion.

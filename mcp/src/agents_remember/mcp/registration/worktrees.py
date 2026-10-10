@@ -20,11 +20,13 @@ from agents_remember.models.worktree import (
 
 from ..tools import (
     worktree_attach_payload,
+    worktree_enclosure_adopt_payload,
     worktree_pause_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
 )
+from ..tools.enclosure_adoption import EnclosureAdoptionRequest
 
 
 def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -111,6 +113,34 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
 
 def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Adopt or re-attach one existing worktree enclosure."""
+
+    @server.tool()
+    def worktree_enclosure_adopt(
+        contract_path: str,
+        expected_worktree_group: str,
+        rationale: str,
+        *,
+        dry_run: bool = True,
+        approved: bool = False,
+        expected_publication_request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default.
+
+        This is the only old-layout address migration. It validates one exact contract/root,
+        preserves source digests and an audit receipt, and never runs from normal status,
+        control, contract writes, or schema-1 repair.
+        """
+        return worktree_enclosure_adopt_payload(
+            config,
+            EnclosureAdoptionRequest(
+                contract_path=contract_path,
+                expected_worktree_group=expected_worktree_group,
+                rationale=rationale,
+                dry_run=dry_run,
+                approved=approved,
+                expected_publication_request_id=expected_publication_request_id,
+            ),
+        )
 
     @server.tool()
     def worktree_attach(

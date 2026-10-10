@@ -10,7 +10,14 @@ from typing import Literal
 
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
 from agents_remember.kernel.memory_ledger import MEMORY_CACHE_EXCLUDE
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    memory_repository_default_branch,
+    repository_default_branch,
+)
 from agents_remember.worktrees.modules.git import local_branch_ref, repository_identity
+from agents_remember.worktrees.modules.terminal_branch_retirement import (
+    _kept_line_branch_proof,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -452,6 +459,16 @@ def _branch_checkout_refusal(
     return None
 
 
+def _preflight_default_branch(target: BranchTarget) -> str | None:
+    """The repo default for the kept-line proof; ``None`` fails the proof closed."""
+    try:
+        if target.key == "code":
+            return repository_default_branch(target.repo)
+        return memory_repository_default_branch(target.repo)
+    except Exception:
+        return None
+
+
 def _cleanup_branch_preflight(
     target: BranchTarget,
     base: dict[str, object],
@@ -466,7 +483,29 @@ def _cleanup_branch_preflight(
         ],
     )
     if merge.returncode == 1:
-        return {**base, "reason": "not-merged-into-source", "target": target.source}
+        proof = _kept_line_branch_proof(
+            target.repo,
+            target.branch,
+            target.source,
+            _preflight_default_branch(target),
+        )
+        if proof is None:
+            return {**base, "reason": "not-merged-into-source", "target": target.source}
+        result = {
+            **base,
+            "deleted": False,
+            "would_delete": True,
+            "target": target.source,
+            "keptLine": proof[0],
+            "foundIn": proof[1],
+        }
+        if target.remote:
+            result["remote"] = _remote_branch_preflight(target.repo, target.branch)
+            remote = result["remote"]
+            if isinstance(remote, dict) and _blocked(remote, pending_key="would_delete"):
+                result["reason"] = f"remote: {remote.get('reason')}"
+                result.pop("would_delete", None)
+        return result
     if merge.returncode != 0:
         return {
             **base,

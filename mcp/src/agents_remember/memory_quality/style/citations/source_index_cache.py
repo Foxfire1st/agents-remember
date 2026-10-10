@@ -785,6 +785,7 @@ def terminal_namespace_guard(
     contract: ContractCacheFacts,
     *,
     requested_contract_path: Path,
+    completed_contract_with_remains: bool = False,
 ) -> Iterator[TerminalNamespaceGuard]:
     """Reserve one exact contract namespace before any terminal mutation."""
     requested = requested_contract_path.resolve()
@@ -807,7 +808,11 @@ def terminal_namespace_guard(
         )
     guard = TerminalNamespaceGuard(authority, handle, _read_control_state(authority))
     try:
-        _validate_terminal_contract(authority, guard.previous_state)
+        _validate_terminal_contract(
+            authority,
+            guard.previous_state,
+            completed_contract_with_remains=completed_contract_with_remains,
+        )
         yield guard
     finally:
         if guard.tombstone is not None:
@@ -902,6 +907,8 @@ def _validate_active_state(
 def _validate_terminal_contract(
     authority: ManagedCacheAuthority,
     state: CacheControlState | None,
+    *,
+    completed_contract_with_remains: bool = False,
 ) -> None:
     current = _current_contract(authority)
     lifecycle = _required_lifecycle(authority)
@@ -911,6 +918,14 @@ def _validate_terminal_contract(
             f"authority={lifecycle}, current={current.lifecycle_id or '<empty>'}"
         )
     if current.cleanup in TERMINAL_CLEANUP_STATES:
+        if state is None and completed_contract_with_remains:
+            # MIK-R82 rule 5, completed contract with remains: the contract says
+            # the cleanup is completed while folder/branches still exist, and the
+            # cache holds no state for the lifecycle, so there is no cache of
+            # this leaf to protect. The cleanup records the terminal state for
+            # the lifecycle on completion and goes on. Any held state (active or
+            # terminal, same or other lifecycle) keeps the refusal below.
+            return
         if state is None or state.phase != "terminal" or state.lifecycle_id != lifecycle:
             raise CitationCacheError(
                 "terminal contract has no matching persistent citation cache fence state"

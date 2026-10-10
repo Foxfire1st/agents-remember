@@ -198,6 +198,10 @@ class ContractCells:
     closeout_status: CloseoutStatus | None = None
     integration_status: IntegrationStatus | None = None
     cleanup: CleanupStatus | None = None
+    # The durable why behind a terminal finish that had nothing to archive or
+    # delete (MIK-R82 rule 5 no-remains exception). Free text, not vocabulary:
+    # ``None`` leaves the cell alone, a value replaces it wholesale.
+    terminal_note: str | None = None
 
 
 def amend_contract(contract: WorktreeContract, cells: ContractCells) -> WorktreeContract:
@@ -228,6 +232,9 @@ def amend_contract(contract: WorktreeContract, cells: ContractCells) -> Worktree
         closeout_status=cells.closeout_status or contract.closeout_status,
         integration_status=cells.integration_status or contract.integration_status,
         cleanup=cells.cleanup or contract.cleanup,
+        terminal_note=(
+            cells.terminal_note if cells.terminal_note is not None else contract.terminal_note
+        ),
     )
 
 
@@ -266,6 +273,11 @@ class WorktreeContract:
     integrated_code_commit: str = ""
     integrated_memory_content_commit: str = ""
     cleanup: CleanupStatus = DEFAULT_CLEANUP_STATUS
+    # Why the enclosure finished terminal with nothing to archive or delete
+    # (MIK-R82 rule 5 no-remains exception). Additive on schema v1 like
+    # ``lifecycle_id``: contracts written before this field existed parse to
+    # ``""``, and only a terminal no-remains publication ever sets it.
+    terminal_note: str = ""
     kind: str = "leaf"
     leaf_id: str = ""
     parent_task_name: str = ""
@@ -675,6 +687,10 @@ def _integration_lines(contract: WorktreeContract) -> list[str]:
     if contract.integrated_memory_content_commit:
         lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
     lines.append(f"  cleanup: {contract.cleanup}")
+    if contract.terminal_note:
+        # Single-line by construction: the only writer records the fixed
+        # no-remains reason, so the limited front-matter parser round-trips it.
+        lines.append(f"  terminal_note: {contract.terminal_note}")
     return lines
 
 
@@ -1055,6 +1071,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         integrated_code_commit=integration.get("code_commit", ""),
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         cleanup=vocabulary.cleanup,
+        terminal_note=integration.get("terminal_note", ""),
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),

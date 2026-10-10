@@ -26,6 +26,8 @@ def _cleanup_with_guard(
     contract: WorktreeContract,
     preflight: TerminalPreflight,
     guard: TerminalGuard,
+    *,
+    kept_line: dict[str, object] | None = None,
 ) -> WorktreeCommandResult:
     try:
         terminal_archive = terminal_archive_required_result(
@@ -63,6 +65,15 @@ def _cleanup_with_guard(
             )
             result = cleanup._cleanup_outputs_result(args, current, preflight, guard, outputs)
             result = cleanup._with_terminal_archive(result, terminal_archive)
+            if kept_line is not None:
+                return WorktreeCommandResult(
+                    result.returncode,
+                    {
+                        **result.payload,
+                        "landedTips": kept_line,
+                        **({"agentArchive": agents} if agents else {}),
+                    },
+                )
             return WorktreeCommandResult(
                 result.returncode,
                 {**result.payload, **({"agentArchive": agents} if agents else {})},

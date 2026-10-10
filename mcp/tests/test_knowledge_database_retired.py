@@ -116,8 +116,8 @@ NAMED_EXCEPTIONS = {
     "memory/conversion/legacy_db.py::export_database": (
         "2. the conversion's read-only legacy reader (MIK-R24 rule 9)"
     ),
-    "application/legacy_dataset_copies.py::sqlite_table_names": (
-        "3. the cleanup's read-only content probe (MIK-R26 rule 6)"
+    "application/dataset_copy_survey.py::sqlite_table_names": (
+        "3. the cleanup survey's read-only content probe (MIK-R26 rule 6)"
     ),
 }
 # Not a knowledge database: the citation source index of the memory-quality checks.
@@ -129,7 +129,7 @@ OTHER_DATABASES = {
 READ_ONLY_EXCEPTIONS = {
     "memory/knowledge/connection.py::open_read_only_database",
     "memory/conversion/legacy_db.py::export_database",
-    "application/legacy_dataset_copies.py::sqlite_table_names",
+    "application/dataset_copy_survey.py::sqlite_table_names",
     "memory_quality/style/citations/source_index_database.py::open",
 }
 # What else of a SQLite module production names outside a type annotation. None of these opens.
@@ -200,6 +200,7 @@ HELPER_CALLERS: dict[str, dict[str, str]] = {
     },
     "export_database": {"memory/conversion/convert.py": "the conversion reads the legacy database"},
     "sqlite_table_names": {
+        "application/legacy_dataset_copies.py": "the copies orchestration rechecks a file before deleting",
         "application/review_artifact_cleanup.py": "the archive hook probes a file before deleting",
     },
     "memory_from_git": {

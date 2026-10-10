@@ -11,10 +11,14 @@ and, under the task's notes, every legacy knowledge dataset copy -- a comparison
 retained snapshot, or any other SQLite file with the knowledge schema, identified by its content
 rather than its name (MIK-R26 rule 6). Git-tracked files are skipped: they leave with their branch.
 
+And, anywhere under the task folder, every ``ar-cache-*`` directory (MIK-R82 rule 3) -- scratch
+cache trees a process rooted inside the task. Each is listed with its size and deleted with the
+whole directory tree; a symlink is never followed or deleted.
+
 A generation's pin and snapshots are released through their own deletion owners
-(:mod:`agents_remember.application.review_comparison_reclamation`), which write the
-unavailable-history record first, so a later reopen of the archived generation says the history was
-deleted and why. Whatever those owners did not cover is deleted directly. Every deletion, and every
+(:mod:`agents_remember.application.review_comparison_reclamation`), which remove the
+verified bytes and then write the unavailable-history record, so a later reopen of the
+archived generation says the history was deleted and why. Whatever those owners did not cover is deleted directly. Every deletion, and every
 failure, is recorded in the task's archive report (``notes/reports/review-artifact-cleanup.json``),
 which the finalizer also returns under ``taskArchive.reviewArtifacts``. The receipts are kept per
 attempt and written before anything is deleted
@@ -29,27 +33,32 @@ cleaning.
 * **The trust line for legacy cleanup.** The ICR-era retained-code pins and a generation manifest's
   own-leaf check need the task's short id (``260921-ICR``), which only the task folder's
   system-written control documents carry. They -- the root series contract (which finalize already
-  trusts for the repository paths), ``task.json`` and the leaf enclosure contracts -- are accepted as
+  trusts for the repository paths), ``task.json`` and the leaf enclosure contracts -- serve as
   the identity source for these two legacy targets only: ``task.json``'s ``id`` counts when it is the
   directory name, or when a leaf contract of this task (physically inside it, naming it as parent)
   carries ``<id>-L<n>`` (:func:`_confirmed_task_id`). Any other file content -- a comparison record,
-  a manifest -- is data checked against that identity, never a source of targets.
+  a manifest -- is data checked against that identity, never a source of targets. This is the
+  second trust statement: the legacy cleanup trusts the control documents the product itself
+  writes, because whoever can forge two of them can delete the refs with Git directly.
 * **Physical confinement.** Every path the hook deletes, releases or writes lies inside the resolved
   task root with no symlink on the way (:class:`_Confinement`); what fails is held and reported.
-* **A check-then-use window** remains between :class:`_Confinement` and the owners' own writes; it
-  needs a concurrent writer inside the just-archived task, which could delete those files directly
-  anyway, so it grants nothing (accepted, R5 ruling).
+* **A check-then-use window** remains between :class:`_Confinement` and the owners' own writes.
+  This is the first trust statement: the hook guards against accidents, not against a second
+  writer with the same rights -- a path is checked then deleted, and a process that could swap
+  a symlink in between already has the right to delete the target itself (R5 ruling).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
-from agents_remember.application.legacy_dataset_copies import (
+from agents_remember.application.dataset_copy_survey import (
     is_derived_index,
     is_knowledge_dataset,
     sqlite_table_names,
@@ -88,6 +97,7 @@ __all__ = [
 ]
 
 _REASON: Final = "the task was archived (MIK-R25 rule 5, D17)"
+_AR_CACHE_PREFIX: Final = "ar-cache-"
 
 
 @dataclass
@@ -98,6 +108,7 @@ class _Report:
     retained_code_refs: list[dict[str, str]] = field(default_factory=list)
     released_generations: list[dict[str, str]] = field(default_factory=list)
     dataset_copies: list[dict[str, Any]] = field(default_factory=list)
+    ar_caches: list[dict[str, Any]] = field(default_factory=list)
     failures: list[dict[str, str]] = field(default_factory=list)
     held_refs: set[str] = field(default_factory=set)
     confinement: _Confinement | None = None
@@ -128,6 +139,7 @@ class _Report:
             "retainedCodeRefs": self.retained_code_refs,
             "releasedGenerations": self.released_generations,
             "datasetCopies": self.dataset_copies,
+            "arCaches": self.ar_caches,
             "failures": self.failures,
             "alreadyAbsent": [],
         }
@@ -198,6 +210,7 @@ def _sweep(request: ReviewArtifactCleanupRequest, confined: _Confinement) -> _Re
                 _delete_ref(repository, ref, report.retained_code_refs, report)
     report.confinement = confined
     _delete_dataset_copies(confined, report)
+    _delete_ar_caches(confined, report)
     return report
 
 
@@ -616,3 +629,73 @@ def _tracked(path: Path) -> bool:
 
     listed = run_git(path.parent, ["ls-files", "--error-unmatch", "--", path.name])
     return listed.returncode == 0
+
+
+# -- scratch cache directories ---------------------------------------------------------------
+
+
+def _directory_bytes(path: Path) -> int:
+    """The bytes of every regular file under ``path``; links are never followed."""
+
+    total = 0
+    stack = [path]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as error:
+            raise OSError(f"{directory} cannot be listed: {error}") from error
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(Path(entry.path))
+            elif entry.is_file(follow_symlinks=False):
+                try:
+                    total += entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    return total
+
+
+def _delete_ar_caches(confined: _Confinement, report: _Report) -> None:
+    """Delete every ``ar-cache-*`` directory under the archived task, listing each with its size.
+
+    Scratch cache trees a process rooted inside the task: the whole directory tree goes, with
+    its byte size recorded in ``arCaches``. A symlink is never followed or deleted -- the
+    confinement refuses it, and the entry is held and reported. On a dry run the directories
+    are listed, not deleted.
+    """
+
+    for candidate in sorted(confined.task_root.rglob(f"{_AR_CACHE_PREFIX}*")):
+        outside = confined.problem(candidate)
+        if outside is not None:
+            report.failures.append(
+                {"target": candidate.as_posix(), "detail": f"held, not deleted: {outside}"}
+            )
+            continue
+        if candidate.is_symlink() or not candidate.is_dir():
+            continue
+        try:
+            size = _directory_bytes(candidate)
+        except OSError as error:
+            report.failures.append({"target": candidate.as_posix(), "detail": str(error)})
+            continue
+        entry = {"path": candidate.as_posix(), "bytes": size}
+        if report.dry_run:
+            report.ar_caches.append(entry)
+            continue
+        if candidate.is_symlink():
+            report.failures.append(
+                {
+                    "target": candidate.as_posix(),
+                    "detail": "held, not deleted: became a symlink before its deletion",
+                }
+            )
+            continue
+        try:
+            shutil.rmtree(candidate)
+        except OSError as error:
+            report.failures.append({"target": candidate.as_posix(), "detail": str(error)})
+            continue
+        report.ar_caches.append(entry)

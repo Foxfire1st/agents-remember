@@ -20,24 +20,49 @@ coordination root holding a copy for every rule and measure:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import apsw
 import pytest
 from agents_remember.application import legacy_dataset_copies
-from agents_remember.application.legacy_dataset_copies import (
+from agents_remember.application import review_comparison_reclamation as reclaim
+from agents_remember.application.citation_cache_census import CITATION_CACHE_RULE
+from agents_remember.application.dataset_copy_survey import (
     is_derived_index,
     is_knowledge_dataset,
-    plan_cleanup,
-    run_cleanup,
     sqlite_table_names,
 )
+from agents_remember.application.legacy_dataset_copies import (
+    plan_cleanup,
+    run_cleanup,
+)
+from agents_remember.application.review_comparison_generation import (
+    _UNSEALED_FIELDS,
+    COMPARISON_GENERATION_VERSION,
+    ComparisonGenerationManifest,
+    ComparisonKnowledgeBinding,
+    ComparisonPublicationLineage,
+    ComparisonRecordBinding,
+    ComparisonScopeBinding,
+    ComparisonSourceBinding,
+    generation_directory,
+    generation_identity,
+    read_history_deletion,
+)
+from agents_remember.application.review_comparison_reclamation import (
+    SNAPSHOT_DELETION_OWNER,
+)
+from agents_remember.application.review_comparison_reopen import reopen_comparison_generation
 from agents_remember.cli.__main__ import main
+from agents_remember.kernel.canonical_json import sha256_digest
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from knowledge_rows_test_support import open_knowledge_store
 
 RUNTIME = "provider-runtime/dev-ar-coordination/knowledge"
@@ -519,3 +544,541 @@ def test_an_apply_is_bound_to_the_reviewed_dry_run_and_refuses_when_the_scan_dif
     assert main([*arguments, "--reviewed", str(final), "--json"]) == 0
     applied = json.loads(capsys.readouterr().out)
     assert applied["deleted"] == listed["wouldDelete"] and len(applied["deleted"]) == 6
+
+
+# -- L82 stream B repairs: probe-mirroring regressions for findings 03/04/05/12 ---------------
+#
+# Each case mirrors one sealed Reviewer CODE R1 probe scenario and asserts the repaired
+# behavior: unreadable control documents fail closed with zero deletions (12), a mixed
+# tracked/untracked generation is refused whole (03), owner history failures are retained
+# and repaired through the owner (04), and publisher-owned citation slots are censused
+# wherever they are rooted (05).
+
+_DONE_TASK = "260102_done-task"
+_OPEN_TASK = "260101_live-task"
+_DONE_LEAF = "260102-DONE-L1"
+
+
+def _finished_task(root: Path, name: str, status: str | None) -> Path:
+    task_root = root / "tasks" / "proj" / name
+    task_root.mkdir(parents=True, exist_ok=True)
+    (task_root / "task.md").write_text("# task\n", encoding="utf-8")
+    if status is not None:
+        (task_root / "task.json").write_text(
+            json.dumps({"id": name.upper(), "status": status}), encoding="utf-8"
+        )
+    return task_root
+
+
+def _sealed_manifest(
+    task_root: Path, leaf: str, master: str, snapshots: dict[str, bytes]
+) -> ComparisonGenerationManifest:
+    """Seal one committed-history generation whose retained snapshots are the given bytes."""
+
+    identity = {
+        "repository_id": "00000000-0000-4000-8000-000000000001",
+        "schema_version": "legacy",
+        "logical_digest": "0" * 64,
+    }
+    knowledge = [
+        {
+            "side": side,
+            "state": "retained",
+            "identity": identity,
+            "artifact": {
+                "relative_path": f"knowledge/{side}/snapshot.sqlite",
+                "sha256": hashlib.sha256(snapshots[side]).hexdigest(),
+                "byte_count": len(snapshots[side]),
+                "deletion_owner": SNAPSHOT_DELETION_OWNER,
+                "cleanup_scope": f"knowledge/{side}/snapshot.sqlite",
+            },
+        }
+        for side in ("before", "after")
+    ]
+    body: dict[str, Any] = {
+        "manifest_version": COMPARISON_GENERATION_VERSION,
+        "generation_index": 1,
+        "recorded_at": "2026-01-01T00:00:00Z",
+        "repository_id": "proj",
+        "master": master,
+        "leaf_id": leaf,
+        "task_root": str(task_root),
+        "temporary_storage_scope": "notes/reports/comparison-generations",
+        "contract_path": str(task_root / "contract.json"),
+        "source": ComparisonSourceBinding.model_validate(
+            {
+                "code_repository_root": str(task_root.parent / "code"),
+                "baseline_code_tree_id": "a" * 40,
+                "candidate_code_tree_id": "b" * 40,
+                "candidate_capture": {
+                    "observedCodeHead": "a" * 40,
+                    "codeBaseCommit": "a" * 40,
+                    "codeCandidateTree": "b" * 40,
+                },
+                "custody": "committed-history",
+                "custody_refs": [],
+                "custody_commits": [],
+            }
+        ).model_dump(mode="json"),
+        "knowledge": [
+            ComparisonKnowledgeBinding.model_validate(item).model_dump(mode="json")
+            for item in knowledge
+        ],
+        "scope": ComparisonScopeBinding.model_validate(
+            {
+                "selected": "task-context",
+                "inventory_state": "unavailable",
+                "inventory_digest": hashlib.sha256(b"unavailable").hexdigest(),
+                "changed_path_count": 0,
+                "inventory_partial": True,
+                "detail": "This fixture records no measured inventory.",
+            }
+        ).model_dump(mode="json"),
+        "records": ComparisonRecordBinding.model_validate(
+            {
+                "state": "not-supplied",
+                "assessments": 0,
+                "signals": 0,
+                "observations": 0,
+                "current_measured": False,
+                "collection_digest": hashlib.sha256(b"{}").hexdigest(),
+                "detail": "No record collection was captured.",
+            }
+        ).model_dump(mode="json"),
+        "evidence": [],
+        "policies": [],
+        "lineage": ComparisonPublicationLineage().model_dump(mode="json"),
+    }
+    body["binding_digest"] = sha256_digest(
+        {key: value for key, value in body.items() if key not in _UNSEALED_FIELDS}
+    )
+    body["generation_id"] = generation_identity(body["binding_digest"])
+    return ComparisonGenerationManifest.model_validate(body)
+
+
+def _publish_generation(
+    task_root: Path, staging: Path, *, leaf: str = _DONE_LEAF, master: str = _DONE_TASK
+) -> tuple[Path, str]:
+    """Publish one generation whose before/after snapshots are real knowledge datasets."""
+
+    staged = {
+        side: _dataset(staging / f"{side}.sqlite").read_bytes() for side in ("before", "after")
+    }
+    manifest = _sealed_manifest(task_root, leaf, master, staged)
+    directory = generation_directory(task_root, leaf, manifest.generation_id)
+    for side in ("before", "after"):
+        target = directory / f"knowledge/{side}/snapshot.sqlite"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(staged[side])
+    (directory / "manifest.json").write_bytes(manifest.manifest_bytes())
+    return directory, manifest.generation_id
+
+
+def _citation_slot(root: Path, relative: str, *, marker: str = "index") -> Path:
+    """One publisher-owned citation source index slot: database beside manifest and readiness."""
+
+    slot = root / relative
+    slot.mkdir(parents=True, exist_ok=True)
+    (slot / "index.sqlite3").write_bytes(b"citation-index-bytes:" + marker.encode())
+    (slot / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 8,
+                "codeRoot": str(root / "code"),
+                "memoryRoot": str(root / "memory"),
+                "snapshotId": "0" * 64,
+                "sourceBytes": len(marker),
+                "directories": [],
+                "files": [],
+                "candidateTree": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (slot / "ready.json").write_text(json.dumps({"ready": True}), encoding="utf-8")
+    return slot
+
+
+def _slot_bytes(slot: Path) -> int:
+    return sum(path.stat().st_size for path in slot.rglob("*") if path.is_file())
+
+
+def _git_tracked_unchanged(repository: Path) -> None:
+    """No tracked file modified, and nothing staged: the Git index state is preserved."""
+
+    for arguments in (["diff", "--name-only"], ["diff", "--cached", "--name-only"]):
+        listed = subprocess.run(
+            ["git", *arguments],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert listed == "", f"Git tracked state changed ({arguments}): {listed}"
+
+
+def test_an_unreadable_task_document_is_an_admission_failure_with_no_deletions(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    live = _finished_task(root, _OPEN_TASK, "inProgress")
+    open_copy = _dataset(live / "notes/scratch/open.sqlite")
+    eligible = _dataset(root / "worktrees/proj/group-ar/provider-runtime/knowledge.sqlite")
+    (live / "task.json").write_text("{invalid", encoding="utf-8")
+
+    document = plan_cleanup(root)
+
+    assert [entry["path"] for entry in document["unreadable"]] == [
+        f"tasks/proj/{_OPEN_TASK}/task.json"
+    ]
+    assert "refusing" in document["unreadable"][0]["detail"]
+    assert open_copy.relative_to(root).as_posix() not in document["wouldDelete"]
+    assert eligible.relative_to(root).as_posix() in document["wouldDelete"]
+
+    with pytest.raises(ValueError, match="unreadable control document"):
+        run_cleanup(root, str(document["reviewDigest"]))
+    assert eligible.is_file() and open_copy.is_file()
+
+
+def test_an_unreadable_generation_manifest_never_falls_through_to_unlink(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    scratch = _dataset(done / "notes/scratch/pub2.sqlite")
+    directory, _ = _publish_generation(done, tmp_path / "staging")
+    before = directory / "knowledge/before/snapshot.sqlite"
+    after = directory / "knowledge/after/snapshot.sqlite"
+    manifest = directory / "manifest.json"
+    manifest.write_text("{invalid", encoding="utf-8")
+
+    document = plan_cleanup(root)
+
+    assert [entry["path"] for entry in document["unreadable"]] == [
+        manifest.relative_to(root).as_posix()
+    ]
+    with pytest.raises(ValueError, match="unreadable control document"):
+        run_cleanup(root, str(document["reviewDigest"]))
+    assert before.is_file() and after.is_file() and scratch.is_file()
+    assert not (directory / "deletions").exists()
+
+
+def test_a_missing_task_document_keeps_legacy_classification_distinct_from_parse_failures(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    no_doc = root / "tasks" / "proj" / "260105_nodoc-task"
+    left = _dataset(no_doc / "notes/scratch/left.sqlite")
+    live = _finished_task(root, _OPEN_TASK, "inProgress")
+    _dataset(live / "notes/scratch/open.sqlite")
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    finished = _dataset(done / "notes/scratch/pub2.sqlite")
+
+    document = plan_cleanup(root)
+
+    rules = {copy["path"]: copy["rule"] for copy in document["copies"]}
+    assert rules[left.relative_to(root).as_posix()] == "unarchived-task-notes"
+    assert rules[finished.relative_to(root).as_posix()] == "completed-task-notes"
+    assert document["unreadable"] == []
+
+    applied = run_cleanup(root, str(document["reviewDigest"]))
+    assert applied["failures"] == [] and applied["unreadable"] == []
+    assert left.is_file() and not finished.exists()
+
+
+def test_a_tracked_sibling_refuses_the_whole_generation_release(tmp_path: Path) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    scratch = _dataset(done / "notes/scratch/pub2.sqlite")
+    directory, _ = _publish_generation(done, tmp_path / "staging")
+    before = directory / "knowledge/before/snapshot.sqlite"
+    after = directory / "knowledge/after/snapshot.sqlite"
+    before_bytes, after_bytes = before.read_bytes(), after.read_bytes()
+    before_rel = before.relative_to(root).as_posix()
+    after_rel = after.relative_to(root).as_posix()
+    _git(done, "init", "-q", "-b", "main")
+    _git(done, "config", "user.email", "fixture@example.invalid")
+    _git(done, "config", "user.name", "tracked-half fixture")
+    _git(done, "add", "-f", str(before.relative_to(done)))
+    _git(done, "commit", "-q", "-m", "protect the before half")
+    code = root / "code"
+    code.mkdir(parents=True, exist_ok=True)
+    _git(code, "init", "-q", "-b", "main")
+    _git(code, "config", "user.email", "fixture@example.invalid")
+    _git(code, "config", "user.name", "tracked-half fixture")
+    (code / "file.txt").write_text("x\n", encoding="utf-8")
+    _git(code, "add", "-A")
+    _git(code, "commit", "-q", "-m", "fixture")
+    _git(code, "update-ref", f"refs/ar/review/proj/{_DONE_TASK}/1", "HEAD")
+    _git(code, "update-ref", "refs/ar/retained-code/260102-done-l1/g1", "HEAD")
+    pins = subprocess.run(
+        ["git", "for-each-ref", "refs/ar/"],
+        cwd=code,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    document = plan_cleanup(root)
+
+    rules = {copy["path"]: copy["rule"] for copy in document["copies"]}
+    assert rules[before_rel] == "git-tracked"
+    assert before_rel not in document["wouldDelete"]
+    assert rules[after_rel] == "completed-task-notes"
+
+    applied = run_cleanup(root, str(document["reviewDigest"]))
+
+    assert scratch.relative_to(root).as_posix() in applied["deleted"]
+    assert after_rel not in applied["deleted"] and before.is_file() and after.is_file()
+    assert before.read_bytes() == before_bytes and after.read_bytes() == after_bytes
+    assert [failure["path"] for failure in applied["failures"]] == [after_rel]
+    assert "git-tracked" in applied["failures"][0]["detail"]
+    assert before_rel in applied["failures"][0]["detail"]
+    _git_tracked_unchanged(done)
+    _git_tracked_unchanged(code)
+    assert (
+        subprocess.run(
+            ["git", "for-each-ref", "refs/ar/"],
+            cwd=code,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == pins
+    )
+
+
+def test_a_wholly_eligible_generation_releases_with_truthful_history(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    directory, generation_id = _publish_generation(done, tmp_path / "staging")
+    members = [
+        (directory / f"knowledge/{side}/snapshot.sqlite").relative_to(root).as_posix()
+        for side in ("before", "after")
+    ]
+
+    applied = run_cleanup(root, str(plan_cleanup(root)["reviewDigest"]))
+
+    assert applied["failures"] == []
+    assert all(member in applied["deleted"] for member in members)
+    for target in ("knowledge-before", "knowledge-after"):
+        record = read_history_deletion(done, _DONE_LEAF, generation_id, target)
+        assert record is not None
+        assert record.deletion_owner == SNAPSHOT_DELETION_OWNER
+        assert "Completed" in record.reason
+
+
+def test_a_failed_owner_history_write_is_retained_never_reported_removed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    directory, generation_id = _publish_generation(done, tmp_path / "staging")
+    members = [
+        (directory / f"knowledge/{side}/snapshot.sqlite").relative_to(root).as_posix()
+        for side in ("before", "after")
+    ]
+    original = reclaim.write_history_deletion
+
+    def fail_after_history(task_root: Path, leaf: str, generation: str, deletion: Any) -> Any:
+        if deletion.target == "knowledge-after":
+            raise OSError("after history write refused")
+        return original(task_root, leaf, generation, deletion)
+
+    with mock.patch.object(reclaim, "write_history_deletion", side_effect=fail_after_history):
+        applied = run_cleanup(root, str(plan_cleanup(root)["reviewDigest"]))
+
+    assert sorted(failure["path"] for failure in applied["failures"]) == sorted(members)
+    assert all(
+        "after history write refused" in failure["detail"]
+        and generation_id in failure["detail"]
+        and "knowledge-after" in failure["detail"]
+        for failure in applied["failures"]
+    )
+    assert not (set(applied["deleted"]) & set(members))
+    assert read_history_deletion(done, _DONE_LEAF, generation_id, "knowledge-after") is None
+
+
+def test_a_transient_owner_failure_is_repaired_in_the_same_request(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    directory, generation_id = _publish_generation(done, tmp_path / "staging")
+    members = [
+        (directory / f"knowledge/{side}/snapshot.sqlite").relative_to(root).as_posix()
+        for side in ("before", "after")
+    ]
+    original = reclaim.write_history_deletion
+    calls: list[str] = []
+
+    def flaky_history(task_root: Path, leaf: str, generation: str, deletion: Any) -> Any:
+        if deletion.target == "knowledge-after" and not calls:
+            calls.append(deletion.target)
+            raise OSError("transient after history write")
+        return original(task_root, leaf, generation, deletion)
+
+    with mock.patch.object(reclaim, "write_history_deletion", side_effect=flaky_history):
+        applied = run_cleanup(root, str(plan_cleanup(root)["reviewDigest"]))
+
+    assert applied["failures"] == []
+    assert all(member in applied["deleted"] for member in members)
+    for target in ("knowledge-before", "knowledge-after"):
+        assert read_history_deletion(done, _DONE_LEAF, generation_id, target) is not None
+    reopened = reopen_comparison_generation(
+        McpRuntimeConfig(
+            workspace_root=tmp_path,
+            coordination_root=root,
+            config_path=tmp_path / "config.json",
+            transcript_root=tmp_path / "transcripts",
+        ),
+        "proj",
+        _DONE_TASK,
+        _DONE_LEAF,
+    )
+    assert reopened.generation is not None
+    assert {channel.state for channel in reopened.knowledge} == {"unavailable-history"}
+    for channel in reopened.knowledge:
+        assert "was deleted explicitly" in channel.detail
+        assert SNAPSHOT_DELETION_OWNER in channel.detail
+
+
+def test_a_silently_skipped_history_write_is_caught_and_repaired(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    done = _finished_task(root, _DONE_TASK, "Completed")
+    directory, generation_id = _publish_generation(done, tmp_path / "staging")
+    members = [
+        (directory / f"knowledge/{side}/snapshot.sqlite").relative_to(root).as_posix()
+        for side in ("before", "after")
+    ]
+    original = reclaim.write_history_deletion
+    skipped: list[str] = []
+
+    def silent_once(task_root: Path, leaf: str, generation: str, deletion: Any) -> Any:
+        if deletion.target == "knowledge-after" and not skipped:
+            skipped.append(deletion.target)
+            return task_root
+        return original(task_root, leaf, generation, deletion)
+
+    with mock.patch.object(reclaim, "write_history_deletion", side_effect=silent_once):
+        applied = run_cleanup(root, str(plan_cleanup(root)["reviewDigest"]))
+
+    assert skipped == ["knowledge-after"] and applied["failures"] == []
+    assert all(member in applied["deleted"] for member in members)
+    for target in ("knowledge-before", "knowledge-after"):
+        assert read_history_deletion(done, _DONE_LEAF, generation_id, target) is not None
+
+
+def test_citation_slots_are_found_wherever_publishers_root_them(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "coordination"
+    (root / "tasks" / "proj").mkdir(parents=True, exist_ok=True)
+    first = _citation_slot(root, "temp/citation-source-index/slot-0")
+    second = _citation_slot(root, "temp/citation-source-index/slot-1", marker="second")
+    task_placed = _citation_slot(
+        root, "tasks/proj/finished/notes/reports/tmp/ar-cache-1/slot-0", marker="task"
+    )
+    enclosure_placed = _citation_slot(
+        root, "tasks/proj/enclosed-task/enclosures/l1/tmp/ar-cache-9/slot-0", marker="enclosure"
+    )
+    managed = _citation_slot(root, "temp/citation-source-index/managed/ns-9f2c", marker="managed")
+    foreign = root / "tasks/proj/finished/notes/reports/tmp/ar-cache-2/slot-0"
+    foreign.mkdir(parents=True, exist_ok=True)
+    (foreign / "index.sqlite3").write_bytes(b"another tool's database")
+    (foreign / "manifest.json").write_text(json.dumps({"note": "not a manifest"}))
+
+    document = plan_cleanup(root)
+
+    caches = {cache["path"]: cache for cache in document["citationCaches"]}
+    assert set(caches) == {
+        slot.relative_to(root).as_posix() for slot in (first, second, task_placed, enclosure_placed)
+    }
+    assert all(cache["rule"] == CITATION_CACHE_RULE for cache in caches.values())
+    for slot in (first, second, task_placed, enclosure_placed):
+        relative = slot.relative_to(root).as_posix()
+        assert caches[relative]["bytes"] == _slot_bytes(slot)
+    assert managed.relative_to(root).as_posix() not in caches
+    assert foreign.relative_to(root).as_posix() not in caches
+
+    applied = run_cleanup(root, str(document["reviewDigest"]))
+
+    assert applied["failures"] == []
+    assert set(applied["deletedCaches"]) == set(caches)
+    for slot in (first, second, task_placed, enclosure_placed):
+        assert not slot.exists()
+    assert (managed / "index.sqlite3").is_file()
+    assert (foreign / "index.sqlite3").is_file()
+
+
+def test_a_cache_added_after_the_review_refuses_the_apply(tmp_path: Path) -> None:
+    root = tmp_path / "coordination"
+    (root / "tasks" / "proj").mkdir(parents=True, exist_ok=True)
+    _citation_slot(root, "temp/citation-source-index/slot-0")
+    digest = str(plan_cleanup(root)["reviewDigest"])
+    _citation_slot(root, "tasks/proj/finished/notes/reports/tmp/ar-cache-1/slot-0", marker="late")
+
+    with pytest.raises(ValueError, match="the scan differs from the reviewed dry run"):
+        run_cleanup(root, digest)
+
+
+def test_citation_protections_hold_at_every_placement(tmp_path: Path) -> None:
+    root = tmp_path / "coordination"
+    (root / "tasks" / "proj").mkdir(parents=True, exist_ok=True)
+    kept = _citation_slot(root, "temp/citation-source-index/slot-0")
+    repository = root / "temp"
+    _git(repository, "init", "-q", "-b", "main")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+    _git(repository, "config", "user.name", "cache fixture")
+    _git(repository, "add", "-f", "citation-source-index/slot-0/index.sqlite3")
+    _git(repository, "commit", "-q", "-m", "track the index")
+    gone = _citation_slot(
+        root, "tasks/proj/finished/notes/reports/tmp/ar-cache-1/slot-0", marker="gone"
+    )
+    derived = root / "runtime/knowledge-index/slot-0"
+    derived.mkdir(parents=True, exist_ok=True)
+    (derived / "index.sqlite3").write_bytes(b"citation-index-bytes:derived")
+    (derived / "manifest.json").write_text(
+        (root / "temp/citation-source-index/slot-0/manifest.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    target = _citation_slot(root, "temp/citation-source-index/real-slot", marker="real")
+    (root / "tasks/proj/link-slot").symlink_to(target, target_is_directory=True)
+
+    document = plan_cleanup(root)
+
+    caches = {cache["path"]: cache for cache in document["citationCaches"]}
+    assert "kept" in caches[kept.relative_to(root).as_posix()]["ruleText"]
+    assert set(document["wouldDeleteCaches"]) == {
+        gone.relative_to(root).as_posix(),
+        target.relative_to(root).as_posix(),
+    }
+    assert [entry["path"] for entry in document["wouldKeepCaches"]] == [
+        kept.relative_to(root).as_posix()
+    ]
+    assert "runtime/knowledge-index/slot-0" not in caches
+    assert "tasks/proj/link-slot" not in caches
+
+    applied = run_cleanup(root, str(document["reviewDigest"]))
+
+    assert set(applied["deletedCaches"]) == {
+        gone.relative_to(root).as_posix(),
+        target.relative_to(root).as_posix(),
+    }
+    assert (kept / "index.sqlite3").is_file()
+    # The link itself is never followed or deleted, even once its target is gone.
+    assert (root / "tasks/proj/link-slot").is_symlink()
+    assert (
+        subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == ""
+    )

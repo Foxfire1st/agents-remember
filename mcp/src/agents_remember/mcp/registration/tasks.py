@@ -121,7 +121,7 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'add_step' | 'remove_step' |
         'skip_step' | 'read_steps' | 'set_subtask' | 'remove_subtask' |
         'set_section' | 'append_decision' | 'begin_review' | 'record_review' | 'record_route_review' |
-        'author_execution_graph' | 'attach_master' | 'detach_master' | 'retire_master' | 'linkage_report' |
+        'author_execution_graph' | 'attach_master' | 'detach_master' | 'retire_master' | 'archive_sprint' | 'linkage_report' |
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
@@ -230,6 +230,24 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         that differs from the record is refused; when the hook failed in part (ok=false, state
         retired-with-hook-failures) the repeat retries the cleanup only, and every attempt keeps a
         numbered receipt. A retired row cannot be changed or dropped by any other operation.
+        'archive_sprint' (sprint) archives a Completed sprint as a whole with fields={reason}.
+        It refuses before anything changes — in a dry run as in a real run, naming each row or
+        file and the clearing action — unless the sprint status is Completed, every row
+        commanding a master is Completed, abandoned, or a retirement row, and every commanded
+        master passes the retire-operation readiness check (no open work in its leaves). The
+        sprint's own folder moves first, then every moving commanded master's folder, all under
+        tasks/<repository>/0_archive/; a master also commanded by another live sprint stays and
+        the result names that sprint in stayedMasters. Before the first move it writes
+        notes/reports/sprint-archive.json into the sprint folder (reason, time, every master
+        with folder, every staying master and why, and the same-request comparison basis),
+        protected like a retirement record: a repeat is compared by reason and selection and a
+        differing request is refused. A failure before the moves end restores every folder and
+        removes the record this request wrote. After the moves the review-artifact archive hook
+        runs for every archived folder; a hook failure keeps the archive with ok=false and
+        state archived-with-hook-failures plus per-folder deleted/failed lists under
+        taskArchive.cleanups, a repeat with the same reason retries only the remaining cleanup
+        with receipts per attempt, and a different reason is refused. dry_run reports exactly
+        what would change (wouldChange) and every file a real run writes (wouldWrite).
         An abandoned row never blocks a master: it needs no enclosure, no landing and no document.
         A master that a sprint commands stays in place when it is finalized, with its sprint row
         Completed.

@@ -33,6 +33,10 @@ from agents_remember.application.review_artifact_cleanup import (
     ReviewArtifactCleanup,
     cleanup_review_artifacts,
 )
+from agents_remember.application.task_docs.task_retirement_shared import (
+    hook_failed,
+    hook_remainder,
+)
 from agents_remember.errors import CodeObjectRetentionError
 from agents_remember.worktrees.modules import finalize
 from agents_remember.worktrees.services import (
@@ -639,3 +643,142 @@ def test_an_artifact_that_failed_and_is_gone_since_gets_a_receipt_once(task: Tas
     again = task.archive()
     assert again["receipt"] == "unchanged" and again["attempt"] == 2
     assert [r["attempt"] for r in _receipts(task).values()] == [1, 2]
+
+
+# -- L82 stream B repairs: probe-mirroring regressions for finding 02 -----------------------
+#
+# The new arCaches deletion class travels through the shared receipt contract exactly like
+# the older classes: planned receipts retain cache path/size before removal, an interrupted
+# removal replays as attributed already-absent history, cache-only dry runs show real
+# work, and zero-input repeats do not churn receipts.
+
+
+def _cache(task: Task, name: str, payload: bytes) -> Path:
+    cache = task.task_root / "notes" / name
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "payload").write_bytes(payload)
+    return cache
+
+
+def test_an_interrupted_cache_deletion_replays_as_attributed_already_absent(
+    task: Task,
+) -> None:
+    cache = _cache(task, "ar-cache-7", b"cache-bytes")
+    first = task.archive()
+    assert first["attempt"] == 1 and first["state"] == "deleted"
+    assert first["arCaches"] == [{"path": cache.as_posix(), "bytes": len(b"cache-bytes")}]
+
+    late = _cache(task, "ar-cache-8", b"late")
+    with (
+        mock.patch.object(
+            review_artifact_receipts.ReceiptLedger, "finish", side_effect=KeyboardInterrupt
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        task.archive()
+    interrupted = _receipts(task)[CLEANUP_REPORT_NAME]
+    assert interrupted["state"] == "in-progress" and interrupted["attempt"] == 2
+    assert set(interrupted["planned"]) == {
+        "reviewRefs",
+        "retainedCodeRefs",
+        "datasetCopies",
+        "arCaches",
+        "releasedGenerations",
+    }
+    assert interrupted["planned"]["arCaches"] == [{"path": late.as_posix(), "bytes": 4}]
+
+    retry = task.archive()
+    assert retry["attempt"] == 3 and retry["arCaches"] == []
+    assert {
+        (
+            entry["artifact"],
+            entry["kind"],
+            entry["deletedInAttempt"],
+            entry.get("interrupted", False),
+        )
+        for entry in retry["alreadyAbsent"]
+    } == {
+        (cache.as_posix(), "arCaches", 1, False),
+        (late.as_posix(), "arCaches", 2, True),
+    }
+
+    again = task.archive()
+    assert again["receipt"] == "unchanged" and again["attempt"] == 3
+    assert _receipts(task)[CLEANUP_REPORT_NAME]["alreadyAbsent"] == retry["alreadyAbsent"]
+
+
+def test_a_cache_only_dry_run_shows_work_remainder_and_preview(task: Task) -> None:
+    cache = _cache(task, "ar-cache-9", b"0123456789")
+
+    dry = task.archive(dry_run=True)
+    assert dry["arCaches"] == [{"path": cache.as_posix(), "bytes": 10}]
+    assert hook_remainder(dry) == 1 and not hook_failed(dry)
+    assert "arCaches" in review_artifact_receipts.DELETION_KEYS
+    assert dry["receipt"] == "would-write" and dry["receiptFiles"] != []
+    assert dry["attempt"] == 1
+
+    done = task.archive()
+    assert done["state"] == "deleted" and not cache.exists()
+    assert done["arCaches"] == [{"path": cache.as_posix(), "bytes": 10}]
+
+    again = task.archive()
+    assert again["receipt"] == "unchanged" and again["attempt"] == done["attempt"]
+
+
+def test_old_classes_and_caches_share_one_receipt_recovery(task: Task) -> None:
+    task.pin(f"refs/ar/review/{MASTER}/{LEAF}/1")
+    first_copy = task.task_root / "notes" / "first.sqlite"
+    _knowledge_dataset(first_copy)
+    first_cache = _cache(task, "ar-cache-10", b"first-cache")
+    assert task.archive()["attempt"] == 1
+
+    second_ref = f"refs/ar/review/{MASTER}/{LEAF}/2"
+    task.pin(second_ref)
+    second_copy = task.task_root / "notes" / "second.sqlite"
+    _knowledge_dataset(second_copy)
+    second_cache = _cache(task, "ar-cache-11", b"second-cache")
+    with (
+        mock.patch.object(
+            review_artifact_receipts.ReceiptLedger, "finish", side_effect=KeyboardInterrupt
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        task.archive()
+    interrupted = _receipts(task)[CLEANUP_REPORT_NAME]
+    assert interrupted["attempt"] == 2
+    assert {entry["ref"] for entry in interrupted["planned"]["reviewRefs"]} == {second_ref}
+    assert {entry["path"] for entry in interrupted["planned"]["datasetCopies"]} == {
+        str(second_copy)
+    }
+    assert interrupted["planned"]["arCaches"] == [
+        {"path": second_cache.as_posix(), "bytes": len(b"second-cache")}
+    ]
+
+    retry = task.archive()
+    assert retry["attempt"] == 3
+    recovered = {(entry["artifact"], entry["kind"]): entry for entry in retry["alreadyAbsent"]}
+    assert (second_ref, "reviewRefs") in recovered
+    assert (str(second_copy), "datasetCopies") in recovered
+    assert (second_cache.as_posix(), "arCaches") in recovered
+    for artifact in (second_ref, str(second_copy), second_cache.as_posix()):
+        entry = next(entry for (name, _kind), entry in recovered.items() if name == artifact)
+        assert entry["deletedInAttempt"] == 2 and entry["interrupted"] is True
+    for artifact in (f"refs/ar/review/{MASTER}/{LEAF}/1", str(first_copy), first_cache.as_posix()):
+        entry = next(entry for (name, _kind), entry in recovered.items() if name == artifact)
+        assert entry["deletedInAttempt"] == 1 and "interrupted" not in entry
+
+
+def test_nothing_is_deleted_when_the_cache_receipt_cannot_be_written(task: Task) -> None:
+    cache = _cache(task, "ar-cache-12", b"held")
+    reports = task.task_root / "notes/reports"
+    reports.mkdir(parents=True)
+    reports.chmod(0o500)
+    try:
+        refused = task.archive()
+    finally:
+        reports.chmod(0o700)
+    assert refused["state"] == "partial" and refused["arCaches"] == [] and cache.is_dir()
+    assert "nothing was deleted" in refused["failures"][-1]["detail"]
+    assert refused["failures"][-1]["target"] == str(reports / CLEANUP_REPORT_NAME)
+    done = task.archive()
+    assert done["attempt"] == 1 and done["state"] == "deleted" and not cache.exists()

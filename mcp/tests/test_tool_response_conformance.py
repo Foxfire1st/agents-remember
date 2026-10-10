@@ -112,7 +112,7 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 96 call sites name 89 ids. Role-start and
+    adapter surface it describes. 97 call sites name 90 ids. Role-start and
     role-message adapters remain; the retired database-only change and projection adapters are gone.
     Some tools have two entry points, and every knowledge builder routes through the same choke point.
     """
@@ -221,14 +221,15 @@ def advertised_tool_names() -> set[str]:
 # number somebody has to remember to update.
 #
 # Role start and role messaging remain public; database-only change and projection do not.
-ROSTER_SIZE = 72
+# MIK-R82 rule 4 restores `worktree_enclosure_adopt`: 73.
+ROSTER_SIZE = 73
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
-TOOL_MODULE_COUNT = 21
-TOOL_HANDLER_COUNT = 96
+TOOL_MODULE_COUNT = 22
+TOOL_HANDLER_COUNT = 97
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -472,7 +473,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 21 modules hold 96 handlers and 96 call sites -- the same
+        handlers. 22 modules hold 97 handlers and 97 call sites -- the same
         count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring

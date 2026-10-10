@@ -1,0 +1,338 @@
+"""Sprint-archive recovery, legacy-row, and preview-bound regressions (MIK-R82 rule 1).
+
+Each test mirrors a Reviewer CODE R1 probe scenario that the L82-W1 candidate
+failed: a same-request retry must refuse lost master custody and changed archived
+sprint bytes, a caught failure on a resumed prefix must restore the whole record
+prefix truthfully, an open legacy seat row must refuse like a typed row, and a
+fifteen-master sprint must preview completely inside the public response bounds.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import sqlite3
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
+from test_sprint_archive import ArchiveWorld
+from test_task_execution_topology import REPOSITORY, _master
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def world(tmp_path):
+    return ArchiveWorld(tmp_path)
+
+
+def _interrupt_on(target_name: str):
+    real_rename = Path.rename
+
+    def side_effect(path, target):
+        if Path(target).name == target_name:
+            raise KeyboardInterrupt(f"crash before {target_name}")
+        return real_rename(path, target)
+
+    return side_effect
+
+
+def _legacy_seat(world: ArchiveWorld, slug: str, status: str = "inProgress") -> None:
+    seat = TaskDocument.model_validate(
+        {
+            "id": "SEAT-A",
+            "slug": slug,
+            "title": "Manager A",
+            "kind": "subTask",
+            "status": status,
+            "repo": REPOSITORY,
+            "type": "SubTask",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "references": ["../master-a/task.json"],
+        }
+    )
+    write_task_doc(world.tasks / "sprint", seat)
+
+
+def test_recorded_retry_refuses_missing_master_custody(world):
+    with (
+        patch.object(Path, "rename", autospec=True, side_effect=_interrupt_on("master-a")),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        world.archive()
+    assert (world.tasks / "0_archive" / "sprint").is_dir()
+    for name in ("master-a", "master-b"):
+        shutil.rmtree(world.tasks / name)
+    before = world.snapshot()
+    for dry_run in (True, False):
+        with pytest.raises(ValueError, match=r"master-a/task\.json.*restore that master's folder"):
+            world.archive(dry_run=dry_run)
+        assert world.snapshot() == before
+    assert [path.name for path in (world.tasks / "0_archive").iterdir()] == ["sprint"]
+
+
+def test_recorded_retry_refuses_changed_archived_sprint_bytes(world):
+    result = world.archive()
+    assert result["ok"] and result["state"] == "archived"
+    sprint_json = world.tasks / "0_archive" / "sprint" / "task.json"
+    data = json.loads(sprint_json.read_text())
+    data["status"] = "inProgress"
+    sprint_json.write_text(json.dumps(data))
+    for dry_run in (True, False):
+        with pytest.raises(
+            ValueError,
+            match=r"0_archive/sprint/task\.json.*changed since archive admission",
+        ):
+            world.archive(dry_run=dry_run)
+    assert (world.tasks / "0_archive" / "sprint").is_dir()
+
+
+def test_resumed_prefix_failure_restores_all_and_removes_record(world):
+    original = world.snapshot()
+    with (
+        patch.object(Path, "rename", autospec=True, side_effect=_interrupt_on("master-a")),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        world.archive()
+    assert not (world.tasks / "sprint").exists()
+    assert (world.tasks / "0_archive" / "sprint" / "task.json").is_file()
+    assert (world.tasks / "master-a").is_dir()
+
+    real_rename = Path.rename
+
+    def fail_master_b(path, target):
+        if Path(target).name == "master-b":
+            raise OSError("retry move failed")
+        return real_rename(path, target)
+
+    with (
+        patch.object(Path, "rename", autospec=True, side_effect=fail_master_b),
+        pytest.raises(ValueError, match=r"archive failed before archival.*restored"),
+    ):
+        world.archive()
+    # The whole record prefix came back: master-a and the sprint, masters first.
+    assert (world.tasks / "sprint").is_dir()
+    assert (world.tasks / "master-a").is_dir()
+    assert (world.tasks / "master-b").is_dir()
+    assert not (world.tasks / "0_archive" / "sprint").exists()
+    assert not (world.tasks / "0_archive" / "master-a").exists()
+    assert not (world.tasks / "sprint" / "notes" / "reports" / "sprint-archive.json").exists()
+    assert world.snapshot() == original
+    # Complete restoration removed the record, so the next same request starts fresh.
+    result = world.archive()
+    assert result["ok"] and result["state"] == "archived"
+    assert not result["archiveResumed"]
+
+
+def test_resumed_retry_dry_run_previews_remaining_moves(world):
+    with (
+        patch.object(Path, "rename", autospec=True, side_effect=_interrupt_on("master-a")),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        world.archive()
+    before = world.snapshot()
+    preview = world.archive(dry_run=True)
+    assert preview["ok"] and preview["state"] == "would-archive"
+    assert preview["archiveResumed"] and preview["archiveState"] == "recorded"
+    moves = [change for change in preview["wouldChange"] if change.startswith("task folder: move")]
+    assert len(moves) == 2
+    assert all("0_archive/sprint" not in change for change in moves)
+    assert all("sprint-archive.json" not in change for change in preview["wouldChange"])
+    assert world.snapshot() == before
+    result = world.archive()
+    assert result["ok"] and result["state"] == "archived" and result["archiveResumed"]
+
+
+def test_open_legacy_seat_row_refuses_and_terminal_passes(world):
+    _legacy_seat(world, "00_master-a-seat")
+    sprint = world.sprint().model_copy(
+        update={
+            "subTasks": [
+                SubTaskRef(
+                    number="0",
+                    name="Manager A",
+                    status="inProgress",
+                    file="00_master-a-seat.md",
+                ),
+                world.sprint().subTasks[1],
+            ]
+        }
+    )
+    write_task_doc(world.tasks / "sprint", sprint)
+    before = world.snapshot()
+    for dry_run in (True, False):
+        with pytest.raises(
+            ValueError, match=r"row '0'.*master-a/task\.json.*'inProgress'.*Completed or abandoned"
+        ):
+            world.archive(dry_run=dry_run)
+        assert world.snapshot() == before
+    assert not (world.tasks / "0_archive").exists()
+    # The same correlated seat row, terminal, archives like a typed row.
+    sprint = world.sprint().model_copy(
+        update={
+            "subTasks": [
+                world.sprint().subTasks[0].model_copy(update={"status": "Completed"}),
+                world.sprint().subTasks[1],
+            ]
+        }
+    )
+    write_task_doc(world.tasks / "sprint", sprint)
+    result = world.archive()
+    assert result["ok"] and result["state"] == "archived"
+
+
+def test_unknown_seat_row_refuses(world):
+    sprint = world.sprint().model_copy(
+        update={
+            "subTasks": [
+                *world.sprint().subTasks,
+                SubTaskRef(number="7", name="Ghost", status="inProgress", file="00_ghost-seat.md"),
+            ]
+        }
+    )
+    write_task_doc(world.tasks / "sprint", sprint)
+    before = world.snapshot()
+    with pytest.raises(ValueError, match=r"row '7'.*00_ghost-seat.*cannot be read"):
+        world.archive()
+    assert world.snapshot() == before
+
+
+def test_ambiguous_legacy_rows_refuse(world):
+    _legacy_seat(world, "00_master-a-seat", status="Completed")
+    second = TaskDocument.model_validate(
+        {
+            "id": "SEAT-B",
+            "slug": "00_master-a-second-seat",
+            "title": "Manager A again",
+            "kind": "subTask",
+            "status": "Completed",
+            "repo": REPOSITORY,
+            "type": "SubTask",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "references": ["../master-a/task.json"],
+        }
+    )
+    write_task_doc(world.tasks / "sprint", second)
+    sprint = world.sprint().model_copy(
+        update={
+            "subTasks": [
+                *world.sprint().subTasks,
+                SubTaskRef(
+                    number="0",
+                    name="Manager A",
+                    status="Completed",
+                    file="00_master-a-seat.md",
+                ),
+                SubTaskRef(
+                    number="1",
+                    name="Manager A again",
+                    status="Completed",
+                    file="00_master-a-second-seat.md",
+                ),
+            ]
+        }
+    )
+    write_task_doc(world.tasks / "sprint", sprint)
+    before = world.snapshot()
+    with pytest.raises(ValueError, match=r"2 seat rows.*master-a/task\.json.*exactly one row"):
+        world.archive()
+    assert world.snapshot() == before
+
+
+def _fifteen_master_world(world: ArchiveWorld):
+    refs = list(world.refs)
+    for n in range(13):
+        name = f"extra-{n}"
+        refs.append(TaskDocumentRef(repository=REPOSITORY, path=f"{name}/task.json"))
+        write_task_doc(
+            world.tasks / name,
+            _master(identity=name, execution_nature="atomic").model_copy(
+                update={"status": "Completed"}
+            ),
+        )
+    sprint = world.sprint().model_copy(
+        update={
+            "orchestrates": [Path(ref.path).parent.name for ref in refs],
+            "subTasks": [
+                SubTaskRef(number=str(i), name=f"Master {i}", status="Completed", masterRef=ref)
+                for i, ref in enumerate(refs)
+            ],
+        }
+    )
+    write_task_doc(world.tasks / "sprint", sprint)
+    return refs
+
+
+def test_fifteen_master_preview_bounded_and_exact(world):
+    refs = _fifteen_master_world(world)
+    before = world.snapshot()
+    preview = world.archive(dry_run=True)
+    assert preview["ok"] and preview["state"] == "would-archive"
+    assert len(preview["wouldChange"]) <= 16
+    assert len(preview["wouldWrite"]) <= 16
+    assert preview["sprintArchive"]["moveOrder"][0] == "sprint"
+    assert len(preview["sprintArchive"]["moveOrder"]) == 16
+    assert {entry["masterRef"]["path"] for entry in preview["archivedMasters"]} == {
+        ref.path for ref in refs
+    }
+    assert len(preview["taskArchive"]["cleanups"]) == 16
+    assert world.snapshot() == before
+    result = world.archive()
+    assert result["ok"] and result["state"] == "archived"
+    for ref in refs:
+        assert (world.tasks / "0_archive" / Path(ref.path).parent / "task.json").is_file()
+    repeat = world.archive(dry_run=True)
+    assert repeat["ok"] and repeat["state"] == "archived"
+    assert repeat["wouldChange"] == []
+
+
+def test_shared_keeper_preview_and_hook_failure_preview(world):
+    other = _master(identity="other", orchestrates=["master-b"]).model_copy(
+        update={
+            "status": "inProgress",
+            "subTasks": [
+                SubTaskRef(number="0", name="Shared", status="inProgress", masterRef=world.refs[1])
+            ],
+        }
+    )
+    write_task_doc(world.tasks / "other-sprint", other)
+    preview = world.archive(dry_run=True)
+    assert preview["ok"] and preview["state"] == "would-archive"
+    assert [entry["masterRef"]["path"] for entry in preview["stayedMasters"]] == [
+        "master-b/task.json"
+    ]
+    moves = [change for change in preview["wouldChange"] if change.startswith("task folder: move")]
+    assert len(moves) == 2
+    assert all("master-b" not in change for change in moves)
+    result = world.archive()
+    assert result["ok"] and (world.tasks / "master-b").is_dir()
+
+    world2 = ArchiveWorld(world.coord.parent / "hook-preview")
+    hook_notes = world2.tasks / "master-a" / "notes"
+    hook_notes.mkdir()
+    for name in ("a.sqlite", "b.sqlite"):
+        connection = sqlite3.connect(hook_notes / name)
+        connection.executescript(
+            "CREATE TABLE invariant (id TEXT); CREATE TABLE invariant_revision (id TEXT)"
+        )
+        connection.close()
+    failed = world2.tasks / "0_archive" / "master-a" / "notes" / "b.sqlite"
+    unlink = Path.unlink
+
+    def partial_delete(path, *args, **kwargs):
+        if path == failed:
+            raise OSError("dataset is busy")
+        return unlink(path, *args, **kwargs)
+
+    with patch.object(Path, "unlink", autospec=True, side_effect=partial_delete):
+        failed_run = world2.archive()
+        assert not failed_run["ok"]
+        assert failed_run["state"] == "archived-with-hook-failures"
+        preview = world2.archive(dry_run=True)
+        assert preview["state"] == "would-clean-up"
+        assert any("delete 1" in change for change in preview["wouldChange"])
+        assert len(preview["wouldChange"]) <= 16
+        assert len(preview["wouldWrite"]) <= 16

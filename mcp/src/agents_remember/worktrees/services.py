@@ -50,6 +50,7 @@ class CitationGuardPort(Protocol):
         contract: WorktreeContract,
         *,
         requested_contract_path: Path,
+        completed_contract_with_remains: bool = False,
     ) -> AbstractContextManager[TerminalGuard]: ...
 
 

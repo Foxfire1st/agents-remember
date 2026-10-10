@@ -67,6 +67,7 @@ from .task_execution_topology import (
     verify_sprint_judgment_ids,
 )
 from .task_master_retirement import retire_master
+from .task_sprint_archive import archive_sprint
 from .task_sprint_candidates import SprintLinkageError, _detach_candidate
 from .task_sprint_context import (
     SprintLinkageRequest,
@@ -79,7 +80,13 @@ from .task_sprint_context import (
     _validate_candidate,
 )
 
-SPRINT_LINKAGE_OPERATIONS = ("attach_master", "detach_master", "retire_master", "linkage_report")
+SPRINT_LINKAGE_OPERATIONS = (
+    "attach_master",
+    "detach_master",
+    "retire_master",
+    "archive_sprint",
+    "linkage_report",
+)
 
 
 @dataclass(frozen=True)
@@ -150,6 +157,8 @@ def sprint_linkage_operation(operation: str, call: SprintLinkageCall) -> dict[st
     )
     if operation == "retire_master":
         return retire_master(request)
+    if operation == "archive_sprint":
+        return archive_sprint(request)
     if operation == "attach_master":
         return attach_master(request)
     if operation == "detach_master":
