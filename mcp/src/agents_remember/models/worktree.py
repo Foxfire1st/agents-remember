@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
-from agents_remember.kernel.coordination_context.models import MemoryMode
+from agents_remember.kernel.memory_mode import ReadableMemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
 from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
@@ -274,7 +274,9 @@ class WorktreeSummary(StrictResponseModel):
     leafId: str | None = None
     kind: str | None = None
     workflowKind: WorkflowKind | None = None
-    memoryMode: MemoryMode | None = None
+    # The readable vocabulary, not the startable one: an existing contract that
+    # carries the removed `disabled` mode is shown as it is today (MIK-R50 R3a).
+    memoryMode: ReadableMemoryMode | None = None
     worktreeGroup: str | None = None
     codeWorktree: str | None = None
     codeWorktreeExists: bool | None = None

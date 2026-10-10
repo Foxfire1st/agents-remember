@@ -20,6 +20,7 @@ from agents_remember.tasks.store import (
     write_task_docs,
 )
 
+from .disabled_memory import opt_out_result_fields, subject_for_contract
 from .integration.lifecycle.lifecycle_enclosure_terminal import (
     restartable_predecessor_contract,
 )
@@ -760,6 +761,22 @@ def _series_start_guidance(plan: _SeriesReopenPlan, summary: str) -> dict[str, o
 def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> WorktreeCommandResult:
     """Reopen one terminal atomic series as a single journaled, CAS-guarded operation."""
 
+    if contract.memory_mode != "external":
+        # A series contract that carries the removed mode is reopened nowhere
+        # (MIK-R50 R3c): the way out is the new-master escape, not a reset.
+        fields = opt_out_result_fields(
+            subject_for_contract(contract),
+            "task_reopen",
+            "series",
+        )
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": fields["status"],
+                "summary": fields["detail"],
+                **fields,
+            },
+        )
     plan = _series_reopen_plan(contract)
     if isinstance(plan, WorktreeCommandResult):
         return plan

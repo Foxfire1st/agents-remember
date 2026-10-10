@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
+from agents_remember.errors import MemoryOptOutRefusedError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import GitRunnerOptions
 from agents_remember.tasks import TaskDocument, read_task_doc
@@ -22,6 +23,7 @@ from agents_remember.worktrees.activation.atomic_series_activation_transaction i
     atomic_series_activation_input_refusal,
     reconcile_selected_series_under_authority,
 )
+from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
     integration_surfaces,
@@ -61,6 +63,7 @@ from agents_remember.worktrees.scheduling_mode import (
 )
 from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
     leaf_enclosure_path,
     resolve_active_task_root,
     series_contract_path,
@@ -740,6 +743,62 @@ def _declared_integration_source_branch(context, task_root: Path) -> str:
     return branch
 
 
+def _tombstone_successor_series(
+    context, args: WorktreeArgs, task_root: Path, configured_memory: Path | None
+) -> WorktreeContract | None:
+    """Admit a restart-after-abandon under its still-disabled parent series.
+
+    MIK-R50 rule 3 plus the abandon-terminal-state ruling: the restart at the
+    address of an abandoned (or reopened) tombstone, requesting no memory
+    directive, is that tombstone's authorized successor — the live disabled
+    parent series admits it instead of refusing the new-master escape
+    (L50-CODE-R1-F01 keeps refusing genuinely new leaves, which have no
+    tombstone). No mode conversion is built and the series file is untouched;
+    only this start's parent resolution uses the admitted series.
+    Returns None when this is not such a restart (normal admission applies).
+    """
+    if args.memory_mode is not None or args.memory_choice is not None or args.topology is not None:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        leaf_path = leaf_enclosure_path(task_root, leaf_id)
+        tombstone = load_contract(leaf_path) if leaf_path.exists() else None
+        series_path = series_contract_path(task_root)
+        series = load_contract(series_path) if series_path.exists() else None
+    except (
+        AssertionError,
+        LeafRefResolutionError,
+        TaskResolutionError,
+        ContractError,
+        OSError,
+    ):
+        return None
+    if tombstone is None or tombstone.cleanup not in ("abandoned", "reopened"):
+        return None
+    if (
+        series is None
+        or series.kind != "series"
+        or series.cleanup in TERMINAL_SERIES_CLEANUP
+        or series.memory_mode == "external"
+    ):
+        # Missing/non-series/terminal series fall through to normal admission;
+        # an external series needs no bypass.
+        return None
+    # The series must be the live disabled parent of this lane: same code
+    # repo, same configured memory root, same task root — mode excepted.
+    try:
+        same_lane = (
+            series.code_repo_path.resolve() == context.code_repository_root.resolve()
+            and configured_memory is not None
+            and series.memory_repo_path is not None
+            and series.memory_repo_path.resolve() == configured_memory.resolve()
+            and series.task_root.resolve() == task_root.resolve()
+        )
+    except OSError:
+        return None
+    return series if same_lane else None
+
+
 def _parent_series_contract(
     context, args: WorktreeArgs, memory_mode: str
 ) -> WorktreeContract | WorktreeCommandResult | None:
@@ -777,6 +836,9 @@ def _parent_series_contract(
             "choose a distinct worktree_name or work_branch"
         )
     configured_memory = _start_memory_repo(context, memory_mode)
+    tombstone_series = _tombstone_successor_series(context, args, task_root, configured_memory)
+    if tombstone_series is not None:
+        return tombstone_series
     series = ensure_master_series_contract(
         MasterSeriesContractSpec(
             coordination_root=context.coordination_root,
@@ -837,6 +899,19 @@ def build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | Wor
         return _build_start_contract(context, args)
     except LeafRefResolutionError as exc:
         return invalid_leaf_ref_result(exc)
+    except MemoryOptOutRefusedError as exc:
+        # A direct caller that names the removed mode meets the same opt-out
+        # refusal the top of ``worktree_start`` answers (MIK-R50): the mode, the
+        # reason and the action, never the internal text or invalid-request.
+        fields = exc.response_fields()
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": fields["status"],
+                "summary": fields["detail"],
+                **fields,
+            },
+        )
     except ContractError as exc:
         return invalid_contract_request_result(exc)
 
@@ -966,6 +1041,33 @@ def _existing_master_series_admission_refusal(
     try:
         _existing_master_series_contract(spec)
     except MasterSeriesContractAdmissionError as error:
+        if (
+            error.existing_contract is not None
+            and error.existing_contract.memory_mode != "external"
+        ):
+            # A restart-after-abandon at a tombstone address is that tombstone's
+            # authorized successor: the live disabled parent admits it (MIK-R50
+            # rule 3 + abandon-terminal-state ruling). Genuinely new leaves have
+            # no tombstone and keep the refusal below.
+            if _tombstone_successor_series(context, args, task_root, memory_repo) is not None:
+                return None
+            # Under a master whose series contract carries the removed mode, a
+            # leaf start is refused with the series and the new-master way out
+            # (MIK-R50 R3f) -- never "correct the named edge". This packet builds
+            # no conversion of a contract from disabled to external.
+            fields = opt_out_result_fields(
+                subject_for_contract(error.existing_contract),
+                "atomic leaf start",
+                "series",
+            )
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": fields["status"],
+                    "summary": fields["detail"],
+                    **fields,
+                },
+            )
         return _master_series_admission_refusal(
             spec,
             error,
@@ -988,7 +1090,10 @@ def _build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | Wo
     if restamp_block is not None:
         return restamp_block
     repo = context.code_repository_root
-    memory_mode = args.memory_mode or context.memory_mode
+    # A start that names no mode uses ``external`` (MIK-R50): it never takes
+    # ``disabled`` from an abandoned or reopened contract at the leaf's address,
+    # and never from the master's series contract.
+    memory_mode = args.memory_mode or "external"
     memory_repo = _start_memory_repo(context, memory_mode)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
     admission_refusal = _existing_master_series_admission_refusal(

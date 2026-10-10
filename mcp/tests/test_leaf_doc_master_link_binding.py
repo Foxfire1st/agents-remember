@@ -152,7 +152,7 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
                 worktree_name=LEAF_ID,
                 leaf_id=LEAF_ID,
                 workflow_kind="light-task",
-                memory_mode="disabled",
+                memory_mode="external",
                 skip_provider_setup=True,
                 lifecycle_id=lifecycle_id,
             )

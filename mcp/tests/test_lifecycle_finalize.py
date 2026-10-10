@@ -64,17 +64,25 @@ class _FinalizeFixtures(unittest.TestCase):
         git(code_repo, "checkout", "main")
         if landed:
             git(code_repo, "merge", "--ff-only", "ar/task")
+        memory_repo = self.tmp / f"memory-{fixture_name}"
+        memory_commit = init_repo(memory_repo, "main")
         contract = default_contract(
             ContractTask(
                 name=fixture_name,
                 repo_name="repo-a",
                 coordination_root=self.tmp / "ar-coordination",
                 workflow_kind="light-task",
-                memory_mode="disabled",
+                memory_mode="external",
             ),
             leaf=LeafIdentity(worktree_name=fixture_name, leaf_id="14"),
             code=RepoBranchPlan(
                 repo_path=code_repo,
+                source_branch="main",
+                work_branch="ar/task",
+                base_commit=code_base,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=self.tmp / f"memory-{fixture_name}",
                 source_branch="main",
                 work_branch="ar/task",
                 base_commit=code_base,
@@ -87,6 +95,8 @@ class _FinalizeFixtures(unittest.TestCase):
             "code_commit": code_commit,
             "integration_status": "completed",
             "integrated_code_commit": code_commit,
+            "memory_content_commit": memory_commit,
+            "integrated_memory_content_commit": memory_commit,
             "cleanup": cleanup,
             **over,
         }

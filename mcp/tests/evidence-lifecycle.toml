@@ -470,6 +470,8 @@ consumers = [
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_branch_authority.py",
   "mcp/tests/test_memory_mode_removal.py",
+  "mcp/tests/test_memory_opt_out_refused_routes.py",
+  "mcp/tests/test_memory_opt_out_refused_start.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
@@ -1030,6 +1032,7 @@ consumers = [
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_capsule_serving.py",
+  "mcp/tests/test_capsule_serving_surface.py",
   "mcp/tests/test_catalog_selection.py",
   "mcp/tests/test_causal_failure_localization.py",
   "mcp/tests/test_causal_quality_preflight.py",
@@ -1252,6 +1255,8 @@ consumers = [
   "mcp/tests/test_memory_incremental_scope_compiler.py",
   "mcp/tests/test_memory_ledger.py",
   "mcp/tests/test_memory_mode_removal.py",
+  "mcp/tests/test_memory_opt_out_refused_routes.py",
+  "mcp/tests/test_memory_opt_out_refused_start.py",
   "mcp/tests/test_memory_quality.py",
   "mcp/tests/test_memory_quality_is_independent_of_the_closeout_plane.py",
   "mcp/tests/test_memory_quality_runs.py",
@@ -1945,6 +1950,25 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_eve_adapter.py",
   "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/memory_opt_out_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "memory-opt-out-refusal-test-port"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "scratch opt-out refusal worlds and assertions shared once by the split rule modules"
+introduced_by = "260928-MIK-L50"
+lifetime = "permanent"
+permanence_rationale = "The helper owns the scratch opt-out worlds and refusal assertions shared once by the start and routes rule modules; a copy would drift."
+replacement_contract = "node:mcp/tests/test_memory_opt_out_refused_start.py::test_start_refuses_disabled_where_knowledge_exists"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_memory_opt_out_refused_routes.py",
+  "mcp/tests/test_memory_opt_out_refused_start.py",
 ]
 
 [[artifact]]

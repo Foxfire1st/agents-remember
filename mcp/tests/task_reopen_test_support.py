@@ -36,6 +36,7 @@ def _external_memory_repo(
     branch: str,
     *,
     code_commit: str,
+    work_branch: str = "ar/260698_demo-series",
 ) -> tuple[RepoBranchPlan, Path]:
     """One external memory repository with a real ledger, and the branch plan addressing it.
 
@@ -96,7 +97,7 @@ def _external_memory_repo(
         RepoBranchPlan(
             repo_path=memory_repo,
             source_branch=branch,
-            work_branch="ar/260698_demo-series",
+            work_branch=work_branch,
             base_commit=memory_base,
         ),
         memory_repo,
@@ -107,7 +108,7 @@ def _completed_series_contract(
     workspace: Path,
     *,
     repo_name: str = "repo-a",
-    memory_mode: str = "disabled",
+    memory_mode: str = "external",
     sprint: bool = False,
 ) -> WorktreeContract:
     """A terminal atomic series: landed, cleaned up, its enclosure root collected.
@@ -251,12 +252,19 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
     base = init_repo(code_repo, "main")
     git(code_repo, "branch", "super", "main")
     git(code_repo, "branch", "ar/01-demo-leaf", "super")
+    memory_plan = _external_memory_repo(
+        coordination_root,
+        "repo-a",
+        "super",
+        code_commit=base,
+        work_branch="ar/01-demo-leaf",
+    )[0]
     task = ContractTask(
         name="260698_demo-series",
         repo_name="repo-a",
         coordination_root=coordination_root,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
     )
     contract = default_contract(
         task,
@@ -271,6 +279,7 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
             work_branch="ar/01-demo-leaf",
             base_commit=base,
         ),
+        memory=memory_plan,
     )
     contract = replace(
         contract,
@@ -278,8 +287,10 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
         approved_for_commit=True,
         closeout_status="completed",
         code_commit=base,
+        memory_content_commit=memory_plan.base_commit,
         integration_status="completed",
         integrated_code_commit=base,
+        integrated_memory_content_commit=memory_plan.base_commit,
         cleanup="completed",
     )
     write_contract(contract.contract_path, contract)

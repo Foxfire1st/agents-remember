@@ -70,7 +70,7 @@ def _contract(
         task_name=leaf_id,
         repo_name="repo",
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=root,
         task_root=root / "tasks",
         contract_path=root / "enclosures" / leaf_id / contract_name,

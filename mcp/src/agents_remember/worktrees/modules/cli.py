@@ -141,13 +141,23 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--work-branch")
     start.add_argument(
         "--memory-mode",
-        metavar="external|disabled",
+        metavar="external",
         help=(
-            "Memory mode for the started task: `external` or `disabled`. An unsupported "
-            "value is refused by name before any worktree is created."
+            "Memory mode for the started task: `external` is the only startable mode. "
+            "Memory cannot be disabled for a task: naming the removed `disabled` mode is "
+            "refused by name (status `memory-opt-out-refused`) before any worktree is created."
         ),
     )
-    start.add_argument("--memory-choice", choices=("disabled-memory",))
+    start.add_argument(
+        "--memory-choice",
+        help=(
+            "Removed recovery answer: naming `disabled-memory` is refused by name (status "
+            "`memory-opt-out-refused`) before any worktree is created. Memory cannot be "
+            "disabled for a task. The removed value is deliberately not offered as a "
+            "choice: it still parses so the start can refuse it by name, and any other "
+            "answer is an invalid request."
+        ),
+    )
     start.add_argument("--custom-instruction")
     start.add_argument("--skip-provider-setup", action="store_true")
     start.add_argument("--provider-timeout", type=int, default=1800)

@@ -13,6 +13,11 @@ from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.disabled_memory import (
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+    opt_out_refusal_result,
+)
 from agents_remember.worktrees.integration.atomic_series_landing import (
     AtomicLandingBlocked,
     require_atomic_landing_authority,
@@ -193,8 +198,10 @@ def validate_integrate_contract(contract: WorktreeContract) -> None:
         require_clean(contract.code_worktree, "code worktree")
         if head_commit(contract.code_worktree) != contract.code_commit:
             raise RuntimeError("code worktree HEAD does not match closeout code_commit")
-    if contract.memory_mode == "external":
-        validate_integrate_memory_contract(contract)
+    if is_disabled_contract(contract):
+        # No integration lands code without its memory side (MIK-R50 R4b).
+        raise RuntimeError(opt_out_detail_for_contract(contract, "worktree_integrate"))
+    validate_integrate_memory_contract(contract)
 
 
 def validate_integrate_memory_contract(contract: WorktreeContract) -> None:
@@ -246,8 +253,13 @@ def _integration_lineage_block(
 
 
 def _integration_sources_moved_block(
-    contract: WorktreeContract, sources: IntegrationSources
+    contract: WorktreeContract, sources: IntegrationSources, *, operation: str
 ) -> WorktreeCommandResult | None:
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never lands (MIK-R50 R4b):
+        # the entry refuses it first, and this function refuses it itself for
+        # a direct caller rather than judging only the code source.
+        return opt_out_refusal_result(contract, operation)
     current_code = branch_commit(contract.code_repo_path, contract.code_source_branch)
     moved = current_code != sources.current_code_source
     current_memory = ""
@@ -273,24 +285,31 @@ def _integration_sources_moved_block(
 
 
 def _integration_source_state_block(
-    contract: WorktreeContract, sources: IntegrationSources
+    contract: WorktreeContract, sources: IntegrationSources, *, operation: str
 ) -> WorktreeCommandResult | None:
     """Re-prove transitive ancestry and the exact source-tip snapshot."""
-    return _integration_sources_moved_block(contract, sources) or _integration_lineage_block(
-        contract, persist=True
+    return _integration_sources_moved_block(contract, sources, operation=operation) or (
+        _integration_lineage_block(contract, persist=True)
     )
 
 
 def _integration_replay_requirements(contract: WorktreeContract) -> IntegrationSources:
     """The source state for the routes whose candidate is the contract's closeout cell."""
 
-    return _replay_requirements(contract, contract.code_commit, contract.memory_content_commit)
+    return _replay_requirements(
+        contract,
+        contract.code_commit,
+        contract.memory_content_commit,
+        operation="worktree_integrate",
+    )
 
 
 def _replay_requirements(
     contract: WorktreeContract,
     code_commit: str,
     memory_content_commit: str,
+    *,
+    operation: str,
 ) -> IntegrationSources:
     """One exact reading of both sources and their replay verdicts for one candidate.
 
@@ -299,6 +318,11 @@ def _replay_requirements(
     capture for an unfinished one) and not in how its ancestry is judged.
     """
 
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never lands (MIK-R50 R4b):
+        # the entry refuses it first, and this function refuses it itself for
+        # a direct caller rather than judging only the code ancestry.
+        raise RuntimeError(opt_out_detail_for_contract(contract, operation))
     current_code_source = branch_commit(contract.code_repo_path, contract.code_source_branch)
     current_memory_source = ""
     code_replay_required = not is_ancestor(
@@ -438,21 +462,21 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
             "checkpoint landing is defined only for an atomic series contract; a leaf lands "
             "through worktree_integrate"
         )
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never lands (MIK-R50 R4b):
+        # the entry refuses it first, and this function refuses it itself for
+        # a direct caller rather than skipping the memory-side obligations.
+        raise RuntimeError(opt_out_detail_for_contract(contract, "worktree_checkpoint_landing"))
     require_series_checkpoint_authority(contract)
     refs = capture_series_checkpoint_refs(contract)
-    if contract.memory_mode == "external":
-        if not refs.memory_content_commit:
-            raise RuntimeError(
-                "external-memory checkpoint landing requires the captured memory ref"
-            )
-        assert contract.memory_repo_path is not None
-        if (
-            branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-            != refs.memory_content_commit
-        ):
-            raise RuntimeError(
-                "atomic memory ref does not match the captured checkpoint memory commit"
-            )
+    if not refs.memory_content_commit:
+        raise RuntimeError("external-memory checkpoint landing requires the captured memory ref")
+    assert contract.memory_repo_path is not None
+    if (
+        branch_commit(contract.memory_repo_path, contract.memory_work_branch)
+        != refs.memory_content_commit
+    ):
+        raise RuntimeError("atomic memory ref does not match the captured checkpoint memory commit")
     if branch_commit(contract.code_repo_path, contract.code_work_branch) != refs.code_commit:
         raise RuntimeError("atomic code ref does not match the captured checkpoint candidate")
     return CheckpointLanding(
@@ -461,7 +485,12 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
             code=refs.code_commit,
             memory_content=refs.memory_content_commit,
         ),
-        sources=_replay_requirements(contract, refs.code_commit, refs.memory_content_commit),
+        sources=_replay_requirements(
+            contract,
+            refs.code_commit,
+            refs.memory_content_commit,
+            operation="worktree_checkpoint_landing",
+        ),
     )
 
 
@@ -484,8 +513,9 @@ def _require_memory_ancestry(
 ) -> None:
     """Apply the same real-memory ancestry proof at preview and protected ref movement."""
 
-    if contract.memory_mode != "external":
-        return
+    if is_disabled_contract(contract):
+        # No landing proves ancestry without its memory side (MIK-R50 R4b).
+        raise RuntimeError(opt_out_detail_for_contract(contract, "the landing"))
     require_integrated_memory_ancestry(
         contract,
         commits,
@@ -567,14 +597,20 @@ def _integrated_code_commit(
 def _integrated_memory_commit(
     contract: WorktreeContract,
     current_memory_source: str,
+    *,
+    operation: str,
 ) -> str:
     memory_commit = contract.memory_content_commit
-    if contract.memory_mode == "external":
-        assert contract.memory_repo_path is not None
-        if not is_ancestor(contract.memory_repo_path, current_memory_source, memory_commit):
-            raise RuntimeError(
-                "integrated memory commit is not a fast-forward from the current memory source branch"
-            )
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never lands its memory side
+        # (MIK-R50 R4b): the entry refuses it first, and this function refuses
+        # it itself for a direct caller rather than skipping the ancestry proof.
+        raise RuntimeError(opt_out_detail_for_contract(contract, operation))
+    assert contract.memory_repo_path is not None
+    if not is_ancestor(contract.memory_repo_path, current_memory_source, memory_commit):
+        raise RuntimeError(
+            "integrated memory commit is not a fast-forward from the current memory source branch"
+        )
     return memory_commit
 
 
@@ -625,6 +661,9 @@ def integrate_result(
     contract = current_contract
     if args.contract_path.resolve() != contract.contract_path.resolve():
         raise RuntimeError("integration contract path does not match the passed current contract")
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode never integrates (MIK-R50 R4a).
+        return opt_out_refusal_result(contract, "worktree_integrate")
     if contract.kind == "series":
         require_series_contract_authority(contract, operation="worktree_integrate")
     else:
@@ -667,6 +706,9 @@ def checkpoint_landing_result(
     contract = current_contract
     if args.contract_path.resolve() != contract.contract_path.resolve():
         raise RuntimeError("checkpoint contract path does not match the passed current contract")
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode never checkpoint-lands (MIK-R50 R4a).
+        return opt_out_refusal_result(contract, "worktree_checkpoint_landing")
     require_series_contract_authority(contract, operation="worktree_checkpoint_landing")
     integration_targets(contract)
     landing = checkpoint_landing_eligibility(contract)
@@ -748,7 +790,15 @@ def _handover_or_apply_integration(
             },
         )
 
-    blocked = _knowledge_gate_block(contract, args, _route_commits(contract, checkpoint), sources)
+    blocked = _knowledge_gate_block(
+        contract,
+        args,
+        _route_commits(contract, checkpoint),
+        sources,
+        operation=(
+            "worktree_checkpoint_landing" if checkpoint is not None else "worktree_integrate"
+        ),
+    )
     if blocked is not None:
         return blocked
 
@@ -782,6 +832,8 @@ def _knowledge_gate_block(
     args: WorktreeArgs,
     commits: IntegratedCommits,
     sources: IntegrationSources,
+    *,
+    operation: str,
 ) -> WorktreeCommandResult | None:
     """MIK-R09 rule 4: a master or checkpoint landing waits for valid, current knowledge.
 
@@ -789,10 +841,14 @@ def _knowledge_gate_block(
     every entry at a path the master's net code diff changed must not be stale at its code commit.
     Preview and apply refuse alike. Unconverted memory is not gated; the cutover lock refuses it
     instead -- for a leaf's integration as well -- once the repository holds converted memory
-    (MIK-R09 rule 6).
+    (MIK-R09 rule 6). A contract that carries the removed mode never reaches the gate: the
+    route entry refuses it with the opt-out refusal first (MIK-R50 R4a), and this
+    function refuses it itself for a direct caller (MIK-R50 R4b).
     """
 
     if contract.memory_mode != "external" or contract.memory_repo_path is None:
+        if contract.memory_mode != "external":
+            return opt_out_refusal_result(contract, operation)
         return None
     if contract.kind != "series":
         refusal = _leaf_landing_lock(contract, commits, sources)
@@ -915,7 +971,7 @@ def _publish_integration_edge(
         require_series_contract_authority(current, operation=operation)
     else:
         require_ordinary_worktree(current, operation=operation)
-    blocked = _integration_source_state_block(current, publication.sources)
+    blocked = _integration_source_state_block(current, publication.sources, operation=operation)
     if blocked is not None:
         return blocked
     snapshot = prepare_integration_ref_move(
@@ -1019,22 +1075,29 @@ def _prepare_integration_commits(
     # lands those rather than re-deriving them from closeout cells it does not have.
     if checkpoint is not None:
         return checkpoint.commits
-    return _prepare_fresh_integration_commits(contract, args, sources)
+    return _prepare_fresh_integration_commits(
+        contract,
+        args,
+        sources,
+        operation="worktree_integrate",
+    )
 
 
 def _prepare_fresh_integration_commits(
     contract: WorktreeContract,
     _args: WorktreeArgs,
     sources: IntegrationSources,
+    *,
+    operation: str,
 ) -> WorktreeCommandResult | IntegratedCommits:
     integrated_code_commit, blocked = _integrated_code_commit(contract, sources.current_code_source)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
-    blocked = _integration_source_state_block(contract, sources)
+    blocked = _integration_source_state_block(contract, sources, operation=operation)
     if blocked is not None:
         return blocked
     integrated_memory_content_commit = _integrated_memory_commit(
-        contract, sources.current_memory_source
+        contract, sources.current_memory_source, operation=operation
     )
     commits = IntegratedCommits(
         code=integrated_code_commit,

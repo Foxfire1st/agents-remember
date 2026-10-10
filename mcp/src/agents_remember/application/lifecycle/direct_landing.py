@@ -70,7 +70,9 @@ def direct_landing_tool(
         require_direct_landing_enabled(config)
     except DirectLandingError as exc:
         return _direct_error_payload(exc, recovery={})
-    configured = admit_configured_contract(config, request.contract_path)
+    configured = admit_configured_contract(
+        config, request.contract_path, operation="direct_landing"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return _direct_landing_refusal(
             project_configured_contract_refusal(

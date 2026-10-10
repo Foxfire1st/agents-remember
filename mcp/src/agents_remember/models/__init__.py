@@ -1,5 +1,6 @@
 """Pydantic response contracts for Agents Remember MCP tools."""
 
+from agents_remember.kernel.memory_mode import MemoryMode
 from agents_remember.models import (
     conversations as conversations,  # curated package surface
 )
@@ -70,7 +71,6 @@ from agents_remember.models.worktree import (
     HumanReviewStatus,
     IntegrationStatus,
     LifecycleStatus,
-    MemoryMode,
     NextOperation,
     NextTool,
     WorkflowKind,

@@ -126,16 +126,15 @@ def _publish_completed_closeout_fixture(
     return load_contract(finalized.contract_path)
 
 
-def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
+def _authority_fixture(root: Path, *, external_memory: bool = True) -> Any:
     fixture: Any = _fixture(
         root,
-        external_memory=external_memory,
         publish_locations=False,
         selected_profile=True,
     )
     configured_code = root / "repo"
     configured_code.symlink_to(fixture.code_repo, target_is_directory=True)
-    memory_mode = "external" if external_memory else "disabled"
+    memory_mode = "external"
     if fixture.leaf_contract.memory_repo_path is not None:
         configured_memory = fixture.coordination / "memory-repos" / "ar-repo"
         configured_memory.parent.mkdir(parents=True, exist_ok=True)
@@ -161,33 +160,30 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
     task_root = fixture.coordination / "tasks" / "repo"
     for repo in filter(None, (fixture.code_repo, fixture.leaf_contract.memory_repo_path)):
         _git(repo, "branch", "ar/atomic-two", "super")
-    if external_memory:
-        memory_repo = fixture.leaf_contract.memory_repo_path
-        assert memory_repo is not None
-        code_head = _git(fixture.code_repo, "rev-parse", "ar/master")
-        _git(memory_repo, "switch", "ar/master")
-        (memory_repo / "base.md").write_text("# Base memory\n", encoding="utf-8")
-        prepare_memory_cache(memory_repo)
-        _git(memory_repo, "add", "-A")
-        _git(
-            memory_repo,
-            "commit",
-            "-m",
-            render_memory_content_message("base memory content", code_head),
-        )
-        refresh_memory_cache(memory_repo, repo_name="repo")
-        _git(memory_repo, "branch", "-f", "leaf", "ar/master")
-        _git(memory_repo, "branch", "-f", "super", "ar/master")
-        _git(memory_repo, "switch", "super")
+    memory_repo = fixture.leaf_contract.memory_repo_path
+    assert memory_repo is not None
+    code_head = _git(fixture.code_repo, "rev-parse", "ar/master")
+    _git(memory_repo, "switch", "ar/master")
+    (memory_repo / "base.md").write_text("# Base memory\n", encoding="utf-8")
+    prepare_memory_cache(memory_repo)
+    _git(memory_repo, "add", "-A")
+    _git(
+        memory_repo,
+        "commit",
+        "-m",
+        render_memory_content_message("base memory content", code_head),
+    )
+    refresh_memory_cache(memory_repo, repo_name="repo")
+    _git(memory_repo, "branch", "-f", "leaf", "ar/master")
+    _git(memory_repo, "branch", "-f", "super", "ar/master")
+    _git(memory_repo, "switch", "super")
     master_contract = replace(
         fixture.master_contract,
         memory_mode=memory_mode,
         code_work_branch="ar/master",
-        memory_work_branch=("ar/master" if external_memory else ""),
+        memory_work_branch="ar/master",
         memory_base_commit=(
             _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
-            if external_memory
-            else ""
         ),
     )
     write_contract(master_contract.contract_path, master_contract)
@@ -203,11 +199,9 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         fixture.leaf_contract,
         memory_mode=memory_mode,
         code_source_branch="ar/master",
-        memory_source_branch=("ar/master" if external_memory else ""),
+        memory_source_branch="ar/master",
         memory_base_commit=(
             _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
-            if external_memory
-            else ""
         ),
     )
     write_contract(fixture.leaf_contract.contract_path, fixture.leaf_contract)
@@ -256,6 +250,7 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "main"))
         _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     memory_repo = fixture.leaf_contract.memory_repo_path
+    assert memory_repo is not None
     sibling = default_series_contract(
         ContractTask(
             "atomic-two",
@@ -270,15 +265,11 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
             "ar/atomic-two",
             _git(fixture.code_repo, "rev-parse", "super"),
         ),
-        memory=(
-            RepoBranchPlan(
-                memory_repo,
-                "super",
-                "ar/atomic-two",
-                _git(memory_repo, "rev-parse", "super"),
-            )
-            if memory_repo is not None
-            else None
+        memory=RepoBranchPlan(
+            memory_repo,
+            "super",
+            "ar/atomic-two",
+            _git(memory_repo, "rev-parse", "super"),
         ),
         task_root=task_root / "atomic-two",
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     sync_selected_atomic_series_under_authority,
 )
+from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
 from agents_remember.worktrees.integration.integration_branch_authority import require_sync_worktree
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -29,6 +30,9 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
     fetch: dict[str, object] = {}
     try:
         contract = load_contract_from_args(args)
+        if is_disabled_contract(contract):
+            # A contract that carries the removed mode never syncs (MIK-R50 R4a).
+            return opt_out_refusal_result(contract, "worktree_sync")
         require_sync_worktree(contract)
         if contract.kind == "leaf" and not contract.code_worktree.exists():
             return WorktreeCommandResult(

@@ -869,7 +869,11 @@ def _repository_sides(contract: WorktreeContract) -> tuple[_RepositorySide, ...]
             work_branch=contract.code_work_branch,
         )
     ]
-    if contract.memory_mode == "external":
+    if contract.memory_mode == "external" or contract.memory_repo_path is not None:
+        # Sides follow repository topology, not the mode label: a series that
+        # carries a memory repository participates in memory even when its mode
+        # is removed (MIK-R50 rule 3 tombstone succession reads the same sides).
+        # An external contract without a repository path stays malformed.
         if contract.memory_repo_path is None:
             raise RuntimeError("external-memory branch authority requires a repository path")
         if _repository_identity(contract.memory_repo_path, "memory") == _repository_identity(

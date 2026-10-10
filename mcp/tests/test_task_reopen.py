@@ -356,6 +356,16 @@ class SeriesReopenTests(unittest.TestCase):
         git(contract.code_repo_path, "checkout", "-q", contract.code_work_branch)
         landed = commit_file(contract.code_repo_path, "landed.txt", "landed\n", "Land the work")
         git(contract.code_repo_path, "checkout", "-q", contract.code_source_branch)
+        # The converted series has two legs: the memory branch carries its own
+        # landed work exactly as the code branch does, so the resume advances
+        # it instead of refusing an unprovable re-cut.
+        memory_repo = contract.memory_repo_path
+        self.assertIsNotNone(memory_repo)
+        assert memory_repo is not None
+        git(memory_repo, "branch", contract.memory_work_branch)
+        git(memory_repo, "checkout", "-q", contract.memory_work_branch)
+        commit_file(memory_repo, "landed.txt", "landed\n", "Land the memory work")
+        git(memory_repo, "checkout", "-q", contract.memory_source_branch)
         write_contract(contract.contract_path, reopen_module._reopened_contract(contract))
         self.assertEqual(load_contract(contract.contract_path).cleanup, "reopened")
 
@@ -424,12 +434,26 @@ class SeriesReopenTests(unittest.TestCase):
 
         self.assertEqual((result.returncode, result.payload["state"]), (0, "reopened"))
         self.assertEqual(result.payload["mode"], "publish")
+        # The converted external series has two legs: the live code branch
+        # advances with its landed work while the retired memory branch is
+        # re-cut at its source tip.
+        refs = cast("list[dict[str, object]]", result.payload["seriesRefs"])
+        by_side = {str(ref["side"]): ref for ref in refs}
+        self.assertEqual(sorted(by_side), ["code", "memory"])
         self.assertEqual(
-            [
-                recut["action"]
-                for recut in cast("list[dict[str, object]]", result.payload["seriesRefs"])
-            ],
-            ["advance"],
+            [by_side["code"]["action"], by_side["memory"]["action"]],
+            ["advance", "re-cut"],
+        )
+        self.assertEqual(by_side["code"]["branch"], contract.code_work_branch)
+        self.assertEqual(by_side["code"]["tip"], landed)
+        self.assertEqual(by_side["memory"]["branch"], contract.memory_work_branch)
+        memory_repo = contract.memory_repo_path
+        self.assertIsNotNone(memory_repo)
+        assert memory_repo is not None
+        self.assertEqual(
+            by_side["memory"]["tip"],
+            branch_commit(memory_repo, contract.memory_source_branch),
+            "the retired memory branch is re-cut at the recorded source tip",
         )
         self.assertEqual(
             branch_commit(contract.code_repo_path, contract.code_work_branch),

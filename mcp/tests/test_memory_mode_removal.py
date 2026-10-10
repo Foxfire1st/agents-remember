@@ -1,20 +1,28 @@
-"""The removed ``internal`` memory mode: refused by name, reported, never substituted.
+"""The removed ``internal`` and ``disabled`` memory modes: refused by name, reported, never substituted.
 
 ``internal`` memory -- a repo-sidecar root at ``<code-repository-root>/ar-memory`` -- was removed
-from the product. The supported set is ``external`` and ``disabled``. Three properties are pinned
+from the product. The supported set is ``external`` alone. ``disabled`` memory -- a task that
+runs with no memory at all -- was removed from the product with it (MIK-R50): a task in it
+can be neither closed out, synced, integrated nor landed, and where converted knowledge exists
+invariant work is mandatory (D5), so no task may opt out of memory. Three properties are pinned
 here, and each one names the failure it prevents:
 
-1. **Refused by name.** Every surface that used to accept the vocabulary answers with the typed
-   ``memory-mode-unsupported`` status, carrying the removal, the supported set and the route out.
-   The failure this prevents is the silent substitution: a caller asking for ``internal`` and
-   receiving ``external`` (or a default) without being told the mode is gone.
-2. **Reported, not migrated.** Existing state that records the mode -- a contract file, a settings
-   file, a memory root -- is named by its exact artifact and left byte-identical on disk. The
-   failure this prevents is a silent rewrite of a developer's contract or the deletion of a memory
-   root.
-3. **The supported set is untouched.** ``external`` and ``disabled`` still resolve, still write and
-   still read, in the application layer and through the CLI the developer actually types. The
-   failure this prevents is a removal that takes the working modes with it.
+1. **Refused by name.** Every surface that used to accept the vocabulary answers with a typed
+   status carrying the removal, the supported set and the route out: ``internal`` keeps
+   ``memory-mode-unsupported``, and ``disabled`` is refused with ``memory-opt-out-refused``,
+   which names the true reason (converted knowledge where it exists, removal elsewhere) and
+   the known action. The failure this prevents is the silent substitution: a caller asking
+   for a removed mode and receiving ``external`` (or a default) without being told the mode
+   is gone -- and, for ``disabled``, answering with the ``internal`` text, which would blame
+   a memory root inside the code repository that was never the problem.
+2. **Reported, not migrated.** Existing state that records a removed mode -- a contract file,
+   a settings file, a memory root -- is named by its exact artifact and left byte-identical
+   on disk, except that a contract recording ``disabled`` stays readable where status, attach
+   and guarded abandon need it. The failure this prevents is a silent rewrite of a developer's
+   contract or the deletion of a memory root.
+3. **The supported set is untouched.** ``external`` still resolves, still writes and still
+   reads, in the application layer and through the CLI the developer actually types. The
+   failure this prevents is a removal that takes the working mode with it.
 
 Both sides of every comparison below come from different sources: the expected supported set is
 written out literally here, while the observed set is whatever the raising surface produced.
@@ -44,16 +52,18 @@ from agents_remember.application.lifecycle.lifecycle_operation_location import (
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_docs.task_unstarted_evidence import _contract_fact
 from agents_remember.application.worktree_status import worktree_status_packet
-from agents_remember.errors import MemoryModeUnsupportedError
-from agents_remember.kernel.coordination_context.models import MemoryMode, Topology
+from agents_remember.errors import MemoryModeUnsupportedError, MemoryOptOutRefusedError
 from agents_remember.kernel.coordination_context.paths import (
     infer_topology_from_onboarding_root,
     memory_roots_from_settings,
 )
 from agents_remember.kernel.coordination_context.resolver import detect_coordination_selection
 from agents_remember.kernel.memory_mode import (
+    REMOVED_MEMORY_MODES,
     SUPPORTED_MEMORY_MODES,
     SUPPORTED_TOPOLOGIES,
+    MemoryMode,
+    Topology,
     require_supported_memory_mode,
     require_supported_topology,
 )
@@ -79,6 +89,7 @@ from agents_remember.worktrees.worktree_contract import (
     RepoBranchPlan,
     WorktreeContract,
     default_contract,
+    default_series_contract,
     load_contract,
     write_contract,
 )
@@ -90,9 +101,11 @@ from test_worktree_support import git, init_repo
 
 # The supported set, written here rather than imported, so a change to the vocabulary has to be
 # made in two places and this file cannot silently agree with a mistake.
-EXPECTED_MODES = ("external", "disabled")
+EXPECTED_MODES = ("external",)
 EXPECTED_TOPOLOGIES = ("external",)
-REMOVED = "internal"
+REMOVED_INTERNAL = "internal"
+REMOVED_DISABLED = "disabled"
+REMOVED = (REMOVED_INTERNAL, REMOVED_DISABLED)
 
 
 def _refusal(call) -> MemoryModeUnsupportedError:
@@ -101,17 +114,37 @@ def _refusal(call) -> MemoryModeUnsupportedError:
     return raised.value
 
 
-def _assert_names_the_removal(error: MemoryModeUnsupportedError) -> None:
+def _opt_out_refusal(call) -> MemoryOptOutRefusedError:
+    with pytest.raises(MemoryOptOutRefusedError) as raised:
+        call()
+    return raised.value
+
+
+def _assert_names_the_removal(error: MemoryModeUnsupportedError, *, removed: str) -> None:
     """The refusal must be actionable, not just typed: removal, supported set, route out."""
     assert error.status == "memory-mode-unsupported"
-    assert error.requested == REMOVED
+    assert error.requested == removed
     assert error.supported == EXPECTED_MODES
-    assert REMOVED in error.detail
+    assert removed in error.detail
     assert "removed" in error.detail
     for mode in EXPECTED_MODES:
         assert f"`{mode}`" in error.detail
     assert "c-00-initialize-memory-repo" in error.detail
     assert error.remedies
+
+
+def _assert_names_the_opt_out_refusal(error: MemoryOptOutRefusedError) -> None:
+    """The opt-out refusal names the true reason and the known action, never the other removal."""
+    assert error.status == "memory-opt-out-refused"
+    assert error.requested == REMOVED_DISABLED
+    assert error.supported == EXPECTED_MODES
+    assert REMOVED_DISABLED in error.detail
+    assert "removed" in error.detail
+    assert error.reason is not None
+    assert error.next_action is not None
+    # The `internal` text blames a memory root inside the code repository that was never here.
+    assert "inside the code repository" not in error.detail
+    assert "memory-mode-unsupported" not in error.detail
 
 
 # --------------------------------------------------------------------------------------
@@ -122,19 +155,29 @@ def _assert_names_the_removal(error: MemoryModeUnsupportedError) -> None:
 def test_the_declared_vocabulary_has_no_removed_member() -> None:
     assert SUPPORTED_MEMORY_MODES == EXPECTED_MODES
     assert SUPPORTED_TOPOLOGIES == EXPECTED_TOPOLOGIES
+    assert REMOVED_MEMORY_MODES == REMOVED
     assert MemoryMode is not None and Topology is not None
 
 
-def test_require_supported_memory_mode_refuses_the_removed_member() -> None:
-    error = _refusal(lambda: require_supported_memory_mode(REMOVED))
-    _assert_names_the_removal(error)
+def test_require_supported_memory_mode_refuses_internal_first() -> None:
+    error = _refusal(lambda: require_supported_memory_mode(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact is None
+
+
+def test_require_supported_memory_mode_refuses_disabled_as_an_opt_out() -> None:
+    error = _opt_out_refusal(lambda: require_supported_memory_mode(REMOVED_DISABLED))
+    _assert_names_the_opt_out_refusal(error)
 
 
 def test_require_supported_memory_mode_accepts_the_supported_set() -> None:
     assert require_supported_memory_mode("external") == "external"
-    assert require_supported_memory_mode("disabled") == "disabled"
     assert require_supported_topology("external") == "external"
+
+
+def test_require_supported_topology_refuses_disabled_as_an_opt_out() -> None:
+    error = _opt_out_refusal(lambda: require_supported_topology(REMOVED_DISABLED))
+    _assert_names_the_opt_out_refusal(error)
 
 
 def test_require_supported_topology_keeps_unknown_tokens_distinct_from_the_removal() -> None:
@@ -142,6 +185,7 @@ def test_require_supported_topology_keeps_unknown_tokens_distinct_from_the_remov
     with pytest.raises(ValueError) as raised:
         require_supported_topology("sidecar")
     assert not isinstance(raised.value, MemoryModeUnsupportedError)
+    assert not isinstance(raised.value, MemoryOptOutRefusedError)
     assert "external" in str(raised.value)
 
 
@@ -158,15 +202,34 @@ def test_worktree_start_refuses_an_explicit_removed_memory_mode() -> None:
             code_repository_root=Path("/nonexistent/code"),
             task_name="task",
             worktree_name="leaf",
-            memory_mode=REMOVED,
+            memory_mode=REMOVED_INTERNAL,
         )
     )
     assert result.returncode == 2
     assert result.payload["state"] == "memory-mode-unsupported"
     assert result.payload["status"] == "memory-mode-unsupported"
-    assert result.payload["requested"] == REMOVED
+    assert result.payload["requested"] == REMOVED_INTERNAL
     assert result.payload["supported"] == list(EXPECTED_MODES)
     assert result.payload["remedies"]
+
+
+def test_worktree_start_refuses_a_disabled_memory_mode_as_an_opt_out() -> None:
+    """The same gate for the opt-out removal: its own status, never the internal text."""
+    result = start_result(
+        WorktreeArgs(
+            code_repository_name="repo-a",
+            code_repository_root=Path("/nonexistent/code"),
+            task_name="task",
+            worktree_name="leaf",
+            memory_mode=REMOVED_DISABLED,
+        )
+    )
+    assert result.returncode == 2
+    assert result.payload["state"] == "memory-opt-out-refused"
+    assert result.payload["status"] == "memory-opt-out-refused"
+    assert result.payload["requested"] == REMOVED_DISABLED
+    assert result.payload["supported"] == list(EXPECTED_MODES)
+    assert "memory-mode-unsupported" not in cast(str, result.payload["summary"])
 
 
 def test_worktree_start_refuses_a_removed_topology_argument() -> None:
@@ -176,7 +239,7 @@ def test_worktree_start_refuses_a_removed_topology_argument() -> None:
             code_repository_root=Path("/nonexistent/code"),
             task_name="task",
             worktree_name="leaf",
-            topology=REMOVED,  # type: ignore[arg-type]
+            topology=REMOVED_INTERNAL,  # type: ignore[arg-type]
         )
     )
     assert result.returncode == 2
@@ -188,10 +251,21 @@ def test_resolver_refuses_a_requested_removed_topology() -> None:
         lambda: detect_coordination_selection(
             "repo-a",
             Path("/nonexistent/code"),
-            requested_topology=REMOVED,  # type: ignore[arg-type]
+            requested_topology=REMOVED_INTERNAL,  # type: ignore[arg-type]
         )
     )
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+
+
+def test_resolver_refuses_a_requested_disabled_topology_as_an_opt_out() -> None:
+    error = _opt_out_refusal(
+        lambda: detect_coordination_selection(
+            "repo-a",
+            Path("/nonexistent/code"),
+            requested_topology=REMOVED_DISABLED,  # type: ignore[arg-type]
+        )
+    )
+    _assert_names_the_opt_out_refusal(error)
 
 
 def test_resolver_reports_a_repository_that_still_carries_the_removed_root(tmp_path: Path) -> None:
@@ -209,7 +283,7 @@ def test_resolver_reports_a_repository_that_still_carries_the_removed_root(tmp_p
             "repo-a", code_repo, coordination_root_hint=coordination_root
         )
     )
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == legacy_root.resolve().as_posix()
     assert legacy_root.is_dir(), "the removed memory root must be reported, never deleted"
 
@@ -220,7 +294,7 @@ def test_settings_inside_the_removed_root_are_reported_by_their_own_path(tmp_pat
     settings_path.write_text("# Settings\n", encoding="utf-8")
 
     error = _refusal(lambda: memory_roots_from_settings(settings_path, "repo-a"))
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == settings_path.as_posix()
     assert settings_path.is_file()
 
@@ -230,7 +304,7 @@ def test_onboarding_root_inside_the_removed_root_is_reported(tmp_path: Path) -> 
     onboarding_root.mkdir(parents=True)
 
     error = _refusal(lambda: infer_topology_from_onboarding_root(onboarding_root))
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == onboarding_root.as_posix()
 
 
@@ -240,7 +314,7 @@ def test_configured_memory_root_refuses_the_removed_layout(tmp_path: Path) -> No
     legacy_root.mkdir(parents=True)
 
     error = _refusal(lambda: default_memory_root(code_repo, tmp_path / "coordination", "repo-a"))
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == legacy_root.resolve().as_posix()
     assert legacy_root.is_dir()
 
@@ -251,20 +325,20 @@ def test_contract_vocabulary_derivation_refuses_the_removed_root(tmp_path: Path)
     legacy_root.mkdir(parents=True)
 
     error = _refusal(lambda: memory_mode_for_repository(code_repo, legacy_root))
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == legacy_root.resolve().as_posix()
 
 
 def test_resolve_context_tool_refuses_the_removed_topology() -> None:
-    error = _refusal(lambda: _topology(REMOVED))
-    _assert_names_the_removal(error)
+    error = _refusal(lambda: _topology(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert _topology(None) is None
     assert _topology("external") == "external"
 
 
 def test_baseline_topology_flag_refuses_the_removed_topology() -> None:
-    error = _refusal(lambda: _normalize_topology(REMOVED))
-    _assert_names_the_removal(error)
+    error = _refusal(lambda: _normalize_topology(REMOVED_INTERNAL))
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert _normalize_topology(None) is None
     assert _normalize_topology("external") == "external"
 
@@ -278,7 +352,7 @@ def test_contract_writer_refuses_a_removed_memory_mode_request(tmp_path: Path) -
                 repo_name="repo-a",
                 coordination_root=tmp_path / "coordination",
                 workflow_kind="light-task",
-                memory_mode=REMOVED,
+                memory_mode=REMOVED_INTERNAL,
             ),
             leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
             code=RepoBranchPlan(
@@ -289,7 +363,36 @@ def test_contract_writer_refuses_a_removed_memory_mode_request(tmp_path: Path) -
             ),
         )
     )
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
+
+
+def test_contract_writers_refuse_a_disabled_request_as_an_opt_out(tmp_path: Path) -> None:
+    """Both factories refuse the opt-out before anything reaches the disk."""
+    task = ContractTask(
+        name="task",
+        repo_name="repo-a",
+        coordination_root=tmp_path / "coordination",
+        workflow_kind="light-task",
+        memory_mode=REMOVED_DISABLED,
+    )
+    code = RepoBranchPlan(
+        repo_path=tmp_path / "code",
+        source_branch="main",
+        work_branch="ar/leaf",
+        base_commit="a" * 40,
+    )
+    leaf_error = _opt_out_refusal(
+        lambda: default_contract(
+            task,
+            leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
+            code=code,
+        )
+    )
+    _assert_names_the_opt_out_refusal(leaf_error)
+    series_error = _opt_out_refusal(
+        lambda: default_series_contract(task, code=code, task_root=tmp_path / "tasks")
+    )
+    _assert_names_the_opt_out_refusal(series_error)
 
 
 # --------------------------------------------------------------------------------------
@@ -297,16 +400,18 @@ def test_contract_writer_refuses_a_removed_memory_mode_request(tmp_path: Path) -
 # --------------------------------------------------------------------------------------
 
 
-def _disabled_contract(root: Path):
+def _external_contract(root: Path):
     code_repo = root / "code"
     init_repo(code_repo, "main")
+    memory_repo = root / "memory"
+    init_repo(memory_repo, "main")
     return default_contract(
         ContractTask(
             name="task",
             repo_name="repo-a",
             coordination_root=root / "coordination",
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="leaf", leaf_id="leaf-1"),
         code=RepoBranchPlan(
@@ -315,42 +420,66 @@ def _disabled_contract(root: Path):
             work_branch="ar/leaf",
             base_commit="a" * 40,
         ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/leaf",
+            base_commit="b" * 40,
+        ),
     )
 
 
 def test_a_contract_recording_the_removed_mode_is_reported_and_left_byte_identical(
     tmp_path: Path,
 ) -> None:
-    contract = _disabled_contract(tmp_path)
+    contract = _external_contract(tmp_path)
     write_contract(contract.contract_path, contract)
     text = contract.contract_path.read_text(encoding="utf-8")
-    assert "memory_mode: disabled" in text
+    assert "memory_mode: external" in text
     contract.contract_path.write_text(
-        text.replace("memory_mode: disabled", "memory_mode: internal", 1), encoding="utf-8"
+        text.replace("memory_mode: external", "memory_mode: internal", 1), encoding="utf-8"
     )
     before = contract.contract_path.read_bytes()
 
     error = _refusal(lambda: load_contract(contract.contract_path))
-    _assert_names_the_removal(error)
+    _assert_names_the_removal(error, removed=REMOVED_INTERNAL)
     assert error.artifact == contract.contract_path.as_posix()
+    assert contract.contract_path.read_bytes() == before, "existing state must not be rewritten"
+
+
+def test_a_contract_recording_disabled_stays_readable_and_byte_identical(
+    tmp_path: Path,
+) -> None:
+    """The second removal reads the opposite way: status, attach and guarded abandon need it."""
+    contract = _external_contract(tmp_path)
+    write_contract(contract.contract_path, contract)
+    text = contract.contract_path.read_text(encoding="utf-8")
+    contract.contract_path.write_text(
+        text.replace("memory_mode: external", "memory_mode: disabled", 1), encoding="utf-8"
+    )
+    before = contract.contract_path.read_bytes()
+
+    loaded = load_contract(contract.contract_path)
+    assert loaded.memory_mode == "disabled"
+    assert loaded.unknown_cells == ()
     assert contract.contract_path.read_bytes() == before, "existing state must not be rewritten"
 
 
 def test_a_removed_token_is_refused_while_an_unknown_token_still_degrades(tmp_path: Path) -> None:
     """The reader's tolerance is unchanged for unknown tokens; only the removal is a refusal."""
-    contract = _disabled_contract(tmp_path)
+    contract = _external_contract(tmp_path)
     write_contract(contract.contract_path, contract)
     text = contract.contract_path.read_text(encoding="utf-8")
     contract.contract_path.write_text(
-        text.replace("memory_mode: disabled", "memory_mode: hybrid", 1), encoding="utf-8"
+        text.replace("memory_mode: external", "memory_mode: hybrid", 1), encoding="utf-8"
     )
     loaded = load_contract(contract.contract_path)
-    assert loaded.memory_mode == "disabled"
+    assert loaded.memory_mode == "external"
     assert loaded.unknown_cells
 
 
 # --------------------------------------------------------------------------------------
-# external and disabled are unregressed
+# external is unregressed
 # --------------------------------------------------------------------------------------
 
 
@@ -384,56 +513,73 @@ def test_default_memory_root_is_the_external_root_when_no_removed_layout_exists(
     assert resolved == tmp_path / "coordination" / "memory-repos" / "ar-repo-a"
 
 
-def test_a_disabled_contract_round_trips(tmp_path: Path) -> None:
-    contract = _disabled_contract(tmp_path)
+def test_an_external_contract_round_trips(tmp_path: Path) -> None:
+    contract = _external_contract(tmp_path)
     write_contract(contract.contract_path, contract)
     loaded = load_contract(contract.contract_path)
-    assert loaded.memory_mode == "disabled"
+    assert loaded.memory_mode == "external"
+    assert loaded.memory_repo_path == contract.memory_repo_path
+    assert loaded.memory_worktree == contract.memory_worktree
+    assert loaded.ledger_path == contract.ledger_path
     assert loaded.unknown_cells == ()
     assert loaded.contract_path == contract.contract_path
 
 
-def test_cli_never_advertises_the_removed_member(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_never_advertises_a_removed_member(capsys: pytest.CaptureFixture[str]) -> None:
     """The documented call surface is the rendered help, so that is what is checked."""
     with pytest.raises(SystemExit):
         build_parser().parse_args(["start", "--help"])
     help_text = capsys.readouterr().out
-    assert REMOVED not in help_text
-    assert "external" in help_text and "disabled" in help_text
+    assert REMOVED_INTERNAL not in help_text
+    assert "external" in help_text
+    # `disabled` appears only as the named removal with its own refusal status.
+    assert "naming the removed `disabled` mode" in help_text
+    assert "memory-opt-out-refused" in help_text
+    # The removed choice is documented in prose but never offered as CLI syntax.
+    assert "{disabled-memory}" not in help_text
 
 
-def test_cli_parses_the_supported_set_and_hands_a_removed_token_to_the_typed_refusal() -> None:
+def test_cli_parses_the_supported_set_and_hands_removed_tokens_to_their_typed_refusals() -> None:
     supported = build_parser().parse_args(
-        ["start", "--worktree-name", "leaf", "--memory-mode", "disabled"]
+        ["start", "--worktree-name", "leaf", "--memory-mode", "external"]
     )
-    assert supported.memory_mode == "disabled"
+    assert supported.memory_mode == "external"
 
-    # The token still parses here on purpose: argparse `choices` would reject it before the
-    # application could answer with its own typed status, and a bare "invalid choice" does not
-    # name the removal. The refusal is asserted where a developer actually meets it.
-    parsed = build_parser().parse_args(
-        ["start", "--worktree-name", "leaf", "--memory-mode", REMOVED]
-    )
-    refused = start_result(
-        WorktreeArgs(
-            code_repository_name="repo-a",
-            code_repository_root=Path("/nonexistent/code"),
-            task_name="task",
-            worktree_name=parsed.worktree_name,
-            memory_mode=parsed.memory_mode,
+    # Each removed token still parses here on purpose: argparse `choices` would reject it
+    # before the application could answer with its own typed status, and a bare
+    # "invalid choice" does not name the removal. The refusal is asserted where a
+    # developer actually meets it.
+    for token, state in (
+        (REMOVED_INTERNAL, "memory-mode-unsupported"),
+        (REMOVED_DISABLED, "memory-opt-out-refused"),
+    ):
+        parsed = build_parser().parse_args(
+            ["start", "--worktree-name", "leaf", "--memory-mode", token]
         )
-    )
-    assert refused.returncode == 2
-    assert refused.payload["state"] == "memory-mode-unsupported"
+        refused = start_result(
+            WorktreeArgs(
+                code_repository_name="repo-a",
+                code_repository_root=Path("/nonexistent/code"),
+                task_name="task",
+                worktree_name=parsed.worktree_name,
+                memory_mode=parsed.memory_mode,
+            )
+        )
+        assert refused.returncode == 2
+        assert refused.payload["state"] == state
+        assert refused.payload["status"] == state
 
 
-def test_the_start_tool_documentation_no_longer_offers_the_removed_mode() -> None:
+def test_the_start_tool_documentation_names_external_only_and_both_refusals() -> None:
     """The MCP docstring is a documented call surface, so it is checked as one."""
     import inspect  # noqa: PLC0415 - one local import keeps the collector light
 
     source = inspect.getsource(worktrees_registration)
-    assert "memory_mode is 'external' or 'disabled'" in source
+    assert "memory_mode is 'external' (the only startable mode" in source
+    assert "status 'memory-mode-unsupported'" in source
+    assert "status 'memory-opt-out-refused'" in source
     assert "memory_mode is 'internal'" not in source
+    assert "memory_mode is 'external' or 'disabled'" not in source
 
 
 # --------------------------------------------------------------------------------------
@@ -525,7 +671,7 @@ def _config(root: Path, contract: WorktreeContract, *, direct_execution: bool = 
 def _assert_operator_payload(payload: Mapping[str, Any], *, artifact: str) -> None:
     """The removal facts an operator needs, wherever the payload keeps them."""
     assert payload["status"] == "memory-mode-unsupported"
-    assert payload["requested"] == REMOVED
+    assert payload["requested"] == REMOVED_INTERNAL
     assert payload["supported"] == list(EXPECTED_MODES)
     assert payload["remedies"]
     assert artifact in str(payload["detail"])
@@ -542,7 +688,7 @@ def test_worktree_status_packet_reports_the_removed_mode_to_the_operator(tmp_pat
     evidence = summary.errorEvidence
     assert evidence is not None
     observed = cast("Mapping[str, Any]", evidence["observed"])
-    assert observed["requested"] == REMOVED
+    assert observed["requested"] == REMOVED_INTERNAL
     assert observed["supported"] == list(EXPECTED_MODES)
     assert observed["remedies"]
 
@@ -569,7 +715,7 @@ def test_configured_admission_reports_the_removed_mode_with_its_own_reason(tmp_p
     assert contract_path.as_posix() in refused.detail
     assert refused.expected["supported"] == list(EXPECTED_MODES)
     observed = cast("Mapping[str, Any]", refused.observed["observed"])
-    assert observed["requested"] == REMOVED
+    assert observed["requested"] == REMOVED_INTERNAL
 
 
 @pytest.mark.integration
@@ -592,7 +738,7 @@ def test_terminal_admission_reports_the_removed_mode_on_a_surviving_contract(
     assert refused.reason == "memory-mode-unsupported"
     assert refused.status == "memory-mode-unsupported"
     observed = cast("Mapping[str, Any]", refused.observed["observed"])
-    assert observed["requested"] == REMOVED
+    assert observed["requested"] == REMOVED_INTERNAL
     assert observed["remedies"]
 
 
@@ -641,7 +787,7 @@ def test_unstarted_evidence_reports_the_removed_mode_as_its_own_fact(tmp_path: P
     assert got is None
     assert failure is not None
     assert failure["state"] == "removed-mode"
-    assert failure["requested"] == REMOVED
+    assert failure["requested"] == REMOVED_INTERNAL
     assert failure["supported"] == list(EXPECTED_MODES)
     assert failure["remedies"]
     assert severity == ["ambiguous"]
@@ -682,10 +828,14 @@ def test_the_flag_narrowers_do_not_report_a_typo_as_a_removal() -> None:
         with pytest.raises(ValueError) as raised:
             narrower("bogus")
         assert not isinstance(raised.value, MemoryModeUnsupportedError), narrower.__name__
+        assert not isinstance(raised.value, MemoryOptOutRefusedError), narrower.__name__
         assert "external" in str(raised.value)
 
         with pytest.raises(MemoryModeUnsupportedError):
-            narrower(REMOVED)
+            narrower(REMOVED_INTERNAL)
+
+        with pytest.raises(MemoryOptOutRefusedError):
+            narrower(REMOVED_DISABLED)
 
 
 # --------------------------------------------------------------------------------------

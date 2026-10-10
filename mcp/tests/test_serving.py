@@ -335,12 +335,13 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
     async def test_history_is_not_probed_and_open_landing_finishes_once_or_reopens(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            task = ContractTask("task", "repo", root, "light-task", "disabled")
+            task = ContractTask("task", "repo", root, "light-task", "external")
             live = replace(
                 default_contract(
                     task,
                     leaf=LeafIdentity("live"),
                     code=RepoBranchPlan(root / "code", "main", "work", "a" * 40),
+                    memory=RepoBranchPlan(root / "memory", "main", "work", "a" * 40),
                 ),
                 closeout_status="completed",
             )
@@ -416,9 +417,10 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
             root = Path(tmp)
             live = replace(
                 default_contract(
-                    ContractTask("task", "repo", root, "light-task", "disabled"),
+                    ContractTask("task", "repo", root, "light-task", "external"),
                     leaf=LeafIdentity("live"),
                     code=RepoBranchPlan(root / "code", "main", "work", "a" * 40),
+                    memory=RepoBranchPlan(root / "memory", "main", "work", "a" * 40),
                 ),
                 closeout_status="completed",
             )

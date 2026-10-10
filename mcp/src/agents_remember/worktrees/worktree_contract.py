@@ -17,6 +17,8 @@ from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_ve
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.memory_mode import (
+    MemoryMode,
+    ReadableMemoryMode,
     is_removed_memory_mode,
     refuse_removed_memory_mode,
 )
@@ -26,7 +28,6 @@ from agents_remember.models.worktree import (
     CloseoutStatus,
     HumanReviewStatus,
     IntegrationStatus,
-    MemoryMode,
     WorkflowKind,
 )
 from agents_remember.worktrees.leaf_refs import (
@@ -143,17 +144,19 @@ def _vocabulary_cell[Cell: str](
     return fallback
 
 
-def _memory_mode_fallback(memory: dict[str, str]) -> MemoryMode:
+def _memory_mode_fallback(memory: dict[str, str]) -> ReadableMemoryMode:
     """What an unreadable ``memory_mode`` degrades to, read off the section it governs.
 
-    The one cell whose fallback cannot be a constant: ``external`` and ``disabled`` are not
-    two shades of the same state, they decide whether there is a second repository to commit
-    and a ledger to map. Guessing ``external`` for a contract that owns no memory worktree
-    would make closeout claim work that does not exist. The memory section itself already
-    answers the question -- a recorded worktree or ledger *is* an external topology -- so the
-    degrade reads the facts rather than picking a default. A section showing neither is the
-    shape the removed repo-sidecar mode left behind, and ``disabled`` is the only supported
-    mode with no memory repository; the cell still carries its quarantine record.
+    The one cell whose fallback cannot be a constant: ``external`` and the removed
+    ``disabled`` mode are not two shades of the same state, they decide whether there
+    is a second repository to commit and a ledger to map. Guessing ``external`` for a
+    contract that owns no memory worktree would make closeout claim work that does not
+    exist. The memory section itself already answers the question -- a recorded worktree
+    or ledger *is* an external topology -- so the degrade reads the facts rather than
+    picking a default. A section showing neither is the shape a contract in the removed
+    ``disabled`` mode (MIK-R50) left behind, and ``disabled`` is the only mode with no
+    memory repository; the cell still carries its quarantine record when the raw token
+    was not exactly ``disabled``.
     """
     if _scalar(memory.get("worktree")) or _scalar(memory.get("ledger")):
         return "external"
@@ -244,7 +247,7 @@ class WorktreeContract:
     task_name: str
     repo_name: str
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     coordination_root: Path
     task_root: Path
     contract_path: Path
@@ -370,12 +373,10 @@ def default_contract(
     task_artifact = task_root / "task.md"
     worktree_group = worktree_group_for(task.coordination_root, task.repo_name, leaf.worktree_name)
     code_worktree = worktree_group / slugify(leaf.worktree_name)
-    memory_worktree = (
-        worktree_group / f"memory-{slugify(leaf.worktree_name)}"
-        if task.memory_mode == "external"
-        else None
-    )
-    ledger_path = memory_worktree / "memory.md" if memory_worktree else None
+    # A started task always runs external memory (MIK-R50): the vocabulary
+    # above refuses any other request, so there is no disabled branch left here.
+    memory_worktree = worktree_group / f"memory-{slugify(leaf.worktree_name)}"
+    ledger_path = memory_worktree / "memory.md"
     return WorktreeContract(
         kind="leaf",
         task_id=task_id,
@@ -399,7 +400,7 @@ def default_contract(
         memory_base_commit=memory.base_commit if memory is not None else "",
         memory_worktree=memory_worktree,
         ledger_path=ledger_path,
-        memory_state="disabled" if task.memory_mode == "disabled" else "",
+        memory_state="",
         lifecycle_id=leaf.lifecycle_id,
         leaf_id=persisted_leaf,
         parent_task_name=task.parent_task_name,
@@ -829,6 +830,13 @@ def validate_contract(contract: WorktreeContract, *, path: Path) -> None:
     if contract.kind not in VALID_KINDS:
         raise ContractError(f"invalid contract kind: {contract.kind} (in {path})")
     for name, value, vocabulary in _contract_vocabularies(contract):
+        if value == "disabled" and name == "memory mode":
+            # A contract on disk that carries the removed ``disabled`` mode stays
+            # readable and rewritable in its other cells (MIK-R50: status, attach
+            # and guarded abandon need it). Nothing may *create* this state: the
+            # request vocabulary refuses it before any write, so it can only
+            # arrive from outside and can only leave.
+            continue
         if value not in vocabulary:
             raise ContractError(f"invalid {name}: {value} (in {path})")
     if contract.kind == "leaf" and not contract.leaf_id:
@@ -932,7 +940,7 @@ class _ParsedVocabulary:
     """
 
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     human_review_status: HumanReviewStatus
     closeout_status: CloseoutStatus
     integration_status: IntegrationStatus
@@ -950,14 +958,22 @@ def _parsed_vocabulary(
     had emptied was a hard refusal where its five siblings were tolerant, on a file the
     packet was perfectly able to report.
 
-    The exception is a *removed* memory mode. That is not an unreadable token to degrade
-    around: it is a specific, previously supported state whose owner must be told which
-    contract still records it, because the route out of it is the developer's decision. It is
-    refused with the contract path attached and the file is left byte-identical.
+    The exception is a *removed* memory mode other than ``disabled``. That is not an
+    unreadable token to degrade around: it is a specific, previously supported state whose
+    owner must be told which contract still records it, because the route out of it is the
+    developer's decision. It is refused with the contract path attached and the file is left
+    byte-identical.
+
+    ``disabled`` is the second removed mode (MIK-R50), and it reads the opposite way: a
+    contract on disk that carries it stays readable -- status, attach and guarded abandon
+    need it -- while every route that would change or land the task refuses it with the
+    opt-out refusal. An explicit ``disabled`` token reads as itself with no quarantine
+    record; an empty or unknown token still degrades through the fallback below, so the
+    raw cell is named in the refusal exactly when the mode was read from one.
     """
     memory = _section(data, "memory")
     recorded_memory_mode = _scalar(data.get("memory_mode")) or _scalar(memory.get("mode"))
-    if is_removed_memory_mode(recorded_memory_mode):
+    if is_removed_memory_mode(recorded_memory_mode) and recorded_memory_mode != "disabled":
         refuse_removed_memory_mode(recorded_memory_mode, artifact=contract_path.as_posix())
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
@@ -970,12 +986,20 @@ def _parsed_vocabulary(
             DEFAULT_WORKFLOW_KIND,
             quarantined,
         ),
-        memory_mode=_vocabulary_cell(
-            recorded_memory_mode,
-            VALID_MEMORY_MODES,
-            "memory_mode",
-            _memory_mode_fallback(memory),
-            quarantined,
+        memory_mode=(
+            # The removed ``disabled`` mode stays readable on disk (MIK-R50): an
+            # explicit token reads as itself with no quarantine record, so the
+            # raw cell is named in a refusal only when the mode was read from an
+            # empty or unknown cell through the fallback below.
+            "disabled"
+            if recorded_memory_mode == "disabled"
+            else _vocabulary_cell(
+                recorded_memory_mode,
+                VALID_MEMORY_MODES,
+                "memory_mode",
+                _memory_mode_fallback(memory),
+                quarantined,
+            )
         ),
         human_review_status=_vocabulary_cell(
             _scalar(human_review.get("status")),

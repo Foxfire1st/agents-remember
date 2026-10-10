@@ -24,7 +24,7 @@ from agents_remember.worktrees.worktree_contract import (
     CloseoutStatus,
     HumanReviewStatus,
     IntegrationStatus,
-    MemoryMode,
+    ReadableMemoryMode,
     WorkflowKind,
     WorktreeContract,
 )
@@ -95,7 +95,7 @@ class WorktreeStatusFacts(TypedDict):
     task_name: str
     code_repository_name: str
     workflow_kind: WorkflowKind
-    memory_mode: MemoryMode
+    memory_mode: ReadableMemoryMode
     kind: str
     leaf_id: str
     enclosure_path: str

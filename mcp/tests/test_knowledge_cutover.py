@@ -150,9 +150,11 @@ def _direct(probe: _Probe) -> str | None:
     return None
 
 
-def _blocked(probe: _Probe, target: Any) -> str | None:
+def _blocked(probe: _Probe, target: Any, operation: str) -> str | None:
     dry = cast(Any, SimpleNamespace(dry_run=True))
-    result = integrate._knowledge_gate_block(target, dry, probe.commits, probe.sources)
+    result = integrate._knowledge_gate_block(
+        target, dry, probe.commits, probe.sources, operation=operation
+    )
     return None if result is None else str(result.payload["reason"])
 
 
@@ -208,8 +210,8 @@ _ROUTES: dict[str, Callable[[_Probe], str | None]] = {
     "record landing (no memory commit named)": lambda p: record_landing._knowledge_gate_refusal(
         p.world.contract, p.world.code_base, ""
     ),
-    "leaf integration": lambda p: _blocked(p, p.world.contract),
-    "master or checkpoint landing": lambda p: _blocked(p, _series(p.world)),
+    "leaf integration": lambda p: _blocked(p, p.world.contract, "worktree_integrate"),
+    "master or checkpoint landing": lambda p: _blocked(p, _series(p.world), "worktree_integrate"),
     "landing gate": lambda p: landing_gate_refusal(
         LandingGateRequest(p.world.memory, p.head, (p.main,), p.world.code, p.world.code_base)
     ),

@@ -331,7 +331,14 @@ def project_contract_status(
     path: Path,
     caller: DeclaredCaller | None,
 ) -> dict[str, Any]:
-    terminal = admit_configured_terminal_contract(config, path.as_posix())
+    terminal = admit_configured_terminal_contract(
+        config,
+        path.as_posix(),
+        # Status keeps answering on a contract that carries the removed mode
+        # (MIK-R50 R3a): it shows the contract as it is today.
+        allow_disabled_memory=True,
+        operation="worktree_status",
+    )
     if isinstance(terminal, TerminalConfiguredContractAccepted):
         _project_terminal_contract_status(result, terminal)
         _replace_operation_status(result, [])

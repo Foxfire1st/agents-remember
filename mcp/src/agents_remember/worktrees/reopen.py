@@ -45,6 +45,7 @@ from agents_remember.tasks.store import (
     read_task_doc,
     write_task_docs,
 )
+from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 
 from .integration.integration_branch_authority import require_parent_series
 from .integration.integration_ref_transaction import (
@@ -113,9 +114,12 @@ def _start_preview_args(contract: WorktreeContract) -> dict[str, object]:
         "workflow_kind": contract.workflow_kind,
         "source_branch": contract.code_source_branch,
         "work_branch": contract.code_work_branch,
-        "memory_mode": contract.memory_mode,
         "dry_run": True,
     }
+    if contract.memory_mode == "external":
+        # Restart arguments never carry the removed mode (MIK-R50): a restart
+        # names no mode and starts in the default external mode.
+        args["memory_mode"] = contract.memory_mode
     if len(relative.parts) > 1:
         args["parent_task"] = relative.parts[-2]
     return args
@@ -255,6 +259,22 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
 
 
 def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResult | None:
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode is reopened nowhere (MIK-R50
+        # R3c): the way out is abandon and a fresh start, not a state reset.
+        fields = opt_out_result_fields(
+            subject_for_contract(contract),
+            "task_reopen",
+            "series" if contract.kind == "series" else "leaf",
+        )
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": fields["status"],
+                "summary": fields["detail"],
+                **fields,
+            },
+        )
     blockers = _reopen_blockers(contract)
     if blockers:
         return WorktreeCommandResult(

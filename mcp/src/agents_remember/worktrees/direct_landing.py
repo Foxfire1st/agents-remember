@@ -71,6 +71,11 @@ from agents_remember.worktrees.closeout_input import (
     raw_closeout_messages,
 )
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE
+from agents_remember.worktrees.disabled_memory import (
+    OPT_OUT_STATUS,
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+)
 from agents_remember.worktrees.integration.configured_contract_authority import (
     reread_configured_contract,
 )
@@ -180,6 +185,14 @@ def direct_landing(
     committed the candidate on the series branch in direct mode.
     """
     require_direct_landing_enabled(config)
+    if is_disabled_contract(admitted_contract):
+        # A contract that carries the removed mode never lands directly
+        # (MIK-R50 R4a): the apply refuses with the opt-out refusal, as the
+        # preview does.
+        raise DirectLandingError(
+            OPT_OUT_STATUS,
+            opt_out_detail_for_contract(admitted_contract, "direct_landing"),
+        )
     return _direct_landing_after_policy(config, request, admitted_contract)
 
 
@@ -348,6 +361,12 @@ def _direct_landing_preview(
     effective_input: EffectiveCloseoutInput,
     code_commit: str,
 ) -> dict[str, object]:
+    if is_disabled_contract(contract):
+        # The preview refuses exactly as the apply does (MIK-R50 R4c).
+        raise DirectLandingError(
+            OPT_OUT_STATUS,
+            opt_out_detail_for_contract(contract, "direct_landing"),
+        )
     _verify_code_commit(contract, code_commit, request.candidate_tree)
     memory = _memory_facts(contract)
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
@@ -419,10 +438,11 @@ def _start_or_observe_direct_landing(
     effective_input: EffectiveCloseoutInput,
     code_commit: str,
 ) -> dict[str, object]:
-    if contract.memory_mode != "external":
+    if is_disabled_contract(contract):
+        # No direct landing lands without its memory side (MIK-R50 R4b).
         raise DirectLandingError(
-            "direct-landing-memory-required",
-            "direct landing currently requires an external memory repository",
+            OPT_OUT_STATUS,
+            opt_out_detail_for_contract(contract, "direct_landing"),
         )
     if contract.memory_repo_path is None:
         raise DirectLandingError(

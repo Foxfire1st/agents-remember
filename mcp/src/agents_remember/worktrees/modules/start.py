@@ -18,12 +18,14 @@ from agents_remember.kernel.memory_mode import (
     memory_mode_refusal_fields,
 )
 from agents_remember.tasks.store import write_task_docs
+from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.activation.atomic_series_activation import (
     atomic_series_status_projection,
 )
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     activate_atomic_series_contract,
 )
+from agents_remember.worktrees.disabled_memory import disabled_opt_out_result
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_parent_series,
@@ -37,7 +39,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
 )
-from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
+from agents_remember.worktrees.leaf_refs import (
+    LeafRefResolutionError,
+    resolve_leaf_enclosure_contract_for_ref,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -51,6 +56,10 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup.leaf_ref_start import (
+    invalid_contract_request_result,
+    resolve_start_leaf_doc_id,
+)
 from agents_remember.worktrees.modules.startup.series_attach import (
     series_attach_result,
 )
@@ -99,7 +108,11 @@ from agents_remember.worktrees.task_leaf_binding import (
     require_current_leaf_enclosure_binding,
     require_current_start_task_binding,
 )
-from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
+from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
+    resolve_active_task_root,
+    resolve_leaf_enclosure_contract,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -443,11 +456,76 @@ def _record_start_progress(
     )
 
 
+def _unknown_choice_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """An unknown recovery answer is not a removal and never borrows the opt-out status.
+
+    The CLI no longer offers ``disabled-memory`` as a choice (L50-CODE-R1-F06),
+    so an unknown answer reaches the application; the MCP signature always
+    passed it through. Either way it is answered here as an invalid request,
+    in the same shape as every other mistyped start argument.
+    """
+    if args.memory_choice is None or args.memory_choice == "disabled-memory":
+        return None
+    return invalid_contract_request_result(
+        ContractError(
+            f"unknown memory_choice {args.memory_choice!r}; memory cannot be disabled for a task"
+        )
+    )
+
+
+def _live_disabled_leaf_attach_result(context, args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """Attach a no-mode start to its live disabled leaf before new-parent admission.
+
+    R3a preserves attaching to a live leaf; building a fresh external contract
+    first lets the disabled master-series admission refuse before the existing
+    object can answer (L50-CODE-R1-F01).  This narrow pre-check fires only when
+    the request names no memory directive at all and a live disabled leaf
+    contract already exists at the requested address.  Genuinely new leaves,
+    explicit disabled requests and explicit conversions all keep the build path
+    and its refusals; any resolution failure falls through so argument errors
+    keep their exact current answers.
+    """
+    if args.memory_mode is not None or args.memory_choice is not None or args.topology is not None:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        task_root = resolve_active_task_root(
+            context.coordination_root,
+            context.code_repository_name,
+            args.task_name or "",
+            parent_task=args.parent_task,
+        )
+        contract_path = leaf_enclosure_path(task_root, leaf_id)
+        existing = load_contract(contract_path) if contract_path.exists() else None
+    except (
+        AssertionError,
+        LeafRefResolutionError,
+        TaskResolutionError,
+        ContractError,
+        OSError,
+    ):
+        return None
+    if (
+        existing is None
+        or existing.memory_mode != "disabled"
+        or existing.cleanup in ("abandoned", "reopened", "completed")
+    ):
+        return None
+    return _active_existing_contract_result(context, existing, args)
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     refused = _removed_vocabulary_result(args)
+    if refused is None:
+        refused = disabled_opt_out_result(args)
+    if refused is None:
+        refused = _unknown_choice_result(args)
     if refused is not None:
         return refused
     context = resolve_context(args)
+    attached = _live_disabled_leaf_attach_result(context, args)
+    if attached is not None:
+        return attached
     built = build_start_contract(context, args)
     if isinstance(built, WorktreeCommandResult):
         return built
@@ -470,9 +548,13 @@ def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | No
     point at which no worktree, branch, contract or task binding exists to unwind. It reports
     the removed member and the supported set as a typed status rather than an exception, and
     it never substitutes ``external`` for what was asked.
+
+    ``disabled`` is refused just below with its own opt-out refusal, never here: answering
+    it with the ``internal`` text would blame a memory root inside the code repository
+    that was never the problem.
     """
     for requested in (args.memory_mode, args.topology):
-        if requested is not None and is_removed_memory_mode(requested):
+        if requested is not None and requested != "disabled" and is_removed_memory_mode(requested):
             # The request boundary holds the *value*, so it builds the refusal facts from the
             # vocabulary rather than from a raised error.
             fields = memory_mode_refusal_fields(requested)
@@ -703,6 +785,16 @@ def _plan_start_enclosure(
     )
     if memory_preview["state"] == "blocked":
         return _blocked_memory_start_result(context, args, "not-created", memory_preview)
+    if memory_preview["state"] == "memory-opt-out-refused":
+        # The removed ``disabled-memory`` recovery answer, refused by name with
+        # the mode, the reason and the action (MIK-R50 R1c). Nothing was created.
+        return WorktreeCommandResult(
+            2,
+            {
+                "summary": str(memory_preview.get("detail", memory_preview)),
+                **memory_preview,
+            },
+        )
     planned_contract = _contract_after_memory_start(contract, memory_preview)
     provider_plan = plan_providers_for_start(context, planned_contract, args)
     if provider_plan["state"] == "blocked":

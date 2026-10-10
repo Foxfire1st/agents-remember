@@ -7,6 +7,10 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import derive_memory_ledger
+from agents_remember.worktrees.disabled_memory import (
+    OptOutSubject,
+    opt_out_result_fields,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -22,11 +26,9 @@ def _memory_source_state(
 ) -> dict[str, object] | None:
     """Verify the configured memory repository before preparing its worktree."""
 
-    if contract.memory_mode == "disabled":
-        return {"state": "disabled"}
     assert contract.memory_repo_path is not None
     if not contract.memory_repo_path.exists():
-        return _missing_memory_repo_state(args)
+        return _missing_memory_repo_state(contract, args)
     return None
 
 
@@ -140,20 +142,34 @@ def _memory_divergence_paths(source: Path, target: Path) -> set[str] | None:
     return {line.strip() for line in diff.stdout.splitlines() if line.strip()}
 
 
-def _disabled_memory_choice(args: WorktreeArgs) -> dict[str, object] | None:
+def _disabled_memory_choice(contract: WorktreeContract) -> dict[str, object]:
+    """The opt-out refusal for the removed ``disabled-memory`` recovery answer.
+
+    The answer is still parsed so it can be refused by name (MIK-R50 R1c) with
+    the mode, the reason and the action -- it is never honored, and it is no
+    longer offered as a choice.
+    """
+
+    return {
+        "state": "memory-opt-out-refused",
+        **opt_out_result_fields(
+            OptOutSubject(
+                coordination_root=contract.coordination_root,
+                repo_name=contract.repo_name,
+            ),
+            "worktree_start",
+            "start",
+        ),
+    }
+
+
+def _missing_memory_repo_state(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
     if args.memory_choice == "disabled-memory":
-        return {"state": "disabled", "reason": "human selected disabled memory"}
-    return None
-
-
-def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
-    disabled = _disabled_memory_choice(args)
-    if disabled:
-        return disabled
+        return _disabled_memory_choice(contract)
     return {
         "state": "blocked",
         "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
-        "choices": ["initialize-memory-repo", "disabled-memory"],
+        "choices": ["initialize-memory-repo"],
     }
 
 

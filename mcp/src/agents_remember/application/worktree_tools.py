@@ -359,7 +359,7 @@ def worktree_sync_tool(
     resolution: SyncResolutionInput | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_sync")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_sync")
     args = git_worktree_manager.WorktreeArgs(
@@ -428,7 +428,7 @@ def worktree_integrate_tool(
     ``RuntimeError("code integration source moved")``.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_integrate")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -490,7 +490,9 @@ def worktree_checkpoint_landing_tool(
     enclosure for the work that continues.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config, contract_path, operation="worktree_checkpoint_landing"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -528,7 +530,7 @@ def worktree_pause_tool(
     and publishing one are two operations, and reaching for the stop must never publish.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(config, contract_path, operation="worktree_pause")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_pause")
     args = git_worktree_manager.WorktreeArgs(
@@ -557,7 +559,9 @@ def worktree_record_landing_tool(
     that landed nowhere.
     """
 
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config, contract_path, operation="worktree_record_landing"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
@@ -584,7 +588,9 @@ def worktree_operation_control_tool(
     invalid = _operation_control_request_refusal(request)
     if invalid is not None:
         return invalid
-    configured = admit_configured_contract(config, request.contract_path)
+    configured = admit_configured_contract(
+        config, request.contract_path, operation="worktree_operation_control"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return _configured_control_refusal(config, request, configured)
     caller_result = _resolve_control_caller(config, configured.contract, request)
@@ -811,7 +817,9 @@ def worktree_cleanup_tool(
     dry_run: bool = False,
     teardown_providers: bool = True,
 ) -> dict[str, Any]:
-    configured = admit_configured_terminal_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(
+        config, contract_path, operation="worktree_cleanup"
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_cleanup")
     args = git_worktree_manager.WorktreeArgs(
@@ -830,7 +838,15 @@ def worktree_abandon_tool(
     dry_run: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
-    configured = admit_configured_terminal_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(
+        config,
+        contract_path,
+        # Abandon admits a contract whose only disagreement with the configured
+        # authority is the removed mode (MIK-R50 R3b) and writes its terminal
+        # state. Everything else about abandon is unchanged.
+        allow_disabled_memory=True,
+        operation="worktree_abandon",
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_abandon")
     args = git_worktree_manager.WorktreeArgs(
@@ -932,6 +948,7 @@ def _worktree_closeout(
         config,
         contract_path,
         require_candidate_identity=False,
+        operation=operation,
     )
     address = LifecycleOperationPublicAddress(operation, "closeout")
     if isinstance(configured, ConfiguredContractRefused):

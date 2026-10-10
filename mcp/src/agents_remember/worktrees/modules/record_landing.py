@@ -29,6 +29,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from agents_remember.worktrees.disabled_memory import (
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+    opt_out_refusal_result,
+)
 from agents_remember.worktrees.knowledge_gate import (
     GateProbeError,
     closed_out_memory,
@@ -108,10 +113,17 @@ def _unnamed_memory_commit_refusal(converted: bool) -> str | None:
 def _knowledge_gate_refusal(
     contract: WorktreeContract, code_commit: str, memory_commit: str
 ) -> str | None:
-    """MIK-R09 rule 3 over the landed memory commit; ``None`` for unconverted memory."""
+    """MIK-R09 rule 3 over the landed memory commit; ``None`` for unconverted memory.
+
+    A contract that carries the removed mode never reaches the gate's reads:
+    the route entry refuses it with the opt-out refusal first (MIK-R50 R4a),
+    and this function refuses it itself for a direct caller (MIK-R50 R4b).
+    """
 
     repository = contract.memory_repo_path
-    if contract.memory_mode != "external" or repository is None:
+    if contract.memory_mode != "external":
+        return opt_out_detail_for_contract(contract, "worktree_record_landing")
+    if repository is None:
         return None
     line = _line_converted(contract, repository)
     if isinstance(line, str):
@@ -177,6 +189,9 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("recording a landing requires explicit developer approval")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode never records a landing (MIK-R50 R4a).
+        return opt_out_refusal_result(contract, "worktree_record_landing")
     payload = _identity_payload(contract)
     # A checkpointed contract has already recorded a landing, so it is "already recorded" too --
     # and it must be, because the full-record path below writes ``completed`` plus

@@ -1,23 +1,33 @@
-"""The supported memory topology/mode vocabulary, and the refusal for the removed one.
+"""The supported memory topology/mode vocabulary, and the refusals for removed modes.
 
 ``internal`` memory -- a repo-sidecar root at ``<code-repository-root>/ar-memory`` with a
 repo-sidecar coordination tree beside it -- was removed from the product. It is incompatible
 with the worktree lifecycle: it keeps onboarding inside the code repository, so there is no
 memory repository to branch, no memory commit to attribute and no ledger row to map, and the
-capsule/closeout contract has nothing to bind. The supported set is ``external`` and
-``disabled``.
+capsule/closeout contract has nothing to bind.
+
+``disabled`` memory -- a task that runs with no memory at all -- was removed from the
+product (MIK-R50). A task in it can be neither closed out, synced, integrated nor landed,
+and where converted knowledge exists invariant work is mandatory (D5), so no task may opt
+out of memory. The supported set is ``external`` alone.
 
 Two vocabularies live here because they are one fact seen from two altitudes: a repository's
 ``Topology`` says where its memory root lives, and a worktree contract's ``MemoryMode`` says
-what the started task does with it. Both lost their removed member together, so both are
+what the started task does with it. All removed members were lost together, so all are
 declared together rather than re-declared per consumer.
 
-A caller that asks for the removed mode is refused by name, with an operator-legible message
+A caller that asks for a removed mode is refused by name, with an operator-legible message
 that carries the removal, the supported set and the route out. It is never substituted with
 ``external``, never defaulted, and never degraded into some other mode. Existing state that
-records the removed mode (a contract, a settings block, a memory root) is *reported* with its
+records a removed mode (a contract, a settings block, a memory root) is *reported* with its
 exact artifact and left on disk untouched: this module names and detects that state, it never
 rewrites it.
+
+The two removed modes keep distinct refusals: ``internal`` keeps its own unsupported-mode
+refusal, and ``disabled`` is refused with the opt-out refusal, which names the true reason
+(converted knowledge where it exists, removal elsewhere) and the known action. Answering
+``disabled`` with the ``internal`` text would blame a memory root inside the code repository
+that was never the problem.
 """
 
 from __future__ import annotations
@@ -25,7 +35,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, NoReturn, cast, get_args
 
-from agents_remember.errors import MemoryModeUnsupportedError
+from agents_remember.errors import (
+    MemoryModeUnsupportedError,
+    MemoryOptOutFacts,
+    MemoryOptOutRefusedError,
+)
 from agents_remember.kernel.recorded_reads import observed_resolve
 
 Topology = Literal["external"]
@@ -33,12 +47,24 @@ Topology = Literal["external"]
 
 SUPPORTED_TOPOLOGIES: tuple[Topology, ...] = get_args(Topology)
 
-MemoryMode = Literal["external", "disabled"]
-"""What a worktree contract does with memory. ``internal`` was removed."""
+MemoryMode = Literal["external"]
+"""What a worktree contract does with memory. ``internal`` and ``disabled`` were removed."""
 
 SUPPORTED_MEMORY_MODES: tuple[MemoryMode, ...] = get_args(MemoryMode)
 
-REMOVED_MEMORY_MODES: tuple[str, ...] = ("internal",)
+ReadableMemoryMode = Literal["external", "disabled"]
+"""What a contract on disk may carry: the supported mode plus the removed one.
+
+A contract that records ``disabled`` stays readable -- status, attach and guarded
+abandon need it -- while nothing may start in it or write it anew. Read paths,
+response models and projections declare this vocabulary; request and amendment
+shapes declare :data:`MemoryMode`, so producing the removed mode is a type error
+at the writer.
+"""
+
+READABLE_MEMORY_MODES: tuple[ReadableMemoryMode, ...] = get_args(ReadableMemoryMode)
+
+REMOVED_MEMORY_MODES: tuple[str, ...] = ("internal", "disabled")
 """Vocabulary members this product no longer produces, accepts, types or documents."""
 
 LEGACY_INTERNAL_MEMORY_DIRNAME = "ar-memory"
@@ -109,8 +135,138 @@ def memory_mode_refusal_fields(value: str, *, artifact: str | None = None) -> di
 
 
 def refuse_removed_memory_mode(value: str, *, artifact: str | None = None) -> NoReturn:
-    """Refuse a removed memory mode by name, never by substituting a supported one."""
+    """Refuse a removed memory mode by name, never by substituting a supported one.
+
+    ``disabled`` keeps its own opt-out refusal (MIK-R50) rather than the
+    ``internal`` text: the caller is told the true reason and the known action
+    instead of a memory root inside the code repository that was never there.
+    """
+
+    if value == "disabled":
+        raise disabled_opt_out_refusal(
+            _disabled_removed_detail(artifact=artifact),
+            facts=MemoryOptOutFacts(
+                artifact=artifact,
+                reason=_DISABLED_REMOVED_REASON,
+                next_action=START_AGAIN_ACTION,
+            ),
+        )
     raise memory_mode_refusal(value, artifact=artifact)
+
+
+DISABLED_MEMORY_MODE = "disabled"
+"""The removed opt-out mode, named once so no surface re-spells it."""
+
+_DISABLED_UNUSABLE = "a task in it can be neither closed out, synced, integrated nor landed"
+"""Why the removed mode refuses everywhere, in one clause."""
+
+_DISABLED_REMOVED_REASON = f"the disabled memory mode is removed: {_DISABLED_UNUSABLE}"
+"""The true reason where no converted knowledge decides it."""
+
+START_AGAIN_ACTION = "start again without `memory_mode`, in the default `external` mode"
+"""The action every start refusal names."""
+
+SETUP_FIRST_ACTION = (
+    "set up the memory repository first (`c-00-initialize-memory-repo`), then "
+    "start again without `memory_mode`"
+)
+"""The action where the memory repository is not set up."""
+
+LEAF_WAY_OUT = (
+    "save the changes worth keeping (abandon discards the leaf's worktree and branch), "
+    "run `worktree_abandon` (the dry run first), then `worktree_start` at the same address "
+    "without `memory_mode`"
+)
+"""The way out for a leaf contract that carries the removed mode."""
+
+SERIES_WAY_OUT = (
+    "abandon the leaves, declare the master abandoned in its task document, abandon the "
+    "series contract with `worktree_abandon`, and start the work under a new master"
+)
+"""The way out under a master whose series contract carries the removed mode."""
+
+
+def opt_out_reason_knowledge(location: str) -> str:
+    """The true reason where converted knowledge exists (D5)."""
+
+    return (
+        "invariant work is mandatory, and a task cannot opt out of memory (D5): "
+        f"converted knowledge was found at {location}"
+    )
+
+
+def opt_out_reason_removed(*, setup_first: bool = False) -> str:
+    """The true reason where no converted knowledge decides the refusal."""
+
+    if setup_first:
+        return f"{_DISABLED_REMOVED_REASON}; the memory repository is not set up"
+    return _DISABLED_REMOVED_REASON
+
+
+def opt_out_reason_probe_failure(error: str) -> str:
+    """The reason when Git cannot say whether knowledge exists."""
+
+    return (
+        "the cutover probe cannot say whether converted knowledge exists "
+        f"({error}), and an unanswered probe never authorizes opting out of memory"
+    )
+
+
+def _disabled_removed_detail(artifact: str | None = None) -> str:
+    origin = f"{artifact} records " if artifact is not None else ""
+    return (
+        f"{origin}memory mode `disabled`, which was removed from Agents Remember: "
+        f"{_DISABLED_UNUSABLE}. The supported memory modes are `external`. {START_AGAIN_ACTION}."
+    )
+
+
+def disabled_opt_out_detail(
+    *,
+    operation: str,
+    contract: str | None = None,
+    raw_cell: str | None = None,
+    reason: str,
+    way_out: str,
+) -> str:
+    """The one refusal text every disabled-mode surface uses.
+
+    It names the contract and the mode it carries (with the raw cell when the
+    mode was read from an empty or unknown cell), the true reason and the known
+    way out. It never asks for a developer decision.
+    """
+
+    if contract is not None:
+        origin = f"{operation} refuses: contract {contract} carries memory mode `disabled`"
+        if raw_cell is not None:
+            origin += f" (read from {raw_cell})"
+    else:
+        origin = f"{operation} refuses memory mode `disabled`"
+    return f"{origin}: {reason}. {way_out}."
+
+
+def disabled_opt_out_refusal(
+    detail: str,
+    *,
+    facts: MemoryOptOutFacts | None = None,
+) -> MemoryOptOutRefusedError:
+    """The one refusal every disabled-mode surface raises or publishes."""
+
+    return MemoryOptOutRefusedError(
+        detail,
+        requested=DISABLED_MEMORY_MODE,
+        supported=SUPPORTED_MEMORY_MODES,
+        facts=facts,
+    )
+
+
+def disabled_opt_out_refusal_fields(
+    detail: str,
+    *,
+    facts: MemoryOptOutFacts | None = None,
+) -> dict[str, object]:
+    """The publishable refusal facts, for a surface that returns a typed result."""
+
+    return disabled_opt_out_refusal(detail, facts=facts).response_fields()
 
 
 def require_supported_memory_mode(value: str) -> MemoryMode:

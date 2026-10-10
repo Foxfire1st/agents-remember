@@ -353,11 +353,13 @@ def _worktree_group(
 def _memory_mode(topology: Topology) -> MemoryMode:
     """The contract memory mode a topology implies.
 
-    The two vocabularies lost their removed member together and this is where they meet; both
-    remaining members are now named explicitly so a future third topology cannot silently
-    inherit a mode.
+    ``external`` is the only mode a task can run in (MIK-R50): the removed
+    ``disabled`` mode is never inherited, not from a topology and not from an
+    existing contract. A start that names no mode uses ``external``; the
+    contract's own recorded mode is reported as-is by the caller.
     """
-    return "external" if topology == "external" else "disabled"
+    del topology
+    return "external"
 
 
 def _effective_memory_root(memory_root: Path, contract) -> Path:

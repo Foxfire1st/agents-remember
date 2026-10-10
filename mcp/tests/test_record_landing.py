@@ -52,13 +52,23 @@ def _fixture(root: Path) -> WorktreeContract:
     _git(repo, "commit", "-m", "base")
     for branch in ("super", "ar/master"):
         _git(repo, "branch", branch)
+    memory_repo = root / "memory"
+    memory_repo.mkdir()
+    _git(memory_repo, "init", "-b", "main")
+    (memory_repo / "memory.md").write_text("# memory\n", encoding="utf-8")
+    _git(memory_repo, "add", "-A")
+    _git(memory_repo, "commit", "-m", "base")
+    for branch in ("super", "ar/master"):
+        _git(memory_repo, "branch", branch)
     coordination = root / "coordination"
     task_root = coordination / "tasks" / "repo" / "master"
     task_root.mkdir(parents=True)
     contract = default_series_contract(
-        ContractTask("master", "repo", coordination, "light-task", "disabled"),
+        ContractTask("master", "repo", coordination, "light-task", "external"),
         code=RepoBranchPlan(repo, "super", "ar/master", _git(repo, "rev-parse", "super")),
-        memory=None,
+        memory=RepoBranchPlan(
+            memory_repo, "super", "ar/master", _git(memory_repo, "rev-parse", "super")
+        ),
         task_root=task_root,
     )
     write_contract(contract.contract_path, contract)

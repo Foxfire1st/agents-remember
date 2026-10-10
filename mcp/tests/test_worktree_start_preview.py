@@ -37,7 +37,7 @@ LEAF = "FRESH-L1"
 class PreviewFixture:
     """Canonical task documents and repositories, with no pre-published series."""
 
-    def __init__(self, root: Path, *, external: bool = False, commanded: bool = False) -> None:
+    def __init__(self, root: Path, *, commanded: bool = False) -> None:
         self.root = root
         # Harness receipts live beside the observed product root, never inside its snapshot.
         self.receipts = root.parent / f"{root.name}-receipts"
@@ -45,7 +45,6 @@ class PreviewFixture:
         self.coord = root / "ar-coordination"
         self.code = root / REPO
         self.base = init_repo(self.code)
-        self.external = external
         self.memory = self.coord / "memory-repos" / f"ar-{REPO}"
         self.source = "super" if commanded else "main"
         self.task_root = self.coord / "tasks" / REPO / MASTER
@@ -118,7 +117,7 @@ class PreviewFixture:
             "task_name": MASTER,
             "worktree_name": "fresh-preview-l1",
             "leaf_id": LEAF,
-            "memory_mode": "external" if external else "disabled",
+            "memory_mode": "external",
             "skip_provider_setup": True,
             "dry_run": True,
         }
@@ -174,7 +173,7 @@ class PreviewFixture:
             leaf_id=LEAF,
             worktree_name="fresh-preview-l1",
             parent_task="sprint" if self.source == "super" else None,
-            memory_mode="external" if self.external else "disabled",
+            memory_mode="external",
             skip_provider_setup=True,
             dry_run=True,
         )
@@ -225,11 +224,11 @@ class PreviewFixture:
         return {"paths": paths, "repositories": repositories}
 
 
-@pytest.mark.parametrize("external,commanded", [(False, False), (True, True)])
+@pytest.mark.parametrize("commanded", [False, True])
 def test_registered_first_leaf_preview_is_repeatable_without_publication(
-    tmp_path: Path, external: bool, commanded: bool
+    tmp_path: Path, commanded: bool
 ) -> None:
-    world = PreviewFixture(tmp_path, external=external, commanded=commanded)
+    world = PreviewFixture(tmp_path, commanded=commanded)
     before = world.snapshot()
     world.record("before", before)
     for _ in range(2):
@@ -243,13 +242,34 @@ def test_registered_first_leaf_preview_is_repeatable_without_publication(
         assert contract["parent_contract_path"] == world.parent_path.as_posix()
         assert contract["code_source_branch"] == f"ar/{MASTER}"
         assert contract["code_base_commit"] == git(world.code, "rev-parse", world.source)
-        if world.external:
-            assert contract["memory_source_branch"] == f"ar/{MASTER}"
-            assert contract["memory_base_commit"] == git(world.memory, "rev-parse", world.source)
-        else:
-            assert contract["memory_mode"] == "disabled"
+        assert contract["memory_source_branch"] == f"ar/{MASTER}"
+        assert contract["memory_base_commit"] == git(world.memory, "rev-parse", world.source)
         after = world.snapshot()
         world.record(f"after-{world.calls}", after)
+        assert after == before
+        assert not world.parent_path.exists()
+
+
+def test_disabled_start_is_refused_before_any_publication(tmp_path: Path) -> None:
+    """The removed opt-out mode never previews: the refusal names itself, twice identically.
+
+    Both the preview and the real run are refused at the top of ``worktree_start``,
+    before any branch, worktree, contract or task binding exists to unwind -- so the
+    world is byte-identical afterwards and no parent contract was published.
+    """
+    world = PreviewFixture(tmp_path, commanded=True)
+    before = world.snapshot()
+    world.record("before", before)
+    for dry_run in (True, False):
+        refused = world.start(memory_mode="disabled", dry_run=dry_run)
+        assert not refused.isError, refused
+        assert refused.structuredContent is not None
+        payload = refused.structuredContent
+        assert not payload["ok"], payload
+        assert payload["state"] == "memory-opt-out-refused"
+        assert payload["status"] == "memory-opt-out-refused"
+        after = world.snapshot()
+        world.record(f"refused-after-call-{world.calls}", after)
         assert after == before
         assert not world.parent_path.exists()
 
@@ -289,11 +309,10 @@ def _assert_ambient_request_observes_only_tool_completion(world: PreviewFixture)
     assert ambient_before["repositories"] == ambient_after["repositories"]
 
 
-@pytest.mark.parametrize("external", [False, True])
 def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read_only(
-    tmp_path: Path, external: bool
+    tmp_path: Path,
 ) -> None:
-    world = PreviewFixture(tmp_path, external=external, commanded=True)
+    world = PreviewFixture(tmp_path, commanded=True)
     preview = world.start()
     assert preview.structuredContent is not None and preview.structuredContent["ok"], preview
     git(world.code, "switch", "super")
@@ -320,12 +339,9 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
     assert require_parent_series(leaf, operation="apply preservation") == parent
     assert observe_atomic_series(parent).state == "active"
     assert leaf.code_worktree.is_dir()
-    if external:
-        assert parent.memory_base_commit == leaf.memory_base_commit
-        assert parent.memory_base_commit == git(world.memory, "rev-parse", "super")
-        assert leaf.memory_worktree is not None and leaf.memory_worktree.is_dir()
-    else:
-        assert leaf.memory_mode == parent.memory_mode == "disabled"
+    assert parent.memory_base_commit == leaf.memory_base_commit
+    assert parent.memory_base_commit == git(world.memory, "rev-parse", "super")
+    assert leaf.memory_worktree is not None and leaf.memory_worktree.is_dir()
     world.add_leaf("FRESH-L2")
     _assert_ambient_request_observes_only_tool_completion(world)
     world.restart_session()
@@ -343,7 +359,7 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
 def test_preview_handoff_is_failure_sensitive_and_cannot_supply_durable_authority(
     tmp_path: Path,
 ) -> None:
-    world = PreviewFixture(tmp_path, external=True, commanded=True)
+    world = PreviewFixture(tmp_path, commanded=True)
     planned = world.plan()
     parent = planned.preview_parent
     assert parent is not None
@@ -365,7 +381,7 @@ def test_preview_handoff_is_failure_sensitive_and_cannot_supply_durable_authorit
         replace(parent, code_source_branch="main"),
         replace(parent, code_work_branch="main"),
         replace(parent, memory_source_branch="main"),
-        replace(parent, memory_mode="disabled", memory_repo_path=None),
+        replace(parent, memory_work_branch="main"),
     ):
         with pytest.raises(RuntimeError):
             require_parent_series(
@@ -408,7 +424,7 @@ def test_preview_handoff_is_failure_sensitive_and_cannot_supply_durable_authorit
 def test_foreign_or_unreadable_persisted_parent_after_preview_is_never_replaced(
     tmp_path: Path,
 ) -> None:
-    world = PreviewFixture(tmp_path, external=True, commanded=True)
+    world = PreviewFixture(tmp_path, commanded=True)
     planned = world.plan()
     parent = planned.preview_parent
     assert parent is not None
@@ -482,7 +498,7 @@ def test_invalid_public_leaf_source_base_and_protected_ref_stay_refused_without_
 def test_organizational_direct_super_preview_keeps_its_distinct_parent_route(
     tmp_path: Path,
 ) -> None:
-    world = PreviewFixture(tmp_path, external=True, commanded=True)
+    world = PreviewFixture(tmp_path, commanded=True)
     master = read_task_doc(world.task_root / "task.json")
     write_task_doc(world.task_root, master.model_copy(update={"executionNature": "organizational"}))
     sprint_root = world.coord / "tasks" / REPO / "sprint"
@@ -511,7 +527,7 @@ def test_organizational_direct_super_preview_keeps_its_distinct_parent_route(
 def test_public_partial_bootstrap_preview_is_read_only_then_apply_recovers_same_journal(
     tmp_path: Path,
 ) -> None:
-    world = PreviewFixture(tmp_path, external=True, commanded=True)
+    world = PreviewFixture(tmp_path, commanded=True)
     original = start_contract._require_bootstrap_ref
     journal = world.coord / "logs" / "worktree-series-bootstrap" / REPO / f"{MASTER}.json"
     retained_journal = None

@@ -58,6 +58,10 @@ from agents_remember.models.knowledge_files.documents import (
 )
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
+from agents_remember.worktrees.disabled_memory import (
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+)
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
     PairedCode,
@@ -160,6 +164,10 @@ def leaf_line(contract: WorktreeContract) -> str:
 def leaf_cutover_refusal(contract: WorktreeContract, operation: str) -> str | None:
     """The cutover lock over a contract whose memory is unconverted on every side (rule 6)."""
 
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode is never "nothing to judge"
+        # (MIK-R50 R4b): it is refused with the opt-out refusal at every gate.
+        return opt_out_detail_for_contract(contract, operation)
     if contract.memory_mode != "external":
         return None
     repository = contract.memory_repo_path or contract.memory_worktree
@@ -209,6 +217,8 @@ def prepared_closeout_refusal(contract: WorktreeContract) -> str | None:
     untouched. A probe Git cannot answer refuses as well.
     """
 
+    if is_disabled_contract(contract):
+        return opt_out_detail_for_contract(contract, "the certified (prepared) closeout")
     try:
         if not leaf_memory_converted(contract):
             return None
@@ -242,6 +252,8 @@ def leaf_gate_refusal(
 ) -> str | None:
     """The closeout validator's gate over a leaf's exact candidate; ``None`` when it passes."""
 
+    if is_disabled_contract(contract):
+        return opt_out_detail_for_contract(contract, "the closeout validator")
     applies, refusal = _leaf_gate_applies(contract, memory_tree)
     if refusal is not None:
         return refusal
@@ -283,14 +295,17 @@ def direct_gate_verdict(
 ) -> DirectGateVerdict:
     """The gate at direct landing over its exact candidate (``applies`` is False when unconverted)."""
 
+    if is_disabled_contract(contract):
+        return DirectGateVerdict(
+            True, None, opt_out_detail_for_contract(contract, "direct landing")
+        )
     repository = contract.memory_repo_path
-    if repository is None:
-        return DirectGateVerdict(False, None, None)
     try:
-        if not converted_memory(repository, memory_tree, "HEAD"):
-            return DirectGateVerdict(False, None, None)
+        unconverted = repository is None or not converted_memory(repository, memory_tree, "HEAD")
     except GateProbeError as error:
         return DirectGateVerdict(True, None, str(error))
+    if unconverted:
+        return DirectGateVerdict(False, None, None)
     port = _port()
     if port is None:
         return DirectGateVerdict(True, None, GATE_UNBOUND)

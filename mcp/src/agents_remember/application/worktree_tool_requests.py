@@ -35,10 +35,11 @@ class TaskBases:
     """What a started task is based on, and the answers that clear a refused base.
 
     A start cuts a code work branch from a source branch and opens memory alongside
-    it under ``memory_mode``. When a preflight refuses -- a source branch behind or
+    it in ``external`` mode. When a preflight refuses -- a source branch behind or
     diverged from its remote, or an undecided memory setup -- the caller may explicitly
-    choose ``proceed-stale`` or ``disabled-memory``. Protected source repair belongs to a
-    separate landing/recovery operation.
+    choose ``proceed-stale``. Memory cannot be disabled for a task: there is no
+    ``disabled-memory`` recovery choice, and a start that names it is refused.
+    Protected source repair belongs to a separate landing/recovery operation.
     """
 
     source_branch: str | None = None

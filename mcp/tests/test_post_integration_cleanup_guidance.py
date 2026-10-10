@@ -26,23 +26,43 @@ from test_worktree_support import git, init_repo
 
 
 def _integrated_contract(root: Path) -> WorktreeContract:
+    """An integrated leaf with real landed code and memory commits.
+
+    External memory proves carryover by ancestry, so the fixture lands one
+    commit in each repo and records both as integrated: the position is the
+    moment before the terminal edge, with cleanup still pending.
+    """
+
     worktree_group = root / "worktrees" / "repo" / "leaf"
+    code_repo = root / "code"
+    memory_repo = root / "memory"
+    code_commit = init_repo(code_repo)
+    memory_commit = init_repo(memory_repo)
     return WorktreeContract(
         task_id="T",
         task_name="leaf",
         repo_name="repo",
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=root,
         task_root=root / "tasks",
         contract_path=root / "tasks" / "series-contract.md",
         task_artifact=root / "tasks" / "task.md",
         worktree_group=worktree_group,
-        code_repo_path=root / "repo",
+        code_repo_path=code_repo,
         code_source_branch="main",
         code_work_branch="ar/leaf",
         code_base_commit="abc1234",
         code_worktree=worktree_group / "leaf",
+        code_commit=code_commit,
+        integrated_code_commit=code_commit,
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_work_branch="ar/leaf",
+        memory_base_commit=memory_commit,
+        memory_content_commit=memory_commit,
+        integrated_memory_content_commit=memory_commit,
+        ledger_path=memory_repo / "memory.md",
         leaf_id="L1",
         closeout_status="completed",
         integration_status="completed",
@@ -88,23 +108,10 @@ def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() ->
 def test_external_completion_proves_landed_commits_without_reading_the_cache(
     tmp_path: Path,
 ) -> None:
-    code_repo = tmp_path / "code"
-    memory_repo = tmp_path / "memory"
-    code = init_repo(code_repo)
-    memory = init_repo(memory_repo)
+    contract = _integrated_contract(tmp_path)
+    assert contract.memory_repo_path is not None
+    memory_repo = contract.memory_repo_path
     cache = memory_repo / "memory.md"
-    contract = replace(
-        _integrated_contract(tmp_path),
-        memory_mode="external",
-        code_repo_path=code_repo,
-        code_commit=code,
-        integrated_code_commit=code,
-        memory_repo_path=memory_repo,
-        memory_source_branch="main",
-        memory_content_commit=memory,
-        integrated_memory_content_commit=memory,
-        ledger_path=cache,
-    )
     for contents in (None, "<<<<<<< broken cache\n", "a stale row with no accepted pair\n"):
         if contents is not None:
             cache.write_text(contents, encoding="utf-8")

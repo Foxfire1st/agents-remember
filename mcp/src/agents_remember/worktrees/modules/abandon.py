@@ -512,11 +512,9 @@ def _abandon_worktrees(
             authority=authority,
         ),
     }
-    if (
-        contract.memory_mode == "external"
-        and contract.memory_repo_path is not None
-        and contract.memory_worktree is not None
-    ):
+    # The abandon's own teardown reaches a carried memory leg whatever mode
+    # the contract carries (MIK-R50 rule 3): no conversion, just no shield.
+    if contract.memory_repo_path is not None and contract.memory_worktree is not None:
         worktrees["memory"] = remove_registered_worktree(
             contract.memory_repo_path,
             contract.memory_worktree,
@@ -587,6 +585,20 @@ def _abandon_branches(
     if "memory" in targets:
         branches["memory"] = _abandon_branch(
             targets["memory"],
+            dry_run=dry_run,
+            force=force,
+            authority=authority,
+        )
+    elif contract.memory_repo_path is not None and contract.memory_work_branch:
+        # A carried memory branch goes with the abandon, whatever the mode;
+        # an absent branch is benign, an unmerged one was already refused
+        # before anything moved when force is off.
+        branches["memory"] = _abandon_branch(
+            _AbandonBranchTarget(
+                contract.memory_repo_path,
+                contract.memory_work_branch,
+                contract.memory_source_branch,
+            ),
             dry_run=dry_run,
             force=force,
             authority=authority,

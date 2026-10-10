@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agents_remember.kernel.memory_attribution import render_memory_content_message
-from agents_remember.kernel.memory_mode import MemoryMode
+from agents_remember.kernel.memory_mode import ReadableMemoryMode
 
 # The attribution trailer every memory-content commit carries is declared in the kernel module
 # that READS it back and renders it (``kernel/memory_attribution.py``), and this model reaches
@@ -69,7 +69,7 @@ class ResolvedCloseoutPlan(BaseModel):
 
     route: CloseoutInputRoute
     contractKind: Literal["leaf", "series"]
-    memoryMode: MemoryMode
+    memoryMode: ReadableMemoryMode
     code: CloseoutLegPlan
     memory: CloseoutLegPlan
 
@@ -132,7 +132,7 @@ class EffectiveCloseoutInput(BaseModel):
 
     route: CloseoutInputRoute
     contractKind: Literal["leaf", "series"]
-    memoryMode: MemoryMode
+    memoryMode: ReadableMemoryMode
     code: EffectiveCloseoutLeg
     memory: EffectiveCloseoutLeg
 

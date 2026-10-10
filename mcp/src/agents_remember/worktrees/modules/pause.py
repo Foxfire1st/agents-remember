@@ -26,6 +26,7 @@ from agents_remember.worktrees.activation.atomic_series_activation_release impor
     SELECTION_MISSING_STATUS,
     release_atomic_series_selection,
 )
+from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -98,6 +99,9 @@ def pause_result(
     contract = current_contract
     if args.contract_path.resolve() != contract.contract_path.resolve():
         raise RuntimeError("pause contract path does not match the passed current contract")
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode is never paused (MIK-R50 R4a).
+        return opt_out_refusal_result(contract, "worktree_pause")
     if contract.kind != "series":
         return WorktreeCommandResult(
             2,

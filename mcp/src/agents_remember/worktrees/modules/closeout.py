@@ -17,6 +17,14 @@ from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
     require_effective_closeout_plan,
 )
+from agents_remember.worktrees.disabled_memory import (
+    OPT_OUT_STATUS,
+    is_disabled_contract,
+    opt_out_detail_for_contract,
+    opt_out_refusal_result,
+    opt_out_result_fields,
+    subject_for_contract,
+)
 from agents_remember.worktrees.integration.closeout.integration_reopen import (
     completed_integration_reopen,
     preview_integration_reopen,
@@ -209,10 +217,14 @@ class _MemoryRefreshPreview:
 def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _MemoryRefreshPreview:
     """Plan the external-memory refresh and classify it, without touching anything.
 
-    Every field is the same conditional: plan it for real when the task carries external
-    memory, and answer with the empty plan when it does not -- a disabled-memory closeout has
-    no onboarding tree to refresh.
+    The plan is built for real when the task carries external memory. A
+    contract that carries the removed mode never previews a refresh: the route
+    entry refuses it with the opt-out refusal first (MIK-R50 R4a), and this
+    function refuses it itself for a direct caller (MIK-R50 R4b) rather than
+    describing an empty code-only plan.
     """
+    if contract.memory_mode != "external":
+        raise RuntimeError(opt_out_detail_for_contract(contract, "worktree_closeout"))
     changed_paths = worklist["all"]
     external_leaf = contract.memory_mode == "external" and contract.kind == "leaf"
     metadata_refresh: OnboardingRefreshPlan = (
@@ -274,6 +286,11 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     evaluate it again.
     """
 
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode never previews a closeout
+        # (MIK-R50 R4a): the preview refuses with the opt-out refusal, as the
+        # apply does.
+        return _opt_out_preview(contract, "worktree_closeout_preview")
     refuse_series_workbench_commit(contract)
     require_closeout_publication_authority(contract)
     verdict = candidate_gate_verdict(contract, args.candidate_tree or code_candidate_tree(contract))
@@ -332,6 +349,34 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
 
 GATE_REFUSED_PREVIEW = "knowledge-gate-refused"
 MAX_PREVIEW_FINDINGS = 50
+
+
+def _opt_out_preview(contract, operation: str) -> dict[str, object]:
+    """The preview of a closeout the removed mode refuses: never ``would-closeout``.
+
+    It carries the opt-out status with the contract, the reason and the known
+    way out, and its own next step, so the response is not followed by the hint
+    to ask for the commit approval.
+    """
+
+    fields = opt_out_result_fields(
+        subject_for_contract(contract),
+        operation,
+        "series" if contract.kind == "series" else "leaf",
+    )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": OPT_OUT_STATUS,
+        **status,
+        **fields,
+        "summary": fields["detail"],
+        "commit_approval_required": False,
+        "nextStep": {"summary": str(fields.get("nextAction"))},
+    }
 
 
 def _gate_refused_preview(contract, refusal: str) -> dict[str, object]:
@@ -582,6 +627,12 @@ class _CloseoutResultFacts:
 
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
     """Finalize an already-committed detached closeout exactly once."""
+    operation = "worktree_closeout_preview" if args.dry_run else "worktree_closeout_apply"
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never recovers a closeout
+        # (MIK-R50 R4b): the entry refuses it first, and this function refuses
+        # it itself for a direct caller rather than replaying code-only logic.
+        raise RuntimeError(opt_out_detail_for_contract(contract, operation))
     commits = args.recovery_commits
     if commits is None or (contract.memory_mode == "external" and not commits.memoryContentCommit):
         return None
@@ -598,7 +649,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             "recovered": True,
             **status_payload(contract),
         }
-        repair = _memory_ledger_repair(contract, MemoryCloseoutOutcome())
+        repair = _memory_ledger_repair(contract, MemoryCloseoutOutcome(), operation=operation)
         if repair is not None:
             payload["memory_ledger_repair"] = repair
         return WorktreeCommandResult(0, payload)
@@ -678,23 +729,28 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
     }
-    repair = _memory_ledger_repair(updated, memory)
+    repair = _memory_ledger_repair(updated, memory, operation="worktree_closeout_apply")
     if repair is not None:
         payload["memory_ledger_repair"] = repair
     return payload
 
 
-def _memory_ledger_repair(updated, memory: MemoryCloseoutOutcome) -> dict[str, object] | None:
+def _memory_ledger_repair(
+    updated, memory: MemoryCloseoutOutcome, *, operation: str
+) -> dict[str, object] | None:
     """What recomputing the ledger changed, or an explicit statement that it was not touched.
 
-    External-memory closeout always speaks about its ledger; a disabled-memory closeout has
-    no ledger to speak about, so the key is absent rather than falsely present.
+    External-memory closeout always speaks about its ledger. A contract that
+    carries the removed mode has no ledger to speak about and never reaches
+    this repair: the route entry refuses it first (MIK-R50 R4a), and this
+    function refuses it itself for a direct caller (MIK-R50 R4b) rather than
+    answering a populated repair or omitting the key with code-only semantics.
     """
 
+    if updated.memory_mode != "external":
+        raise RuntimeError(opt_out_detail_for_contract(updated, operation))
     if memory.ledger_repair:
         return memory.ledger_repair
-    if updated.memory_mode != "external":
-        return None
     return inspect_ledger_projection(updated)
 
 
@@ -751,19 +807,20 @@ def _closeout_commit_phase(
         contract.code_repo_path if contract.kind == "series" else contract.code_worktree
     )
     code_commit_date = commit_date(code_repository, code_commit)
-    memory = MemoryCloseoutOutcome()
-    if contract.memory_mode == "external":
-        memory = external_closeout_commits(
-            contract,
-            args,
-            effective_input,
-            VerifiedChange(
-                commit=code_commit,
-                commit_date=code_commit_date,
-                changed_paths=worklist["all"],
-                working_paths=worklist["working"],
-            ),
-        )
+    # Every closeout commits memory (MIK-R50 R4b): there is no code-only branch
+    # left. A contract that carries the removed mode never reaches this commit
+    # phase -- the route entry refuses it with the opt-out refusal first.
+    memory = external_closeout_commits(
+        contract,
+        args,
+        effective_input,
+        VerifiedChange(
+            commit=code_commit,
+            commit_date=code_commit_date,
+            changed_paths=worklist["all"],
+            working_paths=worklist["working"],
+        ),
+    )
     integration_reopen = completed_integration_reopen(
         contract,
         code_commit=code_commit,
@@ -921,6 +978,18 @@ def _closeout_entry(
     args: WorktreeArgs,
     current_contract: WorktreeContract,
 ) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
+    if is_disabled_contract(current_contract):
+        # A contract that carries the removed mode never closes out (MIK-R50
+        # R4a): the apply refuses with the opt-out refusal, as the preview does.
+        # First, before any worktree or branch read, so the refusal does not
+        # depend on what else is wrong with the enclosure.
+        effective_input = _effective_closeout_input(args)
+        operation = "worktree_closeout_preview" if args.dry_run else "worktree_closeout_apply"
+        return (
+            current_contract,
+            effective_input,
+            opt_out_refusal_result(current_contract, operation),
+        )
     _contract_path, contract = _closeout_contract(args, current_contract)
     effective_input = _effective_closeout_input(args)
     if contract.kind == "leaf":
@@ -936,6 +1005,6 @@ def _closeout_entry(
     refuse_series_workbench_commit(contract)
     if args.dry_run:
         preview = closeout_preview_payload(contract, args)
-        refused = preview["state"] == GATE_REFUSED_PREVIEW
+        refused = preview["state"] in (GATE_REFUSED_PREVIEW, OPT_OUT_STATUS)
         return contract, effective_input, WorktreeCommandResult(2 if refused else 0, preview)
     return contract, effective_input, None

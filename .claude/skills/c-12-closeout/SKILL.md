@@ -172,7 +172,9 @@ an explicitly existing gate, not a second lifecycle or recovery mechanism.
 The `c-12-closeout` skill resolves or consumes the current
 `c-08-ar-coordination-context-resolver` context. External-memory closeout
 requires the code checkout/worktree and memory repo/worktree to be on the same
-selected branch. A `disabled`-memory contract has no memory leg to commit.
+selected branch. Memory cannot be disabled for a task: every closeout runs under the
+invariant gate, and a contract on disk that carries the removed `disabled` mode is
+abandoned and started again rather than closed out.
 
 The accepted code and memory commits, their trees, ancestry, and recorded refs are transaction
 authority. Each newly created memory-content commit carries `Code-Commit: <code sha>` in its message.

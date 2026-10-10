@@ -202,13 +202,19 @@ def write_current_task_lineage(
         repo_name=repo_name,
         coordination_root=coordination_root,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
     )
     leaf = default_contract(
         task,
         leaf=LeafIdentity(worktree_name=leaf_id, leaf_id=leaf_id),
         code=RepoBranchPlan(
             repo_path=repo,
+            source_branch=super_branch,
+            work_branch=leaf_branch,
+            base_commit=base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=coordination_root / "memory-repos" / repo_name,
             source_branch=super_branch,
             work_branch=leaf_branch,
             base_commit=base,

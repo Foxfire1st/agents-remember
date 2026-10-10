@@ -685,6 +685,97 @@ class MemoryModeUnsupportedError(AgentsRememberError):
         return fields
 
 
+@dataclass(frozen=True)
+class MemoryOptOutFacts:
+    """The bounded variable facts of a disabled-mode opt-out refusal."""
+
+    repository: str | None = None
+    reason: str | None = None
+    next_action: str | None = None
+    artifact: str | None = None
+    raw_cell: str | None = None
+
+
+class MemoryOptOutRefusedError(AgentsRememberError):
+    """A caller asked for, or a contract records, the removed disabled memory mode.
+
+    ``disabled`` was removed from the product (MIK-R50): a task in it can be
+    neither closed out, synced, integrated nor landed, and where converted
+    knowledge exists invariant work is mandatory (D5), so no task may opt out
+    of memory. The refusal names the mode, the repository, the true reason and
+    the way out (start again in the default mode, or abandon the legacy
+    contract and start again). It is never answered with the removed
+    ``internal`` mode's text or a general invalid-mode text, and it never asks
+    for a developer decision, because the action is known.
+
+    ``status`` is the stable, branchable code every surface publishes for this
+    refusal; it is one value rather than a per-surface spelling so a caller can
+    match on it directly.
+    """
+
+    status = "memory-opt-out-refused"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        requested: str = "disabled",
+        supported: Sequence[str] = ("external",),
+        facts: MemoryOptOutFacts | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.requested = requested
+        self.supported = tuple(supported)
+        self.facts = facts if facts is not None else MemoryOptOutFacts()
+
+    @property
+    def repository(self) -> str | None:
+        return self.facts.repository
+
+    @property
+    def reason(self) -> str | None:
+        return self.facts.reason
+
+    @property
+    def next_action(self) -> str | None:
+        return self.facts.next_action
+
+    @property
+    def artifact(self) -> str | None:
+        return self.facts.artifact
+
+    @property
+    def raw_cell(self) -> str | None:
+        return self.facts.raw_cell
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "requested": self.requested,
+            "supported": list(self.supported),
+        }
+        if self.facts.repository is not None:
+            fields["repository"] = self.facts.repository
+        if self.facts.reason is not None:
+            fields["reason"] = self.facts.reason
+        if self.facts.next_action is not None:
+            fields["nextAction"] = self.facts.next_action
+        if self.facts.artifact is not None:
+            fields["artifact"] = self.facts.artifact
+        if self.facts.raw_cell is not None:
+            fields["rawCell"] = self.facts.raw_cell
+        return fields
+
+
 class RolePreparationError(AgentsRememberError):
     def __init__(self, status: str, detail: str, next_action: str) -> None:
         self.status = status

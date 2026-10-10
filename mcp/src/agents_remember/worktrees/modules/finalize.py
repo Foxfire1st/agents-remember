@@ -8,6 +8,7 @@ from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
+from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.cleanup_report import cleanup_report
@@ -26,27 +27,16 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract, load_c
 from .finalize_task_documents import (
     FinalizeArgs,
     FinalizeTaskDocumentError,
+    FinalizeTaskTargets,
     _reconcile_task_documents,
     _resolve_task_targets,
 )
 
 
-def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
-    contract = load_contract(args.contract_path)
-    readiness = _readiness(contract)
-    if readiness:
-        return WorktreeCommandResult(
-            0,
-            {
-                **_identity_payload(contract),
-                "state": "not-finalizable-yet",
-                "dryRun": args.dry_run,
-                "contractPath": contract.contract_path.as_posix(),
-                "enclosurePath": contract.contract_path.as_posix(),
-                "blockers": readiness,
-                "summary": "Task lifecycle is not finalizable yet.",
-            },
-        )
+def _resolve_finalize_targets(
+    contract: WorktreeContract, args: FinalizeArgs
+) -> FinalizeTaskTargets | WorktreeCommandResult:
+    """Resolve the task targets a finalization reconciles, or the refusal that blocks it."""
 
     try:
         targets = _resolve_task_targets(contract, args)
@@ -67,6 +57,32 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
             blockers=step_blockers,
             summary="Task lifecycle cannot be finalized while declared work units are unresolved.",
         )
+    return targets
+
+
+def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
+    contract = load_contract(args.contract_path)
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode is never finalized (MIK-R50 R4a).
+        return opt_out_refusal_result(contract, "lifecycle_finalize_task")
+    readiness = _readiness(contract)
+    if readiness:
+        return WorktreeCommandResult(
+            0,
+            {
+                **_identity_payload(contract),
+                "state": "not-finalizable-yet",
+                "dryRun": args.dry_run,
+                "contractPath": contract.contract_path.as_posix(),
+                "enclosurePath": contract.contract_path.as_posix(),
+                "blockers": readiness,
+                "summary": "Task lifecycle is not finalizable yet.",
+            },
+        )
+
+    targets = _resolve_finalize_targets(contract, args)
+    if isinstance(targets, WorktreeCommandResult):
+        return targets
 
     cleanup = _run_or_verify_cleanup(contract, args)
     if cleanup.returncode != 0:

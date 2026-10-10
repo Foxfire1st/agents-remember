@@ -74,6 +74,9 @@ class ActivationFixture:
         self.code = root / "code"
         init_repo(self.code, "main")
         git(self.code, "branch", "super", "main")
+        self.memory = root / "memory"
+        init_repo(self.memory, "main")
+        git(self.memory, "branch", "super", "main")
         for ref in (MASTER_A, MASTER_B):
             write_task_doc(self.tasks / Path(ref.path).parent, _master(ref))
         write_task_doc(
@@ -99,7 +102,7 @@ class ActivationFixture:
                 coordination_root=self.coord,
                 repo_name=REPO,
                 code_repo=self.code,
-                memory_root=memory_root,
+                memory_root=self.memory if memory_root is None else memory_root,
                 task_root=self.tasks / name,
                 task_name=name,
                 parent_task_name="sprint",

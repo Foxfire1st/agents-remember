@@ -211,8 +211,9 @@ integration branch lands.
 When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repository and the actual code/memory objects, ancestry, and refs. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If the actual memory history cannot be reconciled, the skill stops and reports the allowed human choices:
 
 1. `reconciliation`
-2. `disabled-memory`
-3. `custom`
+2. `custom`
+
+Memory cannot be disabled for a task: there is no `disabled-memory` recovery choice, and a start that names it is refused (`memory-opt-out-refused`). A contract on disk that carries the removed mode is abandoned and started again: save the changes worth keeping, run `worktree_abandon` (the dry run first), then `worktree_start` at the same address without `memory_mode`.
 
 `memory.md` is an ignored consumer cache computed from `Code-Commit` trailers in memory commits.
 Its absence, stale rows, or malformed bytes never make an otherwise valid pair incompatible.

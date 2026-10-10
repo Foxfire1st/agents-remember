@@ -580,18 +580,27 @@ def test_a_timed_out_blob_read_or_an_unverifiable_entry_refuses_a_master_landing
     series = replace(_series(world), code_commit=code_commit, memory_content_commit=memory_commit)
     sources = IntegrationSources(world.code_base, world.memory_base, False, False)
     args = WorktreeArgs(contract_path=series.contract_path, dry_run=True)
-    assert integrate._knowledge_gate_block(series, args, _commits(series), sources) is None
+    assert (
+        integrate._knowledge_gate_block(
+            series, args, _commits(series), sources, operation="worktree_integrate"
+        )
+        is None
+    )
 
     timed_out = subprocess.TimeoutExpired(["git", "cat-file"], 30)
     with mock.patch.object(observe, "_observed_content", side_effect=timed_out):
-        blocked = integrate._knowledge_gate_block(series, args, _commits(series), sources)
+        blocked = integrate._knowledge_gate_block(
+            series, args, _commits(series), sources, operation="worktree_integrate"
+        )
     assert blocked is not None
     reason = str(blocked.payload["reason"])
     assert "knowledge-worklist-incomplete" in reason and "a Git read failed" in reason
 
     unsupported = "the locator kind 'symbol' is unsupported for 'pkg/a.py': no shipped grammar"
     with mock.patch.object(observe, "_unsupported", return_value=unsupported):
-        blocked = integrate._knowledge_gate_block(series, args, _commits(series), sources)
+        blocked = integrate._knowledge_gate_block(
+            series, args, _commits(series), sources, operation="worktree_integrate"
+        )
     assert blocked is not None
     reason = str(blocked.payload["reason"])
     assert "knowledge-unverifiable-at-landing" in reason and "RLZ-A00002" in reason

@@ -21,6 +21,11 @@ from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.enclosure import LifecycleEnclosureLocator
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.worktrees.disabled_memory import (
+    OPT_OUT_STATUS,
+    opt_out_result_fields,
+    subject_for_contract,
+)
 from agents_remember.worktrees.integration.configured_contract_authority import (
     require_configured_contract_repositories,
     require_configured_terminal_contract_repositories,
@@ -57,6 +62,7 @@ ConfiguredContractRefusalReason = Literal[
     "location-invalid",
     "contract-unreadable",
     "memory-mode-unsupported",
+    "memory-opt-out",
     "authority-invalid",
 ]
 
@@ -104,8 +110,18 @@ def admit_configured_contract(
     contract_path: str | Path,
     *,
     require_candidate_identity: bool = True,
+    allow_disabled_memory: bool = False,
+    operation: str = "task",
 ) -> ConfiguredContractAdmission:
-    """Resolve, read, and cross-check one configured current task contract."""
+    """Resolve, read, and cross-check one configured current task contract.
+
+    A contract that carries the removed ``disabled`` mode is refused here with
+    the opt-out refusal (status, reason and known way out) unless
+    ``allow_disabled_memory`` admits it for status and guarded abandon. The
+    configured-authority comparison below stays: it still refuses every other
+    mismatch, and it is what a disabled contract meets when the opt-out check
+    is bypassed.
+    """
 
     try:
         confined, location = configured_lifecycle_operation_location(config, contract_path)
@@ -137,12 +153,35 @@ def admit_configured_contract(
     if isinstance(read, ConfiguredContractRefused):
         return read
     contract = read
+    if contract.memory_mode != "external" and not allow_disabled_memory:
+        return _disabled_memory_mode_refusal(contract, confined, location, operation)
+    return _admit_read_contract(
+        config,
+        contract,
+        confined,
+        location,
+        require_candidate_identity=require_candidate_identity,
+        allow_disabled_memory=allow_disabled_memory,
+    )
+
+
+def _admit_read_contract(  # noqa: PLR0913 - the allow flag completes the documented status/abandon admission path
+    config: McpRuntimeConfig,
+    contract: WorktreeContract,
+    confined: Path,
+    location: LifecycleOperationLocation,
+    *,
+    require_candidate_identity: bool,
+    allow_disabled_memory: bool,
+) -> ConfiguredContractAdmission:
+    """Cross-check one read contract against configured authority and location."""
 
     try:
         require_configured_contract_repositories(
             contract,
             config.config_path.as_posix(),
             require_candidate_identity=require_candidate_identity,
+            allow_disabled_memory=allow_disabled_memory,
         )
     except ConfiguredContractAuthorityError as error:
         return configured_authority_refusal(
@@ -166,8 +205,16 @@ def admit_configured_contract(
 def admit_configured_terminal_contract(
     config: McpRuntimeConfig,
     contract_path: str | Path,
+    *,
+    allow_disabled_memory: bool = False,
+    operation: str = "task",
 ) -> TerminalConfiguredContractAdmission:
-    """Admit live authority normally or one exact terminal archive for final retry/status."""
+    """Admit live authority normally or one exact terminal archive for final retry/status.
+
+    ``allow_disabled_memory`` admits a contract whose only disagreement with the
+    configured authority is the removed mode, for guarded abandon (and status);
+    every other route refuses it with the opt-out refusal.
+    """
 
     try:
         confined = require_within_coordination(config, str(contract_path), "contract_path")
@@ -191,17 +238,48 @@ def admit_configured_terminal_contract(
         confined,
     )
     if observation.state != "terminal-archived":
-        return admit_configured_contract(config, confined)
+        return admit_configured_contract(
+            config,
+            confined,
+            allow_disabled_memory=allow_disabled_memory,
+            operation=operation,
+        )
     assert observation.locator is not None
     read = _read_terminal_surviving_contract(confined)
     if isinstance(read, ConfiguredContractRefused):
         return read
-    contract = read
+    return _admit_terminal_surviving_contract(
+        config,
+        read,
+        observation.locator,
+        allow_disabled_memory=allow_disabled_memory,
+        operation=operation,
+    )
+
+
+def _admit_terminal_surviving_contract(
+    config: McpRuntimeConfig,
+    contract: WorktreeContract,
+    locator: LifecycleEnclosureLocator,
+    *,
+    allow_disabled_memory: bool,
+    operation: str,
+) -> TerminalConfiguredContractAdmission:
+    """Admit one surviving terminal contract for final retry/status/cleanup.
+
+    A surviving contract that carries the removed mode meets the same opt-out
+    refusal as a live one (L50-CODE-R1-F03): the archive and location checks
+    below stay, but the mode is classified before the repository-authority
+    comparison can turn it into a developer decision.
+    """
+    confined = contract.contract_path
+    if contract.memory_mode != "external" and not allow_disabled_memory:
+        return _disabled_memory_mode_refusal(contract, confined, None, operation)
     try:
         authority = terminal_cleanup_contract_authority(
             config.coordination_root,
             contract,
-            observation.locator,
+            locator,
         )
     except LifecycleOperationLocationError as error:
         return ConfiguredContractRefused(
@@ -216,6 +294,7 @@ def admit_configured_terminal_contract(
         require_configured_terminal_contract_repositories(
             authority.archived_contract,
             config.config_path.as_posix(),
+            allow_disabled_memory=allow_disabled_memory,
         )
     except ConfiguredContractAuthorityError as error:
         detail = "the archived terminal contract does not match configured repository authority"
@@ -239,7 +318,7 @@ def admit_configured_terminal_contract(
     return TerminalConfiguredContractAccepted(
         contract_path=confined,
         contract=contract,
-        locator=observation.locator,
+        locator=locator,
         authority=authority,
     )
 
@@ -337,6 +416,54 @@ def _read_terminal_surviving_contract(
         )
 
 
+def _disabled_memory_mode_refusal(
+    contract: WorktreeContract,
+    confined: Path,
+    location: LifecycleOperationLocation | None,
+    operation: str,
+) -> ConfiguredContractRefused:
+    """Refuse a configured contract that carries the removed disabled mode.
+
+    The refusal carries the opt-out status with the contract, the mode it
+    carries (and the raw cell, when the mode was read from an empty or unknown
+    cell), the true reason and the known way out. It never asks for a developer
+    decision, because the action is known: abandon the legacy contract and
+    start again (a leaf), or the new-master escape (a series).
+    """
+
+    way_out = "series" if contract.kind == "series" else "leaf"
+    fields = opt_out_result_fields(subject_for_contract(contract), operation, way_out)
+    detail = str(fields["detail"])
+    return ConfiguredContractRefused(
+        reason="memory-opt-out",
+        status=OPT_OUT_STATUS,
+        detail=detail,
+        expected={
+            "contractPath": confined.as_posix(),
+            "requested": fields["requested"],
+            "supported": fields["supported"],
+            "wayOut": way_out,
+            "nextAction": fields.get("nextAction"),
+        },
+        observed=public_failure_evidence(
+            stage="contract-read",
+            side="contract",
+            name=confined.name,
+            error_type="MemoryOptOutRefusedError",
+            observed={
+                "state": "removed-mode",
+                "requested": fields["requested"],
+                "supported": fields["supported"],
+                **({"repository": fields["repository"]} if "repository" in fields else {}),
+                **({"reason": fields["reason"]} if "reason" in fields else {}),
+                **({"rawCell": fields["rawCell"]} if "rawCell" in fields else {}),
+            },
+        ),
+        contract_path=confined,
+        location=location,
+    )
+
+
 def _removed_memory_mode_refusal(
     error: MemoryModeUnsupportedError,
     confined: Path,
@@ -408,6 +535,8 @@ def project_configured_contract_refusal(
 ) -> dict[str, Any]:
     """Project one semantic refusal without re-reading or inferring authority."""
 
+    if refusal.reason == "memory-opt-out":
+        return _project_opt_out_refusal(refusal, operation=operation)
     if refusal.reason == "memory-mode-unsupported":
         # The refusal already carries the value, the supported set and the route, so it takes the
         # same developer-decision shape as every other complete refusal rather than the
@@ -458,6 +587,47 @@ def project_configured_contract_refusal(
         expected=expected,
         observed=observed,
     )
+
+
+def _project_opt_out_refusal(
+    refusal: ConfiguredContractRefused, *, operation: str
+) -> dict[str, Any]:
+    """Project the opt-out refusal as the action it names.
+
+    The refusal already carries the status, the contract, the reason and the
+    known way out: abandon and start again (a leaf) or the new-master escape (a
+    series). It is never projected as a developer decision, because the action
+    is known.
+    """
+
+    expected = dict(refusal.expected)
+    observed = dict(refusal.observed)
+    result: dict[str, Any] = {
+        "ok": False,
+        "operation": operation,
+        "state": refusal.status,
+        "status": refusal.status,
+        "summary": refusal.detail,
+        "detail": refusal.detail,
+        "expected": expected,
+        "observed": observed,
+        "requested": "disabled",
+        "supported": ["external"],
+        "nextAction": expected.get("nextAction"),
+        "decisionSurface": refusal.detail,
+    }
+    inner = observed.get("observed")
+    if isinstance(inner, dict):
+        for key in ("repository", "reason", "rawCell"):
+            if key in inner:
+                result[key] = inner[key]
+    if expected.get("wayOut") == "leaf" and refusal.contract_path is not None:
+        result["nextTool"] = "worktree_abandon"
+        result["nextArgs"] = {
+            "contract_path": refusal.contract_path.as_posix(),
+            "dry_run": True,
+        }
+    return result
 
 
 def _project_unreadable_contract(

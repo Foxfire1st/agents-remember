@@ -8,10 +8,11 @@ from pydantic import Field
 
 from agents_remember.kernel.git_facts import RepoState
 from agents_remember.kernel.git_freshness import FreshnessState
+from agents_remember.kernel.memory_mode import ReadableMemoryMode
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
-from agents_remember.models.worktree import MemoryMode, WorktreeSummary
+from agents_remember.models.worktree import WorktreeSummary
 
 
 class RepoSummary(StrictResponseModel):
@@ -78,10 +79,9 @@ class CrossRepoSummary(StrictResponseModel):
 
 class MemorySummary(StrictResponseModel):
     # `CoordinationContext.memory_mode` -- which is `WorktreeContract.memory_mode` whenever a
-    # contract is in scope -- has always been able to be `disabled`, and `WorktreeSummary`
-    # below in the same response declares it. This field was the only copy that did not, so
-    # one packet could pass `memoryMode="disabled"` and fail `memory.mode` on the same value.
-    mode: MemoryMode
+    # contract is in scope -- is `external` for every started task, and still reads the legacy
+    # `disabled` a contract on disk may carry, as `WorktreeSummary` in the same response does.
+    mode: ReadableMemoryMode
     storage: StorageSummary
     crossRepo: CrossRepoSummary = Field(default_factory=CrossRepoSummary)
 

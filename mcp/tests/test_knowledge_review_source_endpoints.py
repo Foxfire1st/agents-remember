@@ -208,18 +208,18 @@ def endpoint_fixture(tmp_path: Path) -> EndpointFixture:
 
 
 def build_endpoint_fixture(
-    directory: Path, *, datasets: bool = True, memory_mode: str = "disabled"
+    directory: Path, *, datasets: bool = True, memory_mode: str = "external"
 ) -> EndpointFixture:
     """Build synthetic row indexes beside a real source enclosure for composition unit tests.
 
     ``datasets=False`` leaves both row indexes absent. The public resolver treats this enclosure's
     unconverted memory as legacy-unavailable, independently of whether these test rows are present.
 
-    ``memory_mode="external"`` adds the other half of the enclosure a later leaf's cases need: a real
-    external-memory repository and its linked worktree, on the same contract. It is a parameter rather
-    than a second builder because every other fact about the enclosure -- the recorded base, the
-    captured candidate, the two row indexes -- is the same one, and two builders would be two fixtures
-    free to drift apart.
+    ``memory_mode`` defaults to ``external``, which adds the other half of the enclosure a later
+    leaf's cases need: a real external-memory repository and its linked worktree, on the same
+    contract. It is a parameter rather than a second builder because every other fact about the
+    enclosure -- the recorded base, the captured candidate, the two row indexes -- is the same
+    one, and two builders would be two fixtures free to drift apart.
     """
 
     diff = build_diff_fixture(directory / "diff")
@@ -241,7 +241,7 @@ def build_endpoint_fixture(
 
 
 def _enclosure(
-    directory: Path, diff: DiffFixture, *, memory_mode: str = "disabled"
+    directory: Path, diff: DiffFixture, *, memory_mode: str = "external"
 ) -> WorktreeContract:
     """The leaf contract, its source branch and its linked worktree, all really on disk."""
 

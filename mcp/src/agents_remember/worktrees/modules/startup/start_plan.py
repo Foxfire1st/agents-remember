@@ -8,11 +8,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import ensure_worktree
 from agents_remember.worktrees.modules.guidance import recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.worktree_contract import (
-    ContractCells,
-    WorktreeContract,
-    amend_contract,
-)
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
@@ -66,22 +62,9 @@ def _blocked_memory_start_result(
 def _contract_after_memory_start(
     contract: WorktreeContract, memory_state: dict[str, object]
 ) -> WorktreeContract:
-    if contract.memory_mode == "external" and memory_state["state"] == "disabled":
-        return amend_contract(
-            replace(
-                contract,
-                memory_repo_path=None,
-                memory_source_branch="",
-                memory_work_branch="",
-                memory_base_commit="",
-                memory_worktree=None,
-                ledger_path=None,
-                memory_state="disabled",
-            ),
-            # Through the typed record, like every other vocabulary cell: `memory_state` above
-            # is free text and `memory_mode` is not.
-            ContractCells(memory_mode="disabled"),
-        )
+    # No code path rewrites a contract to the removed ``disabled`` mode or writes
+    # a new contract in it (MIK-R50): a started contract always runs external
+    # memory, and the memory preview only reconciles the external base commit.
     reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
     if isinstance(reconciled_base, str) and reconciled_base:
         return replace(contract, memory_base_commit=reconciled_base)

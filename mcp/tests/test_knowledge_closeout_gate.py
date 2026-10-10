@@ -944,6 +944,7 @@ def test_a_master_or_checkpoint_landing_waits_until_no_entry_at_a_changed_path_i
         cast(Any, SimpleNamespace(dry_run=True)),
         IntegratedCommits(code=code_commit, memory_content=memory_commit),
         sources,
+        operation="worktree_integrate",
     )
     assert blocked is not None and blocked.returncode == 2
     assert blocked.payload["state"] == "knowledge-gate-refused"

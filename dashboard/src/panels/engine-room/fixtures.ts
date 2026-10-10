@@ -563,7 +563,8 @@ const providerBlockStages: EngineRoomScenario[] = [
     // P4 BLOCK — provider runtime setup config missing: a steady gate drops on the worktree CODE node BEFORE
     // the contract anchors and the engines NEVER light (providers: [] → unlit). setupState 'blocked' + the
     // provider-plan missing fact is the T7B signal the renderer keys on (scan-at-engine + provider gate +
-    // engine-dropout halo, NOT the big red fleeting box). Recovery: retry setup / disabled-memory / abandon.
+    // engine-dropout halo, NOT the big red fleeting box). Recovery: retry setup / abandon (memory cannot
+    // be disabled for a task, so no disabled-memory choice is offered).
     name: "engine-boot-provider-blocked",
     processes: [
       engineProcess({
@@ -576,7 +577,6 @@ const providerBlockStages: EngineRoomScenario[] = [
         edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
         actions: [
           { action: "retry setup", enabled: true },
-          { action: "disabled-memory", enabled: true },
           { action: "abandon", enabled: true },
         ],
         nextAction: "retry_provider_setup",

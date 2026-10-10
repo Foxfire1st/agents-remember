@@ -17,6 +17,9 @@ from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.memory_content_excludes import (
     MEMORY_CONTENT_EXCLUDES,
 )
+from agents_remember.worktrees.disabled_memory import (
+    opt_out_detail_for_contract,
+)
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     ephemeral_git_mutation_snapshot,
@@ -196,6 +199,12 @@ def candidate_gate_verdict(contract, code_tree: str) -> str | None:
     """
 
     repository = contract.memory_worktree
+    if contract.memory_mode != "external":
+        # A contract that carries the removed mode never reaches the gate's
+        # trees: the verdict itself refuses it by name (L50-CODE-R1-F02), so a
+        # direct caller meets the opt-out refusal rather than not-applicable.
+        # External unconverted and series contracts keep GATE_NOT_APPLICABLE.
+        return opt_out_detail_for_contract(contract, "worktree_closeout")
     if contract.kind != "leaf" or repository is None or not leaf_memory_converted(contract):
         return GATE_NOT_APPLICABLE
     return leaf_gate_refusal(

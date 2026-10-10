@@ -581,11 +581,12 @@ describe("EnclosureCanvas — T7B provider-plan block (05o: scan-at-engine + gat
     expect(gx).toBeGreaterThan(960);
     expect(Number(gate?.getAttribute("height"))).toBeGreaterThan(Number(gate?.getAttribute("width")));
     expect(queryByTestId("attention")).not.toBeNull();
-    // the recovery choices lead with retry-setup / disabled-memory (RecoveryChips caps at the first 3, so the
-    // 4th 'abandon' action is not rendered on canvas — retry + disabled are the visible provider-plan choices)
+    // the recovery choices lead with retry-setup / abandon (memory cannot be disabled for a
+    // task, so no disabled-memory choice is offered; RecoveryChips renders the two actions)
     const chips = container.querySelector('[data-testid="recovery-chips"]')?.textContent ?? "";
     expect(chips).toMatch(/retry/i);
-    expect(chips).toMatch(/disabled/i);
+    expect(chips).toMatch(/abandon/i);
+    expect(chips).not.toMatch(/disabled-memory/i);
   });
 
   it("sweeps the cyan scan ring AT the worktree engine (cx=1084) during the provider-plan verify — effects on", () => {

@@ -49,13 +49,17 @@ def create_fixture(root: Path, *, repository_root: Path, responses_base_url: str
 
     source_commit = _initialize_repository(workspace_repo)
     sprint, master, leaf = _write_topology(coordination)
+    # Memory cannot be disabled for a task (MIK-R50): the fixture runs external
+    # memory like every started task, with its own memory repository.
+    memory_repo = coordination / "memory-repos" / "ar-repo"
+    memory_base = _initialize_repository(memory_repo)
     contract = default_contract(
         ContractTask(
             name="master",
             repo_name="repo",
             coordination_root=coordination,
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="leaf-1", leaf_id="leaf-1"),
         code=RepoBranchPlan(
@@ -63,6 +67,12 @@ def create_fixture(root: Path, *, repository_root: Path, responses_base_url: str
             source_branch="ar/super",
             work_branch="ar/leaf-1",
             base_commit=source_commit,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="ar/super",
+            work_branch="ar/leaf-1",
+            base_commit=memory_base,
         ),
     )
     contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)

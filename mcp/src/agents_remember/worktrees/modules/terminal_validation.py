@@ -190,7 +190,7 @@ def terminal_preflight(
     mode: TerminalMode,
     force: bool,
 ) -> TerminalPreflight:
-    worktrees, worktree_blockers = _worktree_preflight(contract, force=force)
+    worktrees, worktree_blockers = _worktree_preflight(contract, force=force, mode=mode)
     branches: dict[str, dict[str, object]] = {}
     branch_blockers: list[dict[str, object]] = []
     allowed_worktrees = {
@@ -316,11 +316,17 @@ def _worktree_preflight(
     contract: WorktreeContract,
     *,
     force: bool,
+    mode: TerminalMode,
 ) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
     if contract.kind == "series":
         return {}, []
     candidates = {"code": contract.code_worktree}
-    if contract.memory_mode == "external" and contract.memory_worktree is not None:
+    # The abandon's own steps reach every leg the contract carries: a removed
+    # mode never shields a live memory checkout from preflight or teardown
+    # (MIK-R50 rule 3). Cleanup keeps the external-only shape.
+    if contract.memory_worktree is not None and (
+        contract.memory_mode == "external" or mode == "abandon"
+    ):
         candidates["memory"] = contract.memory_worktree
     previews: dict[str, dict[str, object]] = {}
     blockers: list[dict[str, object]] = []
@@ -369,6 +375,19 @@ def _branch_targets(
         )
     ]
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        targets.append(
+            BranchTarget(
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_work_branch,
+                contract.memory_source_branch,
+            )
+        )
+    elif (
+        mode == "abandon" and contract.memory_repo_path is not None and contract.memory_work_branch
+    ):
+        # Abandon reaches a carried memory branch whatever the mode names:
+        # a removed mode never shields it from preflight or deletion.
         targets.append(
             BranchTarget(
                 "memory",

@@ -32,7 +32,6 @@ from tempfile import TemporaryDirectory
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.memory_mode import MemoryMode
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.series_closeout import (
     _leaf_landing_precedes,
@@ -104,15 +103,13 @@ class AtomicSeriesChainPairOrderTests(unittest.TestCase):
         code: str,
         memory: str,
         leaf_id: str,
-        memory_mode: MemoryMode = "external",
     ) -> WorktreeContract:
-        external = memory_mode == "external"
         return WorktreeContract(
             task_id="260915_TEST",
             task_name="chain-pair-order",
             repo_name="agents-remember",
             workflow_kind="light-task",
-            memory_mode=memory_mode,
+            memory_mode="external",
             coordination_root=self.root,
             task_root=self.root / "tasks",
             contract_path=self.root / "tasks" / f"{leaf_id}-contract.md",
@@ -123,7 +120,7 @@ class AtomicSeriesChainPairOrderTests(unittest.TestCase):
             code_work_branch=f"ar/{leaf_id}",
             code_base_commit=code,
             code_worktree=self.root / "worktrees" / leaf_id,
-            memory_repo_path=self.memory if external else None,
+            memory_repo_path=self.memory,
             memory_source_branch="line",
             memory_work_branch=f"ar/{leaf_id}",
             memory_base_commit=memory,
@@ -166,31 +163,6 @@ class AtomicSeriesChainPairOrderTests(unittest.TestCase):
 
             self.assertFalse(_leaf_landing_precedes(series, one, two))
             self.assertFalse(_leaf_landing_precedes(series, two, one))
-
-    def test_disabled_memory_keeps_the_code_only_rule(self) -> None:
-        """With memory disabled there is no pair to order, so a shared code commit stays unordered."""
-
-        disabled = self._contract(
-            code=self.code_next,
-            memory=self.memory_first,
-            leaf_id="L1",
-            memory_mode="disabled",
-        )
-        one = self._contract(
-            code=self.code_next,
-            memory=self.memory_first,
-            leaf_id="L1",
-            memory_mode="disabled",
-        )
-        two = self._contract(
-            code=self.code_next,
-            memory=self.memory_second,
-            leaf_id="L2",
-            memory_mode="disabled",
-        )
-
-        self.assertFalse(_leaf_landing_precedes(disabled, one, two))
-        self.assertFalse(_leaf_landing_precedes(disabled, two, one))
 
 
 class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):

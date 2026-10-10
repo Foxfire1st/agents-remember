@@ -95,10 +95,14 @@ def memory_mode_for_repository(code_repo: Path, memory_root: Path | None) -> str
     A memory root inside the code repository is the removed repo-sidecar layout, and it is
     refused by its own path: this function used to *derive* ``internal`` from it, which is how
     a repository could silently keep a mode the product no longer supports.
+
+    A missing memory root no longer derives ``disabled`` (MIK-R50): every configured
+    repository implies ``external``, and a start without a memory repository fails with
+    the existing "memory is missing" error before anything is created.
     """
 
     if memory_root is None:
-        return "disabled"
+        return "external"
     if memory_root.resolve() == legacy_internal_memory_root(code_repo):
         refuse_removed_memory_mode("internal", artifact=memory_root.resolve().as_posix())
     return "external"

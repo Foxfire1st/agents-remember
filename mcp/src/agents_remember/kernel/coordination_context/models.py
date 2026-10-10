@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.kernel.memory_mode import MemoryMode, Topology
+from agents_remember.kernel.memory_mode import ReadableMemoryMode, Topology
 
 
 class MissingMemoryError(AgentsRememberError):
@@ -207,8 +207,9 @@ class CoordinationContext:
     # From the worktree contract whenever one is in scope: `build_coordination_context` in
     # `resolver.py` reads `contract.memory_mode` straight into this field, falling back
     # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
-    # contract's, and this alias is the one declaration rather than a second copy of the pair.
-    memory_mode: MemoryMode
+    # contract's readable one (a legacy `disabled` contract still reports itself), and this
+    # alias is the one declaration rather than a second copy of the pair.
+    memory_mode: ReadableMemoryMode
     contract_path: Path | None = None
     worktree_group: Path | None = None
     code_worktree: Path | None = None

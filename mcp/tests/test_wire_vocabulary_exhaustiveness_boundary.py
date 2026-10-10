@@ -57,7 +57,11 @@ class ContractBoundaryTests(unittest.TestCase):
             "workflow_kind: master-task",
             ("workflowKind", "master-task", "light-task"),
         ),
-        ("memory_mode: disabled", "memory_mode: hybrid", ("memoryMode", "hybrid", "disabled")),
+        # The reader's tolerance is unchanged, only its vocabulary moved: an unknown token
+        # still degrades to the memory section's answer (here `external`, which the shared
+        # `_contract` helper now carries) plus a quarantine record, rather than stranding
+        # the task. The removed `disabled` token itself stays readable with no record.
+        ("memory_mode: external", "memory_mode: hybrid", ("memoryMode", "hybrid", "external")),
         (
             "  status: pending-review",
             "  status: awaiting",

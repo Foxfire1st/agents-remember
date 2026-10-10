@@ -15,6 +15,7 @@ from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupA
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
+from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
 from agents_remember.worktrees.integration.atomic_series_terminal import (
     AtomicSeriesTerminalPermit,
     require_atomic_series_terminal_permit,
@@ -107,6 +108,25 @@ def _terminal_mutation_authority(
         remote_branches.add((code_repository, code_branch))
 
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        memory_repository = _required_repository_identity(contract.memory_repo_path, "memory")
+        if contract.kind == "leaf" and contract.memory_worktree is not None:
+            memory_worktree = contract.memory_worktree.resolve()
+            worktrees.add((memory_repository, memory_worktree))
+        branches.add(
+            (
+                memory_repository,
+                _normalized_branch(contract.memory_work_branch),
+                _normalized_branch(contract.memory_source_branch),
+            )
+        )
+    elif (
+        operation == "worktree_abandon"
+        and contract.memory_repo_path is not None
+        and contract.memory_work_branch
+    ):
+        # The abandon's own authority reaches a carried memory leg and branch
+        # whatever mode the contract carries (MIK-R50 rule 3): no conversion,
+        # just no shield. Cleanup keeps the external-only shape.
         memory_repository = _required_repository_identity(contract.memory_repo_path, "memory")
         if contract.kind == "leaf" and contract.memory_worktree is not None:
             memory_worktree = contract.memory_worktree.resolve()
@@ -600,11 +620,15 @@ def _require_series_terminal_release(contract: WorktreeContract) -> None:
         require_atomic_series_terminal_release(contract)
 
 
-def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
+def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:  # noqa: PLR0911
     if not args.approved and not args.dry_run:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    if is_disabled_contract(contract):
+        # A contract that carries the removed mode is never cleaned up (MIK-R50
+        # R4a): the way out is abandon and a fresh start, not cleanup.
+        return opt_out_refusal_result(contract, "worktree_cleanup")
     terminal = terminal_contract_authority_if_present(contract)
     if terminal is not None:
         accepted_arguments = TerminalWorktreeCleanupArguments(

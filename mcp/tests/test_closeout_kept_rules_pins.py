@@ -189,12 +189,23 @@ def _git_repo(tmp_path: Path):
     return git, repo, base, candidate
 
 
+def _git_memory_repo(tmp_path: Path) -> tuple[Path, str]:
+    """One real external-memory repository, so the replay requirement reads live refs."""
+
+    repo = tmp_path / "memory-a"
+    init_repo(repo)
+    (repo / "memory.md").write_text("# fixture memory ledger\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "Add memory ledger")
+    return repo, git(repo, "rev-parse", "HEAD")
+
+
 def _git_contract(repo: Path, **overrides: object) -> WorktreeContract:
     values: dict[str, object] = {
         "code_repo_path": repo,
         "code_source_branch": "main",
         "code_work_branch": "ar/task-one",
-        "memory_mode": "disabled",
+        "memory_mode": "external",
     }
     values.update(overrides)
     return replace(_contract(), **values)  # type: ignore[arg-type]
@@ -255,8 +266,17 @@ def test_r4_integration_replay_requirement_is_git_ancestry_not_a_record(tmp_path
     """
 
     git, repo, base, candidate = _git_repo(tmp_path)
+    memory_repo, memory_base = _git_memory_repo(tmp_path)
     unmoved = _integration_replay_requirements(
-        _git_contract(repo, code_base_commit=base, code_commit=candidate)
+        _git_contract(
+            repo,
+            code_base_commit=base,
+            code_commit=candidate,
+            memory_repo_path=memory_repo,
+            memory_source_branch="main",
+            memory_base_commit=memory_base,
+            memory_content_commit=memory_base,
+        )
     )
     assert unmoved.code_replay_required is False
 
@@ -264,7 +284,15 @@ def test_r4_integration_replay_requirement_is_git_ancestry_not_a_record(tmp_path
     git(repo, "add", "-A")
     git(repo, "commit", "-m", "parent moved")
     moved = _integration_replay_requirements(
-        _git_contract(repo, code_base_commit=base, code_commit=candidate)
+        _git_contract(
+            repo,
+            code_base_commit=base,
+            code_commit=candidate,
+            memory_repo_path=memory_repo,
+            memory_source_branch="main",
+            memory_base_commit=memory_base,
+            memory_content_commit=memory_base,
+        )
     )
     assert moved.code_replay_required is True
 

@@ -43,7 +43,7 @@ def enclosure_contract(
         repo_name="repo",
         coordination_root=coordination,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
     )
     code = RepoBranchPlan(
         repo_path=root / "repo",
@@ -51,13 +51,20 @@ def enclosure_contract(
         work_branch=f"ar/{worktree_name}",
         base_commit="a" * 40,
     )
+    memory = RepoBranchPlan(
+        repo_path=root / "memory",
+        source_branch="main",
+        work_branch=f"ar/{worktree_name}",
+        base_commit="b" * 40,
+    )
     if kind == "series":
-        contract = default_series_contract(task, code=code)
+        contract = default_series_contract(task, code=code, memory=memory)
     else:
         contract = default_contract(
             task,
             leaf=LeafIdentity(worktree_name=worktree_name, leaf_id=leaf_id),
             code=code,
+            memory=memory,
         )
     return contract, contract_publication_text(contract.contract_path, contract)
 

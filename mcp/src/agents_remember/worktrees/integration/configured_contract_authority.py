@@ -96,13 +96,28 @@ def require_configured_contract_repositories(
     config_path: str,
     *,
     require_candidate_identity: bool = True,
+    allow_disabled_memory: bool = False,
 ) -> RepositoryScope:
     """Bind a task contract to repository identities selected by MCP authority.
 
     Return the same configured repository whose identity was checked so callers that need
     the authoritative roots do not perform a second, potentially inconsistent settings read.
+
+    A contract that carries the removed ``disabled`` mode is admitted only with
+    ``allow_disabled_memory`` (status, attach and guarded abandon): every other
+    route refuses it with the opt-out refusal before reaching here.
     """
 
+    if allow_disabled_memory and contract.memory_mode != "external":
+        configured, code_identity = _require_configured_repository_authority_except_mode(
+            contract,
+            config_path,
+        )
+        if require_candidate_identity:
+            candidate_code_identity = repository_identity(contract.code_worktree)
+            if candidate_code_identity != code_identity:
+                raise ConfiguredContractAuthorityError(side="code", name="candidate")
+        return configured
     configured, code_identity = _require_configured_repository_authority(
         contract,
         config_path,
@@ -111,8 +126,6 @@ def require_configured_contract_repositories(
         candidate_code_identity = repository_identity(contract.code_worktree)
         if candidate_code_identity != code_identity:
             raise ConfiguredContractAuthorityError(side="code", name="candidate")
-    if contract.memory_mode != "external":
-        return configured
     memory_identity = _require_external_memory_repository_authority(
         contract,
         configured,
@@ -133,25 +146,50 @@ def require_configured_contract_repositories(
 def require_configured_terminal_contract_repositories(
     contract: WorktreeContract,
     config_path: str,
+    *,
+    allow_disabled_memory: bool = False,
 ) -> None:
     """Bind archived deletion authority without requiring already-deleted candidates."""
 
+    if allow_disabled_memory and contract.memory_mode != "external":
+        _require_configured_repository_authority_except_mode(contract, config_path)
+        return
     configured, code_identity = _require_configured_repository_authority(
         contract,
         config_path,
     )
-    if contract.memory_mode == "external":
-        _require_external_memory_repository_authority(
-            contract,
-            configured,
-            code_identity,
-        )
+    _require_external_memory_repository_authority(
+        contract,
+        configured,
+        code_identity,
+    )
 
 
 def _require_configured_repository_authority(
     contract: WorktreeContract,
     config_path: str,
 ) -> tuple[RepositoryScope, Path]:
+    configured, code_identity = _require_configured_repository_authority_except_mode(
+        contract,
+        config_path,
+    )
+    expected_memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
+    if contract.memory_mode != expected_memory_mode:
+        raise ConfiguredContractAuthorityError(side="memory", name="mode")
+    return configured, code_identity
+
+
+def _require_configured_repository_authority_except_mode(
+    contract: WorktreeContract,
+    config_path: str,
+) -> tuple[RepositoryScope, Path]:
+    """The configured-authority checks that do not compare the memory mode.
+
+    The mode comparison stays in :func:`_require_configured_repository_authority`
+    (MIK-R50 R3c): every other route refuses a disabled contract with the opt-out
+    refusal, while abandon admits a contract whose only disagreement is the mode.
+    """
+
     config = load_config(config_path)
     try:
         configured = require_repo(config, contract.repo_name)
@@ -162,9 +200,6 @@ def _require_configured_repository_authority(
     contract_code_identity = repository_identity(contract.code_repo_path)
     if code_identity is None or contract_code_identity != code_identity:
         raise ConfiguredContractAuthorityError(side="code", name="repository")
-    expected_memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
-    if contract.memory_mode != expected_memory_mode:
-        raise ConfiguredContractAuthorityError(side="memory", name="mode")
     return configured, code_identity
 
 

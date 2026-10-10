@@ -31,7 +31,7 @@ def _series_contract(root: Path) -> WorktreeContract:
         task_name="t",
         repo_name="r",
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode="external",
         coordination_root=root,
         task_root=root / "tasks" / "r" / "t",
         contract_path=root / "tasks" / "r" / "t" / "series-contract.md",

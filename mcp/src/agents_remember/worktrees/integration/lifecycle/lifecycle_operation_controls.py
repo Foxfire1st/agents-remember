@@ -27,6 +27,7 @@ from agents_remember.worktrees.closeout_input import (
     CloseoutInputError,
     corrected_closeout_arguments,
 )
+from agents_remember.worktrees.disabled_memory import OPT_OUT_STATUS, opt_out_detail_for_contract
 from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationClassification,
     DoorPublicationError,
@@ -168,6 +169,13 @@ def control_operation(
             "lifecycle-control-intent-required",
             "lifecycle control requires a nonblank developer intent note",
             next_action=command.action,
+        )
+    if command.admitted_contract.memory_mode != "external":
+        # A contract that carries the removed mode takes no operation control
+        # (MIK-R50 R4a): the way out is abandon and a fresh start, not control.
+        raise LifecycleControlError(
+            OPT_OUT_STATUS,
+            opt_out_detail_for_contract(command.admitted_contract, "worktree_operation_control"),
         )
     contract, location = _reload_control_contract(command)
     store = LifecycleOperationStore(location.journal_path(command.kind))

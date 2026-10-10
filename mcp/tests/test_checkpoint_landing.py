@@ -130,17 +130,34 @@ def _code_repo(path: Path) -> Path:
     return path
 
 
+def _memory_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    _git(path, "init", "-b", "super")
+    (path / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(path, "add", "base.txt")
+    _git(path, "commit", "-m", "base")
+    _git(path, "branch", "ar/master")
+    # The terminal guard reads the remote default branch before it will retire anything, so the
+    # repository must name its own default the way a real clone does.
+    _git(path, "update-ref", "refs/remotes/origin/super", _git(path, "rev-parse", "super"))
+    _git(path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/super")
+    return path
+
+
 def _fixture(root: Path) -> WorktreeContract:
     """An atomic series contract whose master is open and owns no leaf enclosure yet."""
 
     coordination = root / "coordination"
     code_repo = _code_repo(root / "code")
+    memory_repo = _memory_repo(root / "memory")
     task_root = coordination / "tasks" / "repo" / "master"
     _write_task_tree(coordination)
     contract = default_series_contract(
-        ContractTask("master", "repo", coordination, "light-task", "disabled"),
+        ContractTask("master", "repo", coordination, "light-task", "external"),
         code=RepoBranchPlan(code_repo, "super", "ar/master", _git(code_repo, "rev-parse", "super")),
-        memory=None,
+        memory=RepoBranchPlan(
+            memory_repo, "super", "ar/master", _git(memory_repo, "rev-parse", "super")
+        ),
         task_root=task_root,
     )
     write_contract(contract.contract_path, contract)
