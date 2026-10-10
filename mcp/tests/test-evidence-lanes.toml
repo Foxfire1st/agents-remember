@@ -330,6 +330,7 @@ integration = [
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
   "mcp/tests/test_cleanup_kept_line_carryover.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",

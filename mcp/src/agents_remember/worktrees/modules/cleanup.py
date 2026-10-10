@@ -633,6 +633,11 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 {**result.payload, **({"agentArchive": agents} if agents else {})},
             )
         contract = terminal.archived_contract
+        # MIK-R129 rule 1 per L129-THE-GATE-IS-NOT-JUDGED-AGAIN-RULING: on the archive
+        # branch the gate is not judged again. TerminalEnclosureArchive declares no
+        # kept-line record of that judgement (and forbids extra fields), so the repeat
+        # carries no record; its answer may lack landedTips but invents none.
+        kept_line = None
     else:
         _require_series_terminal_release(contract)
         require_terminal_worktree(contract, operation="worktree_cleanup")

@@ -437,6 +437,7 @@ consumers = [
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
   "mcp/tests/test_cleanup_kept_line_carryover.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",
   "mcp/tests/test_closeout_projection_source_classification.py",
@@ -1047,6 +1048,7 @@ consumers = [
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
   "mcp/tests/test_cleanup_kept_line_carryover.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_cli_discovery.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -1914,6 +1916,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_cleanup_completed_contract_remains.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
   "mcp/tests/test_enclosure_without_remains.py",
