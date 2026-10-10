@@ -11,6 +11,7 @@ from agents_remember.application.knowledge_bootstrap_admission import (
     BootstrapRefusal,
     admit_bootstrap_context,
 )
+from agents_remember.application.memory_quality.converted_base import converted_check_base
 from agents_remember.application.memory_scope import (
     MemoryScope,
 )
@@ -120,6 +121,14 @@ def drift_check_tool(
         code_repository_root=scope.code_root,
         context=scope.context,
         detail_limit=detail_limit,
+        # A leaf that deleted a file carries that anchor as carried and stale, not as
+        # newly written: with a contract the check compares against the leaf's converted
+        # base, without one against the memory checkout's converted HEAD (MIK-R44 rule 4).
+        base=(
+            converted_check_base(scope, config.coordination_root)
+            if contract_path is not None
+            else None
+        ),
     )
     return {
         "ok": packet.get("status") == "checked",
@@ -559,7 +568,7 @@ def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> di
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
     return {
-        "ok": payload.get("state") not in {"blocked-drift", "unavailable"},
+        "ok": payload.get("state") not in {"blocked-drift", "blocked-invalid", "unavailable"},
         "operation": "memory_baseline_status",
         **payload,
     }

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.memory_quality.converted_base import context_check_base
 from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
@@ -174,6 +175,21 @@ def _repo_scope(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:
     return config.repositories[repo_id]
 
 
+def _leaf_drift_base(repo_scope: RepositoryScope, context: Any) -> Any:
+    """Return the converted comparison base for a leaf context, else `None`.
+
+    A context that names an enclosure contract compares against the
+    application-owned converted base for that leaf (L44-C1-05), so this route
+    agrees with the drift tool on the same candidate and contract. A context
+    without a contract keeps today's semantics: no separate base.
+    """
+
+    contract_path = getattr(context, "contract_path", None)
+    if not isinstance(contract_path, Path) or not contract_path.is_file():
+        return None
+    return context_check_base(repo_scope.path, context)
+
+
 def _drift_packet(
     request: ContextPacketRequest,
     context: Any,
@@ -185,4 +201,5 @@ def _drift_packet(
         code_repository_root=repo_scope.path,
         context=context,
         detail_limit=request.drift_detail_limit,
+        base=_leaf_drift_base(repo_scope, context),
     )

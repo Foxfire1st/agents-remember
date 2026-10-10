@@ -42,6 +42,16 @@ def require_git(repo: Path, args: list[str]) -> str:
     return result.stdout.strip()
 
 
+def _require_git_with_index(repo: Path, args: list[str], index: Path) -> str:
+    """Run one Git command against a private index file; a failure keeps its name."""
+
+    result = run_git_with_index(repo, args, index)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(_transport_safe_git_diagnostic(detail))
+    return result.stdout.strip()
+
+
 def _excluded_pathspec(path: str) -> str:
     return MEMORY_CACHE_EXCLUDE if path == LEDGER_RELATIVE_PATH else f":(top,exclude){path}"
 
@@ -321,13 +331,25 @@ def ensure_worktree(
     return "created"
 
 
-def stage_worktree_content(repo: Path, *, exclude_paths: tuple[str, ...] = ()) -> None:
-    """Stage real content without reading or retaining explicitly derived index entries."""
+def stage_worktree_content(
+    repo: Path, *, exclude_paths: tuple[str, ...] = (), index_path: Path | None = None
+) -> None:
+    """Stage real content without reading or retaining explicitly derived index entries.
+
+    With ``index_path`` the staging writes a private index file instead of the
+    worktree's own index; without it the worktree's own index is staged.
+    """
+
+    def step(args: list[str]) -> str:
+        if index_path is not None:
+            return _require_git_with_index(repo, args, index_path)
+        return require_git(repo, args)
+
     args = ["add", "-A"]
     if exclude_paths:
-        require_git(repo, ["update-index", "--force-remove", "--", *exclude_paths])
+        step(["update-index", "--force-remove", "--", *exclude_paths])
         args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
-    require_git(repo, args)
+    step(args)
 
 
 @dataclass(frozen=True)

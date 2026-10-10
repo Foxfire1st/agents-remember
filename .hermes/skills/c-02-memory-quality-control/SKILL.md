@@ -122,6 +122,14 @@ format report `not-applicable-converted`:
   `onboarding_trace` row;
 - cards and their references are authored as the c-05 skill's converted-card workflow describes.
 
+The drift check measures the reference anchors of onboarding cards and the validity of the tree:
+how many anchors are current, how many are stale against the code, and which files the knowledge
+validator refuses. Whether an invariant is still current is answered by `knowledge_read` and
+`knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself;
+a leaf that changes a source file must change that file's card or record why not. Nothing is
+repaired by this check: `citation_fix` re-records anchors that only moved, and a curator
+re-authors a stale one.
+
 The rest of this section describes unconverted memory.
 
 Primary drift detection supports sidecar Markdown onboarding under the resolved

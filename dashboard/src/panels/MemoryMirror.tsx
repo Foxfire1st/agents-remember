@@ -45,6 +45,10 @@ const SEG_BG: Record<string, string> = {
   current: css({ background: "mint" }),
   ok: css({ background: "mint" }),
   drifted: css({ background: "amber" }),
+  // Converted repositories report `stale` anchors and validator `violation`s (MIK-R44);
+  // they read like their legacy counterparts.
+  stale: css({ background: "amber" }),
+  violation: css({ background: "alarm" }),
   missingVerification: css({ background: "cyan" }),
   missing: css({ background: "alarm" }),
   orphaned: css({ background: "alarm" }),

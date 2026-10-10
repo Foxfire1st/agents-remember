@@ -173,7 +173,9 @@ export interface DriftSegment {
 
 // Healthy classifications first so the bar reads left→right from good to actionable; any
 // classification the snapshot reports but we didn't anticipate is appended (forward-compatible).
-const DRIFT_ORDER = ["current", "drifted", "missingVerification", "missing", "orphaned", "unsupported"];
+// A converted repository reports `current`, `stale` and `violation` (MIK-R44): those three
+// names are ordered here so the converted bar reads the same way.
+const DRIFT_ORDER = ["current", "drifted", "missingVerification", "missing", "orphaned", "unsupported", "stale", "violation"];
 
 export function driftSegments(snapshot: DriftSnapshotNode | undefined | null): DriftSegment[] {
   const counts = snapshot?.counts ?? {};

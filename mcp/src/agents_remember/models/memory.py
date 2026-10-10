@@ -23,6 +23,17 @@ class DriftCheckResponse(ToolResponse):
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
     error: str | None = None
+    # Converted-tree measurement (MIK-R44): the check measures the reference anchors of
+    # onboarding cards and the validity of the tree. Absent on legacy results.
+    basis: str | None = None
+    memoryRoot: str | None = None
+    codeRoot: str | None = None
+    sidecarCount: int | None = Field(default=None, ge=0)
+    states: dict[str, int] | None = None
+    violationCount: int | None = Field(default=None, ge=0)
+    violationSample: list[dict[str, Any]] | None = None
+    reportOnlyCount: int | None = Field(default=None, ge=0)
+    unreadableSidecars: list[str] | None = None
     # WHICH tree was measured. `repo_id` alone means the official memory repo and a
     # `contract_path` means a leaf's memory worktree, and nothing else in this response
     # distinguishes them -- a caller that got the wrong one could not tell.

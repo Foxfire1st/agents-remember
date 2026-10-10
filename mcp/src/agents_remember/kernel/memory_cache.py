@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import run_git, run_git_with_index
 from agents_remember.kernel.memory_attribution import (
     MemoryAttributionError,
     attributed_commits,
@@ -41,35 +41,47 @@ def derive_memory_ledger(
     )
 
 
-def ignore_memory_cache(repository: Path) -> None:
+def ignore_memory_cache(repository: Path) -> bytes:
     """Record the cache's ignore rule: the one write :func:`prepare_memory_cache` makes to content.
 
     A route that judges the exact tree it is about to commit records the rule first, so the tree it
     judges already holds the line, and restores ``.gitignore`` when it refuses.
+
+    Returns the exact bytes written, so a refusing route can tell its own change apart from a
+    concurrent external edit without re-reading the file.
     """
 
     ignore = repository / ".gitignore"
     text = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
     if f"/{LEDGER_RELATIVE_PATH}" not in text.splitlines():
         separator = "" if not text or text.endswith("\n") else "\n"
-        atomic_write_text(ignore, f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n")
+        text = f"{text}{separator}/{LEDGER_RELATIVE_PATH}\n"
+        atomic_write_text(ignore, text)
+    return text.encode("utf-8")
 
 
-def prepare_memory_cache(repository: Path) -> None:
+def prepare_memory_cache(repository: Path, *, index_path: Path | None = None) -> bytes:
     """Exclude the cache from the next memory-content commit, retaining its disk copy.
 
     Removing a previously tracked cache and recording its ignore rule belong to the ordinary
     memory-content change. They never require a separate ledger publication. This also removes
     cache-only index conflicts; genuine content conflicts remain in the index for Git to refuse.
+
+    With ``index_path`` the exclusion writes a private index file instead of
+    the worktree's own index; without it the worktree's own index is prepared.
+
+    Returns the prepared `.gitignore` bytes (see :func:`ignore_memory_cache`).
     """
 
-    ignore_memory_cache(repository)
-    result = run_git(
-        repository,
-        ["rm", "--cached", "--force", "--ignore-unmatch", "--", LEDGER_RELATIVE_PATH],
-    )
+    prepared = ignore_memory_cache(repository)
+    args = ["rm", "--cached", "--force", "--ignore-unmatch", "--", LEDGER_RELATIVE_PATH]
+    if index_path is not None:
+        result = run_git_with_index(repository, args, index_path)
+    else:
+        result = run_git(repository, args)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "could not exclude the memory cache")
+    return prepared
 
 
 def refresh_memory_cache(

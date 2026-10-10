@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { DashboardState } from "./store";
-import type { AttentionItem, LifecycleProjection, Phase } from "../types/projection";
-import { buildTree, fmtWait, hasLiveWorktree, selectQueue } from "./selectors";
+import type { AttentionItem, DriftSnapshotNode, LifecycleProjection, Phase } from "../types/projection";
+import { buildTree, driftSegments, fmtWait, hasLiveWorktree, selectQueue } from "./selectors";
 
 const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): LifecycleProjection => {
   const base: LifecycleProjection = {
@@ -100,5 +100,25 @@ describe("selectQueue", () => {
         suppressedAttentionIds: { [item.id]: true },
       } as DashboardState),
     ).toEqual([]);
+  });
+});
+
+function driftSnapshot(counts: Record<string, number>): DriftSnapshotNode {
+  return { actionableCount: 0, branch: "main", counts, repository: "repo" };
+}
+
+// A converted repository reports `current`, `stale` and `violation` (MIK-R44):
+// the mirror orders and shows those three names instead of legacy classifications.
+describe("driftSegments on converted snapshots", () => {
+  it("orders current, stale and violation with exact shares", () => {
+    const segments = driftSegments(driftSnapshot({ current: 10, stale: 3, violation: 1 }));
+    expect(segments.map((segment) => segment.cls)).toEqual(["current", "stale", "violation"]);
+    expect(segments.map((segment) => segment.count)).toEqual([10, 3, 1]);
+    expect(segments.reduce((sum, segment) => sum + segment.pct, 0)).toBeLessThanOrEqual(100);
+  });
+
+  it("keeps legacy classifications ahead of converted-only names", () => {
+    const segments = driftSegments(driftSnapshot({ current: 4, drifted: 2, stale: 2 }));
+    expect(segments.map((segment) => segment.cls)).toEqual(["current", "drifted", "stale"]);
   });
 });

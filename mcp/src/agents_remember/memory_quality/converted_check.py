@@ -32,6 +32,9 @@ from agents_remember.memory_quality.reference_state import check_references
 
 CONVERTED_KNOWLEDGE_CHECK: Final = "knowledge.converted"
 CONVERTED_BASE_RULE: Final = "R24.7-converted-base"
+#: The validator rule whose refusals classify anchors against the comparison
+#: base (L44-C1-09): withheld, never refused, when the base cannot be built.
+_BASE_DEPENDENT_RULE: Final = "R22.6-anchor-path"
 KnowledgeBasePort = Callable[[Path, KnowledgeTree], tuple[KnowledgeTree | None, str | None]]
 """``(memory root, candidate) -> (K_B as the candidate is compared with it, or why it cannot be
 built)``. This layer cannot reach the converted-base cache; the application binds it."""
@@ -99,7 +102,14 @@ def _unbuildable_base(problem: str) -> dict[str, Any]:
 def converted_knowledge_check(
     memory_root: Path, code_root: Path, *, base: KnowledgeBasePort | None = None
 ) -> dict[str, Any]:
-    """Validate the converted tree and report its stale references (report-only)."""
+    """Validate the converted tree and report its stale references (report-only).
+
+    When the comparison base cannot be built, carried-vs-new classification is
+    unknown, so the base-dependent anchor-path refusals are withheld instead
+    of being decided against an invented empty base (L44-C1-09): the named
+    unbuildable-base refusal is recorded, every independently measurable
+    reference state keeps being reported, and no new/carried refusal fires.
+    """
 
     tree = knowledge_tree_from_directory(memory_root)
     bases, problem = _comparison_bases(memory_root, tree, base)
@@ -109,10 +119,10 @@ def converted_knowledge_check(
         code=CodeDirectory(label=code_root.as_posix(), root=code_root),
     )
     findings = [_unbuildable_base(problem)] if problem is not None else []
-    findings += [
-        {"check": CONVERTED_KNOWLEDGE_CHECK, **violation.to_document()}
-        for violation in report.refusals
-    ]
+    refused = [violation.to_document() for violation in report.refusals]
+    if problem is not None:
+        refused = [document for document in refused if document.get("rule") != _BASE_DEPENDENT_RULE]
+    findings += [{"check": CONVERTED_KNOWLEDGE_CHECK, **document} for document in refused]
     report_only = [
         {"check": CONVERTED_KNOWLEDGE_CHECK, **violation.to_document()}
         for violation in report.reports
@@ -127,4 +137,6 @@ def converted_knowledge_check(
         "findings": findings,
         "reportOnlyFindings": report_only,
         "referenceStates": references["states"],
+        "sidecarCount": references["sidecarCount"],
+        "unreadableSidecars": references["unreadableSidecars"],
     }

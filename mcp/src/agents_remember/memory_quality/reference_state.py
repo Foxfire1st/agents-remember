@@ -107,10 +107,12 @@ _MALFORMED: Final = (AttributeError, KeyError, TypeError, ValueError)
 def _sidecars(
     memory_root: Path, unreadable: list[str], only: str | None = None
 ) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Every sidecar that holds references (or the one ``only`` names), parsed.
+    """Every sidecar with a references map (or the one ``only`` names), parsed.
 
     A sidecar that is not valid JSON is named in ``unreadable`` and skipped: the knowledge validator
-    refuses it by its own rule, and the reference check and the fixer never raise on it.
+    refuses it by its own rule, and the reference check and the fixer never raise on it. A sidecar
+    with an empty references map is still yielded: the fixer and the conversion toolchain visit it
+    to author references, while counting consumers decide what counts (L44-C1-08).
     """
 
     onboarding = memory_root / "onboarding"
@@ -146,13 +148,22 @@ def check_references(
     """Report every reference anchor's state in the code working tree (report-only).
 
     ``only`` names one sidecar (memory-root relative): no other sidecar is read or reported.
+    Only sidecars that actually hold references are counted or observed (L44-C1-08): a sidecar
+    with an empty references map holds nothing to observe, so it is neither read nor
+    unreadable here (the fixer still visits it to author references). A sidecar whose
+    references name only non-code targets is counted, while its anchors stay out of the
+    observed code/test counts. A sidecar whose references cannot be read as targets is named
+    in ``unreadableSidecars`` and excluded from every count.
     """
 
     files = _WorkingFiles(code_root)
     states: Counter[str] = Counter()
     stale: list[dict[str, Any]] = []
     unreadable: list[str] = []
+    sidecars_read = 0
     for relative, document in _sidecars(memory_root, unreadable, only):
+        if not document.get("references"):
+            continue
         try:
             observed = [
                 (field_name, anchor, anchor_state(anchor["path"], anchor, files))
@@ -161,6 +172,7 @@ def check_references(
         except _MALFORMED:
             unreadable.append(relative)
             continue
+        sidecars_read += 1
         for field_name, anchor, state in observed:
             states[state.split(":")[0]] += 1
             if state != "current":
@@ -173,6 +185,7 @@ def check_references(
         "findings": [],
         "reportOnlyFindings": stale,
         "states": dict(sorted(states.items())),
+        "sidecarCount": sidecars_read,
         "unreadableSidecars": unreadable,
     }
 

@@ -56,9 +56,16 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         detail_limit: int = 50,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
-        """Task-start gate: classify how far onboarding has drifted from the code since it was last
-        verified. Read-only (writes only a temp drift report). A nonzero actionable count is
-        expected after code changes, not a failure. Pass `contract_path` (a leaf enclosure
+        """Measure the reference anchors of onboarding cards and the validity of the tree.
+
+        Read-only (writes only a temp drift report). On converted memory the result names
+        how many anchors are current and how many are stale against the code, plus the
+        knowledge validator's refusing findings. Whether an invariant is still current is
+        answered by `knowledge_read` and `knowledge_integrity_check`, not here. A stale
+        reference is reported and never blocks by itself: a leaf that changes a source
+        file must change that file's card or record why not (MIK-R30). Nothing is repaired by this
+        check: `citation_fix` re-records anchors that only moved, and a curator
+        re-authors a stale one. Pass `contract_path` (a leaf enclosure
         contract) to check that leaf's memory worktree; omit it for the official memory repo."""
         return drift_check_payload(
             config, repo_id, detail_limit=detail_limit, contract_path=contract_path
@@ -221,7 +228,10 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Create the first attributed memory baseline for an external memory repo. Mutating: commits
-        memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true. Preview with
+        memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true.
+        `accept_drift` accepts stale anchors only: it never lets a tree with a validator
+        violation through, and the first baseline of a converted tree is validated
+        before it is committed. Preview with
         dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill."""
         return memory_baseline_adopt_payload(
             config,

@@ -18,6 +18,17 @@ class DriftSummaryPacket(TypedDict):
     actionableSample: NotRequired[list[dict[str, Any]]]
     rows: NotRequired[list[dict[str, Any]]]
     error: NotRequired[str]
+    # Converted-tree measurement (MIK-R44): the summary is built from
+    # `converted_knowledge_check` and carries what was really measured.
+    basis: NotRequired[str]
+    memoryRoot: NotRequired[str]
+    codeRoot: NotRequired[str]
+    sidecarCount: NotRequired[int]
+    states: NotRequired[dict[str, int]]
+    violationCount: NotRequired[int]
+    violationSample: NotRequired[list[dict[str, Any]]]
+    reportOnlyCount: NotRequired[int]
+    unreadableSidecars: NotRequired[list[str]]
 
 
 CLASSIFICATIONS = (

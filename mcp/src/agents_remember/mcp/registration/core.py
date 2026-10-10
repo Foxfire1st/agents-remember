@@ -67,7 +67,13 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         memory mode/storage, worktree state, and (optionally) provider status, drift, and branch
         freshness (include_freshness fetches remote-tracking refs and reports ahead/behind for the
         code and memory checkouts plus whether the ledger maps code HEAD). Read-only apart from
-        that optional fetch. For a canonical leaf, pass task_context with task_document_ref and
+        that optional fetch. `include_drift` measures the reference anchors of onboarding cards
+        and the validity of the tree -- a stale reference is reported and never blocks by itself; whether
+        an invariant is still current is answered by `knowledge_read` and
+        `knowledge_integrity_check`, not here; a leaf that changes a source file must change
+        that file's card or record why not (MIK-R30); and nothing is repaired (`citation_fix`
+        re-records anchors that only moved, and a curator re-authors a stale one); omit it
+        and nothing is measured. For a canonical leaf, pass task_context with task_document_ref and
         contract_path together; the admitted enclosure supplies code and memory roots, and repo_id
         must match its repository. Omit task_context for configured Projects scope."""
         return context_packet_payload(

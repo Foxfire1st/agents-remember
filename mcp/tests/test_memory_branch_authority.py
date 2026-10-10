@@ -23,6 +23,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
+from unittest import mock
 
 import pytest
 
@@ -40,6 +42,10 @@ from agents_remember.kernel._agentic_settings_core import KNOWN_ROLES
 from agents_remember.kernel.memory_init import DEFAULT_BRANCH_CONFIG_KEY
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.memory.baseline import _baseline_default_branch
+from agents_remember.memory.conversion.base import GitBaseConverter
+from agents_remember.memory_quality.knowledge_validator.commit_route import (
+    GitKnowledgeValidation,
+)
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -57,6 +63,11 @@ from agents_remember.worktrees.integration.integration_branch_repository import 
     memory_repository_default_branch,
 )
 from agents_remember.worktrees.modules.git import commit_if_dirty
+from agents_remember.worktrees.services import (
+    WorktreeServices,
+    bind_worktree_services,
+    reset_worktree_services,
+)
 from test_worktree_support import git, init_repo
 
 REPO_ID = "repo"
@@ -100,6 +111,26 @@ def _memory_root(config) -> Path:
     root = config.repositories[REPO_ID].memory_root
     assert root is not None, "the fixture configures an external memory root"
     return root
+
+
+@pytest.fixture
+def bound_validation() -> Any:
+    """Bind real worktree services so the first baseline validates before it commits.
+
+    Fresh `memory_init` trees are converted, so MIK-R44 rule 7 validates the staged
+    tree through the knowledge validator instead of committing unvalidated.
+    """
+
+    bind_worktree_services(
+        WorktreeServices(
+            provider_lifecycle=mock.Mock(),
+            memory_quality=cast(Any, None),
+            citation_guard=cast(Any, None),
+            knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
+        )
+    )
+    yield
+    reset_worktree_services()
 
 
 def _recorded_branch(memory: Path) -> str:
@@ -227,7 +258,9 @@ def test_the_recorded_refs_heads_spelling_is_accepted_and_normalized(tmp_path: P
     assert git(memory, "symbolic-ref", "HEAD") == "refs/heads/team-memory"
 
 
-def test_baseline_adoption_follows_the_configured_branch(tmp_path: Path) -> None:
+def test_baseline_adoption_follows_the_configured_branch(
+    tmp_path: Path, bound_validation: Any
+) -> None:
     """The first baseline is adopted on a repository founded on a non-``main`` branch.
 
     This is the end-to-end property: ``memory_init`` records ``spear/2026-q3``, the unborn
@@ -471,7 +504,9 @@ def _adoptable_memory(config, *, bootstrap_file: str = "bootstrap/state.md") -> 
     return memory
 
 
-def test_the_first_baseline_never_commits_bootstrap_scaffolding(tmp_path: Path) -> None:
+def test_the_first_baseline_never_commits_bootstrap_scaffolding(
+    tmp_path: Path, bound_validation: Any
+) -> None:
     """``bootstrap/`` is absent from the commit, and still on disk afterwards.
 
     This is the case the baseline round demanded. The behaviour it protects was measured as

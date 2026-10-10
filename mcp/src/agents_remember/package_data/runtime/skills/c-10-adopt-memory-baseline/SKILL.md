@@ -34,21 +34,32 @@ installed and development workflows use the MCP/package route.
 2. Run the `c-02-memory-quality-control` skill's drift classification against the resolved onboarding root; its reusable report is written under the `c-08-ar-coordination-context-resolver` skill's resolved temp root.
 3. Inspect reachable memory commits for existing `Code-Commit:` attribution.
 4. If attributed memory already exists, report `already-adopted` and stop; cache presence does not determine adoption.
-5. If drift has actionable findings, stop unless `accept_drift=true` is part of the approved `memory_baseline_adopt` request.
+5. If drift has actionable findings, stop unless `accept_drift=true` is part of the approved `memory_baseline_adopt` request. On converted memory, `blocked-invalid` (the knowledge validator refuses the tree) stops adoption with or without `accept_drift`: accepting drift accepts stale anchors only, never a validator violation. The first baseline of a converted tree is validated before it is committed.
 6. Adopt through `memory_baseline_adopt` on the configured memory default branch. Existing onboarding/system/docs become one memory-content commit with a `Code-Commit:` trailer; `memory.md` is computed afterward without another commit.
 
 ## Output States
 
 - `ready`: no attributed memory baseline exists and drift is clean enough to adopt.
 - `blocked-drift`: drift has actionable findings and `accept_drift=true` was not supplied.
+- `blocked-invalid`: on converted memory, the knowledge validator refuses the tree; `accept_drift` cannot clear it.
 - `unavailable`: a current memory HEAD exists but its history cannot be read; adoption waits for readable Git history.
 - `already-adopted`: reachable memory history already carries code attribution.
 - `adopted`: the attributed memory-content baseline was committed and the cache refresh was attempted.
-- `would-adopt`: dry run would create the baseline.
+- `would-adopt`: dry run would create the baseline. A dry run reports `would-adopt` only when the staged-tree validation would pass; a refusal or a dry run leaves the index, the refs and every file as they were.
+
+### Converted memory drift
+
+On converted memory the drift check measures the reference anchors of onboarding cards and the
+validity of the tree: how many anchors are current, how many are stale against the code, and which
+files the knowledge validator refuses. Whether an invariant is still current is answered by
+`knowledge_read` and `knowledge_integrity_check`, not here. A stale reference is reported and never
+blocks by itself; a leaf that changes a source file must change that file's card or record why not
+(MIK-R30). Nothing is repaired by this check: `citation_fix` re-records anchors that only moved,
+and a curator re-authors a stale one.
 
 ## Boundaries
 
 1. Baseline adoption commits real memory content and computes the cache; it never commits the cache.
 2. The `c-10-adopt-memory-baseline` skill must not refresh onboarding content itself; use the `c-05-create-or-update-onboarding-files` skill for that.
 3. A missing, stale, or malformed `memory.md` is a cache state, not evidence that a baseline exists or is absent.
-4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite the `c-02-memory-quality-control` skill's warnings.
+4. `accept_drift=true` means the developer is asserting the current onboarding content is factual enough to become the baseline despite the `c-02-memory-quality-control` skill's warnings. On converted memory it accepts stale anchors only: it never lets a tree with a validator violation through.
