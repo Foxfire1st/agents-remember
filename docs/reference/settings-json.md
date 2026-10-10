@@ -5,16 +5,16 @@ Agents Remember has five settings families with stated authorities:
 | Family | Home | Read cadence |
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
-| Host runtime (`paseoRuntime`) | coordinator `system/settings.json`, linked by each harness coordinationRoot | per use; install reads at each call |
+| Host runtime (`paseoRuntime`) | user configuration `agents-remember/settings.json`, shared by every harness | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
 memory root's `settings.json`.
 
-The coordinator root's `system/settings.json` is the GLOBAL agentic settings
-file — it is NOT an MCP authority file (the server refuses it as `--config`)
+The user's `~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when
+set) is the GLOBAL agentic settings file — it is NOT an MCP authority file (the server refuses it as `--config`)
 and NOT a provider settings source (the old implicit fallback to it is
 removed; an explicit `--from-settings` path is still read wherever it points). MCP authority settings
 live outside the coordinator root; see `examples/mcp/settings.example.json`.
@@ -116,8 +116,9 @@ Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pa
 
 ### Paseo runtime
 
-`paseoRuntime` lives once in `<coordinationRoot>/system/settings.json`, linked
-by each harness MCP file's `coordinationRoot`. It is optional and describes one
+`paseoRuntime` lives once in `~/.config/agents-remember/settings.json`
+(or `$XDG_CONFIG_HOME/agents-remember/settings.json`), linked
+by every harness using the same user configuration directory. It is optional and describes one
 build-pinned Paseo install, one daemon home and one listen address. The shared
 block is read per use; `runtime_install` reads it at each call and never writes
 it. Starter/setup creates it, preserving an existing file. Old per-harness
@@ -197,7 +198,9 @@ agents-remember paseo status    --config <MCP settings file>
 agents-remember paseo stop      --config <MCP settings file>
 ```
 
-`--config` is required: its coordinationRoot links the shared host settings.
+`--config` is required for the MCP installation context. The host block is read from
+the same user configuration file as the agentic settings; `coordinationRoot` no longer
+selects a host settings file.
 `runtime_install` already provisions the host during product install; no host
 command is an extra install step. A repeat with no changes is read-only. A dry
 run reports Node/version/start/restart disposition and performs no mutation.
@@ -436,12 +439,24 @@ global file.
 The agentic settings family — everything under the top-level `orchestration`
 key — lives in TWO JSON files merged on every read (260703-L13):
 
-- **Global:** `<coordinationRoot>/system/settings.json`. Starter/setup owns the
+- **Global:** `~/.config/agents-remember/settings.json` (or
+  `$XDG_CONFIG_HOME/agents-remember/settings.json`). Starter/setup owns the
   host block; the c-13 interview adds the developer's agentic preferences after
   approval. Absent knobs retain built-in defaults without a seeded copy.
   User-owned: runtime_install never writes this file.
 - **Repo-local override:** `<code-repo>/system/settings.json` (optional). The
   same `orchestration.*` shape; repo-local values supersede global ones.
+
+The whole former `<coordinationRoot>/system/settings.json` file moves once, including
+its other settings families. Normal starts, dashboard settings loads and `runtime_install`
+refuse an old file with both paths and `agents-remember upgrade-user-settings
+--coordination-root <absolute root>`. Run that command with `--dry-run` to preview, then
+without it to move. Both files together refuse; the upgrade never overwrites the new file.
+A failed transfer retains the old file and may leave a partial new file, so the next load
+refuses both paths; there is no automatic choice or recovery. The repository-local and
+memory-repository settings files, and MCP's separate `--config` file, stay in place.
+The upgrade resolves the user directory of its own process, including an isolated
+sandbox home. It changes no running agent mode.
 
 **Merge semantics.** Deep merge at leaf-key granularity: a local scalar or
 object leaf overrides the global one, sibling keys survive; arrays REPLACE
@@ -474,7 +489,7 @@ quality gate with normal RAM and swap behavior (see `orchestration.qualityGate`)
 
 ### orchestration.gateDelegation
 
-GLOBAL-LAYER ONLY: the boot snapshot reads the coordinator file exclusively, and the
+GLOBAL-LAYER ONLY: the boot snapshot reads the user file exclusively, and the
 loader REFUSES a `gateDelegation` key in a repo-local settings file (a local value
 would otherwise validate and silently do nothing — a fail-open shape). Gate posture
 is workspace-wide enforcement state, never a per-repo preference.
@@ -497,31 +512,95 @@ Read cadence above).
 
 ### orchestration.roles, orchestration.rolesPerLevel
 
-For Paseo role launches, optional `serviceTier` selects processing service independently of
-`model` and reasoning `effort`. It is a nonempty string with the same global/repository/per-level
-inheritance as the other role fields. `fast` intentionally requests native `priority`, the Fast
-option advertised by the pinned Paseo provider; `default` requests the advertised Normal option.
-Other values must match an advertised native `service_tier` option exactly. No `fast` boolean,
-launch argument or reasoning-effort downgrade is used. Missing capability refuses before creation.
+Paseo role launches read these choices from the host's running catalog, not a built-in model table:
 
-The tier default applies on the role's default agent, including explicit model overrides; each
-actual model (or advertised native default when unset) is checked. Choosing another agent
-explicitly uses that provider's defaults, as with the role's model/effort defaults. An unset tier
-adds no feature override. The logical setting is displayed in launch options; immutable
-`sessionOptions` records resolved requested native creation values, while `agent.serviceTier`
-is observed only when the host reports its feature value. Replay uses its saved call and does
-not apply subsequently changed role defaults to an existing actor. Legacy terminal spawning
-refuses a configured tier because it has no Paseo feature channel.
+| Role key | Host profile field | Effect on a Paseo launch |
+| --- | --- | --- |
+| `harness` | `provider` | Agent kind |
+| `model` | `model` | Model ID offered for that agent |
+| `effort` | `thinkingOptionId` | Thinking option offered for that model |
+| `mode` | `modeId` | Permission/operating mode offered for that agent; user layer/profile only |
+| `featureValues` | `featureValues` | Boolean for each toggle; option ID for each selection |
+| `serviceTier` | `featureValues.service_tier` | Speed selection; `fast` normalizes to native `priority` |
+| `notes` | `notes` (host page: When to use) | User's plain instruction text; user layer/profile only |
+| `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; terminal dispatch applies them. No effect on a Paseo role launch. |
+
+A mode or `notes` in a repository's `system/settings.json` refuses loading, naming the file and
+key, in both `roles` and `rolesPerLevel`. Feature authority is classified by the product:
+`service_tier` and Claude's `fast_mode` are speed features and may come from either settings layer
+or a start call. Codex's `plan_mode`, ACP's `auto_accept`, and every unknown feature are permission
+bearing; only the user's configuration settings and host profile may state them. No start route
+accepts a mode. `role_start` adds `feature_values` for speed choices beside agent/model/effort;
+this feature argument is new. The launcher shows the applied mode and offers speed-feature
+controls. It saves no defaults and adds no instruction editor. A running agent's mode is changed
+by its user in the host chat, never by a repeat, settings edit or landing.
+
+`serviceTier` and `featureValues.service_tier` are compared after layer and level merging and alias
+normalization. Equal native values resolve to one choice; conflicting values refuse loading.
+Claude's `fast_mode` is a separate toggle, not a service-tier alias.
+
+Role provider IDs are shape-checked at settings load and validated against the actual host catalog at launch. Custom host providers need no AR terminal-harness declaration. The separate AR registry and terminal adapter checks remain unchanged. Internal provenance retains the original file/key and provider/model binding through global, repository and per-level merges, so a repository provider override cannot reinterpret a lower user mode with an identically spelled ID. Ignored lower choices are recorded with their source and reason.
+
+Each first start reads the host's profiles through a read-only bridge call. A profile matches a
+role when its `name` equals the role ID exactly; the first match in host order wins and the record
+names skipped matches. Host `id`, `icon` and `color` are not launch choices: ID/name identify the
+profile in provenance; AR owns role titles and labels. If profiles cannot be read, role settings
+are used and the unavailable-read reason is recorded. The launch never reads or edits `config.json`.
+
+For agent/model/effort and speed features, resolution is explicit start selection, host profile,
+our settings, host default. For mode, it is host profile, our settings, the named least
+working offered mode. The existing service tier default stays provider-scoped and is revalidated against the actual model, including a model override. Other lower choices stay bound to their provider/model; a different higher
+provider/model omits them with a reason. Features resolve individually. Differing settings/profile
+values are not a refusal; an effective unoffered value is, before a workspace/agent is created.
+Empty optional strings/maps state no choice. Records carry each value/source and read provenance.
+Settings are read per call; profiles are read fresh for each options call and first start. Displayed
+defaults are not submitted as explicit start selections. Repeats/retries use the original saved
+call; revive resumes the host's stored agent, including any manually changed mode.
+
+With no user/profile mode, new Claude starts explicitly state `default`, new Codex starts explicitly
+state `auto`, only when offered. Pi has no selectable mode; for unknown kinds or a missing named
+mode, no mode is sent and the record says why. The catalog's `defaultModeId` is the host form's
+preselection, not this product's least permissive mode choice. An incomplete or failed catalog
+refuses a start because its modes are unknown; an explicitly empty catalog states no mode.
+Modes retain the host wire's ID, label, description,
+icon and colorTier; the wire offers no unattended marking, so none is manufactured.
+
+Stating Codex `auto` selects the host's workspace-write/on-request/user-reviewer preset; explicit host provider options can override its policy fields. Earlier
+unstated-mode Codex starts inherited the user's configuration. The explicit preset concerns new
+starts only. Mode labels alone do not prove permission
+behavior. Claude's host describes `default` as Always Ask, prompting the first time a tool is used.
+Pi extensions can ask for permission. Actual prompt behavior also depends on host/provider
+configuration; no universal no-prompt behavior is established by the mode catalog alone.
+
+The user text follows the whole baseline as a marked block naming its settings key/source. If
+`<overwrite>` (case sensitive) is alone on the first nonblank line, ignoring surrounding whitespace,
+that tag line is removed and the remainder replaces the baseline. Empty replacement refuses before
+creation. The handover, binding, parent, server and product start/message permissions stay intact.
+Records distinguish baseline/effective digests, raw text digest and delivered blocks; plain text is
+never a file or link loader. There is no role skill setting or skill-existence check. The host's
+`daemon.appendSystemPrompt` is a separate global text the host adds to every agent; AR neither reads
+nor records it. `role_capsule_compile` alone compiles the baseline, not a live profile.
 
 ```json
-"architect": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh", "serviceTier": "fast" }
+"reviewer": {
+  "harness": "claude", "model": "claude-opus-4-6", "effort": "high",
+  "mode": "auto", "featureValues": {"fast_mode": true},
+  "notes": "Write every finding in German."
+}
 ```
 
-Model/effort/tier availability remains dynamic. The earlier private Codex CLI0.156.1 catalog
-lacked the exact example model; the isolated CLI0.160.0 metadata qualification now advertises
-`gpt-6.1-sol`, `xhigh`/`max`, and native `default`/`priority`. No launcher substitution or paid
-model turn was used to establish that metadata. Unknown choices still refuse on the actual runtime.
+```json
+"worker": {
+  "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh",
+  "mode": "auto-review", "serviceTier": "fast",
+  "featureValues": {"plan_mode": false},
+  "notes": "<overwrite>\nImplement the selected task and report its evidence."
+}
+```
 
+These are complete shape examples; use only IDs/features the installation's current catalog offers.
+Legacy terminal dispatch retains its existing tier refusal and is not expanded by these keys.
+The existing terminal-specific role behavior follows below.
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
@@ -662,7 +741,7 @@ policy; the gate treats a capped kill as a failure, never a skip.
 
 `orchestration.concurrency` caps parallel orchestration fan-out:
 `maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
-omitted means uncapped). The caps are doctrine input for the spawning seats.
+omitted means uncapped). These keys stay accepted but no code reads or enforces them in this build. `maxParallelMasters` means concurrent masters, `maxParallelLeaves` means concurrent leaves (not agents), and `maxSubAgents` means sub-agents. Reaching one refuses no start; leaf limits are deliberately unenforced.
 
 `orchestration.spawn.harness` names the default harness the private launch seam uses when no
 role/level knob supplies one. Resolution order at that seam:
@@ -774,3 +853,38 @@ The global agentic file is the earmarked durable settings home beyond the
 - Other top-level keys (`$comment`, `version`, and any future family) are
   likewise tolerated-not-parsed by the agentic loader; only documented
   `orchestration.*` keys are read, and only they fail loud.
+
+### Role working folders and assignment reads
+
+Every new leaf execution writes reports/evidence under its group's real `role-reports/<role>/<requestId>` directory and
+scratch under `scratch/<role>/<requestId>`. Product-owned `reports` stays distinct. Existing recorded
+`task-reports` aliases remain only for old bindings until terminal collection/cleanup; no new start
+uses them. Existing bindings keep their recorded paths until their enclosures close.
+Controller/taskless roles retain their workspace cwd and receive local per-execution report/scratch
+folders under `.agents-remember/role-executions`, which installation creates and ignores in Git.
+
+Reports, handovers, evidence and producer files are copied to canonical notes on outgoing
+`role_message` and before cleanup/abandon (including force). Options, result and status reads
+neither collect files nor remove execution folders. Each new execution has its own source and
+canonical folder; an unchanged file is skipped using source/copy file metadata, without rereading
+its bytes. A collection failure is recorded and returned alongside a delivered message, while
+failed collection preserves folders and refuses removal. Collection is bounded to
+10,000 files/directories / 2 GiB per call, with large evidence archived in canonical notes first. Legacy aliases
+are unlinked without following them to delete their targets. Scratch is reclaimed with the leaf;
+non-leaf execution folders are reclaimed when that execution is archived or replaced.
+
+Task documents are read as rendered Markdown with the harness's own file tools. For leaf
+Worker, Reviewer and Curator starts, the product publishes a real copy of its own leaf document under `task-documents/` in the enclosure group before the first turn, preserving its canonical relative path. `INDEX.json` has one entry with the canonical reference,
+JSON and copy SHA-256 digests, and publication time. Writes rendering that leaf refresh its
+copy in every existing enclosure for that leaf atomically per file;
+cleanup removes the copies with the enclosure. Copies stay outside code and memory Git worktrees.
+Change documents through `task_doc` only; edits to copies are never read back and are replaced by
+its next publication. Controllers read their own canonical rendered file without a copy; the
+start answer names when that path is outside their working folder. Taskless roles have no task
+file. The handover names the paths. `task_doc get` and `read_ar_files` keep their existing behavior.
+`server_info` advertises read-only annotations; the other AR tools remain available under the mode.
+
+Claude launches send the installed host's per-tool session grant for `server_info` on `agents-remember-task`, before the first message. Other tools stay under the mode; no harness settings file is written. Prompt behavior depends on the provider and its effective configuration. Codex's host preapproval removes other tools from that server via enabled_tools;
+it must not be applied wholesale or worked around with another AR server. Pi/Hermes offer no
+per-tool read-grant route in the installed host. A user's global allow can mask whether a narrower
+session grant applies; the catalog alone does not establish actual first-call permission behavior.

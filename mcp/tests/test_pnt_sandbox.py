@@ -237,7 +237,7 @@ class SafetyCheckTests(SandboxCase):
         """Resolved by the build's own loader: no settings key names these roots."""
         settings = self.layout.settings_file
         settings.parent.mkdir(parents=True)
-        shared = self.layout.coordination / "system/settings.json"
+        shared = self.layout.user_settings_file
         shared.parent.mkdir(parents=True, exist_ok=True)
         shared.write_text(json.dumps(host_settings_document(self.layout, None)))
         document = settings_document(self.layout)
@@ -251,6 +251,7 @@ class SafetyCheckTests(SandboxCase):
         memory = f"{REPOSITORY}.memoryRoot"
         authority = {
             "AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix(),
+            "XDG_CONFIG_HOME": str(self.layout.config_home),
             "XDG_DATA_HOME": str(self.layout.root / "data"),
             "XDG_CACHE_HOME": str(self.layout.root / "cache"),
         }
@@ -539,6 +540,7 @@ class BuildInputTests(SandboxCase):
             "PYTHONPYCACHEPREFIX": self.layout.pycache.as_posix(),
             "GIT_OPTIONAL_LOCKS": "0",
             "AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix(),
+            "XDG_CONFIG_HOME": self.layout.config_home.as_posix(),
             "XDG_DATA_HOME": (self.layout.root / "data").as_posix(),
             "XDG_STATE_HOME": (self.layout.root / "state").as_posix(),
             "XDG_CACHE_HOME": (self.layout.root / "cache").as_posix(),

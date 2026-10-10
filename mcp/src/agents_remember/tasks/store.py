@@ -250,6 +250,20 @@ def _restore_task_doc_batch(originals: dict[Path, bytes | None]) -> None:
             atomic_write_bytes(path, payload)
 
 
+def restore_task_doc_sources(snapshots: tuple[TaskDocSourceSnapshot, ...]) -> None:
+    """Restore the accepted source set when its derived-file publication fails."""
+    _restore_task_doc_batch(
+        {
+            path: raw
+            for snapshot in snapshots
+            for path, raw in (
+                (snapshot.json_path, snapshot.json_bytes),
+                (snapshot.markdown_path, snapshot.markdown_bytes),
+            )
+        }
+    )
+
+
 def _source_evidence(path: Path, payload: bytes | None) -> dict[str, object]:
     if payload is None:
         return {"name": path.name, "state": "missing"}

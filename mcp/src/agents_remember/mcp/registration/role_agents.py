@@ -7,7 +7,7 @@ import uuid
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
-from pydantic import Field
+from pydantic import Field, StrictBool, StrictStr
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.role_agents import role_message_payload, role_start_payload
@@ -35,6 +35,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         agent: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        feature_values: dict[str, StrictBool | StrictStr] | None = None,
     ) -> dict[str, object]:
         """Start one role agent for one canonical AR selection, with the caller as its parent.
 
@@ -51,7 +52,9 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         new start. A selected investigator admits at most eight open request-addressed executions;
         the other task-bound roles refuse a new start while an execution is open. agent, model and
         effort override the role default and are checked against the host's catalog at the time
-        of the call.
+        of the call. feature_values supplies speed features (service_tier or fast_mode), using the
+        host's exact option IDs/booleans. A start call cannot state a mode or a permission-bearing
+        feature; configure those in the user's coordination settings or host profile.
 
         One call resolves or creates the leaf enclosure, compiles the role's first message,
         records the launch and creates the agent in Paseo. It returns agentId, reportPath,
@@ -75,6 +78,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             agent=agent,
             model=model,
             effort=effort,
+            feature_values=feature_values or {},
         )
         return await asyncio.to_thread(role_start_payload, config, call)
 

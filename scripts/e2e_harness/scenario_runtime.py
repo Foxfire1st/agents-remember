@@ -133,6 +133,7 @@ def prepare_tmux_server(fixture: E2EFixture) -> None:
     env.update(
         {
             "CODEX_HOME": fixture.codex_home.as_posix(),
+            "XDG_CONFIG_HOME": (fixture.root / "config").as_posix(),
             "OPENAI_API_KEY": "arspawn-e2e-non-secret",
             "PYTHONIOENCODING": "utf-8",
         }

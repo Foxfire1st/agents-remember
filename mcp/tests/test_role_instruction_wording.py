@@ -628,7 +628,13 @@ class HandoverTextWordingTests(unittest.TestCase):
         for name, stub in (
             ("compile_launch_capsule", self.role_capsule),
             ("build_context_packet", lambda *_args, **_kwargs: {"repo": {"id": "repo"}}),
-            ("_read_task_doc", lambda _config, resolved: {"canonicalTaskPath": resolved.ref.key}),
+            (
+                "_read_task_doc",
+                lambda _config, resolved: {
+                    "canonicalTaskPath": resolved.ref.key,
+                    "taskDocumentRef": resolved.ref.model_dump(mode="json"),
+                },
+            ),
             # A leaf's readers are confined to its enclosure, which this test does not create.
             ("task_scoped_mcp_config_for_reader", lambda config, **_scope: config),
         ):
@@ -717,14 +723,17 @@ class HandoverTextWordingTests(unittest.TestCase):
         if context.task is not None:
             enclosure = self.config.workspace_root / "enclosure"
             workspace = {
-                "path": (enclosure / "code").as_posix(),
+                "path": enclosure.as_posix(),
                 "contractPath": (enclosure / "contract.json").as_posix(),
-                "taskReportAccessRoot": (context.task.path.parent / "notes" / "reports").as_posix(),
+                "taskReportAccessRoot": (enclosure / "role-reports").as_posix(),
+                "taskReportRoot": (context.task.path.parent / "notes" / "reports").as_posix(),
             }
         return context, workspace
 
     def compiled(self, role: str, started_by: StartingAgent | None) -> tuple[str, dict[str, Any]]:
         context, workspace = self.launch_of(role)
+        request_id = uuid.uuid4()
+        role_launch_preparation._prepare_role_folders(context, workspace, request_id)
         prepared = _compile_handover(
             RoleHandoverRequest(
                 config=self.config,
@@ -732,7 +741,7 @@ class HandoverTextWordingTests(unittest.TestCase):
                 workspace=workspace,
                 agent_id="some-provider",
                 ar_mcp_context=_ar_mcp_context(self.config, context, workspace),
-                request_id=uuid.uuid4(),
+                request_id=request_id,
                 started_by=started_by,
             )
         )
@@ -940,7 +949,7 @@ class HandoverTextWordingTests(unittest.TestCase):
         self.assertIn(
             "Put every question for the developer in your own chat", host["developerQuestions"]
         )
-        self.assertIn(f"calling task_doc on {TOOL_SERVER}", handover["ownerHandover"])
+        self.assertIn("taskless role has no task document", handover["ownerHandover"])
         self.assertTrue(
             prompt.startswith("AR ROLE BRIEF: the dashboard launcher started this role")
         )

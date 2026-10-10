@@ -39,6 +39,16 @@ export interface RoleModelChoice {
   isDefault?: boolean;
   serviceTiers?: RoleEffortChoice[];
   serviceTierError?: string;
+  features?: RoleFeatureChoice[];
+}
+
+export interface RoleFeatureChoice {
+  id: string;
+  label: string;
+  type: "toggle" | "select";
+  value?: boolean | string | null;
+  options?: RoleEffortChoice[];
+  permissionBearing: boolean;
 }
 
 export const EMPTY_ROLE_MODELS: RoleModelChoice[] = [];
@@ -50,6 +60,7 @@ export interface RoleAgentChoice {
   models: RoleModelChoice[];
   /** Set when the host could not list this agent's models; the agent stays selectable. */
   listingError?: string;
+  modes?: { id: string; label: string; description?: string }[];
 }
 
 export interface RoleDefaults {
@@ -57,14 +68,18 @@ export interface RoleDefaults {
   model?: string;
   effort?: string;
   serviceTier?: string;
+  mode?: string;
+  featureValues?: Record<string, boolean | string>;
+  choices?: Record<string, { value?: unknown; source?: string; present?: boolean; baselineReplaced?: boolean; [key: string]: unknown }>;
   /** False when the host's catalog does not offer this default; it is never replaced. */
   available?: boolean;
 }
 
 export interface RoleAgentOverride {
-  agentId: string;
+  agentId?: string;
   modelId?: string;
   effortId?: string;
+  featureValues?: Record<string, boolean | string>;
 }
 
 export interface RoleScopedExecution {
@@ -370,10 +385,13 @@ export function sameRoleOptionsScope(left: RoleOptionsScope, right: RoleOptionsS
 }
 
 export function sameRoleLaunchSelection(left: RoleLaunchSelection, right: RoleLaunchSelection): boolean {
+  const leftOverride = left.agentOverride ?? {};
+  const rightOverride = right.agentOverride ?? {};
   return sameRoleDocumentScope(roleDocumentScope(left), roleDocumentScope(right)) &&
-    left.agentOverride?.agentId === right.agentOverride?.agentId &&
-    left.agentOverride?.modelId === right.agentOverride?.modelId &&
-    left.agentOverride?.effortId === right.agentOverride?.effortId;
+    leftOverride.agentId === rightOverride.agentId &&
+    leftOverride.modelId === rightOverride.modelId &&
+    leftOverride.effortId === rightOverride.effortId &&
+    JSON.stringify(Object.entries(leftOverride.featureValues ?? {}).sort()) === JSON.stringify(Object.entries(rightOverride.featureValues ?? {}).sort());
 }
 
 /**
@@ -388,12 +406,17 @@ export function launchChoiceProblem(
   override: RoleAgentOverride | undefined,
 ): string | null {
   if (!override) return unofferedRoleDefault(defaults);
-  const agent = agents.find((choice) => choice.id === override.agentId);
-  if (!agent) return "Agent " + override.agentId + " is not offered by the Paseo runtime.";
-  const modelId = override.modelId || roleValue(override.agentId === defaults.agent, defaults.model);
-  const onRoleModel = override.agentId === defaults.agent && modelId === roleValue(true, defaults.model);
+  const agentId = override.agentId ?? defaults.agent;
+  const agent = agents.find((choice) => choice.id === agentId);
+  if (!agent) return unofferedAgent(agentId);
+  const modelId = override.modelId || roleValue(agentId === defaults.agent, defaults.model);
+  const onRoleModel = agentId === defaults.agent && modelId === roleValue(true, defaults.model);
   return unofferedModelOrEffort(agent, modelId, override.effortId || roleValue(onRoleModel, defaults.effort)) ||
-    unofferedServiceTier(agent, modelId, roleValue(override.agentId === defaults.agent, defaults.serviceTier));
+    unofferedServiceTier(agent, modelId, typeof override.featureValues?.service_tier === "string" ? override.featureValues.service_tier : roleValue(agentId === defaults.agent, defaults.serviceTier));
+}
+
+function unofferedAgent(agentId: string | undefined): string {
+  return "Agent " + (agentId ?? "unset") + " is not offered by the Paseo runtime.";
 }
 
 function unofferedServiceTier(agent: RoleAgentChoice, modelId: string | undefined, tier: string | undefined): string | null {
@@ -437,14 +460,17 @@ export function roleAgentOverrideFor(
   modelId: string | undefined,
   effortId: string | undefined,
   defaults: RoleDefaults,
+  featureValues?: RoleAgentOverride["featureValues"],
 ): RoleAgentOverride | undefined {
   if (!agentId) return undefined;
-  if (agentId === defaults.agent && (!modelId || modelId === defaults.model) && (!effortId || effortId === defaults.effort)) {
+  const speedValues = Object.keys(featureValues ?? {}).length > 0;
+  if (agentId === defaults.agent && !modelId && !effortId && !speedValues) {
     return undefined;
   }
   return {
     agentId,
     ...(modelId ? { modelId } : {}),
     ...(effortId ? { effortId } : {}),
+    ...(speedValues ? { featureValues } : {}),
   };
 }

@@ -17,6 +17,7 @@ from agents_remember.cli.paseo_frame import (
     host_frame_facts,
     normalise_origin,
 )
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoEmbedEntry,
@@ -183,7 +184,7 @@ class PaseoFrameTests(unittest.TestCase):
             {
                 "available": False,
                 "reason": "not-configured",
-                "detail": f"{self.root / 'coordination/system/settings.json'} has no paseoRuntime block",
+                "detail": f"{user_agentic_settings_path()} has no paseoRuntime block",
             },
         )
 
@@ -357,7 +358,8 @@ class WiredHostFactsTests(unittest.TestCase):
 
     def test_no_runtime_and_an_unlisted_origin_never_reach_the_bridge(self) -> None:
         bridge = FakeBridge()
-        unconfigured = self.ask(bridge, runtime_config(self.root / "unconfigured", None))
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.root / "unconfigured/config")}):
+            unconfigured = self.ask(bridge, runtime_config(self.root / "unconfigured", None))
         self.assertEqual(unconfigured["reason"], "not-configured")
         self.assertIn("has no paseoRuntime block", unconfigured["detail"])
 

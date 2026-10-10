@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
 
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
@@ -150,7 +152,10 @@ def run_scenario(
     root: Path, *, repository_root: Path, recorder: CheckpointRecorder
 ) -> dict[str, object]:
     script = ScriptedResponses(_placeholder_addresses())
-    with ResponsesServer(script) as responses:
+    with (
+        patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root / "config")}),
+        ResponsesServer(script) as responses,
+    ):
         fixture = create_fixture(
             root,
             repository_root=repository_root,

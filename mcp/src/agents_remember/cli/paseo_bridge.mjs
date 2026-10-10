@@ -29,6 +29,8 @@
 //            The server id of the configured daemon and nothing else. An answer means that the
 //            daemon is reachable and is the configured one; no runtime function is called.
 //
+//   role-profiles {} -> {profiles, readAt}: reads getDaemonConfig only, never writes profiles.
+//
 //   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
 //            -> {serverId, preparation?: "created" | "found" | "opened",
 //                workspace: {id, directory, name, projectId, projectKind}}
@@ -40,11 +42,12 @@
 //            retain directory-open semantics. Explicit placement never falls back to that path.
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
-//                  title, labels, prompt?, systemPrompt?, parentAgentId?,
+//                  title, labels, prompt?, systemPrompt?, parentAgentId?, modeId?, featureValues?, toolPolicy?,
 //                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
 //            -> {serverId, existing: boolean, agent: AGENT, creationError?}
 //            One agent under the caller's agent id (a UUID) in that workspace's directory, with
-//            the provider's default permission mode. An agent that already has the id is returned
+//            the supplied mode/features/read policy from creation (an absent mode is left absent).
+//            An agent that already has the id is returned
 //            with `existing: true` and nothing is created; so is one that exists although the
 //            creation answered with an error (`creationError` carries the runtime's text). A
 //            creation the runtime refuses, with no agent under the id afterwards, fails with
@@ -208,6 +211,7 @@ const COMMANDS = {
   'runtime-info': readRuntimeInfo,
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
+  'role-profiles': readRoleProfiles,
   'agent-get': getAgent,
   'agent-archive': archiveAgent,
   'agent-state': readAgentState,
@@ -337,6 +341,11 @@ async function readCatalog({ api, daemon, deadline }, input) {
   }
 }
 
+async function readRoleProfiles({ daemon }) {
+  const reply = await daemon.getDaemonConfig()
+  return { profiles: reply.config?.agentProfiles ?? [], readAt: new Date().toISOString() }
+}
+
 function stillLoading(entry) {
   return {
     id: entry.provider,
@@ -347,7 +356,11 @@ function stillLoading(entry) {
 }
 
 async function listProvider(api, entry, deadline, cwd) {
-  const row = { id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider }
+  const row = {
+    id: entry.provider, label: nonEmpty(entry.label) ?? entry.provider,
+    modes: entry.modes ?? [], defaultModeId: entry.defaultModeId ?? null,
+    fetchedAt: entry.fetchedAt ?? null
+  }
   try {
     const listing = await within(
       api.providers.listModels(entry.provider),
@@ -361,9 +374,9 @@ async function listProvider(api, entry, deadline, cwd) {
       try {
         const features = await within(api.providers.listFeatures({ provider: `${entry.provider}/${model.id}`, cwd }), deadline, () => new Error('Service tier discovery timed out'))
         if (features.error) throw new Error(features.error)
-        return { ...result, serviceTiers: tierOptions(features.features) }
+        return { ...result, features: features.features, serviceTiers: tierOptions(features.features) }
       } catch (error) {
-        return { ...result, serviceTiers: [], serviceTierError: text(error?.message ?? error) }
+        return { ...result, features: [], featureError: text(error?.message ?? error), serviceTiers: [], serviceTierError: text(error?.message ?? error) }
       }
     }))
     return { ...row, models: projected }
@@ -545,10 +558,12 @@ function agentCreation(input, agentId) {
   const provider = requiredText(input, 'provider')
   const model = optionalText(input, 'model')
   const thinkingOptionId = optionalText(input, 'thinkingOptionId')
+  const modeId = optionalText(input, 'modeId')
   const featureValues = input.featureValues
   if (featureValues !== undefined && (featureValues === null || typeof featureValues !== 'object' ||
-    Array.isArray(featureValues) || Object.keys(featureValues).length !== 1 || !nonEmpty(featureValues.service_tier))) {
-    throw failure('invalid_bridge_payload', 'featureValues must contain only a nonempty service_tier string.')
+    Array.isArray(featureValues) || Object.entries(featureValues).some(([id, value]) =>
+      !nonEmpty(id) || !(typeof value === 'boolean' || nonEmpty(value))))) {
+    throw failure('invalid_bridge_payload', 'featureValues must map feature ids to booleans or nonempty option ids.')
   }
   const prompt = optionalText(input, 'prompt')
   const idempotencyKey = requiredText(input, 'idempotencyKey')
@@ -556,6 +571,11 @@ function agentCreation(input, agentId) {
   const title = requiredText(input, 'title')
   const parentAgentId = optionalText(input, 'parentAgentId')
   const systemPrompt = optionalText(input, 'systemPrompt')
+  const toolPolicy = input.toolPolicy
+  if (toolPolicy !== undefined && (!toolPolicy || !Array.isArray(toolPolicy.preapproved) ||
+      toolPolicy.preapproved.some((grant) => grant?.kind !== 'mcp' || !nonEmpty(grant.server) || !nonEmpty(grant.tool)))) {
+    throw failure('invalid_bridge_payload', 'toolPolicy must contain exact MCP server/tool grants.')
+  }
   const mcpServers = input.mcpServers ?? null
   const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
   const wellFormed =
@@ -579,6 +599,8 @@ function agentCreation(input, agentId) {
   }
   // What the runtime keeps with the agent and applies again on every resume of its session.
   const kept = {
+    ...(modeId ? { modeId } : {}),
+    ...(toolPolicy ? { toolPolicy } : {}),
     ...(thinkingOptionId ? { thinkingOptionId } : {}),
     ...(featureValues ? { featureValues } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
@@ -596,8 +618,13 @@ function agentCreation(input, agentId) {
         cwd = (await workspace.refresh())?.workspaceDirectory
         if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
         const features = await daemon.listProviderFeatures({ provider, cwd, ...(model ? { model } : {}) })
-        if (features.error || !tierOptions(features.features).some(({ id }) => id === featureValues.service_tier)) {
-          throw new Error(`Service tier ${featureValues.service_tier} is not offered for ${provider}/${model ?? 'native default'}${features.error ? ': ' + features.error : ''}`)
+        if (features.error) throw new Error(features.error)
+        for (const [id, value] of Object.entries(featureValues)) {
+          const feature = features.features?.find((row) => row.id === id)
+          if (!feature || (feature.type === 'toggle' ? typeof value !== 'boolean' :
+              !feature.options?.some((option) => option.id === value))) {
+            throw new Error(`Feature ${id} value ${JSON.stringify(value)} is not offered for ${provider}/${model ?? 'native default'}`)
+          }
         }
       }
       if (model) {
@@ -1033,6 +1060,8 @@ function projectAgent(agent) {
     provider: agent.provider ?? null,
     model: agent.model ?? null,
     thinkingOptionId: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
+    modeId: agent.currentModeId ?? null,
+    featureValues: Object.fromEntries((agent.features ?? []).map((feature) => [feature.id, feature.value])),
     ...(typeof serviceTier === 'string' ? { serviceTier } : {}),
     title: agent.title ?? null,
     labels: agent.labels ?? {},

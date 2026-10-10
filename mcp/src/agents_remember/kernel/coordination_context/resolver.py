@@ -192,7 +192,9 @@ def _context_from_onboarding_root(
     _refuse_requested_removed_topology(hints.topology)
     topology = infer_topology_from_onboarding_root(resolved_onboarding_root)
     coordination_root, memory_root = memory_roots_from_settings(resolved_settings, repo.name)
-    storage, cross_repo = parse_coordination_settings(resolved_settings)
+    storage, cross_repo = parse_coordination_settings(
+        resolved_settings, coordination_root=coordination_root
+    )
     return build_coordination_context(
         repo,
         roots=CoordinationRoots(
@@ -227,7 +229,9 @@ def _context_from_selection(
     resolved_settings = (
         observed_resolve(hints.settings_path) if hints.settings_path else selection.settings_path
     )
-    storage, cross_repo = parse_coordination_settings(resolved_settings)
+    storage, cross_repo = parse_coordination_settings(
+        resolved_settings, coordination_root=selection.coordination_root
+    )
     return build_coordination_context(
         repo,
         roots=CoordinationRoots(
@@ -296,7 +300,7 @@ def build_coordination_context(
             effective_memory_root, roots.onboarding_root, "onboarding"
         ),
         settings_path=roots.settings_path,
-        path_settings_path=_existing_path_settings(roots.settings_path),
+        path_settings_path=_existing_path_settings(roots.settings_path, coordination_root),
         task_root=task_root,
         temp_root=coordination_root / "temp",
         docs_root=_effective_child_root(effective_memory_root, coordination_root / "docs", "docs"),
@@ -379,8 +383,8 @@ def _effective_child_root(effective_memory_root: Path, fallback: Path, child: st
     return candidate if candidate.exists() else fallback
 
 
-def _existing_path_settings(settings_path: Path) -> Path | None:
-    path_settings_path = path_settings_path_for(settings_path)
+def _existing_path_settings(settings_path: Path, coordination_root: Path) -> Path | None:
+    path_settings_path = path_settings_path_for(settings_path, coordination_root=coordination_root)
     return path_settings_path if path_settings_path.exists() else None
 
 

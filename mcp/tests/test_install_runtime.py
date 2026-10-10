@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import io
+import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.cli.__main__ import main
 from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.install import runtime as install_runtime
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettingsError,
+    agentic_settings_path,
+    user_agentic_settings_path,
+)
 
 
 def write_file(path: Path, content: str = "x\n") -> None:
@@ -169,7 +178,7 @@ class AgenticSettingsSeedTests(unittest.TestCase):
             root = Path(tmp_dir)
             source_root = create_runtime_source(root)
             coordination_root = root / "ar-coordination"
-            settings_path = coordination_root / "system" / "settings.json"
+            settings_path = user_agentic_settings_path()
             developer_content = '{"orchestration": {"spawn": {"harness": "codex"}}}\n'
             write_file(settings_path, developer_content)
 
@@ -199,8 +208,89 @@ class AgenticSettingsSeedTests(unittest.TestCase):
                 ),
             )
 
-            self.assertFalse((coordination_root / "system" / "settings.json").exists())
+            self.assertFalse(user_agentic_settings_path().exists())
             self.assertGreater(summary.copied_files, 0)
+
+    def test_public_upgrade_dry_run_then_move_preserves_the_entire_file_and_repeats_without_copy(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            old = agentic_settings_path(coordination)
+            new = user_agentic_settings_path()
+            old.parent.mkdir(parents=True)
+            original = b'{"orchestration":{"roles":{}},"otherFamily":{"untouched":true}}\r\n'
+            old.write_bytes(original)
+            old.chmod(0o600)
+            command = ["upgrade-user-settings", "--coordination-root", str(coordination)]
+            for arguments, state in [
+                ([*command, "--dry-run"], "would-move"),
+                (command, "moved"),
+                (command, "already-current"),
+            ]:
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(main(arguments), 0)
+                self.assertEqual(json.loads(output.getvalue())["state"], state)
+                if state == "would-move":
+                    self.assertEqual(old.read_bytes(), original)
+                    self.assertFalse(new.exists())
+                else:
+                    self.assertFalse(old.exists())
+                    self.assertEqual(new.read_bytes(), original)
+                    self.assertEqual(new.stat().st_mode & 0o777, 0o600)
+
+    def test_runtime_install_old_or_both_file_refusal_precedes_all_asset_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = create_runtime_source(root)
+            coordination = root / "coord"
+            old = agentic_settings_path(coordination)
+            new = user_agentic_settings_path()
+            old.parent.mkdir(parents=True)
+            old.write_text("{}")
+            for both in (False, True):
+                if both:
+                    new.parent.mkdir(parents=True, exist_ok=True)
+                    new.write_text('{"user":"keep"}')
+                with (
+                    self.subTest(both=both),
+                    self.assertRaisesRegex(AgenticSettingsError, "upgrade-user-settings") as caught,
+                ):
+                    install_runtime.install_runtime(
+                        source,
+                        coordination,
+                        dry_run=False,
+                        provider_deps=install_runtime.ProviderDependencyInstall(
+                            settings={}, timeout=1800, enabled=False
+                        ),
+                    )
+                self.assertIn(str(old), str(caught.exception))
+                self.assertIn(str(new), str(caught.exception))
+                self.assertFalse((coordination / "AGENTS.md").exists())
+                self.assertEqual(old.read_text(), "{}")
+
+    def test_upgrade_collision_and_failed_transfer_preserve_the_old_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            old = agentic_settings_path(coordination)
+            new = user_agentic_settings_path()
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old complete bytes")
+            new.parent.mkdir(parents=True, exist_ok=True)
+            new.write_bytes(b"existing user bytes")
+            with self.assertRaisesRegex(AgenticSettingsError, "upgrade-collision"):
+                install_runtime.upgrade_user_settings(coordination, dry_run=False)
+            self.assertEqual(old.read_bytes(), b"old complete bytes")
+            self.assertEqual(new.read_bytes(), b"existing user bytes")
+            new.unlink()
+            with (
+                patch.object(
+                    install_runtime.shutil, "copyfileobj", side_effect=OSError("transfer failed")
+                ),
+                self.assertRaisesRegex(OSError, "transfer failed"),
+            ):
+                install_runtime.upgrade_user_settings(coordination, dry_run=False)
+            self.assertEqual(old.read_bytes(), b"old complete bytes")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,10 @@ if str(MCP_SRC) not in sys.path:
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.install import experiment as install_experiment
 from agents_remember.install import runtime as install_runtime
-from agents_remember.kernel.agentic_settings import default_agentic_settings_seed_text
+from agents_remember.kernel.agentic_settings import (
+    default_agentic_settings_seed_text,
+    user_agentic_settings_path,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.core import runtime_install_payload
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
@@ -501,7 +504,7 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
 
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
-    config_path = coordination_root / "system" / "settings.json"
+    config_path = user_agentic_settings_path()
 
     config_path.parent.mkdir(parents=True)
     config_path.write_text(default_agentic_settings_seed_text(), encoding="utf-8")

@@ -41,6 +41,12 @@ from agents_remember.install.provider_watchers import (
     stop_provider_watchers_before_refresh,
     write_temp_provider_settings,
 )
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettingsError,
+    agentic_settings_path,
+    require_user_agentic_settings_path,
+    user_agentic_settings_path,
+)
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
@@ -230,6 +236,41 @@ def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
         if not dry_run:
             path.mkdir(parents=True, exist_ok=True)
         summary.created_dirs += 1
+
+
+def upgrade_user_settings(coordination_root: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Move the entire old file once without overwriting an existing user file."""
+    old = agentic_settings_path(coordination_root)
+    new = user_agentic_settings_path()
+    old_exists = old.exists() or old.is_symlink()
+    new_exists = new.exists() or new.is_symlink()
+    if old_exists and new_exists:
+        raise AgenticSettingsError(f"agentic-settings-upgrade-collision: old: {old}; user: {new}")
+    if not old_exists:
+        return {
+            "state": "already-current" if new_exists else "no-settings",
+            "oldPath": str(old),
+            "userPath": str(new),
+            "dryRun": dry_run,
+        }
+    if old.is_symlink() or not old.is_file():
+        raise AgenticSettingsError(
+            f"agentic-settings-upgrade-source-not-regular: old: {old}; user: {new}"
+        )
+    if not dry_run:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        # Exclusive creation also refuses a destination that appears after the check.
+        # The old file remains until the complete transfer and metadata copy succeed.
+        with old.open("rb") as source, new.open("xb") as destination:
+            shutil.copyfileobj(source, destination)
+        shutil.copystat(old, new)
+        old.unlink()
+    return {
+        "state": "would-move" if dry_run else "moved",
+        "oldPath": str(old),
+        "userPath": str(new),
+        "dryRun": dry_run,
+    }
 
 
 def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -733,6 +774,7 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
     source_root = scope.source_root
     coordination_root = scope.coordination_root
     dry_run = scope.dry_run
+    require_user_agentic_settings_path(coordination_root)
     runtime_root = source_root / "runtime"
     require_runtime_tree(runtime_root)
 
@@ -849,6 +891,10 @@ def install_runtime_from_config(
                 include_benchmarks=scope.include_benchmarks,
             )
         )
+    ensure_dir(config.workspace_root / ".agents-remember" / "role-executions", summary, dry_run)
+    ensure_gitignore_entry(
+        config.workspace_root / ".gitignore", ".agents-remember/role-executions/", summary, dry_run
+    )
     ok = summary.provider_watcher_rebind is None or summary.provider_watcher_rebind.ok is not False
     payload = {
         "ok": ok,

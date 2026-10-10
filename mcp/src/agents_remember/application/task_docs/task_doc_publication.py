@@ -19,9 +19,11 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.store import restore_task_doc_sources
 from agents_remember.worktrees.queue.closeout_projection_publication import (
     preview_closeout_projection_effect,
 )
+from agents_remember.worktrees.task_document_copies import refresh_task_document_copies
 from agents_remember.worktrees.task_fact_publication import (
     publish_task_fact_mutation,
 )
@@ -132,6 +134,22 @@ def publish_task_doc_transaction_and_refresh(
 ) -> TaskDocPublicationResult:
     """Commit task truth and invalidate every scope under CAS, then rebuild independently."""
 
+    def publication() -> list[tuple[Path, Path]]:
+        written = transaction.publisher()
+        try:
+            refresh_task_document_copies(
+                transaction.coordination_root, transaction.target_repo_id, written
+            )
+        except BaseException as publish_error:
+            try:
+                restore_task_doc_sources(transaction.source_snapshots)
+            except BaseException as rollback_error:
+                raise RuntimeError(
+                    f"task document publication and source rollback both failed: {rollback_error}"
+                ) from publish_error
+            raise
+        return written
+
     published = publish_task_fact_mutation(
         transaction.coordination_root,
         validate=lambda: require_task_doc_sources_current(transaction.source_snapshots),
@@ -140,7 +158,7 @@ def publish_task_doc_transaction_and_refresh(
             transaction.target_repo_id,
             transaction.scope_changes,
         ),
-        publication=transaction.publisher,
+        publication=publication,
     )
     return TaskDocPublicationResult(published.result, published.projection_effects)
 

@@ -73,8 +73,8 @@ Rules for using it:
 | `projects/` | the Projects folder; `projects/sandbox-app` is a small Git repository with one test |
 | `remotes/sandbox-app.git` | the repository's origin, so leaf enclosures can be opened |
 | `coordination/` | the coordination root: one sprint, one master, two leaves with approved requirement packets, and the memory repository `memory-repos/ar-sandbox-app` |
-| `settings/agents-remember-settings.json` | dashboard/tool server settings; coordinationRoot links the shared host authority |
-| `coordination/system/settings.json` | the one `paseoRuntime` block for this sandbox |
+| `settings/agents-remember-settings.json` | dashboard/tool server MCP settings; user configuration supplies the host authority |
+| `config/agents-remember/settings.json` | the one user settings file for this sandbox, including `paseoRuntime` |
 | `paseo/home`, `paseo/prefix` | the Paseo runtime's home and install prefix |
 | `eve/` | the Eve application, its launcher and the list of variables an env file may not set |
 | `dagger-authority/` | the registry of the build's quality tools, which the build otherwise keeps in the user's home |
@@ -203,7 +203,7 @@ The cost: a Pi agent of the sandbox runs without every extension and package of 
 Pi, not only the gateway. Nothing under `~/.pi` is read differently or written: the developer's
 Pi configuration, logins and models stay as they are, and a Pi started outside the sandbox loads
 its extensions as before. Outside the sandbox the entry is the developer's choice
-(`paseoRuntime.providers` of the shared coordinator settings file); without it only the instructions apply.
+(`paseoRuntime.providers` of the shared user configuration settings file); without it only the instructions apply.
 
 ## Eve
 
@@ -251,7 +251,7 @@ The live roots are not among them. These are writes of other programs, in their 
 The host install phase uses the candidate's public `runtime_install` tool after
 server_info proves the exact sandbox roots and package root. Coordination asset
 bootstrap happens before the sandbox setup supplies its one shared
-`coordination/system/settings.json` paseoRuntime block; no per-harness fallback.
+`config/agents-remember/settings.json` paseoRuntime block; no per-harness fallback.
 Node data/state/cache variables are confined to this sandbox, and install receipts
 are kept under run/. Dashboard starts then ensure the already installed host and
 never run npm or rewrite daemon/plugin configuration. One host home lock covers
@@ -262,3 +262,10 @@ a machine restart. Each public install archives its prior request/receipt/logs
 under run/host-install-history; a cut leaves no stale success at the current
 receipt path. Reset owns that history's retirement. A deferred restart is a named
 start refusal, so an old host cannot qualify the requested build silently.
+
+Every sandbox process uses `XDG_CONFIG_HOME=<sandbox>/config` for AR user settings.
+The developer's HOME and harness login directories are retained. An older sandbox
+with `coordination/system/settings.json` requires the explicit whole-file upgrade
+under this same owned `XDG_CONFIG_HOME`; build/start never reads that file as a
+fallback or chooses between two files. The user settings move does not change the
+separate `--config` authority file or the memory repository settings.

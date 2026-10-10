@@ -98,7 +98,7 @@ def create_fixture(root: Path, *, repository_root: Path, responses_base_url: str
         + "\n",
         encoding="utf-8",
     )
-    _write_agentic_settings(coordination)
+    _write_agentic_settings(root / "config/agents-remember/settings.json")
 
     architect_brief = compile_architect_brief(repository_root, coordination)
     _write_codex_config(
@@ -259,8 +259,7 @@ def _initialize_repository(repo: Path) -> str:
     return commit
 
 
-def _write_agentic_settings(coordination_root: Path) -> None:
-    settings_path = coordination_root / "system" / "settings.json"
+def _write_agentic_settings(settings_path: Path) -> None:
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     roles = {
         role: {"harness": "codex", "model": CODEX_MODEL, "effort": "low"}
@@ -327,6 +326,7 @@ def _write_codex_config(
             "",
             "[mcp_servers.agents_remember_candidate.env]",
             f"CODEX_HOME = {quote(codex_home.as_posix())}",
+            f"XDG_CONFIG_HOME = {quote((codex_home.parent / 'config').as_posix())}",
             'OPENAI_API_KEY = "arspawn-e2e-non-secret"',
             'PYTHONIOENCODING = "utf-8"',
             "",

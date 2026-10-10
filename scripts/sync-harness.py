@@ -41,6 +41,15 @@ HARNESS_ROOT = REPO_ROOT / "scripts" / "harness"
 SHARED_ROOT = HARNESS_ROOT / "shared"
 STARTER_LIBRARY = HARNESS_ROOT / "render_starter.py"
 HOOK_LIBRARY = HARNESS_ROOT / "session_start_hook.py"
+USER_SETTINGS_LIBRARY = (
+    REPO_ROOT / "mcp/src/agents_remember/kernel/primitives/user_settings_location.py"
+)
+USER_SETTINGS_FRAGMENTS = (
+    "UserSettingsLocationError",
+    "user_settings_path",
+    "settings_upgrade_command",
+    "require_user_settings_path",
+)
 
 # Generated starter files are plain data files invoked through an interpreter
 # (`python .claude/render-starter.py`, `sh .claude/render-starter.sh`, and the hook
@@ -60,6 +69,7 @@ BLANK_LINES_BEFORE_TOP_LEVEL = ("", "", "")
 # Emission order for starter fragments. Declaring it once here keeps every generated
 # file in the same order no matter what order a target lists its fragments in.
 STARTER_FRAGMENT_ORDER = (
+    *USER_SETTINGS_FRAGMENTS,
     "RenderOptions",
     "DEFAULT_RENDER_OPTIONS",
     "Renderer",
@@ -190,6 +200,7 @@ PLACEHOLDER_VALUES = {
 }
 
 SHARED_STARTER_FRAGMENTS = (
+    *USER_SETTINGS_FRAGMENTS,
     "infer_workspace_root",
     "repository_ids",
     "replace_text",
@@ -541,7 +552,10 @@ def render_starter_program(harness: Harness, sources: dict[str, str]) -> str:
         "#!/usr/bin/env python3",
         f'"""Render the {spec.label} Agents Remember starter package for one workspace."""',
         "",
-        *generated_notice("scripts/harness/render_starter.py"),
+        *generated_notice(
+            "scripts/harness/render_starter.py + "
+            "mcp/src/agents_remember/kernel/primitives/user_settings_location.py"
+        ),
         "",
         "from __future__ import annotations",
         "",
@@ -585,7 +599,10 @@ def render_hook_program(label: str, hook: HookSpec, sources: dict[str, str]) -> 
 
 
 def generated_files() -> list[GeneratedFile]:
-    starter_sources = fragment_sources(STARTER_LIBRARY)
+    starter_sources = {
+        **fragment_sources(USER_SETTINGS_LIBRARY),
+        **fragment_sources(STARTER_LIBRARY),
+    }
     hook_sources = fragment_sources(HOOK_LIBRARY)
     files: list[GeneratedFile] = []
     for harness in HARNESSES:

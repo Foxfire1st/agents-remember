@@ -32,6 +32,7 @@ from agents_remember.cli.paseo_launch import opened_workspace_id
 from agents_remember.cli.role_launch_workspace import workspace_folder
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.user_settings_location import user_settings_path
 
 REASON_NOT_CONFIGURED = "not-configured"
 REASON_ORIGIN_NOT_LISTED = "origin-not-listed"
@@ -158,7 +159,7 @@ def frame_descriptor(
     if settings is None:
         return _unavailable(
             REASON_NOT_CONFIGURED,
-            f"{config.coordination_root / 'system/settings.json'} has no paseoRuntime block",
+            f"{user_settings_path()} has no paseoRuntime block",
         )
     frame_base_url = frame_base_url_for(settings, dashboard_origin)
     if frame_base_url is None:

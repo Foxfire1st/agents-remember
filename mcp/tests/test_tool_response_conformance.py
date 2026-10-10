@@ -222,6 +222,7 @@ def advertised_tool_names() -> set[str]:
 #
 # Role start and role messaging remain public; database-only change and projection do not.
 # MIK-R82 rule 4 restores `worktree_enclosure_adopt`: 73.
+# D124 reads rendered task files; the MCP tool roster remains unchanged.
 ROSTER_SIZE = 73
 
 # The tool-adapter module population and the handler population, same rule: the numbers are

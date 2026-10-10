@@ -6,7 +6,7 @@ import json
 import threading
 from pathlib import Path
 
-from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
@@ -92,7 +92,7 @@ def structural_config(root: Path) -> McpRuntimeConfig:
 
 
 def write_structural_settings(root: Path) -> None:
-    path = agentic_settings_path(root)
+    path = user_agentic_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     roles = {
         role: {"harness": "claude", "model": "claude-fable-5", "effort": "high"}

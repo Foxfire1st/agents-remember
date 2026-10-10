@@ -3,6 +3,7 @@
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from agents_remember.application.context_packet import ContextPacketRequest
 from agents_remember.application.runtime.install import RuntimeInstallRequest
@@ -40,7 +41,11 @@ def _register_identity_tools(
         """Liveness check. Returns server name, version, and transport. Read-only; no side effects."""
         return ping_payload()
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        )
+    )
     def server_info() -> dict[str, Any]:
         """Report the resolved configuration: coordination/workspace/transcript roots, allowed
         repo ids, allowed provider ids, full tool list, and the boot-resolved package identity.
@@ -50,6 +55,7 @@ def _register_identity_tools(
         Read-only; reflects the settings and exact runtime loaded at startup (settings-file or
         package changes need a harness restart to take effect)."""
         return server_info_payload(config, serving_build)
+
 
 
 def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

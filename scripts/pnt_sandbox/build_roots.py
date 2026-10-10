@@ -183,10 +183,10 @@ def _coordination_roots(found: _Roots, config: Any) -> None:
 
     def agentic_settings() -> Path:
         from agents_remember.kernel.agentic_settings import (  # noqa: PLC0415
-            agentic_settings_path,
+            require_user_agentic_settings_path,
         )
 
-        return agentic_settings_path(config.coordination_root)
+        return require_user_agentic_settings_path(config.coordination_root)
 
     def observer() -> Path:
         from agents_remember.observer import observer_root  # noqa: PLC0415

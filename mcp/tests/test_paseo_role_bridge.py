@@ -64,6 +64,8 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId } }
+  async getDaemonConfig() { record({ via: "getDaemonConfig" }); return { config: { agentProfiles: scenario.profiles ?? [] } } }
+  async listProviderFeatures() { return { features: scenario.features ?? [] } }
   async createAgent(options) {
     record({ via: 'daemon.createAgent', options })
     const agent = { id: options.agentId, provider: options.config.provider, status: 'idle', labels: options.labels }
@@ -874,3 +876,60 @@ class AgentParentScriptTests(RoleBridgeScriptTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class R71CreationWireTests(RoleBridgeScriptTestCase):
+    def test_r71_creation_sends_mode_and_each_feature_before_any_prompt(self) -> None:
+        payload = {
+            "agentId": AGENT_ID,
+            "workspaceId": "wks_1",
+            "provider": "codex",
+            "idempotencyKey": "r71",
+            "title": "Worker",
+            "labels": {},
+            "modeId": "auto",
+            "featureValues": {"plan_mode": False, "service_tier": "priority"},
+        }
+        self.call(
+            "agent-create",
+            payload,
+            features=[
+                {"id": "plan_mode", "type": "toggle", "value": False},
+                {"id": "service_tier", "type": "select", "options": [{"id": "priority"}]},
+            ],
+        )
+        config = self.recorded("daemon.createAgent")[0]["options"]["config"]
+        self.assertEqual(
+            (config["modeId"], config["featureValues"]), ("auto", payload["featureValues"])
+        )
+        self.assertEqual(self.recorded("send"), [])
+
+    def test_r71_profile_bridge_reads_only_the_running_host_configuration(self) -> None:
+        profiles = [{"id": "one", "name": "worker", "provider": "codex", "notes": "Plain text"}]
+        result = self.call("role-profiles", {}, profiles=profiles)
+        self.assertEqual(result["profiles"], profiles)
+        self.assertTrue(result["readAt"])
+        self.assertEqual(
+            [row["via"] for row in self.recorded() if row["via"] != "connect"], ["getDaemonConfig"]
+        )
+
+    def test_r71_read_grant_uses_exact_server_info_and_keeps_mutators_out(self) -> None:
+        grants = [
+            {"kind": "mcp", "server": "agents-remember-task", "tool": name}
+            for name in ("server_info",)
+        ]
+        payload = {
+            "agentId": AGENT_ID,
+            "workspaceId": "wks_1",
+            "provider": "claude",
+            "idempotencyKey": "r71-read",
+            "title": "Reviewer",
+            "labels": {},
+            "modeId": "default",
+            "toolPolicy": {"preapproved": grants},
+        }
+        self.call("agent-create", payload)
+        kept = self.recorded("daemon.createAgent")[0]["options"]["config"]
+        self.assertEqual(kept["toolPolicy"], {"preapproved": grants})
+        self.assertEqual(kept["modeId"], "default")
+        self.assertFalse(any(row["tool"] == "task_doc" for row in grants))

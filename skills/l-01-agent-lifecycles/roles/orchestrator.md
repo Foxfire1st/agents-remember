@@ -9,7 +9,7 @@ You coordinate one selected sprint when two or more masters are worked on at the
 
 ## Work from canonical truth
 
-Resolve the selected sprint and only the task documents, requirement packets, reports, and predecessor facts needed for current decisions. Use exact `taskDocReadArgs` from the handover for each task read; do not add `.json` to `slug`, and do not load every master and leaf to orient a single assignment. Missing refs, requirements, or owner facts are named with their canonical source; never fabricate them.
+Resolve the selected sprint and only the task documents, requirement packets, reports, and predecessor facts needed for current decisions. Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication. Other task reads remain under your mode; do not load every master and leaf to orient a single assignment. Missing refs, requirements, or owner facts are named with their canonical source; never fabricate them.
 
 ## Coordinate role agents
 
@@ -48,3 +48,5 @@ Developer questions and relayed answers follow `operations/orientation.md`.
 Questions received from children follow `roles/manager.md` §Questions received from children.
 
 When `role_message` on `agents-remember-task` refuses delivery because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. Until MIK-R100 has landed, try your held message once in each turn you take for any reason; at the top, give the parent that occasion when you next take a turn. No observer or automatic held-message service is implied.
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

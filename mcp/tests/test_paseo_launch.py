@@ -42,7 +42,7 @@ from agents_remember.models.role_launcher import (
     RoleResultRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
@@ -75,6 +75,7 @@ CATALOG: dict[str, Any] = {
         {
             "id": "codex",
             "label": "Codex",
+            "modes": [],
             "models": [
                 {
                     "id": "gpt-a",
@@ -85,7 +86,7 @@ CATALOG: dict[str, Any] = {
         },
         # A provider that reports no models is launched without one. The runtime reports this one
         # as taking no tool servers from its host.
-        {"id": "eve", "label": "Eve", "models": [], "acceptsToolServers": False},
+        {"id": "eve", "label": "Eve", "models": [], "modes": [], "acceptsToolServers": False},
     ],
 }
 LAUNCH_COMMANDS = {"agent-archive", "workspace-open", "agent-create"}
@@ -337,6 +338,7 @@ def resolved_document(
         }
     )
     path = config.coordination_root / "tasks" / REPO / ref.path
+    write_task_doc(path.parent, document)
     return ResolvedTaskDocument(ref=ref, path=path, document=document)
 
 
@@ -418,6 +420,7 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
             path=self.leaf.path,
             document=self.leaf.document.model_copy(update={"enclosures": [enclosure]}),
         )
+        write_task_doc(self.leaf.path.parent, self.leaf.document)
 
     def compile_handover(self, request: RoleHandoverRequest) -> dict[str, Any]:
         assert request.request_id is not None

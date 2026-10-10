@@ -9,6 +9,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeNotConfigured,
@@ -79,7 +80,7 @@ class McpConfigTests(unittest.TestCase):
                     },
                 ],
             }
-            shared = root / "ar-coordination/system/settings.json"
+            shared = user_agentic_settings_path()
             write_json(shared, {"paseoRuntime": block})
             configured = load_config(path).paseo_runtime
             assert configured is not None
@@ -387,7 +388,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
     """gateDelegation boot sourcing (260703-L13, GQ1).
 
     The key's home is the GLOBAL agentic settings file
-    (``<coordinationRoot>/system/settings.json``), read once at boot through the
+    (``~/.config/agents-remember/settings.json``), read once at boot through the
     kernel loader (boot-snapshot). An authority-file value is a one-cycle
     legacy fallback with a boot warning; every other ``orchestration.*`` key in
     the authority file fails loud naming the new home.
@@ -405,7 +406,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
             if authority is not None:
                 payload["orchestration"] = authority
             if global_orchestration is not None:
-                global_path = root / "ar-coordination" / "system" / "settings.json"
+                global_path = user_agentic_settings_path()
                 write_json(global_path, {"orchestration": global_orchestration})
             path = root / "mcp-settings.json"
             write_json(path, payload)

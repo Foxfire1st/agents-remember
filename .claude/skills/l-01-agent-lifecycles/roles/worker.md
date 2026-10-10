@@ -9,7 +9,7 @@ Implement only the selected leaf's approved primary requirement and explicit pre
 
 ## Inputs
 
-Read the selected requirement and leaf task only. Use the supplied `taskDocReadArgs` exactly (`repo_id`, `task_name`, extensionless `slug`, `operation=get`), then read the canonical JSON at the returned `docPath`. Verify the code and memory roots match the handover; edit only the code worktree and use memory as read-only context. Follow the repository's actual coding and test instructions when the brief supplies them. When the handover names invariant/family context, inspect the affected realization claims and relevant sibling realizations through `knowledge_read` on the `agents-remember-task` tool server.
+Read the selected requirement and the rendered leaf document named in your handover. Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication. Do not load unrelated task documents or reread other role/core files. Verify the code and memory roots match the handover; edit only the code worktree and use memory as read-only context. Follow the repository's actual coding and test instructions when the brief supplies them. When the handover names invariant/family context, inspect the affected realization claims and relevant sibling realizations through `knowledge_read` on the `agents-remember-task` tool server.
 
 If a task fact seems absent, resolve it from the named canonical task and requirement using the supplied exact read arguments before reporting it missing. If a required binding is still absent or conflicts after that read, report the exact source and field rather than inferring another task or workspace. A parent agent is optional: a Worker started from the dashboard has none and needs none. Without a parent, ask the developer in your own chat; with a parent, send the question to it.
 
@@ -40,3 +40,5 @@ When the master line moves, run the supported sync of your own leaf as `../opera
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

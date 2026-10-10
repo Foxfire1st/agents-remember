@@ -32,8 +32,8 @@ from .operations import HELPERS, Operations, StepFailed
 
 # Raised when a rebuild has something to add to sandboxes built earlier: 2 added the Dagger
 # authority directory and the Eve launcher's list of variables an env file may not set; 3 added
-# the Pi provider entry to the settings file, which a rebuild writes anew.
-LAYOUT_VERSION = 4
+# the Pi provider entry to the settings file; 5 gives the sandbox its own user configuration.
+LAYOUT_VERSION = 5
 EVE_LAUNCHER_SOURCE = HELPERS / "eve-acp-launcher.mjs"
 EVE_SCRUB_NAME = "removed-variables.json"
 # The marker's state while a reset deletes the directory: neither built nor to be built on.
@@ -315,7 +315,7 @@ def build_unlocked(
         "coordination root, memory repository and task documents (through the build's tool server):"
     )
     _seed_corpus(layout, checkout, ops, out)
-    shared = layout.coordination / "system/settings.json"
+    shared = layout.user_settings_file
     document = json.loads(shared.read_text(encoding="utf-8")) if shared.exists() else {}
     document.update(host_settings_document(layout, eve_env_file))
     _put(shared, json.dumps(document, indent=2) + "\n")

@@ -30,3 +30,5 @@ Organise your own work inside the assignment, with whatever your harness offers,
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

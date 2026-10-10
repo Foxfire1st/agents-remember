@@ -102,6 +102,14 @@ class SandboxLayout:
         return self.root / "settings" / "agents-remember-settings.json"
 
     @property
+    def config_home(self) -> Path:
+        return self.root / "config"
+
+    @property
+    def user_settings_file(self) -> Path:
+        return self.config_home / "agents-remember" / "settings.json"
+
+    @property
     def harness_skills(self) -> Path:
         return self.root / "harness" / "skills"
 

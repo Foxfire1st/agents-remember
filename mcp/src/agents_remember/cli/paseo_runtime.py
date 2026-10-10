@@ -4,8 +4,8 @@
     agents-remember paseo status    --config <MCP settings file>
     agents-remember paseo stop      --config <MCP settings file>
 
-Each command uses the named MCP file's coordinationRoot to read the shared
-``system/settings.json`` host block and prints one JSON document. ``--config`` is required: these commands install software and start or stop a daemon,
+Each command uses the named MCP file and the single user configuration
+(``~/.config/agents-remember/settings.json``, or ``$XDG_CONFIG_HOME``) host block and prints one JSON document. ``--config`` is required: these commands install software and start or stop a daemon,
 so they never fall back to a discovered settings file.
 
 Exit status: 0 when the command did what it reports; 1 when a step failed (the document's
@@ -30,6 +30,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     load_paseo_runtime_settings,
 )
+from agents_remember.kernel.primitives.user_settings_location import user_settings_path
 from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
 from agents_remember.serving.paseo.paseo_daemon import runtime_status, stop_runtime
 from agents_remember.serving.paseo.paseo_provision import provision_runtime
@@ -55,16 +56,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         command.add_argument(
             "--config",
             required=True,
-            help="Absolute path of the harness MCP settings file; its coordinationRoot links the shared system/settings.json host block.",
+            help="Absolute path of the harness MCP settings file; the host block is in the single user configuration file.",
         )
 
 
 def run(args: argparse.Namespace) -> int:
     try:
         loaded = load_paseo_runtime_settings(args.config)
-        settings = require_paseo_runtime(
-            loaded, source="shared coordinator system/settings.json linked by " + args.config
-        )
+        settings = require_paseo_runtime(loaded, source=str(user_settings_path()))
     except PaseoRuntimeNotConfigured as error:
         return _refuse(error.code, str(error))
     except ConfigError as error:

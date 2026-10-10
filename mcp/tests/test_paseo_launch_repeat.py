@@ -119,7 +119,12 @@ class RepeatAfterChangeTests(RepeatTestCase):
                 self.runtime.calls.clear()
 
                 self.change_what_a_launch_is_compiled_from()
-                status, public = self.dispatch(request)
+                with patch.object(
+                    launch.role_launch_preparation,
+                    "read_host_role",
+                    side_effect=AssertionError("changed host role must not be read by a repeat"),
+                ):
+                    status, public = self.dispatch(request)
 
                 self.assertEqual((status, public["status"]), (200, "running"))
                 self.assertEqual(public["execution"]["agentId"], saved["agentId"])
@@ -720,6 +725,96 @@ class RuntimeReplyTests(RepeatTestCase):
 
 
 class ServiceTierReplayTests(RepeatTestCase):
+    def test_r71_repeat_keeps_first_profile_choices_after_the_host_role_changes(self) -> None:
+        catalog = copy.deepcopy(launch.CATALOG)
+        catalog["providers"][0]["modes"] = [{"id": "auto"}, {"id": "full-access"}]
+        profile = {
+            "id": "profile-one",
+            "name": "worker",
+            "provider": "codex",
+            "model": "gpt-a",
+            "modeId": "auto",
+        }
+        configured = {**launch.ROLE_DEFAULTS[0], "hostRole": {"profile": profile}}
+        with (
+            patch.object(self.runtime, "_catalog", return_value=catalog),
+            patch.object(
+                launch.role_launch_preparation,
+                "_role_defaults",
+                return_value=(configured, launch.ROLE_DEFAULTS[1]),
+            ) as reads,
+        ):
+            request = self.request("worker")
+            self.assertEqual(self.dispatch(request)[0], 200)
+            first = self.receipt(request)
+            profile.update(model="gpt-b", modeId="full-access")
+            status, repeated = self.dispatch(request)
+        self.assertEqual(reads.call_count, 1)
+        self.assertEqual(status, 200)
+        self.assertEqual(repeated["execution"]["agentId"], first["agentId"])
+        self.assertEqual(
+            (repeated["choices"]["model"]["value"], repeated["choices"]["mode"]["value"]),
+            ("gpt-a", "auto"),
+        )
+
+    def test_r71_still_loading_mode_catalog_refuses_before_any_agent_or_workspace_creation(
+        self,
+    ) -> None:
+        request = self.request("worker")
+        catalog = {"providers": [{"id": "codex", "models": [], "listingError": "still loading"}]}
+        with (
+            patch.object(self.runtime, "_catalog", return_value=catalog),
+            patch.object(
+                launch.role_launch_preparation,
+                "_role_defaults",
+                return_value=(
+                    {"agent": "codex", "model": None, "effort": None, "role": "worker"},
+                    ("codex",),
+                ),
+            ),
+        ):
+            error = self.refused(request)
+        self.assertIn("codex", str(error.detail))
+        self.assertIn("still loading", str(error.detail))
+        self.assertFalse(self.runtime.agents)
+        self.assertFalse(self.runtime.launch_calls())
+
+    def test_r71_old_override_digest_reconciles_without_an_empty_feature_map(self) -> None:
+        request = self.request("worker", agentId="codex", modelId="gpt-a")
+        self.assertEqual(self.dispatch(request)[0], 200)
+        stored = self.receipt(request)
+        stored["requestDigest"] = role_launch_receipts.digest(
+            {
+                "selection": selection_binding(request),
+                "agentOverride": {"agentId": "codex", "modelId": "gpt-a"},
+            }
+        )
+        role_launch_receipts._write_receipt(self.receipt_path(request), stored)
+        status, public = self.dispatch(request)
+        self.assertEqual((status, public["execution"]["agentId"]), (200, stored["agentId"]))
+
+    def test_r71_options_and_result_read_neither_collect_nor_remove_evidence(self) -> None:
+        request = self.request("worker")
+        self.assertEqual(self.dispatch(request)[0], 200)
+        stored = self.receipt(request)
+        local = Path(stored["workspace"]["taskReportAccessRoot"])
+        local.mkdir(parents=True, exist_ok=True)
+        (local / "uncollectable-link").symlink_to(self.root)
+        with patch.object(
+            role_launch_receipts,
+            "collect_execution_reports",
+            side_effect=AssertionError("read called collector"),
+        ):
+            self.refresh(request)
+            options = role_launch_routes._role_launch_options_endpoint(
+                self.config,
+                launch.RoleLauncherOptionsRequest.model_validate(
+                    {"role": "worker", **launch.ROLE_REFS["worker"]}
+                ),
+            )
+            self.assertEqual(options.status_code, 200)
+        self.assertTrue((local / "uncollectable-link").is_symlink())
+
     def test_success_preserves_requested_and_observed_tier_and_old_calls_replay_unchanged(
         self,
     ) -> None:
@@ -727,6 +822,15 @@ class ServiceTierReplayTests(RepeatTestCase):
         catalog["providers"][0]["models"][0]["serviceTiers"] = [
             {"id": "default", "label": "Normal"},
             {"id": "priority", "label": "Fast"},
+        ]
+        catalog["providers"][0]["models"][0]["features"] = [
+            {
+                "id": "service_tier",
+                "type": "select",
+                "label": "Speed",
+                "value": "default",
+                "options": catalog["providers"][0]["models"][0]["serviceTiers"],
+            }
         ]
         for tier in [None, "fast"]:
             with (
@@ -755,7 +859,11 @@ class ServiceTierReplayTests(RepeatTestCase):
                     status, public = self.dispatch(request)
                 self.assertEqual(status, 200)
                 self.assertEqual(
-                    public["sessionOptions"],
+                    {
+                        key: value
+                        for key, value in public["sessionOptions"].items()
+                        if key in {"model", "effort", "serviceTier"}
+                    },
                     {
                         "model": "gpt-a",
                         "effort": "low",

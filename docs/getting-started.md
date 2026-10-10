@@ -80,7 +80,8 @@ python .codex/render-starter.py --repo my-app shared-lib
 
 The renderer fills workspace paths, repository names and harness-specific hook
 or context commands. It also creates or consumes the one shared `paseoRuntime`
-block in `<coordinationRoot>/system/settings.json`, with absolute data/state
+block in `~/.config/agents-remember/settings.json`
+(or `$XDG_CONFIG_HOME/agents-remember/settings.json`), with absolute data/state
 paths and the configured host/dashboard origins. Run it for host setup; manual
 placeholder edits alone do not supply that block. The [settings reference](reference/settings-json.md#paseo-runtime)
 and [install guide](install/README.md) describe the complete block and the

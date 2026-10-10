@@ -74,7 +74,8 @@ def is_removed(name: str) -> bool:
 def sandbox_variables(layout: SandboxLayout) -> dict[str, str]:
     """What the sandbox sets in every process it starts.
 
-    ``TMUX_TMPDIR`` gives the dashboard's terminal sessions a multiplexer server of the sandbox's
+    ``XDG_CONFIG_HOME`` isolates the single user settings file without redirecting HOME or
+    harness login directories. ``TMUX_TMPDIR`` gives the dashboard's terminal sessions a multiplexer server of the sandbox's
     own instead of the developer's. ``PYTHONPYCACHEPREFIX`` and ``GIT_OPTIONAL_LOCKS=0`` keep the
     checkout unwritten: no bytecode beside its sources, and no index lock when the dashboard asks
     Git whether the build it serves is modified. ``AR_DAGGER_AUTHORITY_ROOT`` puts the registry of
@@ -83,6 +84,7 @@ def sandbox_variables(layout: SandboxLayout) -> dict[str, str]:
     """
     return {
         "TMUX_TMPDIR": layout.tmux_dir.as_posix(),
+        "XDG_CONFIG_HOME": layout.config_home.as_posix(),
         "XDG_DATA_HOME": (layout.root / "data").as_posix(),
         "XDG_STATE_HOME": (layout.root / "state").as_posix(),
         "XDG_CACHE_HOME": (layout.root / "cache").as_posix(),

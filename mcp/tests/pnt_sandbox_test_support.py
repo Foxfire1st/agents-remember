@@ -23,6 +23,7 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from agents_remember.kernel.primitives.paseo_host_contract import NODE_VERSION
 
@@ -417,14 +418,15 @@ class FakeOperations(Operations):
         assert spec is not None and spec.loader is not None
         renderer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(renderer)
-        renderer.render_settings(
-            self.layout.settings_file,
-            self.layout.projects,
-            [REPOSITORY_ID],
-            renderer.RenderOptions(
-                self.layout.coordination, self.layout.paseo_port, self.layout.dashboard_port
-            ),
-        )
+        with mock.patch.dict(os.environ, self.environment):
+            renderer.render_settings(
+                self.layout.settings_file,
+                self.layout.projects,
+                [REPOSITORY_ID],
+                renderer.RenderOptions(
+                    self.layout.coordination, self.layout.paseo_port, self.layout.dashboard_port
+                ),
+            )
         return {"renderedSettingsPath": self.layout.settings_file.as_posix(), "invocations": 1}
 
     def resolve_roots(self, checkout: Path, mode: str) -> dict[str, Any]:

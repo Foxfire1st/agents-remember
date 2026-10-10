@@ -74,6 +74,7 @@ _CARRIED_VARIABLES = (
 )
 TOOL_SERVER_APPLIED = "tool server applied"
 TOOL_SERVER_NOT_SUPPORTED = "tool server not applied: not supported by provider"
+ROLE_IDENTITY_READ_TOOLS = ("server_info",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +91,7 @@ class LaunchOutcome:
     code: str | None = None
     message: str | None = None
     execution: dict[str, str] | None = None
-    applied: dict[str, str] | None = None
+    applied: dict[str, Any] | None = None
     warning: str | None = None
     # False while the agent this launch replaces has not been archived in the runtime.
     predecessor_settled: bool = True
@@ -149,7 +150,7 @@ class RoleLaunch:
     context: RoleLaunchContext
     folder: str
     provider: str
-    session_options: dict[str, str]
+    session_options: dict[str, Any]
     # The first message exactly as the agent receives it: the artifact line, then the content.
     prompt: str
     # The file the agent is told to write its report to.
@@ -365,8 +366,7 @@ def _leading_id(part: str) -> str:
 def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
     """Everything needed to make, and to repeat, the runtime calls of one launch.
 
-    Model and effort go to the runtime as its model and thinking option; no permission mode is
-    named, so the provider's default applies. A launch without a model leaves the choice to the
+    Model, effort, mode and features go to the runtime at creation. A launch without a model leaves the choice to the
     provider. The first message, the recovery note and the tool-server definition are plain data
     in the call, so a repeat sends exactly what the first run sent.
     """
@@ -384,14 +384,25 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))
         }
+        if launch.provider == "claude":
+            # Installed host applyClaudeToolPolicy grants by exact tool name and retains
+            # all other tools. Codex's enabled_tools side effect prevents this same grant.
+            agent["toolPolicy"] = {
+                "preapproved": [
+                    {"kind": "mcp", "server": TOOL_SERVER_NAME, "tool": name}
+                    for name in ROLE_IDENTITY_READ_TOOLS
+                ]
+            }
     if launch.parent_agent_id:
         agent["parentAgentId"] = launch.parent_agent_id
     if launch.session_options.get("model"):
         agent["model"] = launch.session_options["model"]
     if launch.session_options.get("effort"):
         agent["thinkingOptionId"] = launch.session_options["effort"]
-    if launch.session_options.get("serviceTier"):
-        agent["featureValues"] = {"service_tier": launch.session_options["serviceTier"]}
+    if launch.session_options.get("mode"):
+        agent["modeId"] = launch.session_options["mode"]
+    if launch.session_options.get("featureValues"):
+        agent["featureValues"] = dict(launch.session_options["featureValues"])
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
         "workspace": workspace_call(launch.context, launch.folder),
@@ -437,7 +448,17 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
             "environment": dict(definition["env"]),
             "sourceRoot": launching_source_root().as_posix(),
         }
-    return {"toolServer": tool_server, "recoveryNote": agent["systemPrompt"]}
+    return {
+        "toolServer": tool_server,
+        "recoveryNote": agent["systemPrompt"],
+        "assignmentReadGrant": {
+            "server": TOOL_SERVER_NAME,
+            "preapproved": agent.get("toolPolicy", {}).get("preapproved", []),
+            "detail": "Claude per-tool session grant for server_info; other tools remain subject to the agent's permission mode"
+            if "toolPolicy" in agent
+            else "not applied: this provider has no supported per-tool route that retains the role server's other tools",
+        },
+    }
 
 
 def run_launch_call(
@@ -526,15 +547,18 @@ def _created_outcome(reply: dict[str, Any], agent_id: str, workspace_id: str) ->
             BRIDGE_INVALID_REPLY, "The Paseo bridge returned an unreadable agent."
         )
     agent_workspace = agent.get("workspaceId")
-    applied: dict[str, str] = {"id": provider}
+    applied: dict[str, Any] = {"id": provider}
     for key, source in (
         ("model", "model"),
         ("effort", "thinkingOptionId"),
         ("serviceTier", "serviceTier"),
+        ("mode", "modeId"),
     ):
         value = agent.get(source)
         if isinstance(value, str) and value:
             applied[key] = value
+    if agent.get("featureValues"):
+        applied["featureValues"] = agent["featureValues"]
     creation_error = reply.get("creationError")
     return LaunchOutcome(
         kind="created",

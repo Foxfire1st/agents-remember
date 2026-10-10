@@ -46,6 +46,7 @@ from agents_remember.cli.paseo_launch import (
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
+from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
     _reconcile_prior_execution,
@@ -61,7 +62,7 @@ from agents_remember.cli.role_launch_preparation import (
 )
 from agents_remember.cli.role_launch_receipts import (
     RECEIPT_SCHEMA,
-    _archived_receipt_agent_id,
+    _archived_receipt_for_selection,
     _create_receipt,
     _discard_message_binding_projection,
     _execute_prepared_launch,
@@ -336,7 +337,8 @@ def _reserve_message_binding_projection(
     if current is None:
         # A closed receipt may already be in the history (a launch that ended, or lost, between
         # archiving it and creating its own); its agent is archived by this launch.
-        replaces_agent_id = _archived_receipt_agent_id(path, request)
+        current = _archived_receipt_for_selection(path, request)
+        replaces_agent_id = _replaced_agent_id(current) if current else None
     elif current.get("requestId") != str(request.request_id):
         replaces_agent_id = _replaced_agent_id(current)
     else:
@@ -344,6 +346,10 @@ def _reserve_message_binding_projection(
     prior = _reconcile_prior_execution(config, path, request, request_digest)
     if prior is not None:
         return reference, None, False, prior
+    if current and replaces_agent_id:
+        prepared["predecessorReports"] = {
+            key: current[key] for key in ("requestId", "workspace", "report") if key in current
+        }
     created = _place_message_binding_projection(config, request.request_id, binding, reference)
     return reference, replaces_agent_id, created, None
 
@@ -461,7 +467,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     role_handover = start.role_handover
     workspace = role_handover.workspace
     provider = role_handover.agent_id
-    session_options = role_handover.session_options
+    session_options = {
+        **role_handover.session_options,
+        "choices": launch_choice_metadata(role_handover.session_options.get("choices", {})),
+    }
     prepared = role_handover.handover
     # The agent id is chosen here: before the receipt is written and before the runtime is called.
     agent_id = mint_agent_id()
@@ -504,6 +513,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             }
         ),
         "capsuleDigest": prepared["capsuleDigest"],
+        "instructionComposition": prepared.get("instructionComposition"),
+        "taskDocumentFiles": prepared.get("taskDocumentFiles"),
+        "predecessorReports": prepared.get("predecessorReports"),
+        "choices": session_options.get("choices", {}),
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
         "messageBindingProjection": start.message_binding_projection,

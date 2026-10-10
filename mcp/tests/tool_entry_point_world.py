@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
@@ -464,8 +465,8 @@ class EntryPointWorld:
             encoding="utf-8",
         )
         # The documented home for the delegation policy (the MCP authority file rejects it).
-        (self.coord / "system").mkdir()
-        (self.coord / "system" / "settings.json").write_text(
+        user_agentic_settings_path().parent.mkdir(parents=True, exist_ok=True)
+        user_agentic_settings_path().write_text(
             json.dumps(
                 {
                     "version": 1,

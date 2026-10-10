@@ -30,6 +30,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
+from agents_remember.kernel.primitives.user_settings_location import (
+    UserSettingsLocationError,
+    require_user_settings_path,
+)
+
 HARNESS_LABEL = "Claude Code"
 PATH_PLACEHOLDER = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
 REPO_PLACEHOLDER = "<YOUR_REPOSITORY_FOLDER_NAME>"
@@ -170,7 +175,10 @@ def render_settings(
     data = settings_payload(
         json.loads(path.read_text(encoding="utf-8")), workspace_root, repos, options
     )
-    shared = Path(data["coordinationRoot"]) / "system/settings.json"
+    try:
+        shared = require_user_settings_path(Path(data["coordinationRoot"]))
+    except UserSettingsLocationError as error:
+        raise SystemExit(str(error)) from error
     if shared.exists():
         # Configured setup is an input; its folders/providers and every other family stay intact.
         document = json.loads(shared.read_text(encoding="utf-8"))
@@ -399,5 +407,10 @@ def main(render: Renderer) -> None:
     script_root = Path(__file__).resolve().parent
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
+    # Refuse the removed location before any harness hook or settings file is rewritten.
+    try:
+        require_user_settings_path(options.coordination_root or workspace_root / "ar-coordination")
+    except UserSettingsLocationError as error:
+        raise SystemExit(str(error)) from error
     render(script_root, workspace_root, repos, options)
     print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")

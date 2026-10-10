@@ -2,7 +2,7 @@
 """Render the Antigravity/Gemini Agents Remember starter package for one workspace."""
 
 # Generated file -- do not edit.
-# Source: scripts/harness/render_starter.py
+# Source: scripts/harness/render_starter.py + mcp/src/agents_remember/kernel/primitives/user_settings_location.py
 # Regenerate: python3 scripts/sync-harness.py
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
@@ -28,6 +29,40 @@ TARGET_FILES = (
 )
 # Mirrored to the workspace root, where Antigravity reads it from.
 WORKSPACE_TARGET_FILES = ("GEMINI.md",)
+
+
+class UserSettingsLocationError(ValueError):
+    """The user's settings location needs an explicit correction or upgrade."""
+
+
+def user_settings_path() -> Path:
+    configured = os.environ.get("XDG_CONFIG_HOME")
+    config_home = Path(configured) if configured else Path.home() / ".config"
+    if not config_home.is_absolute():
+        raise UserSettingsLocationError("XDG_CONFIG_HOME must be an absolute directory")
+    return config_home / "agents-remember" / "settings.json"
+
+
+def settings_upgrade_command(coordination_root: Path) -> str:
+    return shlex.join(
+        ["agents-remember", "upgrade-user-settings", "--coordination-root", str(coordination_root)]
+    )
+
+
+def require_user_settings_path(
+    coordination_root: Path, exists: Callable[[Path], bool] = Path.exists
+) -> Path:
+    """Refuse the old location without reading or migrating its contents."""
+    old = coordination_root / "system" / "settings.json"
+    new = user_settings_path()
+    if exists(old) or old.is_symlink():
+        state = "both files exist" if exists(new) or new.is_symlink() else "old file exists"
+        raise UserSettingsLocationError(
+            f"agentic-settings-location-upgrade-required: {state}; old: {old}; user: {new}; "
+            f"upgrade command: {settings_upgrade_command(coordination_root)}. "
+            "The old file is not read; when both exist, resolve the collision before upgrading."
+        )
+    return new
 
 
 class RenderOptions(NamedTuple):
@@ -148,7 +183,10 @@ def render_settings(
     data = settings_payload(
         json.loads(path.read_text(encoding="utf-8")), workspace_root, repos, options
     )
-    shared = Path(data["coordinationRoot"]) / "system/settings.json"
+    try:
+        shared = require_user_settings_path(Path(data["coordinationRoot"]))
+    except UserSettingsLocationError as error:
+        raise SystemExit(str(error)) from error
     if shared.exists():
         # Configured setup is an input; its folders/providers and every other family stay intact.
         document = json.loads(shared.read_text(encoding="utf-8"))
@@ -218,6 +256,11 @@ def main(render: Renderer) -> None:
     script_root = Path(__file__).resolve().parent
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
+    # Refuse the removed location before any harness hook or settings file is rewritten.
+    try:
+        require_user_settings_path(options.coordination_root or workspace_root / "ar-coordination")
+    except UserSettingsLocationError as error:
+        raise SystemExit(str(error)) from error
     render(script_root, workspace_root, repos, options)
     print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")
 

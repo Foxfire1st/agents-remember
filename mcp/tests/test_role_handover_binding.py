@@ -31,10 +31,12 @@ from agents_remember.cli import (
 )
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
+from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
     RoleHandoverRequest,
     _compile_handover,
+    _prepare_role_folders,
     _resolve_workspace,
     _role_report_path,
     prepare_role_handover,
@@ -45,7 +47,8 @@ from agents_remember.cli.role_launch_receipts import (
     _message_binding_projection_reference,
     digest,
 )
-from agents_remember.cli.role_launch_workspace import _ensure_leaf_enclosure
+from agents_remember.cli.role_launch_workspace import _ensure_leaf_enclosure, workspace_folder
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
@@ -552,8 +555,10 @@ def _bridge_whose_first_creation_gets_no_answer(
     answers = [PaseoBridgeFailure("paseo_bridge_timeout", "no answer in time")]
 
     def bridge(_config: McpRuntimeConfig, command: str, payload: dict[str, Any]) -> Any:
+        if command == "role-profiles":
+            return {"profiles": [], "readAt": "fixture"}
         if command == "catalog":
-            return {"providers": [{"id": "codex", "label": "Codex", "models": []}]}
+            return {"providers": [{"id": "codex", "label": "Codex", "models": [], "modes": []}]}
         if command == "workspace-open":
             return {"serverId": "srv", "workspace": {"id": "wks", "directory": payload["cwd"]}}
         if command == "agent-state":
@@ -636,7 +641,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 },
             }
             atomic_write_text(
-                contract.coordination_root / "system/settings.json",
+                user_agentic_settings_path(),
                 json.dumps({"paseoRuntime": settings.pop("paseoRuntime")}),
             )
             atomic_write_text(settings_path, json.dumps(settings))
@@ -815,9 +820,7 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
             self.assertEqual(workspace["path"], group.resolve().as_posix())
             self.assertEqual(workspace["codeRoot"], code.resolve().as_posix())
             self.assertFalse({"id", "selector"} & set(workspace))
-            self.assertEqual(
-                (group / "task-reports").resolve(), (task_root / "notes" / "reports").resolve()
-            )
+            self.assertEqual((group / "role-reports").resolve(), group / "role-reports")
             identity = start.call_args.args[1]
             self.assertEqual(identity.repo_id, "agents-remember")
             self.assertEqual(identity.task_name, "master")
@@ -910,10 +913,16 @@ class RoleReportPathIsolationTests(unittest.TestCase):
                     effective_task=master,
                 )
                 request_id = uuid.uuid4()
+                _prepare_role_folders(context, workspace, request_id)
                 report = Path(_role_report_path(context, workspace, request_id=request_id))
                 self.assertTrue(
                     report.resolve(strict=False).is_relative_to(
-                        (master.path.parent / "notes" / "reports").resolve()
+                        (
+                            Path(workspace["path"])
+                            / ".agents-remember"
+                            / "role-executions"
+                            / str(request_id)
+                        ).resolve()
                     )
                 )
                 self.assertEqual(report.name, f"{master.document.id}-manager-{request_id}.md")
@@ -927,8 +936,10 @@ class RoleReportPathIsolationTests(unittest.TestCase):
                 task=None,
                 effective_task=masters[0],
             )
+            retry_request = uuid.uuid4()
+            _prepare_role_folders(retry_context, workspace, retry_request)
             retry_report = Path(
-                _role_report_path(retry_context, workspace, request_id=uuid.uuid4())
+                _role_report_path(retry_context, workspace, request_id=retry_request)
             )
             retry_report.write_text("new request\n", encoding="utf-8")
             self.assertNotEqual(manager_reports[0], manager_reports[1])
@@ -974,3 +985,58 @@ class RoleReportPathIsolationTests(unittest.TestCase):
             self.assertTrue(first.resolve().is_relative_to(reports.resolve()))
             self.assertTrue(second.resolve().is_relative_to(reports.resolve()))
             self.assertEqual(first.read_text(encoding="utf-8"), "original leaf report\n")
+
+
+class R71FolderAndGrantTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.config = McpRuntimeConfig(
+            config_path=self.root / "settings.json",
+            coordination_root=self.root / "coordination",
+            workspace_root=self.root / "projects",
+            transcript_root=self.root / "logs",
+        )
+        self.config.workspace_root.mkdir()
+
+    def test_r71_launch_builder_grants_only_the_supported_claude_route(self) -> None:
+        context = resolve_role_launch_context(self.config, RoleSelection(role="architect"))
+        for provider in ("claude", "codex", "pi", "hermes"):
+            launch = RoleLaunch(
+                agent_id=str(uuid.uuid4()),
+                request_id=uuid.uuid4(),
+                context=context,
+                folder=str(self.config.workspace_root),
+                provider=provider,
+                session_options={"mode": "default" if provider == "claude" else "auto"},
+                prompt="first message",
+                report_path=str(self.root / "report.md"),
+                handover_artifact={"path": str(self.root / "handover.txt"), "sha256": "a" * 64},
+                settings_file=self.config.config_path,
+            )
+            created = build_launch_call(launch)["agent"]
+            self.assertEqual(set(created["mcpServers"]), {"agents-remember-task"})
+            if provider == "claude":
+                self.assertEqual(
+                    [row["tool"] for row in created["toolPolicy"]["preapproved"]],
+                    ["server_info"],
+                )
+            else:
+                self.assertNotIn("toolPolicy", created)
+
+    def test_r71_folder_preparation_refuses_external_link_before_creating_any_child(self) -> None:
+        context = resolve_role_launch_context(self.config, RoleSelection(role="architect"))
+        external = self.root / "external"
+        external.mkdir()
+        (self.config.workspace_root / ".agents-remember").symlink_to(
+            external, target_is_directory=True
+        )
+        request_id = uuid.uuid4()
+        with self.assertRaisesRegex(ValueError, "real directory"):
+            _prepare_role_folders(
+                context,
+                workspace_folder(self.config.workspace_root),
+                request_id,
+            )
+        self.assertEqual(list(external.iterdir()), [])

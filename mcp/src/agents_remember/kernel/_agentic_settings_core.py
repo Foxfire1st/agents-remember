@@ -23,6 +23,13 @@ from agents_remember.kernel.primitives.gate_policy import (
 from agents_remember.kernel.primitives.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
 )
+from agents_remember.kernel.primitives.user_settings_location import (
+    UserSettingsLocationError,
+    require_user_settings_path,
+    settings_upgrade_command,
+    user_settings_path,
+)
+from agents_remember.kernel.recorded_reads import observed_path_exists
 from agents_remember.models.role_identity import canonical_role
 
 
@@ -95,8 +102,39 @@ KNOWN_ROLES = frozenset(
     }
 )
 KNOWN_ROLE_KNOB_FIELDS = frozenset(
-    {"harness", "model", "effort", "serviceTier", "launchArgs", "promptKeywords", "sessionCommands"}
+    {
+        "harness",
+        "model",
+        "effort",
+        "serviceTier",
+        "mode",
+        "featureValues",
+        "notes",
+        "launchArgs",
+        "promptKeywords",
+        "sessionCommands",
+    }
 )
+# R71 rule 20: unknown features carry permission authority until explicitly classified.
+NON_PERMISSION_FEATURES = frozenset({"service_tier", "fast_mode"})
+
+
+def native_service_tier(value: str) -> str:
+    return "priority" if value == "fast" else value
+
+
+def role_feature_values(knobs: RoleKnobs, source: str) -> dict[str, str | bool]:
+    values = dict(knobs.feature_values)
+    if knobs.service_tier:
+        tier = native_service_tier(knobs.service_tier)
+        if "service_tier" in values and values["service_tier"] != tier:
+            raise AgenticSettingsError(
+                f"{source}: serviceTier and featureValues.service_tier conflict after alias normalization"
+            )
+        values["service_tier"] = tier
+    return values
+
+
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
 # R1/R5 (260707-HFX2-L2): the deterministic agent-notifier sweep's own knobs -- interval, enable
@@ -188,10 +226,21 @@ class LoopSettings:
 
 
 @dataclass(frozen=True)
+class RoleChoiceOrigin:
+    """Internal provenance from the loader's exact layer reads, never a settings key."""
+
+    source: str
+    key: str
+    provider: str | None
+    model: str | None
+    precedence: int
+
+
+@dataclass(frozen=True)
 class RoleKnobs:
     """One role's knob overrides (``orchestration.roles.<role>``); ``None`` = role-file default.
 
-    ``harness`` must be a registry id; ``model``/``effort`` are free strings HERE. Native adapters
+    ``harness``/``model``/``effort`` are free strings HERE. A Paseo launch validates provider and model choices against its host catalog; terminal dispatch still requires its existing registry adapter. Native adapters
     validate them against their token-free dynamic catalog at launch; settings-defined non-native
     harnesses use their explicit registry mappings at dispatch. The
     free-form escape hatch (``launch_args``/``prompt_keywords``/``session_commands``, JSON keys
@@ -204,6 +253,10 @@ class RoleKnobs:
     model: str | None = None
     effort: str | None = None
     service_tier: str | None = None
+    mode: str | None = None
+    feature_values: dict[str, str | bool] = field(default_factory=dict)
+    notes: str | None = None
+    origins: dict[str, RoleChoiceOrigin] = field(default_factory=dict, compare=False, repr=False)
     launch_args: tuple[str, ...] = ()
     prompt_keywords: tuple[str, ...] = ()
     session_commands: tuple[str, ...] = ()
@@ -318,6 +371,10 @@ class AgenticSettings:
             model=override.model or base.model,
             effort=override.effort or base.effort,
             service_tier=override.service_tier or base.service_tier,
+            mode=override.mode or base.mode,
+            feature_values={**base.feature_values, **override.feature_values},
+            notes=override.notes or base.notes,
+            origins={**base.origins, **override.origins},
             launch_args=override.launch_args or base.launch_args,
             prompt_keywords=override.prompt_keywords or base.prompt_keywords,
             session_commands=override.session_commands or base.session_commands,
@@ -329,8 +386,28 @@ class AgenticSettings:
 
 
 def agentic_settings_path(root: Path) -> Path:
-    """The agentic settings file under ``root`` (coordination root or code repo)."""
+    """The repository-local agentic settings file; never the user's layer."""
     return root / "system" / "settings.json"
+
+
+def user_agentic_settings_path() -> Path:
+    """The user's single settings file, independent of the working directory."""
+    try:
+        return user_settings_path()
+    except UserSettingsLocationError as error:
+        raise AgenticSettingsError(str(error)) from error
+
+
+def agentic_settings_upgrade_command(coordination_root: Path) -> str:
+    return settings_upgrade_command(coordination_root)
+
+
+def require_user_agentic_settings_path(coordination_root: Path) -> Path:
+    """Apply the location guard through the settings loader's recorded reads."""
+    try:
+        return require_user_settings_path(coordination_root, observed_path_exists)
+    except UserSettingsLocationError as error:
+        raise AgenticSettingsError(str(error)) from error
 
 
 def default_agentic_settings_seed() -> dict[str, Any]:

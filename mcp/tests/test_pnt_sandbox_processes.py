@@ -633,7 +633,7 @@ class StartAndStopTests(SandboxCase):
             "while not os.path.exists(sys.argv[1]):\n    time.sleep(0.05)\n"
             "print(json.dumps({'results': [{'payload': {'ok': True, 'names': sorted(os.environ), "
             "'values': {k: v for k, v in os.environ.items() if k in "
-            "['XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','PWD',"
+            "['XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','PWD',"
             "'GIT_OPTIONAL_LOCKS','PYTHONPYCACHEPREFIX','TMUX_TMPDIR',"
             "'AR_DAGGER_AUTHORITY_ROOT']}}}]}))\n"
         )
@@ -680,6 +680,7 @@ class StartAndStopTests(SandboxCase):
         self.assertEqual(
             reports[0]["values"],
             {
+                "XDG_CONFIG_HOME": str(self.layout.config_home),
                 "XDG_DATA_HOME": str(self.layout.root / "data"),
                 "XDG_STATE_HOME": str(self.layout.root / "state"),
                 "XDG_CACHE_HOME": str(self.layout.root / "cache"),

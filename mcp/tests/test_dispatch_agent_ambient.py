@@ -19,7 +19,7 @@ from agents_remember.application.structural.agent_tools import (
 )
 from agents_remember.application.terminal_tools import SpawnedBy, SpawnOverrides
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.structural.agent import DispatchAgentRequest
@@ -145,7 +145,7 @@ def _detected(_command: str) -> str | None:
 
 def _write_architect_settings(root: Path) -> None:
     """A settings-owned architect launch selection (mirrors the spawn wire tests)."""
-    path = agentic_settings_path(root)
+    path = user_agentic_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(

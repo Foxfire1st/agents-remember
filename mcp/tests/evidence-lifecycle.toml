@@ -237,6 +237,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_la
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -365,6 +366,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_lifecycle_operations.py",
@@ -1411,6 +1413,7 @@ consumers = [
   "mcp/tests/test_task_document.py",
   "mcp/tests/test_task_document_application_1.py",
   "mcp/tests/test_task_document_body_lookup.py",
+  "mcp/tests/test_task_document_copies.py",
   "mcp/tests/test_task_document_master.py",
   "mcp/tests/test_task_documents_graph_projection.py",
   "mcp/tests/test_task_execution_topology.py",
@@ -1486,6 +1489,7 @@ consumers = [
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",
@@ -1524,6 +1528,7 @@ replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",
@@ -1575,6 +1580,7 @@ replacement_contract = "node:mcp/tests/test_integration_branch_authority.py::Int
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -1635,6 +1641,7 @@ permanence_rationale = "The conversion, crossing and toolchain cases convert the
 replacement_contract = "node:mcp/tests/test_knowledge_conversion.py::test_a_card_becomes_prose_one_evidence_section_and_numbered_references"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
@@ -1677,6 +1684,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_index.py::test_a_working_t
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
@@ -1712,6 +1720,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_la
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -1778,6 +1787,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_la
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -1991,6 +2001,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_investigator.py",
   "mcp/tests/test_paseo_agent_tools.py",
+  "mcp/tests/test_paseo_catalog.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_role_messages.py",
@@ -2059,6 +2070,25 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/preview_read_only_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "worktree-start-read-only-preview-cases"
+category = "public-contract"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "MIK-R131 call-record admission: fixture snapshots, actual UTC call days, append-only line and river records, and detail files named by the calls"
+introduced_by = "260928-MIK-L131"
+lifetime = "permanent"
+permanence_rationale = "Read-only preview cases need an independent comparison that admits only the actual call record, verifies its append and call identities, and preserves all other paths, modes, repository refs, worktrees and indices. The stale-day, bare-directory-touch and event-mode negatives protect that boundary."
+replacement_contract = "node:mcp/tests/test_worktree_start_preview.py::test_registered_first_leaf_preview_is_repeatable_without_publication"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_master_retirement_readiness.py",
+  "mcp/tests/test_worktree_start_preview.py",
+]
+
+[[artifact]]
 path = "mcp/tests/read_scope_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -2119,6 +2149,7 @@ consumers = [
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",
@@ -2175,6 +2206,7 @@ replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_start_
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_retired_door_publication_fields.py",
@@ -2203,6 +2235,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_certification_lane_bridge.py",
   "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",

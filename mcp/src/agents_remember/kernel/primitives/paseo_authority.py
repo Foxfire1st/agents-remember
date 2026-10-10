@@ -12,10 +12,17 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettingsError,
     parse_paseo_runtime_settings,
 )
+from agents_remember.kernel.primitives.user_settings_location import (
+    UserSettingsLocationError,
+    require_user_settings_path,
+)
 
 
 def paseo_runtime_path(coordination_root: Path) -> Path:
-    return coordination_root / "system" / "settings.json"
+    try:
+        return require_user_settings_path(coordination_root)
+    except UserSettingsLocationError as error:
+        raise PaseoRuntimeSettingsError(str(error)) from error
 
 
 def load_shared_paseo_runtime(coordination_root: Path) -> PaseoRuntimeSettings | None:

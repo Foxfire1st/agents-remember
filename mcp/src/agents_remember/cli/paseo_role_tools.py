@@ -52,6 +52,7 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_preparation import (
     ROLE_MESSAGE_TOOL,
     ROLE_START_TOOL,
@@ -62,6 +63,7 @@ from agents_remember.cli.role_launch_receipts import (
     _read_receipt,
     _receipt_path,
     _taskless_execution_receipts,
+    _write_receipt,
 )
 from agents_remember.cli.role_launch_routes import LaunchLockBusy, _role_launch_dispatch_endpoint
 from agents_remember.errors import RolePreparationError
@@ -76,6 +78,10 @@ from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelect
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.tool_events import call_target_role
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees.role_reports import (
+    RoleReportCollectionError,
+    collect_execution_reports,
+)
 
 # How long a start waits for another start of the same tool server to end: one agent issues
 # its starts side by side, and the launch path runs them one at a time.
@@ -320,19 +326,23 @@ def _host_not_read(response: JSONResponse) -> str | None:
     return None
 
 
-def _agent_override(call: RoleStartCall) -> dict[str, str] | None:
+def _agent_override(call: RoleStartCall) -> dict[str, Any] | None:
     if call.agent is None:
         if call.model is not None or call.effort is not None:
             raise ValueError("a model or an effort is given without the agent it belongs to")
-        return None
+        if not call.feature_values:
+            return None
     return {
-        key: value
-        for key, value in (
-            ("agentId", call.agent),
-            ("modelId", call.model),
-            ("effortId", call.effort),
-        )
-        if value is not None
+        **({"featureValues": call.feature_values} if call.feature_values else {}),
+        **{
+            key: value
+            for key, value in (
+                ("agentId", call.agent),
+                ("modelId", call.model),
+                ("effortId", call.effort),
+            )
+            if value is not None
+        },
     }
 
 
@@ -429,6 +439,9 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,
         "executionStatus": execution,
         **({"preparation": receipt["preparation"]} if "preparation" in receipt else {}),
+        "choices": launch_choice_metadata(receipt.get("choices", {})),
+        **({"taskDocumentFiles": receipt["taskDocumentFiles"]} if receipt.get("taskDocumentFiles") else {}),
+        **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
 
@@ -474,10 +487,37 @@ def send_role_message(
 
     try:
         binding = _caller(config, environment)
+        selection = RoleSelection.model_validate(
+            dict(
+                role=binding.role,
+                sprintDocumentRef=binding.sprint_ref,
+                masterDocumentRef=binding.master_ref,
+                taskDocumentRef=binding.task_ref,
+            )
+        )
+        own_path = _receipt_path(
+            config,
+            selection,
+            uuid.UUID(binding.request_id) if binding.role in TASKLESS_ROLES else None,
+        )
+        own_receipt = _read_receipt(own_path)
         sender = starting_agent(config, binding)
         recipient = _resolve_recipient(config, call, binding)
         _carry_resolved_target_role(call, recipient)
+        collection = None
+        if own_receipt and own_receipt.get("agentId") == binding.agent_id:
+            try:
+                collection = collect_execution_reports(own_receipt)
+            except RoleReportCollectionError as error:
+                collection = {"state": "failed", "detail": str(error), "sourcesPreserved": True}
+                own_receipt["reportCollection"] = collection
+            try:
+                _write_receipt(own_path, own_receipt)
+            except OSError as error:
+                collection = {**collection, "recordError": str(error)}
         result = _deliver(config, call, sender, recipient)
+        if collection is not None:
+            result["reportCollection"] = collection
     except _Refused as refused:
         result = refused.payload()
     if call.role == "system-specialist":

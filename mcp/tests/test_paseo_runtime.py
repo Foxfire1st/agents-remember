@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 from agents_remember.cli.__main__ import main
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.serving.paseo.paseo_command import (
     CommandResult,
@@ -975,8 +976,8 @@ class PaseoRuntimeTests(unittest.TestCase):
                     self.assertEqual(document["error"]["code"], "paseo_runtime_not_configured")
                     self.assertIn("no Paseo runtime configured", document["error"]["message"])
             block = {"installPrefix": (self.root / "prefix").as_posix()}
-            shared = self.root / "system/settings.json"
-            shared.parent.mkdir(exist_ok=True)
+            shared = user_agentic_settings_path()
+            shared.parent.mkdir(parents=True, exist_ok=True)
             shared.write_text(json.dumps({"paseoRuntime": block}), encoding="utf-8")
             code, document = command("provision")
             self.assertEqual((code, document["error"]["code"]), (2, "settings_invalid"))
@@ -999,7 +1000,7 @@ class PaseoRuntimeTests(unittest.TestCase):
         settings_path.write_text(
             json.dumps({"coordinationRoot": self.root.as_posix()}), encoding="utf-8"
         )
-        (self.root / "system/settings.json").write_text(
+        (user_agentic_settings_path()).write_text(
             json.dumps({"paseoRuntime": block}), encoding="utf-8"
         )
         code, document = command("stop")

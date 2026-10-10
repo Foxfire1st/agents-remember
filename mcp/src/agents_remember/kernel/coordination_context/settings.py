@@ -48,10 +48,12 @@ __all__ = [
 
 def parse_coordination_settings(
     settings_path: Path,
+    *,
+    coordination_root: Path | None = None,
 ) -> tuple[StorageSettings, CrossRepoSettings]:
     fallback_storage = StorageSettings()
     fallback_cross_repo = CrossRepoSettings()
-    path_settings_path = path_settings_path_for(settings_path)
+    path_settings_path = path_settings_path_for(settings_path, coordination_root=coordination_root)
     if observed_exists(path_settings_path):
         return parse_json_settings(path_settings_path)
 

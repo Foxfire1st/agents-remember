@@ -92,3 +92,9 @@ every path. `sync-harness.py` does not manage those and leaves them alone.
 
 The skill trees under each starter package are generated too, by
 `scripts/sync-skills.py` from root `skills/`.
+
+The user settings location and removed-location refusal are generated from
+`mcp/src/agents_remember/kernel/primitives/user_settings_location.py`. The installed
+readers use that same source. Standalone starters need no installed AR import,
+refuse the old coordination file before changing hooks, and preserve an existing
+user file at `~/.config/agents-remember/settings.json` (`XDG_CONFIG_HOME` when set).

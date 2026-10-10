@@ -55,6 +55,8 @@ def test_other_roles_and_leafless_contexts_receive_no_sibling_value(handovers) -
         _, handover = handovers.compiled(role, None)
         assert "leafSeats" not in handover
     context, workspace = handovers.launch_of("manager")
+    request_id = wording.uuid.uuid4()
+    wording.role_launch_preparation._prepare_role_folders(context, workspace, request_id)
     # A non-leaf role is outside the launcher leaf seat; it must not
     # inherit sibling addresses even if a caller presents a leaf field.
     leaf_context, _ = handovers.launch_of("worker")
@@ -65,6 +67,6 @@ def test_other_roles_and_leafless_contexts_receive_no_sibling_value(handovers) -
         workspace=workspace,
         agent_id="some-provider",
         ar_mcp_context={"scopeKind": "configured-projects"},
-        request_id=wording.uuid.uuid4(),
+        request_id=request_id,
     )
     assert "leafSeats" not in _compile_handover(request)["handover"]

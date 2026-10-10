@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import copy
+import os
 import unittest
 import uuid
 from pathlib import Path
 from typing import Any, get_args
+from unittest.mock import patch
 
 from agents_remember.cli import paseo_role_tools, role_launch_receipts
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
@@ -15,6 +17,7 @@ from agents_remember.models.role_agents import (
     RoleMessageRefusal,
     RoleMessageStatus,
 )
+from agents_remember.worktrees import role_reports
 from test_paseo_launch import runtime_config
 from test_paseo_role_tools import (
     ARCHIVED_AT,
@@ -28,6 +31,52 @@ from test_paseo_status import NO_ROLLOUT
 
 
 class RoleMessageTests(RoleToolsTestCase):
+    def test_r71_messages_deliver_despite_collection_errors_and_isolate_agents(self) -> None:
+        worker_request, worker = self.started("worker", status="idle")
+        reviewer_request, reviewer = self.started("reviewer", status="idle")
+        worker_record = self.receipt(worker_request)
+        reviewer_record = self.receipt(reviewer_request)
+        local = Path(worker_record["workspace"]["taskReportAccessRoot"])
+        other = Path(reviewer_record["workspace"]["taskReportAccessRoot"])
+        self.assertNotEqual(local, other)
+        local.mkdir(parents=True, exist_ok=True)
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "report.md").write_text("reviewer result")
+        for failure in ("link", "budget"):
+            with self.subTest(failure=failure):
+                path = local / "problem"
+                if failure == "link":
+                    path.symlink_to(self.root)
+                else:
+                    path.write_text("over budget")
+                with patch.object(role_reports, "MAX_COLLECTION_BYTES", 1):
+                    result = self.message(binding("worker", worker), agent_id=reviewer)
+                self.assertEqual(result["status"], "accepted")
+                self.assertEqual(result["reportCollection"]["state"], "failed")
+                self.assertIn(
+                    "link" if failure == "link" else "budget", result["reportCollection"]["detail"]
+                )
+                self.assertTrue(self.received(reviewer))
+                self.assertEqual(
+                    self.receipt(worker_request)["reportCollection"]["state"], "failed"
+                )
+                unaffected = self.message(binding("reviewer", reviewer), agent_id=worker)
+                self.assertEqual(unaffected["status"], "accepted")
+                canonical = Path(reviewer_record["workspace"]["taskReportRoot"])
+                self.assertEqual((canonical / "report.md").read_text(), "reviewer result")
+                with patch.object(
+                    role_reports,
+                    "_file_digest",
+                    side_effect=AssertionError(
+                        "a repeated message must skip unchanged report bytes"
+                    ),
+                ):
+                    self.assertEqual(
+                        self.message(binding("reviewer", reviewer), agent_id=worker)["status"],
+                        "accepted",
+                    )
+                path.unlink()
+
     def test_the_delivered_text_opens_with_the_line_that_names_the_sender(self) -> None:
         _request, worker = self.started(status="idle")
         before = sorted(path.as_posix() for path in self.root.rglob("*") if path.is_file())
@@ -558,11 +607,15 @@ class RoleMessageTests(RoleToolsTestCase):
         _request, worker = self.started(status="idle")
         self.runtime.calls.clear()
         self.refusal(self.message(None, agent_id=worker), "caller-has-no-binding")
-        unconfigured = send_role_message(
-            runtime_config(self.root / "unconfigured", configured=False),
-            RoleMessageCall(text="report your plan", agent_id=worker),
-            environment=self.architect.environment(),
-        )
+        with patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str((self.root / "unconfigured-user-config").resolve())},
+        ):
+            unconfigured = send_role_message(
+                runtime_config(self.root / "unconfigured", configured=False),
+                RoleMessageCall(text="report your plan", agent_id=worker),
+                environment=self.architect.environment(),
+            )
         self.assertIn(
             "no Paseo runtime configured",
             self.refusal(unconfigured, "no-paseo-runtime-configured")["detail"],

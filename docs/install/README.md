@@ -51,7 +51,8 @@ The normal first-run path is:
    leaves the host and agent sessions running; `paseo stop` is explicit and ends
    running turns and permission prompts.
 
-The renderer creates one shared `<coordinationRoot>/system/settings.json`
+The renderer creates one shared `~/.config/agents-remember/settings.json`
+(or `$XDG_CONFIG_HOME/agents-remember/settings.json`)
 `paseoRuntime` block for all harnesses, with absolute data/state paths and fresh
 listen `127.0.0.1:8766`; it never overwrites an existing file. The host currently
 supports Linux x86_64 with `/proc` only. The build carries one exact host, a whole
@@ -65,7 +66,8 @@ explicit listen/home/prefix and other settings. The renderer also accepts
 workspace/ar-coordination, 8766 and 8765. Sandbox tooling supplies its recorded
 root and two ports through that public invocation and does not edit the rendered
 file. The developer chooses the real
-settings migration and any terminal provision needed to switch a running host
+settings upgrade (`agents-remember upgrade-user-settings --coordination-root
+<absolute root>`) and any terminal provision needed to switch a running host
 from another Node. `runtime_install` only reads this authority and defers a restart.
 
 Initial skills and hooks/rules/instructions come from the copied package. Do not
@@ -97,3 +99,7 @@ Then choose the guide for your tool:
 - [Hermes.md](hermes.md)
 - [Pi.dev](pi.md)
 - [OpenClaw](openclaw.md)
+
+An old coordination settings file, alone or beside the user file, refuses rendering
+before any harness file is changed. The refusal names both paths and the explicit
+whole-file upgrade command; the renderer never selects or migrates an old file.

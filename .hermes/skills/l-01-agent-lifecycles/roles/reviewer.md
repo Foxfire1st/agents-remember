@@ -11,9 +11,7 @@ the verdict artifact is your durable handoff.**
 
 ## Bound Paseo intake and transport
 
-Review only on the owner's explicit assignment. On an AR-launched Paseo capsule, read the supplied
-task with its exact `taskDocReadArgs` on `agents-remember-task` (extensionless slug), then read the
-canonical JSON at the returned `docPath`. Use `arMcpContext.readerArguments` and the actual schemas;
+Review only on the owner's explicit assignment. Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication. Use `arMcpContext.readerArguments` and the actual schemas;
 `task_context` requires both the canonical task reference and enclosure contract. Missing fields or a
 refused capability are reported gaps, never a reason to use another AR server or unscoped retrieval.
 Read the task documents required by the assigned seam, not unrelated role files or an unrequested
@@ -196,3 +194,5 @@ decider and bound transport.
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

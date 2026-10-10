@@ -15,9 +15,9 @@ from typing import Any
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
-    agentic_settings_path,
     load_agentic_settings,
     parse_gate_delegation,
+    user_agentic_settings_path,
 )
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_mode import (
@@ -76,7 +76,7 @@ KNOWN_RETIREMENT_FIELDS = frozenset(
 # MIK-R108 rule 3: the tool-call log keeping. Unknown keys fail loud, like
 # every other settings family.
 KNOWN_TOOL_LOG_FIELDS = frozenset({"keepDays", "maxBytes", "enclosureMaxBytes"})
-# The agentic orchestration family moved to the coordinator's global settings
+# The agentic orchestration family lives in the user's settings
 # file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
 # legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
 # the new home (roles/concurrency were previously reserved-and-silently-dropped
@@ -292,6 +292,8 @@ def require_config_path(config_path: str | Path) -> Path:
     if not path.is_absolute():
         raise ConfigError("--config must be an absolute path")
     path = path.resolve()
+    if path == user_agentic_settings_path().resolve():
+        raise ConfigError(f"user agentic settings are not an MCP authority settings file: {path}")
     if path.name == "settings.json" and path.parent.name == "system":
         raise ConfigError("coordinator system/settings.json is not an MCP authority settings file")
     if not path.exists():
@@ -691,7 +693,7 @@ def parse_orchestration_settings(
     """Resolve the boot-snapshot orchestration settings (260703-L13, GQ1).
 
     ``orchestration.gateDelegation``'s home is the GLOBAL agentic settings file
-    (``<coordinationRoot>/system/settings.json``), read once at boot through the
+    (``~/.config/agents-remember/settings.json``), read once at boot through the
     kernel agentic-settings loader -- a change still needs a restart (documented
     boot-snapshot semantics; the downstream ``gate_policy`` wiring is
     unchanged). An authority-file value is honored as a one-cycle legacy
@@ -700,27 +702,26 @@ def parse_orchestration_settings(
     Any other ``orchestration.*`` key in the authority file fails loud -- those
     knobs never belonged here (loops) or moved home (roles/concurrency/spawn).
     """
-    legacy = _parse_legacy_authority_gate_delegation(raw, coordination_root, config_path)
+    legacy = _parse_legacy_authority_gate_delegation(raw, config_path)
     try:
         agentic = load_agentic_settings(coordination_root)
     except AgenticSettingsError as error:
         raise ConfigError(str(error)) from error
     if agentic.gate_delegation_configured:
         if legacy is not None:
-            _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=True)
+            _warn_legacy_gate_delegation(config_path, shadowed=True)
         return OrchestrationSettings(
             gate_policy=agentic.gate_policy,
             require_reviewer_verdict_at_seams=agentic.require_reviewer_verdict_at_seams,
         )
     if legacy is not None:
-        _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=False)
+        _warn_legacy_gate_delegation(config_path, shadowed=False)
         return legacy
     return OrchestrationSettings()
 
 
 def _parse_legacy_authority_gate_delegation(
     raw: object,
-    coordination_root: Path,
     config_path: Path,
 ) -> OrchestrationSettings | None:
     """The authority file's ``orchestration`` block: gateDelegation-only, legacy."""
@@ -736,7 +737,7 @@ def _parse_legacy_authority_gate_delegation(
             "authority file only reads the legacy gateDelegation fallback -- "
             "agentic orchestration settings (gateDelegation, loops, roles, "
             "rolesPerLevel, concurrency, spawn, harnesses) live in "
-            f"{agentic_settings_path(coordination_root)}"
+            f"{user_agentic_settings_path()}"
         )
     gate_raw = raw.get("gateDelegation")
     if gate_raw is None:
@@ -755,12 +756,11 @@ def _parse_legacy_authority_gate_delegation(
 
 def _warn_legacy_gate_delegation(
     config_path: Path,
-    coordination_root: Path,
     *,
     shadowed: bool,
 ) -> None:
     """One-cycle migration warning (GQ1): the authority-file key must move home."""
-    new_home = agentic_settings_path(coordination_root)
+    new_home = user_agentic_settings_path()
     if shadowed:
         message = (
             f"orchestration.gateDelegation in the MCP authority file ({config_path}) "

@@ -159,7 +159,6 @@ def _parse_roles(
     raw: object,
     *,
     source: str,
-    harness_ids: tuple[str, ...] | None,
     owner: str = "orchestration.roles",
 ) -> dict[str, RoleKnobs]:
     if raw is None:
@@ -171,11 +170,10 @@ def _parse_roles(
         _refuse_unknown(knobs, KNOWN_ROLE_KNOB_FIELDS, f"{owner}.{role}", source)
         harness = None
         if "harness" in knobs:
-            harness = _require_harness_id(
+            harness = _require_string(
                 knobs["harness"],
                 f"{owner}.{role}.harness",
                 source,
-                harness_ids,
             )
         model = None
         if "model" in knobs:
@@ -211,6 +209,11 @@ def _parse_roles(
             model=model,
             effort=effort,
             service_tier=service_tier,
+            mode=_optional_role_text(knobs, "mode", f"{owner}.{role}", source),
+            notes=_optional_role_text(knobs, "notes", f"{owner}.{role}", source),
+            feature_values=_parse_feature_values(
+                knobs.get("featureValues", {}), f"{owner}.{role}.featureValues", source
+            ),
             launch_args=launch_args,
             prompt_keywords=prompt_keywords,
             session_commands=session_commands,
@@ -234,6 +237,29 @@ def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any
     return normalized
 
 
+def _optional_role_text(knobs: dict[str, Any], key: str, owner: str, source: str) -> str | None:
+    if key not in knobs:
+        return None
+    value = knobs[key]
+    if not isinstance(value, str):
+        raise AgenticSettingsError(f"{owner}.{key} must be text: {source}")
+    return value if value.strip() else None
+
+
+def _parse_feature_values(raw: object, owner: str, source: str) -> dict[str, str | bool]:
+    values = _require_object(raw, owner, source)
+    for key, value in values.items():
+        if (
+            not isinstance(key, str)
+            or not key.strip()
+            or not (isinstance(value, bool) or (isinstance(value, str) and value.strip()))
+        ):
+            raise AgenticSettingsError(
+                f"{owner}.{key} must be a boolean or nonempty option id: {source}"
+            )
+    return dict(values)
+
+
 def _parse_service_tier(knobs: dict[str, Any], owner: str, source: str) -> str | None:
     if "serviceTier" not in knobs:
         return None
@@ -243,9 +269,7 @@ def _parse_service_tier(knobs: dict[str, Any], owner: str, source: str) -> str |
     return value
 
 
-def _parse_roles_per_level(
-    raw: object, *, source: str, harness_ids: tuple[str, ...] | None
-) -> dict[str, dict[str, RoleKnobs]]:
+def _parse_roles_per_level(raw: object, *, source: str) -> dict[str, dict[str, RoleKnobs]]:
     """``orchestration.rolesPerLevel`` (260703-L16, ruling 2026-07-07T08:15): per-level role knobs.
 
     ``{leaf|master|portfolio: {role: knob-overrides}}`` -- the level vocabulary matches
@@ -262,7 +286,6 @@ def _parse_roles_per_level(
         parsed[level] = _parse_roles(
             value,
             source=source,
-            harness_ids=harness_ids,
             owner=f"orchestration.rolesPerLevel.{level}",
         )
     return parsed

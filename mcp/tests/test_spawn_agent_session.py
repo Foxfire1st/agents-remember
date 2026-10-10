@@ -23,7 +23,7 @@ from agents_remember.application.terminal_tools import (
     SpawnOverrides,
     SpawnSeat,
 )
-from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
@@ -332,7 +332,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(paster.calls, [])
 
     def test_seat_taken_is_surfaced_never_overridden(self) -> None:
-        path = agentic_settings_path(self.tmp)
+        path = user_agentic_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(

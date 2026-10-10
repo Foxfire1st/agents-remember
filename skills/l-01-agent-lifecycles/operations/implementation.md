@@ -1,6 +1,6 @@
 # Operation — Implementation
 
-The Worker implements the selected leaf's primary requirement and explicit constraints in the supplied code root. Its inputs are the requirement packet and leaf task, read with the exact `taskDocReadArgs`, and the code worktree for edits with the memory root as read-only context. It does not expand scope or edit task, contract, memory, or onboarding state.
+The Worker implements the selected leaf's primary requirement and explicit constraints in the supplied code root. Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication. Its inputs are the selected requirement packet, rendered leaf task and code worktree for edits, with the memory root as read-only context. It does not expand scope or edit task, contract, memory, or onboarding state.
 
 ## Outputs
 

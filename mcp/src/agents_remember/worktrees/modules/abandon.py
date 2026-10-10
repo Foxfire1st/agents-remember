@@ -67,6 +67,11 @@ from agents_remember.worktrees.modules.terminal_validation import (
     terminal_preflight,
     terminal_result_blockers,
 )
+from agents_remember.worktrees.role_reports import (
+    RoleReportCollectionError,
+    collect_group_reports,
+    remove_group_role_folders,
+)
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -442,6 +447,10 @@ def _abandon_terminal_outputs(
         operation="worktree_abandon",
         series_permit=series_permit,
     )
+    try:
+        collect_group_reports(contract, dry_run=args.dry_run)
+    except RoleReportCollectionError as error:
+        return {}, {}, {}, {"role_reports": {"removed": False, "reason": str(error)}}
     providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
         contract, dry_run=args.dry_run
     )
@@ -737,6 +746,7 @@ def _abandon_directories(
                 dry_run=dry_run,
             ),
         }
+    role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     if force:
         directories = {
             "worktree_group": worktree_services().provider_lifecycle.remove_tree(
@@ -750,12 +760,17 @@ def _abandon_directories(
             lifecycle,
             dry_run=dry_run,
         )
-        planned: set[Path] = set()
+        planned: set[Path] = {
+            Path(str(row["path"]))
+            for row in role_folders.values()
+            if row.get("would_remove") or row.get("removed")
+        }
         if reports.get("removed") or reports.get("would_remove"):
             planned.add(reports_path.resolve())
         if lifecycle_result.get("removed") or lifecycle_result.get("would_remove"):
             planned.add(lifecycle.resolve())
         directories = {
+            **role_folders,
             "reports": reports,
             "lifecycle": lifecycle_result,
             "worktree_group": remove_empty_dir(group, dry_run, planned),

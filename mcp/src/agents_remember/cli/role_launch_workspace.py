@@ -12,7 +12,6 @@ from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import TaskIdentity
 from agents_remember.application.worktree_tools import worktree_status_tool
 from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
-from agents_remember.cli.role_launch_receipts import _bind_task_report_access
 from agents_remember.errors import RolePreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -112,7 +111,12 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     workspace = workspace_folder(group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
-    report_access = _bind_task_report_access(group, task_reports)
+    report_access = group / "role-reports"
+    report_access.mkdir(exist_ok=True)
+    if report_access.is_symlink():
+        raise ValueError(
+            "The new role-reports folder must be a real directory inside its working folder."
+        )
     workspace.update(
         enclosurePreparation=str(status["enclosurePreparation"]),
         contractPath=contract_path.as_posix(),

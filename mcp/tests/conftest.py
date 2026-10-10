@@ -178,6 +178,12 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _user_settings_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test has its own user settings; no process-wide settings leak between cases."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "user-config"))
+
+
+@pytest.fixture(autouse=True)
 def _integration_composition(request: pytest.FixtureRequest) -> Iterator[None]:
     if request.node.get_closest_marker("integration") is not None and not request.config.getoption(
         "certify"

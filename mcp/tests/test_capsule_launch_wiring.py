@@ -66,7 +66,7 @@ from agents_remember.application.terminal_tools import (
 )
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.errors import HarnessControlError, TaskProjectionSourceError
-from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.eve_runtime_readiness import eve_runtime_readiness
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
@@ -390,7 +390,7 @@ def _write_settings(root: Path, *, harness: str, with_selection: bool = True) ->
     payload: dict[str, object] = {"roles": {"worker": dict(role), "bootstrap": dict(role)}}
     if harness == "eve":
         payload["harnesses"] = {"eve": {"command": EVE_STUB_PROGRAM, "argv": [EVE_STUB_PROGRAM]}}
-    path = agentic_settings_path(root)
+    path = user_agentic_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"orchestration": payload}), encoding="utf-8")
 

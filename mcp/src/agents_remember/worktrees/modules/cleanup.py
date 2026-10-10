@@ -62,6 +62,11 @@ from agents_remember.worktrees.modules.terminal_validation import (
     terminal_preflight,
     terminal_result_blockers,
 )
+from agents_remember.worktrees.role_reports import (
+    RoleReportCollectionError,
+    collect_group_reports,
+    remove_group_role_folders,
+)
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -356,7 +361,13 @@ def _removed_directories(
     )
     if contract.kind == "series":
         return {"reports": reports, "lifecycle": lifecycle}
+    role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     planned = set(planned_removed or ())
+    planned.update(
+        Path(str(row["path"]))
+        for row in role_folders.values()
+        if row.get("would_remove") or row.get("removed")
+    )
     if reports.get("removed") or reports.get("would_remove"):
         planned.add(reports_path.resolve())
     if lifecycle.get("removed") or lifecycle.get("would_remove"):
@@ -364,6 +375,7 @@ def _removed_directories(
     if logs.get("removed") or logs.get("would_remove"):
         planned.add(logs_path.resolve())
     directories = {
+        **role_folders,
         "reports": reports,
         "lifecycle": lifecycle,
         "logs": logs,
@@ -970,6 +982,10 @@ def _cleanup_terminal_outputs(
         operation="worktree_cleanup",
         series_permit=series_permit,
     )
+    try:
+        collect_group_reports(contract, dry_run=args.dry_run)
+    except RoleReportCollectionError as error:
+        return {}, {}, {}, {}, {"role_reports": {"removed": False, "reason": str(error)}}
     providers: dict[str, object] = (
         worktree_services().provider_lifecycle.teardown(contract, dry_run=args.dry_run)
         if args.teardown_providers

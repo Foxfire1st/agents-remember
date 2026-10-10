@@ -59,12 +59,12 @@ their accumulated change is reviewed on the canonical master at master-to-parent
 
 ## Bound Paseo intake and capabilities
 
-For an AR-launched Paseo capsule, read the supplied task with its exact `taskDocReadArgs` on
-`agents-remember-task` (extensionless slug), then read the canonical JSON at the returned `docPath`.
+Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication.
 Use the handover's `arMcpContext.readerArguments` and the actual tool schemas; `task_context` carries
 both the canonical task reference and enclosure contract. Missing scope fields and refused
 capabilities are blockers, not permission to use another AR server or an unscoped command. Read the
 assignment's applicable task packets, not an unrelated role or the complete hierarchy by default.
+
 
 Read the immutable baseline and candidate through admitted scoped `knowledge_read` on `agents-remember-task`/`knowledge_diff`
 before semantic changes, preserve the baseline, and read admitted records back under that authority.

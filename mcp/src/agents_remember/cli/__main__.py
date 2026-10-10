@@ -34,6 +34,7 @@ from agents_remember.cli import (
     memory_citations,
     paseo_runtime,
     tool_log_stats,
+    upgrade_user_settings,
 )
 
 
@@ -136,6 +137,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tool_log_stats.add_arguments(stats)
     stats.set_defaults(func=tool_log_stats.run)
+    upgrade = sub.add_parser(
+        "upgrade-user-settings",
+        help="Move the old coordination settings file to the user's configuration directory.",
+    )
+    upgrade_user_settings.add_arguments(upgrade)
+    upgrade.set_defaults(func=upgrade_user_settings.run)
     return parser
 
 

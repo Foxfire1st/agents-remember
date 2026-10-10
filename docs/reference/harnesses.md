@@ -107,7 +107,7 @@ not need a separate reload. Settings do not need mutation for this contract.
 
 The registry is **good defaults, never a rigid wall** (developer ruling
 2026-07-07). The `orchestration.harnesses` settings family — global
-`<coordinationRoot>/system/settings.json`, repo-local
+`~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when set), repo-local
 `<repo>/system/settings.json`, standard L13 merge and fail-loud rules —
 merges over the registry **by id**:
 
@@ -281,7 +281,7 @@ is declared:
 > (see docs/reference/harnesses.md).
 
 Teach it in the GLOBAL agentic settings
-(`<coordinationRoot>/system/settings.json`):
+at `~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when set):
 
 ```jsonc
 {

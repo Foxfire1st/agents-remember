@@ -19,6 +19,7 @@ from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import reviewer_worklist_process as process_owner
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.coordination_context.paths import settings_path_for_roots
 from agents_remember.kernel.coordination_context.resolver import detect_coordination_selection
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
@@ -281,12 +282,13 @@ def _settings_selection(root: Path) -> None:
         (directory / "system").mkdir(parents=True)
     higher = memory / "system/settings.md"
     markdown = coordination / "system/settings.md"
-    machine = markdown.with_suffix(".json")
+    machine = user_agentic_settings_path()
+    machine.parent.mkdir(parents=True, exist_ok=True)
     raw = b"```yaml\ronboarding:\r  storage:\r    mode: memory-repo\r```\r"
     markdown.write_bytes(raw)
     with recorded_reads() as reads:
         selected = settings_path_for_roots(memory, coordination)
-        parsed, _ = parse_coordination_settings(selected)
+        parsed, _ = parse_coordination_settings(selected, coordination_root=coordination)
     assert selected == markdown and parsed.mode == "memory-repo"
     assert reads[f"exists:{higher}"] == ABSENT and reads[f"exists:{machine}"] == ABSENT
     assert reads[str(markdown)] == bytes_identity(raw)
@@ -296,12 +298,13 @@ def _settings_selection(root: Path) -> None:
     assert f"exists:{machine}" in review_leaf_view_memo.moved_inputs(None, reads)
     markdown.unlink()
     with recorded_reads() as machine_reads:
-        json_only, _ = parse_coordination_settings(markdown)
+        json_only, _ = parse_coordination_settings(markdown, coordination_root=coordination)
     assert json_only.default == "JSON takes precedence"
-    assert machine_reads == {str(machine): bytes_identity(machine.read_bytes())}
+    assert machine_reads[str(machine)] == bytes_identity(machine.read_bytes())
+    assert machine_reads[f"exists:{coordination / 'system/settings.json'}"] == ABSENT
     machine.write_bytes(b"not JSON")
     with recorded_reads() as failed, pytest.raises(ValueError, match="invalid JSON settings"):
-        parse_coordination_settings(markdown)
+        parse_coordination_settings(markdown, coordination_root=coordination)
     assert failed[str(machine)] == bytes_identity(b"not JSON")
 
 
@@ -310,9 +313,9 @@ def _fallback_reads(fixture: World) -> None:
 
     external = fixture.config.coordination_root / "memory-repos" / f"ar-{REPO}"
     external.mkdir(parents=True)
-    system = fixture.config.coordination_root / "system"
-    system.mkdir()
-    (system / "settings.json").write_text(json.dumps({"storage": {"mode": "memory-repo"}}))
+    user = user_agentic_settings_path()
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"storage": {"mode": "memory-repo"}}))
     contract, _trees = _live(fixture)
     path = contract.contract_path
     original = path.read_bytes()
@@ -757,7 +760,8 @@ def _external_ledger(fixture: World) -> None:
     commit(memory, {"memory.md": raw.decode()})
     ledger = memory / "memory.md"
     _settings(fixture.config.coordination_root, "memory-repo")
-    (fixture.config.coordination_root / "system/settings.json").write_text(
+    user_agentic_settings_path().parent.mkdir(parents=True, exist_ok=True)
+    user_agentic_settings_path().write_text(
         json.dumps(
             {
                 "storage": {"mode": "memory-repo"},

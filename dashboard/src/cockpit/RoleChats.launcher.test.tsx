@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoleChatsPane } from "./RoleChats";
-import { launchChoiceProblem, type RoleAgentChoice, type RoleDefaults } from "./roleLaunchModel";
+import { launchChoiceProblem, roleAgentOverrideFor, type RoleAgentChoice, type RoleDefaults } from "./roleLaunchModel";
 
 
 const AGENTS: RoleAgentChoice[] = [
@@ -56,6 +56,13 @@ afterEach(() => {
 });
 
 describe("launcher bar and the host catalog", () => {
+  it("keeps a speed override when choosing model or effort and names the resolved agent", () => {
+    const values = { service_tier: "priority" };
+    const defaults = { agent: "codex", model: "gpt-a" };
+    expect(roleAgentOverrideFor("codex", "gpt-a", "high", defaults, values)?.featureValues).toEqual(values);
+    expect(roleAgentOverrideFor("codex", "gpt-a", undefined, defaults, values)?.featureValues).toEqual(values);
+    expect(launchChoiceProblem({ agent: "missing" }, AGENTS, { featureValues: values })).toContain("Agent missing");
+  });
   it("displays the configured tier, revalidates a model override and discloses other-agent defaults", async () => {
     optionsReplies = [optionsReply({ agent: "codex", model: "gpt-a", effort: "high", serviceTier: "fast", available: true })];
     const { getByRole, getByLabelText, getByTestId, queryByTestId } = renderLauncher();
@@ -194,5 +201,44 @@ describe("launchChoiceProblem", () => {
       [role, { agentId: "eve", modelId: "eve-1" }, "Model eve-1 is not offered for Eve"],
     ];
     for (const [defaults, override, text] of refused) expect(launchChoiceProblem(defaults, AGENTS, override)).toContain(text);
+  });
+});
+
+describe("R71 speed feature choices", () => {
+  it("submits only an explicit speed feature and shows permission choices as settings owned", async () => {
+    const offered = structuredClone(AGENTS);
+    offered[0].modes = [{ id: "auto", label: "Default Permissions" }];
+    offered[0].models[0].features = [
+      { id: "service_tier", label: "Speed feature", type: "select", value: "default", permissionBearing: false, options: [{ id: "priority", label: "Fast" }] },
+      { id: "plan_mode", label: "Plan mode", type: "toggle", value: false, permissionBearing: true },
+    ];
+    optionsReplies = [{ status: 200, body: { roleDefaults: { agent: "codex", model: "gpt-a", available: true, mode: "auto", choices: { mode: { source: "least permissive mode" }, featureValues: { service_tier: { value: "default", source: "host role" } }, notes: { present: true, baselineReplaced: true, source: "host role" } } }, agents: offered, catalogOrigin: "r71", executions: [] } }];
+    const requests: Record<string, unknown>[] = [];
+    const optionsFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/role-launch/dispatch") {
+        requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ requestId: requests.at(-1)?.requestId, status: "rejected", detail: "fixture", canStart: true, canRevive: false }), { status: 200 });
+      }
+      return optionsFetch(url, init);
+    }));
+    const view = renderLauncher();
+    await waitFor(() => expect(view.getByText("Mode: auto · least permissive mode")).toBeTruthy());
+    expect(view.getByText(/Features:/).textContent).toContain("service_tier: default (host role)");
+    expect(view.getByText(/User instructions/).textContent).toContain("baseline replaced");
+    expect(view.queryByLabelText("Plan mode override")).toBeNull();
+    expect(view.queryByLabelText("Mode override")).toBeNull();
+    fireEvent.change(view.getByLabelText("Speed feature override"), { target: { value: "priority" } });
+    fireEvent.click(view.getByRole("button", { name: "Start role" }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].agentOverride).toEqual({ featureValues: { service_tier: "priority" } });
+    expect(requests[0]).not.toHaveProperty("mode");
+    await waitFor(() => expect((view.getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(view.getByLabelText("Role model override"), { target: { value: "gpt-a" } });
+    await waitFor(() => expect((view.getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(view.getByLabelText("Role effort override"), { target: { value: "high" } });
+    fireEvent.click(view.getByRole("button", { name: "Start role" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect((requests[1].agentOverride as { featureValues: unknown }).featureValues).toEqual({ service_tier: "priority" });
   });
 });

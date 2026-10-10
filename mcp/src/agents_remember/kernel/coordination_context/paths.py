@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from agents_remember.kernel.agentic_settings import require_user_agentic_settings_path
 from agents_remember.kernel.memory_mode import (
     LEGACY_INTERNAL_MEMORY_DIRNAME,
     Topology,
@@ -173,7 +174,11 @@ def infer_settings_path(onboarding_root: Path) -> Path:
     return context_root / "system" / "settings.md"
 
 
-def path_settings_path_for(settings_path: Path) -> Path:
+def path_settings_path_for(settings_path: Path, *, coordination_root: Path | None = None) -> Path:
+    if coordination_root is not None and observed_resolve(
+        settings_path.parent.parent
+    ) == observed_resolve(coordination_root):
+        return require_user_agentic_settings_path(coordination_root)
     return settings_path.with_suffix(".json")
 
 

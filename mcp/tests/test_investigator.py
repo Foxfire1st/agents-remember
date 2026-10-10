@@ -98,7 +98,11 @@ class InvestigatorTests(RoleToolsTestCase):
         self.assertEqual((first["status"], second["status"]), ("running", "running"))
         self.assertNotEqual(first["agentId"], second["agentId"])
         self.assertNotEqual(first["reportPath"], second["reportPath"])
-        self.assertIn("master/notes/reports", first["reportPath"])
+        self.assertTrue(
+            first["reportPath"].endswith(
+                f"/role-reports/role-launch/MASTER-investigator-{first_id}.md"
+            )
+        )
         request = RoleDispatchRequest.model_validate(
             {"role": "investigator", "requestId": first_id, **self.selected()}
         )

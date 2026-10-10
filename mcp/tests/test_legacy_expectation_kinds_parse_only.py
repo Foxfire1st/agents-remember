@@ -40,8 +40,8 @@ from agents_remember.kernel._agentic_settings_core import (
 )
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
-    agentic_settings_path,
     load_agentic_settings,
+    user_agentic_settings_path,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
@@ -243,8 +243,8 @@ class LegacyExpectationKindVocabularyTests(unittest.TestCase):
         return tmp.name
 
     @staticmethod
-    def _write_settings(root: Path, defaults: dict[str, float]) -> None:
-        path = agentic_settings_path(root)
+    def _write_settings(_root: Path, defaults: dict[str, float]) -> None:
+        path = user_agentic_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps({"orchestration": {"expectations": {"defaults": defaults}}}),

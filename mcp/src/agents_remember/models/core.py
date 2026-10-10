@@ -10,8 +10,6 @@ from agents_remember.models.base import ResponseModel
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 Transport = Literal["stdio"]
-
-
 class ServingBuildPayload(BaseModel):
     """Boot-bound runtime identity shared by dashboard and MCP server surfaces."""
 
@@ -66,3 +64,4 @@ class ServerInfoResponse(ResponseModel):
     # under which the launch gave that agent this server, and the agent's binding.
     toolServer: str | None = None
     agentBinding: AgentBindingPayload | None = None
+

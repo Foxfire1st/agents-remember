@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,8 +30,17 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
-from agents_remember.cli.paseo_catalog import launcher_options, resolve_agent_selection
+from agents_remember.cli.paseo_catalog import (
+    launcher_options,
+    read_host_role,
+    resolve_agent_selection,
+)
 from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_instructions import (
+    compose_role_instructions,
+    instruction_metadata,
+    launch_choice_metadata,
+)
 from agents_remember.cli.role_launch_receipts import (
     _message_binding_projection_reference,
 )
@@ -52,6 +61,7 @@ from agents_remember.models.role_launcher import (
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.worktrees.task_document_copies import prepare_task_document_copies
 
 ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
@@ -80,6 +90,7 @@ _PREFIXED_TOOL_EXAMPLE = f"{_PREFIXED_TOOL_SERVER}__server_info"
 # before the capsule, and as host.arMcpUsage of the handover. It names no harness and no
 # harness's tool: every harness shows a tool server's tools in its own way.
 _AR_TOOL_SERVER_USAGE = (
+    f"First call server_info on {TOOL_SERVER_NAME}. "
     f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: the AR build "
     "that launched this agent started it for this agent, and its tools are in this session. A "
     "harness shows them in its own way, so find them by the server's name in either spelling, "
@@ -122,6 +133,7 @@ class RoleHandoverRequest:
     request_id: uuid.UUID | None = None
     # The role agent that starts this role; none when the launcher starts it.
     started_by: StartingAgent | None = None
+    session_options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +143,7 @@ class PreparedRoleHandover:
     context: RoleLaunchContext
     workspace: dict[str, str]
     agent_id: str
-    session_options: dict[str, str]
+    session_options: dict[str, Any]
     ar_mcp_context: dict[str, Any]
     handover: dict[str, Any]
     request_id: uuid.UUID
@@ -153,10 +165,12 @@ def prepare_role_handover(
         config, defaults, harness_order, agent_override
     )
     workspace = _resolve_workspace(config, context)
+    _prepare_role_folders(context, workspace, request_id)
     if context.role in LEAF_ROLES:
         # Creating the enclosure records it in the leaf's task document. The handover describes
         # the documents as they stand now, so the same request compiles to the same binding again.
         context = _current_role_context(config, context)
+    _prepare_task_document_files(config, context, workspace)
     ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         RoleHandoverRequest(
@@ -167,6 +181,7 @@ def prepare_role_handover(
             ar_mcp_context=ar_mcp_context,
             request_id=request_id,
             started_by=started_by,
+            session_options=session_options,
         )
     )
     return PreparedRoleHandover(
@@ -178,6 +193,72 @@ def prepare_role_handover(
         handover=handover,
         request_id=request_id,
     )
+
+
+def _prepare_task_document_files(
+    config: McpRuntimeConfig, context: RoleLaunchContext, workspace: dict[str, str]
+) -> None:
+    if context.role not in LEAF_ROLES:
+        return
+    if "contractPath" not in workspace:
+        raise ValueError("A leaf role has no enclosure for its task document copies")
+    root = Path(workspace["path"]) / "task-documents"
+    for key in ("codeRoot", "memoryRoot"):
+        if key in workspace and root.resolve().is_relative_to(Path(workspace[key]).resolve()):
+            raise ValueError(
+                "Task document copies must be outside the code and memory Git worktrees"
+            )
+    if context.task is None:
+        raise ValueError("A leaf role has no canonical leaf document")
+    prepare_task_document_copies(
+        config.coordination_root, Path(workspace["path"]), context.task.ref
+    )
+
+
+def _task_document_read_metadata(
+    config: McpRuntimeConfig,
+    context: RoleLaunchContext,
+    workspace: dict[str, str],
+    task_reads: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str]:
+    own_document = context.effective_task
+    own_ref = own_document.ref.model_dump(mode="json") if own_document is not None else None
+    for row in task_reads:
+        reference = row["taskDocumentRef"]
+        if reference != own_ref:
+            continue
+        if context.role in LEAF_ROLES:
+            row["renderedReadPath"] = (
+                Path(workspace["path"])
+                / "task-documents"
+                / Path(reference["path"]).with_suffix(".md")
+            ).as_posix()
+        else:
+            row["renderedReadPath"] = (
+                config.coordination_root
+                / "tasks"
+                / reference["repository"]
+                / Path(reference["path"]).with_suffix(".md")
+            ).as_posix()
+    primary_files = [
+        row["renderedReadPath"] for row in task_reads if row["taskDocumentRef"] == own_ref
+    ]
+    document_files = {
+        "paths": primary_files,
+        "state": "taskless"
+        if not primary_files
+        else "controller-document-outside-working-folder"
+        if any(not Path(path).is_relative_to(Path(workspace["path"])) for path in primary_files)
+        else "inside-working-folder",
+    }
+    first_read = (
+        "Read this rendered task document first with your harness's own file tools: "
+        + ", ".join(primary_files)
+        + ". Change documents through task_doc only; edits to a copy are never read back and are lost on the next publication."
+        if primary_files
+        else "This taskless role has no task document to read."
+    )
+    return document_files, first_read
 
 
 def _current_role_context(
@@ -209,7 +290,7 @@ def _launcher_catalog(
 
 def _role_defaults(
     config: McpRuntimeConfig, context: RoleLaunchContext
-) -> tuple[dict[str, str | None], tuple[str, ...]]:
+) -> tuple[dict[str, Any], tuple[str, ...]]:
     repository = context.effective_task.ref.repository if context.effective_task else None
     repo_scope = config.repositories.get(repository) if repository else None
     settings = load_agentic_settings(
@@ -224,6 +305,16 @@ def _role_defaults(
             "model": knobs.model,
             "effort": knobs.effort,
             "serviceTier": knobs.service_tier,
+            "mode": knobs.mode,
+            "featureValues": dict(knobs.feature_values),
+            "notes": knobs.notes,
+            "role": context.role,
+            "notesKey": knobs.origins["notes"].key
+            if "notes" in knobs.origins
+            else f"orchestration.roles.{context.role}.notes",
+            "hostRole": read_host_role(config, context.role),
+            "settingsSources": [path.as_posix() for path in settings.sources],
+            "fieldOrigins": {key: asdict(origin) for key, origin in knobs.origins.items()},
         },
         tuple(harness.id for harness in settings.harnesses),
     )
@@ -335,6 +426,37 @@ def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
     return scope if isinstance(scope, dict) else None
 
 
+def _prepare_role_folders(
+    context: RoleLaunchContext, workspace: dict[str, str], request_id: uuid.UUID
+) -> None:
+    root = Path(workspace["path"])
+    if context.role not in LEAF_ROLES:
+        execution = root / ".agents-remember" / "role-executions" / str(request_id)
+        local = execution / "role-reports"
+        canonical = (
+            (context.effective_task.path.parent / "notes" / "reports")
+            if context.effective_task
+            else root / ".agents-remember" / "reports"
+        )
+        workspace.update(taskReportAccessRoot=local.as_posix(), taskReportRoot=canonical.as_posix())
+        scratch = execution / "scratch"
+    else:
+        workspace["taskReportAccessRoot"] = (
+            root / "role-reports" / context.role / str(request_id)
+        ).as_posix()
+        scratch = root / "scratch" / context.role / str(request_id)
+    workspace["taskReportRoot"] = (
+        Path(workspace["taskReportRoot"]) / context.role / str(request_id)
+    ).as_posix()
+    for path in (Path(workspace["taskReportAccessRoot"]), scratch):
+        if any(
+            parent.is_symlink() for parent in (path, *path.parents) if parent.is_relative_to(root)
+        ) or not path.resolve().is_relative_to(root):
+            raise ValueError(f"Role folder {path} must be a real directory inside {root}.")
+        path.mkdir(parents=True, exist_ok=True)
+    workspace["scratchRoot"] = scratch.as_posix()
+
+
 def _compile_handover(
     request: RoleHandoverRequest,
 ) -> dict[str, Any]:
@@ -374,6 +496,9 @@ def _compile_handover(
         raise ValueError("The selected agent has no supported AR instruction carrier.")
     documents = [doc for doc in (context.sprint, context.master, context.task) if doc]
     task_reads = [_read_task_doc(config, document) for document in documents]
+    document_files, first_read = _task_document_read_metadata(
+        config, context, workspace, task_reads
+    )
     primary = context.effective_task
     context_packet = None
     if context.role in LEAF_ROLES and context.task is not None:
@@ -401,14 +526,24 @@ def _compile_handover(
     if request_id is None:
         raise ValueError("A message binding requires its durable requestId.")
     task_document_digest = _digest(task_reads)
+    instructions, instruction_record = compose_role_instructions(
+        capsule.codex_delivery.trusted_instructions,
+        capsule.codex_delivery.semantic_digest,
+        request.session_options.get("choices", {}).get("notes", {}),
+    )
+    effective_digest = instruction_record["semanticDigest"]
+    canonical_report_path = (
+        Path(workspace["taskReportRoot"])
+        / Path(report_path).relative_to(Path(workspace["taskReportAccessRoot"]))
+    ).as_posix()
     ar_binding = {
         "requestId": str(request_id),
         "role": context.role,
         "operation": operation,
         "selection": selection_binding(context),
         "taskDocumentDigest": task_document_digest,
-        "taskReportPath": Path(report_path).resolve(strict=False).as_posix(),
-        "capsuleDigest": capsule.codex_delivery.semantic_digest,
+        "taskReportPath": canonical_report_path,
+        "capsuleDigest": effective_digest,
     }
     message_binding_projection = _message_binding_projection_reference(
         config, request_id, ar_binding
@@ -423,27 +558,33 @@ def _compile_handover(
         "agent": agent_id,
         "selection": selection_binding(context),
         "documents": task_reads,
+        "taskDocumentFiles": document_files,
         "taskDocumentDigest": task_document_digest,
         "workspace": workspace,
         "repositoryContext": repository_context,
         "taskReportPath": report_path,
-        "canonicalTaskReportPath": Path(report_path).resolve(strict=False).as_posix(),
+        "canonicalTaskReportPath": canonical_report_path,
+        "launchChoices": launch_choice_metadata(request.session_options.get("choices", {})),
+        "instructionComposition": instruction_metadata(instruction_record),
         "contextPacket": context_packet,
         "arMcpContext": ar_mcp_context,
         "capsule": {
             "role": capsule.role,
             "operation": capsule.codex_delivery.binding.operation,
-            "semanticDigest": capsule.codex_delivery.semantic_digest,
+            "semanticDigest": effective_digest,
+            "baselineSemanticDigest": capsule.codex_delivery.semantic_digest,
+            "blocks": instruction_metadata(instruction_record)["blocks"],
+            "baselineReplaced": instruction_record["baselineReplaced"],
             "binding": capsule.codex_delivery.binding.as_report(),
         },
         "host": {
             "name": "Paseo",
             "entryMode": "agent-role-start" if started_by else "dashboard-role-start",
             "instructionSource": {
-                "kind": "compiled-role-operation-capsule",
+                "kind": instruction_record["kind"],
                 "role": capsule.codex_delivery.binding.role,
                 "operation": capsule.codex_delivery.binding.operation,
-                "semanticDigest": capsule.codex_delivery.semantic_digest,
+                "semanticDigest": effective_digest,
                 "ambientRoleFilesSelected": False,
             },
             "parent": (
@@ -522,7 +663,7 @@ def _compile_handover(
             },
         },
         "ownerHandover": (
-            "This exact compiled role and operation plus this handover are the role brief for "
+            "The effective role instructions and this handover are the role brief for "
             "this request. Older ambient AR lifecycle/router/role files and coordination-level "
             "role-routing prose were not selected by this launch; do not load them as a second "
             "role, operation, hierarchy, parent, or transport. "
@@ -533,9 +674,8 @@ def _compile_handover(
             "arMcpContext.readerArguments; task scope is per call and includes no "
             f"caller-selected roots. If the {TOOL_SERVER_NAME} tool schema does not expose "
             "task_context with both required fields, stop and report that capability mismatch. "
-            f"Resolve each task document by calling task_doc on {TOOL_SERVER_NAME} "
-            "with the row's taskDocReadArgs exactly, then read its canonical JSON at the returned "
-            "docPath before acting. Do not add .json to the slug. Each contentDigest records the "
+            + first_read
+            + " Each contentDigest records the "
             "document snapshot used for this launch. Never claim AR review, curation, lifecycle, "
             "or Git acceptance from a finished turn."
         ),
@@ -557,14 +697,16 @@ def _compile_handover(
     prompt = (
         f"AR ROLE BRIEF: {_started_from(started_by)} started this role with the role and "
         "operation identified below. "
-        "The following compiled capsule and canonical handover are the complete AR "
+        "The following effective instructions and canonical handover are the complete AR "
         "role/operation instructions and assignment for this agent. Do not reopen ambient AR role, "
         "lifecycle, or coordination-level role-routing text to infer a different assignment. "
         "Preserve system/developer instructions, approvals, sandbox policy, and "
         "repository-specific coding/tool rules.\n\n"
         # Before the capsule, which names AR tools: where this session holds them.
         f"AR tools, before your first tool call: {_AR_TOOL_SERVER_USAGE}\n\n"
-        + capsule.codex_delivery.trusted_instructions
+        + first_read
+        + "\n\n"
+        + instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))
     )
@@ -572,7 +714,8 @@ def _compile_handover(
         "prompt": prompt,
         "handover": handover,
         "capsuleOperation": operation,
-        "capsuleDigest": capsule.codex_delivery.semantic_digest,
+        "capsuleDigest": effective_digest,
+        "instructionComposition": instruction_record,
         "taskDocumentDigest": task_document_digest,
         "messageBindingProjection": {
             "requestId": str(request_id),
@@ -580,8 +723,9 @@ def _compile_handover(
             **message_binding_projection,
         },
         "taskReportPath": report_path,
-        "canonicalTaskReportPath": Path(report_path).resolve(strict=False).as_posix(),
+        "canonicalTaskReportPath": canonical_report_path,
         "arMcpContext": ar_mcp_context,
+        "taskDocumentFiles": document_files,
     }
 
 
@@ -703,7 +847,7 @@ def _role_assignment(
     return (
         f"Perform the {context.role} role for canonical AR document "
         f"{selected.ref.repository}:{selected.ref.path}. Follow its current requirements, references, "
-        f"steps and the role capsule. Write the role handoff to {report_path}."
+        f"steps and the effective role instructions. Write the role handoff to {report_path}."
     )
 
 
@@ -713,42 +857,15 @@ def _role_report_path(
     *,
     request_id: uuid.UUID | None = None,
 ) -> str:
-    if context.effective_task is None:
-        if request_id is None:
-            raise ValueError("A taskless role report requires its durable requestId.")
-        report_root = (
-            Path(workspace["path"])
-            / ".agents-remember"
-            / "reports"
-            / REPORTS_DIRECTORY
-            / context.role
-        )
-        report_name = f"{request_id}.md"
-    else:
-        selected = context.effective_task
-        if selected is None:
-            raise ValueError("A task-bound role report requires its canonical task document.")
-        if request_id is None:
-            raise ValueError("A task-bound role report requires its durable requestId.")
-
-        report_root = (selected.path.parent / "notes" / "reports").resolve(strict=False)
-        if context.role in LEAF_ROLES:
-            if context.task is None:
-                raise ValueError("A leaf role report requires its canonical task document.")
-            access_path = workspace.get("taskReportAccessRoot")
-            if not isinstance(access_path, str) or not access_path:
-                raise ValueError(
-                    "The selected leaf workspace has no canonical task-report access path."
-                )
-            report_root = Path(access_path)
-            if report_root.resolve(strict=False) != (
-                selected.path.parent / "notes" / "reports"
-            ).resolve(strict=False):
-                raise ValueError(
-                    "The leaf task-report access path does not resolve to its canonical reports."
-                )
-        report_root = report_root / REPORTS_DIRECTORY
-        report_name = f"{selected.document.id}-{context.role}-{request_id}.md"
+    if request_id is None:
+        raise ValueError("A role report requires its durable requestId.")
+    report_root = Path(workspace["taskReportAccessRoot"]) / REPORTS_DIRECTORY
+    selected = context.effective_task
+    if selected is None:
+        report_root = report_root / context.role
+    report_name = (
+        f"{selected.document.id}-{context.role}-{request_id}.md" if selected else f"{request_id}.md"
+    )
     report = report_root / report_name
     report.parent.mkdir(parents=True, exist_ok=True)
     return report.as_posix()

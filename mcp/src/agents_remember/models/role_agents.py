@@ -9,8 +9,8 @@ out has ``ok: false``, ``status: "refused"``, the one ``refusal`` that applies, 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,6 +33,7 @@ class RoleStartCall:
     agent: str | None = None
     model: str | None = None
     effort: str | None = None
+    feature_values: dict[str, bool | str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +114,9 @@ class RoleStartResponse(ToolResponse):
     executionStatus: str | None = None
     preparation: RoleEnvironmentPreparation | None = None
     preparationStatus: str | None = None
+    choices: dict[str, Any] | None = None
+    warning: str | None = None
+    taskDocumentFiles: dict[str, Any] | None = None
 
 
 class RoleMessageResponse(ToolResponse):
@@ -138,3 +142,4 @@ class RoleMessageResponse(ToolResponse):
     permission: str | None = None
     waitedSeconds: int | None = None
     warning: str | None = None
+    reportCollection: dict[str, Any] | None = None

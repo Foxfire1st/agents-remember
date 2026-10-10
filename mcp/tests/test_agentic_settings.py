@@ -11,6 +11,7 @@ spawn harness preference / gateDelegation).
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -30,13 +31,16 @@ from agents_remember.kernel.agentic_settings import (
     agentic_settings_path,
     load_agentic_settings,
     merge_settings,
+    user_agentic_settings_path,
 )
+from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
 from agents_remember.kernel.harnesses import HARNESSES
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.recorded_reads import bytes_identity, recorded_reads
 
 
-def write_settings(root: Path, data: dict) -> Path:
-    path = agentic_settings_path(root)
+def write_settings(root: Path, data: dict, *, user: bool = True) -> Path:
+    path = user_agentic_settings_path() if user else agentic_settings_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return path
@@ -73,6 +77,7 @@ class MergePrecedenceTests(unittest.TestCase):
                     "loops": {"defaults": {"maxRounds": 2}},
                 }
             },
+            user=False,
         )
 
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
@@ -86,7 +91,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertEqual(
             settings.sources,
             (
-                agentic_settings_path(self.coordination_root),
+                user_agentic_settings_path(),
                 agentic_settings_path(self.repo_root),
             ),
         )
@@ -145,6 +150,7 @@ class FailLoudTests(unittest.TestCase):
         local_path = write_settings(
             self.repo_root,
             {"orchestration": {"gateDelegation": {"policy": "all-human"}}},
+            user=False,
         )
 
         with self.assertRaisesRegex(AgenticSettingsError, "global-layer only") as caught:
@@ -152,7 +158,7 @@ class FailLoudTests(unittest.TestCase):
         self.assertIn(str(local_path), str(caught.exception))
 
     def test_malformed_json_fails_loud_with_path(self) -> None:
-        path = agentic_settings_path(self.coordination_root)
+        path = user_agentic_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{broken", encoding="utf-8")
 
@@ -176,6 +182,7 @@ class FailLoudTests(unittest.TestCase):
         local_path = write_settings(
             self.repo_root,
             {"orchestration": {"loops": {"defaults": {"maxRounds": 99}}}},
+            user=False,
         )
         with self.assertRaisesRegex(AgenticSettingsError, "hard review limit 3") as local_error:
             load_agentic_settings(self.coordination_root, self.repo_root)
@@ -265,6 +272,7 @@ class TypedModelTests(unittest.TestCase):
                     "rolesPerLevel": {"portfolio": {"system-specialist": {"effort": "high"}}},
                 }
             },
+            user=False,
         )
         with warnings.catch_warnings(record=True) as notices:
             warnings.simplefilter("always")
@@ -344,7 +352,7 @@ class HarnessesFamilyTests(unittest.TestCase):
     def _load(self, orchestration: dict, local: dict | None = None):
         write_settings(self.coordination_root, {"orchestration": orchestration})
         if local is not None:
-            write_settings(self.repo_root, {"orchestration": local})
+            write_settings(self.repo_root, {"orchestration": local}, user=False)
         return load_agentic_settings(
             self.coordination_root, self.repo_root if local is not None else None
         )
@@ -447,6 +455,7 @@ class ServiceTierSettingsTests(unittest.TestCase):
                         "rolesPerLevel": {"portfolio": {"architect": {"serviceTier": "default"}}},
                     }
                 },
+                user=False,
             )
             settings = load_agentic_settings(global_root, local_root)
             role = settings.role_knobs("architect")
@@ -489,6 +498,122 @@ class ServiceTierSettingsTests(unittest.TestCase):
             )
         self.assertIsNone(dispatch)
         self.assertIn("serviceTier", cast(dict[str, str], refusal)["detail"])
+
+
+class UserSettingsLocationTests(unittest.TestCase):
+    def test_user_file_is_read_per_use_and_repository_file_keeps_its_location(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination, repo = Path(folder) / "coord", Path(folder) / "repo"
+            user = write_settings(
+                coordination,
+                {
+                    "orchestration": {
+                        "roles": {
+                            "worker": {
+                                "harness": "codex",
+                                "mode": "auto",
+                                "notes": "user instructions",
+                            }
+                        }
+                    }
+                },
+            )
+            local = write_settings(
+                repo, {"orchestration": {"roles": {"worker": {"effort": "high"}}}}, user=False
+            )
+            first = load_agentic_settings(coordination, repo)
+            self.assertEqual(first.sources, (user, local))
+            self.assertEqual(
+                (
+                    first.role_knobs("worker").mode,
+                    first.role_knobs("worker").notes,
+                    first.role_knobs("worker").effort,
+                ),
+                ("auto", "user instructions", "high"),
+            )
+            user.write_text('{"orchestration":{"roles":{"worker":{"mode":"read-only"}}}}')
+            self.assertEqual(
+                load_agentic_settings(coordination, repo).role_knobs("worker").mode, "read-only"
+            )
+            self.assertFalse(agentic_settings_path(coordination).exists())
+
+    def test_default_home_and_explicit_xdg_select_only_their_own_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "sandbox-home"
+            inherited = user_agentic_settings_path()
+            inherited.parent.mkdir(parents=True, exist_ok=True)
+            inherited.write_text('{"orchestration":{"roles":{"worker":{"model":"outside"}}}}')
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("pathlib.Path.home", return_value=home),
+            ):
+                path = user_agentic_settings_path()
+                self.assertEqual(path, home / ".config/agents-remember/settings.json")
+                path.parent.mkdir(parents=True)
+                path.write_text('{"orchestration":{"roles":{"worker":{"model":"sandbox"}}}}')
+                self.assertEqual(
+                    load_agentic_settings(Path(folder) / "coord").role_knobs("worker").model,
+                    "sandbox",
+                )
+                with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(Path(folder) / "xdg")}):
+                    self.assertEqual(
+                        user_agentic_settings_path(),
+                        Path(folder) / "xdg/agents-remember/settings.json",
+                    )
+                    self.assertIsNone(
+                        load_agentic_settings(Path(folder) / "coord").role_knobs("worker").model
+                    )
+
+    def test_old_only_and_both_files_refuse_before_any_settings_content_read(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            old = agentic_settings_path(coordination)
+            new = user_agentic_settings_path()
+            old.parent.mkdir(parents=True)
+            old.write_text("not JSON and never parsed")
+            for both in (False, True):
+                if both:
+                    new.parent.mkdir(parents=True, exist_ok=True)
+                    new.write_text("{}")
+                with (
+                    self.subTest(both=both),
+                    patch("agents_remember.kernel.agentic_settings._read_settings_file") as read,
+                ):
+                    with self.assertRaisesRegex(
+                        AgenticSettingsError, "location-upgrade-required"
+                    ) as caught:
+                        load_agentic_settings(coordination)
+                    self.assertIn(str(old), str(caught.exception))
+                    self.assertIn(str(new), str(caught.exception))
+                    self.assertIn(
+                        "agents-remember upgrade-user-settings --coordination-root",
+                        str(caught.exception),
+                    )
+                    read.assert_not_called()
+            self.assertEqual(old.read_text(), "not JSON and never parsed")
+
+    def test_global_topology_fallback_reads_user_bytes_and_memory_repo_bytes_stay_local(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            notes = coordination / "system/settings.md"
+            new = user_agentic_settings_path()
+            new.parent.mkdir(parents=True, exist_ok=True)
+            data = b'{"storage":{"mode":"memory-repo"},"crossRepo":{"allow":[]}}'
+            new.write_bytes(data)
+            with recorded_reads() as reads:
+                global_storage, _ = parse_coordination_settings(
+                    notes, coordination_root=coordination
+                )
+            self.assertEqual(global_storage.mode, "memory-repo")
+            self.assertEqual(reads[str(new)], bytes_identity(data))
+            self.assertNotIn(str(agentic_settings_path(coordination)), reads)
+            memory = Path(folder) / "memory-repos/ar-repo/system/settings.md"
+            memory.parent.mkdir(parents=True)
+            memory.with_suffix(".json").write_text('{"storage":{"mode":"disabled"}}')
+            local_storage, _ = parse_coordination_settings(memory, coordination_root=coordination)
+            self.assertEqual(local_storage.mode, "disabled")
 
 
 if __name__ == "__main__":

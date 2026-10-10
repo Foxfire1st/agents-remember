@@ -93,7 +93,7 @@ Check, in order:
    `coordinationRoot`, `workspaceRoot`, allowed repositories, and providers.
    Surface the resolved absolute paths because wrong paths are the common cause
    of resolver failures. Also report whether the global agentic settings file
-   (`<coordinationRoot>/system/settings.json`) exists and carries `paseoRuntime`.
+   (`~/.config/agents-remember/settings.json`, under `XDG_CONFIG_HOME` when set) exists and carries `paseoRuntime`.
    Starter setup supplies one block; runtime_install never writes this authority.
    If missing, calculate the complete five-key block below using the installation's
    actual absolute data/state folders. Empty or unset XDG values use the home
@@ -176,9 +176,17 @@ manual maintenance or non-package setups, but it is not the default path.
 
 ## Stage 2 - Agentic Settings: Interview The Developer
 
+An existing `<coordinationRoot>/system/settings.json` requires the explicit product
+upgrade before the server can load settings. Preview `agents-remember upgrade-user-settings
+--coordination-root <absolute root> --dry-run`, then run it without `--dry-run` to move
+the entire file once. An old-only or both-file state refuses and names both paths;
+there is no old-location reader. Never migrate the MCP `--config` file or a repository
+or memory-repository settings file. In a sandbox, use its own user configuration directory.
+
 Starter/setup supplies the GLOBAL settings file at
-`<coordinationRoot>/system/settings.json`; `runtime_install()` never writes it.
-Absent agentic knobs retain their documented defaults: all-human gate delegation, the standard three-party-loop
+`~/.config/agents-remember/settings.json` (under `XDG_CONFIG_HOME` when set);
+`runtime_install()` never writes it. Absent agentic knobs retain their documented
+defaults: all-human gate delegation, the standard three-party-loop
 defaults, no concurrency caps, no spawn harness preference. This stage turns
 those defaults into the developer's actual posture so the intended workflows
 run on ANY harness. The schema reference is `docs/reference/settings-json.md`
@@ -190,7 +198,7 @@ their answers (leave a family at its built-in default when they have no
 preference):
 
 1. **Gate delegation posture** (`orchestration.gateDelegation`; GLOBAL file only - the
-   loader refuses it repo-locally and the boot snapshot reads the coordinator file) - keep every
+   loader refuses it repo-locally and the boot snapshot reads the user file) - keep every
    gate human (`all-human`, the default), or delegate leaf gates with the
    `manager-decides-leaf-gates` policy, optional per-kind `kinds` overrides,
    and `requireReviewerVerdictAtSeams`. Say explicitly that this one key is
@@ -243,6 +251,30 @@ The internal session-creation primitive is not installed caller guidance.
 If the developer wants to skip the interview, confirm the built-in defaults
 apply and continue; tell them the file can be edited any time (picked up
 per-use, except the gateDelegation restart note above).
+
+For every role offered by the Paseo launcher, guide a new user through permission mode choice. The accepted designer, strategist and bootstrap role entries have no Paseo start route in this build; name that limit instead of inventing an options request. Read the running host's modes
+and descriptions once per agent kind from the existing public `POST /api/role-launch/options`
+route with `{"role":"architect","refreshCatalog":true}`. This taskless catalog read needs no
+sprint, master or leaf; use the returned agent kinds to interview each launcher role. A running host/dashboard is a named setup
+prerequisite: if unavailable, report it and defer this interview, without a guessed or second
+catalog. Write `orchestration.roles.<role>.mode` in the user's configuration settings only after
+the user chooses it. No shipped settings contain a mode. With no choice, new Claude starts state
+`default` (host label Always Ask), new Codex starts state `auto` (the host's workspace-write,
+on-request preset). This explicitly changes Codex starts that previously inherited a different
+user configuration; existing agents retain their settings. Pi has no selectable permission mode;
+task-document changes can proceed without a permission request. Describe any extension's prompts
+separately, without promising that Pi asks before a change. For unknown providers or a missing named mode, no mode is
+stated; describe the observed behavior, and mark unwitnessed claims as not established.
+
+Modes, `notes`, and permission-bearing features (`plan_mode`, `auto_accept`, and unknown features)
+are user/profile authority only; never put them in a repository's settings. `service_tier` and
+`fast_mode` are speed features and may come from either settings layer. A role's host profile wins
+field by field; user instruction text is plain text, with `<overwrite>` alone on the first nonblank
+line replacing the baseline. No skill or file-path loading is performed.
+
+Verify the workspace's `.agents-remember/role-executions/` directory exists and is ignored by Git.
+Each taskless or controller role receives a per-execution scratch folder there; leaf roles receive
+one under their group's real `scratch`. The handover names the exact folder.
 
 Per-repo overrides: a code repo may carry its own `<repo>/system/settings.json`
 with the same `orchestration.*` shape; repo-local leaf values override the

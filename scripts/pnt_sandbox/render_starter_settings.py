@@ -35,7 +35,7 @@ def render(args: argparse.Namespace) -> dict:
     renderer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(renderer)
     before = json.loads(settings.read_text(encoding="utf-8"))
-    shared = coordination / "system/settings.json"
+    shared = renderer.require_user_settings_path(coordination)
     shared_before = digest(shared)
     block = json.loads(shared.read_text(encoding="utf-8"))["paseoRuntime"]
     default = renderer.settings_payload(before, workspace, [repo], renderer.RenderOptions())

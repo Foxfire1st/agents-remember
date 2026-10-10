@@ -33,6 +33,7 @@ from agents_remember.cli.investigator_receipts import (
 )
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
+from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -43,13 +44,19 @@ from agents_remember.models.role_launcher import (
     RoleSelection,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.role_reports import (
+    LEGACY_ROLE_REPORT_ALIAS,
+    RoleReportCollectionError,
+    close_execution_role_folders,
+    collect_execution_reports,
+)
 
 # Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
 EXECUTIONS_DIRECTORY = "paseo-native-executions"
 # The schema name every receipt of this line carries; a file without it is not read as a receipt.
 RECEIPT_SCHEMA = "ar-role-execution/v1"
 # The link in a leaf's enclosure group folder through which its agents reach the task's reports.
-REPORT_ACCESS_LINK = "task-reports"
+REPORT_ACCESS_LINK = LEGACY_ROLE_REPORT_ALIAS
 
 
 def digest(value: Any) -> str:
@@ -95,6 +102,9 @@ def _execute_prepared_launch(
         # The first message names this file; it must hold that message whenever it is sent.
         _rebind_report_access(current)
         restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
+    predecessor = current.get("predecessorReports")
+    if isinstance(predecessor, dict):
+        collect_execution_reports(predecessor)
     if current.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
             config, launch_call, before_create=lambda: _leaf_before_create(path, current)
@@ -103,10 +113,12 @@ def _execute_prepared_launch(
         outcome = run_launch_call(config, launch_call)
     with exclusive_file_lock(path, "role execution receipt"):
         current = _same_request_receipt(path, receipt)
+        _settle_predecessor_reports(current, outcome)
         if not _leaf_is_closing(current):
             return _publish_launch_outcome(path, current, launch_call, outcome)
         if outcome.kind == "created":
             current.update(execution=outcome.execution, agent=outcome.applied, hostAgentExists=True)
+            _observe_launch_choices(current, outcome.applied)
             _write_receipt(path, current)
         elif outcome.lost_agent_id:
             current["hostAgentExists"] = True
@@ -169,8 +181,9 @@ def _publish_launch_outcome(
         receipt["agent"] = outcome.applied
         if outcome.workspace_preparation in {"created", "found", "opened"}:
             receipt.setdefault("preparation", {})["workspace"] = outcome.workspace_preparation
+        _observe_launch_choices(receipt, outcome.applied)
         if outcome.warning:
-            receipt["warning"] = outcome.warning
+            receipt["warning"] = " ".join(filter(None, (receipt.get("warning"), outcome.warning)))
         receipt.update(
             status="running",
             hostAgentExists=True,
@@ -217,6 +230,46 @@ def _publish_launch_outcome(
     return JSONResponse(_public_execution(receipt), status_code=202)
 
 
+def _settle_predecessor_reports(receipt: dict[str, Any], outcome: LaunchOutcome) -> None:
+    predecessor = receipt.get("predecessorReports")
+    if outcome.predecessor_settled and isinstance(predecessor, dict):
+        receipt["predecessorSettled"] = True
+        try:
+            close_execution_role_folders(predecessor)
+        except RoleReportCollectionError as error:
+            # The host already answered: retain its actual result and the source folder,
+            # rather than misreporting a created agent as a pre-creation refusal.
+            receipt["predecessorCollectionError"] = str(error)
+
+
+def _observe_launch_choices(receipt: dict[str, Any], applied: dict[str, Any] | None) -> None:
+    if applied and isinstance(receipt.get("choices"), dict):
+        for key in ("model", "effort", "mode"):
+            choice = receipt["choices"].get(key)
+            if isinstance(choice, dict):
+                choice["observedValue"] = applied.get(key)
+                if choice.get("source") == "host default":
+                    choice["value"] = applied.get(key)
+        for key, choice in receipt["choices"].get("featureValues", {}).items():
+            choice["observedValue"] = applied.get("featureValues", {}).get(key)
+        warnings = []
+        for key, choice in [
+            ("mode", receipt["choices"].get("mode", {})),
+            *[
+                (f"featureValues.{key}", value)
+                for key, value in receipt["choices"].get("featureValues", {}).items()
+            ],
+        ]:
+            if choice.get("source") not in ("host default", "none", None) and choice.get(
+                "value"
+            ) != choice.get("observedValue"):
+                warnings.append(
+                    f"{key} stated {choice.get('value')!r}, but the host reported {choice.get('observedValue')!r}."
+                )
+        if warnings:
+            receipt["warning"] = " ".join(filter(None, (receipt.get("warning"), *warnings)))
+
+
 def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
     """What becomes of an agent that can never be given its first message, by role class."""
 
@@ -232,7 +285,8 @@ def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
 def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
     """Expose only this task's canonical reports from inside its enclosure group folder.
 
-    The one place that creates the link, for a first launch and for a retry alike.
+    Only existing alias bindings use this restoration path. New starts use real role-reports;
+    existing enclosures keep their recorded access path until they close.
     """
 
     link = workspace / REPORT_ACCESS_LINK
@@ -598,6 +652,8 @@ def _request_digest(
         if request.agent_override
         else None
     )
+    if override is not None and not override.get("featureValues"):
+        override.pop("featureValues", None)
     return digest(
         {
             "selection": {
@@ -612,25 +668,33 @@ def _request_digest(
 def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     status = receipt.get("status")
     public = {
-        key: receipt[key]
-        for key in (
-            "requestId",
-            "role",
-            "status",
-            "createdAt",
-            "updatedAt",
-            "terminalObservedAt",
-            "revivedAt",
-            "detail",
-            "warning",
-            "result",
-            "capsuleOperation",
-            "arMcpContext",
-            "sessionOptions",
-            "preparation",
-            "canRevive",
-        )
-        if key in receipt
+        **{
+            key: receipt[key]
+            for key in (
+                "requestId",
+                "role",
+                "status",
+                "createdAt",
+                "updatedAt",
+                "terminalObservedAt",
+                "revivedAt",
+                "detail",
+                "warning",
+                "result",
+                "capsuleOperation",
+                "arMcpContext",
+                "sessionOptions",
+                "preparation",
+                "choices",
+                "instructionComposition",
+                "taskDocumentFiles",
+                "assignmentReadGrant",
+                "predecessorCollectionError",
+                "reportCollection",
+                "canRevive",
+            )
+            if key in receipt
+        },
     }
     if canonical_role(str(receipt.get("role", ""))) in TASKLESS_ROLES:
         # Taskless roles admit a fresh deliberate session under a new requestId; unresolved requests remain guarded.
@@ -681,6 +745,19 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             for key in ("kind", "serverId", "workspaceId", "agentId")
             if isinstance(reference.get(key), str)
         }
+    return _public_instruction_fields(public)
+
+
+def _public_instruction_fields(public: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(public.get("choices"), dict):
+        public["choices"] = launch_choice_metadata(public["choices"])
+    if isinstance(public.get("sessionOptions"), dict):
+        public["sessionOptions"] = {
+            **public["sessionOptions"],
+            "choices": launch_choice_metadata(public["sessionOptions"].get("choices", {})),
+        }
+    if isinstance(public.get("instructionComposition"), dict):
+        public["instructionComposition"] = instruction_metadata(public["instructionComposition"])
     return public
 
 
@@ -790,14 +867,21 @@ def _archive_receipt(path: Path, receipt: dict[str, Any]) -> None:
         raise ValueError(
             "The prior role execution receipt has no request identity and cannot be archived safely."
         )
+    predecessor = receipt.get("predecessorReports")
+    if receipt.get("predecessorSettled") and isinstance(predecessor, dict):
+        close_execution_role_folders(predecessor)
     history = path.parent / "history" / f"{request_id}.json"
     if history.exists():
         raise ValueError("A prior role execution archive already has this request identity.")
     history.parent.mkdir(parents=True, exist_ok=True)
+    if "reportCollectionFiles" in receipt:
+        # History preserves the collected evidence/truth, not an inactive reuse cache.
+        receipt.pop("reportCollectionFiles")
+        _write_receipt(path, receipt)
     path.replace(history)
 
 
-def _archived_receipt_agent_id(path: Path, selection: RoleSelection) -> str | None:
+def _archived_receipt_for_selection(path: Path, selection: RoleSelection) -> dict[str, Any] | None:
     """The agent to archive when a task-bound selection has no receipt but an archived one.
 
     The newest receipt in the history that belongs to this selection names it, as
@@ -818,7 +902,7 @@ def _archived_receipt_agent_id(path: Path, selection: RoleSelection) -> str | No
             archived.append(receipt)
     if not archived:
         return None
-    return _replaced_agent_id(max(archived, key=lambda row: str(row.get("createdAt", ""))))
+    return max(archived, key=lambda row: str(row.get("createdAt", "")))
 
 
 def _refuse_reused_request_id(

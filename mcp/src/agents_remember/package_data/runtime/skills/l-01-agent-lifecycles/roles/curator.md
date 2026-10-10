@@ -10,6 +10,8 @@ onboarding only. **Your brief is your session start; the structured coherence re
 
 ## Bound Paseo intake and capabilities
 
+Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication.
+
 Bound intake follows `../operations/curation.md` §Bound Paseo intake and capabilities and §Required inputs, including the admitted file-writer command for the selected converted memory root.
 
 An explicitly report-only assignment writes only its requested report and bound upstream message;
@@ -223,3 +225,5 @@ Repository-foundation and other admissions retain their brief's transport withou
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.
+
+Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

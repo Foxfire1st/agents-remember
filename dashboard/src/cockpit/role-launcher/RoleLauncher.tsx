@@ -3,6 +3,7 @@ import { css, cva } from "../../../styled-system/css";
 import type { SeriesNode, TaskDocNode } from "../../types/projection";
 import { sameTaskDocumentRef } from "../../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "../RoleExecutionStatus";
+import { RoleLaunchDefaults, RoleLaunchFeatures } from "../RoleLaunchFeatures";
 
 
 import { EMPTY_ROLE_EFFORTS, EMPTY_ROLE_MODELS, LAUNCHER_ROLES, isTasklessRole, usesRequestReceipts, launchChoiceProblem, launchSelectionComplete, masterOptionsForSprint, optionIndex, roleAgentOverrideFor, roleDocumentScope, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sameRoleDocumentScope, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleScopedExecution } from "../roleLaunchModel";
@@ -264,7 +265,7 @@ export function RoleLauncher({
   useEffect(() => {
     if (!optionsReady) return;
     const activeScope = roleDocumentScope(selection);
-    if (selection.agentOverride && !agents.some((agent) => agent.id === selection.agentOverride?.agentId)) {
+    if (selection.agentOverride?.agentId && !agents.some((agent) => agent.id === selection.agentOverride?.agentId)) {
       onSelectionChange({ ...activeScope, agentOverride: undefined });
       return;
     }
@@ -413,7 +414,7 @@ export function RoleLauncher({
             const agentId = selection.agentOverride?.agentId ?? selectedAgentId;
             onSelectionChange({
               ...launchSelection,
-              agentOverride: roleAgentOverrideFor(agentId, modelId || undefined, undefined, roleDefaults),
+              agentOverride: roleAgentOverrideFor(agentId, modelId || undefined, undefined, roleDefaults, selection.agentOverride?.featureValues),
             });
           }}
         >
@@ -447,6 +448,7 @@ export function RoleLauncher({
                   selection.agentOverride?.modelId,
                   event.target.value || undefined,
                   roleDefaults,
+                  selection.agentOverride?.featureValues,
                 ),
               });
             }}
@@ -458,6 +460,12 @@ export function RoleLauncher({
           </select>
         </label>
       ) : null}
+      <RoleLaunchDefaults ready={optionsReady} defaults={roleDefaults} selectedAgentId={selectedAgentId}
+        modeDescription={selectedAgent?.modes?.find((mode) => mode.id === roleDefaults.mode)?.description} />
+      <RoleLaunchFeatures features={(selectedModel ?? models.find((model) => model.isDefault))?.features ?? []}
+        defaults={selectedAgentId === roleDefaults.agent ? roleDefaults : {}}
+        override={selection.agentOverride} disabled={!optionsReady || optionsLoading || busy || currentScopedExecution?.canRetry === true}
+        onChange={(agentOverride) => onSelectionChange({ ...roleDocumentScope(selection), agentOverride })} />
       <div className={roleLauncherActions}>
         {roleDefaults.serviceTier ? (
           <span data-testid="role-service-tier" title="The role service tier applies on its default agent, including model overrides; a different agent uses its native default.">

@@ -11,6 +11,8 @@ from pydantic import (
     Field,
     ModelWrapValidatorHandler,
     PrivateAttr,
+    StrictBool,
+    StrictStr,
     field_validator,
     model_validator,
 )
@@ -33,9 +35,12 @@ LauncherRole = Literal[
 class RoleAgentOverride(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    agent_id: str = Field(alias="agentId", min_length=1, max_length=80)
+    agent_id: str | None = Field(default=None, alias="agentId", min_length=1, max_length=80)
     model_id: str | None = Field(default=None, alias="modelId", max_length=200)
     effort_id: str | None = Field(default=None, alias="effortId", max_length=80)
+    feature_values: dict[str, StrictBool | StrictStr] | None = Field(
+        default=None, alias="featureValues"
+    )
 
 
 class RoleSelection(BaseModel):

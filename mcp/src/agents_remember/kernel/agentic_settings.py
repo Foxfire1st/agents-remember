@@ -7,7 +7,7 @@ extension/override table (``orchestration.harnesses``, 260703-L16) -- lives in
 TWO JSON files that are merged on every read; the full quality gate's optional
 hard-cap override is ``orchestration.qualityGate``:
 
-- GLOBAL: ``<coordination_root>/system/settings.json``
+- USER: ``~/.config/agents-remember/settings.json`` (or under ``XDG_CONFIG_HOME``)
 - LOCAL:  ``<code_repo>/system/settings.json`` (optional; merged OVER global)
 
 Semantics (``docs/reference/settings-json.md`` is the schema reference):
@@ -17,7 +17,7 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
 - Unknown keys anywhere inside the ``orchestration.*`` family FAIL LOUD naming
   the offending file -- the MCP-authority-file discipline, extended. This also
   fixes the historic silent drop of ``orchestration.roles``/``concurrency``.
-- Unknown TOP-LEVEL families are tolerated-not-parsed: the same coordinator
+- Unknown TOP-LEVEL families are tolerated-not-parsed: the same user
   file doubles as the c-08 memory-settings fallback, and it is the earmarked
   future home of further families (``contextProviders`` first in line, gate
   amendment 2026-07-06), so the fail-loud scope must not foreclose them.
@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,7 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_KNOB_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
+    NON_PERMISSION_FEATURES,
     AgenticSettings,
     AgenticSettingsError,
     AgentNotifierSettings,
@@ -87,6 +89,7 @@ from agents_remember.kernel._agentic_settings_core import (
     LoopDefaults,
     LoopSettings,
     QualityGateSettings,
+    RoleChoiceOrigin,
     RoleKnobs,
     _refuse_unknown,
     _require_bool,
@@ -97,9 +100,13 @@ from agents_remember.kernel._agentic_settings_core import (
     _require_string,
     _require_string_list,
     agentic_settings_path,
+    agentic_settings_upgrade_command,
     default_agentic_settings_seed,
     default_agentic_settings_seed_text,
     merge_settings,
+    require_user_agentic_settings_path,
+    role_feature_values,
+    user_agentic_settings_path,
 )
 from agents_remember.kernel._agentic_settings_harness import (
     _entry_string,
@@ -131,6 +138,7 @@ from agents_remember.kernel._agentic_settings_sections import (
     _require_agent_notifier_floor_seconds,
     _resolve_role_keys,
 )
+from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 
 __all__ = [
     "COMPLEXITY_SCALE",
@@ -199,11 +207,14 @@ __all__ = [
     "_require_string_list",
     "_resolved_launch",
     "agentic_settings_path",
+    "agentic_settings_upgrade_command",
     "default_agentic_settings_seed",
     "default_agentic_settings_seed_text",
     "load_agentic_settings",
     "merge_settings",
     "parse_gate_delegation",
+    "require_user_agentic_settings_path",
+    "user_agentic_settings_path",
 ]
 
 
@@ -219,22 +230,24 @@ def load_agentic_settings(
     """
     layers: list[tuple[Path, dict[str, Any]]] = []
     role_alias_notices: list[str] = []
-    for layer, root in (("global", coordination_root), ("local", repo_root)):
-        if root is None:
-            continue
-        path = agentic_settings_path(root)
+    paths = [("global", require_user_agentic_settings_path(coordination_root))]
+    if repo_root is not None:
+        paths.append(("local", agentic_settings_path(repo_root)))
+    for layer, path in paths:
         data = _read_settings_file(path)
         if data is None:
             continue
         orchestration, aliases = _validated_orchestration_block(data, path)
         role_alias_notices.extend(f"{path}: {key}" for key in aliases)
+        if layer == "local":
+            _refuse_repository_role_authority(orchestration, path)
         if layer == "local" and "gateDelegation" in orchestration:
             # Gate posture is workspace-wide enforcement state: the boot snapshot
             # reads the GLOBAL file only, so a repo-local value would validate and
             # then silently do nothing -- a fail-open shape. Refuse it loudly.
             raise AgenticSettingsError(
                 "orchestration.gateDelegation is global-layer only (the boot "
-                "snapshot reads the coordination file); remove it from the "
+                "snapshot reads the user's settings file); remove it from the "
                 f"repo-local settings: {path}"
             )
         layers.append((path, orchestration))
@@ -245,21 +258,122 @@ def load_agentic_settings(
     sources = tuple(path for path, _ in layers)
     source = _source_label(sources)
     settings = _parse_orchestration(merged, source=source, sources=sources)
-    if role_alias_notices:
-        warnings.warn(
-            "system-specialist is the earlier id of investigator; settings keys apply to "
-            "investigator: " + "; ".join(role_alias_notices),
-            UserWarning,
-            stacklevel=2,
-        )
+    _attach_role_origins(settings, layers)
+    for role, knobs in settings.roles.items():
+        role_feature_values(knobs, f"{source}: orchestration.roles.{role}")
+    for level, roles in settings.roles_per_level.items():
+        for role in roles:
+            role_feature_values(
+                settings.resolved_role_knobs(role, level),
+                f"{source}: orchestration.rolesPerLevel.{level}.{role}",
+            )
+    _warn_role_aliases(role_alias_notices)
     return settings
 
 
+def _warn_role_aliases(notices: list[str]) -> None:
+    if notices:
+        warnings.warn(
+            "system-specialist is the earlier id of investigator; settings keys apply to "
+            "investigator: " + "; ".join(notices),
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def _attach_role_origins(
+    settings: AgenticSettings, layers: list[tuple[Path, dict[str, Any]]]
+) -> None:
+    """Carry each authored choice's binding without changing the existing value merge."""
+    flat: dict[str, dict[str, RoleChoiceOrigin]] = {}
+    levels: dict[str, dict[str, dict[str, RoleChoiceOrigin]]] = {}
+    provider = None
+    for rank, (path, raw) in enumerate(layers):
+        provider = raw.get("spawn", {}).get("harness", provider)
+        for role, row in raw.get("roles", {}).items():
+            flat[role] = _role_row_origins(
+                flat.get(role, {}),
+                row,
+                source=path,
+                owner=f"orchestration.roles.{role}",
+                scope=(provider, rank),
+            )
+        for level, roles in raw.get("rolesPerLevel", {}).items():
+            scope = levels.setdefault(level, {})
+            for role, row in roles.items():
+                authored = _role_row_origins(
+                    {**flat.get(role, {}), **scope.get(role, {})},
+                    row,
+                    source=path,
+                    owner=f"orchestration.rolesPerLevel.{level}.{role}",
+                    scope=(provider, len(layers) + rank),
+                )
+                # Inherited flat fields supply this layer's scope but are not level overrides.
+                scope[role] = {
+                    key: origin
+                    for key, origin in authored.items()
+                    if origin.precedence >= len(layers)
+                }
+    for role, knobs in settings.roles.items():
+        settings.roles[role] = replace(knobs, origins=flat.get(role, {}))
+    for level, roles in settings.roles_per_level.items():
+        for role, knobs in roles.items():
+            roles[role] = replace(knobs, origins=levels[level][role])
+
+
+def _role_row_origins(
+    prior: dict[str, RoleChoiceOrigin],
+    row: dict[str, Any],
+    *,
+    source: Path,
+    owner: str,
+    scope: tuple[str | None, int],
+) -> dict[str, RoleChoiceOrigin]:
+    fallback_provider, rank = scope
+    provider = row.get("harness") or (
+        prior["harness"].provider if "harness" in prior else fallback_provider
+    )
+    model = row.get("model") or (
+        prior["model"].model
+        if "model" in prior and prior["model"].provider in (None, provider)
+        else None
+    )
+    result = dict(prior)
+    for key in ("harness", "model", "effort", "mode", "serviceTier", "notes"):
+        if key in row and row[key].strip():
+            result[key] = RoleChoiceOrigin(str(source), f"{owner}.{key}", provider, model, rank)
+    for key in row.get("featureValues", {}):
+        result[f"featureValues.{key}"] = RoleChoiceOrigin(
+            str(source), f"{owner}.featureValues.{key}", provider, model, rank
+        )
+    return result
+
+
+def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
+    families = [("orchestration.roles", raw.get("roles", {}))]
+    families.extend(
+        (f"orchestration.rolesPerLevel.{level}", roles)
+        for level, roles in raw.get("rolesPerLevel", {}).items()
+    )
+    for owner, roles in families:
+        for role, knobs in roles.items():
+            keys = [key for key in ("mode", "notes") if key in knobs]
+            keys.extend(
+                f"featureValues.{key}"
+                for key in knobs.get("featureValues", {})
+                if key not in NON_PERMISSION_FEATURES
+            )
+            if keys:
+                raise AgenticSettingsError(
+                    f"{owner}.{role}.{keys[0]} is user-layer only; remove it from {path} and configure the user's settings at {user_agentic_settings_path()} or host profile"
+                )
+
+
 def _read_settings_file(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
+    if not observed_exists(path):
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(observed_text(path))
     except json.JSONDecodeError as error:
         raise AgenticSettingsError(
             f"cannot parse agentic settings JSON: {path}: {error}"
@@ -400,10 +514,8 @@ def _parse_orchestration(
         require_reviewer_verdict_at_seams=at_seams,
         gate_delegation_configured=gate_raw is not None,
         loops=_parse_loops(raw.get("loops"), source=source),
-        roles=_parse_roles(raw.get("roles"), source=source, harness_ids=harness_ids),
-        roles_per_level=_parse_roles_per_level(
-            raw.get("rolesPerLevel"), source=source, harness_ids=harness_ids
-        ),
+        roles=_parse_roles(raw.get("roles"), source=source),
+        roles_per_level=_parse_roles_per_level(raw.get("rolesPerLevel"), source=source),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
         expectations=_parse_expectations(raw.get("expectations"), source=source),
         agent_notifier=_parse_agent_notifier(raw.get("agentNotifier"), source=source),

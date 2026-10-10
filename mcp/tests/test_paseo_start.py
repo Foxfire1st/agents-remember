@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
+from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.paseo import paseo_start
@@ -137,7 +138,7 @@ def test_no_shared_block_is_a_named_non_starting_state(tmp_path):
     config, fake = configured(tmp_path)
     write_shared_runtime(tmp_path, None)
     result = ensure_host(config, runner=fake, reader=fake.reader, probe=free)
-    assert result.state == "not configured" and "system/settings.json" in result.line
+    assert result.state == "not configured" and str(user_agentic_settings_path()) in result.line
     assert fake.calls == []
 
 
