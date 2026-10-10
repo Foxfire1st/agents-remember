@@ -564,6 +564,161 @@ describe("control channel unavailable", () => {
   });
 });
 
+describe("document page: chat of the selected task", () => {
+  const SECOND = { agentId: "agent-second", workspaceId: "wks_projects" };
+
+  it("moves across workspaces by message, without reloading the frame", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId, rerender } = render(
+      <PaseoChatFrame active scope="master" target={ARCHITECT} page="document" />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const firstSrc = frame.getAttribute("src");
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    // Ready on a document page also tells the frame its page mode; the selection itself is one message.
+    expect(posts).toHaveBeenLastCalledWith(
+      { type: "ar.open", agentId: ARCHITECT.agentId, workspaceId: ARCHITECT.workspaceId },
+      FRAME_ORIGIN,
+    );
+    expect(posts).toHaveBeenCalledTimes(2);
+    deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
+
+    // The task lives in another workspace: one message names agent and workspace, the frame stays.
+    rerender(
+      <PaseoChatFrame active scope="leaf" target={WORKER} page="document" />,
+    );
+    expect(posts).toHaveBeenLastCalledWith(
+      { type: "ar.open", agentId: WORKER.agentId, workspaceId: WORKER.workspaceId },
+      FRAME_ORIGIN,
+    );
+    expect(posts).toHaveBeenCalledTimes(3);
+    expect(frameElement(container)).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(firstSrc);
+    deliver(frame, plugin({ type: "shown", agentId: WORKER.agentId }));
+    await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId("paseo-frame").getAttribute("data-control")).toBe("ready");
+  });
+
+  it("stays on the frame inside one workspace: another agent is one message, no reload", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, rerender } = render(
+      <PaseoChatFrame active scope="a" target={ARCHITECT} page="document" />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    // A document page loads the wanted agent's deep link up front; the switch below must not reload it.
+    const firstSrc = frame.getAttribute("src");
+    expect(firstSrc).toContain("open=agent:agent-architect");
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    deliver(frame, plugin({ type: "shown", agentId: ARCHITECT.agentId }));
+
+    rerender(
+      <PaseoChatFrame active scope="b" target={SECOND} page="document" />,
+    );
+    expect(posts).toHaveBeenLastCalledWith(
+      { type: "ar.open", agentId: SECOND.agentId, workspaceId: SECOND.workspaceId },
+      FRAME_ORIGIN,
+    );
+    expect(frameElement(container)).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(firstSrc);
+  });
+
+  it("names the missing agent after the deadline and loads its page once", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByRole, getByTestId, queryByTestId, rerender } = render(
+      <PaseoChatFrame active scope="leaf" target={WORKER} page="document" />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    const posts = watchPosts(frame);
+    deliver(frame, plugin({ type: "ready" }));
+    // The page-mode notice plus the one request for the worker.
+    expect(posts).toHaveBeenCalledTimes(2);
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+
+    // The application never shows the agent: the deadline names it. The frame already names the
+    // agent's page (a document page loads the wanted deep link up front), so the sentence says
+    // exactly that and no second load runs.
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain(WORKER.agentId);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("already shows the agent's page");
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(frameElement(container)).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(WORKER_URL + "&arPage=document");
+
+    // Another deadline does not load it again, and no message is posted without the channel.
+    await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
+    expect(frameElement(container)).toBe(frame);
+    expect(posts).toHaveBeenCalledTimes(2);
+
+    // Retry reloads the frame on the agent's page; selecting another execution clears the problem.
+    fireEvent.click(getByRole("button", { name: "Retry" }));
+    await settle();
+    expect(frameElement(container)).not.toBe(frame);
+    rerender(
+      <PaseoChatFrame active scope="master" target={ARCHITECT} page="document" />,
+    );
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+  });
+
+  it("names the selected agent when readiness itself never arrives", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId, queryByTestId } = render(
+      <PaseoChatFrame active scope="leaf" target={WORKER} page="document" />,
+    );
+    await settle();
+    const frame = frameElement(container);
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+
+    // No ready report ever comes: the deadline still names the selected agent, truthfully
+    // saying the frame already shows its page, without loading it again.
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain(WORKER.agentId);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("already shows the agent's page");
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(frameElement(container)).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(WORKER_URL + "&arPage=document");
+  });
+
+  it("names nothing when no execution is selected and readiness never arrives", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId, queryByTestId } = render(
+      <PaseoChatFrame active scope="s" target={null} page="document" />,
+    );
+    await settle();
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();
+    expect(queryByTestId("paseo-frame-agent-problem")).toBeNull();
+    expect(frameElement(container).getAttribute("src")).toBe(PROJECTS_URL + "?arPage=document");
+  });
+
+  it("loads the selected agent's page once when the channel never becomes ready", async () => {
+    stubBackend([AVAILABLE]);
+    const { container, getByTestId } = render(
+      <PaseoChatFrame active scope="worker" target={WORKER} />,
+    );
+    await settle();
+    // A Chats page starts on the Projects workspace, which names no agent.
+    expect(frameElement(container).getAttribute("src")).toBe(PROJECTS_URL);
+
+    // Readiness never arrives for the selected worker: the deadline names it and loads its
+    // page exactly once, saying so.
+    await settle(PASEO_CONTROL_TIMEOUT_MS);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain(WORKER.agentId);
+    expect(getByTestId("paseo-frame-agent-problem").textContent).toContain("loaded the agent's page instead");
+    const loaded = frameElement(container);
+    expect(loaded.getAttribute("src")).toBe(WORKER_URL);
+    await settle(PASEO_CONTROL_TIMEOUT_MS * 2);
+    expect(frameElement(container)).toBe(loaded);
+  });
+});
+
 describe("Chats pane wiring", () => {
   const execution = {
     status: "running",

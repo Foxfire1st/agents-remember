@@ -1,5 +1,6 @@
 import {
   agentProblemText,
+  agentTimeoutText,
   parentProblemText,
   parsePluginMessage,
   paseoFrameUrl,
@@ -186,12 +187,26 @@ export class PaseoFrameControl {
     }));
   }
 
+  /**
+   * The selected target when the frame never became ready: wanted but never settled. Null
+   * when nothing is selected or the selection already settled — then the deadline names nothing.
+   */
+  private unansweredTarget(): PaseoAgentTarget | null {
+    return this.wanted && this.settled !== this.wanted.agentId ? this.wanted : null;
+  }
+
   /** Without a ready report, or an answer to a request, in time the control channel is unavailable. */
   private arm(): void {
     this.clearDeadline();
     this.deadline = window.setTimeout(() => {
       this.deadline = null;
+      // The unanswered selection: the pending request, or the selected target when readiness
+      // itself never arrived. Either way the deadline names it truthfully, saying whether the
+      // fallback below loads its page or the frame already names it.
+      const pending = this.pending;
       this.pending = null;
+      const target = pending ? { agentId: pending } : this.unansweredTarget();
+      if (target) this.pane.setAgentProblem(agentTimeoutText(target.agentId, this.loaded !== target.agentId));
       this.setControl("unavailable");
       this.sync();
     }, PASEO_CONTROL_TIMEOUT_MS);

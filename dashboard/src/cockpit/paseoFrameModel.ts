@@ -219,6 +219,14 @@ function parentErrorMessage(message: Record<string, unknown>): PaseoPluginMessag
   };
 }
 
+/** What the pane says when the frame never shows the agent it was asked for. When the frame
+ * already names the agent's page no second load runs, and the sentence says exactly that. */
+export function agentTimeoutText(agentId: string, fallbackLoaded: boolean): string {
+  return fallbackLoaded
+    ? `The embedded chat did not show this execution's agent "${agentId}" in time, so it loaded the agent's page instead. Retry asks the application again.`
+    : `The embedded chat did not show this execution's agent "${agentId}" in time; the frame already shows the agent's page. Retry asks the application again.`;
+}
+
 /** What the pane says when the frame cannot show the agent it was asked for. */
 export function agentProblemText(code: string, detail?: string): string {
   if (code === "agent-archived") {

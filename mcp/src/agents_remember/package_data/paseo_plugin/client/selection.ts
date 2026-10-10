@@ -18,17 +18,27 @@ export function onSelectedChats(changed: (agentIds: string[]) => void): () => vo
   return () => { selectedChatListeners.delete(changed); };
 }
 
+/**
+ * The visible selected native chats right now: agent tab identities (`workspace-tab-agent_`
+ * plus the opaque agent id) that are selected and actually on screen. Cached workspace tabs
+ * remain selected with zero bounds and are excluded. Pure read; the bridge reuses it so its
+ * display observation never runs on a candidate set older than the batch being handled.
+ */
+export function readSelectedChats(page: PluginPage): string[] {
+  const ids = new Set<string>();
+  for (const tab of page.document.querySelectorAll(SELECTED_TABS)) {
+    const bounds = tab.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0 || !tab.checkVisibility()) continue;
+    const id = tab.getAttribute("data-testid").slice(AGENT_TAB_PREFIX.length);
+    if (id) ids.add(id);
+  }
+  return [...ids].sort();
+}
+
 export function watchSelectedChats(page: PluginPage, changed: (agentIds: string[]) => void): () => void {
   let last = "";
   const publish = () => {
-    const ids = new Set<string>();
-    for (const tab of page.document.querySelectorAll(SELECTED_TABS)) {
-      const bounds = tab.getBoundingClientRect();
-      if (bounds.width <= 0 || bounds.height <= 0 || !tab.checkVisibility()) continue;
-      const id = tab.getAttribute("data-testid").slice(AGENT_TAB_PREFIX.length);
-      if (id) ids.add(id);
-    }
-    const agentIds = [...ids].sort();
+    const agentIds = readSelectedChats(page);
     const value = JSON.stringify(agentIds);
     if (value === last) return;
     last = value;
