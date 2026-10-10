@@ -11,7 +11,7 @@ from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.worktrees.worktree_contract import load_contract
 from checkpoint_landing_test_support import accumulate_master_line, checkpoint
 from test_closeout_queue import QueueFixture
-from tool_entry_point_world import MASTER, REPO, EntryPointWorld, _git
+from tool_entry_point_world import MASTER, REPO, EntryPointWorld, _git, classify
 
 
 @pytest.mark.integration
@@ -90,7 +90,12 @@ def _public(world: EntryPointWorld, tool: str, arguments: dict[str, str], out: P
     kind, payload = world.call(tool, arguments)
     (out / (tool + ".json")).write_text(json.dumps({"kind": kind, "payload": payload}, default=str))
     assert kind == "RETURNED" and payload is not None, payload
-    TOOL_RESPONSE_MODELS[tool].model_validate(payload)
+    # MIK-R130: a delivered wire answer is judged by the world's single reader, never by
+    # validating it against the whole-result model again. The `payload` arm already implies
+    # a valid whole result read back from the answer's log; the explicit `ok` assertion keeps
+    # the valid-progression expectation.
+    arm, detail = classify(tool, (kind, payload))
+    assert arm == "payload", {"arm": arm, "detail": detail}
     assert payload.get("ok") is True, payload
 
 

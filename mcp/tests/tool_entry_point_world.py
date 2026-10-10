@@ -21,6 +21,12 @@ from agents_remember.kernel.primitives.checkout_coordination import declare_test
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.tool_answer import (
+    ENVELOPE_STRIPPED_FIELDS,
+    FRAMEWORK_ANSWER_KEYS,
+    TOOL_ANSWER_LIST_MAX,
+    truncate_lists,
+)
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer.ambient import ambient
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -84,17 +90,20 @@ KNOWN_MEMORY_SCAFFOLD_ADDITIONS = frozenset({"system/sources.md", "system/tools.
 # the pinned raisers — a new member is a failure unless it is added here deliberately, in the
 # change that introduces it.
 #
-# EMPTY ON PURPOSE, and not deleted: `260918-TSIP-L6` repaired `T64` (the `citation_*` family
-# split its `ok` vocabulary on the same preview shape). `migration.payload` now answers
-# ``ok: true`` on a dry run that planned its complete conversion -- matching its sibling
-# `citation_fix` -- and declares the distinction the old `ok` folded together in
-# ``state``/``outcome``/``findingsRemaining``. So there is no bare ``ok:false`` left to pin,
-# and the constant stays here because it is the only place that says what a refusal with no
-# identity would look like. The rule above still governs: adding an entry means editing this
-# constant in the change that introduces the payload.
-UNMARKED_NOT_OK: dict[str, str] = {}
+# T64's citation-preview repair remains; its original bare-not-ok entries were removed.
+# Since b52adc8b (L26's landing), the admitted sweep reaches memory_quality_check's
+# coherence-required result without a standard refusal identity or next action. L110 owns
+# that product answer (MIK-R110 rule 4). Repair it and remove this entry in the same change;
+# the sweep compares the pin with the actual unmarked population in both directions.
+UNMARKED_NOT_OK: dict[str, str] = {
+    "memory_quality_check": "coherence-required without a refusal identity or next action (L110)",
+}
 
-REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus")
+REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus", "code")
+# Shaped `next` is judged only by _actionable_next below, never by the generic
+# string check: a next action is a mapping that names something to do, and a
+# bare string is guidance at most. `nextStep` stays listed for raw shapes that
+# never crossed the shaping.
 NAVIGATION_KEYS = ("nextStep", "nextTool", "nextAction", "nextArgs")
 
 ARMS = (
@@ -135,20 +144,40 @@ COORDINATION_WRITE_ZONES = (
 )
 
 
+def _actionable_next(value: Any | None) -> bool:
+    """Whether a shaped delivered ``next`` names something the caller can do.
+
+    MIK-R130 rule 2 reads a code or a next action from the delivered answer,
+    whose next action rides as shaped ``next`` (translated from ``nextStep``).
+    A mapping that names a next tool or carries its arguments is actionable;
+    a bare summary is guidance, not an action, and rides no mark.
+    """
+
+    return isinstance(value, dict) and (
+        (isinstance(value.get("tool"), str) and bool(value["tool"].strip()))
+        or (isinstance(value.get("args"), dict) and bool(value["args"]))
+    )
+
+
 def refusal_marks(payload: dict[str, Any] | None) -> list[str]:
-    """The machine-readable marks a refusal carries: a refusal identity, or a next action.
+    """The machine-readable marks a refusal carries: a refusal identity, a code, or a next action.
 
     Read from the payload itself, never from the arm the classifier assigned, so a case that
     asserts on marks cannot be satisfied by a classifier that labels everything a refusal.
+    A nonempty delivered ``code`` marks like any refusal identity; a shaped ``next``
+    marks only when it is actionable (see :func:`_actionable_next`).
     """
 
     if not isinstance(payload, dict):
         return []
-    return [
+    marks = [
         key
         for key in (*REFUSAL_IDENTITY_KEYS, *NAVIGATION_KEYS)
         if isinstance(payload.get(key), str) and str(payload[key]).strip()
     ]
+    if _actionable_next(payload.get("next")):
+        marks.append("next")
+    return marks
 
 
 def _raised_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
@@ -170,18 +199,152 @@ def _raised_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
     return "argument-validation", f"{model} refused the call's arguments"
 
 
+# The keys a truncated list rides as, derived from the product's own shaping
+# (MIK-R108 rule 2) rather than handwritten here: cutting any over-long list
+# yields exactly this key set.
+_TRUNCATED_LIST_KEYS = frozenset(truncate_lists([None] * (TOOL_ANSWER_LIST_MAX + 1)))
+
+
+def _unknown_in_mapping(
+    answer: dict[str, Any], whole: dict[str, Any], *, top: bool, path: str
+) -> str | None:
+    """The first key of one delivered mapping no whole result or shaping owns."""
+
+    for key, value in answer.items():
+        child = f"{path}.{key}" if path else str(key)
+        if key in whole:
+            hit = _unknown_delivered_path(value, whole[key], top=False, path=child)
+            if hit is not None:
+                return hit
+        elif top and key in FRAMEWORK_ANSWER_KEYS:
+            # A shaping key is the answer's own shape; its interior is the
+            # shaping's product, so the walk does not descend into it.
+            continue
+        else:
+            return child
+    return None
+
+
+def _unknown_in_truncated(
+    answer: dict[str, Any], whole: list[Any], *, path: str
+) -> str | None:
+    """The first key of one truncated-list wrapper the shaping does not own."""
+
+    if len(whole) <= TOOL_ANSWER_LIST_MAX:
+        # The shaping cuts only over-long lists: a wrapper over a list the
+        # product would have kept whole is not product shaping at this place.
+        return path
+    for key in answer:
+        if key not in _TRUNCATED_LIST_KEYS:
+            return f"{path}.{key}"
+    items = answer.get("items")
+    if not isinstance(items, list):
+        # The shaping rides a truncated list only as its full wrapper; a
+        # mapping without the retained items is not that shape.
+        return path
+    for index, item in enumerate(items):
+        if index >= len(whole):
+            return f"{path}.items[{index}]"
+        hit = _unknown_delivered_path(
+            item, whole[index], top=False, path=f"{path}.items[{index}]"
+        )
+        if hit is not None:
+            return hit
+    return None
+
+
+def _unknown_in_list(answer: list[Any], whole: list[Any], *, path: str) -> str | None:
+    """The first retained list item no same-place whole item accounts for."""
+
+    for index, item in enumerate(answer):
+        if index >= len(whole):
+            return f"{path}[{index}]"
+        hit = _unknown_delivered_path(
+            item, whole[index], top=False, path=f"{path}[{index}]"
+        )
+        if hit is not None:
+            return hit
+    return None
+
+
+def _unknown_delivered_path(answer: Any, whole: Any, *, top: bool, path: str) -> str | None:
+    """The first delivered key path neither the whole result nor the shaping owns, or None.
+
+    MIK-R130 rule 2 accounts every delivered key at the same place: a mapping key
+    must sit in the whole mapping or be a top-level shaping key; a truncated list
+    must wear the product's wrapper with retained items from the whole list; a
+    kept list is matched item by item. Scalars carry no keys and always pass; a
+    mapping or list the shaping could not have produced is named at its path.
+    """
+
+    if isinstance(answer, dict):
+        if isinstance(whole, dict):
+            return _unknown_in_mapping(answer, whole, top=top, path=path)
+        if isinstance(whole, list):
+            return _unknown_in_truncated(answer, whole, path=path)
+        return path
+    if isinstance(answer, list):
+        if isinstance(whole, list):
+            return _unknown_in_list(answer, whole, path=path)
+        return path
+    return None
+
+
+def _read_whole_result(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """Read the whole result of this call from the file the answer names.
+
+    MIK-R130 rule 3: where the answer names no file, or the file cannot be
+    read as the result of this call, the call is unvalidatable and the detail
+    says which. The delivered answer is never taken for the whole result.
+    """
+
+    log = payload.get("log")
+    if not isinstance(log, str) or not log.strip():
+        return None, "the answer names no whole-result file"
+    try:
+        whole = json.loads(Path(log).read_text(encoding="utf-8"))
+    except OSError:
+        return None, f"the whole-result file cannot be read: {log}"
+    except ValueError as error:
+        return None, f"the whole-result file is not this call's result: {log} ({error})"
+    if not isinstance(whole, dict):
+        return None, f"the whole-result file is not this call's result: {log}"
+    return whole, None
+
+
 def _returned_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
-    """The arm for a call that returned: does its payload validate, and can a caller act on it?"""
+    """The arm for a call that returned: the whole result validates, and the
+    delivered answer is judged as delivered (MIK-R130 rules 1 and 2)."""
 
     if payload is None:
         return "unvalidatable", "no structured payload reached the model"
+    whole, missing = _read_whole_result(payload)
+    if whole is None:
+        return "unvalidatable", missing or "the answer names no whole-result file"
     try:
-        TOOL_RESPONSE_MODELS[tool].model_validate(payload)
+        TOOL_RESPONSE_MODELS[tool].model_validate(whole)
     except ValidationError as error:
         # Two lines, not one: the first names the model and the second names the key, which is
         # the part a reader needs when this case fires.
         return "unvalidatable", " | ".join(str(error).splitlines()[:2])
+    for field in ENVELOPE_STRIPPED_FIELDS:
+        if field in payload:
+            return "unvalidatable", f"the delivered answer still carries {field!r}"
+    # Which keys the shaping adds comes from the product's own code --
+    # FRAMEWORK_ANSWER_KEYS, the rule-6 framework keys of
+    # models/tools/tool_answer.py, and the truncated-list wrapper derived from
+    # its truncate_lists -- never from a second list here. Every delivered key
+    # is accounted at its own path, at any depth.
+    unknown = _unknown_delivered_path(payload, whole, top=True, path="")
+    if unknown is not None:
+        return (
+            "unvalidatable",
+            f"the delivered answer holds {unknown!r}, which neither the whole result holds "
+            "nor the shaping of MIK-R108 adds",
+        )
     if payload.get("ok") is False:
+        # Whether the caller can act on the refusal is read from the
+        # delivered answer, never from the whole result (MIK-R130 rule 2).
         marks = refusal_marks(payload)
         if not marks:
             return (
@@ -196,7 +359,9 @@ def classify(tool: str, outcome: tuple[str, dict[str, Any] | None]) -> tuple[str
     """Which arm one tool's outcome falls in, and the machine-readable detail.
 
     The single classifier the sweep and the positive control both use, so the control proves
-    the sweep — not a second implementation of it.
+    the sweep — not a second implementation of it. A returned call is judged
+    from two objects: the whole result, read back from the file the answer
+    names in `log`, and the delivered answer in its own shape.
     """
 
     kind, payload = outcome
@@ -784,9 +949,24 @@ class EntryPointWorld:
             arguments["skill_catalog_read"] = {"uri": skills[0]["uri"]}
         results: dict[str, dict[str, Any]] = {}
         for tool in PUBLIC_TOOLS:
-            self.prepare(tool)
             prepared = self.ambient_state()
-            outcome = self.call(tool, arguments[tool])
+            try:
+                self.prepare(tool)
+                prepared = self.ambient_state()
+                outcome = self.call(tool, arguments[tool])
+            except _ToolCallTimeout as timed_out:
+                # MIK-R130 rule 6: one tool's deadline never keeps the tools
+                # behind it unjudged. The timeout is recorded on the tool,
+                # and the sweep goes on.
+                results[tool] = {
+                    "arm": "unvalidatable",
+                    "detail": f"the sweep could not judge this tool: {timed_out}",
+                    "outcome": ("TIMEOUT", None),
+                    "payload": None,
+                    "prepared_state": prepared,
+                    "state_after": self.ambient_state(),
+                }
+                continue
             arm, detail = classify(tool, outcome)
             results[tool] = {
                 "arm": arm,

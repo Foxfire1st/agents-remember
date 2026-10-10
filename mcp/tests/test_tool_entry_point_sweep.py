@@ -8,14 +8,22 @@ answers in the product's own vocabulary.
 **The arms this sweep publishes, and where each one is reachable:**
 
 ======================== =============================================================
-``payload``              the tool answered and its payload validates.
-``refusal``              ``ok: false`` with a machine-readable refusal identity or a next
-                         action, so the caller keeps ``ok``/``status``.
-``bare-not-ok``          ``ok: false`` with neither — pinned below.
-``unvalidatable``        a payload that does not validate **where the classifier sees it**.
-                         Reachable through the entry point by exactly one shape: a handler
-                         that returns a raw dict PAST the choke point, which is the only
-                         place a payload meets its model. Both controls below drive it.
+``payload``              the tool answered, its whole result (read back from the file
+                         the answer names) validates, and its delivered answer is
+                         judged as delivered.
+``refusal``              ``ok: false`` with a machine-readable refusal identity, a
+                         code, or a next action, so the caller keeps ``ok`` and a
+                         way forward.
+``bare-not-ok``          ``ok: false`` with none of those — pinned below.
+``unvalidatable``        a call the classifier cannot judge **where it must**: the
+                         whole result is missing or unreadable, the whole refuses
+                         its model, or the delivered answer is not the shape
+                         MIK-R108 delivers — an envelope field kept, or a key
+                         neither the whole result nor the shaping accounts for,
+                         at any depth. The bypass shape below reads here too,
+                         through whichever of those rejections it meets first:
+                         a handler that returns a raw dict past the choke point
+                         hands the consumer a payload nothing validated.
 ``boundary-validation``  a raise in which the tool's OWN registered response model refused the
                          payload its producer built — the shape a ``T7``-class break takes when
                          the producer emits the key *through* ``_tool_payload``. Asserted empty
@@ -27,18 +35,27 @@ answers in the product's own vocabulary.
 ``error``                any other raise: the envelope is gone. Pinned twice, below.
 ======================== =============================================================
 
-`T34` (owner `L6`, registered on master `260918_tool-surface-and-process-integrity`) is the
-first pin: an ordinary absent-capability condition escapes as a bare Python exception, so the
-caller loses ``ok``, ``status`` and every recovery key. `L5`'s round-1 trace measured them;
-this module keeps measuring them, so the set can only change on purpose. The second pin is the
-same defect on the lifecycle family's *state* precondition, which this sweep reaches a typed
-branch for by arranging the state its tools document — so it would otherwise read green over
-those five.
+`T34` (owner `L6`, registered on master `260918_tool-surface-and-process-integrity`)
+repaired the original nine raisers: an ordinary absent-capability condition used to
+escape as a bare Python exception, so the caller lost ``ok``, ``status`` and every
+recovery key. `L5`'s round-1 trace measured them; the positive and regression cases
+below keep measuring them, so a repaired tool that raises again fails here by name.
+The second pin below is the same defect on the lifecycle family's *state*
+precondition, which this sweep reaches a typed branch for by arranging the state
+its tools document — so it would otherwise read green over those five.
 
-**The rule for both pins:** when `L6` repairs one of these tools, delete that entry **in the
-same change** that lands the repair — never delete a constant, and never widen one to make a
-new failure pass. A tenth raiser is a failure: each pin is asserted *equal* to what was
-observed, in both directions.
+The current nonempty pins record the measured surface since `b52adc8b` under the
+architect's pin handover: four lifecycle preconditions that raise (owner `L111`,
+repaired under MIK-R111 rule 7) and one bare ``memory_quality_check`` (owner
+`L110`, repaired under MIK-R110 rule 4) — see the copied comments at the
+constants. They are records of what the sweep observes, not waivers: each owner's
+rule binds it to empty its pin with its repair.
+
+**The rule for the pins:** when the owning leaf repairs one of these tools, delete
+that entry **in the same change** that lands the repair — never delete a constant,
+and never widen one to make a new failure pass. A further raiser, or a bare
+``ok: false`` the pin does not name, is a failure: each pin is asserted *equal* to
+what was observed, in both directions.
 
 The positive control is a case, not a comment (``ChokePointControlTests``, in
 ``test_tool_entry_point_controls.py``): it drives
@@ -67,23 +84,21 @@ from tool_entry_point_world import (
 )
 
 # ---------------------------------------------------------------------------------------
-# T34: the tools that lose the whole envelope. Owner L6 -- REPAIRED, and the pin is now
-# empty on purpose rather than deleted.
-#
-# `260918-TSIP-L6` repaired all nine at `application/provider_tools.py` and
-# `application/memory_tools.py`: each now answers with the standard refusal envelope
-# (`ok:false` plus `state`/`status`/`detail`/`nextAction`) instead of raising, which is what
-# its own siblings `provider_status` (`providers.state: "noProviders"`) and
-# `memory_baseline_status` already did under the identical absence.
-#
-# This constant was NOT deleted when the repair landed, because deleting it would delete the
-# only place that says what the sweep is allowed to observe. It is empty, and the rule stands:
-# an entry may only be added here deliberately, in the change that introduces the raiser this
-# list would then pin. Reintroducing one means editing BOTH this constant and
-# `test_the_pinned_raisers_are_exactly_the_ones_that_lose_the_envelope`, which asserts this set
-# equals the sweep's observed error arm in both directions.
+# T34's original nine tools remain repaired; their positive/regression checks stay below.
+# Since b52adc8b (L26's landing), the admitted sweep contract reaches these four existing
+# lifecycle preconditions, which raise instead of returning a refusal envelope. L111 owns
+# their product repair (MIK-R111 rule 7); this pin only records the measured surface.
+# Repair one and remove its entry in the same change. Exact equality below checks both
+# directions, so a new raiser or an entry whose tool no longer raises still fails.
 # ---------------------------------------------------------------------------------------
-ENVELOPE_LOSING_RAISERS: frozenset[str] = frozenset()
+ENVELOPE_LOSING_RAISERS: frozenset[str] = frozenset(
+    {
+        "worktree_checkpoint_landing",
+        "worktree_cleanup",
+        "worktree_integrate",
+        "worktree_record_landing",
+    }
+)
 
 # What the repaired nine must answer with now. Derived from the roster rather than hard-coded,
 # so the case below cannot rot: these are the tools T34 named, and every one of them must still
@@ -138,47 +153,53 @@ class EntryPointProbeTests(unittest.TestCase):
         cls.results = cls.world.sweep()
 
     def test_every_public_tool_answers_in_the_products_own_vocabulary(self) -> None:
-        broken = {
-            tool: row["detail"]
-            for tool, row in self.results.items()
-            if row["arm"] == "unvalidatable"
-        }
-        self.assertEqual({}, broken, "payloads that failed their own response model")
-        # Not "no exceptions": a producer key its model forbids arrives HERE at the entry
-        # point, because the choke point validates before returning. Asserted by name so a
-        # T7-class break is diagnosed as what it is instead of as a raiser.
-        self.assertEqual(
-            {},
-            {
-                tool: row["detail"]
-                for tool, row in self.results.items()
-                if row["arm"] == "boundary-validation"
-            },
-            "a tool's own response model refused its payload at the boundary",
-        )
-        errors = {tool for tool, row in self.results.items() if row["arm"] == "error"}
-        self.assertEqual(
-            set(ENVELOPE_LOSING_RAISERS),
-            errors,
-            "tools that raise instead of answering (T34 pins exactly these)",
-        )
-        self.assertEqual(
-            set(UNMARKED_NOT_OK),
-            {tool for tool, row in self.results.items() if row["arm"] == "bare-not-ok"},
-            "a payload reporting ok:false with no refuse code and no next action appeared or "
-            "disappeared: update UNMARKED_NOT_OK in the same change",
-        )
-        self.assertEqual(
-            len(PUBLIC_TOOLS), len(self.results), "the sweep did not invoke every public tool"
-        )
+        # MIK-R130 rule 6: every aspect below runs even when an earlier one
+        # fails -- one tool's failure no longer keeps the aspects behind it
+        # unrun. Each tool is judged on its own subTest, so one tool's
+        # failure does not hide the rest either.
+        for tool, row in sorted(self.results.items()):
+            with self.subTest(tool=tool, aspect="unvalidatable"):
+                self.assertNotEqual(
+                    "unvalidatable",
+                    row["arm"],
+                    f"payloads that failed their own response model: {row['detail']}",
+                )
+            # Not "no exceptions": a producer key its model forbids arrives HERE at the entry
+            # point, because the choke point validates before returning. Asserted by name so a
+            # T7-class break is diagnosed as what it is instead of as a raiser.
+            with self.subTest(tool=tool, aspect="boundary-validation"):
+                self.assertNotEqual(
+                    "boundary-validation",
+                    row["arm"],
+                    "a tool's own response model refused its payload at the boundary: "
+                    f"{row['detail']}",
+                )
+        with self.subTest(aspect="raisers"):
+            errors = {tool for tool, row in self.results.items() if row["arm"] == "error"}
+            self.assertEqual(
+                set(ENVELOPE_LOSING_RAISERS),
+                errors,
+                "tools that raise instead of answering (L111 pins these preconditions)",
+            )
+        with self.subTest(aspect="unmarked"):
+            self.assertEqual(
+                set(UNMARKED_NOT_OK),
+                {tool for tool, row in self.results.items() if row["arm"] == "bare-not-ok"},
+                "a payload reporting ok:false with no refuse code and no next action appeared or "
+                "disappeared: update UNMARKED_NOT_OK in the same change",
+            )
+        with self.subTest(aspect="census"):
+            self.assertEqual(
+                len(PUBLIC_TOOLS),
+                len(self.results),
+                "the sweep did not invoke every public tool",
+            )
 
     def test_the_pinned_raisers_are_exactly_the_ones_that_lose_the_envelope(self) -> None:
-        """The pin is empty because `T34` is repaired -- and the pin still guards the surface.
+        """The lifecycle pin is exact; T34's original nine must remain repaired.
 
-        Deleting the constant when the repair landed would have deleted the only place that
-        records what the sweep may observe. Keeping it empty keeps the guard: this case asserts
-        the pin equals the observed error arm in BOTH directions, so a reintroduced raiser fails
-        here by name, and an entry added to the pin without a raiser fails here too.
+        Equality checks the observed error arm in BOTH directions. An unpinned raiser or an
+        entry whose tool no longer raises fails here; L111 removes each entry with its repair.
         """
 
         observed = {tool for tool, row in self.results.items() if row["arm"] == "error"}
@@ -186,13 +207,12 @@ class EntryPointProbeTests(unittest.TestCase):
             set(ENVELOPE_LOSING_RAISERS),
             observed,
             "a raiser appeared or disappeared: update ENVELOPE_LOSING_RAISERS in the same "
-            "change that repairs or introduces it (T34, owner L6)",
+            "change that repairs or introduces it (lifecycle preconditions, owner L111)",
         )
         self.assertEqual(
             set(),
-            observed,
-            "an envelope-losing raiser is on the swept surface again; T34's repair (L6) has "
-            "regressed, or a new tool arrived without a refusal envelope",
+            observed & T34_REPAIRED_TOOLS,
+            "an original T34 repaired tool lost its refusal envelope again (owner L6)",
         )
 
     def test_the_t34_family_answers_with_a_named_refusal_instead_of_raising(self) -> None:

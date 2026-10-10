@@ -23,10 +23,11 @@ from agents_remember.kernel.primitives.checkout_coordination import declare_test
 from agents_remember.mcp.registration import core as core_registration
 from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.models.tools.tool_answer import ENVELOPE_STRIPPED_FIELDS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from pydantic import ValidationError
-from tool_entry_point_world import REPO, EntryPointWorld, _ToolCallTimeout, classify
+from tool_entry_point_world import REPO, EntryPointWorld, _ToolCallTimeout, classify, refusal_marks
 
 from mcp import types
 
@@ -149,6 +150,146 @@ class ChokePointControlTests(unittest.TestCase):
         arm, detail = classify("ping", (kind, payload))
         self.assertEqual("unvalidatable", arm, detail)
         self.assertIn("undeclaredControlKey", detail)
+
+    def test_a_delivered_answer_that_keeps_an_envelope_field_is_unvalidatable(self) -> None:
+        """MIK-R130 rule 2: the delivered answer holds none of the envelope fields.
+
+        Each stripped field is tried on its own subTest, so one field's case
+        never keeps the others unrun (rule 6). The key is judged as
+        delivered: even `operation`, which the whole result holds, is
+        unvalidatable in the answer.
+        """
+
+        for field in ENVELOPE_STRIPPED_FIELDS:
+            with self.subTest(field=field):
+                answer = {**self.good, field: "stowaway"}
+                arm, detail = classify("ping", ("RETURNED", answer))
+                self.assertEqual("unvalidatable", arm, detail)
+                self.assertIn(field, detail)
+
+    def test_an_answer_without_a_readable_whole_result_is_unvalidatable(self) -> None:
+        """MIK-R130 rule 3: a missing whole result is a finding, never a fallback.
+
+        Where the answer names no file, or the file cannot be read as the
+        result of this call, the call is unvalidatable and the detail says
+        which. The sweep never takes the delivered answer for the whole
+        result -- so even a well-formed answer with no file stays
+        unvalidatable.
+        """
+
+        nameless = {key: value for key, value in self.good.items() if key != "log"}
+        arm, detail = classify("ping", ("RETURNED", nameless))
+        self.assertEqual("unvalidatable", arm, detail)
+        self.assertIn("names no whole-result file", detail)
+        missing = {**self.good, "log": "does-not-exist/no-such-detail.json"}
+        arm, detail = classify("ping", ("RETURNED", missing))
+        self.assertEqual("unvalidatable", arm, detail)
+        self.assertIn("cannot be read", detail)
+
+    def test_a_key_inside_a_kept_nested_mapping_is_unvalidatable(self) -> None:
+        """MIK-R130 rule 2 at depth: a kept mapping does not launder a new key.
+
+        The top-level ``servingBuild`` key sits in the whole result, so the
+        old top-level-only check waved this through; the recursive walk names
+        the nested path.
+        """
+
+        kind, answer = self.world.call("server_info", {})
+        self.assertEqual("RETURNED", kind)
+        assert answer is not None
+        self.assertIsInstance(answer.get("servingBuild"), dict)
+        self.assertTrue(answer["servingBuild"], "the control needs a real nested mapping")
+        corrupted = {
+            **answer,
+            "servingBuild": {**answer["servingBuild"], "undeclaredNestedKey": 1},
+        }
+        arm, detail = classify("server_info", ("RETURNED", corrupted))
+        self.assertEqual("unvalidatable", arm, detail)
+        self.assertIn("servingBuild.undeclaredNestedKey", detail)
+
+    def test_a_key_inside_a_retained_list_item_is_unvalidatable(self) -> None:
+        """MIK-R130 rule 2 at depth: a retained list item does not launder a new key.
+
+        The fixture leaf's checklist step sits in the whole result, so the old
+        top-level-only check waved this through; the recursive walk names the
+        indexed path.
+        """
+
+        world = EntryPointWorld()
+        self.addCleanup(world.close)
+        world.build()
+        kind, answer = world.call("task_doc", world.benign()["task_doc"])
+        self.assertEqual("RETURNED", kind)
+        assert answer is not None
+        steps = answer.get("steps")
+        self.assertIsInstance(steps, list)
+        self.assertTrue(
+            steps and isinstance(steps[0], dict), "the control needs a real retained item"
+        )
+        corrupted = {**answer, "steps": [{**steps[0], "undeclaredStepKey": 1}, *steps[1:]]}
+        arm, detail = classify("task_doc", ("RETURNED", corrupted))
+        self.assertEqual("unvalidatable", arm, detail)
+        self.assertIn("steps[0].undeclaredStepKey", detail)
+
+    def test_a_wrapper_over_an_uncut_list_is_unvalidatable(self) -> None:
+        """MIK-R130 rule 2 at depth: the shaping cuts only over-long lists.
+
+        A count/items wrapper over a list the product would have kept whole is
+        not product shaping at that place, even with exactly the wrapper keys.
+        """
+
+        kind, answer = self.world.call("server_info", {})
+        self.assertEqual("RETURNED", kind)
+        assert answer is not None
+        repos = answer.get("allowedRepoIds")
+        self.assertIsInstance(repos, list)
+        assert isinstance(repos, list)
+        corrupted = {
+            **answer,
+            "allowedRepoIds": {"count": len(repos), "items": list(repos), "truncated": True},
+        }
+        arm, detail = classify("server_info", ("RETURNED", corrupted))
+        self.assertEqual("unvalidatable", arm, detail)
+        self.assertIn("allowedRepoIds", detail)
+
+    def test_a_code_only_refusal_carries_its_identity(self) -> None:
+        """MIK-R130 rule 2: a delivered code marks a refusal by itself."""
+
+        answer = {**self.good, "ok": False, "code": "entry-point-probe"}
+        self.assertIn("code", refusal_marks(answer))
+        arm, detail = classify("ping", ("RETURNED", answer))
+        self.assertEqual("refusal", arm, detail)
+
+    def test_a_next_only_refusal_carries_its_next_action(self) -> None:
+        """MIK-R130 rule 2: a shaped next that names a next tool marks a refusal by itself."""
+
+        answer = {**self.good, "ok": False, "next": {"tool": "server_info", "args": {}}}
+        self.assertIn("next", refusal_marks(answer))
+        arm, detail = classify("ping", ("RETURNED", answer))
+        self.assertEqual("refusal", arm, detail)
+
+    def test_an_empty_or_guidance_only_next_refusal_stays_bare(self) -> None:
+        """MIK-R130 rule 2: only a genuinely actionable next action marks.
+
+        An empty mapping, a summary with no tool and no arguments, a bare
+        string, and a blank code are guidance or nothing — not something the
+        caller can act on.
+        """
+
+        for next_value in (
+            {},
+            {"summary": "entry-point sweep"},
+            {"tool": "  ", "args": {}},
+            "follow up with the owner",
+        ):
+            with self.subTest(next_value=next_value):
+                answer = {**self.good, "ok": False, "next": next_value}
+                self.assertEqual([], refusal_marks(answer))
+                arm, detail = classify("ping", ("RETURNED", answer))
+                self.assertEqual("bare-not-ok", arm, detail)
+        answer = {**self.good, "ok": False, "code": "   "}
+        self.assertEqual([], refusal_marks(answer))
+        self.assertEqual("bare-not-ok", classify("ping", ("RETURNED", answer))[0])
 
     def test_an_invalid_argument_lands_in_its_own_arm_and_names_the_callers_side(self) -> None:
         """The two validation refusals share a message shape; only the model separates them.
