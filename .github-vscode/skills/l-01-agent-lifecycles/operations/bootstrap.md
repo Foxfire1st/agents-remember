@@ -38,7 +38,7 @@ workspace, not about a task:
 - Which code repository the developer means, and its absolute root.
 - The resolved `coordinationRoot` and `workspaceRoot`, from `server_info`.
 - Whether a memory root already resolves for that repository, and what state it is in.
-- The developer's decisions, asked one at a time and in plain language:
+- The developer's decisions, asked in plain language:
   1. which code branch is the foundation (the **spear**) of the repository's memory;
   2. whether they are scaffolding a new memory repo or pointing at an existing one;
   3. whether providers should index now or be deferred.
@@ -59,8 +59,8 @@ Each step names the surface that owns it. This operation **runs** that surface a
    computed by adoption rather than authored by hand.
 2. **Establish the resolved context, or report exactly which fact is missing.** `server_info` answers
    the coordination root and the allowed repositories; `context_packet` answers whether memory
-   resolves. When it does not, that is step 3, not a reason to guess a path.
-3. **Take the repository's decisions and confirm them out loud.** The spear-branch choice is the one
+   resolves.
+3. **Take the repository's decisions and record them.** The spear-branch choice is the one
    that matters: memory is scaffolded and verified against that branch's state, and changing the spear
    later is a separate carryover operation, not an edit. Record the answer as the branch the memory
    repo's initial branch is named after.
@@ -73,16 +73,10 @@ Each step names the surface that owns it. This operation **runs** that surface a
 6. **Reach the repository's knowledge foundation.** The foundation — the authored records under
    `knowledge/` in the memory repository, as distinct from the onboarding cards and from the baseline — is the
    curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the read-and-report
-   carrier that exists for it before a task does**: the roles admitted without a task document are the
-   taskless seats `bootstrap`, `chat`, `terminal` and — since the developer's 2026-09-24 ruling —
-   `curator`; every other role is refused (`400 task-binding-required`, "named role scope is
-   required"). So read the state first: the `knowledge` block `memory_init` returns says where the
-   repository's foundation lives and what a read of that location finds now — `not-recorded`,
-   `recorded` at an exact identity, `unusable`, or a refused admission with its own next action.
-   Report which of those it is, whether the curator's run has happened, and hand the authoring on: to
-   a **taskless curator session** for a repository with no task at all, to a curator opened on a
-   **task document** for a real task, or to the taskless writer an instructed session holds — never to
-   this seat, which authors no records.
+   carrier that exists for it before a task does**: read the state first — `not-recorded`,
+   `recorded` at an exact identity, `unusable`, or a refused admission with its own next action —
+   report which of those it is, whether the curator's run has happened, and hand the authoring on —
+   never to this seat, which authors no records.
    **The knowledge step is not conditional on this operation's other steps**: it needs a memory line
    that resolves `HEAD`, not an onboarding corpus and not an adopted baseline, so a repository whose
    knowledge begins before its onboarding is a supported order rather than a defect. Nothing about it

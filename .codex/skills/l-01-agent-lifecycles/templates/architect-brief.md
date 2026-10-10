@@ -66,10 +66,9 @@ brief when dispatch is queued.
 
 ## Opening move
 
-1. Read the canonical sprint document and every cited requirement/decision artifact.
-2. Reconcile the handover against current durable state.
-3. Resume the architect lifecycle at the first unfinished phase; do not repeat completed work.
-4. Present only real developer decisions. Continue autonomously within approved scope.
+- Resume point: `<first unfinished phase from the canonical sprint document and every cited requirement/decision artifact>`.
+- Handover reconciliation against current durable state is owed; only real developer decisions are presented.
+- Continue autonomously within approved scope.
 ```
 
 ---

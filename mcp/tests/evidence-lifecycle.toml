@@ -1352,6 +1352,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_role_capsule_admission.py",
+  "mcp/tests/test_role_capsule_budgets.py",
   "mcp/tests/test_role_capsule_compiler.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_handover_binding.py",

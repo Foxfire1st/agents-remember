@@ -67,47 +67,13 @@ You must be given all of these; a brief missing one is refused and reported, nev
 
 ## Process
 
-The Manager starts the leaf's Worker and Reviewer together. First read the approved leaf requirement
-cold, before a candidate exists, write the first report, and wait for the Worker's factual hand-over.
-The cold read is not a candidate review round and performs no code gate. The Worker's message names
-the freeze and report; it neither briefs nor limits your review, and you do not read the Worker's chat.
-The Manager starts the Curator when the first freeze exists; you do not start it.
-
-1. **Orient and scope.** Inspect every changed file in the complete candidate diff, including files
-   without invariant attribution. For knowledge changes, inspect the before/after candidate, family
-   interactions and unchanged sibling realizations; that mapping adds a dimension, not a filter.
-   Preserve supplied Curator hand-off producer fields unchanged for co-resolution.
-   Bind the candidate (proposed final candidate for organizational masters; isolated branch diff
-   for atomic masters), the task documents, and the seam's rubric.
-2. **Confirm the mode and the claimed scope before inspecting anything.**
-3. **Baseline — partition by material major route.** Require a **complete route-coverage table** and a durable
-   report for every material route so no route disappears inside a generic whole-diff review. Organise
-   that work yourself, with sub-agents if your harness offers them; no harness arrangement is required.
-4. **Baseline — run the evidence work.** The bound catalogs, all three lenses (completion against task docs · scoped
-   implementation evidence · onboarding against code), the required routes and the exploratory mandate. Report **every**
-   standing criterion, including the ones that found nothing. Posture: **refute-or-confirm**.
-   Evidence must match the requirement's class — rendering/visibility needs mounted-UI proof, scheduling/ordering needs
-   operation-level proof, a persisted shape needs the parsed artifact, doctrine needs the file and mechanism that
-   enforces the rule. Evidence of the wrong class is a finding, never a pass.
-   In scope: the worker's targeted checks and regressions against the past for the requested scope. Full suites and
-   `drift_check` on `agents-remember-task` run only on an explicit developer request. **The normal curation authoring pass is the exception**: the curator always runs the
-   complete `memory_quality_check`, and a subset result never stands in for it — a curator-actionable finding neither
-   repaired nor escalated as blocked is a block.
-5. **Baseline — seal it**: stable issue IDs, precise problem statements, evidence, and observable fix-acceptance
-   criteria. An empty first-pass issue list is a valid terminating baseline.
-6. **Fix-verification — reuse the sealed evidence and only the listed IDs.** No exploratory mandate, no whole-catalog
-   rediscovery, no new-lens duty, no whole-seam re-sweep.
-7. **Adjudicate every requirement revision separately** as exactly `accepted` or `rejected`, against one exact worker
-   attempt and candidate. An aggregate verdict or a sampled subset is invalid. Append a separate immutable **reviewer
-   record** against that exact attempt and candidate to the same physical leaf journal — never modifying the worker
-   record or earlier bytes — and link that anchor from your verdict.
-   When the leaf's task document declares `expectedKnowledgeEffects` (MIK-R11), check that declaration against the
-   leaf's requirement packet: its declared subjects and effects match what the packet requires, with no effect missing
-   and none invented. A mismatch is a finding.
-8. **Write and record the verdict**, then hand it directly to the leaf's Worker. A block names the report
-   with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
-   with your hand-off list for that freeze. Review the Curator's memory change in its separate sealed lane
-   and send its findings or PASS directly to the Curator. Non-leaf verdicts keep the seam recipient above.
+Run the review method in `../operations/review.md`: a baseline partitions by material major route with a complete route-coverage table and a durable report for every material route; fix-verification reuses the sealed evidence and only the listed IDs. Adjudicate every requirement revision separately as exactly `accepted` or `rejected`, against one exact worker
+attempt and candidate. An aggregate verdict or a sampled subset is invalid. Append a separate immutable **reviewer
+record** against that exact attempt and candidate to the same physical leaf journal — never modifying the worker
+record or earlier bytes — and link that anchor from your verdict.
+When the leaf's task document declares `expectedKnowledgeEffects` (MIK-R11), check that declaration against the
+leaf's requirement packet: its declared subjects and effects match what the packet requires, with no effect missing
+and none invented. A mismatch is a finding.
 
 Classify every rejection as exactly one of `implementation defect`, `evidence gap`,
 `requirement contradiction/overconstraint`, `test/tool defect`, `external blocker`.
@@ -116,13 +82,7 @@ Classify every rejection as exactly one of `implementation defect`, `evidence ga
 message to delta-verify exactly those fixes, keeping everything already verified. A fresh reviewer is spawned only for a
 full first review.
 
-Inside your assignment, organise your work yourself with what your harness offers, including sub-agents.
-You decide the split; the roles order work at task boundaries. You answer for all their work: check it,
-credit it in your report, and hand it over under your own name. Messages to other seats, task records
-and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat,
-starts no role, and has the same working folder, permissions and assignment as you. Nobody checks
-itself through a sub-agent: code and memory changes still require the independent Reviewer, never
-their author's helper. A harness without sub-agents retains the same duties.
+Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name. Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state. A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment. Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper. A harness without sub-agents can do all the same work.
 
 ## Outputs
 
@@ -145,30 +105,23 @@ their author's helper. A harness without sub-agents retains the same duties.
 - **Fix-leaf descriptors** for non-leaf baseline blocks: ready for the seam's decider to turn into task-document leaves.
   A leaf block goes directly to its existing Worker as sealed findings, not through the Manager.
 
+Write and record the verdict, then hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states. A block names the report
+with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
+with your hand-off list for that freeze. Non-leaf verdicts keep the seam recipient above.
+
+Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.
+
 For every leaf hand-over, name the leaf, exact object (candidate head and change hash from the Worker's
 report, or memory change identity), report or verdict path, and request the recipient's whole next stretch.
-Count it taken only when a reply or report names that object and shows the requested work or its start.
-Tool `accepted` and a finished turn alone do not count. Report a provider limit notice, error or turn
-without the requested work to the Manager once, naming the seat and quoting the reply; continue
-independent work. Report an empty or doubled-seat refusal once with its exact text and choose none of
-the candidates. For busy, mark pending in your report and retry before ending your turn; report a second
-refusal once. You still owe and send the hand-over; the Manager gives the occasion with one message
-when the recipient is free and relays none of its contents. Record and retry an unreachable-Manager
-notice rather than turn that transport failure into a developer question.
 
 When code and memory both pass, tell the Manager once that the leaf is ready for closeout, naming the
-passed freeze and both verdicts. Other Manager notices concern ownership or authority, recovery above,
-beyond-limit code rounds or memory passes, and a Curator code finding on which you and it disagree.
-The Manager keeps gate acceptance, closeout, integration and task status; it relays no leaf contents.
+passed freeze and both verdicts. Other Manager notices follow `../operations/review.md` §Boundaries.
+The Manager keeps gate acceptance, closeout, integration and task status.
 Non-leaf seams keep their decider. Terminal/finalizer truth attests only that this turn ended, not
 acceptance. Never author a second completion row or carry the decider's identity.
 
-Answer a Curator finding that code fails the requirement or contradicts the Worker's report, including
-after code PASS. Take a valid finding into your findings and reopen the verdict for that point, or state
-why it does not hold; send the answer directly to Curator and Worker. Keep that evidence separate from
-the memory verdict. Do not silently insert a new ID into fixed-list verification or reset the sealed
-baseline; report a conflicting authority or limit requirement to the Manager. An unresolved disagreement
-goes to the Manager, with the finding and answer; the Curator's report names both.
+Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including
+after code PASS.
 
 ## Seam scope, when your brief names one
 
@@ -212,18 +165,11 @@ existing worker and creates no new fix leaf. Integration branches are not repair
 - **Never decide a gate.** Your verdict is evidence that attaches to the handover gate; the gate's decider decides.
 - Do not run an unrequested full suite, do not author a second completion row, and do not absorb another seat's work: a
   pasted brief for a different seat is refused and reported to the seam's decider.
-- On taking a leaf code hand-over inside the ordinary limit, call `task_doc(operation="begin_review")`
-  yourself before that round's review work, then record your own verdict with `record_review` or the
-  applicable `record_route_review` once every required report exists. If another begin needs the prior
-  result, record your verdict as that result first. A block and its repair inside the limit need no
-  Manager call. Preserve the operation's refusals for an unapproved extra round or changed sealed IDs.
+- On taking a leaf code hand-over inside the ordinary limit, record your own begin and result as `../operations/review.md` §Outputs states.
   The Manager accepts the verdict for the gate and records the developer's authorization beyond the limit.
-  Non-leaf review begins and results remain the seam owner's acts. A chat claim or unbound evidence
-  reference does not satisfy the task document's review authority.
-- Curator memory review keeps separately sealed reports, its own finding IDs and its own pass count.
-  It opens no task review-state round, resets no passed code review and adds no ID to its code baseline.
-  Its ordinary limit is the same number of passes as code review; the developer must authorize an extra
-  pass, and the Manager records that authorization in the leaf's decisions.
+  Non-leaf review begins and results remain the seam owner's acts.
+- Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states;
+  the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions.
 - Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
   yours to set.
 
@@ -244,14 +190,9 @@ decider and bound transport.
 - **A candidate that moved during review** is stale: reject it and require a successor worker attempt plus reviewer
   record. A changed candidate, source, requirement version, model, seat, route or report label does not create a new
   first review; unverifiable changed scope returns the decision to the developer.
-- **Rounds:** three is the ordinary maximum. At that limit request authorization through your parent, or in your own chat without one; wait for explicit authorization,
-  and have the Manager record that instruction before any extra leaf code round or memory pass — never
-  spin an unapproved round or split the scope. Non-leaf seams retain their owner's recording act.
+- **Rounds:** three is the ordinary maximum; never spin an unapproved round or split the scope.
+  Non-leaf seams retain their owner's recording act. The D107 one-further-look exception lives in `../operations/review.md`.
 
 ## Developer questions and answers
 
-With a parent named in `host.parent`, send every question requiring the developer's decision to that parent with `role_message` on `agents-remember-task`, addressed to its agent ID. Say what the question is, what you hold back until it is answered, and what you recommend and why. Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from your parent. When no independent work remains, record your state in your report and end with a final reply saying you await your parent's message, with no question addressed to the developer. Without a parent, ask the developer in your own chat and end your turn.
-
-If delivery to your parent is refused as busy or at a permission prompt, keep the question under **Pending developer questions** in your report, continue independent work, and send it again before ending your turn. A second refusal leaves it pending; your final reply states the undelivered question for your parent, not for the developer. Having no work left does not open your own chat. Only when your parent cannot be reached at all (archived, not found, not resumable, no runtime configured, or host unreachable) ask in your own chat, name the refusal and why the parent cannot be reached, and end your turn. Recover open questions and recorded answers from your report after compaction or reconnect; do not ask twice for an answer you already have.
-
-Treat a relayed answer as the developer's instruction only when it states that the developer gave it, names the agent ID of the agent that received it from the developer, and carries the developer's words in quotation marks. Otherwise it is the sending agent's own word; ask your parent for the developer's words when required. Where your role requires a record before acting, record the relayed answer in the same place and form, with the quoted words. Silence is no approval. Only the developer can answer a harness permission prompt, in the chat of the agent waiting at it; an agent stopped at a prompt cannot relay it.
+Developer questions and relayed answers follow `operations/orientation.md`.

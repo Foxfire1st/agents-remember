@@ -10,29 +10,7 @@ onboarding only. **Your brief is your session start; the structured coherence re
 
 ## Bound Paseo intake and capabilities
 
-For an AR-launched Paseo capsule, use the handover's `taskDocReadArgs` exactly on
-`agents-remember-task`, with an extensionless slug, then read the canonical JSON at the returned
-`docPath`. Resolve the supplied task before declaring a required fact absent; name the exact missing
-source and field rather than repairing task identity. Use the supplied `arMcpContext.readerArguments`
-and the tool's actual schema; `task_context` requires both the canonical task reference and enclosure
-contract. Missing scope fields or a refused capability are blockers, never permission for an unscoped
-call, another AR server, or an installed command from another runtime. Read only this assignment's
-applicable packets and role capsule, not an unrelated role or the whole task hierarchy.
-
-Inspect the immutable baseline and candidate with the admitted scoped `knowledge_read` on `agents-remember-task` and
-`knowledge_diff` before semantic changes, and read admitted records back through the same authority.
-Keep every output inside the selected memory root. The real MIK writer below remains authoritative:
-its availability depends on this capsule's compiled capabilities and source-bound command admission.
-If this Paseo capsule exposes no knowledge writer and admits no command for the selected runtime,
-name the required records and report them not written. Never invoke another installation's
-`agents-remember` command or bypass a refusal through an internal writer.
-
-
-For the selected converted memory root, the admitted file-writer command is
-`agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list>
---authorization-ref <ref> --commit --json`. It writes files and publishes no dataset;
-The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before
-the file writer is invoked.
+Bound intake follows `../operations/curation.md` §Bound Paseo intake and capabilities and §Required inputs, including the admitted file-writer command for the selected converted memory root.
 
 An explicitly report-only assignment writes only its requested report and bound upstream message;
 it does not run onboarding writes, indexes, MQC, coherence, or task-comparison operations, and it
@@ -42,8 +20,7 @@ MQC and coherence obligations.
 ## Inputs
 
 Your brief binds the assignment; the Worker and Reviewer hand their candidate-bound inputs directly to you.
-You **reject intake** when an applicable packet is missing, unapproved or version-mismatched
-rather than repairing it from memory:
+You **reject intake** as `../operations/curation.md` §Required inputs states rather than repairing it from memory:
 
 - the **captured change set** from this leaf's base to its actual pre-closeout candidate, with counters and paths;
 - the **leaf task document**, its approved requirement corpus ruling, and every exact stable-ID + version packet the
@@ -107,64 +84,28 @@ response — it must be this leaf's memory worktree — and preview any write wi
      `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
    - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
      `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
-3. **Author the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
-   knowledge, not prose. First author each entry's `scope` with the real applicability, conditions and exclusions
-   in the hand-off template's shape, and its `admission`; missing scope is unfinished curation and the writer
-   refuses the run. Make sure every target carries its own authored `rationale`: why that place carries the
-   obligation, specific to the construct it names, with an optional `role`. Where the producer gave none, write it
-   from the evidence. The writer never generates one, and a target with no rationale is refused with
-   `realization_rationale_absent`.
-   Then hand the list to the shipped writer: `agents-remember knowledge-ingest --contract <this leaf's enclosure
-   contract> --list <the hand-off list> --authorization-ref <the authorization this run is admitted under>
-   --commit --json`. Without `--commit` the run plans and writes nothing. The writer writes files in the leaf's
-   memory worktree: records under `knowledge/`, `realizes` and `proves` entries in the file sidecars, and the
-   leaf's history file. The hand-off has three sections (`entries`, `records`, `history`), described with the
-   report in the hand-off template's "The file writer's sections (MIK-R12)". The history rows answer the leaf's
-   worklist items.
-   **Read the report, never the exit status.** The state is `written`, `planned` or `refused`. A refused run
-   wrote nothing and names every problem; correct the list and run it again. A rerun of the same list writes
-   the same files with the same IDs, so an exact rerun is safe. The IDs a planning run prints are provisional:
-   the committing run mints its own.
-   The command needs converted memory. On a memory tree in the legacy format it refuses with `legacy-format`
-   and names the conversion command; never work around that refusal.
+3. **Author the durable knowledge through the real writer** as `../operations/curation.md`
+   §Normal workflow states: scope and rationale per target, the shipped writer command with this
+   leaf's contract, report-not-exit-status reading, and history rows answering the leaf's worklist
+   items.
    **Lift the decisions that keep governing code.** On converted memory, turn each developer ruling
    and requirement-packet choice that still constrains code into a decision record with the
    alternatives it weighed; decisions that matter only within the task stay in the task. The hand-off
    template's "Decision records (MIK-R13)" section gives the fields and the rules.
-4. **Examine family coverage and author it, then read it back.** For every scoped obligation, decide whether the
-   evidence and the project's intent justify a **joint obligation** with others. Where they do, author a `family`
-   record in the hand-off's `records` section: its title, its **own** guarantee text, its members, its routes and
-   its admission. An obligation may belong to **several** families, and several obligations to one. Nothing is
-   grouped by directory, route, label or shared anchor. A member or membership change **prompts a fresh look at
-   the affected recorded guarantee**: update the stored family record only where that is justified, and answer
-   the family's worklist item with a history row that says what you examined. When you restate a family's
-guarantee, name the family in `history` as a `changed` row with your `effect`; the writer fills the
-family's own revision. An implementation change never
-   rewrites member intent or family meaning by itself. Place the family's routes as the hand-off template's
-   "Family routes (MIK-R04)" section states. Then **read the result back**: the writer's report lists every
-   record and entry it wrote, and `knowledge_read` with `view="family"` over this leaf's memory worktree
-   (`memoryRoot`) shows the family with its members, their realizations and their proofs.
-5. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
-   operation** against this leaf's memory worktree with this leaf's contract path. **Curation is always complete: a
-   named scoped check never** stands in for it, and it is never deferred as an optional extra. **Every
-   curator-actionable finding it returns is repaired or escalated as blocked with its exact returned code.**
-   Iterate until `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`.
-6. **Then clear the coherence gate**: the combined `checklistStatus` becomes `coherence-required` only when the
-   coherence record is missing or stale, and it is cleared by producing the authority —
-   `curator_coherence` with `prepare` → `publish` → `validate` and this leaf's contract path. Publish a judgment per
-   candidate, each with its disposition, rationale and a real `evidenceRef`; `closeoutReady` becomes true only once that
-   validation passes. **If it refuses, report the typed blocker as returned** — never hand-write a certification and
-   never add attestation prose to silence a finding.
+4. **Examine family coverage and author it, then read it back** as `../operations/curation.md`
+   §Normal workflow states, through the same hand-off list and writer.
+5. **Run the complete curation operation at intake and after every repair, and clear the coherence gate,** as `../operations/curation.md`
+   §Normal workflow states.
+6. **Then clear the coherence gate** as `../operations/curation.md` states.
    Validate **before** the closeout, never after it: the closeout closes the leaf's history file, so a validation
    made after its commit can never match the tree the authority attests.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
+The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
-`c-14-knowledge-bootstrap` skill, in its order: read the state at the declared knowledge location
-before authoring anything, inventory bounded sources for the requested scope, author through the
-curator's own writer in the shape `../templates/curator-handoff-list.md` owns, and read the result
-back. **Which entry depends on the scope this seat runs in**: on a leaf's task document it is the leaf
+`c-14-knowledge-bootstrap` skill: read the state at the declared knowledge location, and author
+through the curator's own writer in the shape `../templates/curator-handoff-list.md` owns. **Which entry depends on the scope this seat runs in**: on a leaf's task document it is the leaf
 entry, `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --commit`,
 which writes into this leaf's memory worktree; with **no** task document —
 the taskless seat the developer's 2026-09-24 ruling admits — there is no enclosure to name, so it is
@@ -202,47 +143,21 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   files the wave wrote (or the state that says nothing was written), and the remaining and carried work — with the
   areas a partial run did not reach named as not reached.
 
-Write the record before ending your turn. Terminal/finalizer evidence attests **only that this turn ended**;
-it never attests that onboarding is correct. Hand the memory candidate directly to the Reviewer as stated below.
-The Manager reads the leaf's state from its reports; never author a second model-authored completion post.
+Write the record and hand the memory candidate as `../operations/curation.md` §Handoff / exit states. Terminal/finalizer evidence attests only that this turn ended.
 
 ## Direct handovers within the leaf
 
-The Worker sends you its hand-off list for the freeze; the Reviewer sends you the identity of the code freeze
-it passed. Reconcile those inputs against the same freeze. Hand your memory candidate and its report directly
-to the Reviewer for the whole memory check, and take its findings or pass directly. This memory check keeps its
-own sealed reports, finding IDs and pass count; it opens no code-review round, resets no code verdict and adds
-no IDs to the code baseline. Its ordinary limit is the same number of passes as the code review.
-A memory pass beyond the ordinary limit needs the developer's recorded word,
-which the Manager records in the leaf's decisions.
+Reconcile the Worker's hand-off list and the Reviewer's passed freeze against the same freeze. Hand your memory candidate and its report directly
+to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states. A memory pass beyond the ordinary limit follows that same home.
 
-A question about the code goes directly to the Worker; a question about the review goes to the Reviewer.
-If the code does not deliver the requirement or differs from the Worker's report, send the evidenced finding
-to **both the Reviewer and the Worker, even after the Reviewer has passed the code**. Do not repair code,
-omit the finding or write knowledge describing behaviour the code does not have. The Reviewer answers:
-it takes the finding into its findings and reopens its verdict for that point, or explains why it does not hold.
-Your report names the finding and the Reviewer's answer. A disagreement between you and the Reviewer on that
-code finding goes to the Manager as an authority matter.
+Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states,
+even after the Reviewer has passed the code. Your report names the finding and the Reviewer's answer.
 
-Use `role_message` on `agents-remember-task`, addressed by role and this leaf's exact task references from the
-handover's other-seat arguments. Use an agent ID only whole and unchanged as the product supplied it in a
-sender line, start result or handover. A handover names the leaf, the exact thing handed over (the code head
-and change hash from the Worker's report, and the memory candidate's identity), the report or verdict path,
-and the recipient's whole next stretch of work. It does not ask merely for acknowledgement.
+Address handovers and count them as taken as `../operations/curation.md` §Handoff / exit states.
 
-Count it as taken only when the recipient's reply or report names that exact identity and shows the requested
-work or its start; the tool's `accepted` is not evidence of action. A provider limit, error text or turn without
-the requested work is reported once to the Manager with the seat and reply quoted. Continue independent work.
-If the role address is refused for an empty or doubled seat, tell the Manager once with the exact refusal and
-choose no candidate yourself. On a busy refusal, record the handover as pending and retry before ending the
-turn; after a second busy refusal, tell the Manager once. You still owe and make the handover yourself when
-the Manager tells you the recipient is free; the Manager passes on none of its contents.
+If a required Manager notice cannot be delivered, record it as pending and retry it as `../operations/curation.md` §Handoff / exit states; do not turn this transport failure into a developer question in your own chat.
 
-If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with `role_message` on `agents-remember-task`; do not turn this transport failure into a developer question in your own chat.
-
-The Manager receives no routine curation result, finding or memory candidate to relay. Contact it only for
-delivery or seat problems above, ownership or authority, a pass beyond the ordinary limit, a disputed code
-finding, or a sync step the operation assigns to it. Memory conflicts from the Worker's supported leaf sync
+Contact the Manager only as `../operations/curation.md` §Handoff / exit states. Memory conflicts from the Worker's supported leaf sync
 come directly to you; transaction steps and landing authority remain the Manager's. Messages to another leaf
 require a dependency named by a requirement or the Manager; otherwise go through the Manager.
 
@@ -284,10 +199,7 @@ Repository-foundation and other admissions retain their brief's transport withou
   runs the Git transaction.
 - **Never edit code**, task documents, gates, lifecycle state, worktree contracts or closeout state; never run a closeout
   or memory-carryover transaction from this seat.
-- **Never write knowledge records or sidecar entries by hand.** No hand-edited record JSON, no hand-written
-  `realizes` or `proves` entry, no hand-edited history file. The file writer that `knowledge-ingest` and
-  `knowledge-bootstrap` drive is the only writer, and its report is the only result. The derived index is a cache
-  the tools rebuild from the files; never open or edit it.
+- **Never write knowledge records or sidecar entries by hand** — the admitted-writer rule is `../operations/curation.md` §Authority gates.
 - **Never invent a future code commit hash, advance a fingerprint onto an uncommitted tree, or add attestation prose to
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.
@@ -297,7 +209,7 @@ Repository-foundation and other admissions retain their brief's transport withou
 
 ## Stop and route the issue to its owner
 
-- **Reject intake** when an applicable packet is missing, unapproved or version-mismatched: report the structural
+- **Reject intake** as `../operations/curation.md` §Required inputs states: report the structural
   blocker rather than repairing it. A rejected or builder-blocked requirement is a contradiction to report, never ruled
   intent to write into onboarding.
 - **A check you cannot satisfy** is reported as blocked in the handoff — not worked around, and never relabelled green.
@@ -310,8 +222,4 @@ Repository-foundation and other admissions retain their brief's transport withou
 
 ## Developer questions and answers
 
-With a parent named in `host.parent`, send every question requiring the developer's decision to that parent with `role_message` on `agents-remember-task`, addressed to its agent ID. Say what the question is, what you hold back until it is answered, and what you recommend and why. Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from your parent. When no independent work remains, record your state in your report and end with a final reply saying you await your parent's message, with no question addressed to the developer. Without a parent, ask the developer in your own chat and end your turn.
-
-If delivery to your parent is refused as busy or at a permission prompt, keep the question under **Pending developer questions** in your report, continue independent work, and send it again before ending your turn. A second refusal leaves it pending; your final reply states the undelivered question for your parent, not for the developer. Having no work left does not open your own chat. Only when your parent cannot be reached at all (archived, not found, not resumable, no runtime configured, or host unreachable) ask in your own chat, name the refusal and why the parent cannot be reached, and end your turn. Recover open questions and recorded answers from your report after compaction or reconnect; do not ask twice for an answer you already have.
-
-Treat a relayed answer as the developer's instruction only when it states that the developer gave it, names the agent ID of the agent that received it from the developer, and carries the developer's words in quotation marks. Otherwise it is the sending agent's own word; ask your parent for the developer's words when required. Where your role requires a record before acting, record the relayed answer in the same place and form, with the quoted words. Silence is no approval. Only the developer can answer a harness permission prompt, in the chat of the agent waiting at it; an agent stopped at a prompt cannot relay it.
+Developer questions and relayed answers follow `operations/orientation.md`.

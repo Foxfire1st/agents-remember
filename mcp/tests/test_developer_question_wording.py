@@ -10,6 +10,8 @@ from test_role_instruction_wording import LIFECYCLE, STARTERS, read, role_text
 
 
 def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> None:
+    home = " ".join(read(LIFECYCLE / "operations" / "orientation.md").split())
+    pointer = "Developer questions and relayed answers follow `operations/orientation.md`"
     clauses = (
         "With a parent named in `host.parent`, send every question requiring the developer's decision",
         "addressed to its agent ID",
@@ -32,13 +34,43 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
         "Silence is no approval",
         "Only the developer can answer a harness permission prompt",
     )
+    for clause in clauses:
+        assert clause in home, ("orientation", clause)
     for role in ("orchestrator", "manager", "worker", "reviewer", "curator", "investigator"):
         text = role_text(role)
-        for clause in clauses:
-            assert clause in text, (role, clause)
+        assert pointer in text, (role, "one-home pointer")
+        assert "With a parent named in `host.parent`, send every question" not in text, (
+            role,
+            "no full doublet copy",
+        )
 
 
 def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() -> None:
+    home = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
+    notice = (
+        "its wait returns `permission-pending`, tell your parent at once",
+        'or "not supplied" when none is named',
+        "each parent passes that notice up unchanged",
+        "tell the developer which chat to open",
+        "never give only a count",
+        "Do not ask the developer to confirm an answered prompt or keep resending to the child",
+    )
+    for clause in notice:
+        assert clause in home, ("coordination", clause)
+    referral = "give the upward notice as `../operations/coordination.md` states"
+    held = (
+        "try your held message once in each turn you take for any reason",
+        "give the parent that occasion when you next take a turn",
+    )
+    for role in STARTERS:
+        text = role_text(role)
+        assert referral in text, (role, "one-home referral")
+        for clause in held:
+            assert clause in text, (role, clause)
+        assert "its wait returns `permission-pending`, tell your parent at once" not in text, (
+            role,
+            "no full notice copy",
+        )
     clauses = (
         "answer it yourself if it lies within your authority and say that the answer is your own",
         "pass the question unchanged to your parent",
@@ -49,33 +81,39 @@ def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() ->
         "your agent ID as the agent that received it",
         "the developer's words in quotation marks",
         "Each parent on the way down passes these three unchanged",
-        "its wait returns `permission-pending`, tell your parent at once",
-        'or "not supplied" when none is named',
-        "each parent passes that notice up unchanged",
-        "tell the developer which chat to open",
-        "never give only a count",
-        "Do not ask the developer to confirm an answered prompt or keep resending to the child",
-        "try your held message once in each turn you take for any reason",
-        "give the parent that occasion when you next take a turn",
     )
-    for role in STARTERS:
+    manager = role_text("manager")
+    for clause in clauses:
+        assert clause in manager, ("manager", clause)
+    pointer = "Questions received from children follow `roles/manager.md`"
+    for role in ("orchestrator", "architect"):
         text = role_text(role)
-        for clause in clauses:
-            assert clause in text, (role, clause)
+        assert pointer in text, (role, "one-home referral")
+        assert "answer it yourself if it lies within your authority" not in text, (
+            role,
+            "no full questions copy",
+        )
 
 
 def test_question_operations_keep_conditional_routing_and_pending_recovery() -> None:
-    for operation in ("orientation", "review", "curation"):
+    home = " ".join(read(LIFECYCLE / "operations" / "orientation.md").split())
+    pointer = "Developer questions and relayed answers follow `operations/orientation.md`"
+    for clause in (
+        "With a parent named in `host.parent`",
+        "Without a parent, ask the developer in your own chat",
+        "**Pending developer questions** in your report",
+        "Having no work left does not open your own chat",
+        "Only when your parent cannot be reached at all",
+        "record the relayed answer in the same place and form, with the quoted words",
+    ):
+        assert clause in home, ("orientation", clause)
+    for operation in ("review", "curation"):
         text = " ".join(read(LIFECYCLE / "operations" / f"{operation}.md").split())
-        for clause in (
-            "With a parent named in `host.parent`",
-            "Without a parent, ask the developer in your own chat",
-            "**Pending developer questions** in your report",
-            "Having no work left does not open your own chat",
-            "Only when your parent cannot be reached at all",
-            "record the relayed answer in the same place and form, with the quoted words",
-        ):
-            assert clause in text, (operation, clause)
+        assert pointer in text, (operation, "one-home pointer")
+        assert "With a parent named in `host.parent`, send every question" not in text, (
+            operation,
+            "no full doublet copy",
+        )
 
 
 def test_leaf_owner_relation_keeps_peer_results_and_named_parent_occasions() -> None:

@@ -2,9 +2,7 @@
 
 The dispatch packet a spawning seat (manager / orchestrator) compiles for a worker. **The brief is
 the worker's entire session start** — it replaces the front half the spawner already ran (trust
-checkpoint, reframe, plan). Compile it fresh per leaf from this shape; the proven form below
-absorbed a series of real dispatch frictions (route-index leaks, attestation format, provider-stack
-keying, missing `python` shim), so deviate knowingly or not at all.
+checkpoint, reframe, plan). Compile it fresh per leaf from this shape.
 
 **This template feeds inputs; it does not author rules.** Where the packet states a rule, the rule's
 single home is `../roles/worker.md` (the seat's own duties), `../operations/implementation.md` and
@@ -24,15 +22,8 @@ ROLE BRIEF — worker
 # WORKER BRIEF — <leaf-id> · <leaf title>
 
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
-`skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
-code completely, freeze the candidate, write your worker turn report, and hand it directly to the
-Reviewer with `role_message` on `agents-remember-task`. The Manager starts the Worker and Reviewer
-together; the Reviewer first cold-reads the requirement, then waits for your candidate. You start
-no role: whoever starts an agent briefs it and becomes its parent. An R27 successor uses
-`reviewMode=fix-verification` and verifies only the sealed outstanding issue IDs. Your report records
-changed routes, surrounding owners, and likely side effects as facts; your handover gives no
-instruction on how or what to review and does not limit the review. The Reviewer does not read your
-chat. The Manager retains closeout and gate acceptance.
+`skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. An R27 successor uses
+`reviewMode=fix-verification` and verifies only the sealed outstanding issue IDs.
 
 ## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)
@@ -48,9 +39,7 @@ chat. The Manager retains closeout and gate acceptance.
 - Read-only AR retrieval: `read_ar_files` (serves the OFFICIAL baseline, never your worktree —
   final verification uses native reads), `grepai_search` / `cgc_*` (provider stack key:
   `<stack-key-or-NONE>`), `context_packet`.
-- When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
-  freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a
-  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
+- When the master line moves, run the supported sync and resolve memory-file conflicts as `../operations/implementation.md` §Boundaries states. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.
@@ -71,11 +60,6 @@ files involved, the invariants that must hold, what NOT to touch.>
 - Outside-list observations: `<report to the owner for developer decision; never turn into a new
   finding, requirement, route, or scope>`.
 
-The first reviewer owns complete discovery and sealing of the agreed scope. A successor worker may
-repair only the listed outstanding IDs. Unknown, duplicate, rewritten, reintroduced, newly
-discovered, or omitted IDs, a new criterion under an old ID, or a changed scope that cannot be
-verified against the baseline are protocol blockers; do not silently widen this leaf.
-
 ## Owned primary requirement (exactly one stable-ID + version)
 Repeat this block exactly once for the revision this leaf owns. List inherited master or adjacent
 requirements separately as dependency/preservation constraints; this leaf verifies but does not
@@ -95,88 +79,29 @@ primary revision.
     other exact class>`
   - Existing developer approval for changed delivery: `<durable ruling citation | N/A>`
 
-Each worker record in the leaf journal must contain one acceptance block for this owned primary ID
-with:
-
-1. status `satisfied`, `blocked`, or `approved-change`;
-2. delivery/implementation rationale;
-3. delivery/implementation citations (code: path + symbol; non-code: path + section/anchor);
-4. verification rationale stating the demonstrated behavior and the failure caught;
-5. test/verification citations;
-6. exact command/result or durable evidence reference;
-7. for `blocked` or `approved-change`: why unchanged delivery is impossible, changed delivery if
-   any, and the durable developer approval/ruling citation.
-
-General prose and an aggregate "requirements addressed" statement do not satisfy this contract.
-An approval-pending blocker is reportable but cannot pass review.
+Record the acceptance block for this owned primary ID as `../core/acceptance.md` states; general prose and an aggregate statement do not satisfy that contract.
 
 ## Adjacent dependency/preservation constraints (not closure claims)
 
 - `<stable-requirement-id>@<version>` — `<dependency | preservation>` — `<packet path>` —
   `<verification needed to prove this leaf did not violate it>`
 
-Advance a delivery attempt only when an exact candidate is handed to independent review, or after
-a reviewer rejection requires a successor handoff. Internal implementation, test, and evidence
-reruns do not consume attempt IDs. Preserve them in a separate experimental-protocol log with
-candidate identity, exact command, result, failure cause, repair made, and expected proof for the
-next run. Each row is an experimental protocol event, never a worker attempt.
-
-Before review handoff, append one immutable `worker-delivery-attempt` record per exact requirement
-revision and leaf manifestation to the single physical leaf journal named above. Bind the attempt
-ID, predecessor and carried findings, exact candidate, requirement-specific status/rationales/
-citations/findings/failure class, a content-addressed reference to the frozen expanded evidence,
-and append timestamp. The expanded artifact carries shared definitions and complete command
-results; do not duplicate the complete master envelope or experimental-run body inside each
-attempt. Never edit a prior record: repair after reviewer rejection creates a successor attempt.
-An unrelated later candidate does not reopen an accepted attempt. In `reviewMode=fix-verification`, a
-  outside-list or changed-route observation is reported to the owner for developer decision and
-  cannot reopen a resolved ID or create a new worker scope. Every
-blocked finding uses exactly one class: `implementation defect`, `evidence gap`, `requirement
-contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A requirement problem is
-reported for architect/developer revision authority; the worker cannot rewrite it.
-
-Validate the complete record before append; append plus exact-candidate review handoff is one
-logical formal-attempt boundary. Preserve an accidentally malformed pre-handoff row with an
-append-only `non-attempt-correction`/void reference, consume no attempt ID, and use the same next ID
-for the corrected handoff. A malformed handed-off row requires independent reviewer rejection;
-the worker cannot self-reject it and appends a successor only at the next candidate handoff.
+Advance delivery attempts, experimental protocol and journal rows as `../core/acceptance.md` and `../templates/turn-report.md` state; the worker never self-rejects or silently replaces a row.
 
 ## Coding guidelines (read before your first edit)
 `<memory-worktree-path>/system/coding-guidelines.md` — your diff is written against it: file and
 function budgets, responsibility rules, source-comment scope (no task/leaf ids in shipped
-comments), typed boundary parameters, D1/D2/D3 stability. Green acceptance evidence proves none of this.
+comments except bounded `L<leaf>-R<n>`/`L<leaf>-S<n>` durable-requirement identifiers per rule 6), typed boundary parameters, D1/D2/D3 stability. Green acceptance evidence proves none of this.
 Name any guideline finding or plan conflict in your turn report; a contradiction you hide is a
 verdict finding, not a style note.
 
 ## Targeted checks (before you report)
-- Before handing a code implementation or fix directly to the Reviewer, select and run
-  the relevant targeted tests and targeted lint, formatting, typing, and structural checks using
-  the resolved repository tools and environment. Record the exact commands,
-  selected scope, and results in the turn report; explicitly list any relevant test or check not run
-  and why, and report failures accurately. After a failure and code fix, rerun the failed tests and
-  every affected targeted check, then document the final results before handoff; if one is not rerun,
-  record why. These diagnostic worker checks are separate from certification and do not consume a
-  review round; applicable non-code checks follow repository policy.
-- Read `system/git-workflow.md`, `system/coding-guidelines.md`, and `system/tools.md`; use their
-  repository-specific targeted-check commands, environment, and evidence requirements. Do not
-  invent a runner or fallback. Full code-quality and full-test operations require an explicit
-  developer request; curation does not, because the curator always runs it complete.
-- Closeout and integration are Git code/memory/ledger transactions. They do not launch automatic
-  code-quality, full-suite, or independent-review work, and full code quality and full tests run only
-  after an explicit developer request. Curation is the exception: the curator always runs the full
-  memory-quality operation as part of curation, and closeout and integration carry that result as a
-  prerequisite. A failed or not-run targeted check is reported and never relabeled as full green.
+Run targeted checks and record the durable-evidence promotion hold point as `../templates/turn-report.md` states, using the repository-specific commands, environment and evidence requirements from `system/git-workflow.md`, `system/coding-guidelines.md` and `system/tools.md`. Full code-quality and full-test operations require an explicit developer request. A failed or not-run targeted check is reported and never relabeled as full green.
 - `git diff --check` in both worktrees.
-- Separate durable-evidence promotion hold point: for each new/retained fixture, recording, shared support,
-  or proof, record either its registered owner + executable stable contract or its dated
-  expiry/replacement/removal event; run the public lifecycle validator and include the decision and
-  result in the turn report. `N/A` must be explicit when the leaf touches no durable evidence. This
-  hold point does not substitute for any requirement acceptance block.
 
 ## Curator handoff input
-After the Reviewer passes code, send the Curator this hand-off list directly for the exact passed
-freeze; the Reviewer sends its code verdict separately. The Manager starts the Curator when your
-first freeze exists; if that seat is absent, ask the Manager for its creation alone.
+After the Reviewer passes code, send the Curator your hand-off list directly for the exact passed
+freeze as `../operations/implementation.md` §Outputs states, in the shape `skills/l-01-agent-lifecycles/templates/curator-handoff-list.md` owns.
 - Changed paths and code-diff summary for the curator's affected-onboarding handoff.
 - Your curator hand-off list: every requirement-shaped item of this leaf, emitted in the shape of
   `skills/l-01-agent-lifecycles/templates/curator-handoff-list.md` — one entry per item, each with its
@@ -193,19 +118,9 @@ first freeze exists; if that seat is absent, ask the Manager for its creation al
 
 ## Turn report and direct handover
 Write `<notes-reports-path>/<leaf-id>-worker-report.md` following
-`skills/l-01-agent-lifecycles/templates/turn-report.md` — including exact links to every newly
+`skills/l-01-agent-lifecycles/templates/turn-report.md` and `../operations/implementation.md` §Outputs — including exact links to every newly
 appended journal attempt, a separate Checks section with exact commands + outcomes,
-changed paths for the curator, the retrieval-evidence tally, and the respawn state. Your handover
-names the leaf, candidate head and change hash as recorded in the report, report path, and the
-recipient's whole next stretch of work, never an acknowledgement-only request. Address a sibling by
-role and the exact leaf task references from your handover; use a supplied agent ID only whole and
-unchanged. Count the handover as taken only when its reply or report identifies that exact candidate
-and shows the requested work or its start; `accepted` alone is no work. Follow the Worker's pending,
-busy, empty/doubled-seat, and non-work recovery rules. Send findings and repairs directly between
-Worker and Reviewer. The Manager receives only its named ownership, authority, seat-recovery,
-extra-round, and reserved-sync occasions; it relays none of the content. Record a pending handover
-and its exact refusal/reply in your report. If blocked, fill Escalations for the responsible seat;
-questions for the developer follow the applicable question rule.
+changed paths for the curator, the retrieval-evidence tally, and the respawn state.
 ```
 
 ---
@@ -227,6 +142,4 @@ questions for the developer follow the applicable question rule.
   new-route, or outside-list mandate.
 - Verify the provider stack actually answers before naming it; write `NONE (native reads only)`
   when it does not — a worker discovering dead providers mid-leaf wastes its turn.
-- Deliver as an echo-confirmed paste; verify the harness's paste chip (`[Pasted Content N chars]`)
-  before submitting, and only count delivery on a post-boot echo.
 - The report path lives under the series `notes/reports/` — the same folder the seam verdicts use.

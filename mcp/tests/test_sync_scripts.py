@@ -111,25 +111,18 @@ class BoundaryClause:
 # checked subject, and it quotes that module's shipped wording rather than paraphrasing it into a
 # second vocabulary that could drift from the first.
 #
-# These clauses check the current owner acceptance boundary and the compact manager/worker
-# instructions. They do not require retired relay/finalizer wording: on the Paseo host a Worker
-# that a parent agent started tells that parent once, with `role_message`, that its report is
-# written, and that message remains distinct from AR acceptance.
+# These clauses check the current owner acceptance boundary and the compact worker
+# instruction. Two formerly listed clauses (manager deliverable inspection; worker
+# parent report notice) are guarded by the retired-wording register
+# (`retired_leaf_handover_wording.RETIRED_LEAF_HANDOVER_WORDING`) and stay out per
+# the packet preservation boundary.
 # A clause whose surface or marker stops matching the canonical tree and its nine copies still fails,
 # which is what `test_a_clause_missing_from_one_...` pins by deleting one clause from one copy.
 PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
     BoundaryClause(
         "core/acceptance.md", "Terminal truth is mechanical; acceptance is the owner's."
     ),
-    BoundaryClause(
-        "roles/manager.md",
-        "Inspect each deliverable, complete changed-file diff, required evidence, and report before handing it onward.",
-    ),
     BoundaryClause("roles/worker.md", "A finished turn is not AR acceptance."),
-    BoundaryClause(
-        "roles/worker.md",
-        "When a parent agent started you, tell it once that the report is written: one role_message on agents-remember-task to its agent ID, naming the report path.",
-    ),
 )
 
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -495,7 +488,7 @@ class BoundaryPropagationTests(unittest.TestCase):
         """Falsifiability: a copy that lost a clause must be reported as that copy, not as a count."""
 
         clause = next(
-            item for item in PROJECTED_BOUNDARY_CLAUSES if item.surface == "roles/manager.md"
+            item for item in PROJECTED_BOUNDARY_CLAUSES if item.surface == "roles/worker.md"
         )
         canonical_name = repo_relative(CANONICAL_SKILLS_PATH)
         packaged = sorted(name for name in boundary_locations() if name != canonical_name)

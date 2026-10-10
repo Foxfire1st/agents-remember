@@ -17,9 +17,7 @@ sections below are the fields a consumer reads; where wording differs, those fil
 
 1. **A verdict is evidence, not a decision.** State an explicit pass/block **recommendation**; the gate's
    decider decides. Never write the verdict as if it were the gate outcome.
-2. **A leaf block goes directly to the Worker** with the sealed findings report for repair inside
-   the leaf; the repaired freeze returns directly to the Reviewer. Master/super scope findings
-   that require a new fix leaf remain with their owning Manager/Orchestrator.
+2. **Route the verdict to the seam's recipient** (leaf block directly to the Worker with the sealed findings report; master/super findings stay with their owning Manager/Orchestrator).
 3. **Refute-or-confirm:** every finding must survive an attempt to refute it. Rank findings and cite
    the backing evidence file.
 4. Cover all three lenses (completion · scoped implementation evidence · onboarding-vs-code)
@@ -27,45 +25,29 @@ sections below are the fields a consumer reads; where wording differs, those fil
    the developer explicitly requested that operation.
 5. Record the gate evidence reference exactly: `kind=reviewer-verdict`, `ref=<artifact path>`, and
    `verdict=<pass | pass-with-notes | block>`.
-6. **Report the phase-appropriate catalog result** in the Criteria Catalog Results table. A
-   `baseline` reports every bound standing criterion, candidate rows when run, and any proposed
-   catalog amendments. A `fix-verification` reports only the sealed-baseline criteria/evidence
-   used to verify its listed IDs and may not run exploratory criteria, add a lens, or propose a
-   catalog amendment.
+6. **Report the phase-appropriate catalog result** in the Criteria Catalog Results table: a
+   `baseline` reports every bound standing criterion; a `fix-verification` reports only the
+   sealed-baseline criteria/evidence used to verify its listed IDs.
 7. **The reviewer seat is distinct from the author seat, and every requirement verdict cites
-   evidence of the requirement's class** (rendering → mounted-UI proof, scheduling →
-   operation-level proof, data model → artifact-level proof). A self-review or a wrong-class
+   evidence of the requirement's class.** A self-review or a wrong-class
    verdict is a verdict-laundering finding.
 8. **Report the durable-evidence promotion hold point:** `N/A`, or one row per introduced/retained
    artifact naming its stable executable contract or dated expiry/retirement event, owner,
    source-observed consumers, compatibility consequence, and public lifecycle-validator result.
-9. **Adjudicate every requirement attempt separately.** Use the mandatory block below once per
-   exact stable ID + version, leaf manifestation, worker attempt, and exact candidate, and choose
-   only `accepted` or `rejected`. Independently inspect the matching canonical packet and every cited artifact;
-   missing rationale, wrong-class evidence, or invalid citations forces rejection. PASS and
-   PASS-WITH-NOTES are forbidden while any requirement is rejected. A worker
-   row correctly adjudicated as `blocked` still requires an overall BLOCK until it is delivered or
-   becomes an authorized `approved-change`.
+9. **Adjudicate every requirement attempt separately** with the mandatory block below, once per
+   exact stable ID + version, leaf manifestation, worker attempt, and exact candidate, choosing
+   only `accepted` or `rejected`. PASS and
+   PASS-WITH-NOTES are forbidden while any requirement is rejected.
 10. **Do not merge the two evidence contracts.** Per-requirement acceptance and the
     durable-evidence stable-contract-or-expiry hold point are separately mandatory; neither is
     evidence for the other.
 11. Append the reviewer block as a separate immutable record in the same single physical leaf
-    Requirement Attempt Journal that contains the worker attempt. In the verdict body, link that
-    exact journal anchor instead of copying the record into a second authority. Never edit the
-    worker record or any earlier journal bytes. A pre-adjudication candidate change for this
-    manifestation requires a successor worker attempt and new reviewer record; acceptance does not
-    float to “latest,” but an unrelated later candidate also does not reopen accepted work. Under
-    `reviewMode=fix-verification`, only the sealed outstanding IDs may be adjudicated; an outside-list
-    regression or changed route is returned to the developer and cannot reopen a resolved ID.
-    A malformed pre-handoff row never enters review: preserve its append-only
-    `non-attempt-correction`/void reference and consume no attempt ID. A malformed handed-off row is
-    a formal attempt; reject it independently without editing it, and require a successor only at
-    the worker's next exact-candidate handoff.
+    Requirement Attempt Journal that contains the worker attempt, and link that
+    exact journal anchor in the verdict body. Never edit the
+    worker record or any earlier journal bytes. Under
+    `reviewMode=fix-verification`, only the sealed outstanding IDs may be adjudicated.
 12. Classify every first-review rejection finding as exactly one of `implementation defect`, `evidence gap`,
-    `requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A
-    requirement problem is rejected for architect/developer-approved revision; a reviewer cannot
-    rewrite it. Previously accepted work stays closed. An outside-list observation is a developer
-    decision packet and cannot reopen work or extend the review by itself.
+    `requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`.
     A successor disposition is valid only when its remaining IDs are a subset of the preceding
     remaining set and sealed baseline, every preceding ID has a fixed/unfixed disposition, and no
     unknown, duplicate, rewritten, reintroduced, or newly discovered finding is present.
@@ -168,22 +150,11 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-The Reviewer takes the Worker's exact frozen candidate and report, opens its own ordinary CODE
-round with `task_doc(operation="begin_review")`, and records its verdict as that round's result
-with `record_review` or the existing `record_route_review`. It records a preceding result when
-needed before a repair round. The Manager keeps gate acceptance and the developer's recorded
-approval beyond the ordinary limit. The task document remains the authority; no
-admission/publication IDs, purpose fields, or proof-of-human-authorship mechanism are required.
+The Reviewer records its own ordinary CODE round and result as `../roles/reviewer.md` states; the Manager keeps gate acceptance and the developer's recorded approval beyond the ordinary limit. The task document remains the authority.
 
 Send the verdict directly to the Worker, including the sealed findings report on BLOCK; on PASS,
-send the passed freeze and verdict directly to the Curator. A Curator code concern goes to both
-Reviewer and Worker, also after code PASS: take it into findings and reopen that point, or explain
-why it does not hold. Keep the Curator's MEMORY review sealed and counted apart with its own report
-IDs and the same ordinary limit. It opens no CODE round, resets no code state and adds no memory
-ID to the code baseline. Return memory findings/pass directly to the Curator. Only when both
+send the passed freeze and verdict directly to the Curator. Keep the Curator's MEMORY review sealed and counted apart. Return memory findings/pass directly to the Curator. Only when both
 lanes pass, send the Manager one ready-for-closeout notice naming the freeze and both verdicts.
-Each handover names the leaf, exact candidate identity, report/verdict path and whole next stretch,
-never an acknowledgement request; delivery acceptance alone proves no work.
 ```
 
 ## Atomic-Master Integration Route-Review Variant
@@ -239,12 +210,7 @@ never an acknowledgement request; delivery acceptance alone proves no work.
 - verdictRef: `notes/reports/<master-id>-integration-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-The master owner calls `task_doc(operation="begin_review")` before dispatching hosted reviewers or
-beginning native reviewer work, then calls `task_doc(operation="record_review")` or the existing
-`task_doc(operation="record_route_review")` on the canonical master document after every child is
-represented. Atomic child closeout and leaf-to-master accumulation do not call this operation.
-Master-to-parent integration revalidates candidate, child membership/intents, evidence, and verdict
-under the protected mutation authority.
+The master owner records its review begin and result on the canonical master document. Atomic child closeout and leaf-to-master accumulation do not call this operation.
 ```
 
 ## Master-Exit Variant
@@ -399,4 +365,4 @@ only the sealed outstanding IDs and their worker fixes, records a fixed/unfixed 
 every preceding ID, and retains earlier accepted adjudications rather than opening a new full
 review. Outside-list observations, changed deliveries, new routes, and newly discovered criteria
 return to the developer rather than becoming successor findings. A successor never adds, reopens,
-or resets an issue. At three rounds, request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent. Wait for explicit authorization and record the developer's quoted words before any extra review.
+or resets an issue. At three rounds, request authorization as `../operations/review.md` states before any extra review. The D107 one-further-look exception for used-up rounds with only repaired items lives in `../operations/review.md`; it names no broader extra-round authority.

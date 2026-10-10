@@ -31,52 +31,24 @@ improvise around.
 
 ## Process
 
-**The eight-phase method is `../operations/planning.md`** — run it there, in order, and keep the evidence
-inventory as you go. This page states only the obligations that are yours while running it:
+**The method is `../operations/planning.md`.** This page states only the obligations that are yours while running it:
 
-1. **Read the brief and every referenced durable artifact** before judging anything.
-2. **Work the method's mechanical phases with real tools** (`cgc_*`, `grepai_*`, the route map) and its
-   judgment phases so they **show their work as citations** the reviewer can refute. An uncited dependency edge
-   is refutable by default.
-3. **Hold the detection/judgment split.** Tooling reports task membership, paths, routes, call/import
-   relationships, lineage, readiness, cycles, and derived topological waves. **You judge** dependency meaning,
-   execution nature, blast radius, priority, and blocker placement — record each judgment with its evidence, and
-   never disguise a stable tie-break as priority reasoning.
-4. **Choose the topology explicitly.** Adopt an `executionGraph` when dependency-aware scheduling is justified,
+1. **Make the draft drive adoption mechanically**: one `task_doc.attach_master` call per
+   commanded master with its ruling `judgmentId`; adopting an explicit graph attaches every master
+   first and then bootstraps the node set and its evidence-backed edges in one
+   `task_doc.author_execution_graph` batch.
+2. **Choose the topology explicitly.** Adopt an `executionGraph` when dependency-aware scheduling is justified,
    or explicitly adopt the graph-less atomic-sequential default. **Planning is mandatory; a persisted graph is
    not**, and an unreasoned default is not a choice. Never author empty or ceremonial topology.
-5. **Fill `../templates/orchestration-task.md` and write the draft to the path the brief names** (convention:
-   `notes/<series>/orchestration-task.md` under the coordination tasks tree, or the series `notes/` folder).
-   **The template is the artifact's shape authority — it requires the shown work** (evidence relations,
-   blast-radius register, coherence findings, execution-nature decisions, priority grades, leaf moves plus
-   rationale, the explicit topology choice, any adopted graph/waves/blockers, and re-evaluation triggers).
-   Where this page and that template disagree about the artifact's **form**, the template governs. Its field
-   list is not restated here.
-6. **Make the draft complete enough to drive adoption mechanically**: one `task_doc.attach_master` call per
-   commanded master owns the typed `masterRef` row, the `orchestrates` membership, and the nature assertion
-   with its ruling `judgmentId`, maintaining a graph node only when the sprint already has an `executionGraph`;
-   a graph-less adoption stops after those attachments, and adopting an explicit graph attaches every master
-   first and then bootstraps the node set and its evidence-backed edges in one
-   `task_doc.author_execution_graph` batch. The Judgment Register row ids your draft assigns are exactly what
-   the nature and edge payloads cite.
-7. **Serve the drawing-board rounds.** The plan reviewer judges the plan with the plan-review catalog; the
-   architect relays the verdict and the drawing-board feedback into this session.
-   - **Convergence over rounds is expected and normal** for the first plan review: large, messy portfolios are
-     not expected to be fixed in one shot, and the first review must still inspect the complete agreed plan
-     scope, every required criterion, route and lens before sealing its issue list.
-   - **A successor review receives that sealed baseline and verifies only its exact outstanding IDs.** It
-     cannot run another portfolio sweep, add a lens or route, invent a requirement, broaden an issue, or reopen
-     a resolved ID; each disposition says fixed or unfixed for every preceding outstanding ID, and its
-     remaining set is a subset of the preceding set. The mode contract is `../operations/review.md`; three
-     rounds are the ordinary maximum.
-   - **A changed plan surface that cannot be verified against the baseline returns to the developer** rather
-     than opening a new review cycle.
-   - **Quo-vadis items** — high-blast-radius truths such as two masters heavily disagreeing on direction — go
-     **straight to the architect** at the first drawing board, flagged unmistakably at the top of the coherence
-     findings; in a successor they are an outside-list observation for developer decision, never a new finding.
-8. **Hand over when the plan is ruled.** The architect rules the plan and relays it to the orchestrator for
-   adoption; the orchestration task remains the sprint's standing scope, and ordinary readiness changes and
-   reprioritization belong to the orchestrator. A new dependency, a changed atomic boundary, an invalidated
+3. **Serve the drawing-board rounds.** A successor review receives the sealed baseline and verifies only its exact outstanding IDs; each disposition says fixed or unfixed for every preceding outstanding ID, and its
+   remaining set is a subset of the preceding set. The mode contract is `../operations/review.md`; three
+   rounds are the ordinary maximum.
+    - **A changed plan surface that cannot be verified against the baseline returns to the developer** rather
+      than opening a new review cycle.
+    - **Quo-vadis items** — high-blast-radius truths such as two masters heavily disagreeing on direction — go
+     **straight to the architect** at the first drawing board; in a successor they are an outside-list observation for developer decision, never a new finding.
+4. **Hand over when the plan is ruled.** The architect rules the plan and relays it to the orchestrator for
+   adoption; the orchestration task remains the sprint's standing scope. A new dependency, a changed atomic boundary, an invalidated
    priority model, or a multi-master reshape may justify a fresh strategist proposal through the architect; a
    master outside the sprint scope waits for the next sprint's evaluation.
 
@@ -139,4 +111,4 @@ state signal never evaluates the artifact.
 
 ## Organise your own work
 
-Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.
+Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name. Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state. A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment. Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper. A harness without sub-agents can do all the same work.

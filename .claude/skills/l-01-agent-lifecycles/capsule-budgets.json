@@ -1,0 +1,2216 @@
+{
+  "schema": "ar-role-capsule-budgets/v1",
+  "authority": "MIK-R101 rule 6",
+  "how": "budget = ceil(size_words * 11 / 10); size = whitespace-split words of render_instructions(), task data and seals excluded",
+  "capsules": {
+    "architect/orientation": {
+      "size_words": 2508,
+      "budget_words": 2759
+    },
+    "architect/planning": {
+      "size_words": 1874,
+      "budget_words": 2062
+    },
+    "architect/review": {
+      "size_words": 2181,
+      "budget_words": 2400
+    },
+    "architect/coordination": {
+      "size_words": 2838,
+      "budget_words": 3122
+    },
+    "architect/authorized-closeout": {
+      "size_words": 1779,
+      "budget_words": 1957
+    },
+    "architect/recovery": {
+      "size_words": 1872,
+      "budget_words": 2060
+    },
+    "orchestrator/orientation": {
+      "size_words": 1990,
+      "budget_words": 2189
+    },
+    "orchestrator/planning": {
+      "size_words": 1356,
+      "budget_words": 1492
+    },
+    "orchestrator/review": {
+      "size_words": 1663,
+      "budget_words": 1830
+    },
+    "orchestrator/coordination": {
+      "size_words": 2320,
+      "budget_words": 2552
+    },
+    "orchestrator/authorized-closeout": {
+      "size_words": 1261,
+      "budget_words": 1388
+    },
+    "orchestrator/recovery": {
+      "size_words": 1354,
+      "budget_words": 1490
+    },
+    "designer/orientation": {
+      "size_words": 1894,
+      "budget_words": 2084
+    },
+    "designer/planning": {
+      "size_words": 1260,
+      "budget_words": 1386
+    },
+    "strategist/orientation": {
+      "size_words": 2174,
+      "budget_words": 2392
+    },
+    "strategist/planning": {
+      "size_words": 1540,
+      "budget_words": 1694
+    },
+    "manager/orientation": {
+      "size_words": 2313,
+      "budget_words": 2545
+    },
+    "manager/review": {
+      "size_words": 1986,
+      "budget_words": 2185
+    },
+    "manager/curation": {
+      "size_words": 5033,
+      "budget_words": 5537
+    },
+    "manager/coordination": {
+      "size_words": 2643,
+      "budget_words": 2908
+    },
+    "manager/authorized-closeout": {
+      "size_words": 1584,
+      "budget_words": 1743
+    },
+    "manager/recovery": {
+      "size_words": 1677,
+      "budget_words": 1845
+    },
+    "worker/orientation": {
+      "size_words": 1664,
+      "budget_words": 1831
+    },
+    "worker/implementation": {
+      "size_words": 1246,
+      "budget_words": 1371
+    },
+    "worker/recovery": {
+      "size_words": 1028,
+      "budget_words": 1131
+    },
+    "curator/orientation": {
+      "size_words": 3612,
+      "budget_words": 3974
+    },
+    "curator/curation": {
+      "size_words": 6332,
+      "budget_words": 6966
+    },
+    "curator/recovery": {
+      "size_words": 2976,
+      "budget_words": 3274
+    },
+    "reviewer/orientation": {
+      "size_words": 3232,
+      "budget_words": 3556
+    },
+    "reviewer/review": {
+      "size_words": 2905,
+      "budget_words": 3196
+    },
+    "reviewer/recovery": {
+      "size_words": 2596,
+      "budget_words": 2856
+    },
+    "investigator/orientation": {
+      "size_words": 1525,
+      "budget_words": 1678
+    },
+    "investigator/recovery": {
+      "size_words": 889,
+      "budget_words": 978
+    },
+    "bootstrap/orientation": {
+      "size_words": 2133,
+      "budget_words": 2347
+    },
+    "bootstrap/recovery": {
+      "size_words": 1497,
+      "budget_words": 1647
+    },
+    "bootstrap/bootstrap": {
+      "size_words": 3745,
+      "budget_words": 4120
+    },
+    "launcher/orientation": {
+      "size_words": 1488,
+      "budget_words": 1637
+    },
+    "launcher/coordination": {
+      "size_words": 1818,
+      "budget_words": 2000
+    }
+  },
+  "decisions_L101": {
+    "leaf": "260928-MIK-L101",
+    "method": "post-sweep sizes compiled from canonical texts with the shipped compiler; every capsule re-measured after each edit round; registry refreshed in the same change (rule 6)",
+    "cuts": "A8 decision 2026-10-09 (F09 narrow repair application; supersedes A7, retained in worker report): per-capsule no-growth under a8f1 holds \u2014 adjusted (raw minus only the four required rule-8 spans) at or under a1b7 on all 38. Actual totals: before 109616 -> raw final 83786 -> adjusted 82200 (deducted 1586). Exactly one raw row grows (launcher/orientation +29, covered). Two Worker-output attempt-record referrals added (role +21w, operation +22w): worker/implementation +43, worker/orientation +21, worker/recovery +21; reviewer/review +0. No new condensation, allowance or finding.",
+    "additions_vs_master": "rule-8 producer clause (curation.md), rule-8 origin-evidence sentence (curation.md), rule-8 permission sentence (orientation.md, read by all ten roles; master carries it nowhere in role/operation texts), D93 closeout-evidence sentence (curator.md; master dropped it with retired comparison procedure, which stays retired), test-pinned Q&A/pending/held-message/relay sentences restored to master wording after a wrong one-place referral was attempted and reverted",
+    "capsules_changed": [
+      {
+        "capsule": "bootstrap/bootstrap",
+        "old_size": 4220,
+        "new_size": 4008,
+        "old_budget": 4642,
+        "new_budget": 4409,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2521,
+        "new_size": 2319,
+        "old_budget": 2774,
+        "new_budget": 2551,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "bootstrap/recovery",
+        "old_size": 1955,
+        "new_size": 1753,
+        "old_budget": 2151,
+        "new_budget": 1929,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 7029,
+        "new_size": 8341,
+        "old_budget": 7732,
+        "new_budget": 9176,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 4283,
+        "new_size": 4957,
+        "old_budget": 4712,
+        "new_budget": 5453,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 3717,
+        "new_size": 4391,
+        "old_budget": 4089,
+        "new_budget": 4831,
+        "direction": "raised"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1977,
+        "new_size": 1853,
+        "old_budget": 2175,
+        "new_budget": 2039,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "designer/planning",
+        "old_size": 1385,
+        "new_size": 1261,
+        "old_budget": 1524,
+        "new_budget": 1388,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1709,
+        "new_size": 1481,
+        "old_budget": 1880,
+        "new_budget": 1630,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 1143,
+        "new_size": 915,
+        "old_budget": 1258,
+        "new_budget": 1007,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 1981,
+        "new_size": 1708,
+        "old_budget": 2180,
+        "new_budget": 1879,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 3035,
+        "new_size": 2762,
+        "old_budget": 3339,
+        "new_budget": 3039,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 5386,
+        "new_size": 5751,
+        "old_budget": 5925,
+        "new_budget": 6327,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2640,
+        "new_size": 2367,
+        "old_budget": 2904,
+        "new_budget": 2604,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 2074,
+        "new_size": 1801,
+        "old_budget": 2282,
+        "new_budget": 1982,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 2431,
+        "new_size": 2158,
+        "old_budget": 2675,
+        "new_budget": 2374,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1678,
+        "new_size": 1450,
+        "old_budget": 1846,
+        "new_budget": 1595,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2732,
+        "new_size": 2504,
+        "old_budget": 3006,
+        "new_budget": 2755,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 2337,
+        "new_size": 2109,
+        "old_budget": 2571,
+        "new_budget": 2320,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1745,
+        "new_size": 1517,
+        "old_budget": 1920,
+        "new_budget": 1669,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1771,
+        "new_size": 1543,
+        "old_budget": 1949,
+        "new_budget": 1698,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 2128,
+        "new_size": 1900,
+        "old_budget": 2341,
+        "new_budget": 2090,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 3864,
+        "new_size": 3553,
+        "old_budget": 4251,
+        "new_budget": 3909,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 3298,
+        "new_size": 2987,
+        "old_budget": 3628,
+        "new_budget": 3286,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 3655,
+        "new_size": 3344,
+        "old_budget": 4021,
+        "new_budget": 3679,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2243,
+        "new_size": 2116,
+        "old_budget": 2468,
+        "new_budget": 2328,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "strategist/planning",
+        "old_size": 1651,
+        "new_size": 1524,
+        "old_budget": 1817,
+        "new_budget": 1677,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1710,
+        "new_size": 1482,
+        "old_budget": 1881,
+        "new_budget": 1631,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 2108,
+        "new_size": 1880,
+        "old_budget": 2319,
+        "new_budget": 2068,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1542,
+        "new_size": 1314,
+        "old_budget": 1697,
+        "new_budget": 1446,
+        "direction": "lowered"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 8341,
+        "new_size": 8355,
+        "old_budget": 9176,
+        "new_budget": 9191,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 4957,
+        "new_size": 4971,
+        "old_budget": 5453,
+        "new_budget": 5469,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 4391,
+        "new_size": 4405,
+        "old_budget": 4831,
+        "new_budget": 4846,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/authorized-closeout",
+        "old_size": 1968,
+        "new_size": 1999,
+        "old_budget": 2165,
+        "new_budget": 2199,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/coordination",
+        "old_size": 3022,
+        "new_size": 3053,
+        "old_budget": 3325,
+        "new_budget": 3359,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/orientation",
+        "old_size": 2627,
+        "new_size": 2785,
+        "old_budget": 2890,
+        "new_budget": 3064,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/planning",
+        "old_size": 2035,
+        "new_size": 2066,
+        "old_budget": 2239,
+        "new_budget": 2273,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/recovery",
+        "old_size": 2061,
+        "new_size": 2092,
+        "old_budget": 2268,
+        "new_budget": 2302,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/review",
+        "old_size": 2418,
+        "new_size": 2809,
+        "old_budget": 2660,
+        "new_budget": 3090,
+        "direction": "raised"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2319,
+        "new_size": 2446,
+        "old_budget": 2551,
+        "new_budget": 2691,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 8355,
+        "new_size": 8555,
+        "old_budget": 9191,
+        "new_budget": 9411,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 4971,
+        "new_size": 5298,
+        "old_budget": 5469,
+        "new_budget": 5828,
+        "direction": "raised"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 4405,
+        "new_size": 4605,
+        "old_budget": 4846,
+        "new_budget": 5066,
+        "direction": "raised"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1853,
+        "new_size": 1980,
+        "old_budget": 2039,
+        "new_budget": 2178,
+        "direction": "raised"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1481,
+        "new_size": 1935,
+        "old_budget": 1630,
+        "new_budget": 2129,
+        "direction": "raised"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 915,
+        "new_size": 1242,
+        "old_budget": 1007,
+        "new_budget": 1367,
+        "direction": "raised"
+      },
+      {
+        "capsule": "launcher/orientation",
+        "old_size": 1418,
+        "new_size": 1545,
+        "old_budget": 1560,
+        "new_budget": 1700,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 1708,
+        "new_size": 2066,
+        "old_budget": 1879,
+        "new_budget": 2273,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 2762,
+        "new_size": 3120,
+        "old_budget": 3039,
+        "new_budget": 3432,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 5751,
+        "new_size": 6109,
+        "old_budget": 6327,
+        "new_budget": 6720,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2367,
+        "new_size": 2852,
+        "old_budget": 2604,
+        "new_budget": 3138,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 1801,
+        "new_size": 2159,
+        "old_budget": 1982,
+        "new_budget": 2375,
+        "direction": "raised"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 2158,
+        "new_size": 2876,
+        "old_budget": 2374,
+        "new_budget": 3164,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1450,
+        "new_size": 1808,
+        "old_budget": 1595,
+        "new_budget": 1989,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2504,
+        "new_size": 2862,
+        "old_budget": 2755,
+        "new_budget": 3149,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 2109,
+        "new_size": 2594,
+        "old_budget": 2320,
+        "new_budget": 2854,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1517,
+        "new_size": 1875,
+        "old_budget": 1669,
+        "new_budget": 2063,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1543,
+        "new_size": 1901,
+        "old_budget": 1698,
+        "new_budget": 2092,
+        "direction": "raised"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 1900,
+        "new_size": 2618,
+        "old_budget": 2090,
+        "new_budget": 2880,
+        "direction": "raised"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 3553,
+        "new_size": 4007,
+        "old_budget": 3909,
+        "new_budget": 4408,
+        "direction": "raised"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 2987,
+        "new_size": 3314,
+        "old_budget": 3286,
+        "new_budget": 3646,
+        "direction": "raised"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 3344,
+        "new_size": 4031,
+        "old_budget": 3679,
+        "new_budget": 4435,
+        "direction": "raised"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2116,
+        "new_size": 2243,
+        "old_budget": 2328,
+        "new_budget": 2468,
+        "direction": "raised"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1482,
+        "new_size": 1809,
+        "old_budget": 1631,
+        "new_budget": 1990,
+        "direction": "raised"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 1880,
+        "new_size": 2334,
+        "old_budget": 2068,
+        "new_budget": 2568,
+        "direction": "raised"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1314,
+        "new_size": 1641,
+        "old_budget": 1446,
+        "new_budget": 1806,
+        "direction": "raised"
+      },
+      {
+        "capsule": "architect/authorized-closeout",
+        "old_size": 1999,
+        "new_size": 1779,
+        "old_budget": 2199,
+        "new_budget": 1957,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/coordination",
+        "old_size": 3053,
+        "new_size": 2838,
+        "old_budget": 3359,
+        "new_budget": 3122,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/orientation",
+        "old_size": 2785,
+        "new_size": 2508,
+        "old_budget": 3064,
+        "new_budget": 2759,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/planning",
+        "old_size": 2066,
+        "new_size": 1874,
+        "old_budget": 2273,
+        "new_budget": 2062,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/recovery",
+        "old_size": 2092,
+        "new_size": 1872,
+        "old_budget": 2302,
+        "new_budget": 2060,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/review",
+        "old_size": 2809,
+        "new_size": 2264,
+        "old_budget": 3090,
+        "new_budget": 2491,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/bootstrap",
+        "old_size": 4008,
+        "new_size": 3853,
+        "old_budget": 4409,
+        "new_budget": 4239,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2446,
+        "new_size": 2241,
+        "old_budget": 2691,
+        "new_budget": 2466,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/recovery",
+        "old_size": 1753,
+        "new_size": 1605,
+        "old_budget": 1929,
+        "new_budget": 1766,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 8555,
+        "new_size": 6705,
+        "old_budget": 9411,
+        "new_budget": 7376,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 5298,
+        "new_size": 3722,
+        "old_budget": 5828,
+        "new_budget": 4095,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 4605,
+        "new_size": 3086,
+        "old_budget": 5066,
+        "new_budget": 3395,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1980,
+        "new_size": 1894,
+        "old_budget": 2178,
+        "new_budget": 2084,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "designer/planning",
+        "old_size": 1261,
+        "new_size": 1260,
+        "old_budget": 1388,
+        "new_budget": 1386,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1935,
+        "new_size": 1525,
+        "old_budget": 2129,
+        "new_budget": 1678,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 1242,
+        "new_size": 889,
+        "old_budget": 1367,
+        "new_budget": 978,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "launcher/coordination",
+        "old_size": 1818,
+        "new_size": 1818,
+        "old_budget": 2000,
+        "new_budget": 2000,
+        "direction": "unchanged",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "launcher/orientation",
+        "old_size": 1545,
+        "new_size": 1488,
+        "old_budget": 1700,
+        "new_budget": 1637,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 2066,
+        "new_size": 1584,
+        "old_budget": 2273,
+        "new_budget": 1743,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 3120,
+        "new_size": 2643,
+        "old_budget": 3432,
+        "new_budget": 2908,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 6109,
+        "new_size": 5296,
+        "old_budget": 6720,
+        "new_budget": 5826,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2852,
+        "new_size": 2313,
+        "old_budget": 3138,
+        "new_budget": 2545,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 2159,
+        "new_size": 1677,
+        "old_budget": 2375,
+        "new_budget": 1845,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 2876,
+        "new_size": 2069,
+        "old_budget": 3164,
+        "new_budget": 2276,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1808,
+        "new_size": 1234,
+        "old_budget": 1989,
+        "new_budget": 1358,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2862,
+        "new_size": 2293,
+        "old_budget": 3149,
+        "new_budget": 2523,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 2594,
+        "new_size": 1963,
+        "old_budget": 2854,
+        "new_budget": 2160,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1875,
+        "new_size": 1329,
+        "old_budget": 2063,
+        "new_budget": 1462,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1901,
+        "new_size": 1327,
+        "old_budget": 2092,
+        "new_budget": 1460,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 2618,
+        "new_size": 1719,
+        "old_budget": 2880,
+        "new_budget": 1891,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 4007,
+        "new_size": 3223,
+        "old_budget": 4408,
+        "new_budget": 3546,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 3314,
+        "new_size": 2587,
+        "old_budget": 3646,
+        "new_budget": 2846,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 4031,
+        "new_size": 2979,
+        "old_budget": 4435,
+        "new_budget": 3277,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2243,
+        "new_size": 2174,
+        "old_budget": 2468,
+        "new_budget": 2392,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "strategist/planning",
+        "old_size": 1524,
+        "new_size": 1540,
+        "old_budget": 1677,
+        "new_budget": 1694,
+        "direction": "raised",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1809,
+        "new_size": 1203,
+        "old_budget": 1990,
+        "new_budget": 1324,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 2334,
+        "new_size": 1643,
+        "old_budget": 2568,
+        "new_budget": 1808,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1641,
+        "new_size": 1007,
+        "old_budget": 1806,
+        "new_budget": 1108,
+        "direction": "lowered",
+        "at": "2026-10-09/A5-final",
+        "decision": "a8f1 adjusted no-growth; raw cells exact"
+      },
+      {
+        "capsule": "architect/authorized-closeout",
+        "old_size": 1779,
+        "new_size": 1779,
+        "old_budget": 1957,
+        "new_budget": 1957,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/coordination",
+        "old_size": 2838,
+        "new_size": 2838,
+        "old_budget": 3122,
+        "new_budget": 3122,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/orientation",
+        "old_size": 2508,
+        "new_size": 2508,
+        "old_budget": 2759,
+        "new_budget": 2759,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/planning",
+        "old_size": 1874,
+        "new_size": 1874,
+        "old_budget": 2062,
+        "new_budget": 2062,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/recovery",
+        "old_size": 1872,
+        "new_size": 1872,
+        "old_budget": 2060,
+        "new_budget": 2060,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/review",
+        "old_size": 2264,
+        "new_size": 2181,
+        "old_budget": 2491,
+        "new_budget": 2400,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/bootstrap",
+        "old_size": 3853,
+        "new_size": 3745,
+        "old_budget": 4239,
+        "new_budget": 4120,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2241,
+        "new_size": 2133,
+        "old_budget": 2466,
+        "new_budget": 2347,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/recovery",
+        "old_size": 1605,
+        "new_size": 1497,
+        "old_budget": 1766,
+        "new_budget": 1647,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 6705,
+        "new_size": 6507,
+        "old_budget": 7376,
+        "new_budget": 7158,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 3722,
+        "new_size": 3612,
+        "old_budget": 4095,
+        "new_budget": 3974,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 3086,
+        "new_size": 2976,
+        "old_budget": 3395,
+        "new_budget": 3274,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1894,
+        "new_size": 1894,
+        "old_budget": 2084,
+        "new_budget": 2084,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "designer/planning",
+        "old_size": 1260,
+        "new_size": 1260,
+        "old_budget": 1386,
+        "new_budget": 1386,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1525,
+        "new_size": 1525,
+        "old_budget": 1678,
+        "new_budget": 1678,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 889,
+        "new_size": 889,
+        "old_budget": 978,
+        "new_budget": 978,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "launcher/coordination",
+        "old_size": 1818,
+        "new_size": 1818,
+        "old_budget": 2000,
+        "new_budget": 2000,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "launcher/orientation",
+        "old_size": 1488,
+        "new_size": 1488,
+        "old_budget": 1637,
+        "new_budget": 1637,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 1584,
+        "new_size": 1584,
+        "old_budget": 1743,
+        "new_budget": 1743,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 2643,
+        "new_size": 2643,
+        "old_budget": 2908,
+        "new_budget": 2908,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 5296,
+        "new_size": 5208,
+        "old_budget": 5826,
+        "new_budget": 5729,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2313,
+        "new_size": 2313,
+        "old_budget": 2545,
+        "new_budget": 2545,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 1677,
+        "new_size": 1677,
+        "old_budget": 1845,
+        "new_budget": 1845,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 2069,
+        "new_size": 1986,
+        "old_budget": 2276,
+        "new_budget": 2185,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1234,
+        "new_size": 1261,
+        "old_budget": 1358,
+        "new_budget": 1388,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2293,
+        "new_size": 2320,
+        "old_budget": 2523,
+        "new_budget": 2552,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 1963,
+        "new_size": 1990,
+        "old_budget": 2160,
+        "new_budget": 2189,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1329,
+        "new_size": 1356,
+        "old_budget": 1462,
+        "new_budget": 1492,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1327,
+        "new_size": 1354,
+        "old_budget": 1460,
+        "new_budget": 1490,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 1719,
+        "new_size": 1663,
+        "old_budget": 1891,
+        "new_budget": 1830,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 3223,
+        "new_size": 3232,
+        "old_budget": 3546,
+        "new_budget": 3556,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 2587,
+        "new_size": 2596,
+        "old_budget": 2846,
+        "new_budget": 2856,
+        "direction": "raised",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 2979,
+        "new_size": 2905,
+        "old_budget": 3277,
+        "new_budget": 3196,
+        "direction": "lowered",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2174,
+        "new_size": 2174,
+        "old_budget": 2392,
+        "new_budget": 2392,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "strategist/planning",
+        "old_size": 1540,
+        "new_size": 1540,
+        "old_budget": 1694,
+        "new_budget": 1694,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1203,
+        "new_size": 1203,
+        "old_budget": 1324,
+        "new_budget": 1324,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 1643,
+        "new_size": 1643,
+        "old_budget": 1808,
+        "new_budget": 1808,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1007,
+        "new_size": 1007,
+        "old_budget": 1108,
+        "new_budget": 1108,
+        "direction": "unchanged",
+        "at": "2026-10-09/A6-final",
+        "decision": "a8f1 adjusted no-growth; protected words restored; raw cells exact"
+      },
+      {
+        "capsule": "architect/authorized-closeout",
+        "old_size": 1779,
+        "new_size": 1779,
+        "old_budget": 1957,
+        "new_budget": 1957,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/coordination",
+        "old_size": 2838,
+        "new_size": 2838,
+        "old_budget": 3122,
+        "new_budget": 3122,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/orientation",
+        "old_size": 2508,
+        "new_size": 2508,
+        "old_budget": 2759,
+        "new_budget": 2759,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/planning",
+        "old_size": 1874,
+        "new_size": 1874,
+        "old_budget": 2062,
+        "new_budget": 2062,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/recovery",
+        "old_size": 1872,
+        "new_size": 1872,
+        "old_budget": 2060,
+        "new_budget": 2060,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/review",
+        "old_size": 2181,
+        "new_size": 2181,
+        "old_budget": 2400,
+        "new_budget": 2400,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/bootstrap",
+        "old_size": 3745,
+        "new_size": 3745,
+        "old_budget": 4120,
+        "new_budget": 4120,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2133,
+        "new_size": 2133,
+        "old_budget": 2347,
+        "new_budget": 2347,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/recovery",
+        "old_size": 1497,
+        "new_size": 1497,
+        "old_budget": 1647,
+        "new_budget": 1647,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 6507,
+        "new_size": 6332,
+        "old_budget": 7158,
+        "new_budget": 6966,
+        "direction": "lowered",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 3612,
+        "new_size": 3612,
+        "old_budget": 3974,
+        "new_budget": 3974,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 2976,
+        "new_size": 2976,
+        "old_budget": 3274,
+        "new_budget": 3274,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1894,
+        "new_size": 1894,
+        "old_budget": 2084,
+        "new_budget": 2084,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "designer/planning",
+        "old_size": 1260,
+        "new_size": 1260,
+        "old_budget": 1386,
+        "new_budget": 1386,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1525,
+        "new_size": 1525,
+        "old_budget": 1678,
+        "new_budget": 1678,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 889,
+        "new_size": 889,
+        "old_budget": 978,
+        "new_budget": 978,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "launcher/coordination",
+        "old_size": 1818,
+        "new_size": 1818,
+        "old_budget": 2000,
+        "new_budget": 2000,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "launcher/orientation",
+        "old_size": 1488,
+        "new_size": 1488,
+        "old_budget": 1637,
+        "new_budget": 1637,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 1584,
+        "new_size": 1584,
+        "old_budget": 1743,
+        "new_budget": 1743,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 2643,
+        "new_size": 2643,
+        "old_budget": 2908,
+        "new_budget": 2908,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 5208,
+        "new_size": 5033,
+        "old_budget": 5729,
+        "new_budget": 5537,
+        "direction": "lowered",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2313,
+        "new_size": 2313,
+        "old_budget": 2545,
+        "new_budget": 2545,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 1677,
+        "new_size": 1677,
+        "old_budget": 1845,
+        "new_budget": 1845,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 1986,
+        "new_size": 1986,
+        "old_budget": 2185,
+        "new_budget": 2185,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1261,
+        "new_size": 1261,
+        "old_budget": 1388,
+        "new_budget": 1388,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2320,
+        "new_size": 2320,
+        "old_budget": 2552,
+        "new_budget": 2552,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 1990,
+        "new_size": 1990,
+        "old_budget": 2189,
+        "new_budget": 2189,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1356,
+        "new_size": 1356,
+        "old_budget": 1492,
+        "new_budget": 1492,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1354,
+        "new_size": 1354,
+        "old_budget": 1490,
+        "new_budget": 1490,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 1663,
+        "new_size": 1663,
+        "old_budget": 1830,
+        "new_budget": 1830,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 3232,
+        "new_size": 3232,
+        "old_budget": 3556,
+        "new_budget": 3556,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 2596,
+        "new_size": 2596,
+        "old_budget": 2856,
+        "new_budget": 2856,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 2905,
+        "new_size": 2905,
+        "old_budget": 3196,
+        "new_budget": 3196,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2174,
+        "new_size": 2174,
+        "old_budget": 2392,
+        "new_budget": 2392,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "strategist/planning",
+        "old_size": 1540,
+        "new_size": 1540,
+        "old_budget": 1694,
+        "new_budget": 1694,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1203,
+        "new_size": 1203,
+        "old_budget": 1324,
+        "new_budget": 1324,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 1643,
+        "new_size": 1643,
+        "old_budget": 1808,
+        "new_budget": 1808,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1007,
+        "new_size": 1007,
+        "old_budget": 1108,
+        "new_budget": 1108,
+        "direction": "unchanged",
+        "at": "2026-10-09/A7-final",
+        "decision": "a8f1 adjusted no-growth; intra-op one-homing; raw cells exact"
+      },
+      {
+        "capsule": "architect/authorized-closeout",
+        "old_size": 1779,
+        "new_size": 1779,
+        "old_budget": 1957,
+        "new_budget": 1957,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "architect/coordination",
+        "old_size": 2838,
+        "new_size": 2838,
+        "old_budget": 3122,
+        "new_budget": 3122,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "architect/orientation",
+        "old_size": 2508,
+        "new_size": 2508,
+        "old_budget": 2759,
+        "new_budget": 2759,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "architect/planning",
+        "old_size": 1874,
+        "new_size": 1874,
+        "old_budget": 2062,
+        "new_budget": 2062,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "architect/recovery",
+        "old_size": 1872,
+        "new_size": 1872,
+        "old_budget": 2060,
+        "new_budget": 2060,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "architect/review",
+        "old_size": 2181,
+        "new_size": 2181,
+        "old_budget": 2400,
+        "new_budget": 2400,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/bootstrap",
+        "old_size": 3745,
+        "new_size": 3745,
+        "old_budget": 4120,
+        "new_budget": 4120,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/orientation",
+        "old_size": 2133,
+        "new_size": 2133,
+        "old_budget": 2347,
+        "new_budget": 2347,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "bootstrap/recovery",
+        "old_size": 1497,
+        "new_size": 1497,
+        "old_budget": 1647,
+        "new_budget": 1647,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "curator/curation",
+        "old_size": 6332,
+        "new_size": 6332,
+        "old_budget": 6966,
+        "new_budget": 6966,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "curator/orientation",
+        "old_size": 3612,
+        "new_size": 3612,
+        "old_budget": 3974,
+        "new_budget": 3974,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "curator/recovery",
+        "old_size": 2976,
+        "new_size": 2976,
+        "old_budget": 3274,
+        "new_budget": 3274,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "designer/orientation",
+        "old_size": 1894,
+        "new_size": 1894,
+        "old_budget": 2084,
+        "new_budget": 2084,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "designer/planning",
+        "old_size": 1260,
+        "new_size": 1260,
+        "old_budget": 1386,
+        "new_budget": 1386,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "investigator/orientation",
+        "old_size": 1525,
+        "new_size": 1525,
+        "old_budget": 1678,
+        "new_budget": 1678,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "investigator/recovery",
+        "old_size": 889,
+        "new_size": 889,
+        "old_budget": 978,
+        "new_budget": 978,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "launcher/coordination",
+        "old_size": 1818,
+        "new_size": 1818,
+        "old_budget": 2000,
+        "new_budget": 2000,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "launcher/orientation",
+        "old_size": 1488,
+        "new_size": 1488,
+        "old_budget": 1637,
+        "new_budget": 1637,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/authorized-closeout",
+        "old_size": 1584,
+        "new_size": 1584,
+        "old_budget": 1743,
+        "new_budget": 1743,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/coordination",
+        "old_size": 2643,
+        "new_size": 2643,
+        "old_budget": 2908,
+        "new_budget": 2908,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/curation",
+        "old_size": 5033,
+        "new_size": 5033,
+        "old_budget": 5537,
+        "new_budget": 5537,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/orientation",
+        "old_size": 2313,
+        "new_size": 2313,
+        "old_budget": 2545,
+        "new_budget": 2545,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/recovery",
+        "old_size": 1677,
+        "new_size": 1677,
+        "old_budget": 1845,
+        "new_budget": 1845,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "manager/review",
+        "old_size": 1986,
+        "new_size": 1986,
+        "old_budget": 2185,
+        "new_budget": 2185,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/authorized-closeout",
+        "old_size": 1261,
+        "new_size": 1261,
+        "old_budget": 1388,
+        "new_budget": 1388,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/coordination",
+        "old_size": 2320,
+        "new_size": 2320,
+        "old_budget": 2552,
+        "new_budget": 2552,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/orientation",
+        "old_size": 1990,
+        "new_size": 1990,
+        "old_budget": 2189,
+        "new_budget": 2189,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/planning",
+        "old_size": 1356,
+        "new_size": 1356,
+        "old_budget": 1492,
+        "new_budget": 1492,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/recovery",
+        "old_size": 1354,
+        "new_size": 1354,
+        "old_budget": 1490,
+        "new_budget": 1490,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "orchestrator/review",
+        "old_size": 1663,
+        "new_size": 1663,
+        "old_budget": 1830,
+        "new_budget": 1830,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/orientation",
+        "old_size": 3232,
+        "new_size": 3232,
+        "old_budget": 3556,
+        "new_budget": 3556,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/recovery",
+        "old_size": 2596,
+        "new_size": 2596,
+        "old_budget": 2856,
+        "new_budget": 2856,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "reviewer/review",
+        "old_size": 2905,
+        "new_size": 2905,
+        "old_budget": 3196,
+        "new_budget": 3196,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "strategist/orientation",
+        "old_size": 2174,
+        "new_size": 2174,
+        "old_budget": 2392,
+        "new_budget": 2392,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "strategist/planning",
+        "old_size": 1540,
+        "new_size": 1540,
+        "old_budget": 1694,
+        "new_budget": 1694,
+        "direction": "unchanged",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "worker/implementation",
+        "old_size": 1203,
+        "new_size": 1246,
+        "old_budget": 1324,
+        "new_budget": 1371,
+        "direction": "raised",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "worker/orientation",
+        "old_size": 1643,
+        "new_size": 1664,
+        "old_budget": 1808,
+        "new_budget": 1831,
+        "direction": "raised",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      },
+      {
+        "capsule": "worker/recovery",
+        "old_size": 1007,
+        "new_size": 1028,
+        "old_budget": 1108,
+        "new_budget": 1131,
+        "direction": "raised",
+        "at": "2026-10-09/A8",
+        "decision": "F09 referral application; raw cells exact"
+      }
+    ],
+    "restorations": "see additions_vs_master; wrong referral reverted in full"
+  }
+}

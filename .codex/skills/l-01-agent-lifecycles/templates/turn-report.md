@@ -1,14 +1,10 @@
 # Turn-Report Template
 
-The **mandatory** artifact a worker writes at **every** hand-off (`roles/worker.md`). It is how the
-leaf's work survives the session's death and how a respawned successor onboards from **state, not the
-transcript**. The Worker hands the frozen candidate and this report directly to the Reviewer,
-then sends its hand-off list directly to the Curator after code PASS. The Manager reads reports
-for state and receives only its named occasions; it relays no content. Terminal completion and
-`role_message` acceptance prove no work by the recipient. The truth boundary this template obeys is authored once
-in `../core/acceptance.md`; the check duty it records is authored in
-`../operations/closeout.md` § The targeted-check contract. The relay never inspects it;
-the manager — never a seat-local watcher — detects a missing report when reading the gate evidence.
+The **mandatory** artifact a worker writes at **every** hand-off (`roles/worker.md`): how the leaf's work survives
+the session and how a successor continues from state, not the transcript. Its truth boundary is
+`../core/acceptance.md`; its check duty is `../operations/closeout.md` § The targeted-check contract.
+The relay never inspects it; the manager — never a seat-local watcher — detects a missing report
+when reading the gate evidence.
 
 ## Rules
 
@@ -26,26 +22,14 @@ the manager — never a seat-local watcher — detects a missing report when rea
    it never replaces exact commands, results, and durable evidence references.
 8. Keep the **Durable-Evidence Promotion Hold Point** separate from requirement acceptance. Neither
    can substitute for the other.
-9. The report and the detailed **Requirement Attempt Journal** are distinct artifacts. The report
-   links the records appended at a review handoff; the journal at
-   `notes/reports/<leaf-id>-requirement-attempt-journal.md` is the single physical append-only
-   authority shared as an ordered record stream. Advance an attempt only when an exact candidate is
-   handed to independent review, or after reviewer rejection. Independent reviewers append separate
-   adjudication records to that same journal without changing earlier bytes. Never edit or delete
-   an earlier attempt; a rejected attempt's repair is a successor attempt.
-10. Bind every attempt to one exact candidate. Use a Git tree/commit for code delivery and an
-    artifact digest plus durable anchors for non-code-only delivery. Branch names or “latest” are
-    not candidate identities.
-11. Internal implementation, test, and evidence reruns are experimental protocol events, not
-    delivery attempts. Preserve them separately with candidate identity, command, result, failure
-    cause, repair made, and expected proof for the next run.
-12. Record harness sub-agent contributions and the seat's verification of them. The seat owns
+9. The report and the detailed **Requirement Attempt Journal** (`notes/reports/<leaf-id>-requirement-attempt-journal.md`) are distinct artifacts. Attempt advance/binding, experimental protocol and journal immutability follow `../core/acceptance.md` §Requirement revisions and delivery attempts are separate axes.
+10. Record harness sub-agent contributions and the seat's verification of them. The seat owns
     boundary messages and records; its helpers hold no AR seat and supply no independent review.
-13. Record each handover's recipient seat, exact candidate head/change hash, report path, requested
+11. Record each handover's recipient seat, exact candidate head/change hash, report path, requested
     whole stretch, and the reply/report evidence that identifies it and shows work or its start.
     Mark busy/unresolved handovers pending; quote the refusal or non-work reply and its Manager
     notice. An `accepted` delivery alone does not mean the stretch started.
-14. Record the review mode. A baseline report supports the complete agreed-scope baseline; a
+12. Record the review mode. A baseline report supports the complete agreed-scope baseline; a
     fix-verification report carries the sealed baseline, immediately preceding result, and
     exact outstanding IDs, then records a fixed/unfixed disposition for every preceding ID. A
     successor may not add, rewrite, reintroduce, or omit an issue, add a route, or reopen a resolved
@@ -75,16 +59,9 @@ the manager — never a seat-local watcher — detects a missing report when rea
 
 ## Requirement Attempt Journal Records Appended For This Handoff
 
-At a review handoff, append this lightweight block to the single physical leaf journal once per
-exact requirement revision and leaf manifestation. In this turn report, link each resulting journal
+At a review handoff, append the journal block as `../core/acceptance.md` §Requirement revisions and delivery attempts are separate axes states: link each resulting journal
 anchor instead of copying the record and creating a second authority. A non-review handoff records
 `none — no candidate handed to review`. Prior blocks are immutable.
-
-Validate the complete record before append. Append plus exact-candidate review handoff is one
-logical formal-attempt boundary. A malformed pre-handoff row remains preserved with an append-only
-`non-attempt-correction`/void reference, consumes no attempt ID, and the corrected record uses the
-same next ID at handoff. A malformed handed-off row requires independent reviewer rejection before
-the next candidate may appear as a successor attempt.
 
 | Requirement revision | Leaf manifestation | Worker attempt ID | Authoritative journal record |
 | -------------------- | ------------------ | ----------------- | ---------------------------- |
@@ -175,9 +152,7 @@ next run. These rows never consume a worker-attempt ID and never appear as revie
 
 For a code handoff, this table records the relevant targeted tests selected by the worker and all
 applicable repository-prescribed lint, formatting, typing, and structural checks, with their exact
-scope, commands, and results. Explicitly list any relevant test or check not run and why, and report
-failures accurately. After a failure and code repair, repeat the failed tests and every affected
-targeted check before another handoff, documenting final results; if one is not rerun, record why.
+scope, commands, and results. Explicitly list any relevant test or check not run and why.
 These are diagnostic worker checks, separate from certification and review-round accounting.
 
 ## Durable-Evidence Promotion Hold Point (separate concern)

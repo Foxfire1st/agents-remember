@@ -94,37 +94,46 @@ def autonomy_clauses(role: str) -> dict[str, tuple[str, ...]]:
 
 LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
     "roles/worker.md": {
-        "freeze to reviewer": ("Freeze the candidate and send it directly to the leaf's Reviewer",),
+        "freeze to reviewer": (
+            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+        ),
         "identity and whole stretch": (
-            "Name the leaf, candidate head and change hash recorded in your report, report path, and request its whole next stretch.",
+            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
         ),
         "repair return": (
-            "repair the sealed findings and return the new freeze to the same Reviewer",
+            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
         ),
         "producer to curator": (
-            "After code PASS, send the Curator your structured hand-off list for that exact freeze",
+            "After code PASS, send the Curator your structured hand-off list for that exact freeze with producer data preserved verbatim",
         ),
-        "factual independence": ("State facts; do not brief, limit or instruct the review.",),
+        "factual independence": (
+            "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
+        ),
         "seat address": ("Use the sibling role and exact leaf task references from the handover.",),
         "whole product identity": (
             "Use an agent ID only whole and unchanged as the product supplied it",
             "Use only the whole, unchanged agent ID supplied by the product",
         ),
         "action evidence": (
-            "recipient's reply or report names the exact object and shows the requested work or its start",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "nonaction notice": (
-            "Report a provider limit notice, error or turn without the requested work to the Manager once",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "empty doubled refusal": (
-            "On an empty or doubled-seat refusal, report its exact text to the Manager once and choose none of the candidates.",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "busy retry": (
-            "mark the hand-over pending in your report and send it again before ending your turn; report a second refusal to the Manager once",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
         ),
-        "sender owes contents": ("You still owe and send the hand-over yourself",),
+        "sender owes contents": (
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+        ),
         "upward notice recovery": (
-            "If the Manager cannot be reached, record the notice pending and retry it; do not turn that transport failure into a developer question.",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.",
+        ),
+        "useful report": (
+            "Write one useful report at the canonical task report path as `../operations/implementation.md` §Outputs states.",
         ),
     },
     "operations/implementation.md": {
@@ -147,52 +156,56 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     "roles/reviewer.md": {
-        "verdict to worker": ("hand it directly to the leaf's Worker",),
+        "verdict to worker": (
+            "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
+        ),
         "sealed whole repair": (
             "A block names the report with sealed findings and requests the whole repair stretch",
         ),
         "pass to curator": (
             "code PASS also goes directly to the Curator with your hand-off list for that freeze",
         ),
-        "memory verdict to curator": ("send its findings or PASS directly to the Curator",),
+        "memory verdict to curator": (
+            "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
+        ),
         "identity and whole stretch": (
             "candidate head and change hash from the Worker's report, or memory change identity), report or verdict path, and request the recipient's whole next stretch",
         ),
         "own code begin": (
-            'call task_doc(operation="begin_review") yourself before that round\'s review work',
+            "record your own begin and result as `../operations/review.md` §Outputs states",
         ),
         "own code result": (
-            "then record your own verdict with record_review or the applicable record_route_review once every required report exists",
+            "record your own begin and result as `../operations/review.md` §Outputs states",
         ),
         "preceding result": (
-            "If another begin needs the prior result, record your verdict as that result first.",
+            "record your own begin and result as `../operations/review.md` §Outputs states",
         ),
         "manager acceptance": (
             "The Manager accepts the verdict for the gate and records the developer's authorization beyond the limit.",
         ),
         "sealed memory lane": (
-            "Curator memory review keeps separately sealed reports, its own finding IDs and its own pass count.",
+            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
         ),
         "memory leaves code untouched": (
-            "It opens no task review-state round, resets no passed code review and adds no ID to its code baseline.",
+            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
         ),
         "memory ordinary limit": (
-            "Its ordinary limit is the same number of passes as code review",
+            "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
         ),
         "memory extra approval": (
             "the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions",
         ),
         "post-pass concern": (
-            "Answer a Curator finding that code fails the requirement or contradicts the Worker's report, including after code PASS.",
+            "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
         ),
         "reopen or refute answer": (
-            "Take a valid finding into your findings and reopen the verdict for that point, or state why it does not hold; send the answer directly to Curator and Worker.",
+            "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
         ),
         "busy retry": (
-            "For busy, mark pending in your report and retry before ending your turn; report a second refusal once.",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
         ),
         "upward notice recovery": (
-            "Record and retry an unreachable-Manager notice rather than turn that transport failure into a developer question.",
+            "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
         ),
     },
     "operations/review.md": {
@@ -224,7 +237,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "they open no review-state round, reset no passed code review and add no IDs to its baseline",
         ),
         "memory extra approval": (
-            "Any extra memory pass needs the developer's authorization recorded by the Manager in leaf decisions.",
+            "Any extra memory pass follows `../operations/curation.md` §Handoff / exit states.",
         ),
         "post-pass concern": (
             "Answer Curator code findings directly to Curator and Worker, even after code PASS",
@@ -233,40 +246,43 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "take a valid finding into your findings and reopen the verdict for that point, or state why it does not hold",
         ),
         "busy retry": (
-            "For busy, record pending, retry before ending your turn and report a second refusal once.",
+            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "upward notice recovery": (
-            "record/retry an unreachable-Manager notice rather than turn it into a developer question",
+            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
         ),
     },
     "roles/curator.md": {
         "memory to reviewer": (
-            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check, and take its findings or pass directly.",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
         ),
         "identity and whole stretch": (
-            "the memory candidate's identity), the report or verdict path, and the recipient's whole next stretch of work",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
         ),
         "post-pass code finding": (
-            "send the evidenced finding to both the Reviewer and the Worker, even after the Reviewer has passed the code",
+            "Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states, even after the Reviewer has passed the code",
         ),
         "code answer": (
-            "The Reviewer answers: it takes the finding into its findings and reopens its verdict for that point, or explains why it does not hold.",
+            "Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states, even after the Reviewer has passed the code",
         ),
         "finding and answer report": ("Your report names the finding and the Reviewer's answer.",),
         "memory lane and count": (
-            "This memory check keeps its own sealed reports, finding IDs and pass count",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
         ),
         "memory leaves code untouched": (
-            "it opens no code-review round, resets no code verdict and adds no IDs to the code baseline",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
         ),
         "memory ordinary limit": (
-            "Its ordinary limit is the same number of passes as the code review.",
+            "Hand your memory candidate and its report directly to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states",
         ),
         "busy retry": (
-            "On a busy refusal, record the handover as pending and retry before ending the turn; after a second busy refusal, tell the Manager once.",
+            "Address handovers and count them as taken as `../operations/curation.md` §Handoff / exit states.",
         ),
         "upward notice recovery": (
-            "If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with role_message on agents-remember-task; do not turn this transport failure into a developer question in your own chat.",
+            "If a required Manager notice cannot be delivered, record it as pending and retry it as `../operations/curation.md` §Handoff / exit states; do not turn this transport failure into a developer question in your own chat.",
+        ),
+        "manager contact": (
+            "Contact the Manager only as `../operations/curation.md` §Handoff / exit states.",
         ),
     },
     "operations/curation.md": {
@@ -293,10 +309,11 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Its ordinary limit is the same number of passes as the code review.",
         ),
         "busy retry": (
-            "A busy refusal is pending in your report: retry before ending the turn, and report a second busy refusal once to the Manager.",
+            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
         ),
         "upward notice recovery": (
-            "If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with role_message on agents-remember-task; do not turn this transport failure into a developer question in your own chat.",
+            "If a required Manager notice cannot be delivered, record it as pending",
+            "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
         ),
     },
 }

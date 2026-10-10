@@ -46,15 +46,13 @@ requested.**
 ## Rounds and convergence
 
 - A governed review has at most **three rounds**: one thorough baseline and two fix-verification
-  rounds. A pending round may resume; a new review counts the next round.
+  rounds. A pending round may resume; a new review counts the next round. The D107 one-further-look exception lives in `../operations/review.md` and covers only used-up rounds whose remaining items were raised before and have since been repaired.
 - Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up
   verification; fix rounds resume the same builder.
 - Reviews 2 and 3 verify **only** the original listed issues. Any outside-list matter goes to the
   developer and is not a successor finding.
 - **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
-  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent; wait for explicit authorization and record the developer's quoted words before any authorized extra work. **Do not spin an unapproved round, split the scope, or create a new finding
-  list.** No agent may self-authorize an extra round, and no code path needs to prove human
-  authorship or build a separate authentication mechanism.
+  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, request authorization as `../operations/review.md` states. The D107 one-further-look exception lives in `../operations/review.md` and covers only used-up rounds whose remaining items were raised before and have since been repaired.
 
 The simple review rule: if no review state is present, the used-round count is zero and the next
 review is a baseline; do not create a pristine marker or refuse because legacy review history is

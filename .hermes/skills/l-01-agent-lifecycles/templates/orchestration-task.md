@@ -65,10 +65,8 @@ identity: the sprint's `orchestrates` and `integrationBranch`, every commanded m
    unknown/duplicate/rewritten/reintroduced issues, or pass with unresolved IDs. Revisions append
    result sections rather than erasing history. A changed plan surface that cannot be verified
    against the baseline returns to the developer; it does not create a new review cycle. The
-  owning task document calls `task_doc(operation="begin_review")` before hosted/native reviewer
-  work and calls `task_doc(operation="record_review")` or the existing
-  `task_doc(operation="record_route_review")` after the result. The artifact remains standing
-  scope after adoption.
+   owning task document records the review begin and result. The artifact remains standing
+   scope after adoption.
 
 ## Shape
 

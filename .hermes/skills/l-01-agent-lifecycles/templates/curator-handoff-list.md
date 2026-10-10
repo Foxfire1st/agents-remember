@@ -320,6 +320,13 @@ exists only where the curator declared one. Nothing infers a family from a path,
 route, a label or a shared anchor. A changed guarantee or member list is an update of the stored
 family record (`id` names it), and the leaf's `history` section carries the row that explains it.
 
+A `changed` family row needs your judgment of its effect: give it `effect`, one of `restore`,
+`clarify`, `introduce`, `strengthen`, `weaken`, `replace`, `split`, `merge`, `retire` — the same
+label vocabulary as an invariant's `changed` row. The writer refuses a `changed` family row
+without it, and refuses an `effect` on an `assigned`, `rerouted`, `no_impact` or `retired`
+family row. You never write the family's `revision`: the writer records the family's own
+revision from the record it just wrote, next to the revision of each examined member.
+
 **An external document is a reference target of a card.** A card that rests on a document outside
 the repository cites it in its sidecar's numbered references as `{"kind": "external", "document":
 {"document": "<URL or name>", "version": "<revision, when known>"}}` (MIK-R21 rule 6). An external
@@ -509,12 +516,7 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   - `assigned` or `rerouted` when only the routes change;
   - `no_impact` when the record is as it was.
 
-  A `changed` family row needs your judgment of its effect: give it `effect`, one of `restore`,
-  `clarify`, `introduce`, `strengthen`, `weaken`, `replace`, `split`, `merge`, `retire` — the same
-  label vocabulary as an invariant's `changed` row. The writer refuses a `changed` family row
-  without it, and refuses an `effect` on an `assigned`, `rerouted`, `no_impact` or `retired`
-  family row. You never write the family's `revision`: the writer records the family's own
-  revision from the record it just wrote, next to the revision of each examined member.
+  A `changed` family row needs your judgment of its effect as §The curator's authored keys beside the thirteen fields states above.
 
   While the family's guarantee differs from the parent line's (the item's facts say
   `guarantee-changed`), a row of another disposition does not answer the family: the gate holds

@@ -13,51 +13,13 @@ this page plus `../operations/bootstrap.md` are your instructions.
 
 A missing input is asked for or reported — never guessed into existence.
 
-- **The code repository the developer means, with its absolute root.** There is no default repository.
-- **The resolved `coordinationRoot` and `workspaceRoot`** from `server_info`, and whether a memory root already
-  resolves for that repository (and its state when it does).
-- **The developer's own answers**, asked one at a time in plain language:
-  1. **which code branch is the foundation — the spear — of the repository's memory**, with the currently
-     checked-out branch as the default;
-  2. **a new memory repo, or an existing one** — do not assume; ask unless one already resolves;
-  3. **index now, or defer** providers. Deferral is always an available answer and is never a failure.
-
-**Not inputs, and their absence is not an error:** a task document, a leaf or master document, a worktree
-enclosure contract, a gate, a requirement packet, or a brief compiled from a template. This seat is started
-before any of them exist, and nothing about it is repaired by inventing one.
+This seat's required inputs, and what is not an input, follow `../operations/bootstrap.md`; nothing about this seat is repaired by inventing a task input.
 
 ## Process
 
 **`../operations/bootstrap.md` is the procedure**: the ordered steps, the surface that owns each step, the
 failure-state inventory, and its authority gates. **That file governs**; where this page and it disagree, it
-wins. This section states only the obligations that are yours while running it.
-
-1. **Explain before asking.** The developer is owed a plain-language account of what changes and why the
-   branch choice matters, in the same turn as the first question — not after the first write.
-2. **Run each step through the surface that owns it**, previewing every effectful step (`dry_run=true`) before
-   applying it, and never bypassing a surface to do its work by hand. The steps themselves belong to the skills
-   that own them — `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-14-knowledge-bootstrap`,
-   `c-10-adopt-memory-baseline`, `c-02-memory-quality-control`, `c-08-ar-coordination-context-resolver`,
-   `c-13-install-and-onboard` — and this seat points at them rather than restating them.
-3. **Ask the decisions that are the developer's**, and record the answers. The spear branch, the
-   new-versus-existing memory repo, and the drift-acceptance decision at adoption are not yours to assume; the
-   spear choice in particular is settled here because changing it later is a carryover operation, not an edit.
-   The **commit word** for the knowledge foundation is the developer's too, and it is asked for rather than
-   assumed.
-4. **Read the state back from the tools after every mutating step.** A step is complete when a follow-up call
-   says so, not when the call returned without raising.
-5. **Reach the knowledge foundation and report its outcome — the authoring is not yours.** The repository's
-   knowledge foundation is the curator's procedure, the `c-14-knowledge-bootstrap` skill, and **this seat is the
-   read-and-report carrier that exists for it before a task does**: sessions are admitted without a task document
-   only for the taskless seats — `chat`, a plain `terminal` pane, this seat, and a **curator seat** (the
-   developer's 2026-09-24 ruling). So read the state at the declared knowledge location — the `knowledge` block
-   `memory_init` returns says where it lives and what a read finds there now — report it, and hand the authoring
-   to a curator: a **taskless curator session** for a repository with no task at all, a curator on a task document
-   for a real task, or the taskless writer an instructed session holds. Say in your report whether the foundation
-   is absent, recorded at an exact identity, or unusable, and whether the curator's run has happened. **A
-   repository whose knowledge is not recorded is not reported as ready**: the onboarding and baseline can both be
-   complete while the knowledge foundation is still absent, and those are separate facts, not one verdict.
-6. **Write the report — § Outputs — and stop.**
+wins. This section states only the obligations that are yours while running it: explain the changes before the first question, run every step through its owning surface with previews and read-backs, ask the developer's decisions and record them, reach the knowledge foundation's outcome without authoring it, and write the report.
 
 ## Outputs
 
@@ -103,12 +65,7 @@ wins. This section states only the obligations that are yours while running it.
 
 - **Nothing else.** No second completion post, and a finding held only in the conversation is a defect.
 
-**How this report is checked — say it in the report.** This agent has **no independent acceptor**: no task
-document, no gate, no reviewer in its loop. Its report is therefore **completion truth**, a claim by the seat
-about itself, and never an acceptance. What makes it worth anything is that every claim is **re-derivable**: a
-reader must be able to open the surface the report names, run the same call with the same arguments, and get
-the same answer. So record the surface, the arguments and the result read back — and where a claim cannot be
-re-derived that way, mark it as this seat's own observation rather than as evidence.
+**How this report is checked — say it in the report.** How conformance is evidenced follows `../operations/bootstrap.md`.
 
 ## What you may do
 
@@ -135,10 +92,8 @@ re-derived that way, mark it as this seat's own observation rather than as evide
   `git push`, no branch movement, no worktree creation. The memory-content commit `memory_baseline_adopt`
   performs is that surface's designed effect, not this seat committing.
 - **Never author or refresh onboarding content** yourself, and never edit a memory file to make a check pass.
-- **Never author knowledge records either.** The repository's knowledge foundation is the curator's procedure
-  (the `c-14-knowledge-bootstrap` skill) and the curator's authored result; this seat reads and reports the
-  foundation's state, and it does not run the writer, invent invariants, or populate a database to make the
-  report look finished.
+- **Never author knowledge records either.** The prohibition and its Curator home (the `c-14-knowledge-bootstrap` skill) are `../operations/bootstrap.md` §Authority gates; this seat reads and reports the
+  foundation's state.
 - **Never work around a refusal that names a capability the product does not have**, substitute a supported
   mode for an unsupported one, or migrate an existing artifact in place.
 - Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are
@@ -170,4 +125,4 @@ a task transaction this seat does not have.
 
 ## Organise your own work
 
-Inside your assignment, organise your work yourself with what your harness offers, including sub-agents. You decide how to split it; the roles order work at task boundaries. You answer for all their work: check it, credit it in your report, and hand it over under your own name. Messages to other seats, task records and product operations that change leaf state are your own acts. A harness sub-agent holds no AR seat, starts no role, and has the same working folder, permissions and assignment as you. Nobody checks itself through a sub-agent: independent code and memory review belongs to the Reviewer. A harness without sub-agents retains the same duties.
+Organise your own work inside the assignment, with whatever your harness offers, at any size. You decide the split; the roles order work at task boundaries. The seat answers for all of it: check their work, report which parts they did, and hand it over under your own name. Every boundary act is yours: a message to another seat, a task record or a product operation changing leaf state. A harness sub-agent is no AR role, holds no seat, does not start a role and has the same working folder, permissions and assignment. Nobody checks itself through a sub-agent: code and memory changes still require the independent Reviewer, never their author's helper. A harness without sub-agents can do all the same work.

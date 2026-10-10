@@ -55,15 +55,6 @@ master's leaf loop to the master-exit seam, then hand over.
 - Exact outstanding IDs: `<prior remaining IDs and digest | none for baseline>`.
 - Successor worker scope: `<fixes/evidence for listed IDs only>`.
 
-When review is requested, the baseline review is responsible for complete discovery and seals stable issue IDs, precise problem
-statements, source/requirement evidence, and observable acceptance criteria. A successor verifies
-only the sealed outstanding IDs and writes a fixed/unfixed disposition for every preceding ID. Its
-remaining set must be a subset of the preceding set and baseline. Unknown, duplicate, rewritten,
-reintroduced, newly discovered, omitted, or newly criteria-backed IDs, a whole-review request, a new
-route, or a pass with unresolved IDs is refused. Candidate/source/version/model/seat/route/report
-changes do not reset the review; changed scope that cannot be verified against the baseline returns
-to the developer.
-
 ## Dispatch defaults
 - Worker dispatches: `templates/worker-brief.md`, with each canonical leaf document and role
   `worker`; the control plane claims each `(leaf document, worker)` seat; knob overrides:
@@ -91,22 +82,6 @@ to the developer.
   logical formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
   `non-attempt-correction`/void reference and consumes no attempt ID; a malformed handed-off row
   requires independent reviewer rejection before a successor handoff. The worker never self-rejects.
-- Start a leaf's Worker and Reviewer together. The Reviewer cold-reads the requirement before code
-  exists and waits for the Worker's freeze. Start its Curator when the first freeze exists. No
-  checked seat starts its checker: the starter briefs the agent and becomes its parent.
-- The Worker hands the frozen candidate and report directly to the Reviewer; verdicts and repairs
-  return directly to the Worker. After code PASS, the Reviewer sends its passed freeze/verdict and
-  the Worker sends its hand-off list directly to the Curator. The Curator hands the memory change
-  directly to the Reviewer and receives its findings/pass directly. Relay none of those contents.
-- Hear from the leaf only for readiness for closeout (Reviewer names the passed freeze and CODE
-  and MEMORY verdicts), a non-work reply, an empty/doubled seat or a second busy refusal, ownership
-  or authority, an extra round/pass, an unresolved Curator/Reviewer code disagreement, or a sync
-  step reserved to you. For a native memory-file conflict, capture, verify and stage the Curator's resolved content; the Worker continues the supported sync. Settle the occasion without relaying handover contents or seeking a
-  developer confirmation for it; extra review still needs the developer's recorded approval.
-  Give a pending sender one message when the recipient is free so that sender retries itself.
-- Read leaf reports and the task document for state; record which seat holds each next step and
-  since when. Keep closeout, integration, status and acceptance writes, and landing order. A
-  Reviewer verdict remains evidence for your gate decision.
 - Closeout-door publication: after that handoff and a current-lineage proof, call
   `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
   contract with complete current
@@ -124,33 +99,20 @@ to the developer.
   `closeout_door(request={action:"update-provenance", ...})` or change its door disposition before
   it is schedulable again.
 - Every requested `reviewMode=baseline` standalone or organizational code-change session receives
-  an independent route review before curator handoff. Require complete coverage of the agreed
-  surface, including material major routes and their surrounding owners; the Reviewer organises
-  its own review and any harness sub-agents. The reviewer seat must be distinct from both the leaf's builder
+  an independent route review before curator handoff, with complete coverage of the agreed
+  surface. The reviewer seat must be distinct from both the leaf's builder
   seat and the seat that authored the plan. Dispatch the exact same owned primary stable-ID + version
   and worker envelope to the reviewer. For `reviewMode=fix-verification`, carry the sealed
-  baseline, preceding result, and exact outstanding IDs; verify listed fixes only, reuse prior
-  route/evidence reports, and do not recensus the diff.
-  The Reviewer itself records `task_doc(operation="begin_review")` when taking an ordinary CODE
-  handover and records its own result with `record_review` or the existing `record_route_review`.
-  It records a preceding result before beginning a repair round when required. MEMORY checks keep
-  their own sealed reports, IDs and count, with the same ordinary limit; they open no CODE round,
-  reset no code state, and add no ID to its baseline. Keep acceptance for the gate and record the
+  baseline, preceding result, and exact outstanding IDs; verify listed fixes only. The reviewer
+  records its own begin and result; keep acceptance for the gate and record the
   developer's approval for a CODE round or MEMORY pass beyond the ordinary limit.
-  The reviewer independently opens the
-  artifacts and adjudicates that exact attempt and candidate `accepted | rejected` in a separately appended
-  record with its own rationale. Missing rationale, an
-  unapproved packet revision, wrong-class evidence, or invalid citations forces rejection; any
-  rejected ID blocks the overall verdict. Every requirement verdict must cite evidence of the
+  The reviewer adjudicates that exact attempt and candidate `accepted | rejected` in a separately appended
+  record with its own rationale. Every requirement verdict must cite evidence of the
   requirement's class (rendering -> mounted-UI proof, scheduling -> operation-level proof, data
   model -> artifact-level proof).
-- Classify each rejected finding as exactly `implementation defect`, `evidence gap`, `requirement
-  contradiction/overconstraint`, `test/tool defect`, or `external blocker`. Requirement problems
-  route through the architect for developer-approved revision; worker/reviewer records cannot
-  rewrite them. Accepted work stays closed. Repairs cite predecessor findings and use the same
-  reviewer for delta verification; no worker, reviewer, candidate change, or summary reopens or
-  extends the review by itself. During `reviewMode=fix-verification`, an outside-list observation
-  is a developer decision packet, not a new or reopened review finding.
+- Rejected findings keep the five exact classes of `../roles/reviewer.md`; requirement problems
+  route through the architect for developer-approved revision. Accepted work stays closed; no worker,
+  reviewer, candidate change, or summary reopens or extends the review by itself.
 - Maintain `notes/reports/<master-id>-requirement-attempt-summary.md` as a rebuildable projection
   linking authoritative leaf records and showing attempts, rejection history/count, current state,
   and dominant open failure class per requirement manifestation. It is never a task, lifecycle,
@@ -169,11 +131,7 @@ to the developer.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
   document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch
   when the Worker's first freeze exists. The Worker and Reviewer feed the frozen change set,
-  hand-off list and code verdict directly. The start brief supplies existing
-  onboarding/entity intent anchors, the leaf task doc, approved developer/design rulings, and
-  notes/. The curator performs the conservative three-way intent reconciliation, routes accepted
-  current truth to the right onboarding home (specific sidecar or governing overview;
-  L3 Operational-Notes last-resort only), and writes onboarding only.
+  hand-off list and code verdict directly.
 - Concurrency: <max parallel leaf build work or "sequential">. Build concurrency does not grant
   landing order. An atomic block exposes no intermediate leaf to super. After a closeout claim,
   lifecycle/worker/commit/recovery evidence belongs only to the enclosure-root operation journal;
@@ -195,9 +153,8 @@ to the developer.
 - When the master reaches its completion boundary, prepare the master-handover packet with the
   exact code/memory transaction, worker targeted-check report, the curator's complete onboarding/
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
-  approved brief requests a master-exit review, dispatch the reviewer on its canonical document,
-  carry the exact requested review mode, and preserve the three-round monotonic rule: review 1
-  seals the fixed finding list; reviews 2 and 3 verify only that list and shrink it to zero; after round 3 request authorization through your parent with `role_message` on `agents-remember-task`, or ask in your own chat without a parent, and record the developer's quoted answer before acting. The verdict is evidence, not a routine transaction gate.
+  approved brief requests a master-exit review, dispatch the reviewer on its canonical document
+  and preserve the three-round monotonic rule with the sealed finding list. The verdict is evidence, not a routine transaction gate.
   Raise `master-handover-approval` only as required by the active gate policy; the orchestrator
   decides the matching open gate structurally.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:
@@ -219,4 +176,3 @@ to the developer.
 - Fill every `<placeholder>`; an unresolved placeholder is not dispatchable.
 - Do not compile branch names, commit ids, or private contract/session ids into this brief. The
   canonical sprint/master documents and their structural admission are the reconciliation anchor.
-- Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.

@@ -99,7 +99,10 @@ CORPUS_LOCATIONS = (
 # case is hat-collapse, which genuinely requires running another seat's file: the architect may
 # wear the designer hat inline. Entries elsewhere are removed rather than kept "just in case".
 SANCTIONED_SIBLING_REFERENCES = {
-    "architect": ("roles/designer.md",),
+    "architect": ("roles/designer.md", "roles/manager.md"),
+    # F03 one-home repair: the Manager role owns the single questions-received
+    # policy; the Architect and Orchestrator carry only a referral to it.
+    "orchestrator": ("roles/manager.md",),
 }
 
 # A coordination-root anchor names a file in the coordination tree this checkout does not contain

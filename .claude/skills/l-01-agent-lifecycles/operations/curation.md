@@ -81,6 +81,14 @@ For the selected converted memory root, the admitted file-writer command is
 The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before
 the file writer is invoked.
 
+On a development install the producer is the build that serves the agent: the tool server
+that started it, or the command line of the same build. It is the clean main checkout, and the
+serving commit is the ruler. Every run states its ruler. The leaf's own source is no producer for
+the leaf's memory, with or without an admission. A leaf that changes the writer or the check proves
+it on fixtures and scratch copies; that proof is evidence of the build, and this text orders no
+fixture procedure. Nothing is installed for a run, no guard is switched off, and no producer stands
+in for one that refused.
+
 An explicit report-only assignment delivers only its requested report and bound upstream message,
 without onboarding writes, MQC, coherence, indexes, or comparison production. It does not claim the
 normal authoring pass complete; that pass retains all the full-operation obligations below.
@@ -94,15 +102,7 @@ normal authoring pass complete; that pass retains all the full-operation obligat
    - the **ruled change intent** — the task, developer decisions, approved design notes, builder
      report, reviewer verdict;
    - the **implemented reality** — the complete fed change set and its verification evidence.
-2. **Treat the durable corpus as three distinct information planes**, even where Markdown stores them
-   in one file:
-   - **current intent** — compact contracts, ownership, invariants, negative knowledge, failure
-     behavior, reconsideration conditions (the default retrieval payload);
-   - **evidence and integrity** — citations, reference health, verification anchors, fingerprints,
-     coverage, generated indexes;
-   - **semantic history** — append-only changes in accepted understanding: what changed, why, and
-     what it superseded. Not a replay of task rounds.
-3. **Route the durable knowledge through the real writer.** The reconciliation's requirement-shaped items
+2. **Route the durable knowledge through the real writer.** The reconciliation's requirement-shaped items
    are authored knowledge, not onboarding prose. Every target in it carries its own authored `rationale` (why
    that place carries the obligation) and optionally a `role`, as `../templates/curator-handoff-list.md` states;
    the writer never generates a rationale and refuses a list with an unexplained target
@@ -115,7 +115,7 @@ normal authoring pass complete; that pass retains all the full-operation obligat
    is `written`, `planned` or `refused`; a refused run wrote nothing and names every problem with its own reason.
    A partial hand-off therefore stays visible; it is never rounded up to "the batch went through". The command
    needs converted memory: on the legacy format it refuses with `legacy-format` and names the conversion command.
-4. **Examine family coverage and author it as part of the same list.** For every scoped obligation, decide whether
+3. **Examine family coverage and author it as part of the same list.** For every scoped obligation, decide whether
    the evidence and the project's intent justify a joint obligation with others. Where they do, author a `family`
    record in the list's `records` section, as `../templates/curator-handoff-list.md` states: the family's **own**
    guarantee text, its members, its routes and its admission — one obligation may belong to several families.
@@ -125,10 +125,12 @@ normal authoring pass complete; that pass retains all the full-operation obligat
 guarantee, name the family in `history` as a `changed` row with your `effect`; the writer fills the
 family's own revision. Never let an implementation
    change rewrite member intent or family meaning by itself. An external document a card rests on is cited as an
-   `external` reference target in the card's sidecar, never as a repository path with a Git blob. Read the result
+   `external` reference target in the card's sidecar, never as a repository path with a Git blob. Name that
+   document in the handoff evidence for the record's `origin`, so the evidence shows which external document
+   each backed record rests on. Read the result
    back — the writer's report, and `knowledge_read` with `view="family"` over this leaf's memory worktree — and
    carry the coverage into the handoff: the families authored or updated, and those examined and left unchanged.
-5. **Route every change-set item and every notes item to the right home** through the
+4. **Route every change-set item and every notes item to the right home** through the
    `c-05-create-or-update-onboarding-files` skill workflow:
    - changed source files → their file-level sidecars with compact current contracts and a newest
      semantic-history entry; a mechanical consumer change with no contract impact gets a precise
@@ -139,26 +141,18 @@ family's own revision. Never let an implementation
    - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
      resort only**, never the default drop point for an inconvenient finding;
    - generated route indexes → regenerate with `route_index_refresh` on `agents-remember-task` scoped to this leaf.
-6. **Reject overview-dumping and task-log-dumping.** Never add an overview heading named for a leaf or date;
+5. **Reject overview-dumping and task-log-dumping.** Never add an overview heading named for a leaf or date;
    update the overview body that owns the meaning. Preserve a truth when it is important to future
    correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
    facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
    tests.
-7. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
-   its exact command and scope. At minimum inspect the changed sidecars and the affected
-   overviews/indexes/entities, run `git diff --check` in the memory worktree, and run the full
-   `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
+6. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
+   its exact command and scope: the changed sidecars, the affected overviews/indexes/entities,
+   `git diff --check` in the memory worktree, and the full `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
    for the full operation, and every curator-actionable finding it returns is repaired or escalated as
    blocked with its exact returned code. Run it at intake and after every repair until
-   `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. The
-   combined `checklistStatus` is rewritten to `coherence-required` only when the coherence record is then
-   missing or stale: that is the coherence gate, not another repair — clear it by publishing the
-   `curator_coherence` authority with `prepare` → `publish` → `validate`, because `closeoutReady` becomes
-   true only once that validation passes.
-   Do this **before** the closeout, never after it: the closeout itself closes the leaf's history file, so
-   the memory tree it commits is a different tree from the one the authority attests, and a validation made after
-   the commit can never match. After the closeout, go straight to integration.
-8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
+   `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. When the coherence record is then missing or stale, clear the coherence gate as §Authority gates states, before the closeout.
+7. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Scope before ingest
 
@@ -243,11 +237,11 @@ and names the areas it did not reach; it never claims the foundation complete fo
   and control-plane state stayed coherent.
 - **Do not promote a historical oddity** into a permanent invariant without checking its causal
   applicability and reconsideration condition.
-- **A partial or refused knowledge hand-off stays partial.** A run whose entries split across
-  `committed` and `refused`, or whose publication the owner refused, names each outcome and
-  manufactures no full completion; an exact retry is the recovery (the batch replays and the
-  publication reports `no_change`), while changed content under one entry id is refused by design and
-  is corrected with a successor entry.
+- **A partial or refused knowledge hand-off stays partial.** A run the writer reports as `planned`
+  wrote nothing; a `refused` run wrote nothing and names every problem with its own reason — correct
+  the list and run it again. A rerun that changes a target's `rationale` or `role` rewrites the
+  `realizes` entry this leaf wrote from that entry; the entry keeps its ID. A refused run is never
+  rounded up to "the batch went through".
 - **If any side of the three-way comparison is missing or ambiguous enough that curation would become
   guesswork**, ask the Worker about code or the Reviewer about its verdict directly; ask the Manager only
   when the missing row is a matter of ownership or authority.
@@ -265,18 +259,10 @@ with the handover's role-and-task arguments. An agent ID is used only whole and 
 by a sender line, start result or handover. A Curator starts no role: the starter briefs an agent and becomes
 its parent, so no seat starts its own checker. A dashboard launch needs no parent. Send questions requiring the developer's decision to your parent; without a parent, ask in your own chat. Repository-foundation and other admissions keep their brief's transport without a fallback.
 
-The curator's memory candidate goes directly to the Reviewer for its whole memory check: the changed
-onboarding paths, the intent
-reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.
-It also carries the knowledge hand-off result: the writer report's state, the records and entries it
-wrote with their IDs and paths, the history rows, and every refusal named. On the repository-foundation
-entry the same facts come from the bootstrap report — each record's outcome, the files the wave
-wrote, and the remaining and carried work — together with the source areas the run examined and the
-areas it did not.
+The curator's memory candidate goes directly to the Reviewer for its whole memory check; the report payload follows `../roles/curator.md` §Outputs.
 The structured coherence record and its generated projection are the durable output — not the
-transcript and not a parallel hand-authored report. Write the record before ending the turn;
-terminal/finalizer evidence attests only that this turn ended. Do not hand-write a curator certification
-or write a parallel model completion post.
+transcript. Write the record before ending the turn;
+terminal/finalizer evidence attests only that this turn ended. Do not hand-write a curator certification.
 
 Each handover names the leaf, the thing's exact identity (the Worker's code head and change hash, and
 the memory candidate's identity), its report or verdict path, and the whole next stretch requested.
@@ -286,12 +272,7 @@ the same number of passes as the code review. A pass beyond its
 ordinary limit needs the developer's word recorded by the Manager. Receive memory findings or PASS
 directly from the Reviewer and repair within that lane; the Manager carries none of these handovers.
 
-The handover is taken only when the recipient's reply or report names the exact thing and shows the
-requested work or its start. `accepted` alone is not action. Quote a provider limit, error or non-action
-reply once to the Manager with the seat, and continue independent work. Report an empty or doubled
-seat refusal once with its exact text; choose no candidate yourself. A busy refusal is pending in your
-report: retry before ending the turn, and report a second busy refusal once to the Manager. You still
-owe the direct handover and send it yourself when the Manager tells you the seat is free.
+Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.
 
 If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with `role_message` on `agents-remember-task`; do not turn this transport failure into a developer question in your own chat.
 
@@ -312,8 +293,6 @@ writer through the admitted writer. A harness without sub-agents can perform the
 
 For a native memory-file sync conflict, repair only the memory content inside your admitted write surface. The Manager captures, verifies and stages the resolution; the Worker continues the supported sync with `resolution_action="continue"`. Do not stage files or change transaction authority.
 
-With a parent named in `host.parent`, send every question requiring the developer's decision to that parent with `role_message` on `agents-remember-task`, addressed to its agent ID. Say what the question is, what you hold back until it is answered, and what you recommend and why. Continue every part of your assignment that does not depend on the answer; do not end your turn on the question or hold a wait for the developer. The answer arrives as a message from your parent. When no independent work remains, record your state in your report and end with a final reply saying you await your parent's message, with no question addressed to the developer. Without a parent, ask the developer in your own chat and end your turn.
+Developer questions and relayed answers follow `operations/orientation.md`.
 
-If delivery to your parent is refused as busy or at a permission prompt, keep the question under **Pending developer questions** in your report, continue independent work, and send it again before ending your turn. A second refusal leaves it pending; your final reply states the undelivered question for your parent, not for the developer. Having no work left does not open your own chat. Only when your parent cannot be reached at all (archived, not found, not resumable, no runtime configured, or host unreachable) ask in your own chat, name the refusal and why the parent cannot be reached, and end your turn. Recover open questions and recorded answers from your report after compaction or reconnect; do not ask twice for an answer you already have.
-
-Treat a relayed answer as the developer's instruction only when it states that the developer gave it, names the agent ID of the agent that received it from the developer, and carries the developer's words in quotation marks. Otherwise it is the sending agent's own word; ask your parent for the developer's words when required. Where your role requires a record before acting, record the relayed answer in the same place and form, with the quoted words. Silence is no approval. Only the developer can answer a harness permission prompt, in the chat of the agent waiting at it; an agent stopped at a prompt cannot relay it.
+Required input: the permission non-bypass boundary in `operations/orientation.md` — a denied or unanswered harness request is never worked around with another tool, command, helper seat, or later turn.

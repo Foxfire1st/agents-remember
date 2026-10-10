@@ -676,9 +676,19 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
 
     def test_a_worker_hands_its_frozen_report_directly_to_the_reviewer(self) -> None:
         worker = normalize(read_surface("skills/l-01-agent-lifecycles/roles/worker.md"))
+        operation = normalize(
+            read_surface("skills/l-01-agent-lifecycles/operations/implementation.md")
+        )
         self.assertIn("freeze the candidate and send it directly to the leaf's reviewer", worker)
-        self.assertIn("the manager receives no routine report notice", worker)
-        self.assertIn("reply or report names the exact object", worker)
+        # One-home repair: the handover mechanics live in the operation; the role
+        # carries the referral.
+        self.assertIn(
+            "freeze the candidate and send it directly to the leaf's reviewer as",
+            worker,
+        )
+        self.assertIn("not routine report notices", operation)
+        self.assertIn("a reply or report names its exact object", operation)
+        self.assertIn("count a hand-over as taken", worker)
         self.assertIn("a worker started from the dashboard has none", worker)
         self.assertIn("a finished turn is not ar acceptance", worker)
 
