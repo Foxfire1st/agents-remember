@@ -705,8 +705,9 @@ class BudgetAgreementTests(unittest.TestCase):
     over the declared files -- not from a checker's output, and not from the numbers this module
     happens to know. ``T79`` is the reason each figure must name its ceiling: the pair below moved
     from ``2000/300`` to ``2300/400`` when a concurrent line landed, to ``3000/600`` by a developer
-    decision on 2026-09-19, and to ``4000/1000`` by ``260918-TSIP-L13``'s developer decision on
-    2026-09-20, so a figure quoted without its ceiling cannot be judged.
+    decision on 2026-09-19, to ``4000/1000`` by ``260918-TSIP-L13``'s developer decision on
+    2026-09-20, and to ``5000/1000`` by ``260928-MIK-L146`` under the developer's word D226 on
+    2026-10-11, so a figure quoted without its ceiling cannot be judged.
     """
 
     #: Every site the sweep found, keyed by ``onboarding-root-relative path:line``, valued with
@@ -836,7 +837,7 @@ class BudgetAgreementTests(unittest.TestCase):
 
     def test_the_declaration_is_the_ceiling_this_module_screens(self) -> None:
         """The authority is one file, and the screen reads it rather than a copy."""
-        self.assertEqual(self.declared(), {"unit": 4000, "integration": 1000})
+        self.assertEqual(self.declared(), {"unit": 5000, "integration": 1000})
         budget_test = (MCP_TESTS / "test_suite_budget.py").read_text("utf-8")
         self.assertIn(f"STUB_UNIT = {self.declared()['unit']}", budget_test)
         self.assertIn(f"STUB_INTEGRATION = {self.declared()['integration']}", budget_test)
