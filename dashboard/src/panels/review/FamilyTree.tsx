@@ -1,38 +1,24 @@
-import { Fragment, useId, useRef } from 'react';
-
+import { useId, useRef } from 'react';
 import { css, cx } from '../../../styled-system/css';
 import type {
+  ReviewEntry,
+  ReviewFailure,
+  ReviewOutline,
   ReviewFamilyContext,
   ReviewFamilyContextEntry,
-  ReviewFamilyGuarantee,
   ReviewFamilyMember,
   ReviewFamilyRevisionContext,
   ReviewFamilyRosterPage,
   ReviewFamilySideName,
 } from '../../data/review';
 import { FAMILY_SIDES } from '../../data/review';
-import type { ReviewMemberChange } from '../../data/reviewFamily';
-import {
-  FamilyBreakdown,
-  GuaranteeChangeBadge,
-  MemberChangeBadge,
-  type MemberChangeState,
-  TriageControls,
-  useMemberChange,
-} from './ChangeBadges';
-import {
-  familyTriage,
-  hasChangeFacts,
-  memberChanges,
-  orderFamilies,
-  orderMemberRows,
-} from './changeTriage';
+import type { ReviewSubject } from './ReviewNavigation';
+import { OutlineChangeBadge, TriageControls } from './ChangeBadges';
+import { outlineGroups, realChange, type OutlineRow } from './changeTriage';
 import { useChangeTraversal } from './changeTraversal';
-import type { MarkTarget } from './hunkMarkers';
-import { TreeComparisonScope, useTreeComparison } from './IntentWordDiff';
-import { MemberTargetNote, useMemberTarget } from './MarkerTargetState';
 import { rowWording, wordingComparison } from './statementWording';
-import { type TreeOrder, useTreeOrder } from './triageOrderPreference';
+import { useTreeOrder } from './triageOrderPreference';
+import { useTreeView, treeViewStore } from './triageViewPreference';
 
 export interface FamilySelection {
   familyId: string;
@@ -51,100 +37,37 @@ export interface WalkedTree {
   subjectState?: string | null;
 }
 
-const shell = css({
-  background: 'bgPanel',
-  borderWidth: '1px',
-  borderStyle: 'solid',
-  borderColor: 'grid',
-  borderRadius: '3px',
-  padding: '1rem',
-  minWidth: '0',
-});
-
-const sectionLabel = css({
-  color: 'cyan',
-  fontSize: '0.72rem',
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
-  margin: '0',
-});
-
-const searchInput = css({
-  width: '100%',
-  background: 'bg',
-  borderWidth: '1px',
-  borderStyle: 'solid',
-  borderColor: 'grid',
-  borderRadius: '2px',
-  color: 'ink',
-  font: 'inherit',
-  padding: '0.25rem 0.35rem',
-  _focusVisible: { outline: '1px solid var(--amber)', outlineOffset: '1px' },
-});
-
-const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.2rem 0' });
-
-const statements = css({ margin: '0.4rem 0', paddingLeft: '0.4rem', listStyle: 'none' });
-
-const AMBER_WASH = (percent: number) =>
-  `color-mix(in oklab, var(--amber) ${percent}%, transparent)`;
-
+const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.25rem 0' });
 const node = css({
-  display: 'block',
+  display: 'flex',
   width: '100%',
+  minWidth: 0,
+  alignItems: 'center',
+  gap: '0.35rem',
   background: 'transparent',
   border: 'none',
-  borderLeftWidth: '2px',
-  borderLeftStyle: 'solid',
-  borderLeftColor: 'transparent',
   color: 'ink',
   cursor: 'pointer',
   font: 'inherit',
-  padding: '0.65rem 0.5rem',
+  lineHeight: '1.5',
+  padding: '0 0.3rem',
   textAlign: 'left',
-  borderRadius: '2px',
-  _focusVisible: { outline: '1px solid var(--amber)', outlineOffset: '1px' },
-  _hover: { background: AMBER_WASH(8) },
+  whiteSpace: 'nowrap',
+  _hover: { background: 'color-mix(in oklab, var(--amber) 8%, transparent)' },
+  _focusVisible: { outline: '1px solid var(--amber)' },
 });
-
 const current = css({
-  background: AMBER_WASH(16),
-  borderLeftColor: 'amber',
-});
-
-const guaranteeText = css({
-  whiteSpace: 'pre-wrap',
-  margin: '0.15rem 0',
-  fontSize: '0.84rem',
-  borderLeftWidth: '1px',
-  borderLeftStyle: 'solid',
-  borderLeftColor: 'grid',
-  paddingLeft: '0.5rem',
-});
-
-const memberText = css({
-  display: 'block',
-  whiteSpace: 'pre-wrap',
-  margin: '0.15rem 0 0.35rem',
-  fontSize: '0.82rem',
-  color: 'ink',
-});
-
-const sideTag = css({
+  background: 'color-mix(in oklab, var(--amber) 16%, transparent)',
   color: 'amber',
-  fontSize: '0.7rem',
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
 });
-
-const familyBlock = css({
-  marginBottom: '0.7rem',
-  borderTopWidth: '1px',
-  borderTopStyle: 'solid',
-  borderTopColor: 'grid',
-  paddingTop: '0.5rem',
+const titleStyle = css({
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  minWidth: 0,
+  flex: 1,
 });
-
+const list = css({ listStyle: 'none', margin: 0, padding: 0, minWidth: 0 });
 interface MemberRow {
   invariantRevisionId: string;
   sides: ReviewFamilySideName[];
@@ -180,48 +103,6 @@ export function memberRows(entry: ReviewFamilyContextEntry): MemberRow[] {
     }
   }
   return [...byRevision.values()];
-}
-
-function SideStates({ entry }: { entry: ReviewFamilyContextEntry }) {
-  return (
-    <>
-      {FAMILY_SIDES.map((side) => {
-        const context = entry[side];
-        if (context.state === 'recorded') return null;
-        return (
-          <p
-            key={side}
-            className={muted}
-            data-testid="review-family-side"
-            data-side={side}
-            data-side-state={context.state}
-          >
-            {side}: {context.state} — {context.detail}
-          </p>
-        );
-      })}
-    </>
-  );
-}
-
-function FamilyHistory({ entry }: { entry: ReviewFamilyContextEntry }) {
-  return (
-    <>
-      {FAMILY_SIDES.map((side) => {
-        const recorded = entry[side].recorded_revision_ids;
-        if (recorded.length === 0) return null;
-        const selected = entry[side].family_revision_id;
-        return (
-          <p key={side} className={muted} data-testid="review-family-history" data-side={side}>
-            {recorded.length} recorded revision(s) of this family in the {side} snapshot
-            {selected === undefined
-              ? '; this review selected none of them'
-              : `; this review selected ${selected}`}
-          </p>
-        );
-      })}
-    </>
-  );
 }
 
 export function RosterLine({
@@ -280,18 +161,6 @@ export function emptyRosterSentence(entry: ReviewFamilyContextEntry): string {
     : `this page carried no member row — ${counts}.`;
 }
 
-function RosterLines({ entry }: { entry: ReviewFamilyContextEntry }) {
-  return (
-    <>
-      {FAMILY_SIDES.map((side) => (
-        <Fragment key={side}>
-          <RosterLine side={entry[side]} />
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
 export function RosterNext({
   entry,
   onRosterNext,
@@ -331,412 +200,6 @@ function familyLabel(entry: ReviewFamilyContextEntry): string {
   return entry.display_label ?? entry.family_id;
 }
 
-// A dataset revision is one immutable text; a tree comparison compares the bytes.
-function sameGuaranteeText(
-  before: ReviewFamilyGuarantee,
-  after: ReviewFamilyGuarantee,
-  tree: boolean,
-): boolean {
-  return !tree || before.joint_guarantee === after.joint_guarantee;
-}
-
-// One revision is "unchanged" only when its two texts are too; on a tree comparison one revision can
-// carry different bytes on its two sides (MIK-R21), and then both texts are shown (review R1 F2).
-// With change facts (MIK-R33) the family row's badge already states "guarantee unchanged", so the
-// block's label does not state it a second time.
-function guaranteesOf(
-  entry: ReviewFamilyContextEntry,
-  tree: boolean,
-  unchangedNote: string,
-): { guarantee: ReviewFamilyGuarantee; side: string; note: string }[] {
-  const before = entry.before.guarantee;
-  const after = entry.after.guarantee;
-  if (before === undefined && after === undefined) return [];
-  if (before !== undefined && after !== undefined) {
-    const oneRevision = before.revision_id === after.revision_id;
-    if (oneRevision && sameGuaranteeText(before, after, tree)) {
-      return [
-        {
-          guarantee: before,
-          side: 'both',
-          note: unchangedNote,
-        },
-      ];
-    }
-    const note = oneRevision ? ' · same revision, text differs' : '';
-    return [
-      { guarantee: before, side: 'before', note: `Joint guarantee · before${note}` },
-      { guarantee: after, side: 'after', note: `Joint guarantee · after${note}` },
-    ];
-  }
-  const one = (before ?? after) as ReviewFamilyGuarantee;
-  const side = before !== undefined ? 'before' : 'after';
-  return [{ guarantee: one, side, note: `Joint guarantee · ${side} only` }];
-}
-
-function FamilyGuarantees({ entry }: { entry: ReviewFamilyContextEntry }) {
-  const guarantees = guaranteesOf(
-    entry,
-    useTreeComparison(),
-    entry.change_kinds ? 'Joint guarantee' : 'Joint guarantee · unchanged',
-  );
-  if (!guarantees.length) {
-    return (
-      <p className={muted} data-testid="review-family-guarantee">
-        no family revision was selected for this family, so no guarantee of it may be shown:{' '}
-        {entry.detail}
-      </p>
-    );
-  }
-  return (
-    <>
-      {guarantees.map((recorded) => (
-        <p
-          key={`${recorded.side}:${recorded.guarantee.revision_id}`}
-          className={guaranteeText}
-          data-testid="review-family-guarantee"
-          data-guarantee-side={recorded.side}
-          data-guarantee-revision={recorded.guarantee.revision_id}
-        >
-          <span
-            className={css({
-              display: 'block',
-              color: 'cyan',
-              fontSize: '0.72rem',
-              marginBottom: '0.3rem',
-            })}
-          >
-            {recorded.note}
-          </span>
-          {recorded.guarantee.joint_guarantee}
-        </p>
-      ))}
-    </>
-  );
-}
-
-function FamilyCandidates({ entry }: { entry: ReviewFamilyContextEntry }) {
-  if (!entry.candidates.length) return null;
-  return (
-    <p className={muted} data-testid="review-family-candidates">
-      {entry.candidates.length} recorded head(s) this context declined to choose between:{' '}
-      {entry.candidates.map((candidate) => candidate.revision_id).join(', ')}
-    </p>
-  );
-}
-
-function memberLabel(member: ReviewFamilyMember): string {
-  const identity = member.display_label ?? member.display_version ?? member.invariant_revision_id;
-  return member.display_label && member.display_version
-    ? `${identity} · ${member.display_version}`
-    : identity;
-}
-
-// The node's side tag. On a tree comparison one revision on both sides is "unchanged" only when its
-// carried texts are the same; otherwise it is the same revision, with its text differing or unknown.
-function memberSideTag(row: MemberRow, tree: boolean, noted = false): string {
-  if (row.sides.length !== 2) return ` · ${row.sides[0]} only`;
-  if (!tree || row.wording === 'same') return ' · unchanged revision';
-  if (row.wording !== 'differs') return ' · same revision';
-  // The change badge's "same revision; text differs" note states it once (MIK-R33).
-  return noted ? '' : ' · same revision · text differs';
-}
-
-function textNoted(facts: Map<string, ReviewMemberChange> | undefined, memberId: string): boolean {
-  return facts?.get(memberId)?.marks.includes('text_differs') ?? false;
-}
-
-function memberSidesNote(row: MemberRow): string {
-  return row.sides.length === 2
-    ? 'recorded on both snapshots'
-    : `recorded on the ${row.sides[0]} snapshot only`;
-}
-
-// A tree comparison's change attributes of one member node (MIK-R33): the traversal reads them. The
-// two revision rows of one occurrence share `data-occurrence`, so they are one stop.
-function memberChangeAttributes(
-  entry: ReviewFamilyContextEntry,
-  member: ReviewFamilyMember,
-  facts: Map<string, ReviewMemberChange> | undefined,
-): Record<string, string> {
-  if (!facts) return {};
-  return {
-    'data-family': entry.family_id,
-    'data-occurrence': member.member_id,
-    'data-change-primary': facts.get(member.member_id)?.primary ?? 'unknown',
-  };
-}
-
-// The family node's own stop: the fact of its guarantee.
-function familyChangeAttributes(entry: ReviewFamilyContextEntry): Record<string, string> {
-  const kinds = entry.change_kinds;
-  if (!kinds) return {};
-  return { 'data-occurrence': `family:${entry.family_id}`, 'data-change-primary': kinds.guarantee };
-}
-
-// A member node's accessible name is its subject only -- the statement and the side tag -- and its
-// description is its facts, once each, in the ruled order (review R3-1): with change facts the badge,
-// the change-kind reason and the membership (`useMemberChange`); without them (a dataset review), a
-// followed marker's unknown membership (MIK-L34's note). Nothing is both named and described.
-function useMemberNodeIds(
-  change: MemberChangeState | undefined,
-  target: MarkTarget | null,
-): { subject: string; side: string; note: string; labelledBy: string; describedBy?: string } {
-  const base = useId();
-  const subject = `${base}-subject`;
-  const side = `${base}-side`;
-  const note = `${base}-note`;
-  const describedBy = change ? change.describedBy : target ? note : undefined;
-  return { subject, side, note, labelledBy: `${subject} ${side}`, describedBy };
-}
-
-// The node's subject: the member's statement, or what the page says of a statement it did not carry.
-function MemberSubject({ member, id }: { member: ReviewFamilyMember; id: string }) {
-  return member.state === 'recorded' ? (
-    <span id={id} className={memberText}>
-      {member.statement}
-    </span>
-  ) : (
-    <span id={id} data-testid="review-family-member-state">
-      {memberLabel(member)} · statement not carried on this page
-    </span>
-  );
-}
-
-function MemberNode({
-  entry,
-  row,
-  selected,
-  onSelect,
-  facts,
-}: {
-  entry: ReviewFamilyContextEntry;
-  row: MemberRow;
-  selected: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  // The tree comparison's change facts by member occurrence (MIK-R33); absent on a dataset review.
-  facts?: Map<string, ReviewMemberChange>;
-}) {
-  const member = row.member;
-  const tree = useTreeComparison();
-  const change = useMemberChange(
-    facts,
-    member.member_id,
-    entry.family_id,
-    member.invariant_revision_id,
-  );
-  const isCurrent =
-    selected?.familyId === entry.family_id &&
-    selected?.memberRevisionId === member.invariant_revision_id;
-  const ids = useMemberNodeIds(
-    change,
-    useMemberTarget(entry.family_id, member.invariant_revision_id),
-  );
-  return (
-    <li
-      data-testid="review-family-member"
-      data-member={member.member_id}
-      data-sides={row.sides.join('+')}
-    >
-      <button
-        type="button"
-        className={cx(node, isCurrent ? current : undefined)}
-        data-tree-node="member"
-        data-testid="review-family-member-open"
-        data-revision={member.invariant_revision_id}
-        {...memberChangeAttributes(entry, member, facts)}
-        aria-labelledby={ids.labelledBy}
-        aria-describedby={ids.describedBy}
-        aria-current={isCurrent ? 'true' : undefined}
-        onClick={() =>
-          onSelect({ familyId: entry.family_id, memberRevisionId: member.invariant_revision_id })
-        }
-        onKeyDown={treeArrow}
-      >
-        <MemberSubject member={member} id={ids.subject} />
-        <span className={muted}>{memberSidesNote(row)}</span>
-        <span id={ids.side} className={sideTag}>
-          {memberSideTag(row, tree, textNoted(facts, member.member_id))}
-        </span>
-        {/* With change facts the badge is the node's one statement, and a followed marker's
-            unknown membership becomes its tag; without them (a dataset review) L34's note stands. */}
-        {change ? (
-          <MemberChangeBadge state={change} />
-        ) : (
-          <MemberTargetNote
-            id={ids.note}
-            familyId={entry.family_id}
-            memberRevisionId={member.invariant_revision_id}
-          />
-        )}
-      </button>
-      {member.other_family_revision_ids.length ? (
-        <details>
-          <summary className={muted}>
-            Shared member · {member.other_family_revision_ids.length} other family revisions
-          </summary>
-          <p className={muted} data-testid="review-family-member-shared">
-            this same member revision is recorded under {member.other_family_revision_ids.length}{' '}
-            other family revision(s): {member.other_family_revision_ids.join(', ')}
-          </p>
-        </details>
-      ) : null}
-    </li>
-  );
-}
-
-function MemberRoster({
-  entry,
-  selected,
-  onSelect,
-  order,
-}: {
-  entry: ReviewFamilyContextEntry;
-  selected: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  order: TreeOrder;
-}) {
-  const rows = orderMemberRows(entry, memberRows(entry), order);
-  const facts = entry.change_kinds ? memberChanges(entry) : undefined;
-  if (rows.length) {
-    return (
-      <ul className={statements}>
-        {rows.map((row) => (
-          <MemberNode
-            key={row.invariantRevisionId}
-            entry={entry}
-            row={row}
-            selected={selected}
-            onSelect={onSelect}
-            facts={facts}
-          />
-        ))}
-      </ul>
-    );
-  }
-  return (
-    <p className={muted} data-testid="review-family-empty-roster">
-      {emptyRosterSentence(entry)}
-    </p>
-  );
-}
-
-// A kept family's tag (MIK-R39): visible beside its row, and the row's accessible description.
-function keptMarks(keptFor: string | undefined, id: string) {
-  if (keptFor === undefined) return { item: {}, node: {}, tag: null };
-  return {
-    item: { 'data-family-kept': 'true' },
-    node: { 'aria-describedby': id },
-    tag: (
-      <p id={id} className={muted} data-testid="review-family-kept">
-        kept · last read for {keptFor}
-      </p>
-    ),
-  };
-}
-
-function FamilyNode({
-  entry,
-  selected,
-  onSelect,
-  onRosterNext,
-  order,
-  keptFor,
-}: {
-  entry: ReviewFamilyContextEntry;
-  selected: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  order: TreeOrder;
-  // Set for a kept family: the subject it was last read for (MIK-R39).
-  keptFor?: string;
-}) {
-  const familyCurrent =
-    selected?.familyId === entry.family_id && selected.memberRevisionId === undefined;
-  const kept = keptMarks(keptFor, `${useId()}-kept`);
-  return (
-    <li
-      className={familyBlock}
-      data-testid="review-family"
-      data-family={entry.family_id}
-      data-family-state={entry.state}
-      {...kept.item}
-      data-members-unreturned={familyTriage(entry)?.partial ? 'true' : undefined}
-    >
-      <button
-        type="button"
-        className={cx(node, familyCurrent ? current : undefined)}
-        data-tree-node="family"
-        data-testid="review-family-open"
-        data-family={entry.family_id}
-        {...familyChangeAttributes(entry)}
-        aria-current={familyCurrent ? 'true' : undefined}
-        {...kept.node}
-        onClick={() => onSelect({ familyId: entry.family_id })}
-        onKeyDown={treeArrow}
-      >
-        ▾ {familyLabel(entry)}
-        <GuaranteeChangeBadge kinds={entry.change_kinds} />
-      </button>
-      {kept.tag}
-      <FamilyBreakdown triage={familyTriage(entry)} />
-      <FamilyGuarantees entry={entry} />
-      <details>
-        <summary>{memberRows(entry).length} member revisions · roster details</summary>
-        {entry.display_label !== undefined && entry.label_side !== undefined ? (
-          <p className={muted} data-testid="review-family-label-side">
-            the label “{entry.display_label}” is the {entry.label_side} snapshot&apos;s recorded
-            label
-          </p>
-        ) : null}
-        <FamilyCandidates entry={entry} />
-        <SideStates entry={entry} />
-        <FamilyHistory entry={entry} />
-        <RosterLines entry={entry} />
-      </details>
-      <MemberRoster entry={entry} selected={selected} onSelect={onSelect} order={order} />
-      <RosterNext entry={entry} onRosterNext={onRosterNext} />
-    </li>
-  );
-}
-
-// The scope line counts the families of the selected subject's context and the kept ones apart.
-function filterScope(
-  query: string,
-  shownFamilies: number,
-  totalFamilies: number,
-  shownMembers: number,
-  totalMembers: number,
-  kept = 0,
-): string {
-  const other = totalFamilies - kept;
-  const families = kept === 0 ? `${totalFamilies} families` : `${other} families · ${kept} kept`;
-  if (query === '') {
-    return `${families} · ${totalMembers} member revisions shown · full sibling context`;
-  }
-  const filtered = kept === 0 ? '' : ` (${other} of this subject · ${kept} kept)`;
-  return `Filter “${query}”: ${shownFamilies}/${totalFamilies} families${filtered} · ${shownMembers}/${totalMembers} member revisions. Matching families retain all siblings.`;
-}
-
-export function familyMatches(entry: ReviewFamilyContextEntry, needle: string): boolean {
-  const haystack = [
-    entry.family_id,
-    entry.display_label ?? '',
-    entry.before.guarantee?.joint_guarantee ?? '',
-    entry.after.guarantee?.joint_guarantee ?? '',
-    ...entry.candidates.map((candidate) => candidate.joint_guarantee),
-    ...memberRows(entry).flatMap((row) => [
-      row.invariantRevisionId,
-      row.member.invariant_revision_id,
-      row.member.display_label ?? '',
-      row.member.statement ?? '',
-    ]),
-  ]
-    .join('\n')
-    .toLowerCase();
-  return haystack.includes(needle);
-}
-
 function treeArrow(event: React.KeyboardEvent<HTMLButtonElement>): void {
   const delta = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
   if (delta === 0) return;
@@ -751,224 +214,290 @@ function treeArrow(event: React.KeyboardEvent<HTMLButtonElement>): void {
   nodes[(index + delta + nodes.length) % nodes.length]?.focus();
 }
 
-function FamilyList({
-  shown,
+function OutlineNode({
+  row,
   selected,
+  keptFor,
   onSelect,
-  onRosterNext,
-  order,
-  kept,
 }: {
-  kept?: ReadonlyMap<string, string>;
-  shown: ReviewFamilyContextEntry[];
-  selected: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  order: TreeOrder;
+  row: OutlineRow;
+  selected: boolean;
+  keptFor?: string;
+  onSelect: () => void;
 }) {
-  return (
-    <ul className={statements} data-testid="review-family-list" data-tree-order={order}>
-      {orderFamilies(shown, order).map((entry) => (
-        <FamilyNode
-          key={entry.family_id}
-          entry={entry}
-          selected={selected}
-          onSelect={onSelect}
-          onRosterNext={onRosterNext}
-          order={order}
-          keptFor={kept?.get(entry.family_id)}
-        />
-      ))}
-    </ul>
-  );
-}
-
-const NONE_KEPT: ReadonlyMap<string, string> = new Map();
-
-// The families to draw: the walked tree's when there is one, else the context's own.
-function treeParts(context: ReviewFamilyContext, walked?: WalkedTree) {
-  return { families: walked?.entries ?? context.entries, kept: walked?.kept ?? NONE_KEPT };
-}
-
-function filtered(families: ReviewFamilyContextEntry[], query: string) {
-  const needle = query.trim().toLowerCase();
-  const count = (list: ReviewFamilyContextEntry[]) =>
-    list.reduce((total, entry) => total + memberRows(entry).length, 0);
-  const shown = families.filter((entry) => needle === '' || familyMatches(entry, needle));
-  return { shown, shownMembers: count(shown), allMembers: count(families) };
-}
-
-// What the tree shows, for the traversal status: the families under the filter, each with the number
-// of member rows returned for it, and the order they are listed in.
-function rowsShown(shown: ReviewFamilyContextEntry[], order: TreeOrder): string {
-  return [order, ...shown.map((entry) => `${entry.family_id}:${memberRows(entry).length}`)].join(
-    ' ',
-  );
-}
-
-function FamilyFilter({
-  query,
-  onQuery,
-  scope,
-}: {
-  query: string;
-  onQuery: (next: string) => void;
-  scope: string;
-}) {
+  const description = useId();
+  const family = row.kind === 'family';
+  const familyId = family ? row.selectorId : row.familyId;
+  const aggregate = /^\d+ changed$/.test(row.badge ?? '');
+  const descriptionId = keptFor ? description : undefined;
   return (
     <>
-      <label className={sectionLabel} htmlFor="review-family-filter">
-        Find family, guarantee or member
-      </label>
+      <button
+        type="button"
+        className={cx(node, selected && current)}
+        data-testid={family ? 'review-family-open' : 'review-family-member-open'}
+        data-tree-node={family ? 'family' : 'member'}
+        data-family={familyId}
+        data-revision={row.revisionId}
+        data-subject-kind={row.kind}
+        data-subject-id={row.selectorId}
+        data-occurrence={JSON.stringify([row.kind, row.familyId, row.selectorId])}
+        data-change-primary={aggregate ? 'unchanged' : row.badge}
+        aria-label={[row.title, row.badge].filter(Boolean).join(' ')}
+        aria-current={selected || undefined}
+        aria-describedby={descriptionId}
+        title={row.title}
+        onClick={onSelect}
+        onKeyDown={treeArrow}
+      >
+        <span className={titleStyle}>{row.title}</span>
+        <OutlineChangeBadge badge={row.badge} />
+        <KeptTag keptFor={keptFor} description={description} />
+      </button>
+    </>
+  );
+}
+function KeptTag({ keptFor, description }: { keptFor?: string; description: string }) {
+  if (!keptFor) return null;
+  return (
+    <>
+      <span data-testid="review-family-kept" title={`Kept; last read for ${keptFor}`}>
+        kept
+      </span>
+      <span id={description} className={css({ srOnly: true })}>
+        Kept; last read for {keptFor}.
+      </span>
+    </>
+  );
+}
+
+interface FamilyTreeProps {
+  walked?: WalkedTree;
+  context: ReviewFamilyContext;
+  selection: FamilySelection | null;
+  query: string;
+  onQuery: (next: string) => void;
+  outline?: ReviewOutline;
+  catalogueEntries?: ReviewEntry[];
+  catalogueLoading?: boolean;
+  catalogueProblem?: ReviewFailure;
+  subject?: ReviewSubject;
+  onSubjectSelect: (subject: ReviewSubject, context?: FamilySelection) => void;
+  traversalEnabled?: boolean;
+}
+function rowSelected(
+  row: OutlineRow,
+  subject: ReviewSubject | undefined,
+  selection: FamilySelection | null,
+): boolean {
+  if (subject) {
+    if (subject.kind !== row.kind || subject.id !== row.selectorId) return false;
+    return selectedFamily(row, selection);
+  }
+  if (!selection) return false;
+  if (row.kind === 'family')
+    return selection.familyId === row.selectorId && !selection.memberRevisionId;
+  return selection.familyId === row.familyId && selection.memberRevisionId === row.revisionId;
+}
+function selectedFamily(row: OutlineRow, selection: FamilySelection | null): boolean {
+  if (row.kind === 'family' || !selection || !row.familyId) return true;
+  return selection.familyId === row.familyId;
+}
+function familyVisible(row: OutlineRow, props: FamilyTreeProps, all: boolean): boolean {
+  if (all || realChange(row.badge) || rowSelected(row, props.subject, props.selection)) return true;
+  if (props.walked?.kept.has(row.selectorId)) return true;
+  return (props.walked?.entries ?? props.context.entries).some(
+    (entry) => entry.family_id === row.selectorId,
+  );
+}
+function shownGroup(
+  group: import('./changeTriage').OutlineGroup,
+  props: FamilyTreeProps,
+  all: boolean,
+) {
+  const familyShown = group.family && familyVisible(group.family, props, all);
+  const members = group.members.filter(
+    (row) => all || realChange(row.badge) || rowSelected(row, props.subject, props.selection),
+  );
+  const needle = props.query.trim().toLowerCase();
+  const familyMatch =
+    group.family && `${group.family.id} ${group.family.title}`.toLowerCase().includes(needle);
+  const matches =
+    needle === '' || familyMatch
+      ? members
+      : members.filter((row) => `${row.id} ${row.title}`.toLowerCase().includes(needle));
+  const show =
+    needle === '' || familyMatch ? familyShown || matches.length > 0 : matches.length > 0;
+  return {
+    family: familyShown || matches.length > 0 ? group.family : undefined,
+    members: matches,
+    show,
+  };
+}
+function treeSelection(row: OutlineRow): FamilySelection | undefined {
+  if (row.kind === 'family') return { familyId: row.selectorId };
+  if (!row.familyId) return undefined;
+  return { familyId: row.familyId, memberRevisionId: row.revisionId };
+}
+function TreeRows({
+  groups,
+  props,
+}: {
+  groups: import('./changeTriage').OutlineGroup[];
+  props: FamilyTreeProps;
+}) {
+  const select = (row: OutlineRow) => {
+    const context = treeSelection(row);
+    props.onSubjectSelect({ kind: row.kind, id: row.selectorId }, context);
+  };
+  const renderRow = (row: OutlineRow) => (
+    <OutlineNode
+      key={row.selectorId}
+      row={row}
+      selected={rowSelected(row, props.subject, props.selection)}
+      keptFor={row.kind === 'family' ? props.walked?.kept.get(row.selectorId) : undefined}
+      onSelect={() => select(row)}
+    />
+  );
+  return (
+    <>
+      {groups.map((group, index) => (
+        <li
+          key={group.family?.selectorId ?? `unlisted:${index}`}
+          data-testid={group.family ? 'review-family' : undefined}
+          data-family={group.family?.selectorId}
+          data-family-kept={keptAttribute(props.walked, group.family)}
+        >
+          {group.family ? (
+            <>{renderRow(group.family)}</>
+          ) : (
+            <p className={muted}>Without a family</p>
+          )}
+          <ul className={cx(list, group.family && css({ paddingLeft: '0.8rem' }))}>
+            {group.members.map((row) => (
+              <li key={row.selectorId} data-testid="review-family-member">
+                {renderRow(row)}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </>
+  );
+}
+function keptAttribute(
+  walked: WalkedTree | undefined,
+  row: OutlineRow | undefined,
+): string | undefined {
+  return row && walked?.kept.has(row.selectorId) ? 'true' : undefined;
+}
+function TreeFilter({
+  query,
+  onQuery,
+  view,
+  available,
+}: Pick<FamilyTreeProps, 'query' | 'onQuery'> & { view: 'changed' | 'all'; available: boolean }) {
+  return (
+    <div className={css({ display: 'flex', gap: '0.4rem', alignItems: 'center', minWidth: 0 })}>
       <input
-        id="review-family-filter"
-        className={searchInput}
+        aria-label="Filter families and invariants"
         data-testid="review-family-filter"
         type="search"
-        placeholder="filter families, guarantees and members"
+        placeholder="Find family or invariant"
         value={query}
+        className={css({
+          flex: 1,
+          minWidth: 0,
+          background: 'bg',
+          color: 'ink',
+          border: '1px solid var(--grid)',
+          font: 'inherit',
+        })}
         onChange={(event) => onQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onQuery('');
         }}
       />
-      <p className={muted} data-testid="review-family-filter-scope">
-        {scope}
-      </p>
-    </>
+      <button
+        type="button"
+        data-testid="review-tree-view"
+        aria-pressed={view === 'all'}
+        disabled={!available}
+        onClick={() => treeViewStore.getState().setView(view === 'all' ? 'changed' : 'all')}
+      >
+        View: {view === 'all' ? 'All' : 'Changed'}
+      </button>
+    </div>
   );
 }
-
-function noneShown(composed: boolean, query: string, families: number): string {
-  return composed
-    ? `no family context matches “${query}”. The ${families} composed context(s) are unchanged by this filter; clear it to see them.`
-    : 'this review composed no family context, so there is nothing here to filter.';
+function groupHasChange(group: import('./changeTriage').OutlineGroup): boolean {
+  return realChange(group.family?.badge) || group.members.some((row) => realChange(row.badge));
 }
-
-function WalkNotes({ walked }: { walked?: WalkedTree }) {
-  return (
-    <>
-      {walked?.notice ? (
-        <p className={muted} role="status" data-testid="review-family-walk-notice">
-          {walked.notice}
-        </p>
-      ) : null}
-      {walked?.subjectState ? (
-        <p className={muted} data-testid="review-family-subject-state">
-          {walked.subjectState}
-        </p>
-      ) : null}
-    </>
-  );
+function treeRowsKey(groups: import('./changeTriage').OutlineGroup[]): string {
+  return groups
+    .flatMap((group) => [...(group.family ? [group.family] : []), ...group.members])
+    .map((row) => `${row.familyId ?? ''}:${row.selectorId}:${row.badge ?? ''}`)
+    .join(' ');
 }
-
-export function FamilyTree({
-  context,
-  selection,
-  onSelect,
-  onRosterNext,
-  query,
-  onQuery,
-  embedded = false,
-  tree = false,
-  walked,
-}: {
-  embedded?: boolean;
-  // The walked tree to draw instead of `context`'s own families (MIK-R39); `context` is then the
-  // selected subject's context, which "Family context details" describes.
-  walked?: WalkedTree;
-  // A tree comparison (MIK-R25): labels compare text bytes, not revision identities alone.
-  tree?: boolean;
-  context: ReviewFamilyContext;
-  selection: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  query: string;
-  onQuery: (next: string) => void;
-}) {
-  // A tree comparison's change facts order the tree and drive j/k (MIK-R33); a dataset review has
-  // none, and its tree is exactly the landed one.
-  const { families, kept } = treeParts(context, walked);
-  const triaged = hasChangeFacts(families);
+function useTreeRows(props: FamilyTreeProps) {
   const order = useTreeOrder();
+  const preference = useTreeView();
+  const admitted = !props.catalogueLoading && !props.catalogueProblem;
+  const available = admitted && props.outline?.state === 'outlined';
+  const view = props.catalogueLoading || available ? preference : 'all';
+  const groups = admittedGroups(props, order);
+  const shown = groups
+    .map((group) => shownGroup(group, props, view === 'all'))
+    .filter((group) => group.show);
+  const noChange = available && view === 'changed' && !groups.some(groupHasChange);
+  return { order, available, view, shown, noChange };
+}
+export function FamilyTree(props: FamilyTreeProps) {
+  const { order, available, view, shown, noChange } = useTreeRows(props);
   const root = useRef<HTMLElement>(null);
-  const { shown, shownMembers, allMembers } = filtered(families, query);
-  const traversal = useChangeTraversal(root, triaged, rowsShown(shown, order));
-  const composed = families.length > 0;
-
+  const traversal = useChangeTraversal(
+    root,
+    available && props.traversalEnabled !== false,
+    `${order}:${view}:${treeRowsKey(shown)}`,
+  );
+  const status = [props.walked?.notice, catalogueStatus(props), traversal.status]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <section
-      ref={root}
-      className={embedded ? css({ minWidth: 0 }) : shell}
-      data-testid="review-family-tree"
-      data-family-state={context.state}
-    >
-      <FamilyFilter
-        query={query}
-        onQuery={onQuery}
-        scope={filterScope(
-          query,
-          shown.length,
-          families.length,
-          shownMembers,
-          allMembers,
-          kept.size,
-        )}
-      />
-      <WalkNotes walked={walked} />
-      <FamilyContextDetails context={context} composed={context.entries.length > 0} />
-      {triaged ? (
-        <TriageControls order={order} onMove={traversal.move} status={traversal.status} />
+    <section ref={root} data-testid="review-family-tree" className={css({ minWidth: 0 })}>
+      <TreeFilter query={props.query} onQuery={props.onQuery} view={view} available={available} />
+      <TriageControls order={order} onMove={traversal.move} status={status} />
+      {noChange ? <p className={muted}>This leaf changed no recorded meaning.</p> : null}
+      <ul
+        className={list}
+        data-testid="review-family-list"
+        data-tree-order={order}
+        data-tree-view={view}
+      >
+        <TreeRows groups={shown} props={props} />
+      </ul>
+      {props.query && shown.length === 0 ? (
+        <p className={muted}>No rows match “{props.query}”.</p>
       ) : null}
-      {shown.length ? (
-        <TreeComparisonScope tree={tree}>
-          <FamilyList
-            shown={shown}
-            selected={selection}
-            onSelect={onSelect}
-            onRosterNext={onRosterNext}
-            order={triaged ? order : 'authored'}
-            kept={kept}
-          />
-        </TreeComparisonScope>
-      ) : (
-        <p className={muted} data-testid="review-family-none-shown">
-          {noneShown(composed, query, families.length)}
-        </p>
-      )}
     </section>
   );
 }
 
-function FamilyContextDetails({
-  context,
-  composed,
-}: {
-  context: ReviewFamilyContext;
-  composed: boolean;
-}) {
-  return (
-    <details>
-      <summary>Family context details</summary>
-      <p className={muted} data-testid="review-family-context" data-context-state={context.state}>
-        {context.state}: {context.detail}
-      </p>
-      {composed ? (
-        <p className={muted} data-testid="review-family-counts">
-          {context.families_returned} of {context.families_total} recorded family context(s)
-          composed
-          {context.families_remaining
-            ? ` · ${context.families_remaining} remaining`
-            : ' · none remaining'}{' '}
-          · {context.membership_rows_total} membership row(s) ·{' '}
-          {context.unique_member_revision_total} distinct member revision(s)
-        </p>
-      ) : null}
-      {context.limitations.map((limitation) => (
-        <p key={limitation} className={muted} data-testid="review-family-limitation">
-          limitation: {limitation}
-        </p>
-      ))}
-    </details>
+function catalogueStatus(props: FamilyTreeProps): string | undefined {
+  if (props.catalogueLoading) return 'Reading families and invariants for this comparison…';
+  if (props.catalogueProblem) return 'The catalogue for this comparison is unavailable.';
+  return undefined;
+}
+
+function admittedGroups(
+  props: FamilyTreeProps,
+  order: import('./triageOrderPreference').TreeOrder,
+) {
+  if (props.catalogueLoading || props.catalogueProblem) return [];
+  return outlineGroups(
+    props.outline,
+    props.catalogueEntries ?? [],
+    props.walked?.entries ?? props.context.entries,
+    order,
   );
 }

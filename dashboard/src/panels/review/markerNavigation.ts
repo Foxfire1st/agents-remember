@@ -15,7 +15,7 @@ import type { WorkspaceState } from './ReviewWorkspace';
 interface Position {
   subject: ReviewNavigationState['subject'];
   chosen: FamilySelection | null;
-  lane: WorkspaceState['lane'];
+  worklist: boolean;
   openPath: WorkspaceState['openPath'];
   layout: WorkspaceState['layout'];
   fullFile: boolean;
@@ -30,7 +30,7 @@ export function workspaceMarkerMoves(
       const position: Position = {
         subject: navigation?.subject,
         chosen: state.chosen,
-        lane: state.lane,
+        worklist: state.worklist,
         openPath: state.openPath,
         layout: state.layout,
         fullFile: state.fullFile,
@@ -67,7 +67,7 @@ function restore(
     state.setChosen(position.chosen);
   }
   // After the subject: choosing a subject leaves the lane, and the return may be into the lane.
-  state.setLane(position.lane);
+  state.setWorklist(position.worklist);
   state.setOpenPath(position.openPath);
   state.setLayout(position.layout);
   state.setFullFile(position.fullFile);

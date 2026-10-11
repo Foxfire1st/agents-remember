@@ -8,8 +8,8 @@ an uncommitted knowledge edit. The counts asserted here do not depend on the mac
   before publication), none of them the full capture, and a bounded number of Git children (rule 7);
 * a converted base tree Git holds is not written again, and the recorded tree id is used only for
   the request's own inputs (rule 3);
-* the leaf-wide view captures nothing itself, asks Git three questions for its knowledge diff
-  whatever the number of changed files, and is computed once per exact comparison (rule 4);
+* the leaf-wide view captures nothing itself, reads no memory-tree diff,
+  and computes its worklist once per exact comparison (rule 4);
 * a read after an edit -- also a same-size rewrite in the second of an index write -- reflects the
   new content, and nothing composed is kept on the server (rule 6).
 
@@ -51,22 +51,17 @@ from agents_remember.application.review_leaf_view_memo import (
     remembered,
 )
 from agents_remember.application.review_tree_comparison import ReviewTrees
-from agents_remember.application.review_tree_knowledge import knowledge_tree_diff
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.kernel import git_command, reviewer_worklist_process
-from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity
-from agents_remember.memory.knowledge_index import is_indexed_path, text_uuid
+from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import KnowledgeReviewResult, ReviewSurfaceRequest
 from agents_remember.models.knowledge.review_trees import (
-    ReviewKnowledgeFileChange,
-    ReviewKnowledgeTreeDiff,
     ReviewTreeComparisonRecord,
     ReviewTreesResult,
     ReviewWorklistView,
 )
-from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.tasks import store as task_store
 from agents_remember.worktrees.modules import git as capture_owner
@@ -149,11 +144,6 @@ def _comparison(view: ReviewTreesResult) -> ReviewTreeComparisonRecord:
     return view.comparison
 
 
-def _patches(view: ReviewTreesResult) -> list[str]:
-    assert view.knowledge_diff is not None
-    return [change.patch for group in view.knowledge_diff.records for change in group.files]
-
-
 def _seed() -> InvariantIdentitySeed:
     return InvariantIdentitySeed(invariant_id=text_uuid("identity", INVARIANT))
 
@@ -174,6 +164,7 @@ class Measured:
 
     def __init__(self) -> None:
         self.children: list[str] = []
+        self.arguments: list[tuple[str, ...]] = []
         self.captures: Counter[str] = Counter()
         self.full_captures = 0
         self.resolutions = 0
@@ -204,6 +195,7 @@ def measured() -> Iterator[Measured]:
     def counting_run(argv: Any, *args: Any, **kwargs: Any) -> Any:
         if argv and str(argv[0]) == "git":
             seen.children.append(_verb([str(word) for word in argv]))
+            seen.arguments.append(tuple(str(word) for word in argv))
         return run(argv, *args, **kwargs)
 
     def counting_copy(repo: Path, *args: Any, **kwargs: Any) -> str:
@@ -410,18 +402,23 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
     world.edit()
     ports = _ports(world)
     worklists = mock.Mock(wraps=review_tree_knowledge.isolated_leaf_worklist)
-    diffs = mock.Mock(wraps=review_tree_knowledge._measured_tree_diff)
     snapshots = mock.Mock(wraps=worklist_leaf.directory_snapshot)
     code_captures = mock.Mock(wraps=worklist_leaf._captured_code)
     with (
         mock.patch.object(review_tree_knowledge, "isolated_leaf_worklist", worklists),
-        mock.patch.object(review_tree_knowledge, "_measured_tree_diff", diffs),
         mock.patch.object(worklist_leaf, "directory_snapshot", snapshots),
         mock.patch.object(worklist_leaf, "_captured_code", code_captures),
     ):
         with measured() as first:
             view = ports.trees(_query())
         assert view.state == "trees" and view.worklist is not None and view.comparison is not None
+        # R86: neither a raw listing nor a patch of these memory trees belongs to the leaf view.
+        assert not any(
+            "diff" in args
+            and view.comparison.memory_base.tree in args
+            and view.comparison.memory_candidate.tree in args
+            for args in first.arguments
+        )
         # The worklist is handed the comparison's own two candidate trees and reads exactly those.
         assert worklists.call_count == 1
         candidate = worklists.call_args.kwargs["candidate"]
@@ -438,7 +435,7 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
         with measured() as repeat:
             again = ports.trees(_query())
         assert _body(again, by_alias=True) == _body(view, by_alias=True)
-        assert (worklists.call_count, diffs.call_count) == (1, 1)
+        assert worklists.call_count == 1
         assert repeat.captures == {"code": 1, "memory": 1}
         assert repeat.verbs["diff"] == 0 and len(repeat.children) < len(first.children)
         # The client pins the view to the comparison it shows: the same kept parts answer.
@@ -457,13 +454,8 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
             invariant(2, "Values land exactly as stated."), encoding="utf-8"
         )
         memory_edited = ports.trees(_query())
-        assert worklists.call_count == 3 and diffs.call_count == 3
-        patches = [
-            change.patch
-            for group in memory_edited.knowledge_diff.records  # type: ignore[union-attr]
-            for change in group.files
-        ]
-        assert any("exactly as stated" in patch for patch in patches)
+        assert worklists.call_count == 3
+        assert memory_edited.currentness is not None
         ports.trees(_query())
         assert worklists.call_count == 3
         contract = world.task_root / "enclosures" / LEAF.lower() / "series-contract.md"
@@ -496,53 +488,10 @@ def test_a_view_behind_which_a_read_failed_is_never_kept(world: World) -> None: 
             assert runs.call_count == expected
     assert len(LEAF_VIEW_MEMO) == 0
 
-    # The aggregate patch read fails, including its single bounded recovery read: patches are
-    # empty as before, and the view is not kept.
-    real = review_tree_knowledge.run_git
-
-    def failing_patch(repository: Path, args: list[str], *rest: Any) -> Any:
-        if args[0] == "diff" and "--raw" not in args:
-            return subprocess.CompletedProcess(args, 128, "", "fatal: a read failed")
-        return real(repository, args, *rest)
-
-    with mock.patch.object(review_tree_knowledge, "run_git", failing_patch):
-        failed = ports.trees(_query())
-    assert failed.knowledge_diff is not None and failed.knowledge_diff.changed_files == 2
-    assert {change.patch for group in failed.knowledge_diff.records for change in group.files} == {
-        ""
-    }
-    assert len(LEAF_VIEW_MEMO) == 0
-    # L40-R1-F4: only the first aggregate read fails. Successful recovery still returns the
-    # complete body, but cannot keep it; the next request must compute again.
-    attempts = 0
-
-    def failing_first_patch(repository: Path, args: list[str], *rest: Any) -> Any:
-        nonlocal attempts
-        if args[0] == "diff" and "--raw" not in args:
-            attempts += 1
-            if attempts == 1:
-                return subprocess.CompletedProcess(args, 128, "", "fatal: aggregate read failed")
-        return real(repository, args, *rest)
-
-    with (
-        mock.patch.object(review_tree_knowledge, "run_git", failing_first_patch),
-        mock.patch.object(
-            review_tree_knowledge, "isolated_leaf_worklist", wraps=computed
-        ) as recovered_runs,
-    ):
-        recovered = ports.trees(_query())
-        assert recovered.knowledge_diff is not None
-        assert recovered.worklist is not None and recovered.worklist.state == "complete"
-        assert all(
-            change.patch for group in recovered.knowledge_diff.records for change in group.files
-        )
-        assert attempts == 2  # identical aggregate recovery, never a child per changed file
-        assert len(LEAF_VIEW_MEMO) == 0
-        kept = ports.trees(_query())
-        assert recovered_runs.call_count == 2
-        assert _body(kept, by_alias=True) == _body(recovered, by_alias=True)
+    # A settled worklist with two readable memory sides may be kept; no memory patch is read.
+    recovered = ports.trees(_query())
+    assert recovered.worklist is not None and recovered.worklist.state == "complete"
     assert len(LEAF_VIEW_MEMO) == 1
-    assert all(change.patch for group in kept.knowledge_diff.records for change in group.files)  # type: ignore[union-attr]
 
     # A file the computation read outside the trees and that changed since is a miss.
     key = next(iter(LEAF_VIEW_MEMO._entries))
@@ -726,7 +675,7 @@ def test_the_view_memo_is_bounded_by_count_and_by_age_and_never_answers_another_
         trees.record.memory_base.tree,
         trees.before.wire.tree,
     )
-    parts = LeafViewParts(None, ReviewWorklistView(source="computed", state="complete"))
+    parts = LeafViewParts(ReviewWorklistView(source="computed", state="complete"))
 
     def other(number: int) -> LeafViewKey:
         return replace(key, memory_before=f"{number:040x}")
@@ -755,239 +704,6 @@ def test_the_view_memo_is_bounded_by_count_and_by_age_and_never_answers_another_
         assert leaf_view_key(contract, trees) is None
     with mock.patch.object(review_leaf_view_memo, "parent_memory_tip", return_value=None):
         assert leaf_view_key(contract, trees) is None  # the line K_B pairs on cannot be named
-
-
-def _reference_tree_diff(repository: Path, before: str, after: str) -> ReviewKnowledgeTreeDiff:
-    """Per-file reference, with the approved exact-filename correction for pathspec metacharacters."""
-
-    listed = run_git(
-        repository,
-        [
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--name-status",
-            "-z",
-            "-M",
-            before,
-            after,
-            "--",
-            "knowledge",
-            "onboarding",
-        ],
-    )
-    assert listed.returncode == 0, listed.stderr
-    tokens = listed.stdout.split("\0")
-    entries: list[tuple[str, str | None, str]] = []
-    position = 0
-    while position < len(tokens) and tokens[position]:
-        status = tokens[position]
-        if status[0] in "RC":
-            entries.append((status, tokens[position + 1], tokens[position + 2]))
-            position += 3
-        else:
-            entries.append((status, None, tokens[position + 1]))
-            position += 2
-
-    def json_at(tree: str, path: str) -> dict[str, Any] | None:
-        shown = run_git(repository, ["cat-file", "blob", f"{tree}:{path}"])
-        if shown.returncode != 0:
-            return None
-        try:
-            loaded = json.loads(shown.stdout)
-        except ValueError:
-            return None
-        return loaded if isinstance(loaded, dict) else None
-
-    groups = review_tree_knowledge._Groups()
-    changes = []
-    for status, old_path, path in entries:
-        if not (is_indexed_path(path) or (old_path is not None and is_indexed_path(old_path))):
-            continue
-        paths = (old_path, path) if old_path else (path,)
-        shown = run_git(
-            repository,
-            [
-                "--literal-pathspecs",
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "-M",
-                before,
-                after,
-                "--",
-                *paths,
-            ],
-        )
-        patch = shown.stdout if shown.returncode == 0 else ""
-        limit = review_tree_knowledge._PATCH_LIMIT
-        change = ReviewKnowledgeFileChange(
-            path=path,
-            old_path=old_path,
-            status=review_tree_knowledge._STATUS.get(status[0], "modified"),
-            patch=patch[:limit],
-            truncated=len(patch) > limit,
-        )
-        changes.append(change)
-        groups.add(change, json_at(before, old_path or path), json_at(after, path))
-    return ReviewKnowledgeTreeDiff(
-        before_tree=before,
-        after_tree=after,
-        changed_files=len(changes),
-        records=tuple(groups.records[key] for key in sorted(groups.records)),
-        sources=tuple(sorted(groups.sources, key=lambda group: group.source_path)),
-        history=tuple(groups.history),
-        other=tuple(groups.other),
-    )
-
-
-_NOT_UTF8 = (
-    b'{\n  "id": "INV-GGGGGG",\n  "statement": "\xff",\n  "a": 1,\n  "b": 2,\n  "c": 3,\n  "d": 4,\n'
-    b'  "e": 5,\n  "f": 6,\n  "schema": "ar-invariant/v1",\n  "status": "%s"\n}\n'
-)
-
-
-def _sidecar(document: dict[str, Any], path: str) -> str:
-    return canonical_text({**document, "path": path})
-
-
-def test_the_knowledge_diff_asks_git_three_questions_and_answers_what_the_per_file_diff_answered(
-    world: World,  # noqa: F811
-) -> None:
-    """Three Git children whatever the number of changed files (two sizes), and the same diff as
-    the per-file implementation, kept above, for every kind of change the trees can hold."""
-
-    memory = world.memory
-    # A record with a byte that is not UTF-8, outside the lines its patch will show: Git's output
-    # of the file was decoded with escapes, and so is the blob.
-    not_utf8 = memory / "knowledge/invariants/INV-GGGGGG-bytes.json"
-    not_utf8.write_bytes(_NOT_UTF8 % b"one")
-    base = git(memory, "rev-parse", f"{commit(memory, {})}^{{tree}}")
-    long_statement = "Values land. " + "x" * 21_000
-    few = commit(
-        memory,
-        {
-            INVARIANT_PATH: invariant(2, "Values land exactly as given."),
-            f"knowledge/history/{LEAF}.json": canonical_text(
-                {"schema": "ar-history/v1", "leaf": LEAF, "closed": False, "rows": []}
-            ),
-            "onboarding/overview.md": "# root, edited: not a file the index reads\n",
-        },
-    )
-    sidecar = json.loads((memory / f"onboarding/{CODE_FILE}.json").read_text())
-    git(memory, "mv", f"onboarding/{CODE_FILE}.json", "onboarding/pkg/moved.py.json")
-    git(memory, "rm", "-q", "knowledge/families/FAM-F00001-landing.json")
-    (memory / "knowledge/invariants/INV-CCCCCC-link.json").symlink_to("INV-AAAAAA-land.json")
-    not_utf8.write_bytes(_NOT_UTF8 % b"two")
-    many = commit(
-        memory,
-        {
-            INVARIANT_PATH: invariant(3, long_statement),  # a patch longer than its bound
-            "knowledge/invariants/INV-BBBBBB-broken.json": "{ not json\r\n",
-            "knowledge/invariants/INV-DDDDDD-list.json": "[1, 2]\n",
-            "knowledge/invariants/INV-EEEEEE-né.json": invariant(1, "A name Git quotes."),
-            "knowledge/invariants/INV-FFFFFF-[x].json": invariant(1, "A name Git reads as a set."),
-            "knowledge/invariants/INV-FFFFFF-x.json": invariant(1, "What that set matches."),
-            "onboarding/pkg/odd name.py.json": _sidecar(sidecar, "pkg/odd name.py"),
-            "onboarding/pkg/deep/more.py.json": _sidecar(sidecar, "pkg/deep/more.py"),
-            "onboarding/pkg/notes.md": "# not indexed\n",
-        },
-    )
-    # A file becomes a symlink (a type change: Git prints it as a removal and an addition).
-    (memory / "knowledge/layout.json").unlink()
-    (memory / "knowledge/layout.json").symlink_to("invariants/INV-AAAAAA-land.json")
-    typed = commit(memory, {})
-    trees = {name: git(memory, "rev-parse", f"{rev}^{{tree}}") for name, rev in
-             (("few", few), ("many", many), ("typed", typed))}  # fmt: skip
-    children: dict[str, int] = {}
-    for name, (before, after) in {
-        "few": (base, trees["few"]),
-        "many": (base, trees["many"]),
-        "back": (trees["many"], base),
-        "typed": (trees["many"], trees["typed"]),
-        "none": (base, base),
-    }.items():
-        with measured() as seen:
-            diff = knowledge_tree_diff(memory, before, after)
-        children[name] = len(seen.children)
-        assert diff == _reference_tree_diff(memory, before, after), name
-    assert trees["few"] != trees["many"] != trees["typed"]
-    counted = knowledge_tree_diff(memory, base, trees["many"])
-    few_files = knowledge_tree_diff(memory, base, trees["few"]).changed_files
-    assert (few_files, counted.changed_files) == (2, 13)
-    assert "INV-GGGGGG" in {group.record_id for group in counted.records}
-    # Listing, aggregate patch and blobs: three children at both sizes and in either direction,
-    # including quoted and literal pattern names, renames and the two sections of a type change.
-    assert children["few"] == 3 and children["none"] == 1
-    assert children["many"] == 3 and children["back"] == 3
-    assert children["typed"] == 3
-    changed = [change for group in counted.records for change in group.files] + list(counted.other)
-    assert any(change.truncated for change in changed)
-    renamed = next(group for group in counted.sources if group.source_path == CODE_FILE)
-    assert renamed.files[0].status == "renamed" and renamed.files[0].old_path is not None
-
-
-def test_exact_filename_patches_keep_quoted_bytes_and_do_not_expand_to_siblings_at_two_sizes(
-    world: World,  # noqa: F811
-) -> None:
-    """F2: full-model literal parity and a constant Git bound, for both quotePath settings."""
-
-    memory = world.memory
-    sidecar = json.loads((memory / f"onboarding/{CODE_FILE}.json").read_text())
-    names = (
-        "pattern[x]",
-        "patternx",
-        "question?",
-        "questiona",
-        "star*",
-        "star-match",
-        "café",
-        "odd name",
-        "with\ttab",
-        "with\nnewline",
-        'with"quote',
-        "with\\backslash",
-        "café\ttab",
-        "b/path b/path",
-        "octal\x01",
-        "delete\x7f",
-        "multi-é漢字",
-        "[[:digit:]]",
-        "one[",
-        "emoji💩",
-    )
-    for family in (tuple(f"café{number}" for number in range(20)), names):
-        base = git(memory, "rev-parse", "HEAD^{tree}")
-        for size in (2, 20):
-            changed = {
-                f"onboarding/pkg/{name}.py.json": _sidecar(sidecar, f"pkg/{name}.py")
-                for name in family[:size]
-            }
-            after = git(memory, "rev-parse", f"{commit(memory, changed)}^{{tree}}")
-            for quoted in (False, True):
-                git(memory, "config", "core.quotePath", str(quoted).lower())
-                with measured() as seen:
-                    result = knowledge_tree_diff(memory, base, after)
-                assert (result.changed_files, len(seen.children), seen.verbs["diff"]) == (
-                    size,
-                    3,
-                    2,
-                )
-                assert result == _reference_tree_diff(memory, base, after)
-                patches = {
-                    change.path: change.patch for group in result.sources for change in group.files
-                }
-                assert set(patches) == set(changed)
-                assert all(patch.count("diff --git ") == 1 for patch in patches.values())
-                if "pattern[x]" in family:
-                    path = "onboarding/pkg/pattern[x].py.json"
-                    legacy = run_git(
-                        memory,
-                        ["diff", "--no-color", "--no-ext-diff", "-M", base, after, "--", path],
-                    )
-                    assert legacy.returncode == 0 and legacy.stdout.count("diff --git ") == 2
-                    assert "diff --git a/onboarding/pkg/patternx.py.json" in legacy.stdout
-                    assert "diff --git a/onboarding/pkg/patternx.py.json" not in patches[path]
 
 
 # -- rule 6: never a stale answer ---------------------------------------------------------------------
@@ -1065,4 +781,4 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
         _comparison(after_view).memory_candidate.tree
         != _comparison(before_view).memory_candidate.tree
     )
-    assert any("exactly as granted" in patch for patch in _patches(after_view))
+    assert read()[0] == "Values land exactly as granted."

@@ -9,7 +9,6 @@
 //   * each knowledge side's state -- `available`, `unavailable-history` (Git can no longer produce
 //     the tree; it is named, never replaced) or `legacy-unavailable` -- and its index state
 //     (`partial` names the files that failed);
-//   * the Git diff of the two memory trees, grouped by record and by source path;
 //   * each invariant's MIK-R03 currentness per side, against that side's own code tree;
 //   * the MIK-R08 worklist view: items, the history rows about their subjects (no current/stale mark
 //     until MIK-R09), and the gate linkage of every changed hunk;
@@ -80,38 +79,6 @@ export interface ReviewCodeSide {
   state: 'available' | 'unavailable-history';
   tree: string;
   detail?: string;
-}
-
-export interface ReviewKnowledgeFileChange {
-  path: string;
-  old_path?: string;
-  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'type_changed';
-  patch: string;
-  truncated: boolean;
-}
-
-export interface ReviewKnowledgeRecordGroup {
-  record_id: string;
-  kind: string;
-  files: ReviewKnowledgeFileChange[];
-  // [entry id, source path, "added" | "removed" | "changed"]
-  entries: [string, string, string][];
-}
-
-export interface ReviewKnowledgeSourceGroup {
-  source_path: string;
-  files: ReviewKnowledgeFileChange[];
-  records: string[];
-}
-
-export interface ReviewKnowledgeTreeDiff {
-  before_tree: string;
-  after_tree: string;
-  changed_files: number;
-  records: ReviewKnowledgeRecordGroup[];
-  sources: ReviewKnowledgeSourceGroup[];
-  history: ReviewKnowledgeFileChange[];
-  other: ReviewKnowledgeFileChange[];
 }
 
 export type InvariantCurrentnessState = 'stale' | 'unverifiable' | 'unrealized' | 'current';
@@ -231,7 +198,6 @@ export interface ReviewTreesResult {
   knowledge_sides: ReviewKnowledgeSide[];
   // Present on a reopened comparison; a live one was just captured.
   code_sides?: ReviewCodeSide[];
-  knowledge_diff?: ReviewKnowledgeTreeDiff;
   currentness?: Partial<Record<'before' | 'after', ReviewSideCurrentness>>;
   worklist?: ReviewWorklistView;
   entries?: ReviewTreeEntry[];

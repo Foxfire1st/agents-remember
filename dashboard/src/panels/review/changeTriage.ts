@@ -198,3 +198,162 @@ export function mergeChangeKinds(
   for (const member of next.members) members.set(member.member_id, member);
   return { ...next, members: [...members.values()] };
 }
+
+export type OutlineBadge =
+  | import('../../data/review').ReviewOutlineChange
+  | 'code changed'
+  | 'joined'
+  | 'left'
+  | `${number} changed`;
+export interface OutlineRow {
+  kind: 'family' | 'invariant';
+  id: string;
+  selectorId: string;
+  title: string;
+  badge?: OutlineBadge;
+  familyId?: string;
+  revisionId?: string;
+}
+export interface OutlineGroup {
+  family?: OutlineRow;
+  members: OutlineRow[];
+}
+export const realChange = (badge: OutlineBadge | undefined): boolean =>
+  badge !== undefined && badge !== 'unknown' && badge !== 'unchanged';
+
+function badgeWeight(badge: OutlineBadge | undefined): number {
+  if (badge === 'added' || badge === 'removed' || badge === 'changed') return 4;
+  if (badge === 'code changed') return 3;
+  if (badge === 'joined' || badge === 'left') return 2;
+  return badge?.endsWith(' changed') ? 4 : 0;
+}
+
+type Outline = import('../../data/review').ReviewOutline;
+type CatalogueEntry = import('../../data/review').ReviewEntry;
+type OutlineMember = import('../../data/review').ReviewOutlineMember;
+
+function catalogueGroups(catalogue: readonly CatalogueEntry[]): OutlineGroup[] {
+  const row = (entry: CatalogueEntry): OutlineRow => ({
+    kind: entry.selector_kind,
+    id: entry.selector_id,
+    selectorId: entry.selector_id,
+    title: entry.label,
+  });
+  return [
+    ...catalogue
+      .filter((entry) => entry.selector_kind === 'family')
+      .map((entry) => ({ family: row(entry), members: [] })),
+    { members: catalogue.filter((entry) => entry.selector_kind === 'invariant').map(row) },
+  ];
+}
+function memberBadge(
+  change: OutlineBadge,
+  fact: ReviewMemberChange | undefined,
+  membership: OutlineMember['membership'] | undefined,
+): OutlineBadge {
+  if (realChange(change)) return change;
+  if (fact?.primary === 'implementation') return 'code changed';
+  if (membership === 'joined' || membership === 'left') return membership;
+  if (fact?.primary === 'unknown') return 'unknown';
+  return change;
+}
+function walkedMember(walked: readonly ReviewFamilyContextEntry[], id: string, familyId?: string) {
+  const context = walked.find((entry) => entry.family_id === familyId);
+  if (!context) return {};
+  const row = [...context.after.members, ...context.before.members].find(
+    (entry) => entry.invariant_id === id,
+  );
+  if (!row) return {};
+  return { revisionId: row.invariant_revision_id, fact: memberChanges(context).get(row.member_id) };
+}
+function outlineMember(
+  outline: Outline,
+  walked: readonly ReviewFamilyContextEntry[],
+  id: string,
+  familyId?: string,
+  membership?: OutlineMember['membership'],
+): OutlineRow {
+  const invariant = outline.invariants.find((entry) => entry.selector_id === id);
+  const { revisionId, fact } = walkedMember(walked, id, familyId);
+  const label = invariant?.id ?? id;
+  return {
+    kind: 'invariant',
+    id: label,
+    selectorId: id,
+    familyId,
+    title: `${label} ${invariant?.summary ?? ''}`.trim(),
+    badge: memberBadge(invariant?.change ?? 'unknown', fact, membership),
+    revisionId,
+  };
+}
+function groupWeight(group: OutlineGroup): number {
+  const badge = group.family?.badge;
+  const ownWeight =
+    badge?.endsWith(' changed') && badge !== 'code changed' ? 0 : badgeWeight(badge);
+  return Math.max(ownWeight, ...group.members.map((row) => badgeWeight(row.badge)));
+}
+export function outlineGroups(
+  outline: Outline | undefined,
+  catalogue: readonly CatalogueEntry[],
+  walked: readonly ReviewFamilyContextEntry[],
+  order: TreeOrder,
+): OutlineGroup[] {
+  if (outline?.state !== 'outlined') return catalogueGroups(catalogue);
+  const listed = new Set<string>();
+  const sort = (rows: OutlineRow[]) =>
+    order === 'authored' ? rows : rows.sort((a, b) => badgeWeight(b.badge) - badgeWeight(a.badge));
+  const groups = outline.families.map((entry): OutlineGroup => {
+    const members = sort(
+      entry.members.map((item) => {
+        listed.add(item.selector_id);
+        return outlineMember(outline, walked, item.selector_id, entry.selector_id, item.membership);
+      }),
+    );
+    const count = members.filter((item) => realChange(item.badge)).length;
+    const badge: OutlineBadge =
+      entry.change === 'unchanged' && count ? `${count} changed` : entry.change;
+    const title = entry.title.includes(' ') ? entry.title : entry.title.replaceAll('-', ' ');
+    return {
+      family: { kind: 'family', id: entry.id, selectorId: entry.selector_id, title, badge },
+      members,
+    };
+  });
+  if (order === 'triage') groups.sort((a, b) => groupWeight(b) - groupWeight(a));
+  groups.push({
+    members: sort(
+      outline.invariants
+        .filter((entry) => !listed.has(entry.selector_id))
+        .map((entry) => outlineMember(outline, walked, entry.selector_id)),
+    ),
+  });
+  return groups;
+}
+
+export function firstOutlineChange(
+  outline: import('../../data/review').ReviewOutline,
+  order: TreeOrder,
+): OutlineRow | undefined {
+  for (const group of outlineGroups(outline, [], [], order)) {
+    // An aggregate family badge points to the member, not to the unchanged family record.
+    if (group.family && ['added', 'removed', 'changed'].includes(group.family.badge ?? ''))
+      return group.family;
+    const member = group.members.find((row) => realChange(row.badge));
+    if (member) return member;
+  }
+  return undefined;
+}
+
+export function outlineCounts(
+  outline: import('../../data/review').ReviewOutline | undefined,
+  walked: readonly ReviewFamilyContextEntry[] = [],
+) {
+  if (outline?.state !== 'outlined') return undefined;
+  return {
+    families: outlineGroups(outline, [], walked, 'authored').filter((group) =>
+      realChange(group.family?.badge),
+    ).length,
+    invariants: outline.invariants.filter((row) =>
+      ['added', 'removed', 'changed'].includes(row.change),
+    ).length,
+  };
+}

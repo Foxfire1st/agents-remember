@@ -289,6 +289,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -596,6 +597,7 @@ permanence_rationale = "The comparison is decided by what changed between two sn
 replacement_contract = "contract:knowledge-diff-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
@@ -1149,6 +1151,7 @@ consumers = [
   "mcp/tests/test_codex_native_history.py",
   "mcp/tests/test_cold_start.py",
   "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_completion_relay_single_owner.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
@@ -1826,6 +1829,7 @@ permanence_rationale = "Production decodes index rows and never encodes one; the
 replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
@@ -1865,6 +1869,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
@@ -2211,6 +2216,7 @@ permanence_rationale = "The selective read is decided by one exact topology -- I
 replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_comparison_changeset.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_diff_attribution.py",

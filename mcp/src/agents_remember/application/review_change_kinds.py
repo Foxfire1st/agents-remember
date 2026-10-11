@@ -60,14 +60,14 @@ from agents_remember.application.review_lane_classification import (
     changes_lines,
     open_tree_lane,
 )
+from agents_remember.application.review_record_changes import Fact, Known, RecordChanges, problems
 from agents_remember.application.review_tree_comparison import ReviewTrees
 from agents_remember.memory.knowledge.tree_observation import TreeChange
-from agents_remember.memory.knowledge_index import Entry, Record
+from agents_remember.memory.knowledge_index import Entry
 from agents_remember.memory.knowledge_index.build import IndexedEntry, ParsedTree
 from agents_remember.models.knowledge.review_change_kinds import (
     UNKNOWN_FACTS,
     ChangeEvidence,
-    ChangeFact,
     ChangeFacts,
     GuaranteeChange,
     ReviewFamilyChanges,
@@ -79,9 +79,7 @@ from agents_remember.models.knowledge.review_family_context import (
     ReviewFamilyMember,
 )
 from agents_remember.models.knowledge_files.documents import (
-    KNOWLEDGE_ROOT,
     ONBOARDING_ROOT,
-    RECORD_DIRECTORIES,
 )
 from agents_remember.models.knowledge_files.ids import RecordKind
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
@@ -90,8 +88,6 @@ __all__ = ["with_change_kinds"]
 
 _RETIRED: Final = "retired"
 _UNREADABLE: Final = "the comparison's trees cannot be read or compared: {error}"
-# The authored text of an invariant record: a byte difference in any of these is a text change.
-_WORDING: Final = ("statement", "applicability", "conditions", "exclusions")
 # The lane's per-entry reasons (MIK-R32), in the words a reviewer reads beside an unknown badge.
 _RANGE_REASONS: Final = {
     "path_absent": "this side holds no file at the path",
@@ -152,65 +148,12 @@ def _unread(entry: ReviewFamilyContextEntry, detail: str) -> ReviewFamilyChanges
     )
 
 
-@dataclass(frozen=True)
-class _Known:
-    """One side's answer about one record: live, absent (``record`` is ``None``), or unknown."""
-
-    record: Record | None = None
-    retired: bool = False
-    unknown: str | None = None
-
-
-@dataclass
-class _Fact:
-    """One fact as it is decided: established (with why), unknown (with why), or neither."""
-
-    established: list[str] = field(default_factory=list)
-    open: list[str] = field(default_factory=list)
-    # Entries in a changed file whose range cannot be resolved there: unknown whatever else holds.
-    # Each reason keeps the entry it is about (``None`` for an unread side).
-    unresolved: dict[str, str | None] = field(default_factory=dict)
-    # The entries that established the fact: their unresolved reasons are listed last.
-    by: set[str] = field(default_factory=set)
-    proof: bool = False
-    text_differs: bool = False
-
-    def establish(self, why: str, *, proof: bool = False, entry: str | None = None) -> None:
-        if why not in self.established:
-            self.established.append(why)
-        if entry is not None:
-            self.by.add(entry)
-        self.proof = self.proof or proof
-
-    def unknown(self, why: str) -> None:
-        if why not in self.open:
-            self.open.append(why)
-
-    def unresolvable(self, why: str, *, entry: str | None = None) -> None:
-        self.unresolved.setdefault(why, entry)
-
-    @property
-    def state(self) -> ChangeFact:
-        if self.established:
-            return "established"
-        return "unknown" if self.open or self.unresolved else "not_established"
-
-    @property
-    def reasons(self) -> list[str]:
-        """Why the fact is unknown, or why an established one still carries an unresolved range."""
-
-        # An entry that established nothing is the more telling reason, so it comes first.
-        unresolved = sorted(self.unresolved, key=lambda why: self.unresolved[why] in self.by)
-        if self.state == "unknown":
-            return [*unresolved, *self.open]
-        return unresolved if self.state == "established" else []
-
-
 @dataclass
 class _ChangeKinds:
     """The facts of one comparison, over the lane's code trees and both memory indexes."""
 
     lane: TreeLane
+    meaning: RecordChanges = field(default_factory=RecordChanges)
     _changes: dict[str, TreeChange] | None = None
     _inventory_problem: str | None = None
     _files: dict[str, FileResult | str] = field(default_factory=dict)
@@ -238,21 +181,8 @@ class _ChangeKinds:
         )
 
     def _guarantee(self, family: str) -> tuple[GuaranteeChange, str]:
-        before, after = (self._record(side, family, "family") for side in self.sides)
-        unread = before.unknown or after.unknown
-        if unread is not None:
-            return "unknown", unread
-        if before.record is None and after.record is None:
-            return "unknown", f"neither memory tree holds a live record of {family}"
-        if before.record is None or after.record is None:
-            held = "after" if before.record is None else "before"
-            return "intent", f"{family} is live on the {held} side only"
-        if before.record.document.get("guarantee") != after.record.document.get("guarantee"):
-            return "intent", (
-                f"the guarantee text of {family} differs (revision {before.record.revision} → "
-                f"{after.record.revision})"
-            )
-        return "unchanged", f"the guarantee text of {family} is the same on both sides"
+        change, detail = self.meaning.guarantee(self.sides, family)
+        return ("intent" if change in ("added", "removed", "changed") else change), detail
 
     def _members_total(self, family: str) -> int | None:
         """The deduplicated union of the family's live members on either side, or ``None``."""
@@ -332,43 +262,14 @@ class _ChangeKinds:
         membership = self._text_id(member.member_id)
         return None if membership is None else membership.split("/", 1)[-1]
 
-    def _intent(self, invariant: str) -> _Fact:
-        fact = _Fact()
-        before, after = (self._record(side, invariant, "invariant") for side in self.sides)
-        unread = before.unknown or after.unknown
-        if unread is not None:
-            fact.unknown(unread)
-            return fact
-        if before.record is None or after.record is None:
-            _presence(fact, invariant, before, after)
-        elif before.record.revision != after.record.revision:
-            fact.establish(
-                f"{invariant} revision {before.record.revision} → {after.record.revision}"
-            )
-        elif _wording(before.record) != _wording(after.record):
-            fact.establish(
-                f"{invariant} keeps revision {after.record.revision}, but its text differs"
-            )
-            fact.text_differs = True
-        return fact
+    def _intent(self, invariant: str) -> Fact:
+        return self.meaning.intent(self.sides, invariant)
 
-    def _membership(self, family: str, invariant: str) -> _Fact:
-        fact = _Fact()
-        listed: list[bool] = []
-        for side in self.sides:
-            known = self._record(side, family, "family")
-            if known.unknown is not None or side.index is None:
-                fact.unknown(known.unknown or f"the {side.name} memory tree could not be read")
-                return fact
-            members = () if known.record is None else side.index.family(family).value.members
-            listed.append(invariant in members)
-        if listed[0] != listed[1]:
-            joined = "joined" if listed[1] else "left"
-            fact.establish(f"{invariant} {joined} {family}")
-        return fact
+    def _membership(self, family: str, invariant: str) -> Fact:
+        return self.meaning.membership(self.sides, family, invariant)
 
-    def _implementation(self, invariant: str) -> _Fact:
-        fact = _Fact()
+    def _implementation(self, invariant: str) -> Fact:
+        fact = Fact()
         entries = [self._entries(side, invariant) for side in self.sides]
         before, after = entries
         if isinstance(before, str) or isinstance(after, str):
@@ -383,7 +284,7 @@ class _ChangeKinds:
         return fact
 
     def _entry_changes(
-        self, fact: _Fact, before: Mapping[str, Entry], after: Mapping[str, Entry]
+        self, fact: Fact, before: Mapping[str, Entry], after: Mapping[str, Entry]
     ) -> None:
         """(a): entries added, retired or re-anchored between the sides (definition 7)."""
 
@@ -415,7 +316,7 @@ class _ChangeKinds:
                     entry=entry_id,
                 )
 
-    def _hunks(self, fact: _Fact, invariant: str, path: str) -> None:
+    def _hunks(self, fact: Fact, invariant: str, path: str) -> None:
         """(b): a hunk the lane links to an entry of ``invariant`` at the changed ``path``."""
 
         change = self._change(path)
@@ -446,22 +347,8 @@ class _ChangeKinds:
                     return found
         return None
 
-    def _record(self, side: LaneSide, record_id: str, kind: RecordKind) -> _Known:
-        if side.index is None:
-            return _Known(unknown=side.detail or f"the {side.name} memory tree could not be read")
-        record = side.index.record(record_id).value
-        if record is not None:
-            retired = record.status == _RETIRED
-            return _Known(record=None if retired else record, retired=retired)
-        failed = _problems(side, kind)
-        if failed:
-            return _Known(
-                unknown=bounded_text(
-                    f"the {side.name} memory tree has {kind} records that do not parse: "
-                    f"{', '.join(failed[:3])}"
-                )
-            )
-        return _Known()
+    def _record(self, side: LaneSide, record_id: str, kind: RecordKind) -> Known:
+        return self.meaning.record(side, record_id, kind)
 
     def _entries(self, side: LaneSide, invariant: str) -> dict[str, Entry] | str:
         """The side's entries of ``invariant`` by ID, or why they are not all known."""
@@ -531,27 +418,12 @@ class _ChangeKinds:
             return None
 
 
-def _presence(fact: _Fact, invariant: str, before: _Known, after: _Known) -> None:
-    """Intent of an invariant at most one side holds live: added, removed (or retired), or unknown."""
-
-    if before.record is None and after.record is None:
-        fact.unknown(f"neither memory tree holds a live record of {invariant}")
-        return
-    change = "added" if before.record is None else "removed"
-    retired = " (retired)" if before.retired or after.retired else ""
-    fact.establish(f"{invariant} is {change}{retired}")
-
-
-def _wording(record: Record) -> tuple[object, ...]:
-    return tuple(record.document.get(key) for key in _WORDING)
-
-
 def _locator_kind(placed: Placed) -> str:
     anchor = placed.entry.document.get("anchor") or {}
     return str((anchor.get("locator") or {}).get("kind", ""))
 
 
-def _hunk_linked(fact: _Fact, invariant: str, path: str, result: FileResult) -> bool:
+def _hunk_linked(fact: Fact, invariant: str, path: str, result: FileResult) -> bool:
     """(b) for one member: a hunk the lane links to one of its entries at ``path``."""
 
     linked = False
@@ -568,7 +440,7 @@ def _hunk_linked(fact: _Fact, invariant: str, path: str, result: FileResult) -> 
     return linked
 
 
-def _file_covered(fact: _Fact, invariant: str, path: str, result: FileResult) -> bool:
+def _file_covered(fact: Fact, invariant: str, path: str, result: FileResult) -> bool:
     """Definition 8 for one member: a ``file`` entry of it covers the changed non-text ``path``."""
 
     covered = False
@@ -606,7 +478,7 @@ def _non_text_content(result: FileResult) -> bool:
 
 
 def _unresolved(
-    fact: _Fact, invariant: str, path: str, result: FileResult, reading: SideReading
+    fact: Fact, invariant: str, path: str, result: FileResult, reading: SideReading
 ) -> None:
     """ICR-R32 rule 1: an entry of the member on a side where the changed file changes lines, whose
     range cannot be resolved there (or whose side is unread), is unknown -- unconditionally."""
@@ -624,7 +496,7 @@ def _unresolved(
             fact.unresolvable(_withheld(placed, reading, path), entry=placed.entry.id)
 
 
-def _unintersectable(fact: _Fact, invariant: str, path: str, result: FileResult) -> None:
+def _unintersectable(fact: Fact, invariant: str, path: str, result: FileResult) -> None:
     """A resolved non-file entry at a non-text content change: no hunk to meet, so unknown."""
 
     if not _non_text_content(result):
@@ -643,13 +515,8 @@ def _own_problem(side: LaneSide, kind: RecordKind, record_id: str) -> bool:
 
     return any(
         path.rsplit("/", 1)[-1].startswith((f"{record_id}-", f"{record_id}."))
-        for path in _problems(side, kind)
+        for path in problems(side, kind)
     )
-
-
-def _problems(side: LaneSide, kind: RecordKind) -> list[str]:
-    prefix = f"{KNOWLEDGE_ROOT}/{RECORD_DIRECTORIES[kind]}/"
-    return sorted(path for path in side.problems if path.startswith(prefix))
 
 
 def _indexed(entry: Entry) -> IndexedEntry:

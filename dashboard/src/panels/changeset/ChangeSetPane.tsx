@@ -6,47 +6,53 @@
 //   full-file + highlight off -> the plain L2 FilePane on the after-content (no highlighter)
 // `inline` flips split <-> inline for whichever diff is shown. Each column owns its own flag keys
 // (passed in `keyPrefix`) so the code column and the sidecar (3rd) column persist independently.
-import { ToggleButton } from "react-aria-components";
+import { useState } from 'react';
+import { ToggleButton } from 'react-aria-components';
 
-import { css, cx } from "../../../styled-system/css";
-import { Markdown } from "../../grammar/Markdown";
-import type { FileDiff } from "../../data/changeset";
-import { FilePane } from "../file-viewer/FilePane";
-import { usePersistedFlag } from "../file-viewer/usePersistedFlag";
-import { DiffPane } from "./DiffPane";
+import { css, cx } from '../../../styled-system/css';
+import { Markdown } from '../../grammar/Markdown';
+import type { FileDiff } from '../../data/changeset';
+import { FilePane } from '../file-viewer/FilePane';
+import { usePersistedFlag } from '../file-viewer/usePersistedFlag';
+import { DiffPane } from './DiffPane';
 
-const col = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
+const col = css({ height: '100%', minHeight: '0', display: 'flex', flexDirection: 'column' });
 const bar = css({
   flexShrink: 0,
-  display: "flex",
-  gap: "0.3rem",
-  alignItems: "center",
-  paddingInline: "0.5rem",
-  paddingBlock: "0.25rem",
-  background: "bgPanel",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
+  display: 'flex',
+  gap: '0.3rem',
+  alignItems: 'center',
+  paddingInline: '0.5rem',
+  paddingBlock: '0.25rem',
+  background: 'bgPanel',
+  borderBottomWidth: '1px',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'grid',
 });
 const toggle = css({
-  fontSize: "0.68rem",
-  fontFamily: "mono",
-  color: "muted",
-  paddingInline: "0.4rem",
-  paddingBlock: "0.1rem",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  cursor: "pointer",
-  background: "transparent",
-  _hover: { color: "ink", borderColor: "amber" },
-  "&[data-selected=true]": { color: "bg", background: "amber", borderColor: "amber" },
+  fontSize: '0.68rem',
+  fontFamily: 'mono',
+  color: 'muted',
+  paddingInline: '0.4rem',
+  paddingBlock: '0.1rem',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '2px',
+  cursor: 'pointer',
+  background: 'transparent',
+  _hover: { color: 'ink', borderColor: 'amber' },
+  '&[data-selected=true]': { color: 'bg', background: 'amber', borderColor: 'amber' },
 });
-const body = css({ flex: "1", minHeight: "0" });
+const body = css({ flex: '1', minHeight: '0' });
 // The rendered-markdown view: same scrollable, padded surface the File Viewer's sidecar uses, so a
 // changed onboarding file reads exactly as nicely here as it does in the file reader.
-const mdScroll = css({ height: "100%", overflow: "auto", padding: "0.6rem 0.85rem", background: "bgPanel" });
+const mdScroll = css({
+  height: '100%',
+  overflow: 'auto',
+  padding: '0.6rem 0.85rem',
+  background: 'bgPanel',
+});
 
 function ChangeSetToolbar({
   isMarkdown,
@@ -96,7 +102,7 @@ function ChangeSetToolbar({
             onChange={onFullFile}
             data-selected={fullFile}
           >
-            {fullFile ? "full file" : "change-set"}
+            {fullFile ? 'full file' : 'change-set'}
           </ToggleButton>
           {!plain ? (
             <ToggleButton
@@ -105,7 +111,7 @@ function ChangeSetToolbar({
               onChange={onInline}
               data-selected={inline}
             >
-              {inline ? "inline" : "split"}
+              {inline ? 'inline' : 'split'}
             </ToggleButton>
           ) : null}
           {fullFile ? (
@@ -120,7 +126,7 @@ function ChangeSetToolbar({
           ) : null}
         </>
       ) : null}
-      <span className={cx(css({ marginLeft: "auto", fontSize: "0.68rem", color: "muted" }))}>
+      <span className={cx(css({ marginLeft: 'auto', fontSize: '0.68rem', color: 'muted' }))}>
         {summary}
       </span>
     </div>
@@ -129,8 +135,8 @@ function ChangeSetToolbar({
 
 function diffContent(diff: FileDiff): { before: string; after: string } {
   return {
-    before: diff.before?.content ?? "",
-    after: diff.after?.content ?? "",
+    before: diff.before?.content ?? '',
+    after: diff.after?.content ?? '',
   };
 }
 
@@ -166,7 +172,7 @@ function ChangeSetBody({
           before={before}
           after={after}
           language={language}
-          mode={inline ? "inline" : "split"}
+          mode={inline ? 'inline' : 'split'}
           collapse={!fullFile}
         />
       )}
@@ -174,14 +180,25 @@ function ChangeSetBody({
   );
 }
 
-export function ChangeSetPane({ diff, keyPrefix }: { diff: FileDiff; keyPrefix: string }) {
+export function ChangeSetPane({
+  diff,
+  keyPrefix,
+  narrow = false,
+}: {
+  diff: FileDiff;
+  keyPrefix: string;
+  narrow?: boolean;
+}) {
   const [fullFile, setFullFile] = usePersistedFlag(`${keyPrefix}.fullfile`, false);
   const [inline, setInline] = usePersistedFlag(`${keyPrefix}.inline`, false);
+  const [narrowInline, setNarrowInline] = useState(true);
+  const shownInline = narrow ? narrowInline : inline;
+  const changeInline = narrow ? setNarrowInline : setInline;
   const [highlight, setHighlight] = usePersistedFlag(`${keyPrefix}.highlight`, true);
   // Onboarding (.md) gets a "rendered" mode that draws the prose like the file reader instead of a raw
   // text diff — the developer reads onboarding as formatted markdown, not as CodeMirror source. Only
   // markdown files offer it; the persisted flag survives a file switch + reload (per-column key).
-  const isMarkdown = diff.language === "markdown";
+  const isMarkdown = diff.language === 'markdown';
   const [rendered, setRendered] = usePersistedFlag(`${keyPrefix}.rendered`, false);
   const showRendered = isMarkdown && rendered;
 
@@ -198,8 +215,8 @@ export function ChangeSetPane({ diff, keyPrefix }: { diff: FileDiff; keyPrefix: 
         fullFile={fullFile}
         onFullFile={setFullFile}
         plain={plain}
-        inline={inline}
-        onInline={setInline}
+        inline={shownInline}
+        onInline={changeInline}
         highlight={highlight}
         onHighlight={setHighlight}
         summary={`${diff.kind} · ${diff.path}`}
@@ -210,7 +227,7 @@ export function ChangeSetPane({ diff, keyPrefix }: { diff: FileDiff; keyPrefix: 
         before={before}
         after={after}
         language={diff.language}
-        inline={inline}
+        inline={shownInline}
         fullFile={fullFile}
       />
     </div>

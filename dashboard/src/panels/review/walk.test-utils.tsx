@@ -1,6 +1,7 @@
 // Shared by the MIK-R39 mounted tests (ReviewSurface.walk*.test.tsx): a served world made of captured
 // bodies, a `fetch` stub that answers from it and logs every request, and small readers of the mounted
-// reviewer. `ReviewSurface` is the real component; only `fetch` is stubbed.
+// reviewer. `ReviewSurface` is real; only `fetch` is replaced. The old catalogue is augmented
+// with the explicitly synthetic outline adapter, leaving every original capture unchanged.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
@@ -14,6 +15,8 @@ import {
 } from '@testing-library/react';
 import type { ReviewResult } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
+import { syntheticCatalogue } from './outline.test-utils';
+import { treeViewStore } from './triageViewPreference';
 import { treeOrderStore } from './triageOrderPreference';
 
 export const captured = <T,>(name: string): T =>
@@ -94,7 +97,7 @@ export function selectedNode(view: RenderResult): HTMLElement | null {
 }
 
 export const triageStatus = (view: RenderResult) =>
-  view.getByTestId('review-change-status').textContent ?? '';
+  view.queryByTestId('review-change-status')?.textContent ?? '';
 
 export const press = (key: { key: string; code: string }) =>
   fireEvent.keyDown(document.activeElement!, key);
@@ -114,7 +117,7 @@ export const memberOccurrences = (block: HTMLElement) =>
   new Set(
     within(block)
       .queryAllByTestId('review-family-member')
-      .map((row) => row.dataset.member),
+      .map((row) => row.querySelector<HTMLElement>('[data-subject-id]')?.dataset.subjectId),
   );
 
 // ---- the real-data world of lane D2's scratch leaf (walkReal.capture-provenance.json)
@@ -194,7 +197,7 @@ export const world: {
 } = {
   requests: { all: [], reviews: () => [] },
   answer: (_url, asked) => (asked === 'task-context' ? task : bodies.get(asked)),
-  entries,
+  entries: { ...(entries as object), ...syntheticCatalogue([R6R, HBJ]) },
 };
 export const reviewCount = () => world.requests.reviews().length;
 
@@ -203,9 +206,10 @@ export const reviewCount = () => world.requests.reviews().length;
 export function serveWorld() {
   localStorage.clear();
   treeOrderStore.getState().setOrder('triage');
+  treeViewStore.getState().setView('all');
   world.answer = (_url, asked) => (asked === 'task-context' ? task : bodies.get(asked));
   world.tree = undefined;
-  world.entries = entries;
+  world.entries = { ...(entries as object), ...syntheticCatalogue([R6R, HBJ]) };
   world.requests = serve({
     get entries() {
       return world.entries;

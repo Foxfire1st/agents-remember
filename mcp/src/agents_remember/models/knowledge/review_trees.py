@@ -10,8 +10,7 @@ candidate. This module fixes two shapes:
   memory repository). A committed side names its commit and needs no ref. A before side that was
   unconverted when compared names the conversion it was read as (MIK-R24 rule 7).
 * :class:`ReviewTreesResult` -- what the tree view route returns for one leaf: the comparison, each
-  knowledge side's index state, the Git diff of the two memory trees grouped by record and by
-  source path, each invariant's MIK-R03 currentness per side, and the MIK-R08 worklist view.
+  knowledge side's index state, each invariant's MIK-R03 currentness per side, and the MIK-R08 worklist view.
 
 No database copy is part of either shape: each knowledge side is the derived index of its tree
 (MIK-R23), which is rebuilt from the tree and never retained with the comparison.
@@ -256,7 +255,6 @@ class ReviewTreesResult(KnowledgeModel):
     comparison: ReviewTreeComparisonRecord | None = None
     knowledge_sides: tuple[ReviewKnowledgeSide, ...] = ()
     code_sides: tuple[ReviewCodeSide, ...] = ()
-    knowledge_diff: ReviewKnowledgeTreeDiff | None = None
     currentness: dict[str, dict[str, Any]] | None = None
     worklist: ReviewWorklistView | None = None
     # Every realization and proof entry, on both code sides, for the focused cards (MIK-R31).

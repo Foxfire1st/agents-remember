@@ -1,10 +1,8 @@
 """A bounded in-process memo of the reviewer's leaf-wide view over exact trees (MIK-R40 rule 4).
 
-The leaf-wide tree view is asked for once when the reviewer opens. Its two expensive parts are pure
-functions of exact identities: the Git diff of the two memory trees, and the leaf's worklist over
-the four trees of the comparison. Computing them takes seconds and, in the same Python process,
-slows every read a click issues meanwhile. The memo keeps both parts, so the view is computed once
-per comparison and a repeat for unchanged trees costs the captures and the lookups only.
+The leaf-wide tree view keeps the leaf's settled worklist over the four trees of the
+comparison, so unchanged captured trees and unchanged recorded inputs need no recomputation.
+The worklist remains isolated in the package's child process.
 
 **The key names everything the computation reads.** It is the gate's own key
 (:func:`agents_remember.application.knowledge_gate.memo.memo_key`) plus the comparison's base trees:
@@ -27,7 +25,7 @@ Actual locator and root selections are recorded too and checked before byte rows
 locator cannot reuse its old judgment or cause a byte read outside its original confinement.
 
 **What is never kept.** A view whose worklist is not ``complete``, a view with an unreadable
-knowledge side, a diff behind which a Git read failed, and a computation that read one file twice
+knowledge side, and a computation that read one file twice
 with different contents. The next request reads again.
 
 The task reader records the bytes it actually parses, including both worklist lookups. Before the
@@ -74,7 +72,6 @@ from agents_remember.kernel.recorded_reads import (
 )
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.models.knowledge.review_trees import (
-    ReviewKnowledgeTreeDiff,
     ReviewWorklistView,
 )
 from agents_remember.worktrees.knowledge_gate import parent_memory_tip
@@ -114,9 +111,8 @@ class LeafViewKey:
 
 @dataclass(frozen=True)
 class LeafViewParts:
-    """The two computed parts of one leaf-wide view: the knowledge diff and the worklist view."""
+    """The computed worklist of one leaf-wide view."""
 
-    knowledge_diff: ReviewKnowledgeTreeDiff | None
     worklist: ReviewWorklistView
 
 

@@ -145,12 +145,12 @@ export function InvariantTargetState({
         absence of a family.
       </p>
       {context ? (
-        <details>
-          <summary>The review&apos;s family context</summary>
+        <div data-review-content>
+          <strong>The review&apos;s family context</strong>
           <p className={muted}>
             {context.state}: {context.detail}
           </p>
-        </details>
+        </div>
       ) : null}
     </section>
   );

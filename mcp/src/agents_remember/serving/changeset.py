@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
@@ -44,6 +44,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
+from agents_remember.serving.changeset_comparison import comparison_changeset, comparison_file_diff
 from agents_remember.serving.changeset_endpoints import (
     NOT_RECORDED,
     RecordedEndpointAbsent,
@@ -59,6 +60,7 @@ from agents_remember.serving.master_net_generation import (
 )
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
+    ComparisonChangeSet,
     FileDiff,
     LeafChangeSet,
     MasterChangeSet,
@@ -515,6 +517,7 @@ class ChangesetFileRef:
     master: str = ""
     leaf: str = ""
     mode: str = ""
+    comparison: int | None = None
     code_base: Annotated[str, Query(alias="codeBase")] = ""
     code_tip: Annotated[str, Query(alias="codeTip")] = ""
     memory_base: Annotated[str, Query(alias="memoryBase")] = ""
@@ -630,7 +633,16 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
     }
 
 
-def _leaf_json(produce: Any, master: str, mode: str) -> Response:
+def _comparison_mode_refusal(comparison: int | None, mode_present: bool) -> Response | None:
+    if comparison is None or not mode_present:
+        return None
+    return JSONResponse(
+        {"status": "bad-request", "detail": "comparison and mode cannot be combined"},
+        status_code=400,
+    )
+
+
+def _leaf_json(produce: Any, master: str, mode: str, comparison: int | None = None) -> Response:
     """Validate the leaf selector, then run ``produce`` with the change-set 400/404 status idiom.
 
     A leaf change-set is qualified by ``master`` (which scopes the contract search) and needs an
@@ -641,7 +653,10 @@ def _leaf_json(produce: Any, master: str, mode: str) -> Response:
         return JSONResponse(
             {"status": "bad-request", "detail": "leaf change-set needs master"}, status_code=400
         )
-    if mode not in ("committed", "working"):
+    conflict = _comparison_mode_refusal(comparison, bool(mode))
+    if conflict is not None:
+        return conflict
+    if comparison is None and mode not in ("committed", "working"):
         return JSONResponse(
             {"status": "bad-request", "detail": "leaf change-set needs mode=committed|working"},
             status_code=400,
@@ -652,6 +667,69 @@ def _leaf_json(produce: Any, master: str, mode: str) -> Response:
         return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
     except FileNotFoundError as err:
         return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+
+
+@dataclass(frozen=True)
+class ChangesetTaskRef:
+    repo: str
+    scope: str = "mainline"
+    master: str = ""
+    leaf: str = ""
+    mode: str = ""
+    comparison: int | None = None
+
+
+def _comparison_response(
+    config: McpRuntimeConfig, ref: ChangesetTaskRef | ChangesetFileRef
+) -> Response:
+    if not ref.leaf:
+        return JSONResponse(
+            {"status": "bad-request", "detail": "comparison needs master and leaf"}, status_code=400
+        )
+
+    def produce() -> dict[str, Any]:
+        contract = _load_leaf_contract(config, ref.repo, ref.master, ref.leaf)
+        if contract is None:
+            raise FileNotFoundError(f"no leaf contract for {ref.leaf!r}")
+        assert ref.comparison is not None
+        if isinstance(ref, ChangesetFileRef):
+            return comparison_file_diff(contract, ref.comparison, ref.kind, ref.path)
+        return comparison_changeset(contract, ref.comparison)
+
+    return _leaf_json(produce, ref.master, ref.mode, ref.comparison)
+
+
+def _task_response(config: McpRuntimeConfig, ref: ChangesetTaskRef) -> Response:
+    if ref.comparison is not None:
+        return _comparison_response(config, ref)
+    if ref.leaf:
+        return _leaf_json(
+            lambda: leaf_changeset(config, ref.repo, ref.master, ref.leaf, ref.mode),
+            ref.master,
+            ref.mode,
+        )
+    return run_scoped(task_changeset, config, ref.repo, ref.scope)
+
+
+def _file_response(config: McpRuntimeConfig, ref: ChangesetFileRef) -> Response:
+    if ref.comparison is not None:
+        return _comparison_response(config, ref)
+    if ref.leaf:
+        return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
+    if ref.master:
+        return _master_json(
+            lambda: master_file_diff(
+                config,
+                MasterFileRef(
+                    repo=ref.repo,
+                    master=ref.master,
+                    kind=ref.kind,
+                    path=ref.path,
+                    pins=_pins_from_ref(ref),
+                ),
+            )
+        )
+    return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
 
 def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
@@ -667,39 +745,25 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     # ``leaf`` selector is what picks between them.
     @app.get(
         "/api/changeset/task",
-        response_model=LeafChangeSet | TaskChangeSet,
+        response_model=ComparisonChangeSet | LeafChangeSet | TaskChangeSet,
         responses=SCOPED_READ_RESPONSES,
     )
     def api_changeset_task(
-        repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
+        ref: Annotated[ChangesetTaskRef, Depends()], request: Request
     ) -> Response:
-        if leaf:
-            return _leaf_json(
-                lambda: leaf_changeset(config, repo, master, leaf, mode), master, mode
-            )
-        return run_scoped(task_changeset, config, repo, scope)
+        conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
+        if conflict is not None:
+            return conflict
+        return _task_response(config, ref)
 
     @app.get("/api/changeset/file-diff", response_model=FileDiff, responses=SCOPED_READ_RESPONSES)
-    def api_changeset_file_diff(ref: Annotated[ChangesetFileRef, Depends()]) -> Response:
-        if ref.leaf:
-            return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
-        if ref.master:
-            # Series net diff (master base -> selected result); no enclosure scope, so it does
-            # not go through run_scoped -- the shared master mapping below carries the same
-            # status idiom. Generation pins freeze the AFTER side to the listed generation.
-            return _master_json(
-                lambda: master_file_diff(
-                    config,
-                    MasterFileRef(
-                        repo=ref.repo,
-                        master=ref.master,
-                        kind=ref.kind,
-                        path=ref.path,
-                        pins=_pins_from_ref(ref),
-                    ),
-                )
-            )
-        return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
+    def api_changeset_file_diff(
+        ref: Annotated[ChangesetFileRef, Depends()], request: Request
+    ) -> Response:
+        conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
+        if conflict is not None:
+            return conflict
+        return _file_response(config, ref)
 
     # An unknown master (no series contract) degrades to empty lists rather than refusing. A
     # master the contract names but whose code endpoints are missing is refused by name instead

@@ -11,14 +11,11 @@ import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
-  ReviewFamilyContext,
   ReviewFamilyMember,
-  ReviewFamilyRevisionContext,
   ReviewKnowledgePane,
   ReviewResult,
   ReviewSideContent,
 } from '../../data/review';
-import { FamilyTree } from './FamilyTree';
 import {
   GuaranteeTextChange,
   IntentWordDiffScope,
@@ -586,62 +583,7 @@ describe('labels of one revision whose texts differ', () => {
   const context = familyPayload.family_context!;
   const entry = context.entries[0];
   const guarantee = entry.before.guarantee!;
-  const touched = entry.after.members[0];
   const edited = `${guarantee.joint_guarantee} Edited.`;
-
-  function navigator(after: Partial<ReviewFamilyRevisionContext>, tree: boolean) {
-    const changed: ReviewFamilyContext = {
-      ...context,
-      entries: [{ ...entry, after: { ...entry.after, ...after } }],
-    };
-    return render(
-      <FamilyTree
-        context={changed}
-        selection={null}
-        onSelect={() => undefined}
-        onRosterNext={() => undefined}
-        query=""
-        onQuery={() => undefined}
-        tree={tree}
-      />,
-    );
-  }
-
-  it('shows both texts of one guarantee revision whose texts differ, on a tree comparison', () => {
-    expect(entry.after.guarantee!.revision_id).toBe(guarantee.revision_id);
-    const notes = (view: ReturnType<typeof render>) =>
-      view
-        .getAllByTestId('review-family-guarantee')
-        .map((node) => `${node.dataset.guaranteeSide}: ${node.firstElementChild!.textContent}`);
-    const differs = { guarantee: { ...guarantee, joint_guarantee: edited } };
-    expect(notes(navigator(differs, true))).toEqual([
-      'before: Joint guarantee · before · same revision, text differs',
-      'after: Joint guarantee · after · same revision, text differs',
-    ]);
-    cleanup();
-    expect(notes(navigator(differs, false))).toEqual(['both: Joint guarantee · unchanged']);
-    cleanup();
-    expect(notes(navigator({}, true))).toEqual(['both: Joint guarantee · unchanged']);
-  });
-
-  it('tags one member revision by its two texts on a tree comparison', () => {
-    const tag = (view: ReturnType<typeof render>) =>
-      view
-        .getAllByTestId('review-family-member-open')
-        .find((node) => node.dataset.revision === touched.invariant_revision_id)!.textContent;
-    const withAfter = (member: ReviewFamilyMember) => ({
-      members: entry.after.members.map((row) => (row === touched ? member : row)),
-    });
-    const reworded = withAfter({ ...touched, statement: `${touched.statement} Edited.` });
-    expect(tag(navigator(reworded, true))).toMatch(/ · same revision · text differs$/);
-    cleanup();
-    const unread = withAfter({ ...touched, state: 'content_not_on_page', statement: undefined });
-    expect(tag(navigator(unread, true))).toMatch(/ · same revision$/);
-    cleanup();
-    expect(tag(navigator(reworded, false))).toMatch(/ · unchanged revision$/);
-    cleanup();
-    expect(tag(navigator({}, true))).toMatch(/ · unchanged revision$/);
-  });
 
   it("names the center details' guarantee fact for one revision whose texts differ", () => {
     const differs = {

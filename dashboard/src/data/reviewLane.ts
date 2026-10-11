@@ -274,18 +274,3 @@ export async function readFileClassification(
     return { phase: 'unavailable', problem: reviewProblemFromCause(cause) };
   }
 }
-
-// One changed path's classification, read when the lane opens it.
-export function useReviewFileClassification(
-  repo: string,
-  master: string,
-  leaf: string,
-  comparison: number | undefined,
-  path: string | null,
-): LaneRead<ReviewFileClassification> | null {
-  const url =
-    comparison === undefined || path === null
-      ? null
-      : laneUrl(repo, master, leaf, comparison, { file: path });
-  return picked(useLaneAnswer(url), (answer) => answer.file_classification);
-}

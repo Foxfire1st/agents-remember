@@ -460,17 +460,13 @@ def test_committed_candidates_need_no_ref_and_a_failed_pin_refuses_naming_reposi
 # -- rules 2 and 3: the tree view ----------------------------------------------------------------------
 
 
-def test_the_tree_view_shows_the_knowledge_diff_currentness_per_side_and_the_worklist(
+def test_the_tree_view_shows_currentness_per_side_and_the_worklist_without_a_knowledge_diff(
     world: World,
 ) -> None:
     world.edit()
     view = read_review_trees(world.config, _query())
-    assert view.state == "trees" and view.comparison is not None and view.knowledge_diff is not None
-    diff = view.knowledge_diff
-    record = next(group for group in diff.records if group.record_id == INVARIANT)
-    assert record.kind == "invariant" and record.files[0].path == INVARIANT_PATH
-    assert '+  "statement": "Values land exactly as given."' in record.files[0].patch
-    assert [change.path for change in diff.history] == [f"knowledge/history/{LEAF}.json"]
+    assert view.state == "trees" and view.comparison is not None
+    assert "knowledge_diff" not in view.model_dump(by_alias=True)
     assert [side.index_state for side in view.knowledge_sides] == ["complete", "complete"]
     # Currentness per side, each against its own code tree: the body edit makes the after side stale.
     assert view.currentness is not None
@@ -495,15 +491,6 @@ def test_the_tree_view_shows_the_knowledge_diff_currentness_per_side_and_the_wor
     assert view.entries == ()  # the cards' entries are read per selection, never leaf-wide
     change = next(one for one in worklist.changes if one["path"] == CODE_FILE)
     assert [hunk["linked"] for hunk in change["hunks"]] == [True]
-    # A sidecar change is grouped by its source path and under the record its entry realizes.
-    _write(world.memory_worktree, {f"onboarding/{CODE_FILE}.json": _without_keep(world)})
-    regrouped = read_review_trees(world.config, _query()).knowledge_diff
-    assert regrouped is not None
-    source = next(group for group in regrouped.sources if group.source_path == CODE_FILE)
-    assert source.records == (INVARIANT,)
-    assert ("RLZ-A00002", CODE_FILE, "removed") in next(
-        group for group in regrouped.records if group.record_id == INVARIANT
-    ).entries
 
 
 def _without_keep(world: World) -> str:
@@ -605,9 +592,8 @@ def test_an_unconverted_before_side_is_compared_as_its_conversion(world: World) 
         # The conversion itself is no change: only the leaf's own edits are in the knowledge diff.
         view = read_review_trees(world.config, _query())
         review = compose_review(_resolve(world), world.review(selector=_seed()))
-    assert view.knowledge_diff is not None
-    changed = {change.path for group in view.knowledge_diff.records for change in group.files}
-    assert changed == {INVARIANT_PATH}
+    assert view.currentness is not None
+    assert "knowledge_diff" not in view.model_dump(by_alias=True)
     assert review.payload is not None
     assert "review:converted-base:1" in review.payload.limitations
     assert review.payload.knowledge.before_statement.text == "Values land unchanged."
@@ -801,7 +787,7 @@ def test_the_cards_read_locates_each_entry_of_the_named_invariants_on_both_code_
     )
     key = text_uuid("identity", INVARIANT)
     view = read_review_trees(world.config, _query(invariants=(key,)))
-    assert view.state == "trees" and view.knowledge_diff is None and view.worklist is None
+    assert view.state == "trees" and view.worklist is None
     entries = {entry.id: entry for entry in view.entries}
     assert list(entries) == ["PRF-A00003", "RLZ-A00001", "RLZ-A00002", "RLZ-A00004"]
     assert {entry.invariant_key for entry in view.entries} == {key}

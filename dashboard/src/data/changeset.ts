@@ -8,12 +8,8 @@
 //   /api/changeset/task?repo&scope                 -> one active enclosure's changed code + memory + counters
 //   /api/changeset/file-diff?repo&scope&kind&path  -> BEFORE + AFTER content for one changed file (MergeView a/b)
 //   /api/changeset/master?repo&master              -> the master's accumulated change-set (dedup by path, sum counts)
-import { qs } from "./files";
-import {
-  type ReviewFailure,
-  ReviewTransportError,
-  reviewFailureToken,
-} from "./reviewTransport";
+import { qs } from './files';
+import { type ReviewFailure, ReviewTransportError, reviewFailureToken } from './reviewTransport';
 
 // One changed file: insertion/deletion counts (null for binary) + the git status letter
 // (A/M/D/R). `hasSidecar` (code files) drives the L4 code->sidecar split affordance.
@@ -43,14 +39,16 @@ export interface TaskChangeset {
   code: ChangedFile[];
   memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
-  state?: "recorded" | "unrecorded";
+  state?: 'recorded' | 'unrecorded';
   stateDetail?: string;
+  comparison?: number;
+  trees?: { codeBase: string; codeTip: string; memoryBase: string; memoryTip: string };
 }
 // `fileDiff` — BEFORE (base) + AFTER (current) content for one file: feeds CodeMirror MergeView
 // a=before, b=after. `before` is null for an added file, `after` is null for a deleted one.
 export interface FileDiff {
   scope: string;
-  kind: "code" | "memory";
+  kind: 'code' | 'memory';
   path: string;
   language: string;
   before: { content: string } | null;
@@ -77,15 +75,15 @@ export interface MasterChangeset {
   master: string;
   leaves: {
     leafId: string;
-    state?: "committed" | "working";
+    state?: 'committed' | 'working';
     counters: { code: ChangeCounters; memory: ChangeCounters };
   }[];
   code: ChangedFile[];
   memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
   generation?: MasterNetGeneration | null;
-  currentness?: "current" | "superseded" | "unmeasured";
-  scope?: "integrated";
+  currentness?: 'current' | 'superseded' | 'unmeasured';
+  scope?: 'integrated';
 }
 export interface MasterChangesetOptions {
   includeLeaves?: boolean;
@@ -107,11 +105,11 @@ interface ChangeSetRefusalBody {
 }
 
 const text = (value: unknown): string | undefined =>
-  typeof value === "string" && value !== "" ? value : undefined;
+  typeof value === 'string' && value !== '' ? value : undefined;
 
 // `404 Not Found`, or just `404` when the response carries no reason phrase (HTTP/2, a test stub).
 const statusLine = (response: Response): string =>
-  `${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+  `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
 
 // A non-2xx (or unreadable) answer as the failure it is. A body that names a refusal keeps the
 // owner's code, reason and echoed identifier; a body that names none is reported as a response this
@@ -121,7 +119,7 @@ function changeSetFailure(response: Response, body: ChangeSetRefusalBody | null)
   const named = text(body?.status);
   if (named === undefined) {
     return {
-      token: "unreadable",
+      token: 'unreadable',
       code: status,
       detail: `the change-set route answered ${status} with a body that names no refusal, so no change-set was read`,
       httpStatus: response.status,
@@ -152,8 +150,8 @@ async function getChangeSetJson<T>(url: string): Promise<T> {
     response = await fetch(url);
   } catch (cause) {
     throw new ReviewTransportError({
-      token: "network",
-      code: "network",
+      token: 'network',
+      code: 'network',
       detail: `the change-set read could not reach the server: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
@@ -164,15 +162,15 @@ async function getChangeSetJson<T>(url: string): Promise<T> {
   throw new ReviewTransportError(changeSetFailure(response, body));
 }
 
-export const taskChangeset = (repo: string, scope: string, base = ""): Promise<TaskChangeset> =>
+export const taskChangeset = (repo: string, scope: string, base = ''): Promise<TaskChangeset> =>
   getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, scope })}`);
 
 export const fileDiff = (
   repo: string,
   scope: string,
-  kind: "code" | "memory",
+  kind: 'code' | 'memory',
   path: string,
-  base = "",
+  base = '',
 ): Promise<FileDiff> =>
   getChangeSetJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, scope, kind, path })}`);
 
@@ -180,7 +178,7 @@ export const masterChangeset = (
   repo: string,
   master: string,
   options: MasterChangesetOptions = {},
-  base = "",
+  base = '',
 ): Promise<MasterChangeset> => {
   const params: Record<string, string> = { repo, master };
   if (options.includeLeaves !== undefined) {
@@ -201,10 +199,10 @@ export const masterChangeset = (
 export const masterFileDiff = (
   repo: string,
   master: string,
-  kind: "code" | "memory",
+  kind: 'code' | 'memory',
   path: string,
   pins: MasterNetPins = {},
-  base = "",
+  base = '',
 ): Promise<FileDiff> => {
   const params: Record<string, string> = { repo, master, kind, path };
   for (const [key, value] of Object.entries(pins)) {
@@ -219,14 +217,14 @@ export const masterFileDiff = (
 //   working   — the UNCOMMITTED delta only (worktree HEAD -> dirty tree); live enclosures only.
 // `master` qualifies the leaf (scopes the contract search to one series). Returns the
 // `taskChangeset` shape (the extra `mode` echo is harmless), so the viewer renders it unchanged.
-export type LeafMode = "committed" | "working";
+export type LeafMode = 'committed' | 'working';
 
 export const leafChangeset = (
   repo: string,
   master: string,
   leaf: string,
   mode: LeafMode,
-  base = "",
+  base = '',
 ): Promise<TaskChangeset> =>
   getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, master, leaf, mode })}`);
 
@@ -236,9 +234,34 @@ export const leafFileDiff = (
   repo: string,
   master: string,
   leaf: string,
-  kind: "code" | "memory",
+  kind: 'code' | 'memory',
   path: string,
   mode: LeafMode,
-  base = "",
+  base = '',
 ): Promise<FileDiff> =>
-  getChangeSetJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, leaf, kind, path, mode })}`);
+  getChangeSetJson<FileDiff>(
+    `${base}/api/changeset/file-diff?${qs({ repo, master, leaf, kind, path, mode })}`,
+  );
+
+// Immutable trees of the review itself, including committed and uncommitted candidate content.
+export const comparisonChangeset = (
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number,
+): Promise<TaskChangeset> =>
+  getChangeSetJson<TaskChangeset>(
+    `/api/changeset/task?${qs({ repo, master, leaf, comparison: String(comparison) })}`,
+  );
+
+export const comparisonFileDiff = (
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number,
+  kind: 'code' | 'memory',
+  path: string,
+): Promise<FileDiff> =>
+  getChangeSetJson<FileDiff>(
+    `/api/changeset/file-diff?${qs({ repo, master, leaf, comparison: String(comparison), kind, path })}`,
+  );

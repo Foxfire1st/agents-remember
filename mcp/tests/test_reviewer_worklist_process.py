@@ -730,13 +730,8 @@ def test_the_reviewers_diff_reads_do_not_depend_on_the_users_git_configuration(
         monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
         review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
         trees = ports.trees(_query())
-        assert trees.state == "trees" and trees.knowledge_diff is not None, name
-        assert trees.knowledge_diff.changed_files and trees.worklist is not None
-        assert all(
-            change.patch.startswith("diff --git a/")
-            for group in trees.knowledge_diff.records
-            for change in group.files
-        )
+        assert trees.state == "trees" and trees.worklist is not None, name
+        assert "knowledge_diff" not in trees.model_dump(by_alias=True)
         review = ports.review(world.review())
         bodies[name] = (_body(trees, by_alias=True), _body(review))
     assert bodies["hostile"] == bodies["clean"]
@@ -972,16 +967,16 @@ def test_the_requests_deadline_runs_from_its_arrival_and_the_child_gets_what_is_
     world: World,  # noqa: F811
 ) -> None:
     world.edit()
-    slow = review_tree_knowledge._measured_tree_diff
+    slow = review_tree_knowledge._worklist_view
     owner = process_owner.ReviewerWorklistProcesses()
     budgets: list[float] = []
     collect = owner._collect
     with controlled_worklist_clock(process_owner) as clock:
         arrived = clock[0]
 
-        def slow_diff(*args: Any) -> Any:
+        def slow_diff(*args: Any, **kwargs: Any) -> Any:
             clock[0] += 1.2  # work before the child consumes the injected request clock
-            return slow(*args)
+            return slow(*args, **kwargs)
 
         def expire_with_remaining_budget(process: Any, data: bytes, flight: Any) -> Any:
             assert flight.created == arrived
@@ -992,7 +987,7 @@ def test_the_requests_deadline_runs_from_its_arrival_and_the_child_gets_what_is_
         with (
             _child_script("import threading; threading.Event().wait()") as children,
             mock.patch.object(process_owner, "DEADLINE_SECONDS", 2.0),
-            mock.patch.object(review_tree_knowledge, "_measured_tree_diff", slow_diff),
+            mock.patch.object(review_tree_knowledge, "_worklist_view", slow_diff),
             mock.patch.object(owner, "_collect", expire_with_remaining_budget),
             process_owner.worklist_request(threading.Event()),
         ):

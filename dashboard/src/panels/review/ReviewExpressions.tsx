@@ -4,7 +4,7 @@ import type { ReviewChangedFile, ReviewFamilyMember, ReviewPayload } from '../..
 import { selectedRevision } from './SubjectReview';
 import type { ReviewSubject } from './ReviewNavigation';
 import { SourceContent } from './SourceContent';
-import type { DiffLayout } from './SourceExplorer';
+import type { DiffMode } from '../changeset/DiffPane';
 
 const bar = css({
   display: 'flex',
@@ -51,8 +51,8 @@ export function ReviewExpressions({
   members?: ReviewFamilyMember[];
   subject?: ReviewSubject;
   linksIncomplete?: boolean;
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
+  layout: DiffMode;
+  onLayout: (next: DiffMode) => void;
   fullFile: boolean;
   onFullFile: (next: boolean) => void;
   openPath: string | null | undefined;
@@ -73,7 +73,7 @@ export function ReviewExpressions({
         {openPath ? `expanded: ${openPath} · ` : ''}
         {members === undefined
           ? 'All changed files are available in the source explorer.'
-          : `${linked.length} linked changed files loaded. The complete source inventory remains in the rail.`}
+          : `${linked.length} linked changed files loaded. All changed files are available in the change-set viewer.`}
         {linksIncomplete
           ? ' Source links are not yet fully loaded; continue the roster walk below.'
           : ''}
@@ -106,8 +106,8 @@ export function ExpressionControls({
   fullFile,
   onFullFile,
 }: {
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
+  layout: DiffMode;
+  onLayout: (next: DiffMode) => void;
   fullFile: boolean;
   onFullFile: (next: boolean) => void;
 }) {
@@ -192,7 +192,7 @@ function ExpressionCard({
   payload: ReviewPayload;
   active: string | null | undefined;
   outsideIntent: boolean;
-  layout: DiffLayout;
+  layout: DiffMode;
   fullFile: boolean;
   onOpenPath: (path: string | null) => void;
 }) {

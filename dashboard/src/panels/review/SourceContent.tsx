@@ -35,7 +35,7 @@ function sideLine(side: ReviewSourceSide, name: 'before' | 'after') {
       data-side-truncated={side.truncated ? 'true' : 'false'}
     >
       {name} ({side.state})
-      <details>
+      <details data-disclosure="identifiers">
         <summary>Object identity</summary>
         {facts.join(' · ')}
       </details>
@@ -140,7 +140,7 @@ function boundedNote(expansion: ReviewSourceExpansion) {
 
 function refusalBlock(refusal: ReviewRefusal) {
   return (
-    <div data-testid="review-source-refusal">
+    <div data-review-content data-testid="review-source-refusal">
       <p style={{ margin: '0.2rem 0' }}>
         this entry's content could not be opened ({refusal.code}): {refusal.detail}
       </p>
@@ -164,29 +164,35 @@ function Expansion({
   markers?: SourceMarkers;
 }) {
   return (
-    <div data-testid="review-source-expansion" data-currentness={expansion.currentness}>
-      <details>
-        <summary>Source generation and provenance</summary>
-        <p style={mutedStyle} data-testid="review-source-currentness">
-          {expansion.currentness}: {expansion.currentness_detail}
-        </p>
-        <p style={mutedStyle} data-testid="review-source-generation">
-          generation {expansion.before_code_tree_id} → {expansion.after_code_tree_id} ·{' '}
-          {expansion.status}
-          {expansion.mode_change ? ' · mode changed' : ''}
-        </p>
-        {expansion.path_bound === 'leaf_change_set' ? (
-          <p style={mutedStyle} data-testid="review-source-path-bound">
-            path admitted by: {expansion.path_bound_detail}
+    <div
+      data-review-content
+      data-testid="review-source-expansion"
+      data-currentness={expansion.currentness}
+    >
+      {expansion.currentness === 'current' ? (
+        <details data-disclosure="provenance">
+          <summary>Source generation and provenance</summary>
+          <p style={mutedStyle} data-testid="review-source-currentness">
+            {expansion.currentness}: {expansion.currentness_detail}
           </p>
-        ) : null}
-        <p style={{ ...mutedStyle, whiteSpace: 'pre-wrap' }} data-testid="review-source-command">
-          reproduce: {expansion.command}
-        </p>
-      </details>
+          <p style={mutedStyle} data-testid="review-source-generation">
+            generation {expansion.before_code_tree_id} → {expansion.after_code_tree_id} ·{' '}
+            {expansion.status}
+            {expansion.mode_change ? ' · mode changed' : ''}
+          </p>
+          <p style={{ ...mutedStyle, whiteSpace: 'pre-wrap' }} data-testid="review-source-command">
+            reproduce: {expansion.command}
+          </p>
+        </details>
+      ) : null}
       {expansion.currentness !== 'current' ? (
         <p style={mutedStyle}>
           {expansion.currentness}: {expansion.currentness_detail}
+        </p>
+      ) : null}
+      {expansion.path_bound === 'leaf_change_set' ? (
+        <p style={mutedStyle} data-testid="review-source-path-bound">
+          path admitted by: {expansion.path_bound_detail}
         </p>
       ) : null}
       <Sides expansion={expansion} mode={mode} collapse={collapse} markers={markers} />

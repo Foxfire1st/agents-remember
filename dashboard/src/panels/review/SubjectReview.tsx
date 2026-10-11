@@ -10,7 +10,7 @@ import type {
   ReviewRevisionSelection,
 } from '../../data/review';
 import type { ReviewSubject } from './ReviewNavigation';
-import type { DiffLayout } from './SourceExplorer';
+import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { KnowledgeStatements } from './KnowledgeStatements';
 import { IntentStatementBody, useTreeComparison } from './IntentWordDiff';
 import {
@@ -283,7 +283,11 @@ export function SelectedStatement({
   );
   const state = statementState(selection, wording);
   return (
-    <div data-testid={`review-center-member-${state}`} data-revision-state={selection.state}>
+    <div
+      data-review-content="statement"
+      data-testid={`review-center-member-${state}`}
+      data-revision-state={selection.state}
+    >
       <p className={muted} data-testid="review-center-statement-label">
         {statementLabel(selection, wording, revisionMeta(...sides.labels))}
         {sameRevisionNote(oneRevision, wording)}
@@ -312,22 +316,12 @@ export function SelectedStatement({
           in this reviewer.
         </p>
       ) : null}
-      <details>
+      <details data-disclosure="identifiers">
         <summary>Statement revision details</summary>
         <p className={muted} data-testid="review-center-member-revisions">
           Before {selection.before_revision_id ?? 'no revision selected'} → after{' '}
           {selection.after_revision_id ?? 'no revision selected'}
         </p>
-        <details>
-          <summary>Raw selection record</summary>
-          <pre className={css({ whiteSpace: 'pre-wrap', fontSize: '0.75rem' })}>
-            {JSON.stringify(
-              { selection, before: knowledge.before_statement, after: knowledge.after_statement },
-              null,
-              2,
-            )}
-          </pre>
-        </details>
       </details>
     </div>
   );
@@ -353,13 +347,13 @@ function Assessment({ record }: { record: ReviewAssessmentDisplay }) {
         Currentness: {record.binding_state}
         <Applicability value={record.applicability} />
       </p>
-      <details>
-        <summary>Assessment record</summary>
+      <div>
+        <p>Assessment record</p>
         <p>
           {record.assessment_id} · {record.author_ref} · {record.role_ref}
         </p>
         <p>{record.examined_inputs.join(' · ')}</p>
-      </details>
+      </div>
     </li>
   );
 }
@@ -377,15 +371,15 @@ function Observation({ record }: { record: ReviewObservation }) {
       <p className={muted}>
         <Applicability value={record.applicability} />
       </p>
-      <details>
-        <summary>Execution record</summary>
+      <div>
+        <p>Execution record</p>
         <p>
           {record.observation_id} · {record.command_identity}
         </p>
         <p>
           {record.tested_candidate} · {record.result_artifact_ref} · {record.result_artifact_digest}
         </p>
-      </details>
+      </div>
     </li>
   );
 }
@@ -424,7 +418,11 @@ export function SubjectEvidence({
     );
   const evidence = payload.evidence;
   return (
-    <section data-testid="review-center-evidence" data-evidence-state={evidence.evidence_state}>
+    <section
+      data-review-content="evidence"
+      data-testid="review-center-evidence"
+      data-evidence-state={evidence.evidence_state}
+    >
       <h3 className={sectionLabel}>
         {subject.kind === 'family'
           ? 'Execution evidence and family impact'
@@ -454,8 +452,8 @@ export function SubjectEvidence({
         <AssessmentAbsence payload={payload} />
       )}
       {evidence.evidence_links.length ? (
-        <details>
-          <summary>{evidence.evidence_links.length} recorded evidence claims</summary>
+        <div>
+          <p>{evidence.evidence_links.length} recorded evidence claims</p>
           <ul className={rows}>
             {evidence.evidence_links.map((link) => (
               <li key={link.claim_id}>
@@ -467,7 +465,7 @@ export function SubjectEvidence({
               </li>
             ))}
           </ul>
-        </details>
+        </div>
       ) : null}
       {evidence.context?.length ? (
         <p className={muted} data-testid="review-center-unjoined">

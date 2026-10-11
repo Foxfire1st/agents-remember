@@ -904,6 +904,21 @@ class TaskChangeSet(WireResponse):
     counters: ChangeSetCounters
 
 
+class ComparisonTrees(WireResponse):
+    code_base: str
+    code_tip: str
+    memory_base: str
+    memory_tip: str
+
+
+class ComparisonChangeSet(TaskChangeSet):
+    """A recorded review comparison, never a working or landed range."""
+
+    mode: Literal["comparison"]
+    comparison: int
+    trees: ComparisonTrees
+
+
 class LeafChangeSet(TaskChangeSet):
     """The same shape for a leaf view, which additionally names the mode it was resolved in.
 

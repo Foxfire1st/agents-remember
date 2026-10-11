@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
+import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
+import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
 import { css } from '../../../styled-system/css';
 import {
   useObservedComparison,
@@ -29,7 +32,13 @@ import { useReviewLane } from '../../data/reviewLane';
 import { treeComparisonNumber } from '../../data/reviewTrees';
 import type { FamilySelection } from './FamilyTree';
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
-import { ReviewReadCache, ReviewReadCacheContext } from './ReviewReadCache';
+import {
+  comparisonGenerationOf,
+  sameGeneration,
+  type ComparisonGeneration,
+  ReviewReadCache,
+  ReviewReadCacheContext,
+} from './ReviewReadCache';
 import { ReviewTechnicalDetails } from './ReviewRecordPanes';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
 import {
@@ -300,6 +309,22 @@ function PageControls({
 // task context) keeps the shell -- scope, navigation, family rail, source explorer and the open
 // disclosures -- mounted, and the reading area alone states the requested subject's status. Nothing
 // of the frame's subject is rendered as the requested subject's reading.
+type ReviewPanesProps = {
+  shown: ReviewPayload | null;
+  frame: ReviewPayload | null;
+  reading: ReadingStatus | null;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+  repo: string;
+  master: string;
+  leaf: string;
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
+  history?: ReviewHistory;
+  workspace: ReturnType<typeof useWorkspaceState>;
+  navigation: ReviewNavigationState;
+};
+
 function ReviewPanes({
   shown,
   frame,
@@ -314,21 +339,7 @@ function ReviewPanes({
   history,
   workspace,
   navigation,
-}: {
-  shown: ReviewPayload | null;
-  frame: ReviewPayload | null;
-  reading: ReadingStatus | null;
-  selection: ReviewPageRequest | undefined;
-  onSelect: (page: ReviewPageRequest | undefined) => void;
-  repo: string;
-  master: string;
-  leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  history?: ReviewHistory;
-  workspace: ReturnType<typeof useWorkspaceState>;
-  navigation: ReviewNavigationState;
-}) {
+}: ReviewPanesProps) {
   const payload = shown ?? (reading ? frame : null);
   // The unexplained-changes lane of the tree comparison on screen, read once: the workspace's lane
   // and explorer and the technical details all show this one classification. A dataset review
@@ -339,34 +350,256 @@ function ReviewPanes({
     leaf,
     payload === null ? undefined : treeComparisonNumber(payload.limitations),
   );
+  const comparison = payload ? treeComparisonNumber(payload.limitations) : undefined;
+  const { changePage, openChanges, closeChanges } = useReviewChangePage({
+    repo,
+    master,
+    leaf,
+    comparison,
+    payload,
+    laneRead,
+  });
   if (payload === null) return null;
   return (
-    <>
-      <ReviewWorkspace
-        payload={payload}
-        reading={shown === null ? reading : null}
-        repo={repo}
-        master={master}
-        leaf={leaf}
-        selectorKind={selectorKind}
-        selectorId={selectorId}
-        history={history}
-        onPageSelect={onSelect}
-        state={workspace}
-        navigation={navigation}
-        laneRead={laneRead}
+    <ReviewChangeSetNavigation.Provider value={openChanges}>
+      <div inert={changePage !== null} style={{ visibility: changePage ? 'hidden' : undefined }}>
+        <ReviewWorkspace
+          payload={payload}
+          reading={shown === null ? reading : null}
+          repo={repo}
+          master={master}
+          leaf={leaf}
+          selectorKind={selectorKind}
+          selectorId={selectorId}
+          history={history}
+          onPageSelect={onSelect}
+          state={workspace}
+          navigation={navigation}
+          laneRead={laneRead}
+          changesOpen={changePage !== null}
+        />
+        <ReviewDetails
+          shown={shown}
+          laneRead={laneRead}
+          reading={reading}
+          selection={selection}
+          onSelect={onSelect}
+        />
+      </div>
+      <ReviewChangeOverlay state={changePage} onBack={closeChanges} />
+    </ReviewChangeSetNavigation.Provider>
+  );
+}
+
+function ReviewDetails({
+  shown,
+  laneRead,
+  reading,
+  selection,
+  onSelect,
+}: {
+  shown: ReviewPayload | null;
+  laneRead: ReturnType<typeof useReviewLane>;
+  reading: ReadingStatus | null;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  return (
+    <ReviewTechnicalDetails
+      payload={shown}
+      laneRead={laneRead}
+      unanswered={{ label: reading?.label ?? '', unavailable: Boolean(reading?.problem) }}
+      paging={
+        shown ? <PageControls payload={shown} selection={selection} onSelect={onSelect} /> : null
+      }
+    />
+  );
+}
+type OpenChangePage =
+  | {
+      kind: 'comparison';
+      repo: string;
+      master: string;
+      leaf: string;
+      generation: ComparisonGeneration;
+      context: ReviewChangeContext;
+    }
+  | { kind: 'unavailable'; problem: ReviewFailure };
+
+function sameLane(
+  left: ReturnType<typeof useReviewLane>,
+  right: ReturnType<typeof useReviewLane>,
+): boolean {
+  if (!left || !right) return left === right;
+  if (left.phase !== right.phase) return false;
+  if (left.phase === 'ready' && right.phase === 'ready') return left.value === right.value;
+  if (left.phase === 'unavailable' && right.phase === 'unavailable')
+    return JSON.stringify(left.problem) === JSON.stringify(right.problem);
+  return true;
+}
+type CurrentChangeContext = {
+  repo: string;
+  master: string;
+  leaf: string;
+  comparison: number | undefined;
+  payload: ReviewPayload | null;
+  laneRead: ReturnType<typeof useReviewLane>;
+};
+function pageMatchesCurrent(
+  state: Extract<OpenChangePage, { kind: 'comparison' }>,
+  current: CurrentChangeContext,
+): boolean {
+  if (!current.payload) return false;
+  return (
+    state.repo === current.repo &&
+    state.master === current.master &&
+    state.leaf === current.leaf &&
+    state.context.page.comparison === current.comparison &&
+    sameGeneration(state.generation, comparisonGenerationOf(current.payload))
+  );
+}
+function useHeldPageLane(
+  state: OpenChangePage | null,
+  setState: React.Dispatch<React.SetStateAction<OpenChangePage | null>>,
+  current: {
+    repo: string;
+    master: string;
+    leaf: string;
+    comparison: number | undefined;
+    payload: ReviewPayload | null;
+    laneRead: ReturnType<typeof useReviewLane>;
+  },
+) {
+  useEffect(() => {
+    if (state?.kind !== 'comparison' || !current.payload) return;
+    const matching = pageMatchesCurrent(state, current);
+    if (matching && !sameLane(state.context.lane, current.laneRead)) {
+      setState({ ...state, context: { ...state.context, lane: current.laneRead } });
+    } else if (!matching && state.context.lane?.phase === 'loading') {
+      setState({
+        ...state,
+        context: {
+          ...state.context,
+          lane: {
+            phase: 'unavailable',
+            problem: {
+              token: 'unavailable-history',
+              code: 'comparison_context_changed',
+              detail: `The reviewer moved before comparison ${state.context.page.comparison}'s lane answered. This page retains its recorded comparison, so its lane filters are unavailable.`,
+              nextAction: 'Return to the intent reviewer to inspect its current comparison.',
+            },
+          },
+        },
+      });
+    }
+  }, [state, setState, current]);
+}
+function useReviewChangePage(current: {
+  repo: string;
+  master: string;
+  leaf: string;
+  comparison: number | undefined;
+  payload: ReviewPayload | null;
+  laneRead: ReturnType<typeof useReviewLane>;
+}) {
+  const [changePage, setChangePage] = useState<OpenChangePage | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useHeldPageLane(changePage, setChangePage, current);
+  const openChanges: OpenReviewChanges = (filter, path, kind) => {
+    opener.current = document.activeElement as HTMLElement | null;
+    if (current.comparison === undefined || current.payload === null) {
+      setChangePage({
+        kind: 'unavailable',
+        problem: {
+          token: 'unavailable-history',
+          code: 'comparison_not_recorded',
+          detail:
+            'This review has no recorded tree comparison for its source inventory. The change-set viewer cannot select that inventory without a recorded range.',
+          offendingInput: `${current.repo}/${current.master}/${current.leaf}`,
+          nextAction:
+            'Open a recorded tree comparison, or ask the task owner to resolve this review’s range authority.',
+        },
+      });
+      return;
+    }
+    setChangePage({
+      kind: 'comparison',
+      repo: current.repo,
+      master: current.master,
+      leaf: current.leaf,
+      generation: comparisonGenerationOf(current.payload),
+      context: {
+        page: { comparison: current.comparison, filter, path, kind },
+        lane: current.laneRead,
+        inventory: current.payload.source.inventory,
+      },
+    });
+  };
+  const closeChanges = () => {
+    setChangePage(null);
+    requestAnimationFrame(() => opener.current?.focus({ preventScroll: true }));
+  };
+  return { changePage, openChanges, closeChanges };
+}
+function UnavailableChangePage({
+  problem,
+  onBack,
+}: {
+  problem: ReviewFailure;
+  onBack: () => void;
+}) {
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onBack();
+      }
+    };
+    document.addEventListener('keydown', escape, true);
+    return () => document.removeEventListener('keydown', escape, true);
+  }, [onBack]);
+  return (
+    <section
+      data-testid="review-changes-unavailable"
+      data-kbzone="changeset"
+      style={{ height: '100%', background: 'var(--bg)', padding: '1rem' }}
+    >
+      <button type="button" onClick={onBack}>
+        ← Back to intent review
+      </button>
+      <h2>All changes unavailable</h2>
+      <ReviewProblemBlock
+        origin="refusal"
+        subject="the complete changed-file inventory"
+        problem={problem}
       />
-      <ReviewTechnicalDetails
-        payload={shown}
-        laneRead={laneRead}
-        unanswered={{ label: reading?.label ?? '', unavailable: Boolean(reading?.problem) }}
-        paging={
-          shown === null ? null : (
-            <PageControls payload={shown} selection={selection} onSelect={onSelect} />
-          )
-        }
-      />
-    </>
+    </section>
+  );
+}
+function ReviewChangeOverlay({
+  state,
+  onBack,
+}: {
+  state: OpenChangePage | null;
+  onBack: () => void;
+}) {
+  if (!state) return null;
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, minWidth: 0 }}>
+      {state.kind === 'comparison' ? (
+        <ChangeSetViewer
+          repo={state.repo}
+          master={state.master}
+          leaf={state.leaf}
+          comparison={state.context.page.comparison}
+          reviewContext={state.context}
+          onBack={onBack}
+        />
+      ) : (
+        <UnavailableChangePage problem={state.problem} onBack={onBack} />
+      )}
+    </div>
   );
 }
 
@@ -435,7 +668,7 @@ function ReviewHeader({
           style={{ color: 'var(--muted)', minWidth: 0, overflowWrap: 'anywhere' }}
           data-testid="review-subject"
         >
-          <details>
+          <details data-disclosure="identifiers">
             <summary>Task and subject identifiers</summary>
             {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
           </details>
@@ -477,6 +710,9 @@ function subjectSelection(parts: {
   // The offer to open the task context after a refusal is an outside selection too.
   const openTaskContext = (failure: ReviewFailure) => {
     workspace.beginSelection(false);
+    navigation.onSelect(undefined);
+    workspace.setChosen(null);
+    setSelection(undefined);
     setInstead(failure);
   };
   return { selectSubject, openTaskContext };

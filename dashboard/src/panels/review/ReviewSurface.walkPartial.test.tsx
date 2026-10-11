@@ -1,15 +1,11 @@
-// MIK-R39 rule 8 on a REAL partial answer (walkReal.capture-provenance.json, "partial_round"): the
-// real route asked for the shared member with its own `pageSize=2`, so both of its families return two
-// members per side. The first family is kept once the second is selected; `j` stops at its
-// continuation control, loads nothing, and the control continues it by selecting it. An end message
-// (rule 11) is dropped when the continuation returns members, and when the order control lists the
-// rows in another order.
+// R39 partial-read preservation under R86: the complete synthetic index outline keeps all rows,
+// while the immutable partial review body supplies only its loaded facts and main-page continuation.
+// The main-page cursor is sent unchanged, and status messages disappear when the shown order changes.
 import { fireEvent, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import {
   HBJ_ID,
-  J,
   K,
   R6R_ID,
   SHARED,
@@ -20,7 +16,6 @@ import {
   installWorld,
   memberOccurrences,
   open,
-  press,
   reviewCount,
   selectedNode,
   settled,
@@ -43,61 +38,43 @@ beforeEach(() => {
   };
 });
 
-it('stops j at the control of a kept real partial family, then continues it by selecting it', async () => {
+it('shows complete outline rows for a partial read and keeps continuation in the main page', async () => {
   const view = open(PAGE as ReviewResult);
-  // With two members returned per side the second family weighs more, so it is displayed first.
-  await clickedSecondFamily(view, [HBJ_ID, R6R_ID]);
+  await clickedSecondFamily(view, [R6R_ID, HBJ_ID]);
   const block = familyBlock(view, R6R_ID);
   expect(block.dataset.familyKept).toBe('true');
-  expect(block.dataset.membersUnreturned).toBe('true');
-  const returned = memberOccurrences(block).size;
-  expect(returned).toBe(3);
-
-  const changes = within(block)
-    .getAllByTestId('review-family-member-open')
-    .filter((node) => node.dataset.changePrimary !== 'unchanged');
-  changes[changes.length - 1].focus();
-  const before = reviewCount();
-  press(J);
-  const control = within(block).getAllByTestId('review-family-roster-next')[0];
-  await waitFor(() => expect(document.activeElement).toBe(control));
-  expect(triageStatus(view)).toContain('are not yet returned');
-  expect(reviewCount() - before).toBe(0);
-  // The next j has nothing later to move to: the kept family is the last in the displayed order.
-  press(J);
-  await waitFor(
-    () => expect(triageStatus(view)).toBe('No later change in this tree; the selection stays.'),
-  );
-  expect(reviewCount() - before).toBe(0);
-  expect(selectedNode(view)!.dataset.family).toBe(HBJ_ID);
-
-  const cursor = control.dataset.continuation!;
-  const asked = reviewCount();
-  fireEvent.click(control);
+  expect(memberOccurrences(block).size).toBe(24);
+  expect(within(block).queryByTestId('review-family-roster-next')).toBeNull();
+  fireEvent.click(within(block).getByTestId('review-family-open'));
   await waitFor(
     () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
   );
+  const control = view.getAllByTestId('review-center-roster-next')[0];
+  const cursor = control.dataset.continuation!;
+  const asked = reviewCount();
+  fireEvent.click(control);
+  await waitFor(() => expect(reviewCount() - asked).toBe(1));
   await settled(view);
   const request = world.requests.reviews()[asked];
   expect([
     request.searchParams.get('selectorKind'),
     request.searchParams.get('continuation'),
   ]).toEqual(['family', cursor]);
-  expect(reviewCount() - asked).toBe(1);
-  expect(memberOccurrences(familyBlock(view, R6R_ID)).size).toBeGreaterThan(returned);
+  expect(memberOccurrences(familyBlock(view, R6R_ID)).size).toBe(24);
   expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
-  // "No later change" was said of the tree before these members were returned: it is gone.
-  expect(triageStatus(view)).toBe('');
 });
 
 it('drops "No earlier change" when the order control lists the other family before the selection', async () => {
   const view = open(PAGE as ReviewResult);
   // Changes first, the second family is displayed first, and its own row is the first change.
-  await clickedSecondFamily(view, [HBJ_ID, R6R_ID]);
+  await clickedSecondFamily(view, [R6R_ID, HBJ_ID]);
+  const filter = view.getByTestId('review-family-filter');
+  fireEvent.change(filter, { target: { value: HBJ_ID } });
   await step(view, K, 0);
   expect(triageStatus(view)).toBe('No earlier change in this tree; the selection stays.');
   // In authored order the first family is listed before it, with a changed member: an earlier
   // change, so the message is gone, and the next k moves to that member.
+  fireEvent.change(filter, { target: { value: '' } });
   fireEvent.click(view.getByTestId('review-tree-order'));
   await waitFor(
     () => expect(view.getByTestId('review-tree-order').dataset.order).toBe('authored'),

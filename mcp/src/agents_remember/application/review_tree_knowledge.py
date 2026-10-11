@@ -1,13 +1,9 @@
-"""The reviewer's tree view: knowledge as a Git diff, currentness per side, the worklist (MIK-R25).
+"""The reviewer's tree view: currentness per side, the worklist (MIK-R25).
 
 For one leaf whose memory is converted, the reviewer's comparison is four Git trees
 (:mod:`agents_remember.application.review_tree_comparison`). This module answers what the landed
 review composition does not already show, and nothing more (rules 2 and 3):
 
-* **The knowledge diff (rule 2).** The Git diff of the two memory trees over the knowledge files
-  -- records, sidecars and history files, the files the index reads -- grouped by record and by
-  source path. A sidecar's changed entries are named under the source path and under the record
-  they realize or prove, so a record's code-side changes are visible from both.
 * **Currentness per side (rule 2).** Every invariant and family of each side, through the one
   MIK-R03 state function, computed against that side's own code tree: the before memory tree at
   the code base, the after memory tree at the code candidate.
@@ -34,13 +30,12 @@ process that also answers every click, so it is built not to compete with them:
 
 * its worklist is computed over the two candidate trees the comparison already holds
   (:class:`~.knowledge_worklist.leaf.CandidateTrees`), so the view captures nothing itself;
-* the knowledge diff asks Git three questions whatever the number of changed files
-  (:func:`_measured_tree_diff`);
-* both computed parts are kept in a bounded in-process memo keyed by exact identities
-  (:mod:`.review_leaf_view_memo`), so a repeat for unchanged trees computes neither;
+* the worklist is kept in a bounded in-process memo keyed by exact identities
+  (:mod:`.review_leaf_view_memo`), so a repeat for unchanged trees computes nothing;
 * each uncached worklist runs in the exact package's child interpreter (MIK-R42), so parsing
   knowledge trees and cyclic collection do not compete with the dashboard's subject reads.
-"""
+
+The shared knowledge_tree_diff helper remains here for the public knowledge_diff reader; its file diff is served there and is not included in this tree-view response or its memo."""
 
 from __future__ import annotations
 
@@ -143,7 +138,7 @@ def read_review_trees(
     *,
     processes: ReviewerWorklistProcesses | None = None,
 ) -> ReviewTreesResult:
-    """The tree view of one leaf: its comparison, knowledge diff, currentness and worklist."""
+    """The tree view of one leaf: its comparison, currentness and worklist."""
 
     found = _comparison(config, query)
     if isinstance(found, ReviewRefusal):
@@ -233,7 +228,6 @@ def _view(
         comparison=record,
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
-        knowledge_diff=parts.knowledge_diff,
         currentness=snake_keys(side_currentness(trees)),
         worklist=parts.worklist,
     )
@@ -245,11 +239,11 @@ def _leaf_wide_parts(
     *,
     processes: ReviewerWorklistProcesses | None = None,
 ) -> LeafViewParts | ReviewRefusal:
-    """The view's knowledge diff and worklist: the kept ones for these exact trees, or computed.
+    """The view's worklist: the kept ones for these exact trees, or computed.
 
     A live comparison's parts are looked up under everything they are a function of
     (:func:`~.review_leaf_view_memo.leaf_view_key`). They are kept only when every read behind
-    them succeeded: both knowledge sides readable, no Git read of the diff failed, and a
+    them succeeded: both knowledge sides readable and a
     ``complete`` worklist. Anything else is returned as computed and read again next time.
 
     An input the view read that changed while it was being computed (MIK-R42 ruling 2) does not
@@ -301,22 +295,13 @@ def _compute_leaf_parts(
     reads: dict[str, str] = {}
     try:
         with recorded_reads() as reads:
-            measured = (
-                _measured_tree_diff(
-                    trees.memory_repository,
-                    trees.before.wire.tree,
-                    trees.record.memory_candidate.tree,
-                )
-                if available
-                else None
-            )
             worklist, settled = _worklist_view(
                 contract, trees, live=trees.live, processes=processes
             )
     finally:
         replay_reads(reads)
-    parts = LeafViewParts(None if measured is None else measured.diff, worklist)
-    return parts, measured is not None and measured.complete and settled, reads
+    parts = LeafViewParts(worklist)
+    return parts, available and settled, reads
 
 
 def _focused(
@@ -868,7 +853,7 @@ def _history_rows(
     subject (an unexplained hunk is answered by a ``hunk:…`` row, MIK-R10), so both are looked up.
     Of one owner's rows about a subject only its latest attempt's is shown: a leaf that continued
     after a closeout answers the subject again in its next attempt file, and that judgment governs
-    (L37 ruling B). The superseded row stays in its frozen file and in the knowledge diff.
+    (L37 ruling B). The superseded row stays in its frozen file, read on the change-set page.
     """
 
     database = trees.after.database

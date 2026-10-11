@@ -1,5 +1,3 @@
-import { Fragment } from 'react';
-
 import { css } from '../../../styled-system/css';
 import type {
   ReviewFamilyContextEntry,
@@ -7,6 +5,7 @@ import type {
   ReviewFamilyMember,
   ReviewFamilySideName,
   ReviewPayload,
+  ReviewOutline,
   ReviewSourceLocation,
 } from '../../data/review';
 import {
@@ -33,14 +32,20 @@ import {
   guaranteeTextChange,
   useTreeComparison,
 } from './IntentWordDiff';
-import { LeafKnowledgeChanges, LeafKnowledgeNotice } from './LeafKnowledgeChanges';
+import { SubjectKnowledge } from './SubjectWorklistIdentity';
 import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
-import { orderMemberRows } from './changeTriage';
+import { familyTriage, memberChanges, orderMemberRows } from './changeTriage';
+import {
+  FamilyBreakdown,
+  MemberChangeBadge,
+  useMemberChange,
+  GuaranteeChangeBadge,
+} from './ChangeBadges';
 import { useTreeOrder } from './triageOrderPreference';
 import { DiffPane } from '../changeset/DiffPane';
-import type { DiffLayout } from './SourceExplorer';
+import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { ReviewExpressions } from './ReviewExpressions';
 import { KnowledgeStatements } from './KnowledgeStatements';
 import {
@@ -109,17 +114,19 @@ function GuaranteeBlock({ guarantee, side }: { guarantee: ReviewFamilyGuarantee;
   return (
     <div
       className={card}
+      data-review-content="guarantee"
       data-testid="review-center-guarantee"
       data-revision={guarantee.revision_id}
     >
       <p className={sectionLabel}>Joint guarantee{side ? ` · ${side}` : ''}</p>
       <p className={prose}>{guarantee.joint_guarantee}</p>
-      <details>
+      <p className={muted}>State at origin: {guarantee.state_at_origin}</p>
+      <details data-disclosure="identifiers">
         <summary>Guarantee record</summary>
         <p className={muted}>
           family {guarantee.family_id}
           {side ? ` · ${side} snapshot` : ''} · revision {guarantee.revision_id} · version{' '}
-          {guarantee.display_version} · state at origin: {guarantee.state_at_origin}
+          {guarantee.display_version}
           {guarantee.acceptance_ref ? ` · accepted by ${guarantee.acceptance_ref}` : ''}
         </p>
       </details>
@@ -181,7 +188,7 @@ function GuaranteeComparisonBlock({
           Wording unchanged · {revisionMeta(...guaranteeRevisionLabels(before, after))}
         </p>
         <GuaranteeBlock guarantee={after} />
-        <details>
+        <details data-disclosure="identifiers">
           <summary>Revision records</summary>
           <p className={muted}>
             before revision {before.revision_id} · after revision {after.revision_id}
@@ -211,51 +218,6 @@ function GuaranteeComparisonBlock({
   );
 }
 
-function MemberIdentity({ member }: { member: ReviewFamilyMember }) {
-  if (!member.display_label && !member.display_version) return null;
-  const label = [member.display_label, member.display_version].filter(Boolean).join(' · ');
-  return (
-    <p className={muted}>
-      {label}
-      {member.lifecycle ? ` · ${member.lifecycle}` : ''}
-    </p>
-  );
-}
-
-function MemberFacts({ member }: { member: ReviewFamilyMember }) {
-  return (
-    <>
-      {member.applicability ? (
-        <p className={muted}>recorded applicability: {member.applicability}</p>
-      ) : null}
-      {member.essential_conditions.length ? (
-        <p className={muted}>essential conditions: {member.essential_conditions.join('; ')}</p>
-      ) : null}
-      {member.exclusions.length ? (
-        <p className={muted}>exclusions: {member.exclusions.join('; ')}</p>
-      ) : null}
-    </>
-  );
-}
-
-function MemberStatement({ member }: { member: ReviewFamilyMember }) {
-  if (member.state !== 'recorded') {
-    return (
-      <p className={muted} data-testid="review-center-member-not-on-page">
-        this page did not carry the revision content of member {member.invariant_revision_id}, so no
-        statement for it may be shown here: {member.detail}
-      </p>
-    );
-  }
-  return (
-    <div data-testid="review-center-member-statement" data-member={member.member_id}>
-      <MemberIdentity member={member} />
-      <p className={prose}>{member.statement}</p>
-      <MemberFacts member={member} />
-    </div>
-  );
-}
-
 function RealizationClaims({ member }: { member: ReviewFamilyMember }) {
   if (!member.sources.length) {
     return (
@@ -266,7 +228,7 @@ function RealizationClaims({ member }: { member: ReviewFamilyMember }) {
     );
   }
   return (
-    <ul className={rows} data-testid="review-center-expressions">
+    <ul className={rows} data-review-content="rationale" data-testid="review-center-expressions">
       {member.sources.map((claim) => (
         <li key={claim.claim_id}>
           claim {claim.claim_id} · role: {claim.role}
@@ -317,7 +279,7 @@ function AttributedPaths({
     );
   }
   return (
-    <ul className={rows} data-testid="review-center-attribution">
+    <ul className={rows} data-review-content="rationale" data-testid="review-center-attribution">
       {mine.map((location) => (
         <li key={`${location.claim_id}:${location.path}`} data-change-state={location.change_state}>
           {listed.has(location.path) ? (
@@ -372,7 +334,8 @@ function UnselectedCenter({
         />
       ) : (
         <p className={muted}>
-          Source-only view. Inspect the changed files below; no intent attribution is claimed.
+          Source-only view. Inspect the changed files in All changes; no intent attribution is
+          claimed.
         </p>
       )}
       {knowledge}
@@ -416,7 +379,7 @@ function familyExpressionVerdict(collection: FamilyExpressionCollection): string
     "resolution that side's claim carried — so an address both sides carried prints both readings whenever " +
     "they differ, and an address only one side carried prints that side's alone. This is the realization " +
     'resolution, not ' +
-    "the comparison's own measured change set, which the source explorer below reports separately; each row " +
+    "the comparison's own measured change set, which All changes opens separately; each row " +
     'says where its address stands in that set.';
   const unmeasured =
     collection.unmeasured === 0
@@ -599,20 +562,20 @@ function FamilyMemberContext({
       <p className={muted}>
         {distinct.length} member revisions shown{membersComplete(entry) ? '' : ' · partial roster'}
       </p>
-      <details>
+      <details data-disclosure="provenance">
         <summary>Member and roster counts</summary>
-        <p className={muted} data-testid="review-center-member-counts">
-          {memberContextCounts(entry, distinct.length)}
-        </p>
         <p className={muted} data-testid="review-center-member-distinct">
           {distinct.length} distinct member revision(s) among the loaded membership contexts
         </p>
-        {FAMILY_SIDES.map((side) => (
-          <Fragment key={side}>
-            <RosterLine side={entry[side]} testid="review-center-roster" />
-          </Fragment>
-        ))}
       </details>
+      <p className={muted} data-testid="review-center-member-counts">
+        {memberContextCounts(entry, distinct.length)}
+      </p>
+      {FAMILY_SIDES.map((side) => (
+        <div key={side} data-review-content="roster-state">
+          <RosterLine side={entry[side]} testid="review-center-roster" />
+        </div>
+      ))}
       <ul className={rows}>
         {distinct.map((member) => (
           <li key={member.invariant_revision_id}>
@@ -625,8 +588,11 @@ function FamilyMemberContext({
             >
               {member.display_label ?? member.invariant_revision_id}
             </button>
+            <MemberMeaning entry={entry} member={member} />
             {member.state === 'recorded' ? (
-              <div className={prose}>{member.statement}</div>
+              <div className={prose} data-review-content="statement">
+                {member.statement}
+              </div>
             ) : (
               <div className={muted}>statement not carried on this page ({member.state})</div>
             )}
@@ -680,20 +646,27 @@ function FamilyCenter({
     <section className={shell} data-testid="review-center-family" data-family={entry.family_id}>
       <div>
         <h2 className={sectionLabel}>Family {entry.display_label ?? entry.family_id}</h2>
-        <details>
-          <summary>Family comparison details</summary>
+        <div>
+          <p>Family comparison details</p>
           <p
             className={muted}
+            data-review-content="reason"
             data-testid="review-center-family-state"
             data-family-state={entry.state}
           >
             {entry.state}: {entry.detail}
           </p>
-          <p className={muted} data-testid="review-center-family-selection">
+          <p
+            className={muted}
+            data-review-content="reason"
+            data-testid="review-center-family-selection"
+          >
             {entry.selection.state}: {entry.selection.statement}
           </p>
-        </details>
+        </div>
       </div>
+      <GuaranteeChangeBadge kinds={entry.change_kinds} />
+      <FamilyBreakdown triage={familyTriage(entry)} />
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
       <FamilyMemberContext
         entry={entry}
@@ -702,8 +675,8 @@ function FamilyCenter({
         onRosterNext={onRosterNext}
       />
       {expressions}
-      <details>
-        <summary>Realization resolution details</summary>
+      <section data-review-content="resolution">
+        <p>Realization resolution details</p>
         <FamilyExpressionExcerpts
           entry={entry}
           membership={carriedMembership(entry)}
@@ -711,7 +684,7 @@ function FamilyCenter({
           listedPartial={listedPartial}
           onOpenPath={onOpenPath}
         />
-      </details>
+      </section>
       <FamilyEvidence entry={entry} payload={payload} />
       {knowledge}
     </section>
@@ -770,6 +743,15 @@ function IndependentFacts({
   );
 }
 
+function SharedMembership({ member }: { member?: ReviewFamilyMember }) {
+  if (!member?.other_family_revision_ids.length) return null;
+  return (
+    <p className={muted}>
+      Shared member · other family revisions: {member.other_family_revision_ids.join(', ')}
+    </p>
+  );
+}
+
 function MemberCenter({
   entry,
   member,
@@ -802,6 +784,7 @@ function MemberCenter({
     >
       <div>
         <h2 className={sectionLabel}>{member?.display_label ?? 'Selected invariant'}</h2>
+        <SharedMembership member={member} />
         <p className={muted} data-testid="review-center-member-family">
           <MemberFamilyLabel subject={subject} payload={payload} entry={entry} />
         </p>
@@ -809,6 +792,7 @@ function MemberCenter({
       {entry ? <GuaranteeComparisonBlock entry={entry} layout={layout} /> : null}
       <div className={card}>
         <h3 className={sectionLabel}>Selected intent</h3>
+        {entry && member ? <MemberMeaning entry={entry} member={member} /> : null}
         <SelectedStatement
           knowledge={payload.knowledge}
           subject={subject}
@@ -817,13 +801,12 @@ function MemberCenter({
         />
       </div>
       {expressions}
-      <details>
-        <summary>Statement, membership and realization details</summary>
+      <section data-review-content="resolution">
+        <p>Statement, membership and realization details</p>
         <IndependentFacts entry={entry} payload={payload} subject={subject} />
         {member ? (
           <div className={card}>
             <h3 className={sectionLabel}>Selected roster revision context</h3>
-            <MemberStatement member={member} />
             <RealizationClaims member={member} />
             <AttributedPaths
               locations={payload.source.locations}
@@ -834,7 +817,7 @@ function MemberCenter({
             />
           </div>
         ) : null}
-      </details>
+      </section>
       <div className={card}>
         <SubjectEvidence payload={payload} subject={subject} />
       </div>
@@ -871,7 +854,7 @@ function UnavailableMember({
     <section className={shell} data-testid="review-center-member-context">
       <h2 className={sectionLabel}>Member revision context</h2>
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
-      <MemberStatement member={member} />
+      <p data-review-content="statement">{member.statement ?? member.detail}</p>
       <p className={muted} data-testid="review-center-evidence-unavailable">
         This page did not supply the member's invariant identity. Continue the roster to open its
         own review; no assessment absence is claimed.
@@ -897,6 +880,7 @@ interface FamilyReviewCenterProps {
   // The leaf's tree view (MIK-R25), read once per task context by the workspace; `null` for a
   // dataset review, which renders exactly as before.
   leafTrees?: ReviewTreesRead | null;
+  outline?: ReviewOutline;
 }
 
 // The center of one review. A tree comparison's intent wording is word-diffed inside it (MIK-R35).
@@ -909,7 +893,7 @@ export function FamilyReviewCenter(props: FamilyReviewCenterProps) {
 }
 
 function ReviewCenterBody(props: FamilyReviewCenterProps) {
-  const { payload, subject, selection, layout, onRosterNext, onOpenMember } = props;
+  const { payload, subject, selection, layout, onRosterNext } = props;
   const { entry, member, members, listed, linksIncomplete } = centerSelection(
     payload,
     selection,
@@ -933,9 +917,55 @@ function ReviewCenterBody(props: FamilyReviewCenterProps) {
     onOpenPath: props.onOpenFromCenter,
     onRosterNext,
     expressions,
-    knowledge: knowledgePanel(props.leafTrees, payload),
+    knowledge: (
+      <SubjectKnowledge
+        read={props.leafTrees}
+        outline={props.outline}
+        subject={addressedSubject}
+        familyId={entry?.family_id}
+        comparison={treeComparisonNumber(payload.limitations)}
+      />
+    ),
   };
 
+  return (
+    <SelectedCenter
+      props={props}
+      common={common}
+      entry={entry}
+      member={member}
+      addressedSubject={addressedSubject}
+      invariant={invariant}
+      expressions={expressions}
+    />
+  );
+}
+function SelectedCenter({
+  props,
+  common,
+  entry,
+  member,
+  addressedSubject,
+  invariant,
+  expressions,
+}: {
+  props: FamilyReviewCenterProps;
+  common: {
+    payload: ReviewPayload;
+    layout: DiffLayout;
+    listed: Set<string>;
+    onOpenPath: (path: string) => void;
+    onRosterNext: FamilyReviewCenterProps['onRosterNext'];
+    expressions: React.ReactNode;
+    knowledge: React.ReactNode;
+  };
+  entry?: ReviewFamilyContextEntry;
+  member?: ReviewFamilyMember;
+  addressedSubject?: ReviewSubject;
+  invariant: boolean;
+  expressions: React.ReactNode;
+}) {
+  const { payload, selection, layout, onRosterNext, onOpenMember } = props;
   return (
     <div
       data-testid="review-center"
@@ -944,13 +974,10 @@ function ReviewCenterBody(props: FamilyReviewCenterProps) {
       }
     >
       {invariant ? (
-        <MemberCenter {...common} entry={entry} member={member} subject={addressedSubject} />
+        <MemberCenter {...common} entry={entry} member={member} subject={addressedSubject!} />
       ) : entry === undefined ? (
         <>
-          <UnselectedCenter
-            payload={payload}
-            knowledge={knowledgePanel(props.leafTrees, payload, true)}
-          />
+          <UnselectedCenter payload={payload} knowledge={common.knowledge} />
           {expressions}
         </>
       ) : member ? (
@@ -983,19 +1010,42 @@ function pinnedWorklist(leafTrees: ReviewTreesRead | null | undefined, payload: 
   return same ? leafTrees.trees.worklist : undefined;
 }
 
-function knowledgePanel(
-  leafTrees: ReviewTreesRead | null | undefined,
-  payload: ReviewPayload,
-  open = false,
-): React.ReactNode {
-  if (leafTrees?.phase !== 'trees')
-    return leafTrees ? <LeafKnowledgeNotice read={leafTrees} /> : null;
+function MemberMeaning({
+  entry,
+  member,
+}: {
+  entry: ReviewFamilyContextEntry;
+  member: ReviewFamilyMember;
+}) {
+  const state = useMemberChange(
+    entry.change_kinds ? memberChanges(entry) : undefined,
+    member.member_id,
+    entry.family_id,
+    member.invariant_revision_id,
+  );
   return (
-    <LeafKnowledgeChanges
-      trees={leafTrees.trees}
-      reviewComparison={treeComparisonNumber(payload.limitations)}
-      open={open}
-    />
+    <div data-review-content="change-facts">
+      <MemberChangeBadge state={state} />
+      {state?.change.unknown_reasons.slice(1).map((reason) => (
+        <p key={reason} className={muted}>
+          change kind unknown: {reason}
+        </p>
+      ))}
+      {state?.change.membership_reasons.slice(1).map((reason) => (
+        <p key={reason} className={muted}>
+          membership unknown: {reason}
+        </p>
+      ))}
+      <p className={muted}>
+        {[...entry.before.members].some((one) => one.member_id === member.member_id)
+          ? 'before'
+          : ''}
+        {[...entry.after.members].some((one) => one.member_id === member.member_id)
+          ? ' · after'
+          : ''}{' '}
+        · {member.state}
+      </p>
+    </div>
   );
 }
 
@@ -1013,7 +1063,6 @@ function CenterExpressions({
   onFullFile,
   openPath,
   onOpenPath,
-  onOpenFromCenter,
   leafTrees = null,
 }: FamilyReviewCenterProps & {
   entry?: ReviewFamilyContextEntry;
@@ -1054,7 +1103,7 @@ function CenterExpressions({
       fullFile={fullFile}
       onFullFile={onFullFile}
       openPath={openPath}
-      onOpenPath={(path) => (path === null ? onOpenPath(null) : onOpenFromCenter(path))}
+      onOpenPath={onOpenPath}
     />
   );
 }

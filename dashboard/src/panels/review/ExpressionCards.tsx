@@ -17,7 +17,8 @@ import { IntentMarkerScope } from './intentMarkerScope';
 import { ReviewProblemBlock } from './ReviewOutcome';
 import { ExpressionControls } from './ReviewExpressions';
 import { SourceContent } from './SourceContent';
-import type { DiffLayout } from './SourceExplorer';
+import type { DiffMode } from '../changeset/DiffPane';
+import { ReviewChangeSetNavigation } from './changeSetNavigation';
 import {
   cardCounts,
   cardVoice,
@@ -125,8 +126,8 @@ export interface CardsProps {
   read: ReviewTreesRead;
   seed?: string;
   planning: Map<string, string>;
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
+  layout: DiffMode;
+  onLayout: (next: DiffMode) => void;
   fullFile: boolean;
   onFullFile: (next: boolean) => void;
   openPath: string | null | undefined;
@@ -171,7 +172,6 @@ export function ExpressionCards(props: CardsProps) {
         ) : (
           <p className={muted}>This review is not a tree comparison; no cards apply.</p>
         )}
-        <OpenedFile {...props} cards={[]} />
       </section>
     );
   return <ReadyCards {...props} entries={read.trees.entries ?? []} />;
@@ -222,7 +222,7 @@ function ReadyCards(props: CardsProps & { entries: ReviewTreeEntry[] }) {
           No realization or proof entry is recorded for this selection on either side.
         </p>
       ) : null}
-      <OpenedFile {...props} cards={cards} />
+      <EntryIdentifiers entries={props.entries} />
       {cards.map((card) => (
         <FocusedCard
           key={card.key}
@@ -233,6 +233,30 @@ function ReadyCards(props: CardsProps & { entries: ReviewTreeEntry[] }) {
         />
       ))}
     </section>
+  );
+}
+
+function EntryIdentifiers({ entries }: { entries: ReviewTreeEntry[] }) {
+  return (
+    <details data-disclosure="identifiers" data-testid="review-entry-identifiers">
+      <summary>Entry identifiers</summary>
+      <ul>
+        {entries.map((entry) => (
+          <li key={entry.id} data-entry={entry.id}>
+            {entry.kind} {entry.id} · {entry.invariant} · {entry.invariant_key}
+            <ul>
+              {(['before', 'after'] as const).map((side) => (
+                <li key={side} data-side={side}>
+                  {side}
+                  {entry[side].blob ? ` · blob ${entry[side].blob}` : ''}
+                  {entry[side].content ? ` · content ${entry[side].content}` : ''}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -304,6 +328,26 @@ function sideStateText(side: ReviewTreeEntrySide): string {
   return `unavailable: ${side.reason ?? 'no reason given'}`;
 }
 
+function CardCurrentness({ card }: { card: ExpressionCard }) {
+  return (
+    <p className={css({ margin: 0, padding: '0 0.8rem' })}>
+      {notCurrent(card).map((mark) => (
+        <span
+          key={`${mark.entry}:${mark.side}`}
+          className={css({ color: 'amber', fontSize: '0.72rem', marginRight: '0.8rem' })}
+          data-testid="review-card-currentness"
+          data-currentness={mark.state}
+          data-entry={mark.entry}
+          data-side={mark.side}
+          data-review-content="currentness"
+        >
+          {mark.entry} {mark.state} on the {mark.side} side{mark.reason ? `: ${mark.reason}` : ''}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function FocusedCard({
   card,
   payload,
@@ -313,7 +357,6 @@ function FocusedCard({
   open,
   onToggle,
 }: CardsProps & { card: ExpressionCard; open: boolean; onToggle: () => void }) {
-  const marks = notCurrent(card);
   return (
     <article
       className={cardShell}
@@ -344,18 +387,7 @@ function FocusedCard({
       <div className={excerptBox}>
         <Excerpt card={card} layout={layout} />
       </div>
-      <p className={css({ margin: 0, padding: '0 0.8rem' })}>
-        {marks.map((mark) => (
-          <span
-            key={`${mark.entry}:${mark.side}`}
-            className={css({ color: 'amber', fontSize: '0.72rem', marginRight: '0.8rem' })}
-            data-testid="review-card-currentness"
-            data-currentness={mark.state}
-          >
-            {mark.entry} {mark.state} on the {mark.side} side
-          </span>
-        ))}
-      </p>
+      <CardCurrentness card={card} />
       <div className={actions}>
         <button
           type="button"
@@ -367,7 +399,6 @@ function FocusedCard({
           {open ? 'Hide full file' : 'Full file'}
         </button>
         <InventoryLink payload={payload} />
-        <CardDetails card={card} />
       </div>
       {open ? (
         <div className={fullFileBox}>
@@ -409,7 +440,7 @@ function Voice({ entry, planning }: { entry: CardEntry; planning: Map<string, st
         {voiceHeading(entry, voice.role, planning.get(entry.invariant))}
       </span>
       {said ? (
-        <p className={voiceText} data-testid="review-card-rationale">
+        <p data-review-content className={voiceText} data-testid="review-card-rationale">
           {said}
         </p>
       ) : (
@@ -418,16 +449,16 @@ function Voice({ entry, planning }: { entry: CardEntry; planning: Map<string, st
         </p>
       )}
       {voice.revised !== undefined ? (
-        <details className={muted}>
-          <summary>Revised in this leaf</summary>
+        <div className={muted} data-review-content>
+          <strong>Revised in this leaf</strong>
           Before: {voice.revised}
-        </details>
+        </div>
       ) : null}
     </li>
   );
 }
 
-function Excerpt({ card, layout }: { card: ExpressionCard; layout: DiffLayout }) {
+function Excerpt({ card, layout }: { card: ExpressionCard; layout: DiffMode }) {
   const language = languageOfPath(card.path);
   if (card.change === 'unchanged') return <UnchangedExcerpt card={card} language={language} />;
   if (card.change === 'changed')
@@ -443,7 +474,7 @@ function UnchangedExcerpt({ card, language }: { card: ExpressionCard; language: 
   if (after.excerpt === undefined)
     return <p className={muted}>{after.reason ?? 'No excerpt was read for this range.'}</p>;
   return (
-    <div data-testid="review-card-excerpt" data-excerpt="unchanged">
+    <div data-review-content data-testid="review-card-excerpt" data-excerpt="unchanged">
       <FilePane
         content={after.excerpt}
         language={language}
@@ -467,7 +498,7 @@ function ChangedExcerpt({
 }: {
   card: ExpressionCard;
   language: string;
-  layout: DiffLayout;
+  layout: DiffMode;
 }) {
   const { before, after } = card;
   const marking = useExcerptMarking(card, layout, { before: true, after: true });
@@ -476,7 +507,7 @@ function ChangedExcerpt({
   if (beforeText === undefined || afterText === undefined)
     return <p className={muted}>{before.reason ?? after.reason ?? 'No excerpt was read.'}</p>;
   return (
-    <div data-testid="review-card-excerpt" data-excerpt="diff">
+    <div data-review-content data-testid="review-card-excerpt" data-excerpt="diff">
       <DiffPane
         before={beforeText}
         after={afterText}
@@ -500,7 +531,7 @@ function ChangedExcerpt({
 function SeparateSides({ card, language }: { card: ExpressionCard; language: string }) {
   const marking = useExcerptMarking(card, 'split', { before: true, after: true });
   return (
-    <div data-testid="review-card-excerpt" data-excerpt="separate">
+    <div data-review-content data-testid="review-card-excerpt" data-excerpt="separate">
       {(['before', 'after'] as const).map((name) => {
         const side = card[name];
         return side.state === 'resolved' && side.excerpt !== undefined ? (
@@ -532,40 +563,8 @@ function Truncated({ side }: { side: ReviewTreeEntrySide }) {
   ) : null;
 }
 
-function CardDetails({ card }: { card: ExpressionCard }) {
-  return (
-    <details className={muted}>
-      <summary>Entry details</summary>
-      {card.entries.map((entry) => (
-        <p key={entry.id} data-testid="review-card-entry-detail">
-          {entry.id} · {entry.kind} · {entry.invariant} · before {sideFacts(entry.before)} · after{' '}
-          {sideFacts(entry.after)}
-        </p>
-      ))}
-    </details>
-  );
-}
-
-function sideFacts(side: ReviewTreeEntrySide): string {
-  return [
-    side.path,
-    side.state,
-    side.blob ? `blob ${side.blob}` : null,
-    side.content ?? null,
-    side.recorded === undefined
-      ? 'memory side unread'
-      : side.recorded
-        ? 'recorded'
-        : 'not recorded',
-    side.currentness ? `R03 ${side.currentness}` : null,
-    side.currentness_reason ?? null,
-    side.reason ?? null,
-  ]
-    .filter((fact): fact is string => fact !== null)
-    .join(' · ');
-}
-
 function InventoryLink({ payload }: { payload: ReviewPayload }) {
+  const open = useContext(ReviewChangeSetNavigation);
   const inventory = payload.source.inventory;
   const total = inventory.state === 'measured' ? `${inventory.listed_total}` : 'unmeasured';
   return (
@@ -573,13 +572,7 @@ function InventoryLink({ payload }: { payload: ReviewPayload }) {
       type="button"
       className={linkButton}
       data-testid="review-card-inventory"
-      onClick={(event) => {
-        const explorer = event.currentTarget
-          .closest('[data-testid="review-workspace"]')
-          ?.querySelector<HTMLElement>('[data-testid="review-source-explorer"]');
-        explorer?.scrollIntoView({ block: 'start' });
-        explorer?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
-      }}
+      onClick={() => open?.('all')}
     >
       All changed files ({total})
     </button>
@@ -596,7 +589,7 @@ function FullFile({
 }: {
   payload: ReviewPayload;
   path: string;
-  layout: DiffLayout;
+  layout: DiffMode;
   fullFile: boolean;
   // The pane's name for the intent markers' return (MIK-R34).
   pane: string;
@@ -612,7 +605,7 @@ function FullFile({
     detail: 'an unchanged file a recorded entry names',
   };
   return (
-    <div data-testid="review-card-full-file-content" data-path={path}>
+    <div data-review-content data-testid="review-card-full-file-content" data-path={path}>
       <SourceContent
         repo={payload.candidate.repository_id}
         master={payload.candidate.master}
@@ -630,29 +623,3 @@ function FullFile({
 
 // A file opened from the source explorer (or a card) that no card shows: it opens here, above the
 // cards, so an unattributed change is inspected in the same reading path.
-function OpenedFile(props: CardsProps & { cards: ExpressionCard[] }) {
-  const { openPath, cards, payload, layout, fullFile, onOpenPath } = props;
-  if (!openPath || cards.some((card) => card.path === openPath)) return null;
-  return (
-    <article className={cardShell} data-testid="review-opened-file" data-path={openPath}>
-      <header className={cardHead}>
-        <div className={css({ minWidth: 0 })}>
-          <p className={kindLabel}>Opened from the source changes</p>
-          <p className={pathText}>{openPath}</p>
-        </div>
-        <button type="button" className={linkButton} onClick={() => onOpenPath(null)}>
-          Close
-        </button>
-      </header>
-      <div className={fullFileBox}>
-        <FullFile
-          payload={payload}
-          path={openPath}
-          layout={layout}
-          fullFile={fullFile}
-          pane="opened"
-        />
-      </div>
-    </article>
-  );
-}

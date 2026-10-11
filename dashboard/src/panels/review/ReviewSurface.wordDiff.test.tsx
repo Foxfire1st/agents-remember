@@ -158,13 +158,7 @@ it('never calls one guarantee revision unchanged when its texts differ, anywhere
   expect(within(center).getByTestId('review-center-guarantee-label').textContent).toBe(
     'Changed guarantee · revision r2 → r2 · the same revision on both sides; its text differs',
   );
-  const rail = view
-    .getAllByTestId('review-family-guarantee')
-    .map((node) => node.firstElementChild!.textContent);
-  expect(rail).toEqual([
-    'Joint guarantee · before · same revision, text differs',
-    'Joint guarantee · after · same revision, text differs',
-  ]);
+  expect(view.queryByTestId('review-family-guarantee')).toBeNull();
   expect(
     within(center).getByTestId('review-center-facts').querySelector('[data-fact="guarantee"]')!
       .textContent,
@@ -173,9 +167,6 @@ it('never calls one guarantee revision unchanged when its texts differ, anywhere
   serve(false, true);
   const dataset = open(invariant);
   await dataset.findByTestId('review-center-member');
-  expect(
-    dataset
-      .getAllByTestId('review-family-guarantee')
-      .map((node) => node.firstElementChild!.textContent),
-  ).toEqual(['Joint guarantee · unchanged']);
+  expect(dataset.queryByTestId('review-family-guarantee')).toBeNull();
+  expect(within(dataset.getByTestId('review-center-member')).getByTestId('diff-pane')).toBeTruthy();
 });

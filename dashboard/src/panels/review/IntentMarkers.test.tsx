@@ -12,7 +12,6 @@ import type {
   ReviewChangedFile,
   ReviewResult,
   ReviewSourceExpansion,
-  ReviewSourceInventory,
   ReviewSourceSide,
 } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
@@ -20,7 +19,6 @@ import type { ReviewTreesResult } from '../../data/reviewTrees';
 import { ExpressionCards } from './ExpressionCards';
 import { expressionCards } from './focusedCards';
 import { type IntentMarkerScopeValue, IntentMarkerScope } from './intentMarkerScope';
-import { LaneFileFocus } from './LaneFileFocus';
 import { SourceContent, type SourceMarkers } from './SourceContent';
 
 type Scenario =
@@ -438,132 +436,6 @@ describe('the return to a followed marker', () => {
     await marks(view, 3);
     expect(view.queryByTestId('review-hunk-mark-panel')).toBeNull();
     expect(scope.settle).not.toHaveBeenCalled();
-  });
-});
-
-describe("the lane's focused windows", () => {
-  const inventory = (file: string): ReviewSourceInventory => ({
-    state: 'measured',
-    entries: [{ path: file, status: 'modified', content: 'text', mode_change: false }],
-    listed_total: 1,
-    detail: 'measured',
-    partial: false,
-    command: 'git diff',
-    before_code_tree_id: BEFORE_TREE,
-    after_code_tree_id: AFTER_TREE,
-    unrepresentable_paths: [],
-  });
-
-  function focus(scope: IntentMarkerScopeValue) {
-    const body = bodies.curated['pkg/lines.txt'];
-    serve(expansionOf(body), body);
-    return render(
-      <IntentMarkerScope.Provider value={scope}>
-        <LaneFileFocus
-          task={{ ...task, comparison: 1 }}
-          path="pkg/lines.txt"
-          destination="unknown"
-          inventory={inventory('pkg/lines.txt')}
-          layout="split"
-          gate={{ state: 'none', detail: 'not part of this check' }}
-        />
-      </IntentMarkerScope.Provider>,
-    );
-  }
-
-  it('marks every hunk a window draws: the focused one and each neighbour its context shows', async () => {
-    // The Unknown destination opens lines.txt on its line 4 replace; three context lines draw the
-    // line 2 replace and the line 6 delete in the same window (MIK-L32 review F5).
-    const view = focus(scopeOf());
-    const windows = await view.findAllByTestId('review-lane-hunk');
-    expect(windows.map((one) => one.dataset.before)).toEqual(['L4']);
-    await waitFor(() =>
-      expect(within(windows[0]).queryAllByTestId('review-hunk-mark')).toHaveLength(3),
-    );
-    expect(
-      inHunkOrder(within(windows[0]).getAllByTestId('review-hunk-mark')).map(described),
-    ).toEqual([
-      ['2 intents', 'L2', 'L2', 'after editor'],
-      ['attribution unknown', 'L4', 'L4', 'after editor'],
-      ['unexplained', 'L6', 'none (after L5)', 'before editor'],
-    ]);
-    // A neighbour's list opens in its window, and follows from that window's pane.
-    const scope = scopeOf();
-    cleanup();
-    const again = focus(scope);
-    const window = (await again.findAllByTestId('review-lane-hunk'))[0];
-    await waitFor(() =>
-      expect(within(window).queryAllByTestId('review-hunk-mark')).toHaveLength(3),
-    );
-    fireEvent.click(inHunkOrder(within(window).getAllByTestId('review-hunk-mark'))[0]);
-    fireEvent.click(within(window).getAllByTestId('review-hunk-mark-occurrence')[0]);
-    expect(vi.mocked(scope.follow).mock.lastCall![0]).toEqual({
-      path: 'pkg/lines.txt',
-      pane: 'lane-window:4:1:4:1',
-      hunk: '2:1:2:1',
-    });
-  });
-
-  it('says what the full file shows of the hunks a focused view does not draw', async () => {
-    // Twenty-two hunks of the focused class, past the six lines the content read returns: twenty
-    // are listed (each past the text), two are named as not drawn.
-    const body = bodies.curated['pkg/lines.txt'];
-    const many = (bucket: 'attributed' | 'unexplained') => ({
-      ...body,
-      file_classification: {
-        ...body.file_classification,
-        bucket,
-        hunks: Array.from({ length: 22 }, (_, index) => ({
-          before: { start: 100 + 2 * index, count: 1 },
-          after: { start: 100 + 2 * index, count: 1 },
-          classification: 'attribution_unknown' as const,
-          links: [],
-          unknown: [],
-        })),
-      },
-    });
-    const note = async (bucket: 'attributed' | 'unexplained') => {
-      serve(expansionOf(body), many(bucket));
-      const view = render(
-        <IntentMarkerScope.Provider value={scopeOf()}>
-          <LaneFileFocus
-            task={{ ...task, comparison: 1 }}
-            path="pkg/lines.txt"
-            destination="unknown"
-            inventory={inventory('pkg/lines.txt')}
-            layout="split"
-            gate={{ state: 'none', detail: 'not part of this check' }}
-          />
-        </IntentMarkerScope.Provider>,
-      );
-      const text = (await view.findByTestId('review-lane-hunks-more')).textContent;
-      cleanup();
-      return text;
-    };
-    expect(await note('attributed')).toBe(
-      '2 more hunk(s) of this class are not drawn here. Full file draws every changed region of ' +
-        'the text its read returns, each owner hunk with its own mark.',
-    );
-    // A confirmed-unregistered file's hunks carry no marks of their own: the note says so.
-    expect(await note('unexplained')).toContain('under the one mark this file carries.');
-  });
-
-  it('reopens the full file a marker was followed from, with its list and focus', async () => {
-    const settle = vi.fn();
-    const view = focus(
-      scopeOf({ returning: { path: 'pkg/lines.txt', pane: 'lane-full', hunk: '2:1:2:1' }, settle }),
-    );
-    const full = await view.findByTestId('review-lane-full-file');
-    expect(full.getAttribute('aria-expanded')).toBe('true');
-    const expansion = await view.findByTestId('review-source-expansion');
-    await waitFor(() => expect(settle).toHaveBeenCalled());
-    const two = inHunkOrder(within(expansion).getAllByTestId('review-hunk-mark'))[0];
-    expect([document.activeElement === two, two.getAttribute('aria-expanded')]).toEqual([
-      true,
-      'true',
-    ]);
-    // The lane's one classification read serves the windows and the full file.
-    expect(requested.filter((url) => url.searchParams.get('file'))).toHaveLength(1);
   });
 });
 

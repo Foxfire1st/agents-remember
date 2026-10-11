@@ -1,4 +1,4 @@
-// MIK-R39 in the mounted reviewer, on the store-authored comparison of MIK-R33
+// MIK-R39 in the mounted R86 reviewer, using a labelled synthetic outline over the store-authored comparison of MIK-R33
 // (walkStore.capture-provenance.json): a member of the second family only, and a kept family whose
 // members are not all returned. `ReviewSurface` is the real component and only `fetch` is stubbed.
 // Family FAM-F00001 has nine members, FAM-F00002 three; INV-FFFFFF belongs to both and INV-PPPPPP
@@ -7,6 +7,8 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
+import { syntheticCatalogue } from './outline.test-utils';
+import { treeViewStore } from './triageViewPreference';
 import { treeOrderStore } from './triageOrderPreference';
 import {
   J,
@@ -15,14 +17,12 @@ import {
   families,
   familyBlock,
   memberOccurrences,
-  press,
   reviewCount,
   selectedNode,
   serve,
   settled,
   step,
   subjectOf,
-  triageStatus,
   world,
 } from './walk.test-utils';
 
@@ -47,6 +47,7 @@ function answer(url: URL): unknown {
   if (selector === null) return undefined;
   if (url.searchParams.get('continuation') !== null) return CONTINUED;
   const asked = `${url.searchParams.get('selectorKind')}:${selector}`;
+  if (useFirstPage && asked === `family:${FAM1_ID}`) return CONTINUED;
   if (asked === `invariant:${MEMBER_G_ID}`)
     return new TypeError('INV-GGGGGG review read deliberately failed');
   const served = [FAM1, FAM2, MEMBER_P, useFirstPage ? SHARED_PAGE : SHARED].find(
@@ -58,8 +59,12 @@ function answer(url: URL): unknown {
 beforeEach(() => {
   localStorage.clear();
   treeOrderStore.getState().setOrder('triage');
+  treeViewStore.getState().setView('all');
   useFirstPage = false;
-  world.requests = serve({ entries: body('entries'), review: answer });
+  world.requests = serve({
+    entries: { ...body('entries'), ...syntheticCatalogue([FAM1, FAM2]) },
+    review: answer,
+  });
 });
 
 afterEach(() => {
@@ -93,9 +98,9 @@ const clickFamilyRow = async (view: View, id: string) => {
   await settled(view);
 };
 
-it("keeps both families as j selects the second family's member and k returns through a failed read", async () => {
+it("keeps both families as j selects the second family's member and an explicit unknown read fails", async () => {
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined);
+  await view.findAllByTestId('review-family-open', undefined);
   await waitFor(() => expect(families(view)).toHaveLength(2));
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);
@@ -111,14 +116,14 @@ it("keeps both families as j selects the second family's member and k returns th
     familyBlock(view, FAM1_ID),
   );
   expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(9);
-  // k returns to the family row it came from, and again to the first family's last change.
   await step(view, K, 0);
   expect(labelOf(selectedNode(view)!)).toBe(`family ${FAM2_ID}`);
   const failedRow = within(familyBlock(view, FAM1_ID))
     .getAllByTestId('review-family-member-open')
     .find((node) => node.textContent?.includes('INV-GGGGGG'))!;
-  // This read deliberately fails: the requested row stays selected and neither family is lost.
-  await step(view, K, 1);
+  // Unknown is not a j/k stop in R86; an explicit selection may still read and fail.
+  fireEvent.click(failedRow);
+  await view.findByTestId('review-reading-problem', undefined);
   expect(selectedNode(view)).toBe(failedRow);
   expect(view.getByTestId('review-reading-problem').textContent).toContain(
     'INV-GGGGGG review read deliberately failed',
@@ -126,63 +131,37 @@ it("keeps both families as j selects the second family's member and k returns th
   expect(families(view)).toEqual(first);
 });
 
-it('stops j at the continuation control of a kept family, loads nothing, and continues it by selecting it', async () => {
+it('keeps complete outline rows while a partial family continues in the main page', async () => {
   useFirstPage = true;
   treeOrderStore.getState().setOrder('authored');
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined);
-  await waitFor(() => expect(families(view)).toEqual([FAM1_ID, FAM2_ID]));
-  // Both families return two members per side: the first one has unreturned members.
-  expect(familyBlock(view, FAM1_ID).dataset.membersUnreturned).toBe('true');
+  await view.findAllByTestId('review-family-open', undefined);
   await clickFamilyRow(view, FAM2_ID);
   expect(familyBlock(view, FAM1_ID).dataset.familyKept).toBe('true');
-  const returned = memberOccurrences(familyBlock(view, FAM1_ID)).size;
-  expect(returned).toBeLessThan(9);
-
-  // The first family's last returned change; j goes on to its continuation control and stops there.
-  const changes = within(familyBlock(view, FAM1_ID))
-    .getAllByTestId('review-family-member-open')
-    .filter((node) => node.dataset.changePrimary !== 'unchanged');
-  const last = changes[changes.length - 1];
-  last.focus();
-  const before = reviewCount();
-  press(J);
-  const control = within(familyBlock(view, FAM1_ID)).getAllByTestId('review-family-roster-next')[0];
-  expect(document.activeElement).toBe(control);
-  expect(triageStatus(view)).toContain('Further members of FAM-F00001 are not yet returned');
-  expect(reviewCount() - before).toBe(0);
-  // The next j moves on, to the second family's own row.
-  await step(view, J, 0);
-  expect(selectedNode(view)!.dataset.family).toBe(FAM2_ID);
-
-  // The control selects the first family, keeps the tree, and continues the roster at its cursor.
+  const rows = memberOccurrences(familyBlock(view, FAM1_ID)).size;
+  expect(rows).toBe(9);
+  expect(view.queryByTestId('review-family-roster-next')).toBeNull();
+  await clickFamilyRow(view, FAM1_ID);
+  const control = view.getAllByTestId('review-center-roster-next')[0];
   const cursor = control.dataset.continuation!;
   const asked = reviewCount();
   fireEvent.click(control);
-  await waitFor(
-    () => expect(view.getByTestId('review-center-family').dataset.family).toBe(FAM1_ID),
-  );
+  await waitFor(() => expect(reviewCount() - asked).toBe(1));
   await settled(view);
   const request = world.requests.reviews()[asked];
   expect([
     request.searchParams.get('selectorId'),
     request.searchParams.get('continuation'),
-  ]).toEqual([FAM1.payload!.knowledge.revision_selection!.record_id, cursor]);
-  expect(reviewCount() - asked).toBe(1);
-  expect(familyBlock(view, FAM2_ID).dataset.familyKept).toBe('true');
-  const continued = memberOccurrences(familyBlock(view, FAM1_ID)).size;
-  expect(continued).toBeGreaterThan(returned);
-  expect(familyBlock(view, FAM1_ID).dataset.membersUnreturned).toBe('true');
-
-  // The continued members survive a selection of the other family.
+  ]).toEqual([FAM1_ID, cursor]);
+  expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(rows);
   await clickFamilyRow(view, FAM2_ID);
   expect(familyBlock(view, FAM1_ID).dataset.familyKept).toBe('true');
-  expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(continued);
+  expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(rows);
 });
 
 it('keeps the first family when a member of the second is opened from the reading area, and k steps back', async () => {
   const view = open(SHARED);
-  await view.findAllByTestId('review-change-badge', undefined);
+  await view.findAllByTestId('review-family-open', undefined);
   await waitFor(() => expect(families(view)).toHaveLength(2));
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);

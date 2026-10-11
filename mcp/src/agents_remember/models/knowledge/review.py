@@ -47,6 +47,7 @@ from agents_remember.models.knowledge.review_applicability import (
 )
 from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_outline import ReviewOutline
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
@@ -1110,6 +1111,7 @@ class ReviewEntryListResult(KnowledgeModel):
     total_subjects: int = Field(default=0, ge=0)
     invariant_total: int = Field(default=0, ge=0)
     family_total: int = Field(default=0, ge=0)
+    outline: ReviewOutline | None = None
 
     @model_validator(mode="after")
     def _require_one_outcome(self) -> ReviewEntryListResult:

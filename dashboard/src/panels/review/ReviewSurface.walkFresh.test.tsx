@@ -17,7 +17,6 @@ import {
   type View,
   bodyOf,
   captured,
-  revisionOf,
   clickedSecondFamily,
   families,
   familyBlock,
@@ -48,63 +47,52 @@ async function keptState() {
   return view;
 }
 
-const catalogue = (view: View, subject: string) =>
-  view.getAllByTestId('review-catalogue-subject').find((row) => row.dataset.subjectId === subject)!;
+const treeRow = (view: View, subject: string) =>
+  view.getAllByTestId('review-family-open').find((row) => row.dataset.subjectId === subject)!;
 const noKept = (view: View) => expect(keptTags(view)).toEqual([]);
 
-it('starts afresh at a row of the list of all invariants, at the moment of the selection', async () => {
-  const view = await keptState();
-  const all = view.getByTestId('review-all-invariants') as HTMLDetailsElement;
-  all.open = true;
-  fireEvent.click(
-    within(all)
-      .getAllByTestId('review-catalogue-subject')
-      .find((row) => row.dataset.subjectId === ZS9_SUBJECT)!,
-  );
-  // Before the answer: the kept family is already gone; the tree is the answer on screen's own.
-  expect(view.getByTestId('review-reading-pending')).toBeTruthy();
-  noKept(view);
-  expect(families(view)).toEqual([HBJ_ID]);
-  await waitFor(() => expect(families(view)).toEqual([R6R_ID]));
-  noKept(view);
-});
-
-it('starts afresh at the family row of the subject already selected', async () => {
+it('keeps the walk when the already-selected family row is chosen, with focus and no new read', async () => {
   const view = await keptState();
   const before = reviewCount();
-  const row = catalogue(view, HBJ_ID);
-  row.focus(); // a pointer focuses the row it clicks
+  const row = treeRow(view, HBJ_ID);
+  row.focus();
   fireEvent.click(row);
-  expect(families(view)).toEqual([HBJ_ID]);
-  noKept(view);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
+  expect(keptTags(view)).toHaveLength(1);
   expect(reviewCount() - before).toBe(0);
-  // The clicked row is gone with the kept family; focus ends on the selected row, not on the body.
   await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)));
   expect(selectedNode(view)!.dataset.family).toBe(HBJ_ID);
 });
 
-it('starts afresh at "All source changes"', async () => {
+it('All changes opens the comparison viewer and returns without resetting the walk or reading subjects', async () => {
   const view = await keptState();
-  fireEvent.click(view.getByTestId('review-task-source'));
-  await waitFor(() => expect(view.getByTestId('review-center-unselected')).toBeTruthy());
-  expect(families(view)).toEqual([]);
-  noKept(view);
-  // With no family to stand for, the tree's place is after the catalogue's rows, still as a child of
-  // the navigation itself: no element of its own is put around it.
-  expect(view.getByTestId('review-family-tree').parentElement).toBe(
-    view.getByTestId('review-catalogue-navigation'),
-  );
+  serveTreeRoutes();
+  const before = reviewCount();
+  const row = within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
+    name: /^All changes/,
+  });
+  row.focus();
+  fireEvent.click(row);
+  await view.findByTestId('changeset-viewer', undefined);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
+  expect(keptTags(view)).toHaveLength(1);
+  fireEvent.click(view.getByTestId('changeset-back'));
+  await waitFor(() => expect(view.queryByTestId('changeset-viewer')).toBeNull());
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
+  expect(keptTags(view)).toHaveLength(1);
+  expect(reviewCount()).toBe(before);
+  expect(document.activeElement).toBe(row);
 });
 
-it('starts afresh at a refresh of the review', async () => {
+it('refresh clears kept reads while preserving every row of the outline', async () => {
   const view = await keptState();
   const before = reviewCount();
   fireEvent.click(view.getByTestId('review-refresh'));
-  expect(families(view)).toEqual([HBJ_ID]);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
   await waitFor(() => expect(reviewCount() - before).toBe(1));
   await settled(view);
-  expect(families(view)).toEqual([HBJ_ID]);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
 });
 
@@ -116,16 +104,16 @@ it('starts afresh at an answer of another comparison and says so', async () => {
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? other : previous(url, asked));
   // A member row of the kept family: an in-tree selection, answered by another comparison.
   fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
-  await waitFor(() => expect(view.getByTestId('review-family-walk-notice')).toBeTruthy());
-  expect(view.getByTestId('review-family-walk-notice').textContent).toContain('comparison changed');
-  expect(families(view)).toEqual([R6R_ID]);
+  await waitFor(() => expect(view.getByTestId('review-change-status')).toBeTruthy());
+  expect(view.getByTestId('review-change-status').textContent).toContain('comparison changed');
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
   noKept(view);
 });
 
 const memberRow = (view: View, familyId: string, label: string) =>
   within(familyBlock(view, familyId))
     .getAllByTestId('review-family-member-open')
-    .find((node) => node.dataset.revision === revisionOf(label))!;
+    .find((node) => node.textContent?.includes(label))!;
 
 const refusal = {
   state: 'refused',
@@ -165,8 +153,9 @@ it('starts afresh at the offer to open the task context after a refusal', async 
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   fireEvent.click(offer);
   noKept(view);
-  expect(families(view)).toEqual([HBJ_ID]);
-  await waitFor(() => expect(families(view)).toEqual([]));
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
+  await view.findByTestId('review-center-unselected', undefined);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
 });
 
@@ -187,32 +176,94 @@ it('keeps every row when the read of a selected subject fails', async () => {
   await waitFor(() => expect(view.queryByTestId('review-reading-problem')).toBeNull());
   // The answer is the subject's own: the second family is now the kept one.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
-  expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
-  expect(familyBlock(view, R6R_ID).dataset.familyKept).toBeUndefined();
+  expect(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-kept')).toBeTruthy();
+  expect(within(familyBlock(view, R6R_ID)).queryByTestId('review-family-kept')).toBeNull();
 });
 
 const MERGE_FILE = 'dashboard/src/panels/review/familyWalkMerge.ts';
 
 // The unexplained-changes lane, the file's classification and its content, as served for the scratch leaf.
+// Explicit synthetic focused-entry adapter: ranges and object text come from the immutable
+// captured classification and source read, which predate the cards route. No capture is rewritten.
 function serveTreeRoutes() {
-  const lane = captured<unknown>('walkReal.lane.captured.json');
-  const file = captured<unknown>('walkReal.file.captured.json');
-  const source = captured<unknown>('walkReal.source.captured.json');
+  const lane = captured<import('../../data/reviewTrees').ReviewTreesResult>(
+    'walkReal.lane.captured.json',
+  );
+  const file = captured<
+    import('../../data/reviewTrees').ReviewTreesResult & {
+      file_classification: import('../../data/reviewLane').ReviewFileClassification;
+    }
+  >('walkReal.file.captured.json');
+  const source = captured<import('../../data/review').ReviewSourceContentResult>(
+    'walkReal.source.captured.json',
+  );
+  const links = file.file_classification!.hunks[0].links;
+  const entrySide = (side: 'before' | 'after') => {
+    const link = links.find((one) => one.side === side)!;
+    const operand = source.expansion![side];
+    return {
+      recorded: true,
+      state: 'resolved' as const,
+      path: MERGE_FILE,
+      blob: operand.object_id,
+      start_line: link.start_line,
+      end_line: link.end_line,
+      excerpt: operand
+        .text!.split('\n')
+        .slice(link.start_line - 1, link.end_line)
+        .join('\n'),
+    };
+  };
+  const cards = {
+    ...lane,
+    entries: [
+      {
+        id: links[0].id,
+        kind: links[0].kind,
+        invariant: links[0].invariant,
+        invariant_key: links[0].invariant_key,
+        change: 'changed',
+        before: entrySide('before'),
+        after: entrySide('after'),
+      },
+    ],
+  };
   world.tree = (url) => {
     if (url.pathname.endsWith('/source-content')) return source;
     if (url.searchParams.get('lane')) return lane;
+    if (url.searchParams.get('invariants')) return cards;
     return url.searchParams.get('file') === MERGE_FILE ? file : undefined;
   };
+  // Synthetic empty viewer answer isolates mounted persistence, not changeset inventory parity.
+  const previous = world.answer;
+  world.answer = (url, asked) =>
+    url.pathname.startsWith('/api/changeset/')
+      ? {
+          scope: 'comparison',
+          code: [],
+          memory: [],
+          counters: {
+            code: { files: 0, insertions: 0, deletions: 0 },
+            memory: { files: 0, insertions: 0, deletions: 0 },
+          },
+          comparison: lane.comparison!.number,
+          trees: {
+            codeBase: lane.comparison!.code_base.tree,
+            codeTip: lane.comparison!.code_candidate.tree,
+            memoryBase: lane.comparison!.memory_base.tree,
+            memoryTip: lane.comparison!.memory_candidate.tree,
+          },
+        }
+      : previous(url, asked);
 }
 
 it('starts afresh at a followed intent marker, and its return does not bring the kept family back', async () => {
   const view = await keptState();
   serveTreeRoutes();
-  fireEvent.click(
-    view
-      .getAllByTestId('review-inventory-open')
-      .find((one) => one.textContent?.includes('familyWalkMerge'))!,
-  );
+  // A file marker now belongs to a card. Select the family that records this range first;
+  // the other read family remains kept until the marker is followed.
+  fireEvent.click(treeRow(view, R6R_ID));
+  await view.findByTestId('review-card-excerpt', undefined);
   const mark = await waitFor(() => {
     const found = view.getAllByTestId('review-hunk-mark');
     expect(found).toHaveLength(1);
@@ -227,12 +278,12 @@ it('starts afresh at a followed intent marker, and its return does not bring the
   await waitFor(() => expect(selectedNode(view) && selectedName(view)).toBe('INV-ZS9ZS878'));
   await waitFor(() => expect(view.queryByTestId('review-reading-pending')).toBeNull());
   // The tree is the marker's subject's own: the second family is not kept beside it.
-  expect(families(view)).toEqual([R6R_ID]);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
   // The way back restores the reading position; it brings no kept family back either.
   fireEvent.click(view.getByTestId('review-marker-return'));
   await waitFor(() => expect(view.queryByTestId('review-marker-return')).toBeNull());
-  await waitFor(() => expect(families(view)).toEqual([HBJ_ID]));
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
   noKept(view);
 });
 
@@ -271,10 +322,14 @@ it('opens on the subject asked for with its own families only, and a late catalo
   );
   await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
   expect(view.getByTestId('review-center-unselected')).toBeTruthy();
+  // The hold has expired on the controlled clock; await the released read normally.
+  vi.useRealTimers();
   await act(async () => release?.());
-  expect(families(view)).toEqual([R6R_ID]);
+  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
-  expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID);
+  expect((await view.findByTestId('review-center-family', undefined)).dataset.family).toBe(
+    R6R_ID,
+  );
 });
 
 it('keeps the families and states the subject when the answer composes no family context', async () => {
@@ -291,9 +346,11 @@ it('keeps the families and states the subject when the answer composes no family
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? bare : previous(url, asked));
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
-  await waitFor(() => expect(view.getByTestId('review-family-subject-state')).toBeTruthy());
-  expect(view.getByTestId('review-family-subject-state').textContent).toBe(
-    'For the selected subject: The selected invariant has no recorded family membership.',
+  await waitFor(
+    () =>
+      expect(view.getByTestId('review-center-member-family').textContent).toContain(
+        'No recorded family',
+      ),
   );
   // No row is removed, and the requested row is still the one marked.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
@@ -311,28 +368,22 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
   fireEvent.click(view.getByTestId('review-tree-order'));
   expect(shown()).toEqual(initial);
   fireEvent.click(view.getByTestId('review-tree-order'));
-  // A refresh of the subject catalogue.
-  const catalogueReads = () =>
-    world.requests.all.filter((url) => url.pathname.endsWith('/entries')).length;
-  const listed = catalogueReads();
-  fireEvent.click(
-    within(view.getByTestId('review-catalogue-navigation')).getByText('Refresh subjects'),
-  );
-  await waitFor(() => expect(catalogueReads()).toBe(listed + 1));
+  // The view switch and worklist choose no new subject and retain the walked state.
+  fireEvent.click(view.getByTestId('review-tree-view'));
+  fireEvent.click(view.getByTestId('review-tree-view'));
   expect(shown()).toEqual(initial);
-  // Opening a file of the source explorer.
-  fireEvent.click(
-    view
-      .getAllByTestId('review-inventory-open')
-      .find((one) => one.textContent?.includes('familyWalkMerge'))!,
-  );
-  await view.findByTestId('review-opened-file', undefined);
+  fireEvent.click(view.getByRole('button', { name: /^Worklist/ }));
+  await view.findByTestId('review-worklist-view', undefined);
   expect(shown()).toEqual(initial);
-  // A lane destination of the unexplained-changes lane, and the way back to a family.
-  const destinations = await view.findByTestId('review-lane-destinations', undefined);
-  await waitFor(() => expect(destinations.dataset.laneState).toBe('measured'));
-  fireEvent.click(within(destinations).getAllByTestId('review-lane-destination')[0]);
-  await view.findByTestId('review-lane', undefined);
+  fireEvent.click(treeRow(view, HBJ_ID));
+  await view.findByTestId('review-center-family', undefined);
+  expect(shown()).toEqual(initial);
+  // Filtered change-set destinations open over the mounted reviewer and return to it.
+  fireEvent.click(view.getByRole('button', { name: /^Unexplained changes/ }));
+  await view.findByTestId('changeset-viewer', undefined);
+  expect(shown()).toEqual(initial);
+  fireEvent.click(view.getByTestId('changeset-back'));
+  await waitFor(() => expect(view.queryByTestId('changeset-viewer')).toBeNull());
   expect(shown()).toEqual(initial);
   expect(reviewCount()).toBe(reads);
 });
@@ -377,11 +428,11 @@ it.each([true, false])(
         expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
         await clickedSecondFamily(view);
         scrolled.length = 0;
-        // The same subject chosen outside the tree keeps its original scrolling behavior.
-        fireEvent.click(catalogue(view, HBJ_ID));
+        // Re-selecting the same row remains an in-tree gesture and keeps the outline.
+        fireEvent.click(treeRow(view, HBJ_ID));
         await settled(view);
-        expect(scrolled).toEqual([]);
-        expect(families(view)).toEqual([HBJ_ID]);
+        expect(scrolled).toEqual(stacked ? [center] : []);
+        expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
       });
     } finally {
       window.matchMedia = media;
@@ -513,7 +564,7 @@ it('brings the selected row into view when the retry of a failed refresh is answ
     await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
     expect(reviewCount() - reads).toBe(1);
     expect(view.queryByTestId('review-retry')).toBeNull();
-    expect(families(view)).toEqual([HBJ_ID]);
+    expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   });
 });
 

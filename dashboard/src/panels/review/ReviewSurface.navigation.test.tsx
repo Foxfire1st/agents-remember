@@ -18,16 +18,21 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type {
-  ReviewEntry,
   ReviewPayload,
   ReviewResult,
   ReviewSourceContentResult,
+  ReviewOutline,
+  ReviewEntryListResult,
 } from '../../data/review';
 import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import { ReviewSurface } from './ReviewSurface';
+import { syntheticCatalogue } from './outline.test-utils';
+import { treeOrderStore } from './triageOrderPreference';
+import { treeViewStore } from './triageViewPreference';
 import {
+  captured as readCaptured,
   CHANGES,
   J,
   R6R,
@@ -51,12 +56,14 @@ const captured = JSON.parse(
 ) as ReviewResult;
 const recorded = captured.payload as ReviewPayload;
 const families = recorded.family_context!.entries;
-const catalogue: ReviewEntry[] = families.map((family) => ({
-  selector_kind: 'family',
-  selector_id: family.family_id,
-  label: family.display_label ?? family.family_id,
-  presence: 'both',
-}));
+const synthetic = syntheticCatalogue([captured]);
+// Explicit synthetic change on the first family keeps these delayed-interaction sequences stable.
+synthetic.outline.families[0].change = 'changed';
+const catalogue = synthetic.entries;
+beforeEach(() => {
+  treeOrderStore.getState().setOrder('authored');
+  treeViewStore.getState().setView('all');
+});
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
 const target = {
   repo: 'agents-remember',
@@ -78,59 +85,23 @@ it('opens a real family from ordinary entry, navigates another family in place a
     vi.fn(async (address: string) => {
       const url = new URL(address, 'http://localhost');
       urls.push(url);
-      if (url.pathname.endsWith('/entries'))
-        return response({
-          state: 'entries',
-          entries: catalogue,
-          total_subjects: catalogue.length,
-          family_total: catalogue.length,
-          invariant_total: 0,
-        });
-      if (url.pathname.endsWith('/source-content'))
-        return response({
-          state: 'refused',
-          refusal: {
-            code: 'not-found',
-            detail: 'source bytes are outside this captured interaction',
-            next_action: 'inspect the mounted source route',
-          },
-        });
-      if (url.searchParams.get('selectorKind') === 'invariant') return response(captured);
-      const family = families.find((item) => item.family_id === url.searchParams.get('selectorId'));
-      return response({
-        ...captured,
-        payload: {
-          ...recorded,
-          family_context: {
-            ...recorded.family_context,
-            entries: family ? [family] : [],
-            families_returned: family ? 1 : 0,
-            state: family ? 'recorded' : 'no_subject_selected',
-          },
-        },
-      });
+      return response(url.pathname.endsWith('/entries') ? catalogueBody : reviewFor(url));
     }),
   );
   const view = render(<ReviewSurface {...target} />);
   await waitFor(() =>
     expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
   );
-  expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('false');
-  const allFiles = view.getAllByTestId('review-inventory-entry').map((row) => row.textContent);
-  const second = view
-    .getAllByTestId('review-catalogue-subject')
-    .find((button) => button.dataset.subjectId === families[1].family_id)!;
-  fireEvent.click(second);
+  const workspace = view.getByTestId('review-workspace');
+  fireEvent.click(subjectButton(view, families[1].family_id));
   await waitFor(() =>
     expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id),
   );
   expect(urls.some((url) => url.searchParams.get('selectorId') === families[1].family_id)).toBe(
     true,
   );
-  // The answer arrived outside `act`, so the selection focus lands in a passive effect after the
-  // commit that shows the family: wait for it rather than racing it.
   await waitFor(() =>
-    expect(document.activeElement).toBe(view.getAllByTestId('review-family-open')[0]),
+    expect(document.activeElement).toBe(subjectButton(view, families[1].family_id)),
   );
   const member = families[1].after.members.find(
     (row) => row.invariant_id === recorded.knowledge.revision_selection?.record_id,
@@ -140,35 +111,19 @@ it('opens a real family from ordinary entry, navigates another family in place a
       .getAllByTestId('review-family-member-open')
       .find((node) => node.dataset.revision === member.invariant_revision_id)!,
   );
-  const center = await view.findByTestId('review-center-member');
-  const statement = center.querySelector('[data-testid^="review-center-member-"]')!;
-  const expressions = within(center).getByTestId('review-expression-diffs');
-  expect(
-    statement.compareDocumentPosition(expressions) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-  expect(view.getAllByTestId('review-inventory-entry').map((row) => row.textContent)).toEqual(
-    allFiles,
-  );
-  const file = view.getAllByTestId('review-inventory-open')[0];
-  file.focus();
-  fireEvent.click(file);
-  await view.findByTestId('review-source-refusal');
+  await view.findByTestId('review-center-member');
   fireEvent.click(view.getByTestId('review-center-full-file'));
   fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
-  expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true');
+  expect(workspace.dataset.fullFile).toBe('true');
+  expect(workspace.dataset.diffLayout).toBe('inline');
   const region = view.getByTestId('review-center-column');
   const focus = vi.spyOn(region, 'focus');
   const scroll = vi.spyOn(region, 'scrollIntoView');
   fireEvent.click(view.getByTestId('review-jump-to-selection'));
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   expect(scroll).toHaveBeenCalledWith({ block: 'start' });
-  expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
-  expect(file.getAttribute('aria-expanded')).toBe('true');
-  fireEvent.click(file);
-  expect(document.activeElement).toBe(file);
-  fireEvent.click(view.getByTestId('review-task-source'));
-  await waitFor(() => expect(view.getByTestId('review-center-unselected')).toBeTruthy());
-  expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(allFiles.length);
+  expect(view.queryByTestId('review-source-explorer')).toBeNull();
+  expect(view.getByTestId('review-workspace')).toBe(workspace);
 });
 
 it('keeps unreadable knowledge source-only without inventing a family or telling the reader to select one', async () => {
@@ -200,14 +155,10 @@ it('keeps unreadable knowledge source-only without inventing a family or telling
     ),
   );
   const view = render(<ReviewSurface {...target} />);
-  const tree = await view.findByTestId('review-family-tree');
-  expect(tree.dataset.familyState).toBe('unavailable');
-  expect(tree.textContent).toContain('could not be read');
-  expect(tree.textContent).not.toContain('Choose');
+  await view.findByTestId('review-family-tree');
+  expect(view.getByTestId('review-outline-unavailable').textContent).toContain('cannot be read');
   expect(view.queryByTestId('review-family-open')).toBeNull();
-  expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(
-    recorded.source.inventory.entries.length,
-  );
+  expect(view.queryByTestId('review-source-explorer')).toBeNull();
   expect(view.getByTestId('review-center-unselected').textContent).toContain('Source');
 });
 
@@ -218,6 +169,7 @@ const INVARIANT = '5a18787e-9f23-44ce-9573-41d93972a274';
 const catalogueBody = {
   state: 'entries',
   entries: catalogue,
+  outline: synthetic.outline,
   total_subjects: catalogue.length,
   family_total: catalogue.length,
   invariant_total: 0,
@@ -329,7 +281,7 @@ const familyItem = (view: ReturnType<typeof render>, familyId: string) =>
 
 const subjectButton = (view: ReturnType<typeof render>, familyId: string) =>
   view
-    .getAllByTestId('review-catalogue-subject')
+    .getAllByTestId('review-family-open')
     .find((button) => button.dataset.subjectId === familyId)!;
 
 it('keeps the reviewer mounted across family → invariant → family, pending only in the reading area, and reuses what it read', async () => {
@@ -349,13 +301,8 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   const family = familyItem(view, families[0].family_id);
   const rail = workspace.querySelector('aside')!;
   const technical = view.getByTestId('review-details') as HTMLDetailsElement;
-  const roster = family.querySelector('details')!;
   technical.open = true;
-  roster.open = true;
   rail.scrollTop = 120;
-  fireEvent.click(view.getAllByTestId('review-inventory-open')[0]);
-  await view.findByTestId('review-source-expansion');
-  expect(server.contentReads()).toHaveLength(1);
   const familyComparison = view.getByTestId('review-surface').dataset.comparison;
 
   // Family → invariant: the member is selected in the tree and its review is held open.
@@ -367,7 +314,7 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
 
   const pending = view.getByTestId('review-reading-pending');
   expect(pending.dataset.pendingSubject).toBe(`invariant:${INVARIANT}`);
-  expect(pending.textContent).toContain(`invariant ${INVARIANT}`);
+  expect(pending.textContent).toContain('invariant shared-retry-budget');
   expect(view.getByTestId('review-surface').dataset.reviewPending).toBe(`invariant:${INVARIANT}`);
   expect(view.getByTestId('review-subject').textContent).toContain(`invariant ${INVARIANT}`);
   // The previous subject's reading, statements and records are not under the new subject's name.
@@ -375,10 +322,12 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(view.queryByTestId('review-center-family')).toBeNull();
   expect(view.queryByTestId('review-selection')).toBeNull();
   expect(view.queryByTestId('review-unassessed')).toBeNull();
-  expect(view.getByTestId('review-details-pending').textContent).toContain(INVARIANT);
+  expect(view.getByTestId('review-details-pending').textContent).toContain('shared-retry-budget');
   expect(view.getByTestId('review-surface').dataset.comparison).toBeUndefined();
   expect(view.getByTestId('review-scope-families').textContent).toContain('being read');
-  expect(view.getByTestId('review-scope-comparison').textContent).not.toContain(familyComparison);
+  expect(view.queryByTestId('review-scope-comparison')?.textContent).not.toContain(
+    familyComparison,
+  );
   expect(view.queryByTestId('review-currentness-status')).toBeNull();
   expect(view.queryByTestId('review-loading')).toBeNull();
   // ...while the shell is the same DOM, still expanded, scrolled, focused and open.
@@ -388,14 +337,15 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(familyItem(view, families[0].family_id)).toBe(family);
   expect(member.getAttribute('aria-current')).toBe('true');
   expect(document.activeElement).toBe(member);
-  expect(technical.open && roster.open).toBe(true);
+  expect(technical.open).toBe(true);
   expect(rail.scrollTop).toBe(120);
   // Navigation stays usable: every other subject and the whole-task view can still be chosen.
   expect(subjectButton(view, families[1].family_id).hasAttribute('disabled')).toBe(false);
-  expect(view.getByTestId('review-task-source').hasAttribute('disabled')).toBe(false);
-  expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(
-    recorded.source.inventory.entries.length,
-  );
+  expect(
+    within(navigation)
+      .getByRole('button', { name: /^All changes/ })
+      .hasAttribute('disabled'),
+  ).toBe(false);
   expect(server.reviewReads().at(-1)!.searchParams.get('selectorKind')).toBe('invariant');
 
   await server.answer(INVARIANT);
@@ -405,7 +355,7 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(familyItem(view, families[0].family_id)).toBe(family);
   expect(view.getByTestId('review-center-column')).toBe(center);
   expect(document.activeElement).toBe(member);
-  expect(technical.open && roster.open).toBe(true);
+  expect(technical.open).toBe(true);
   expect(rail.scrollTop).toBe(120);
 
   // Invariant → the same family: answered from what this comparison already read, with no pending
@@ -417,7 +367,6 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(view.queryByTestId('review-reading-pending')).toBeNull();
   expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
   expect(view.getByTestId('review-surface').dataset.comparison).toBe(familyComparison);
-  expect(view.getByTestId('review-source-expansion')).toBeTruthy();
   await act(async () => {});
   expect(server.reviewReads()).toHaveLength(reviews);
   expect(server.contentReads()).toHaveLength(contents);
@@ -425,19 +374,14 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(view.getByTestId('review-workspace')).toBe(workspace);
   expect(familyItem(view, families[0].family_id)).toBe(family);
   expect(document.activeElement).toBe(familyNode);
-  expect(technical.open && roster.open).toBe(true);
+  expect(technical.open).toBe(true);
   // MIK-R39: the invariant's review showed the other families too; clicking the first family's row
   // leaves them in the tree, tagged as kept and last read for the invariant.
-  const invariantLabel = families
-    .flatMap((one) => [...one.before.members, ...one.after.members])
-    .find((member) => member.invariant_id === INVARIANT)!.display_label;
   const kept = families.slice(1).map((one) => familyItem(view, one.family_id));
   expect(kept.length).toBeGreaterThan(0);
   expect(kept.map((item) => item.dataset.familyKept)).toEqual(kept.map(() => 'true'));
   for (const item of kept)
-    expect(within(item).getByTestId('review-family-kept').textContent).toBe(
-      `kept · last read for invariant ${invariantLabel}`,
-    );
+    expect(within(item).getByTestId('review-family-kept').textContent).toBe('kept');
   expect(familyItem(view, families[0].family_id).dataset.familyKept).toBeUndefined();
 });
 
@@ -500,21 +444,19 @@ it('does not move a reader who is working when the catalogue answers after the b
   await server.answer(null);
   await view.findByTestId('review-center-unselected');
   const workspace = view.getByTestId('review-workspace');
-  const file = view.getAllByTestId('review-inventory-open')[0];
+  const file = view.getByTestId('review-family-filter');
   fireEvent.pointerDown(file);
-  fireEvent.click(file);
   file.focus();
-  await view.findByTestId('review-source-expansion');
 
   await server.releaseCatalogue();
-  await waitFor(() => expect(view.getAllByTestId('review-catalogue-subject')).toHaveLength(2));
+  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(2));
   await act(async () => {});
   // The catalogue filled the navigation; the reader's view, selection and focus did not move.
   expect(server.reviewReads()).toHaveLength(1);
   expect(view.getByTestId('review-center-unselected')).toBeTruthy();
   expect(view.queryByTestId('review-reading-pending')).toBeNull();
   expect(
-    view.getAllByTestId('review-catalogue-subject').some((button) => button.ariaCurrent === 'true'),
+    view.getAllByTestId('review-family-open').some((button) => button.ariaCurrent === 'true'),
   ).toBe(false);
   expect(document.activeElement).toBe(file);
   expect(view.getByTestId('review-workspace')).toBe(workspace);
@@ -564,12 +506,6 @@ it('keeps the task-context answer the bounded wait released when the catalogue a
   await act(async () => {});
   expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
   expect(view.queryByTestId('review-center-unselected')).toBeNull();
-  // It was not thrown away either: "All source changes" opens from it without another request.
-  const reads = server.reviewReads().length;
-  fireEvent.click(view.getByTestId('review-task-source'));
-  await view.findByTestId('review-center-unselected');
-  await act(async () => {});
-  expect(server.reviewReads()).toHaveLength(reads);
   expect(server.reviewReads().filter((url) => !url.searchParams.has('selectorKind'))).toHaveLength(
     1,
   );
@@ -599,7 +535,7 @@ it.each(['failed', 'refused'] as const)(
     const navigation = view.getByTestId('review-catalogue-navigation');
     const center = view.getByTestId('review-center-column');
     const family = familyItem(view, families[0].family_id);
-    const rows = view.getAllByTestId('review-inventory-entry');
+    const rows = view.getAllByTestId('review-family-open');
 
     fireEvent.click(subjectButton(view, families[1].family_id));
     await server.answer(
@@ -631,7 +567,7 @@ it.each(['failed', 'refused'] as const)(
     expect(view.getByTestId('review-surface').dataset.reviewUnavailable).toBe(
       `family:${families[1].family_id}`,
     );
-    expect(view.getByTestId('review-scope-comparison').textContent).toContain('could not be read');
+    expect(view.getByTestId('review-scope-comparison').textContent).toContain('not available');
     expect(view.getByTestId('review-details-unavailable')).toBeTruthy();
     expect(view.queryByTestId('review-selection')).toBeNull();
     // The shell is the same DOM and stays usable.
@@ -639,7 +575,7 @@ it.each(['failed', 'refused'] as const)(
     expect(view.getByTestId('review-catalogue-navigation')).toBe(navigation);
     expect(view.getByTestId('review-center-column')).toBe(center);
     expect(familyItem(view, families[0].family_id)).toBe(family);
-    expect(view.getAllByTestId('review-inventory-entry')).toEqual(rows);
+    expect(view.getAllByTestId('review-family-open')).toEqual(rows);
 
     const reviews = server.reviewReads().length;
     if (outcome === 'failed') {
@@ -678,7 +614,7 @@ it('leaves focus where the reader moved it while the selected subject was pendin
   chosen.focus();
   fireEvent.click(chosen);
   expect(view.getByTestId('review-reading-pending')).toBeTruthy();
-  const elsewhere = view.getAllByTestId('review-inventory-open')[1];
+  const elsewhere = view.getByTestId('review-family-filter');
   elsewhere.focus();
   await server.answer(families[1].family_id);
   await waitFor(() =>
@@ -776,4 +712,316 @@ it('keeps every j pressed in the turn that shows the previous answer, and lands 
   // again (a press that selects the row already selected is a press lost).
   press(J);
   await landedOn(CHANGES[2]);
+});
+
+// F03/F04 adverse sequences use explicit synthetic semantic inputs over immutable served captures.
+// The entire mounted ReviewSurface/read cycle is real; fetch is the sole replacement.
+function sharedNavigationWorld() {
+  const review = structuredClone(readCaptured<ReviewResult>('walkStore.shared.captured.json'));
+  const entries = review.payload!.family_context!.entries;
+  const sharedId = review.payload!.knowledge.revision_selection!.record_id;
+  const unknown = entries[0].after.members.find((row) => row.display_label === 'INV-GGGGGG')!;
+  for (const family of entries) {
+    family.after.guarantee = structuredClone(family.before.guarantee);
+    family.change_kinds!.guarantee = 'unchanged';
+    for (const fact of family.change_kinds!.members.filter(
+      (row) => row.invariant === 'INV-FFFFFF',
+    )) {
+      fact.intent = 'established';
+      fact.primary = 'intent';
+    }
+  }
+  const outline: ReviewOutline = {
+    state: 'outlined',
+    detail: 'Synthetic two-family shared changed occurrence.',
+    families: entries.map((entry, index) => ({
+      selector_id: entry.family_id,
+      id: `FAM-${index}`,
+      title: `Family ${index}`,
+      change: 'unchanged',
+      members: [
+        { selector_id: sharedId, id: 'INV-FFFFFF', membership: 'both' },
+        ...(index === 0
+          ? [{ selector_id: unknown.invariant_id!, id: 'INV-GGGGGG', membership: 'both' as const }]
+          : []),
+      ],
+    })),
+    invariants: [
+      {
+        selector_id: sharedId,
+        id: 'INV-FFFFFF',
+        summary: 'Shared changed invariant',
+        change: 'changed',
+      },
+      {
+        selector_id: unknown.invariant_id!,
+        id: 'INV-GGGGGG',
+        summary: 'Unknown sibling',
+        change: 'unknown',
+      },
+    ],
+  };
+  return { review, outline, sharedId, familyIds: entries.map((entry) => entry.family_id) };
+}
+function outlineReply(outline: ReviewOutline): ReviewEntryListResult {
+  const entries = [
+    ...outline.families.map((row) => ({
+      selector_kind: 'family' as const,
+      selector_id: row.selector_id,
+      label: row.title,
+      presence: 'both' as const,
+    })),
+    ...outline.invariants.map((row) => ({
+      selector_kind: 'invariant' as const,
+      selector_id: row.selector_id,
+      label: row.id,
+      presence: 'both' as const,
+    })),
+  ];
+  return {
+    state: 'entries',
+    operation: 'list_knowledge_review_entries',
+    repository_id: 'agents-remember',
+    master: '260101_tree_review',
+    leaf_id: '260101-TRV-L1',
+    entries,
+    outline,
+    total_subjects: entries.length,
+    family_total: outline.families.length,
+    invariant_total: outline.invariants.length,
+  };
+}
+const auxiliaryRefusal = {
+  state: 'refused',
+  refusal: {
+    code: 'not-found',
+    detail: 'Auxiliary data is outside this focused sequence.',
+    next_action: 'Read the mounted comparison.',
+  },
+};
+function mountSharedWorld(world: ReturnType<typeof sharedNavigationWorld>) {
+  const candidate = world.review.payload!.candidate;
+  return render(
+    <ReviewSurface
+      repo={candidate.repository_id}
+      master={candidate.master}
+      leaf={candidate.leaf_id}
+      selectorKind="family"
+      selectorId={world.familyIds[0]}
+      onBack={() => undefined}
+    />,
+  );
+}
+it('F03 visits shared changed occurrences under both families by keys and controls, skipping aggregates and unknown', async () => {
+  const world = sharedNavigationWorld();
+  const requests: URL[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      requests.push(url);
+      if (url.pathname.endsWith('/entries')) return response(outlineReply(world.outline));
+      return response(
+        url.pathname === '/api/review/intent' ? structuredClone(world.review) : auxiliaryRefusal,
+      );
+    }),
+  );
+  const view = mountSharedWorld(world);
+  await view.findByTestId('review-center-family');
+  const rail = view.getByTestId('review-catalogue-navigation');
+  const rows = () =>
+    within(rail)
+      .getAllByTestId('review-family-member-open')
+      .filter((row) => row.dataset.subjectId === world.sharedId);
+  expect(rows()).toHaveLength(2);
+  expect(new Set(rows().map((row) => row.dataset.occurrence)).size).toBe(2);
+  expect(
+    within(rail)
+      .getAllByTestId('review-family-open')
+      .map((row) => row.dataset.changePrimary),
+  ).toEqual(['unchanged', 'unchanged']);
+  within(rail).getAllByTestId('review-family-open')[0].focus();
+  const move = async (key: 'j' | 'k', family: string) => {
+    fireEvent.keyDown(document.activeElement!, { key, code: key === 'j' ? 'KeyJ' : 'KeyK' });
+    await waitFor(() =>
+      expect(view.getByTestId('review-center-member').dataset.family).toBe(family),
+    );
+    expect((document.activeElement as HTMLElement).dataset.family).toBe(family);
+  };
+  await move('j', world.familyIds[0]);
+  await move('j', world.familyIds[1]);
+  await move('k', world.familyIds[0]);
+  fireEvent.click(within(rail).getByTestId('review-next-change'));
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[1]),
+  );
+  fireEvent.click(within(rail).getByTestId('review-previous-change'));
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[0]),
+  );
+  expect(within(rail).getAllByTestId('review-family')).toHaveLength(2);
+  expect(
+    requests.filter(
+      (url) =>
+        url.pathname === '/api/review/intent' &&
+        url.searchParams.get('selectorKind') === 'invariant',
+    ),
+  ).toHaveLength(1);
+  expect(view.getByTestId('review-navigation-summary').textContent).toContain(
+    '1 invariants changed',
+  );
+});
+
+function generationWorld(axis: 'memory' | 'code') {
+  const world = sharedNavigationWorld();
+  world.outline.families[0].title = 'Old outline title';
+  world.outline.invariants[0].summary = 'Old outline summary';
+  world.outline.invariants[0].change = 'changed';
+  const newer = structuredClone(world.review);
+  newer.payload!.comparison!.reference = '2'.repeat(64);
+  newer.payload!.comparison!.binding_digest = '2'.repeat(64);
+  if (axis === 'memory') newer.payload!.comparison!.after_snapshot_digest = '3'.repeat(64);
+  else newer.payload!.source.inventory.after_code_tree_id = '4'.repeat(40);
+  newer.payload!.limitations = newer.payload!.limitations.map((value) =>
+    value === 'review:trees:1' ? 'review:trees:2' : value,
+  );
+  const entry = newer.payload!.family_context!.entries[0];
+  entry.display_label = 'New outline title';
+  const shared = entry.change_kinds!.members.find((fact) => fact.invariant === 'INV-FFFFFF')!;
+  shared.primary = 'implementation';
+  shared.implementation = 'established';
+  shared.intent = 'not_established';
+  const nextOutline = structuredClone(world.outline);
+  nextOutline.families[0].title = 'New outline title';
+  nextOutline.families[0].members[0].membership = 'left';
+  nextOutline.invariants[0].summary = 'New outline summary';
+  nextOutline.invariants[0].change = 'unchanged';
+  return { ...world, newer, nextOutline };
+}
+function holdNextCatalogue(world: ReturnType<typeof generationWorld>) {
+  const requests: URL[] = [];
+  let refreshed = false;
+  const releases: ((response: Response) => void)[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      requests.push(url);
+      if (url.pathname.endsWith('/entries')) {
+        if (requests.filter((item) => item.pathname.endsWith('/entries')).length === 1)
+          return response(outlineReply(world.outline));
+        return await new Promise<Response>((done) => {
+          releases.push(done);
+        });
+      }
+      return response(
+        url.pathname === '/api/review/intent'
+          ? structuredClone(refreshed ? world.newer : world.review)
+          : auxiliaryRefusal,
+      );
+    }),
+  );
+  return {
+    requests,
+    advance: () => {
+      refreshed = true;
+    },
+    release: (body: unknown, index = releases.length - 1) => releases[index]?.(response(body)),
+  };
+}
+it.each(['memory', 'code'] as const)(
+  'F04 quarantines a prior %s generation outline until the matching catalogue arrives',
+  async (axis) => {
+    const world = generationWorld(axis);
+    const server = holdNextCatalogue(world);
+    const view = mountSharedWorld(world);
+    await view.findByTestId('review-center-family');
+    const rail = view.getByTestId('review-catalogue-navigation');
+    expect(rail.textContent).toContain('Old outline title');
+    const workspace = view.getByTestId('review-workspace');
+    const refresh = view.getByTestId('review-refresh');
+    refresh.focus();
+    server.advance();
+    fireEvent.click(refresh);
+    await waitFor(() =>
+      expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2),
+    );
+    expect(view.getByTestId('review-surface').dataset.comparison).toBe('2'.repeat(64));
+    expect(rail.textContent).not.toContain('Old outline title');
+    expect(rail.textContent).not.toContain('Old outline summary');
+    expect(rail.querySelector('[data-testid="review-outline-badge"]')).toBeNull();
+    expect(rail.textContent).toContain('Reading families and invariants for this comparison');
+    expect(document.activeElement).toBe(refresh);
+    const reads = server.requests.length;
+    await act(async () => server.release(outlineReply(world.nextOutline)));
+    await waitFor(() => expect(rail.textContent).toContain('New outline title'));
+    expect(rail.textContent).toContain('New outline summary');
+    expect(rail.textContent).not.toContain('Old outline summary');
+    expect(rail.querySelector('[data-subject-id="' + world.sharedId + '"]')?.textContent).toContain(
+      'code changed',
+    );
+    expect(view.getByTestId('review-workspace')).toBe(workspace);
+    expect(document.activeElement).toBe(refresh);
+    expect(server.requests).toHaveLength(reads);
+  },
+);
+it('F04 makes a failed generation reread explicit without reviving the prior semantic outline', async () => {
+  const world = generationWorld('memory');
+  const server = holdNextCatalogue(world);
+  const view = mountSharedWorld(world);
+  await view.findByTestId('review-center-family');
+  server.advance();
+  fireEvent.click(view.getByTestId('review-refresh'));
+  await waitFor(() =>
+    expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2),
+  );
+  await act(async () =>
+    server.release({
+      state: 'refused',
+      refusal: {
+        code: 'knowledge_unavailable',
+        detail: 'New generation catalogue could not be read.',
+        next_action: 'Retry the comparison.',
+      },
+    }),
+  );
+  const rail = view.getByTestId('review-catalogue-navigation');
+  await waitFor(() =>
+    expect(rail.textContent).toContain('New generation catalogue could not be read.'),
+  );
+  expect(rail.textContent).not.toContain('Old outline title');
+  expect(rail.textContent).not.toContain('Old outline summary');
+  expect(rail.querySelector('[data-testid="review-outline-badge"]')).toBeNull();
+  expect(rail.textContent).toContain('catalogue for this comparison is unavailable');
+  expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2);
+});
+
+it('F04 ignores a late catalogue answer superseded by another admitted generation', async () => {
+  const world = generationWorld('memory');
+  const server = holdNextCatalogue(world);
+  const view = mountSharedWorld(world);
+  await view.findByTestId('review-center-family');
+  const refresh = view.getByTestId('review-refresh');
+  server.advance();
+  fireEvent.click(refresh);
+  await waitFor(() =>
+    expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2),
+  );
+  world.newer = structuredClone(world.newer);
+  world.newer.payload!.comparison!.reference = '6'.repeat(64);
+  world.newer.payload!.comparison!.binding_digest = '6'.repeat(64);
+  world.newer.payload!.comparison!.after_snapshot_digest = '5'.repeat(64);
+  fireEvent.click(refresh);
+  await waitFor(() =>
+    expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(3),
+  );
+  const latest = structuredClone(world.nextOutline);
+  latest.families[0].title = 'Latest matching catalogue';
+  const rail = view.getByTestId('review-catalogue-navigation');
+  await act(async () => server.release(outlineReply(latest), 1));
+  await waitFor(() => expect(rail.textContent).toContain('Latest matching catalogue'));
+  await act(async () => server.release(outlineReply(world.nextOutline), 0));
+  expect(rail.textContent).toContain('Latest matching catalogue');
+  expect(rail.textContent).not.toContain('New outline title');
+  expect(view.getByTestId('review-surface').dataset.comparison).toBe('6'.repeat(64));
 });

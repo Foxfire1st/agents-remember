@@ -77,16 +77,7 @@ describe('the tree view of a converted leaf', () => {
     expect(degradedKnowledgeSides(result)).toEqual([]);
   });
 
-  it('groups the memory diff by record and by source path, with currentness per side', () => {
-    const diff = captured.knowledge_diff!;
-    const record = diff.records.find((group) => group.record_id === 'INV-2TQGXFAX')!;
-    expect(record.entries).toContainEqual(['RLZ-CXH58B4W', SOURCE, 'changed']);
-    const source = diff.sources.find((group) => group.source_path === SOURCE)!;
-    expect(source.records).toEqual(['INV-2TQGXFAX']);
-    expect(source.files[0].patch).toContain('@@');
-    expect(diff.history.map((file) => [file.path, file.status])).toEqual([
-      ['knowledge/history/260928-MIK-L31.json', 'added'],
-    ]);
+  it('reads currentness per side on the comparison’s code trees', () => {
     expect(invariantCurrentness(captured, 'INV-2TQGXFAX')).toEqual({
       before: 'current',
       after: 'current',

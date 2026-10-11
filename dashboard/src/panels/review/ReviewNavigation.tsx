@@ -1,8 +1,15 @@
 // Recorded subject navigation. The catalogue supplies identity; the review supplies family content.
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReviewCatalogue } from '../../data/useReviewCatalogue';
 import type { FamilySelection } from './FamilyTree';
 import type { ReviewPageRequest } from './ReviewReadCycle';
+import { outlineCounts, firstOutlineChange } from './changeTriage';
+import { useTreeOrder } from './triageOrderPreference';
+import {
+  comparisonGenerationOf,
+  sameGeneration,
+  type ComparisonGeneration,
+} from './ReviewReadCache';
 import { css } from '../../../styled-system/css';
 import type { ReviewEntry, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import type { ReviewCatalogueRead } from '../../data/useReviewCatalogue';
@@ -37,10 +44,11 @@ export interface ReviewNavigation extends ReviewNavigationState {
   // subject read -- and a slow or stalled catalogue never withholds the task-context review and its
   // source explorer for longer than the bound.
   settling: boolean;
-  // Report the compared snapshot pair the surface is showing. The first pair it reports is the one
+  // Report the comparison generation the surface is showing (code trees and known snapshots).
+  // The first generation it reports is the one
   // the entry catalogue describes; a different pair later (a refresh that reached a new candidate
   // generation) re-reads the catalogue for it.
-  observeComparison: (snapshots: string | undefined) => void;
+  observeComparison: (snapshots: ComparisonGeneration | undefined) => void;
   // The reader acted inside the reviewer (pointer, key, wheel or touch). Once the bounded wait has
   // released a read, the subject on screen becomes the reader's own choice, so a catalogue that
   // answers later fills the navigation without moving the reader to its first family. A reader who
@@ -48,119 +56,67 @@ export interface ReviewNavigation extends ReviewNavigationState {
   engage: () => void;
 }
 
-const row = css({
-  display: 'block',
-  width: '100%',
-  textAlign: 'left',
-  padding: '0.65rem',
-  color: 'ink',
-  borderBottom: '1px solid var(--grid)',
-  background: 'transparent',
-  _hover: { background: 'color-mix(in oklab, var(--amber) 8%, transparent)' },
-  '&[aria-current=true]': {
-    color: 'amber',
-    background: 'color-mix(in oklab, var(--amber) 16%, transparent)',
-  },
-});
 const summary = css({ color: 'muted', fontSize: '0.75rem', margin: '0.5rem 0' });
-
-function SubjectButton({
-  entry,
-  subject,
-  onSelect,
-}: {
-  entry: ReviewEntry;
-  subject?: ReviewSubject;
-  onSelect: ReviewNavigationState['onSelect'];
+export interface NavigationCounts {
+  unexplained: number | '…' | 'unavailable';
+  unknown: number | '…' | 'unavailable';
+}
+export function ReviewNavigation({
+  catalogue,
+  children,
+  summaryCounts,
+  destinations,
+  walkedEntries = [],
+}: ReviewNavigationState & {
+  children?: React.ReactNode;
+  summaryCounts?: NavigationCounts;
+  destinations?: React.ReactNode;
+  walkedEntries?: import('../../data/review').ReviewFamilyContextEntry[];
 }) {
+  const { text, reason } = navigationSummary(catalogue, walkedEntries, summaryCounts);
   return (
-    <button
-      type="button"
-      className={row}
-      data-testid="review-catalogue-subject"
-      data-subject-kind={entry.selector_kind}
-      data-subject-id={entry.selector_id}
-      aria-current={
-        subject?.kind === entry.selector_kind && subject.id === entry.selector_id
-          ? 'true'
-          : undefined
-      }
-      onClick={() => onSelect({ kind: entry.selector_kind, id: entry.selector_id })}
-    >
-      {entry.selector_kind === 'family' ? '▸ ' : ''}
-      {entry.label}
-      {entry.presence === 'before_only'
-        ? ' · before only'
-        : entry.presence === 'after_only'
-          ? ' · after only'
-          : ''}
-    </button>
+    <section data-testid="review-catalogue-navigation" aria-label="Families and invariants">
+      <h2 className={css({ fontSize: '0.85rem', margin: 0 })}>Families &amp; invariants</h2>
+      <p className={summary} data-testid="review-navigation-summary">
+        {text}
+      </p>
+      {reason ? (
+        <p className={summary} data-testid="review-outline-unavailable">
+          {reason}
+        </p>
+      ) : null}
+      {children}
+      {destinations}
+    </section>
   );
 }
 
-export function ReviewNavigation({
-  catalogue,
-  subject,
-  onSelect,
-  children,
-  loadedFamilyIds = [],
-  listLoaded = false,
-}: ReviewNavigationState & {
-  children?: React.ReactNode;
-  loadedFamilyIds?: string[];
-  // The tree holds a kept family: the catalogue then lists every family the tree shows (MIK-R39).
-  listLoaded?: boolean;
-}) {
-  const families = (catalogue.entries ?? []).filter((entry) => entry.selector_kind === 'family');
-  const invariants = (catalogue.entries ?? []).filter(
-    (entry) => entry.selector_kind === 'invariant',
-  );
+function navigationSummary(
+  catalogue: ReviewNavigationState['catalogue'],
+  walkedEntries: import('../../data/review').ReviewFamilyContextEntry[],
+  lanes?: NavigationCounts,
+) {
+  const reading = catalogue.loading || (!catalogue.entries && !catalogue.problem);
+  const counts = reading ? undefined : outlineCounts(catalogue.outline, walkedEntries);
+  const placeholder = reading ? '…' : 'unavailable';
+  const text = summaryText(counts, lanes, placeholder);
+  return { text, reason: reading || counts ? undefined : unavailableReason(catalogue) };
+}
+function summaryText(
+  counts: ReturnType<typeof outlineCounts>,
+  lanes: NavigationCounts | undefined,
+  placeholder: string,
+): string {
+  const families = counts?.families ?? placeholder;
+  const invariants = counts?.invariants ?? placeholder;
+  return `${families} families changed · ${invariants} invariants changed · ${lanes?.unexplained ?? '…'} files unexplained · ${lanes?.unknown ?? '…'} unknown attribution`;
+}
+
+function unavailableReason(catalogue: ReviewNavigationState['catalogue']): string {
   return (
-    <section data-testid="review-catalogue-navigation" aria-label="Recorded review subjects">
-      <p className={summary}>{catalogueLabel(catalogue)}</p>
-      <CatalogueFamilies
-        entries={families}
-        subject={subject}
-        onSelect={onSelect}
-        loadedFamilyIds={loadedFamilyIds}
-        listLoaded={listLoaded}
-      >
-        {children}
-      </CatalogueFamilies>
-      {invariants.length ? (
-        <details data-testid="review-all-invariants">
-          <summary>All {invariants.length} recorded invariants</summary>
-          {invariants.map((entry) => (
-            <SubjectButton
-              key={entry.selector_id}
-              entry={entry}
-              subject={subject}
-              onSelect={onSelect}
-            />
-          ))}
-        </details>
-      ) : null}
-      {catalogue.empty ? <p className={summary}>No subjects recorded in this comparison.</p> : null}
-      {catalogue.problem ? (
-        <details data-testid="review-catalogue-problem">
-          <summary>Why attribution is unavailable</summary>
-          <p>
-            {catalogue.problem.code}: {catalogue.problem.detail}
-          </p>
-          <p>{catalogue.problem.nextAction}</p>
-        </details>
-      ) : null}
-      <div
-        className={css({ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.6rem' })}
-      >
-        <button type="button" data-testid="review-task-source" onClick={() => onSelect(undefined)}>
-          All source changes
-        </button>
-        <button type="button" onClick={catalogue.refresh}>
-          Refresh subjects
-        </button>
-      </div>
-    </section>
+    catalogue.outline?.detail ??
+    catalogue.problem?.detail ??
+    'The memory is not converted; change facts are unavailable.'
   );
 }
 
@@ -181,21 +137,28 @@ export function useReviewNavigation(target: {
   history?: 'recorded';
 }): ReviewNavigation {
   const [generation, setGeneration] = useState(0);
-  // The snapshot pair first reported for this task context and record; a pair reported under
+  const [identity, setIdentity] = useState<{ comparison: string; value: ComparisonGeneration }>();
+  // The generation first reported for this task context and record; a generation reported under
   // another context is that context's first, not a new generation of this one.
   const comparison = `${target.repo}/${target.master}/${target.leaf}/${target.history ?? 'live'}`;
-  const seen = useRef<{ comparison: string; snapshots: string } | undefined>(undefined);
+  const seen = useRef<{ comparison: string; snapshots: ComparisonGeneration } | undefined>(
+    undefined,
+  );
   const catalogue = useReviewCatalogue({
     repo: target.repo,
     master: target.master,
     leaf: target.leaf,
     history: target.history,
     generation,
+    comparisonGeneration: identityForTask(identity, comparison),
   });
+  const order = useTreeOrder();
   const key = JSON.stringify(target);
   const [choice, setChoice] = useState<{ key: string; subject?: ReviewSubject }>();
   const chosen = choice?.key === key;
-  const subject = chosen ? choice.subject : initialSubject(target, catalogue.entries);
+  const subject = chosen
+    ? choice.subject
+    : initialSubject(target, catalogue.entries, catalogue.outline, order);
   const answered = catalogue.entries !== undefined || catalogue.problem !== undefined;
   const waiting = !chosen && !(target.selectorKind && target.selectorId) && !answered;
   const [expired, setExpired] = useState<string>();
@@ -206,11 +169,18 @@ export function useReviewNavigation(target: {
   }, [waiting, key]);
   const settling = waiting && expired !== key;
   const observeComparison = useCallback(
-    (snapshots: string | undefined) => {
+    (snapshots: ComparisonGeneration | undefined) => {
       const previous = seen.current;
       if (snapshots === undefined) return;
-      if (previous?.comparison === comparison && previous.snapshots === snapshots) return;
+      if (previous?.comparison === comparison && sameGeneration(previous.snapshots, snapshots)) {
+        if (previous.snapshots.snapshots === undefined && snapshots.snapshots !== undefined) {
+          seen.current = { comparison, snapshots };
+          setIdentity({ comparison, value: snapshots });
+        }
+        return;
+      }
       seen.current = { comparison, snapshots };
+      setIdentity({ comparison, value: snapshots });
       if (previous?.comparison === comparison) setGeneration((value) => value + 1);
     },
     [comparison],
@@ -249,67 +219,47 @@ export function useReaderEngagement(
   }, [root, engage]);
 }
 
-// Report the snapshot pair the surface shows to the navigation that keys its catalogue on it.
+// Report the complete generation to the navigation; code-only moves also invalidate the catalogue.
 export function useObservedComparison(
   observeComparison: ReviewNavigation['observeComparison'],
   shown: ReviewPayload | null,
 ): void {
+  const trees = shown?.source.inventory;
   const identity = shown?.comparison;
-  const snapshots = identity?.knowledge_compared
-    ? `${identity.before_snapshot_digest ?? ''}:${identity.after_snapshot_digest ?? ''}`
-    : undefined;
-  useEffect(() => observeComparison(snapshots), [observeComparison, snapshots]);
+  const beforeTree = trees?.before_code_tree_id;
+  const afterTree = trees?.after_code_tree_id;
+  const beforeSnapshot = identity?.before_snapshot_digest;
+  const afterSnapshot = identity?.after_snapshot_digest;
+  const compared = identity?.knowledge_compared;
+  useEffect(() => {
+    if (!shown) return;
+    observeComparison(comparisonGenerationOf(shown));
+  }, [observeComparison, shown, beforeTree, afterTree, beforeSnapshot, afterSnapshot, compared]);
 }
 
-function catalogueLabel(catalogue: ReviewNavigationState['catalogue']): string {
-  if (catalogue.loading || (!catalogue.entries && !catalogue.problem))
-    return 'Reading recorded subjects…';
-  if (catalogue.problem) return 'Attribution unavailable';
-  return `${catalogue.familyTotal ?? 0} families · ${catalogue.invariantTotal ?? 0} invariants`;
-}
-
-function initialSubject(
+export function initialSubject(
   target: { selectorKind?: ReviewSelectorKind; selectorId?: string },
   entries?: ReviewEntry[],
+  outline?: import('../../data/review').ReviewOutline,
+  order: import('./triageOrderPreference').TreeOrder = 'triage',
 ): ReviewSubject | undefined {
   if (target.selectorKind && target.selectorId)
     return { kind: target.selectorKind, id: target.selectorId };
-  const first = entries?.find((entry) => entry.selector_kind === 'family') ?? entries?.[0];
+  if (outline?.state === 'outlined') {
+    const first = firstOutlineChange(outline, order);
+    return first ? { kind: first.kind, id: first.selectorId } : undefined;
+  }
+  const first = catalogueFirst(entries);
   return first ? { kind: first.selector_kind, id: first.selector_id } : undefined;
 }
 
-function CatalogueFamilies({
-  entries,
-  subject,
-  onSelect,
-  loadedFamilyIds,
-  listLoaded,
-  children,
-}: {
-  entries: ReviewEntry[];
-  subject?: ReviewSubject;
-  onSelect: ReviewNavigationState['onSelect'];
-  loadedFamilyIds: string[];
-  listLoaded: boolean;
-  children?: React.ReactNode;
-}) {
-  const button = (entry: ReviewEntry) => (
-    <SubjectButton key={entry.selector_id} entry={entry} subject={subject} onSelect={onSelect} />
-  );
-  // The tree is one keyed child among the rows, so it keeps its identity (its open disclosures and
-  // scroll) however the walk moves the place it stands in. It stands in the place of the first
-  // family it shows. While it shows a kept family, every family it shows also keeps its catalogue row
-  // (without badges): choosing it starts the tree afresh with that family alone (MIK-R39).
-  const nodes: React.ReactNode[] = [];
-  let placed = false;
-  for (const entry of entries) {
-    const loaded = loadedFamilyIds.includes(entry.selector_id);
-    if (loaded && !placed) {
-      nodes.push(<Fragment key="tree">{children}</Fragment>);
-      placed = true;
-    }
-    if (!loaded || listLoaded) nodes.push(button(entry));
-  }
-  if (!placed) nodes.push(<Fragment key="tree">{children}</Fragment>);
-  return <>{nodes}</>;
+function catalogueFirst(entries: ReviewEntry[] = []): ReviewEntry | undefined {
+  return entries.find((entry) => entry.selector_kind === 'family') ?? entries[0];
+}
+
+function identityForTask(
+  identity: { comparison: string; value: ComparisonGeneration } | undefined,
+  comparison: string,
+): ComparisonGeneration | undefined {
+  return identity?.comparison === comparison ? identity.value : undefined;
 }

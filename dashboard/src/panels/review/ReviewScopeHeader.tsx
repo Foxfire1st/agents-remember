@@ -48,23 +48,80 @@ export function ReviewScopeHeader({
           {scope.currentness}
         </p>
       ) : null}
-      <details>
-        <summary>Comparison details</summary>
-        <p className={muted}>
-          {repo} · {master} · <span data-testid="review-scope-task">{leaf}</span>
-        </p>
-        <p className={muted} data-testid="review-scope-comparison">
+      <FamilyScope payload={payload} status={status} text={scope.families} />
+      {status !== null ? (
+        <p className={muted} data-review-content="read-state">
           {scope.comparison}
         </p>
-        <p className={muted}>
-          Before {inventory.before_code_tree_id ?? 'not recorded'} → after{' '}
-          {inventory.after_code_tree_id ?? 'not recorded'}
-        </p>
-        <p className={muted} data-testid="review-scope-families">
-          {scope.families}
-        </p>
-      </details>
+      ) : null}
+      <ScopeMetadata
+        payload={payload}
+        repo={repo}
+        master={master}
+        leaf={leaf}
+        status={status}
+        comparison={scope.comparison}
+      />
     </header>
+  );
+}
+
+function FamilyScope({
+  payload,
+  status,
+  text,
+}: {
+  payload: ReviewPayload;
+  status: 'pending' | 'unavailable' | null;
+  text: string;
+}) {
+  const limitations = status === null ? payload.family_context?.limitations : undefined;
+  return (
+    <p className={muted} data-testid="review-scope-families" data-review-content="family-state">
+      {text}
+      {limitations?.length ? ` · ${limitations.join('; ')}` : ''}
+    </p>
+  );
+}
+function ScopeMetadata({
+  payload,
+  repo,
+  master,
+  leaf,
+  status,
+  comparison,
+}: {
+  payload: ReviewPayload;
+  repo: string;
+  master: string;
+  leaf: string;
+  status: 'pending' | 'unavailable' | null;
+  comparison: string;
+}) {
+  const inventory = payload.source.inventory;
+  const Container = status === null ? 'details' : 'div';
+  return (
+    <Container
+      data-disclosure={status === null ? 'provenance' : undefined}
+      data-review-content={status === null ? undefined : 'read-state'}
+    >
+      {status === null ? (
+        <summary>Comparison details</summary>
+      ) : (
+        <strong>Comparison details</strong>
+      )}
+      <p className={muted}>
+        {repo} · {master} · <span data-testid="review-scope-task">{leaf}</span>
+      </p>
+      <p className={muted} data-testid="review-scope-comparison">
+        {status === null && payload.comparison ? comparison : 'Comparison identity not available'}
+      </p>
+      <p className={muted}>
+        Before {inventory.before_code_tree_id ?? 'not recorded'} → after{' '}
+        {inventory.after_code_tree_id ?? 'not recorded'}
+      </p>
+      <p className={muted}>{inventory.command}</p>
+    </Container>
   );
 }
 

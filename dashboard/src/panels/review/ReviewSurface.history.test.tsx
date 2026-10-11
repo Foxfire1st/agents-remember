@@ -18,11 +18,15 @@ import { ReviewSurface } from "./ReviewSurface";
 
 // Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
 // exercised through both real readers in ReviewSurface.navigation.test.tsx.
-vi.mock("../../data/useReviewCatalogue", () => ({
+vi.mock("../../data/useReviewCatalogue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../data/useReviewCatalogue")>();
+  return {
+    ...actual,
   useReviewCatalogue: () => ({
     loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
   }),
-}));
+  };
+});
 
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";

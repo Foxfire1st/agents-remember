@@ -1,128 +1,102 @@
-// MIK-R42: while the leaf-wide read computes, the knowledge panel says so; when the read gives no
-// answer it says that instead of being absent, which would read as "this leaf changed no knowledge".
-
-import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
+// Worklist facts stay visible; read failures never mean no items.
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { ReviewResult } from '../../data/review';
-import { ReviewSurface } from './ReviewSurface';
-import { LeafKnowledgeNotice } from './LeafKnowledgeChanges';
-
-const captured = <T,>(name: string): T =>
-  JSON.parse(
-    readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
-  ) as T;
-const family = captured<ReviewResult>('gitTrees.family.captured.json');
-const invariant = captured<ReviewResult>('gitTrees.invariant.captured.json');
-const entries = captured<unknown>('gitTrees.entries.captured.json');
-const cards = captured<unknown>('gitTrees.cards.captured.json');
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
+import type { ReviewTreesResult } from '../../data/reviewTrees';
+import { LeafWorklistView, SubjectWorklistItems } from './LeafKnowledgeChanges';
+const trees = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'laneReview.trees.captured.json'),
+    'utf8',
+  ),
+) as ReviewTreesResult;
+afterEach(cleanup);
+it('states pending, failed and unconverted reads visibly', () => {
+  const open = vi.fn();
+  const view = render(
+    <LeafWorklistView read={{ phase: 'loading' }} onOpenChanges={open} onOpenPath={open} />,
+  );
+  expect(screen.getByRole('status').textContent).toContain("Reading the leaf's worklist");
+  view.rerender(
+    <LeafWorklistView
+      read={{
+        phase: 'unavailable',
+        problem: {
+          token: 'unavailable-history',
+          code: 'candidate_unresolved',
+          detail: 'The worklist could not be read.',
+          nextAction: 'Retry after the inputs settle.',
+        },
+      }}
+      onOpenChanges={open}
+      onOpenPath={open}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Retry after the inputs settle.');
+  expect(view.container.querySelector('details')).toBeNull();
+  view.rerender(
+    <LeafWorklistView read={{ phase: 'not-converted' }} onOpenChanges={open} onOpenPath={open} />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('memory is not converted');
+  view.rerender(<SubjectWorklistItems recordId="INV-ABSENT" read={{ phase: 'loading' }} />);
+  expect(screen.getByRole('status').textContent).toContain("Reading the leaf's worklist");
 });
-
-describe('the knowledge panel while the leaf-wide read has no tree answer', () => {
-  it('says that it is computing', () => {
-    render(<LeafKnowledgeNotice read={{ phase: 'loading' }} />);
-    const note = screen.getByTestId('review-leaf-knowledge-computing');
-    expect(note.textContent).toMatch(/Computing the knowledge changes/);
-    expect(note.getAttribute('role')).toBe('status');
-  });
-
-  it('names the failure and its action when the read is unavailable', () => {
-    render(
-      <LeafKnowledgeNotice
-        read={{
-          phase: 'unavailable',
-          problem: {
-            token: 'unavailable-history',
-            code: 'reviewer_busy',
-            detail: 'the reviewer is computing other worklists',
-            nextAction: 'the reviewer is computing other worklists; retry',
-          },
-        }}
-      />,
-    );
-    const note = screen.getByTestId('review-leaf-knowledge-unavailable');
-    expect(note.textContent).toContain(
-      'are unavailable: the reviewer is computing other worklists',
-    );
-    expect(note.textContent).toContain('retry.');
-  });
-
-  it('draws nothing for a dataset review', () => {
-    const { container } = render(<LeafKnowledgeNotice read={{ phase: 'not-converted' }} />);
-    expect(container.textContent).toBe('');
-  });
+it('draws all items and file links with only one identifiers disclosure per group', () => {
+  const changes = vi.fn();
+  const paths = vi.fn();
+  const view = render(
+    <LeafWorklistView
+      read={{ phase: 'trees', trees }}
+      reviewComparison={trees.comparison!.number}
+      onOpenChanges={changes}
+      onOpenPath={paths}
+    />,
+  );
+  expect(screen.getAllByTestId('review-worklist-item')).toHaveLength(trees.worklist!.items.length);
+  const details = [...view.container.querySelectorAll('details')];
+  expect(details.length).toBeLessThanOrEqual(8);
+  expect(details.every((one) => one.dataset.disclosure === 'identifiers')).toBe(true);
+  expect(view.container.querySelector('details [data-review-content]')).toBeNull();
+  expect(view.container.querySelector('pre')).toBeNull();
+  expect(view.container.textContent).not.toContain('Item facts');
+  fireEvent.click(screen.getByRole('button', { name: 'Open changed knowledge files' }));
+  expect(changes).toHaveBeenCalledOnce();
+  const first = screen.getAllByTestId('review-unexplained-file')[0];
+  fireEvent.click(first.querySelector('button')!);
+  expect(paths).toHaveBeenCalledWith(first.dataset.path);
+  expect(screen.getByTestId('review-worklist-linkage').textContent).toMatch(
+    /changed hunks in \d+ files are linked/,
+  );
 });
-
-it.each(['family', 'invariant'] as const)(
-  'shows the held read and final failure with %s selected through the real surface',
-  async (kind) => {
-    const subject = kind === 'family' ? family : invariant;
-    const payload = subject.payload!;
-    let finish!: (response: Response) => void;
-    const held = new Promise<Response>((resolve) => {
-      finish = resolve;
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (address: string) => {
-        const url = new URL(address, 'http://localhost');
-        if (
-          url.pathname.endsWith('/trees') &&
-          !url.searchParams.get('invariants') &&
-          !url.searchParams.get('lane')
-        )
-          return held;
-        const body = url.pathname.endsWith('/trees')
-          ? cards
-          : url.pathname.endsWith('/entries')
-            ? entries
-            : subject;
-        return { ok: true, status: 200, json: async () => body } as Response;
-      }),
-    );
-    const view = render(
-      <ReviewSurface
-        repo={payload.candidate.repository_id}
-        master={payload.candidate.master}
-        leaf={payload.candidate.leaf_id}
-        selectorKind={kind}
-        selectorId={payload.knowledge.revision_selection!.record_id}
-        onBack={() => undefined}
-      />,
-    );
-    const center = await view.findByTestId(
-      kind === 'family' ? 'review-center-family' : 'review-center-member',
-    );
-    const status = within(center).getByTestId('review-leaf-knowledge-computing');
-    expect(status.getAttribute('role')).toBe('status');
-    expect(status.textContent).toContain('Computing the knowledge changes');
-    expect(status.closest('details:not([open])')).toBeNull();
-    await act(async () => {
-      finish({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          state: 'refused',
-          knowledge_sides: [],
-          refusal: {
-            code: 'candidate_unresolved',
-            detail: 'The installed build changed.',
-            next_action: 'Restart the dashboard.',
-          },
-        }),
-      } as Response);
-    });
-    const unavailable = within(center).getByTestId('review-leaf-knowledge-unavailable');
-    const nextStatus = within(unavailable).getByRole('status');
-    expect(nextStatus).toBe(status);
-    expect(nextStatus.textContent).toContain('are unavailable');
-    expect(nextStatus.closest('details:not([open])')).toBeNull();
-    expect(unavailable.textContent).toContain('Restart the dashboard.');
-  },
-);
+it('shows only record items, an honest empty state and the comparison binding', () => {
+  const record = trees.worklist!.items.find((one) => one.kind === 'touched_invariant')!.subject;
+  const view = render(
+    <SubjectWorklistItems
+      read={{ phase: 'trees', trees }}
+      recordId={record}
+      reviewComparison={trees.comparison!.number}
+    />,
+  );
+  expect(screen.getAllByTestId('review-worklist-item')).toHaveLength(
+    trees.worklist!.items.filter((one) => one.subject === record).length,
+  );
+  expect(view.container.querySelector('details')).toBeNull();
+  view.rerender(
+    <SubjectWorklistItems
+      read={{ phase: 'trees', trees }}
+      recordId="INV-ABSENT"
+      reviewComparison={trees.comparison!.number}
+    />,
+  );
+  expect(view.container.textContent).toContain('No worklist item names this record.');
+  view.rerender(
+    <SubjectWorklistItems
+      read={{ phase: 'trees', trees }}
+      recordId={record}
+      reviewComparison={trees.comparison!.number + 1}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('belongs to comparison');
+  expect(view.container.textContent).not.toContain('No worklist item');
+});

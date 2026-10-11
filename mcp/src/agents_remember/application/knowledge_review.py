@@ -100,6 +100,7 @@ from agents_remember.application.review_family_context import (
 )
 from agents_remember.application.review_family_rosters import family_collection_refusal
 from agents_remember.application.review_legacy_comparison import knowledge_unavailable_limitations
+from agents_remember.application.review_outline import read_review_outline
 from agents_remember.application.review_pagination import (
     comparison_page,
     comparison_reset,
@@ -312,6 +313,7 @@ def list_knowledge_review_entries(
         total_subjects=len(entries),
         invariant_total=invariant_total,
         family_total=len(entries) - invariant_total,
+        outline=read_review_outline(resolved),
     )
 
 

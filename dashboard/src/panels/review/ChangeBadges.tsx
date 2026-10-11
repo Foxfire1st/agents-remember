@@ -12,7 +12,13 @@ import type {
   ReviewFamilyChanges,
   ReviewMemberChange,
 } from '../../data/reviewFamily';
-import { CHANGE_LABEL, CHANGE_MEANING, type FamilyTriage, breakdownText } from './changeTriage';
+import {
+  CHANGE_LABEL,
+  CHANGE_MEANING,
+  type FamilyTriage,
+  type OutlineBadge,
+  breakdownText,
+} from './changeTriage';
 import type { TraversalDirection } from './changeTraversal';
 import type { MarkTarget } from './hunkMarkers';
 import { ATTRIBUTION_UNKNOWN, useMemberTarget } from './MarkerTargetState';
@@ -84,10 +90,11 @@ const triageBar = css({
 });
 const controls = css({
   display: 'flex',
-  flexWrap: 'wrap',
-  gap: '0.4rem',
+  flexWrap: 'nowrap',
+  gap: '0.25rem',
   alignItems: 'center',
-  margin: '0.4rem 0',
+  margin: '0.3rem 0',
+  fontSize: '0.72rem',
 });
 
 function titleOf(kind: ReviewChangeKind, evidence: readonly string[]): string {
@@ -106,12 +113,6 @@ function Marks({ marks }: { marks: readonly ReviewChangeMark[] }) {
   );
 }
 
-// "first reason (and N more)", every reason in the tooltip.
-function firstOf(reasons: readonly string[]): string {
-  const more = reasons.length - 1;
-  return `${reasons[0]}${more > 0 ? ` (and ${more} more)` : ''}`;
-}
-
 // Why an unknown is unknown, as the server named it (the lane's per-entry reason, or the side that
 // could not be read), labelled with what is unknown: the change kind, the membership, the guarantee.
 // A member node names only its subject and is described by these lines (review R3-1).
@@ -126,8 +127,14 @@ function UnknownReason({
 }) {
   if (!reasons.length) return null;
   return (
-    <span id={id} className={why} data-testid="review-change-why" title={reasons.join('\n')}>
-      {label}: {firstOf(reasons)}
+    <span
+      id={id}
+      className={why}
+      data-testid="review-change-why"
+      data-review-content="reason"
+      title={reasons.join('\n')}
+    >
+      {label}: {reasons.join('; ')}
     </span>
   );
 }
@@ -198,7 +205,7 @@ function membershipLine(
 ): { text: string; title?: string } | null {
   if (change.membership === 'unknown' && change.membership_reasons.length > 0)
     return {
-      text: `membership unknown: ${firstOf(change.membership_reasons)}`,
+      text: `membership unknown: ${change.membership_reasons.join('; ')}`,
       title: change.membership_reasons.join('\n'),
     };
   if (!target) return null;
@@ -215,6 +222,7 @@ function MembershipReason({ state }: { state: MemberChangeState }) {
       id={ids.membership}
       className={why}
       data-testid="review-change-membership-why"
+      data-review-content="reason"
       data-member-state={target ? 'membership_unknown' : undefined}
       title={line.title}
     >
@@ -337,23 +345,64 @@ export function TriageControls({
         <button
           type="button"
           data-testid="review-previous-change"
+          title={`Previous change${previous ? ` (${previous.label})` : ''}`}
           aria-keyshortcuts={previous ? ariaKeyshortcuts(previous.chord) : undefined}
           onClick={() => onMove(-1)}
         >
-          ↑ Previous change{previous ? ` (${previous.label})` : ''}
+          ↑ Previous
         </button>
         <button
           type="button"
           data-testid="review-next-change"
+          title={`Next change${next ? ` (${next.label})` : ''}`}
           aria-keyshortcuts={next ? ariaKeyshortcuts(next.chord) : undefined}
           onClick={() => onMove(1)}
         >
-          ↓ Next change{next ? ` (${next.label})` : ''}
+          ↓ Next
         </button>
       </div>
-      <p className={muted} role="status" aria-live="polite" data-testid="review-change-status">
-        {status}
-      </p>
+      {status ? (
+        <p className={muted} role="status" aria-live="polite" data-testid="review-change-status">
+          {status}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+const OUTLINE_MEANING: Record<string, string> = {
+  added: 'Only the after side holds this record.',
+  removed: 'Only the before side holds this record, or the after side retired it.',
+  changed: 'Its revision or authored text differs between the two sides.',
+  'code changed': 'A recorded implementation entry or a hunk within its range changed.',
+  joined: 'This family lists the invariant on the after side only.',
+  left: 'This family lists the invariant on the before side only.',
+  unknown: 'A change fact could not be read or established.',
+  unchanged: 'The record is unchanged; this does not assert that its code is unchanged.',
+};
+export function OutlineChangeBadge({ badge }: { badge?: OutlineBadge }) {
+  if (!badge) return null;
+  const kind =
+    badge === 'unknown'
+      ? 'unknown'
+      : badge === 'unchanged'
+        ? 'unchanged'
+        : badge === 'code changed'
+          ? 'implementation'
+          : badge === 'joined' || badge === 'left'
+            ? 'membership'
+            : 'intent';
+  return (
+    <span
+      className={cx(pill, KIND_STYLE[kind])}
+      data-testid="review-outline-badge"
+      data-change-kind={badge}
+      title={
+        OUTLINE_MEANING[badge] ??
+        `${badge.split(' ')[0]} members of this family carry a real change; its own record is unchanged.`
+      }
+    >
+      {badge}
+    </span>
   );
 }

@@ -106,9 +106,9 @@ it('reads the clicked member owner before displaying its concern, keeps family c
   expect(assessedFamily.payload!.evidence.assessments).toHaveLength(0);
   const view = mount(assessedFamily.payload!);
   await view.findByTestId('review-center-family');
-  const population = view.getAllByTestId('review-inventory-entry').map((row) => row.textContent);
+  const population = view.getByTestId('review-scope-record').textContent;
   const memberButton = view
-    .getAllByTestId('review-family-member-open')
+    .getAllByTestId('review-center-open-member')
     .find((node) => node.dataset.revision === member.invariant_revision_id)!;
   fireEvent.click(memberButton);
   const center = await view.findByTestId('review-center-member');
@@ -140,12 +140,8 @@ it('reads the clicked member owner before displaying its concern, keeps family c
   const retainedFamily = view
     .getAllByTestId('review-family')
     .find((node) => node.dataset.family === family.family_id)!;
-  expect(within(retainedFamily).getAllByTestId('review-family-member')).toHaveLength(
-    family.before.members.length,
-  );
-  expect(view.getAllByTestId('review-inventory-entry').map((row) => row.textContent)).toEqual(
-    population,
-  );
+  expect(within(retainedFamily).getByTestId('review-family-open')).toBeTruthy();
+  expect(view.getByTestId('review-scope-record').textContent).toEqual(population);
 });
 
 it('compares an authored successor through the family member route using both authoritative revision IDs and statements', async () => {
@@ -158,7 +154,7 @@ it('compares an authored successor through the family member route using both au
   await view.findByTestId('review-center-family');
   fireEvent.click(
     view
-      .getAllByTestId('review-family-member-open')
+      .getAllByTestId('review-center-open-member')
       .find((node) => node.dataset.revision === selected.after_revision_id)!,
   );
   const changed = await view.findByTestId('review-center-member-changed');

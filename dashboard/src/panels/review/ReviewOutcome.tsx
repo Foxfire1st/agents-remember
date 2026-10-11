@@ -134,8 +134,7 @@ export function ReviewProblemBlock({
       <p style={{ margin: '0.2rem 0' }}>
         {subject} unavailable · {problem.code}
       </p>
-      <details>
-        <summary>Reason and recovery</summary>
+      <div data-review-content="reason">
         <p style={{ margin: '0.2rem 0' }}>
           {subject} could not be opened ({problem.code}): {problem.detail}
         </p>
@@ -157,7 +156,7 @@ export function ReviewProblemBlock({
             the server published no next action for this failure.
           </p>
         )}
-      </details>
+      </div>
       {problem.token === 'network' && onRetry ? (
         <p style={{ margin: '0.2rem 0' }}>
           <button type="button" data-testid="review-retry" onClick={onRetry}>

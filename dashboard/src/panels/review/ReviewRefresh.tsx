@@ -81,12 +81,11 @@ export function ReviewRefresh({
           data-current-binding={generation.currentBindingDigest ?? ''}
         >
           {generation.state === 'superseded' ? 'Comparison updated' : 'Comparison current'}
-          <details>
-            <summary>Generation details</summary>
+          <div data-review-content="generation-state">
             {generation.state === 'superseded'
               ? `the candidate's comparison moved (was ${generation.previousBindingDigest}, is now ${generation.currentBindingDigest}) — the panes below have been replaced whole with the current one`
               : `the comparison below is still the candidate's current one (${generation.previousBindingDigest})`}
-          </details>
+          </div>
         </span>
       )}
     </span>

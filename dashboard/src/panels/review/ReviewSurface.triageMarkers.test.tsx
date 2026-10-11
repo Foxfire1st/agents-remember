@@ -5,7 +5,8 @@
 // The bodies are the REAL served answers of MIK-L34's scenario rebuilt under /tmp/mik-l33-merge and
 // re-captured over the merged tree, comparison 3 -- the leaf's FAM-4V4GSQCS record does not parse on
 // the after side (markerUnknown.capture-provenance.json) -- and that comparison's expression cards
-// (triageMarker.capture-provenance.json). The one synthetic body is the empty subject catalogue; reads
+// (triageMarker.capture-provenance.json). Labeled synthetic index and family-question adapters
+// expose the initial card; marker targets use the untouched answers. Reads
 // no body answers are held, as a slow one is. `ReviewSurface` is the real component tree.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,6 +15,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
 import { ReviewSurface } from './ReviewSurface';
+import {
+  syntheticMarkerCatalogue,
+  syntheticMarkerFamilyReview,
+} from './markerCatalogue.test-utils';
+import { treeViewStore } from './triageViewPreference';
 import { treeOrderStore } from './triageOrderPreference';
 
 const captured = <T,>(name: string): T =>
@@ -29,8 +35,8 @@ const source = captured<unknown>('markerUnknown.source.captured.json');
 const memberUnknown = captured<ReviewResult>('markerUnknown.memberUnknown.captured.json');
 const noFamily = captured<ReviewResult>('markerUnknown.noFamily.captured.json');
 const cards = captured<unknown>('triageMarker.cards.captured.json');
+const initialFamily = syntheticMarkerFamilyReview(memberUnknown);
 const NOTES = 'mcp/src/agents_remember/serving/notes.py';
-const EMPTY_CATALOGUE = { state: 'entries', entries: [], total_subjects: 0 };
 const links = file.file_classification.hunks[0].links;
 const keyOf = (id: string) => links.find((link) => link.invariant === id)!.invariant_key;
 const Z66_REVISION = links.find(
@@ -44,7 +50,7 @@ const UNPARSED =
 const requested: URL[] = [];
 
 function answer(url: URL): unknown {
-  if (url.pathname.endsWith('/entries')) return EMPTY_CATALOGUE;
+  if (url.pathname.endsWith('/entries')) return syntheticMarkerCatalogue(memberUnknown);
   if (url.pathname.endsWith('/source-content')) return source;
   if (url.pathname.endsWith('/trees')) {
     if (url.searchParams.get('lane')) return lane;
@@ -53,6 +59,8 @@ function answer(url: URL): unknown {
   }
   const selector = url.searchParams.get('selectorId');
   if (selector === null) return task;
+  if (selector === initialFamily.payload!.knowledge.revision_selection!.record_id)
+    return initialFamily;
   if (selector === keyOf('INV-Z66EMHMH')) return memberUnknown;
   return selector === keyOf('INV-413DC8XE') ? noFamily : undefined;
 }
@@ -60,6 +68,7 @@ function answer(url: URL): unknown {
 beforeEach(() => {
   localStorage.clear();
   treeOrderStore.getState().setOrder('triage');
+  treeViewStore.getState().setView('all');
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -86,6 +95,8 @@ function open() {
       repo={payload.candidate.repository_id}
       master={payload.candidate.master}
       leaf={payload.candidate.leaf_id}
+      selectorKind="family"
+      selectorId={initialFamily.payload!.knowledge.revision_selection!.record_id}
       onBack={() => undefined}
     />,
   );
@@ -129,29 +140,16 @@ function announcement(node: HTMLElement): { name: string; description: string } 
   });
   return { name: flat(name), description: flat(description) };
 }
-// A member revision's served statement.
-const memberStatement = (revision: string) => {
-  const [entry] = memberUnknown.payload!.family_context!.entries;
-  return [...entry.before.members, ...entry.after.members].find(
-    (one) => one.invariant_revision_id === revision,
-  )!.statement!;
-};
-
 const selectedMember = (view: View) =>
   view.container.querySelector<HTMLElement>('[data-tree-node="member"][aria-current="true"]');
-const texts = (ids: string | null) =>
-  (ids ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '');
 const card = (view: View, entries: string) =>
   view.getAllByTestId('review-expression-card').find((node) => node.dataset.entries === entries)!;
 
 async function toUnknownMember(view: View) {
-  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }));
-  await follow(
-    view,
-    view.container,
-    '124:1:124:1',
-    'FAM-4V4GSQCS r1 · membership unknown (before, r1)',
-  );
+  const originCard = await waitFor(() => card(view, 'RLZ-7X2C4VRQ'));
+  fireEvent.click(within(originCard).getByTestId('review-card-full-file'));
+  const file = await view.findByTestId('review-card-full-file-content', undefined);
+  await follow(view, file, '124:1:124:1', 'FAM-4V4GSQCS r1 · membership unknown (before, r1)');
   const row = await waitFor(() => {
     const node = selectedMember(view);
     expect(node?.dataset.revision).toBe(Z66_REVISION);
@@ -165,31 +163,25 @@ it('states the followed unknown membership once on the member, below the way bac
   const view = open();
   const row = await toUnknownMember(view);
   // One membership statement: the comparison's membership line, carrying the marker's tag.
-  const stated = row.querySelectorAll<HTMLElement>('[data-member-state="membership_unknown"]');
+  const center = view.getByTestId('review-center-member');
+  const stated = center.querySelectorAll<HTMLElement>('[data-member-state="membership_unknown"]');
   expect([...stated].map((one) => one.dataset.testid)).toEqual(['review-change-membership-why']);
-  expect(view.queryByTestId('review-member-target-state')).toBeNull();
   expect(stated[0].textContent).toBe(
     `Attribution unknown opened from an intent marker · membership unknown: ${UNPARSED}`,
   );
-  const badge = within(row).getByTestId('review-change-badge');
+  expect(stated[0].closest('details')).toBeNull();
+  const badge = within(center).getByTestId('review-change-badge');
   expect([badge.dataset.changeKind, badge.dataset.changeMarks]).toEqual([
     'implementation',
     'unknown',
   ]);
-  // Its accessible name is the subject only: the statement and the side tag (review R3-1). Its
-  // description gives the change kind, then the membership, once each (the kind is known here, so no
-  // change-kind reason is drawn).
+  expect(row.querySelector('[data-member-state]')).toBeNull();
   const { name, description } = announcement(row);
-  expect(name).toBe(flat(`${memberStatement(Z66_REVISION!)} · before only`));
-  expect(description).toMatch(
-    /^impl ?\+unknown Attribution unknown opened from an intent marker · membership unknown: the after memory tree has family records that do not parse: knowledge\/families\/FAM-4V4GSQCS-/,
-  );
-  expect(description.match(/Attribution unknown/g)).toHaveLength(1);
-  expect(within(row).queryByTestId('review-change-why')).toBeNull();
-  expect(texts(row.getAttribute('aria-describedby'))).toEqual([
-    badge.textContent,
-    stated[0].textContent,
-  ]);
+  expect(name).toContain('INV-Z66EMHMH');
+  expect(name).toContain('code changed');
+  expect(name).not.toMatch(/Attribution unknown|membership unknown/);
+  expect(description).not.toMatch(/Attribution unknown|membership unknown/);
+  expect(within(center).queryByTestId('review-change-why')).toBeNull();
   // The way back is open, so the workspace sets the stacked layout's shared sticky offset, and the
   // triage bar is drawn under it.
   const back = view.getByTestId('review-marker-return');
@@ -212,7 +204,9 @@ it('moves with j after a marker return, never taking focus from the held return 
     '124:1:124:1',
     'No recorded family (before, r1)',
   );
-  expect(await view.findByRole('heading', { name: 'No recorded family' })).toBeTruthy();
+  expect(
+    (await view.findByTestId('review-center-member-family', undefined)).textContent,
+  ).toBe('No recorded family');
   vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
   fireEvent.click(view.getByTestId('review-marker-return'));
   const held = await waitFor(async () => {
@@ -233,7 +227,7 @@ it('moves with j after a marker return, never taking focus from the held return 
   // j: the key ends the hold, and the move selects the next change after the selected member.
   const stops = [
     ...view.container.querySelectorAll<HTMLElement>(
-      '[data-testid="review-family-tree"] [data-tree-node][data-change-primary]:not([data-change-primary="unchanged"])',
+      '[data-testid="review-family-tree"] [data-tree-node][data-change-primary]:not([data-change-primary="unchanged"]):not([data-change-primary="unknown"])',
     ),
   ];
   const next = stops[stops.indexOf(row) + 1];

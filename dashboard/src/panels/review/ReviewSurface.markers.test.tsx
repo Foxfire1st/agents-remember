@@ -5,8 +5,9 @@
 // in the MIK-L33 merge round over the merged tree, so the invariant reviews carry change facts). The leaf
 // edits serving/notes.py inside `_confined_stat`, where the recorded ranges of INV-Z66EMHMH
 // (FAM-4V4GSQCS) and INV-413DC8XE (no family) both lie, and deletes `list_notes`'s docstring line,
-// where three ranges lie. The one synthetic body is the subject catalogue, answered empty so the
-// surface opens on the task-context review; the leaf-wide read is held, as a slow one is. Only
+// where three ranges lie. Explicit synthetic catalogue and family-question adapters let the
+// initial family card open its Full file. Marker targets use untouched served answers; the
+// leaf-wide read is held, as a slow one is. Only
 // `fetch` is stubbed: `ReviewSurface` and everything under it is the real component tree.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,6 +16,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
 import { ReviewSurface } from './ReviewSurface';
+import {
+  syntheticMarkerCatalogue,
+  syntheticMarkerFamilyReview,
+} from './markerCatalogue.test-utils';
+import { treeViewStore } from './triageViewPreference';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
@@ -28,8 +34,8 @@ const file = captured<{ file_classification: ReviewFileClassification }>(
 const source = captured<unknown>('markerReturn.source.captured.json');
 const invariant = captured<ReviewResult>('markerReturn.invariant.captured.json');
 const cards = captured<unknown>('markerReturn.cards.captured.json');
+const initialFamily = syntheticMarkerFamilyReview(invariant);
 const NOTES = 'mcp/src/agents_remember/serving/notes.py';
-const EMPTY_CATALOGUE = { state: 'entries', entries: [], total_subjects: 0 };
 const [edit] = file.file_classification.hunks;
 const Z66 = edit.links.find((link) => link.invariant === 'INV-Z66EMHMH')!;
 
@@ -42,7 +48,7 @@ afterEach(() => {
 const requested: URL[] = [];
 
 function answer(url: URL): unknown {
-  if (url.pathname.endsWith('/entries')) return EMPTY_CATALOGUE;
+  if (url.pathname.endsWith('/entries')) return syntheticMarkerCatalogue(invariant);
   if (url.pathname.endsWith('/source-content')) return source;
   if (url.pathname.endsWith('/trees')) {
     if (url.searchParams.get('lane')) return lane;
@@ -51,10 +57,13 @@ function answer(url: URL): unknown {
   }
   const selector = url.searchParams.get('selectorId');
   if (selector === null) return task;
+  if (selector === initialFamily.payload!.knowledge.revision_selection!.record_id)
+    return initialFamily;
   return selector === Z66.invariant_key ? invariant : null;
 }
 
 function serve() {
+  treeViewStore.getState().setView('all');
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -70,29 +79,47 @@ function serve() {
   );
 }
 
-function open() {
+function open(subject = initialFamily) {
   const payload = task.payload!;
   return render(
     <ReviewSurface
       repo={payload.candidate.repository_id}
       master={payload.candidate.master}
       leaf={payload.candidate.leaf_id}
+      selectorKind={subject.payload!.knowledge.revision_selection!.record_kind}
+      selectorId={subject.payload!.knowledge.revision_selection!.record_id}
       onBack={() => undefined}
     />,
   );
 }
 
+async function openFullFile(view: ReturnType<typeof open>) {
+  const card = await waitFor(() => {
+    const one = view
+      .queryAllByTestId('review-expression-card')
+      .find((node) => node.dataset.entries === 'RLZ-7X2C4VRQ');
+    expect(one).toBeTruthy();
+    return one!;
+  });
+  fireEvent.click(within(card).getByTestId('review-card-full-file'));
+  return view.findByTestId('review-card-full-file-content');
+}
 async function marksOf(view: ReturnType<typeof open>, count: number) {
-  await waitFor(() => expect(view.queryAllByTestId('review-hunk-mark')).toHaveLength(count));
+  const file = await view.findByTestId('review-card-full-file-content');
+  await waitFor(() =>
+    expect(within(file).queryAllByTestId('review-hunk-mark')).toHaveLength(count),
+  );
   return Object.fromEntries(
-    view.getAllByTestId('review-hunk-mark').map((mark) => [mark.dataset.hunk!, mark]),
+    within(file)
+      .getAllByTestId('review-hunk-mark')
+      .map((mark) => [mark.dataset.hunk!, mark]),
   );
 }
 
 it('opens a changed file with one marker per hunk, from the one classification', async () => {
   serve();
   const view = open();
-  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }));
+  await openFullFile(view);
   const marks = await marksOf(view, 2);
   // The edit inside _confined_stat meets two recorded ranges; the deleted docstring line three,
   // matched on the before side only (it changes no after line).
@@ -113,7 +140,7 @@ it('selects the tree position a marker names, and returns to the hunk with focus
   const scrolled = vi.fn();
   Element.prototype.scrollIntoView = scrolled;
   const view = open();
-  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }));
+  await openFullFile(view);
   // The reader reads inline.
   fireEvent.change(await view.findByTestId('review-center-diff-layout'), {
     target: { value: 'inline' },
@@ -133,7 +160,7 @@ it('selects the tree position a marker names, and returns to the hunk with focus
 
   // The target: INV-Z66EMHMH's own review, at its member row of FAM-4V4GSQCS.
   const subject = await waitFor(() => {
-    const read = requested.find((url) => url.searchParams.get('selectorId'));
+    const read = requested.find((url) => url.searchParams.get('selectorKind') === 'invariant');
     expect(read).toBeTruthy();
     return read!;
   });
@@ -149,11 +176,9 @@ it('selects the tree position a marker names, and returns to the hunk with focus
     return node!;
   });
   expect(current.dataset.revision).toBe(Z66.invariant_revision_key);
-  expect(current.closest('[data-testid="review-family"]')?.getAttribute('data-family')).toBe(
-    Z66.families[0].family_key,
-  );
+  expect(current.dataset.family).toBe(Z66.families[0].family_key);
   // The file the marker sat in is closed while the target is read; the way back is visible.
-  expect(view.queryByTestId('review-opened-file')).toBeNull();
+  expect(view.queryByTestId('review-card-full-file-content')).toBeNull();
   const back = view.getByTestId('review-marker-return');
   // The target's cards mark the hunks their excerpts draw (the rulings round, Q4): the changed
   // _confined_stat range holds the line 124 edit, the shared list_notes range the line 210 deletion;
@@ -185,7 +210,7 @@ it('selects the tree position a marker names, and returns to the hunk with focus
   expect(view.getByTestId('review-hunk-mark-panel').dataset.hunk).toBe('124:1:124:1');
   expect(scrolled.mock.contexts.some((host) => (host as Element).contains(origin))).toBe(true);
   expect(view.queryByTestId('review-marker-return')).toBeNull();
-  // The task-context review and the file's classification were read once each.
+  // The file classification is shared by the family origin and the invariant target.
   expect(requested.filter((url) => url.searchParams.get('file'))).toHaveLength(1);
 });
 
@@ -205,11 +230,14 @@ const unknownSet = {
   source: captured<unknown>('markerUnknown.source.captured.json'),
   memberUnknown: captured<ReviewResult>('markerUnknown.memberUnknown.captured.json'),
   noFamily: captured<ReviewResult>('markerUnknown.noFamily.captured.json'),
+  cards: captured<unknown>('triageMarker.cards.captured.json'),
 };
+const initialUnknownFamily = syntheticMarkerFamilyReview(unknownSet.memberUnknown);
 const unknownLinks = unknownSet.file.file_classification.hunks[0].links;
 const keyOf = (id: string) => unknownLinks.find((link) => link.invariant === id)!.invariant_key;
 
 function serveUnknown() {
+  treeViewStore.getState().setView('all');
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -218,22 +246,26 @@ function serveUnknown() {
       requested.push(url);
       const selector = url.searchParams.get('selectorId');
       const body = url.pathname.endsWith('/entries')
-        ? EMPTY_CATALOGUE
+        ? syntheticMarkerCatalogue(unknownSet.memberUnknown)
         : url.pathname.endsWith('/source-content')
           ? unknownSet.source
           : url.pathname.endsWith('/trees')
             ? url.searchParams.get('lane')
               ? unknownSet.lane
-              : url.searchParams.get('file') === NOTES
-                ? unknownSet.file
-                : undefined
-            : selector === null
-              ? unknownSet.task
-              : selector === keyOf('INV-Z66EMHMH')
-                ? unknownSet.memberUnknown
-                : selector === keyOf('INV-413DC8XE')
-                  ? unknownSet.noFamily
-                  : null;
+              : url.searchParams.get('invariants')
+                ? unknownSet.cards
+                : url.searchParams.get('file') === NOTES
+                  ? unknownSet.file
+                  : undefined
+            : selector === initialUnknownFamily.payload!.knowledge.revision_selection!.record_id
+              ? initialUnknownFamily
+              : selector === null
+                ? unknownSet.task
+                : selector === keyOf('INV-Z66EMHMH')
+                  ? unknownSet.memberUnknown
+                  : selector === keyOf('INV-413DC8XE')
+                    ? unknownSet.noFamily
+                    : null;
       if (body === undefined) return new Promise<Response>(() => undefined);
       if (body === null) throw new Error(`Unexpected review request: ${address}`);
       return { ok: true, status: 200, json: async () => body } as Response;
@@ -279,8 +311,8 @@ async function backToNotes(view: ReturnType<typeof open>) {
 
 it('opens an unknown membership in its own Attribution unknown state, apart from no family', async () => {
   serveUnknown();
-  const view = open();
-  fireEvent.click(await view.findByRole('button', { name: `▸ ${NOTES}` }));
+  const view = open(initialUnknownFamily);
+  await openFullFile(view);
   fireEvent.click((await marksOf(view, 2))['124:1:124:1']);
   expect(
     within(view.getByTestId('review-hunk-mark-panel'))
@@ -301,35 +333,26 @@ it('opens an unknown membership in its own Attribution unknown state, apart from
     const node = view.container.querySelector<HTMLElement>(
       '[data-tree-node="member"][aria-current="true"]',
     );
-    expect(
-      node?.querySelector(
-        '[data-testid="review-change-membership-why"][data-member-state="membership_unknown"]',
-      ),
-    ).toBeTruthy();
+    expect(node).toBeTruthy();
     return node!;
   });
-  // The selected row is what receives focus, and the state is part of its accessible description
-  // (MIK-L33 review R3-1: a member row is named by its subject only, and described by its facts).
   await waitFor(() => expect(document.activeElement).toBe(row));
-  expect(
-    view.getByRole('button', {
-      description:
-        /Attribution unknown opened from an intent marker · membership unknown: the after memory tree/,
-    }),
-  ).toBe(row);
-  expect(view.queryByRole('button', { name: /Attribution unknown|membership unknown/ })).toBeNull();
-  expect(row.textContent).toContain(
-    'Attribution unknown opened from an intent marker · membership unknown: the after memory tree ' +
-      'has family records that do not parse: knowledge/families/FAM-4V4GSQCS-',
+  const centerReview = view.getByTestId('review-center-member');
+  const reason = within(centerReview).getByTestId('review-change-membership-why');
+  expect(reason.textContent).toContain(
+    'Attribution unknown opened from an intent marker · membership unknown: the after memory tree has family records that do not parse: knowledge/families/FAM-4V4GSQCS-',
   );
-  expect(row.querySelector('[data-testid="review-member-target-state"]')).toBeNull();
-  expect(row.textContent).not.toContain('not every family record');
+  expect(reason.closest('details')).toBeNull();
+  expect(row.querySelector('[data-member-state]')).toBeNull();
+  expect(row.getAttribute('aria-label')).not.toMatch(/Attribution unknown|membership unknown/);
   expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
   await backToNotes(view);
 
   // A confirmed absence reads "No recorded family", with no unknown state anywhere.
   await followFrom(view, 'No recorded family (before, r1)', 'INV-413DC8XE');
-  expect(await view.findByRole('heading', { name: 'No recorded family' })).toBeTruthy();
+  expect((await view.findByTestId('review-center-member-family')).textContent).toBe(
+    'No recorded family',
+  );
   expect(view.queryByTestId('review-rail-target-state')).toBeNull();
   expect(view.queryByTestId('review-center-target-state')).toBeNull();
   expect((await view.findByTestId('review-center-member-family')).textContent).toBe(
@@ -368,9 +391,10 @@ it('opens an unknown membership in its own Attribution unknown state, apart from
   );
   expect(view.queryByTestId('review-member-target-state')).toBeNull();
   const above = await view.findByTestId('review-rail-target-state');
-  expect(above.compareDocumentPosition(view.getByTestId('review-family-tree'))).toBe(
-    Node.DOCUMENT_POSITION_FOLLOWING,
-  );
+  expect(above.closest('[data-testid="review-center-column"]')).toBeTruthy();
+  expect(
+    within(view.getByTestId('review-family-tree')).queryByTestId('review-rail-target-state'),
+  ).toBeNull();
   await waitFor(() => expect(document.activeElement).toBe(above));
   expect(focusedAnnouncement()).toEqual({
     testid: 'review-rail-target-state',

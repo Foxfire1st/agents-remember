@@ -701,7 +701,34 @@ export interface ReviewEntry {
   presence: ReviewSubjectPresence;
 }
 
+export type ReviewOutlineChange = 'added' | 'removed' | 'changed' | 'unchanged' | 'unknown';
+export interface ReviewOutlineMember {
+  selector_id: string;
+  id: string;
+  membership: 'both' | 'joined' | 'left';
+}
+export interface ReviewOutlineFamily {
+  selector_id: string;
+  id: string;
+  title: string;
+  change: ReviewOutlineChange;
+  members: ReviewOutlineMember[];
+}
+export interface ReviewOutlineInvariant {
+  selector_id: string;
+  id: string;
+  summary: string;
+  change: ReviewOutlineChange;
+}
+export interface ReviewOutline {
+  state: 'outlined' | 'unavailable';
+  detail: string;
+  families: ReviewOutlineFamily[];
+  invariants: ReviewOutlineInvariant[];
+}
+
 export interface ReviewEntryListResult {
+  outline?: ReviewOutline | null;
   state: 'entries' | 'refused';
   operation: string;
   repository_id: string;

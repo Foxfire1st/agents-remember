@@ -93,23 +93,21 @@ it('renders a converted leaf family review from its trees and opens the touched 
     />,
   );
   await view.findByTestId('review-center-family');
-  // The complete source inventory: the one changed file.
-  const inventory = view.getAllByTestId('review-inventory-entry').map((row) => row.textContent);
-  expect(inventory.some((text) => text?.includes(CHANGED))).toBe(true);
+  expect(view.getByTestId('review-scope-record').textContent).toContain('1 changed files');
+  expect(view.queryByTestId('review-inventory-entry')).toBeNull();
   // The family and its whole recorded roster, read from the memory trees' indexes.
   const entry = payload.family_context!.entries[0];
   expect(entry.display_label).toBe('Comparison-bound unchanged realization context');
-  const rendered = view
-    .getAllByTestId('review-family')
-    .find((node) => node.dataset.family === entry.family_id)!;
-  const members = within(rendered).getAllByTestId('review-family-member');
+  const members = within(view.getByTestId('review-center-family')).getAllByTestId(
+    'review-center-open-member',
+  );
   expect(members).toHaveLength(entry.before.members.length);
   expect(entry.before.members).toHaveLength(7);
   // Opening the touched member reads its own review and shows both statements.
   const touched = invariant.payload!.knowledge.revision_selection!;
   fireEvent.click(
     view
-      .getAllByTestId('review-family-member-open')
+      .getAllByTestId('review-center-open-member')
       .find((node) => node.dataset.revision === touched.after_revision_id)!,
   );
   const center = await view.findByTestId('review-center-member');
@@ -198,32 +196,19 @@ it('shows the family around _not_listed as focused cards: one changed range, the
   expect(within(changed).getByTestId('review-card-voice').textContent).toContain(
     'touched invariant · planned',
   );
-  // The leaf's knowledge changes and worklist remain reachable in the same reading path.
-  const knowledge = within(center).getByTestId('review-leaf-knowledge');
-  // The lane's destinations follow the families; an answer without a lane is not a zero.
-  const lane = view.getByTestId('review-lane-destinations');
-  expect(lane.dataset.laneState).toBe('unavailable');
-  expect(
-    within(lane)
-      .getAllByTestId('review-lane-destination-totals')
-      .map((line) => line.textContent),
-  ).toEqual(['unavailable', 'unavailable']);
-  // With no lane to read, the explorer names no bucket it did not measure.
-  expect(
-    view
-      .getAllByTestId('review-inventory-entry')
-      .map((row) => row.querySelector<HTMLElement>('[data-attribution]')!.dataset.attribution),
-  ).toEqual(['Attribution unknown']);
-  // The technical details state the same unknown, not the landed accounting's lists.
-  const details = view.getByTestId('review-details');
-  expect(within(details).getByTestId('review-unattributed').dataset.attributionState).toBe(
-    'unknown',
-  );
+  // Worklist records have their own view; the subject shows only its own items.
+  const block = within(center).getByTestId('review-subject-worklist');
+  expect(block.textContent).toContain('Worklist items about this record');
+  expect(view.getByRole('button', { name: /Unexplained changes unavailable/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /Unknown attribution unavailable/ })).toBeTruthy();
+  fireEvent.click(view.getByRole('button', { name: /^Worklist/ }));
+  const knowledge = view.getByTestId('review-worklist-view');
   expect(
     within(knowledge)
       .getAllByTestId('review-worklist-item')
       .map((row) => row.dataset.kind),
   ).toContain('planned_untouched');
+  expect(knowledge.querySelector('pre')).toBeNull();
 });
 
 it('leaves a dataset review exactly as it was: no tree read, the landed file view', async () => {
@@ -261,29 +246,14 @@ it('leaves a dataset review exactly as it was: no tree read, the landed file vie
   expect(view.queryByTestId('review-leaf-knowledge')).toBeNull();
   expect(view.queryByTestId('review-lane-destinations')).toBeNull();
   expect(urls.some((url) => url.pathname.endsWith('/trees'))).toBe(false);
-  // The explorer keeps the landed accounting's labels, path by path.
-  const source = payload.source;
-  const landed = (entry: string) =>
-    source.attributed_changed_paths.includes(entry)
-      ? 'Mapped'
-      : source.unattributed_changed_paths.includes(entry)
-        ? 'Unmapped'
-        : 'Attribution unknown';
-  const rows = view.getAllByTestId('review-inventory-entry');
-  expect(rows).toHaveLength(source.inventory.entries.length);
-  expect(
-    rows.map((row) => row.querySelector<HTMLElement>('[data-attribution]')!.dataset.attribution),
-  ).toEqual(source.inventory.entries.map((entry) => landed(entry.path)));
-  // The technical details keep the landed accounting's counts and list.
-  const details = view.getByTestId('review-details');
-  const remaining = within(details).getByTestId('review-remaining');
+  expect(view.queryByTestId('review-inventory-entry')).toBeNull();
+  const remaining = view.getByTestId('review-remaining');
+  expect(remaining.closest('details')).toBeNull();
   expect(remaining.dataset.attributionSource).toBe('landed');
-  const counted = source.remaining.find((count) => count.name === 'unattributed_changed_paths')!;
+  const counted = payload.source.remaining.find(
+    (count) => count.name === 'unattributed_changed_paths',
+  )!;
   expect(remaining.textContent).toContain(`unattributed_changed_paths: ${counted.value}`);
-  expect(within(details).getByTestId('review-unattributed').textContent).toBe(
-    `changed paths with no registered attribution: ${source.unattributed_changed_paths.join(', ')}`,
-  );
-  expect(within(details).queryByTestId('review-unknown-attribution')).toBeNull();
 });
 
 it('takes no planning mark from a leaf-wide read of another comparison (review R2-3)', async () => {
@@ -302,10 +272,8 @@ it('takes no planning mark from a leaf-wide read of another comparison (review R
     />,
   );
   const center = await view.findByTestId('review-center-family');
-  const panel = await within(center).findByTestId('review-leaf-knowledge');
-  expect(panel.textContent).toContain(
-    'this view reads comparison 2, the review shows comparison 1',
-  );
+  const panel = await within(center).findByTestId('review-subject-worklist');
+  expect(panel.textContent).toContain('The available answer belongs to comparison 2.');
   await waitFor(() =>
     expect(within(center).getByTestId('review-expression-cards').dataset.cardsState).toBe('ready'),
   );

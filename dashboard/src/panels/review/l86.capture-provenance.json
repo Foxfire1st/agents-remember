@@ -1,0 +1,278 @@
+{
+  "command": "PYTHONPATH=<leaf>/mcp/src /home/firefox/projects/agents-remember/mcp/.venv/bin/python task-reports/l86-browser/capture.py",
+  "producer": "leaf-built routes over scratch git clone --shared clones; unmodified HTTP response bytes",
+  "fixture": {
+    "world": "/var/tmp/mik-l86-browser-world",
+    "config": {
+      "version": 1,
+      "coordinationRoot": "/var/tmp/mik-l86-browser-world/coordination",
+      "workspaceRoot": "/var/tmp/mik-l86-browser-world/projects",
+      "transcriptRoot": "/var/tmp/mik-l86-browser-world/transcripts",
+      "repositories": {
+        "agents-remember": {}
+      },
+      "providers": {},
+      "dashboard": {
+        "autoStart": false,
+        "port": 18886
+      }
+    },
+    "source_record": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/review-comparisons/260928-mik-l37/5.json",
+    "remapped_record": {
+      "code_base": {
+        "commit": "3dc2ab0cf59cdc87ec478f6563d4ac6696871076",
+        "ref": null,
+        "repository": "/var/tmp/mik-l86-browser-world/projects/agents-remember",
+        "tree": "08ad2130deb31bb17064f03a8cfb3f149bf7b7a1"
+      },
+      "code_candidate": {
+        "commit": null,
+        "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L37/5",
+        "repository": "/var/tmp/mik-l86-browser-world/projects/agents-remember",
+        "tree": "3063ca45768fd3fc6c0aeeccd2f302407c731c07"
+      },
+      "converted_base": {
+        "code_commit": "3dc2ab0cf59cdc87ec478f6563d4ac6696871076",
+        "commit": "ea4e3962824f62ba1df042f3731c51c29af970ea",
+        "tree": "479f02e6d210f1867caaf9b387e15380d9f2ca59",
+        "version": "1"
+      },
+      "leaf_id": "260928-MIK-L37",
+      "memory_base": {
+        "commit": "ea4e3962824f62ba1df042f3731c51c29af970ea",
+        "ref": null,
+        "repository": "/var/tmp/mik-l86-browser-world/coordination/memory-repos/ar-agents-remember",
+        "tree": "782882ec769c63c7848c0d2b8bd4c95d5ea39b5c"
+      },
+      "memory_candidate": {
+        "commit": null,
+        "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L37/5",
+        "repository": "/var/tmp/mik-l86-browser-world/coordination/memory-repos/ar-agents-remember",
+        "tree": "2cf86737aee79ec911de9542a205ae1e5e585e98"
+      },
+      "number": 5,
+      "recorded_at": "2026-10-02T07:07:47+00:00",
+      "schema": "ar-review-tree-comparison/v1",
+      "task_id": "260928_maintained-invariant-knowledge"
+    },
+    "clone_commands": "git clone --shared --no-checkout then detached checkout of landed commit; source branch copied by update-ref",
+    "persisted_worklist": {
+      "source": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/enclosures/260928-mik-l37/knowledge-worklist.json",
+      "source_sha256": "98a945ff59bfe17d81615a5ae03b2702f96e029152e514000b6ea7f31704781c",
+      "remapped": "/var/tmp/mik-l86-browser-world/coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/enclosures/260928-mik-l37/knowledge-worklist.json",
+      "remapped_sha256": "cf1130efbe98736f76c7afb2e731d2c718cf47fb5e0b97d4f42e349351afe1a2",
+      "items": 673,
+      "remap": "only two repository path strings; items/identities/pairing tree IDs untouched"
+    }
+  },
+  "selected_family": {
+    "selector_id": "ccd6de6f-cfca-549c-8ee0-08fc418f3fd9",
+    "id": "FAM-2HBJREC2",
+    "title": "Comparison-bound unchanged realization context",
+    "change": "changed",
+    "members": [
+      {
+        "selector_id": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+        "id": "INV-2TQGXFAX",
+        "membership": "both"
+      },
+      {
+        "selector_id": "b2400c01-fc05-51e5-b34a-08a97e8255f3",
+        "id": "INV-9ECAFVTQ",
+        "membership": "both"
+      },
+      {
+        "selector_id": "3bce6092-4833-5d2a-b732-8633b2fa9e17",
+        "id": "INV-M9AMAYWY",
+        "membership": "both"
+      },
+      {
+        "selector_id": "49473315-7e7f-5866-834f-c27d49271bbd",
+        "id": "INV-RS0EVBHD",
+        "membership": "both"
+      },
+      {
+        "selector_id": "9f44474c-a3c6-5cca-8269-d4e22a93a27b",
+        "id": "INV-T23G8ZJM",
+        "membership": "both"
+      },
+      {
+        "selector_id": "54d21b24-6258-58f4-86a5-257e9bd62a0d",
+        "id": "INV-XTXZESS6",
+        "membership": "both"
+      },
+      {
+        "selector_id": "bfb457a7-58d0-57d7-aa99-f4f9b4b0726c",
+        "id": "INV-YBS0CVBK",
+        "membership": "both"
+      }
+    ]
+  },
+  "selected_member": {
+    "selector_id": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5",
+    "id": "INV-1XKX9ERN",
+    "summary": "Every authored knowledge write -- a record, a realization or proof entry, or a history row that a curator hands in --",
+    "change": "changed"
+  },
+  "responses": [
+    {
+      "file": "l86.entries.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/intent/entries?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37",
+      "status": 200,
+      "sha256": "cc982e94c0e865b94a6061c9125f087a967526f43b6e704a7cecbff76647ce2f",
+      "bytes": 48895
+    },
+    {
+      "file": "l86.task.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/intent?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&history=recorded",
+      "status": 200,
+      "sha256": "81661ffc43d9202d07334afd7a9fd6f7b06a2a05c09dec0dd33a7785335f5329",
+      "bytes": 122212
+    },
+    {
+      "file": "l86.family.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/intent?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&history=recorded&selectorKind=family&selectorId=ccd6de6f-cfca-549c-8ee0-08fc418f3fd9",
+      "status": 200,
+      "sha256": "f1ed3484ce6cbdb36188b7a4557c9b178e539c40f53268fde8fc1894229772e9",
+      "bytes": 298959
+    },
+    {
+      "file": "l86.member.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/intent?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&history=recorded&selectorKind=invariant&selectorId=8b1a17ca-96ba-5ede-a09f-abfb11ada0a5",
+      "status": 200,
+      "sha256": "297c19a6b007ddab7379fa9a807efb3fabb569d293c8047bb526675282e0a544",
+      "bytes": 265421
+    },
+    {
+      "file": "l86.lane.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/trees?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&lane=files",
+      "status": 200,
+      "sha256": "ca89fd115354131d7e7495ff644f99c500ecb3fedde466fc74c216b2a419bd6b",
+      "bytes": 78325
+    },
+    {
+      "file": "l86.trees.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/trees?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5",
+      "status": 200,
+      "sha256": "28d8e91e6c3fb712d2cb3c75f2f9134eb365ee31908b1c18cd5511bad6fc6b2e",
+      "bytes": 800930
+    },
+    {
+      "file": "l86.changeset.captured.json",
+      "url": "http://127.0.0.1:18886/api/changeset/task?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5",
+      "status": 200,
+      "sha256": "3530e6beac88382b7290de99947b13f12b0ac2828280d8e6acb4f2c122707f56",
+      "bytes": 64428,
+      "serving_build": {
+        "version": "3.0.0rc8",
+        "bootedAt": "2026-10-08T07:42:24.079079+00:00",
+        "sourceDigest": "sha256:0959ff741cfc6424250c7e18dc20350cccacbcff484503e95f1a4c903845ce92",
+        "pythonExecutable": "/home/firefox/.local/share/agents-remember/python/cpython-3.14.8/bin/python3.14",
+        "packageRoot": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l86-ar/260928-mik-l86/mcp/src/agents_remember",
+        "commit": "4afb9f23",
+        "dashboardBuild": "305e1c6da077e1762eea9644cbf66fa52503ecc867ac6b17d6b7ad10d7164d70",
+        "dirty": true
+      },
+      "command": "python3 task-reports/l86-browser/refresh-comparison.py"
+    },
+    {
+      "file": "l86.diff.captured.json",
+      "url": "http://127.0.0.1:18886/api/changeset/file-diff?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&kind=code&path=.agents%2Fskills%2Fc-02-memory-quality-control%2FSKILL.md",
+      "status": 200,
+      "sha256": "d9c4d0967b736cbeab0413a5b2619fd04c5d2804fd724fa1c804ad73af572b56",
+      "bytes": 26851
+    },
+    {
+      "file": "l86.cards.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/trees?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&invariants=b2400c01-fc05-51e5-b34a-08a97e8255f3%2Cbfb457a7-58d0-57d7-aa99-f4f9b4b0726c%2C9f44474c-a3c6-5cca-8269-d4e22a93a27b%2C54d21b24-6258-58f4-86a5-257e9bd62a0d%2C3bce6092-4833-5d2a-b732-8633b2fa9e17%2C09b76b4c-9d5e-50a2-8a4d-de1485e8911c%2C49473315-7e7f-5866-834f-c27d49271bbd",
+      "status": 200,
+      "sha256": "c27cc4b1a4bd0d3b4a607ca92a80968d28b297970a4357e6f5fe8a827173590d",
+      "bytes": 34118
+    },
+    {
+      "file": "l86.member-cards.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/trees?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&invariants=8b1a17ca-96ba-5ede-a09f-abfb11ada0a5%2C6ec03cae-83a4-5f63-9fa4-66b135506c2a%2Cc88cc287-0469-556c-9f42-b742b2377478",
+      "status": 200,
+      "sha256": "3bc297d359f1021e9f8d757a44ef9d85adbe79502de612da2ee3b187125c8a30",
+      "bytes": 42817
+    },
+    {
+      "file": "file-diff-responses/0.json",
+      "url": "http://127.0.0.1:18886/api/changeset/file-diff?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&kind=code&path=.agents%2Fskills%2Fc-02-memory-quality-control%2FSKILL.md",
+      "status": 200,
+      "sha256": "d9c4d0967b736cbeab0413a5b2619fd04c5d2804fd724fa1c804ad73af572b56",
+      "bytes": 26851
+    },
+    {
+      "file": "file-diff-responses/1.json",
+      "url": "http://127.0.0.1:18886/api/changeset/file-diff?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&kind=code&path=mcp%2Fsrc%2Fagents_remember%2Fapplication%2Freview_comparison_freeze.py",
+      "status": 200,
+      "sha256": "59274a1d84f8701fefa6cce95906d7e8e79070e99497e039c09e6d1b9e9c5969",
+      "bytes": 78852
+    },
+    {
+      "file": "file-diff-responses/2.json",
+      "url": "http://127.0.0.1:18886/api/changeset/file-diff?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&kind=memory&path=knowledge%2Fassumptions%2FASM-HDB5GQ-knowledge-stays-git-sized.json",
+      "status": 200,
+      "sha256": "c4b3d1c3c0426d7007aa4d36041bb0e2d996479ae66c21ef66d9e07ac8ca7bbf",
+      "bytes": 743
+    },
+    {
+      "file": "l86.full-file.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/intent/source-content?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&path=mcp%2Fsrc%2Fagents_remember%2Fapplication%2Fknowledge_curator_ingest.py&beforeCodeTreeId=3dc2ab0cf59cdc87ec478f6563d4ac6696871076&afterCodeTreeId=3063ca45768fd3fc6c0aeeccd2f302407c731c07",
+      "status": 200,
+      "sha256": "0c2c7dbd2ed1b89e8167eeffff50abc7add2eb8e27e24305c85be918084c9015",
+      "bytes": 392374
+    },
+    {
+      "file": "l86.classification.captured.json",
+      "url": "http://127.0.0.1:18886/api/review/trees?repo=agents-remember&master=260928_maintained-invariant-knowledge&leaf=260928-MIK-L37&comparison=5&file=mcp%2Fsrc%2Fagents_remember%2Fapplication%2Fknowledge_curator_ingest.py",
+      "status": 200,
+      "sha256": "5b554e683ec0c799d7927b7a81abadaae4846e74e4871708d9afc20aa117ec76",
+      "bytes": 1749
+    }
+  ],
+  "serving_build": {
+    "version": "3.0.0rc8",
+    "bootedAt": "2026-10-08T06:42:37.979824+00:00",
+    "sourceDigest": "sha256:79fe27298cf84284a40cb44695193a1def702b51c2f84db9d679b6e6084be8c8",
+    "pythonExecutable": "/home/firefox/.local/share/agents-remember/python/cpython-3.14.8/bin/python3.14",
+    "packageRoot": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l86-ar/260928-mik-l86/mcp/src/agents_remember",
+    "commit": "4afb9f23",
+    "dirty": true
+  },
+  "aggregates": [
+    {
+      "file": "l86.file-diffs.captured.json",
+      "sha256": "990ccea41980f945c2cbc1141bcbd7f255b2fe23b88b55179b26d4c4b5e51c3b",
+      "bytes": 106653,
+      "meaning": "map of JSON-parsed actual raw HTTP file-diff responses; raw bytes and each HTTP response hash retained in report artifacts",
+      "keys": [
+        "code:.agents/skills/c-02-memory-quality-control/SKILL.md",
+        "code:mcp/src/agents_remember/application/review_comparison_freeze.py",
+        "memory:knowledge/assumptions/ASM-HDB5GQ-knowledge-stays-git-sized.json"
+      ]
+    }
+  ],
+  "first_member_card": {
+    "seed": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5",
+    "record": "INV-1XKX9ERN",
+    "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py",
+    "kind": "realization",
+    "entry": "RLZ-6X7QPYQ5"
+  },
+  "final_comparison_capture": {
+    "serving_build": {
+      "version": "3.0.0rc8",
+      "bootedAt": "2026-10-08T07:42:24.079079+00:00",
+      "sourceDigest": "sha256:0959ff741cfc6424250c7e18dc20350cccacbcff484503e95f1a4c903845ce92",
+      "pythonExecutable": "/home/firefox/.local/share/agents-remember/python/cpython-3.14.8/bin/python3.14",
+      "packageRoot": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l86-ar/260928-mik-l86/mcp/src/agents_remember",
+      "commit": "4afb9f23",
+      "dashboardBuild": "305e1c6da077e1762eea9644cbf66fa52503ecc867ac6b17d6b7ad10d7164d70",
+      "dirty": true
+    },
+    "scope": "changeset listing only; other capture receipts retain their original producer boots",
+    "previous_reply_and_provenance": "task-reports/l86-browser/pre-refinement"
+  }
+}

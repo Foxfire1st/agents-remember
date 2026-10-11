@@ -9,7 +9,7 @@
 //   * choosing another subject reads that subject's review and never the catalogue again;
 //   * a refresh that reaches a new candidate generation (other snapshot digests) re-reads it once;
 //   * the wait for the catalogue is bounded: a catalogue that never answers does not withhold the
-//     task-context review or the complete source explorer beyond `SUBJECT_HOLD_MS`.
+//     task-context review or its All changes destination beyond `SUBJECT_HOLD_MS`.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -123,7 +123,7 @@ it('reads the catalogue once on entry, then asks the review only for the subject
   // Another subject reads that subject's review, never the catalogue again.
   fireEvent.click(
     view
-      .getAllByTestId('review-catalogue-subject')
+      .getAllByTestId('review-family-open')
       .find((button) => button.dataset.subjectId === families[1].family_id)!,
   );
   await waitFor(() =>
@@ -195,7 +195,7 @@ it.each([300, 600])(
   },
 );
 
-it('reads the task-context review and shows the source explorer when the catalogue never answers', async () => {
+it('reads the task-context review and keeps All changes reachable when the catalogue never answers', async () => {
   vi.useFakeTimers();
   const urls: URL[] = [];
   vi.stubGlobal(
@@ -227,9 +227,11 @@ it('reads the task-context review and shows the source explorer when the catalog
   expect(reviewReads()[0].searchParams.get('selectorKind')).toBeNull();
   vi.useRealTimers();
   await waitFor(() =>
-    expect(view.getAllByTestId('review-inventory-entry')).toHaveLength(
-      recorded.source.inventory.entries.length,
+    expect(view.getByTestId('review-scope-record').textContent).toContain(
+      `${recorded.source.inventory.entries.length} changed files`,
     ),
   );
   expect(urls.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(1);
+  expect(view.getAllByRole('button', { name: /^All changes/ }).length).toBeGreaterThan(0);
+  expect(view.queryByTestId('review-source-explorer')).toBeNull();
 });

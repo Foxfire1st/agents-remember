@@ -41,7 +41,7 @@ import { guaranteeComparison } from '../../data/review';
 import { treeComparisonNumber } from '../../data/reviewTrees';
 import { proseLayoutStore, useProseLayout, type ProseLayout } from './intentDiffPreference';
 import { KnowledgeStatements } from './KnowledgeStatements';
-import type { DiffLayout } from './SourceExplorer';
+import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import {
   guaranteeRevisionLabels,
   revisionMeta,
@@ -268,15 +268,15 @@ function WhitespaceOnly({
   field: string;
 }) {
   return (
-    <div data-testid="intent-diff-whitespace-only" data-field={field}>
+    <div data-review-content="wording" data-testid="intent-diff-whitespace-only" data-field={field}>
       <p className={muted} data-testid="intent-diff-whitespace-label">
         whitespace-only change
       </p>
       <p className={prose} data-testid="intent-diff-whitespace-text">
         {after}
       </p>
-      <details>
-        <summary>Both exact texts, whitespace made visible</summary>
+      <div data-review-content="diff">
+        <p>Both exact texts, whitespace made visible</p>
         <p className={sideLabel}>Before</p>
         <pre className={exact} data-testid="intent-diff-exact-before">
           {visibleWhitespace(before)}
@@ -285,7 +285,7 @@ function WhitespaceOnly({
         <pre className={exact} data-testid="intent-diff-exact-after">
           {visibleWhitespace(after)}
         </pre>
-      </details>
+      </div>
     </div>
   );
 }
@@ -309,7 +309,12 @@ function TextPassage({ before, after, field }: { before: string; after: string; 
   const [inlineFor, setInlineFor] = useState<string | null>(null);
   if (diff.kind === 'identical')
     return (
-      <p className={prose} data-testid="intent-diff-identical" data-field={field}>
+      <p
+        className={prose}
+        data-review-content="wording"
+        data-testid="intent-diff-identical"
+        data-field={field}
+      >
         {after}
       </p>
     );
@@ -318,7 +323,12 @@ function TextPassage({ before, after, field }: { before: string; after: string; 
   const fallback = diff.rewrite && preferred === 'inline' && inlineFor !== identity;
   const layout: ProseLayout = fallback ? 'side-by-side' : preferred;
   return (
-    <div data-testid="intent-diff" data-field={field} data-layout={layout}>
+    <div
+      data-review-content="wording"
+      data-testid="intent-diff"
+      data-field={field}
+      data-layout={layout}
+    >
       {fallback ? (
         <p className={muted} data-testid="intent-diff-rewrite">
           {rewriteReason(diff)}{' '}
@@ -385,7 +395,12 @@ function ListPassage({
 }) {
   const rows = useMemo(() => alignLists(before, after), [before, after]);
   return (
-    <ul className={items} data-testid="intent-diff-list" data-field={field}>
+    <ul
+      className={items}
+      data-review-content="wording"
+      data-testid="intent-diff-list"
+      data-field={field}
+    >
       {rows.map((row, index) => (
         <ListItem key={index} row={row} field={field} />
       ))}
@@ -413,7 +428,12 @@ function OneSidedLine({
     : `recorded on the ${present} side only — ${other}: ${otherState}, not known absent` +
       (otherDetail ? ` (${otherDetail})` : '');
   return (
-    <p className={muted} data-testid="intent-one-sided" data-known={String(known)}>
+    <p
+      className={muted}
+      data-review-content="reason"
+      data-testid="intent-one-sided"
+      data-known={String(known)}
+    >
       {text}
     </p>
   );
@@ -442,7 +462,11 @@ function OneSidedStatement({
         otherState={other.state}
         otherDetail={other.detail}
       />
-      <p className={prose} data-testid="review-center-statement-prose">
+      <p
+        className={prose}
+        data-review-content="wording"
+        data-testid="review-center-statement-prose"
+      >
         {present.text}
       </p>
     </>
@@ -548,7 +572,7 @@ function StatementText({
   return changed ? (
     <TextPassage before={before.text ?? ''} after={after.text ?? ''} field="statement" />
   ) : (
-    <p className={prose} data-testid="review-center-statement-prose">
+    <p className={prose} data-review-content="wording" data-testid="review-center-statement-prose">
       {before.text}
     </p>
   );
@@ -645,7 +669,11 @@ export function GuaranteeTextChange({
     ? [before.display_version, after.display_version]
     : guaranteeRevisionLabels(before, after);
   return (
-    <div data-testid="review-center-guarantee-changed" data-word-diff="true">
+    <div
+      data-review-content="wording"
+      data-testid="review-center-guarantee-changed"
+      data-word-diff="true"
+    >
       <p className={muted} data-testid="review-center-guarantee-label">
         Changed guarantee · {revisionMeta(...labels)}
         {same ? ' · the same revision on both sides; its text differs' : ''}
@@ -660,7 +688,7 @@ export function GuaranteeTextChange({
           after={after.joint_guarantee}
           field="guarantee"
         />
-        <details>
+        <details data-disclosure="identifiers">
           <summary>Revision records</summary>
           <p className={muted}>
             before revision {before.revision_id} · after revision {after.revision_id}

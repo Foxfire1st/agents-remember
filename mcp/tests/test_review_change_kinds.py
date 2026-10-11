@@ -39,10 +39,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application import knowledge_review
 from agents_remember.application.knowledge_review import compose_review
 from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.review_candidate_resolution import (
@@ -50,8 +52,11 @@ from agents_remember.application.review_candidate_resolution import (
     resolve_review_candidate,
 )
 from agents_remember.application.review_change_kinds import with_change_kinds
+from agents_remember.application.review_lane_classification import TreeLane
+from agents_remember.application.review_outline import read_review_outline
+from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge_index import text_uuid
+from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review_change_kinds import ReviewMemberChange
 from agents_remember.models.knowledge.review_family_context import (
@@ -680,3 +685,112 @@ def _no_bound_services() -> Iterator[None]:
     reset_worktree_services()
     yield
     reset_worktree_services()
+
+
+def test_the_outline_reads_only_indexes_and_preserves_catalogue_fields(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole outline keeps authored membership order and uses the detail's meaning facts."""
+
+    fam1 = world.memory_worktree / "knowledge" / "families" / f"{FAM1}-{FAM1.lower()}.json"
+    body = json.loads(fam1.read_text())
+    body["members"] = [H, A, B, C, D, E, G, K]
+    fam1.write_text(canonical_text(body))
+    # F left FAM1 but joined FAM2; FAM3 changes only its revision/order, not its guarantee.
+    fam2 = world.memory_worktree / "knowledge" / "families" / f"{FAM2}-{FAM2.lower()}.json"
+    fam2.unlink()
+    _write(world.memory_worktree, dict([_family("FAM-F00004", [H], "Four.")]))
+    statement = " ".join(["A complete word in the invariant summary."] * 5)
+    _write(world.memory_worktree, dict([_invariant(H, statement=statement)]))
+    resolved = _resolve(world)
+    expected = read_subject_catalogue(resolved)
+    monkeypatch.setattr(knowledge_review, "resolve_review_candidate", lambda *_a, **_k: resolved)
+
+    def forbidden(*_a: Any, **_k: Any) -> None:
+        raise AssertionError("the outline read source, a roster or a subject review")
+
+    monkeypatch.setattr(TreeLane, "classify", forbidden)
+    monkeypatch.setattr(CodeTrees, "_blob", forbidden)
+    monkeypatch.setattr(KnowledgeIndex, "family", forbidden)
+    monkeypatch.setattr(KnowledgeIndex, "invariant", forbidden)
+    monkeypatch.setattr(knowledge_review, "compose_review", forbidden)
+    result = knowledge_review.list_knowledge_review_entries(world.config, REPO, MASTER, LEAF)
+    assert result.entries == expected
+    assert tuple(result.model_dump(exclude={"outline"})) == (
+        "state",
+        "operation",
+        "repository_id",
+        "master",
+        "leaf_id",
+        "entries",
+        "refusal",
+        "total_subjects",
+        "invariant_total",
+        "family_total",
+    )
+    assert result.total_subjects == len(expected)
+    assert result.invariant_total == sum(e.selector_kind == "invariant" for e in expected)
+    assert result.family_total == sum(e.selector_kind == "family" for e in expected)
+    outline = result.outline
+    assert outline is not None and outline.state == "outlined"
+    families = {family.id: family for family in outline.families}
+    assert {identity: family.change for identity, family in families.items()} == {
+        FAM1: "unchanged",
+        FAM2: "removed",
+        FAM3: "unchanged",
+        "FAM-F00004": "added",
+    }
+    assert [member.id for member in families[FAM1].members] == [H, A, B, C, D, E, G, K, F]
+    assert {member.id: member.membership for member in families[FAM1].members} == {
+        H: "joined",
+        A: "both",
+        B: "both",
+        C: "both",
+        D: "both",
+        E: "both",
+        G: "both",
+        K: "both",
+        F: "left",
+    }
+    invariants = {invariant.id: invariant for invariant in outline.invariants}
+    assert invariants[A].change == invariants[P].change == "changed"
+    assert invariants[H].change == "added" and invariants[R].change == "removed"
+    assert invariants[B].change == "unchanged"  # Its code changed; outline classifies meaning only.
+    summary = invariants[H].summary
+    assert statement.startswith(summary) and len(summary) <= 120
+    assert (
+        statement[len(summary)] == " "
+        and len(summary) + len(statement[len(summary) :].split()[0]) > 120
+    )
+    assert all(
+        invariant.selector_id == text_uuid("identity", invariant.id)
+        for invariant in invariants.values()
+    )
+    assert all(
+        member.selector_id == text_uuid("identity", member.id)
+        for family in families.values()
+        for member in family.members
+    )
+
+
+def test_the_outline_states_unknown_records_and_unavailable_membership_or_indexes(
+    world: World,
+) -> None:
+
+    invariant_path = world.memory_worktree / "knowledge" / "invariants" / f"{A}-{A.lower()}.json"
+    invariant_path.write_text("{")
+    resolved = _resolve(world)
+    outline = read_review_outline(resolved)
+    assert outline.state == "outlined"
+    assert (
+        next(invariant for invariant in outline.invariants if invariant.id == A).change == "unknown"
+    )
+    family_path = world.memory_worktree / "knowledge" / "families" / f"{FAM1}-{FAM1.lower()}.json"
+    family_path.write_text("{")
+    unread = read_review_outline(_resolve(world))
+    assert unread.state == "unavailable" and "do not parse" in unread.detail
+    assert not unread.families and not unread.invariants
+    dataset = read_review_outline(replace(resolved, trees=None))
+    assert dataset.state == "unavailable" and "no converted memory" in dataset.detail
+    missing = read_review_outline(replace(resolved, baseline_database=world.root / "absent-index"))
+    assert missing.state == "unavailable" and "indexes could not be read" in missing.detail
