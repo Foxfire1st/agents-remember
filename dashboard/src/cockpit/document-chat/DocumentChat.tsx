@@ -28,7 +28,9 @@ function DocumentChatView({ scope, launcher, launchControl, bindingProblem, deta
       {bindingProblem ? <p role="status">{bindingProblem}</p> : null}
       {launcher}
       {available && detail ? <FrameUnavailable reason={reason ?? "backend"} detail={detail} onRetry={onRetry} /> : null}
-      <div className={shell} style={hideFrame ? { display: "none" } : undefined}>
+      {/* MIK-R122 rule 6: a hidden chat keeps its frame loaded but stays out of keyboard
+          focus and the accessibility tree (display:none already drops focusability). */}
+      <div className={shell} style={hideFrame ? { display: "none" } : undefined} aria-hidden={hideFrame || undefined}>
         <PaseoChatFrame active={active} scope={scope} target={target} page="document" onAvailability={onAvailability} />
       </div>
     </section>

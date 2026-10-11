@@ -257,7 +257,14 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
     control,
   } = props;
   return (
-    <div className={frameShell} data-testid="paseo-frame" data-control={control}>
+    <div
+      className={frameShell}
+      data-testid="paseo-frame"
+      data-control={control}
+      /* MIK-R122 rule 7: the generation rises by exactly one per document load, so tests
+         can read the number of loads. Only load() bumps it; message switches never do. */
+      data-generation={frame.generation}
+    >
       <FrameNotices {...props} />
       <div className={frameBody}>
         <iframe

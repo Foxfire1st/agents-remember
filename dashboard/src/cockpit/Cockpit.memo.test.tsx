@@ -290,18 +290,19 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(counts.eventRiver).toBe(1);
   });
 
-  it("swaps the right rail between River and Chat (memoized RailToggle still updates)", () => {
+  it("hides the right-rail chat behind the River (memoized RailToggle still updates)", () => {
     seed("engine-fleet");
     const view = render(<CockpitShell initialView="operations" />);
     const railRight = view.container.querySelector(".rail--right");
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
 
     fireEvent.click(view.getByTestId("rail-toggle-chat"));
-    expect(railRight?.querySelector('[data-testid="document-chat"]')).not.toBeNull();
+    const chat = railRight?.querySelector('[data-testid="document-chat"]');
+    expect(chat).not.toBeNull();
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
 
     fireEvent.click(view.getByTestId("rail-toggle-river"));
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBe(chat);
   });
 });

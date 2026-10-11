@@ -666,26 +666,29 @@ describe("rail keep-alive across view switches (260721 F1)", () => {
   });
 });
 
-describe("right-rail River⇄Chat toggle (L5 S2)", () => {
-  it("swaps the rail--right content between the Event River and the single-instance chat", () => {
+describe("right-rail River⇄Chat toggle (L5 S2; MIK-R122 keep-alive)", () => {
+  it("hides the single-instance chat behind the Event River instead of unmounting it", () => {
     seed("engine-fleet");
     const { container, getByTestId } = render(<CockpitShell initialView="operations" />);
 
     const railRight = container.querySelector(".rail--right");
     expect(railRight).not.toBeNull();
-    // Default = the Event River; the chat surface is not mounted.
+    // Default = the Event River; the chat surface stays mounted but hidden.
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
+    const chat = railRight?.querySelector('[data-testid="document-chat"]');
+    expect(chat).not.toBeNull();
+    expect(railRight?.querySelector('[data-testid="rail-chat-keepalive"]')?.getAttribute("aria-hidden")).toBe("true");
 
-    // Toggle to Chat: the river is gone, the single-instance chat is mounted in its place.
+    // Toggle to Chat: the river is gone, the same chat instance shows.
     fireEvent.click(getByTestId("rail-toggle-chat"));
-    expect(railRight?.querySelector('[data-testid="document-chat"]')).not.toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBe(chat);
     expect(railRight?.querySelector('[data-testid="event-river"]')).toBeNull();
 
-    // Toggle back to River restores it.
+    // Toggle back to River: the river returns, the same chat hides again.
     fireEvent.click(getByTestId("rail-toggle-river"));
     expect(railRight?.querySelector('[data-testid="event-river"]')).not.toBeNull();
-    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBeNull();
+    expect(railRight?.querySelector('[data-testid="document-chat"]')).toBe(chat);
+    expect(railRight?.querySelector('[data-testid="rail-chat-keepalive"]')?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("remembers the rail choice across a window refresh (localStorage)", () => {

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { taskDoc } from "../test/fixtures/wire";
 import { RoleChatsPane } from "./RoleChats";
 import { PaseoChatFrame } from "./PaseoChatFrame";
-import { PASEO_CONTROL_TIMEOUT_MS } from "./paseoFrameControl";
+import { PASEO_CONTROL_TIMEOUT_MS, PASEO_UNAVAILABLE_QUIET_MS } from "./paseoFrameControl";
 import { tasklessRequestStorageKey } from "./roleLaunchModel";
 import {
   paseoAgentTarget,
@@ -476,12 +476,15 @@ describe("control channel unavailable", () => {
     expect(frameElement(container).getAttribute("src")).toBe(PROJECTS_URL);
 
     // An execution is displayed: its agent's URL is loaded in the frame; nothing is posted.
+    // A lone selection while the channel is unavailable loads when its quiet window expires
+    // (MIK-R122 recovery 3: later-turn intermediates never load, the latest does).
     const before = frameElement(container);
     const posts = watchPosts(before);
     rerender(
       <PaseoChatFrame active scope="worker" target={WORKER} />,
     );
     expect(posts).not.toHaveBeenCalled();
+    await settle(PASEO_UNAVAILABLE_QUIET_MS);
     expect(frameElement(container).getAttribute("src")).toBe(WORKER_URL);
     expect(frameElement(container)).not.toBe(before);
     expect(getByTestId("paseo-frame-control-banner")).not.toBeNull();

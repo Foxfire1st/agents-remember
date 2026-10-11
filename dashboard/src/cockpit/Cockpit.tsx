@@ -688,7 +688,7 @@ function LeftRail({
   );
 }
 
-function RightRail({
+export function RightRail({
   fullBleed,
   railEnter,
   railView,
@@ -720,16 +720,24 @@ function RightRail({
     >
       <RailResizeHandle side="right" width={rightRailWidth} onResize={onResize} />
       <RailToggle value={railView} onChange={setRailView} />
+      {/* MIK-R122: the river keeps its remove-while-chat-shows behaviour, but the chat is
+          never unmounted — only hidden — so the single frame stays loaded and keeps the
+          developer's draft and scroll position across the toggle. */}
       {railView === "river" ? (
         <EventRiver />
-      ) : (
+      ) : null}
+      <div
+        style={{ display: railView === "chat" ? "flex" : "none", flex: "1", minHeight: "0", minWidth: "0" }}
+        aria-hidden={railView !== "chat"}
+        data-testid="rail-chat-keepalive"
+      >
         <DocumentChat
-          active={!fullBleed}
+          active={railView === "chat" && !fullBleed}
           taskDocumentRef={viewedTask?.taskDocumentRef}
           taskDocuments={taskDocuments}
           series={series}
         />
-      )}
+      </div>
     </motion.aside>
   );
 }

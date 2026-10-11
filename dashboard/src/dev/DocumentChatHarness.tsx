@@ -1,11 +1,12 @@
-// DEV-ONLY harness for the MIK-R121 browser test (`/dev/document-chat-host`). It renders the real
-// `DocumentChat` (document page: Operations right rail) against stubbed role-launch answers and a
-// doc switcher, so the spec can select the master and the task and watch the shared frame follow.
+// DEV-ONLY harness for the MIK-R121/R122 browser tests (`/dev/document-chat-host`). It renders
+// the real Operations right rail (`RightRail` from Cockpit: the rail toggle plus EventRiver /
+// `DocumentChat`) against stubbed role-launch answers and a doc switcher, so a spec can walk
+// the rail toggle and the document selection and watch the single shared frame follow.
 // Never shipped: `App.tsx` loads `DevApp` only under `import.meta.env.DEV`.
 import { useState } from "react";
 
 import type { TaskDocumentRef } from "../types/terminalCatalog";
-import { DocumentChat } from "../cockpit/document-chat/DocumentChat";
+import { RightRail } from "../cockpit/Cockpit";
 import { chatLeaf, chatMaster, chatSeries, chatSprint } from "../test/fixtures/documentChat";
 import type { DocumentAgent } from "../cockpit/document-chat/model";
 
@@ -51,22 +52,41 @@ const DOCS: Array<{ key: string; label: string; ref: TaskDocumentRef | undefined
   { key: "projects", label: "Projects", ref: undefined },
   { key: "master", label: "Master", ref: { repository: "repo", path: "master/task.json" } },
   { key: "leaf", label: "Task", ref: { repository: "repo", path: "master/leaf.json" } },
+  // A selected document with no agent anywhere: the frame hides and the launcher shows.
+  { key: "ghost", label: "Agentless", ref: { repository: "repo", path: "master/ghost.json" } },
 ];
 
 export default function DocumentChatHarness() {
   useState(installFetchStub);
   const [doc, setDoc] = useState<string>("projects");
+  const [railView, setRailView] = useState<"river" | "chat">("chat");
   const ref = DOCS.find((entry) => entry.key === doc)?.ref;
   return (
-    <div data-testid="doc-harness" data-selection={doc}>
+    <div data-testid="doc-harness" data-selection={doc} data-rail={railView}>
       <div role="toolbar" aria-label="harness documents">
         {DOCS.map((entry) => (
           <button key={entry.key} type="button" data-testid={`harness-doc-${entry.key}`} onClick={() => setDoc(entry.key)}>
             {entry.label}
           </button>
         ))}
+        <button type="button" data-testid="harness-rail-river" onClick={() => setRailView("river")}>
+          River
+        </button>
+        <button type="button" data-testid="harness-rail-chat" onClick={() => setRailView("chat")}>
+          Chat
+        </button>
       </div>
-      <DocumentChat active taskDocumentRef={ref} taskDocuments={[chatSprint, chatMaster, chatLeaf]} series={chatSeries} />
+      <RightRail
+        fullBleed={false}
+        railEnter={{}}
+        railView={railView}
+        rightRailWidth={360}
+        setRailView={setRailView}
+        viewedTask={ref ? { taskDocumentRef: ref } : undefined}
+        taskDocuments={[chatSprint, chatMaster, chatLeaf]}
+        series={chatSeries}
+        onResize={() => {}}
+      />
     </div>
   );
 }
