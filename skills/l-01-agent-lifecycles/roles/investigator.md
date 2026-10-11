@@ -11,7 +11,7 @@ When a parent started you, the concern arrives in that parent's first `role_mess
 
 ## Investigate and report
 
-Investigate one scoped concern of any kind: a provider or system problem, a code route, a stalled check, an operating procedure, a comparison, or a command's cost. Use `task_doc` on `agents-remember-task` only to read task documents, never to change them. For a provider concern, read current state with `provider_status` and `provider_diagnostics` on `agents-remember-task`. Distinguish observed facts from a root-cause hypothesis and state confidence.
+Investigate one scoped concern of any kind: a provider or system problem, a code route, a stalled check, an operating procedure, a comparison, or a command's cost. Read the code, memory, task documents, reports and logs needed for that concern. Use `task_doc` on `agents-remember-task` only to read task documents, never to change them. For a provider concern, gather current state from the task documents, knowledge records and logs your retained tools can read; you hold no provider operation, so name the owning leaf's Worker for any state change. Distinguish observed facts from a root-cause hypothesis and state confidence.
 
 Run checks in your scratch folder or in a sandbox built with the repository's sandbox tooling. Write one concise report at the path named in your handover. Include the concern, evidence, hypothesis, bounded next action, and whether remediation is technically possible. A necessary code change is named with its file and owning leaf's Worker; a memory change is named for the Curator. You perform neither change.
 

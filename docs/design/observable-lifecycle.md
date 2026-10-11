@@ -1,6 +1,8 @@
 # Observable Lifecycle, Events, and Gates — the Agents Remember 3.0 Design
 
-**Status:** Design — approved, pre-implementation.
+**Status:** Design — approved, pre-implementation; amended by MIK-R112, which removed the
+model-facing signal tools (§1.3). States, events, gates, and the ambient correlation below
+stay as designed; the transitions that were model-invoked signals are now session-driven.
 
 **Scope:** the architecture that makes the Agents Remember lifecycle *observable* and
 *controllable* — a first-class lifecycle entity, an append-only event substrate with
@@ -26,8 +28,8 @@ zero or one active lifecycle.
 - Ids are minted **server-side, adjacent to `context_packet`** (governance confirmed ⇒
   start); minted locally (no network), unique across parallel sessions (ULID).
 - **The model never handles ids.** Guarded start prevents duplicates; the worktree
-  contract owns resume; only `switch_lifecycle` carries a target *reference* (a worktree,
-  which the contract resolves to a lifecycle id server-side).
+  contract owns resume; only a worktree-carrying transition carries a target
+  *reference* (a worktree, which the contract resolves to a lifecycle id server-side).
 - **The contract enclosure is the identity anchor** for persistent lifecycles: one
   enclosure = one lifecycle, even when it wraps several repos. A multi-task series runs
   in one enclosure and is therefore one lifecycle.
@@ -46,13 +48,13 @@ lifecycle there is no "off-task digression" left for a model-driven pause to mea
 
 | From | To | Trigger | Actor / trust | Event (`data.cause`) |
 | --- | --- | --- | --- | --- |
-| — | running | `lifecycle_start` (guarded) | model / declared | `lifecycle.started` |
-| — | running | `switch_lifecycle` / `worktree_attach` into target | system / observed | `lifecycle.resumed` (`adopted`) |
-| running | blocked | `lifecycle_gate` (with ask) | model / declared | `lifecycle.blocked` |
+| — | running | guarded start | model / declared | `lifecycle.started` |
+| — | running | switch / `worktree_attach` into target | system / observed | `lifecycle.resumed` (`adopted`) |
+| running | blocked | gate raised (with ask) | model / declared | `lifecycle.blocked` |
 | running | paused | switch-away (persistent lifecycle) | system / observed | `lifecycle.paused` (`switched-away`) |
 | running | paused | dormancy inference: heartbeats stale | system / inferred | `lifecycle.paused` (`quiet`) |
-| running | completed \| abandoned | `lifecycle_end` | model / declared | `lifecycle.ended` (`outcome`) |
-| blocked | running | `lifecycle_resume` after gate resolution | model / declared | `lifecycle.resumed` |
+| running | completed \| abandoned | terminal record | model / declared | `lifecycle.ended` (`outcome`) |
+| blocked | running | resume after gate resolution | model / declared | `lifecycle.resumed` |
 | blocked | running | tool activity follows resolved gate, signal missed | system / inferred | `lifecycle.resumed` (`inferred`) |
 | blocked | paused | gate resolved ∧ no live session | system / inferred | `lifecycle.paused` (`released-quiet`) |
 | blocked | blocked | switch-away or chat death | — | none (gate record keeps the queue item) |
@@ -68,18 +70,19 @@ written event**: by definition no live owner remains to write it, so readers *pr
 through the save gate first: save ⇒ promote (then the switch-away pauses it); decline ⇒
 deliberate discard (`lifecycle.ended`, outcome `abandoned`).
 
-### 1.3 Signals (the complete model-facing surface)
+### 1.3 Signals (session-driven transitions)
 
-| Signal | Effect | Notes |
-| --- | --- | --- |
-| `lifecycle_start` | mint + `running` | **Guarded**: rejected with a reminder naming the active lifecycle while one is active in the session. Takes no identifier. |
-| `lifecycle_gate` | `blocked` | The public gate junction. It opens the durable typed gate, records the structured **ask** (`kind: question \| decision \| conflict`, prompt, options) on `lifecycle.blocked`, and initializes wait/response state in one operation. |
-| `lifecycle_resume` | `running` | Clears `blocked` once the gate response has been handled. Re-adoption of `paused` lifecycles is system-driven via switch/attach, never this signal. |
-| `lifecycle_end` | `completed` \| `abandoned` | `completed` = the human declared done; `abandoned` otherwise. |
-| `switch_lifecycle` | transition | The **only** id-carrying signal (a worktree reference, contract-resolved). Creates new, or resumes existing. Leaving fleeting ⇒ save gate; leaving persistent running ⇒ auto-pause. |
-| `lifecycle_phase` | phase change | Orthogonal axis (§1.4). |
+MIK-R112 removed the model-facing signal tools, so there is no model-invoked signal surface.
+The transitions and their effects stay as the table in §1.2 records them: guarded start mints
+and moves to `running`; a raised gate moves to `blocked` and records the structured **ask**
+(`kind: question \| decision \| conflict`, prompt, options) with wait/response state in one
+operation; resume after gate resolution clears `blocked`; the terminal record is `completed`
+(the human declared done) or `abandoned` otherwise; switching carries the single id-carrying
+reference (a worktree, contract-resolved), creating new or resuming existing, with the save
+gate on leaving fleeting and auto-pause on leaving persistent running; the phase axis (§1.4)
+moves orthogonally. Re-adoption of `paused` lifecycles is system-driven via switch/attach.
 
-`worktree_attach` **always behaves as `switch_lifecycle`** with the contract-resolved
+`worktree_attach` **always behaves as a contract-resolved switch**
 target (active fleeting → save gate; active persistent → auto-pause; same lifecycle →
 no-op; none → resume). `worktree_start` mid-lifecycle is **not** a switch: it is the
 fleeting→persistent **promotion** of the current lifecycle (`lifecycle.promoted`).
@@ -110,7 +113,7 @@ in phase `reframe-research` and state `paused` at once; you cannot be `paused` a
   dormant > TTL) and the opportunistic sweep **prunes** (deletes) the log directory. No
   process ever appends to a lifecycle file it does not own, so the single-writer
   invariant (§2.3) holds without coordination. The sweep runs on the next live trigger —
-  `lifecycle_start`/`switch_lifecycle`, and the dashboard's projection tick once it
+  a guarded start, a switch, and the dashboard's projection tick once it
   exists — never a daemon (a dead stdio process cannot reap itself). TTL exists because
   disconnects may be involuntary (a dropped network is not intent), and pruning a
   worktree-less, artifact-less stub loses nothing audit-critical. Persistent lifecycles
@@ -119,8 +122,8 @@ in phase `reframe-research` and state `paused` at once; you cannot be `paused` a
 
 ### 1.6 Ambient attribution and the heartbeat
 
-- The stdio MCP server process ≈ one harness session. `lifecycle_start` /
-  `switch_lifecycle` set the **ambient current lifecycle**; every subsequent tool
+- The stdio MCP server process ≈ one harness session. Guarded start and switch set the
+  **ambient current lifecycle**; every subsequent tool
   response is auto-tagged server-side. An explicit `lifecycle_id` parameter exists only
   as an override. Subagents sharing the connection inherit the ambient id. (Per-harness
   session scoping is confirmed during implementation and recorded in a harness matrix.)
@@ -272,7 +275,7 @@ current blocker text) without dropping back to the build phase. (Code changes, b
 contrast, *do* return the lifecycle to the build phase.)
 
 Two opening doors only: **tools** open gates server-side (the commit gate at closeout
-preview — no model involvement), and **`lifecycle_gate`** materializes
+preview — no model involvement), and **a raised gate** materializes
 agent/developer wait points with the gate kind and ask shape kept separate. Alarms are
 system-opened.
 
@@ -295,7 +298,7 @@ arranging the harness's own re-invocation.
   compacted away.
 - **L1 — passive pull.** Envelope enrichment: open / recently-resolved gate state stamped
   into every tool response in the ambient lifecycle. Universal across harnesses.
-- **L2 — active pull.** `lifecycle_gate` initializes the wait window: gate and inbox
+- **L2 — active pull.** A raised gate initializes the wait window: gate and inbox
   state are checked on a bounded cadence behind the unified gate channel. Callers
   consume returned inbox entries after reading them; they do not wrap the normal path
   in their own re-call loop.
@@ -305,9 +308,9 @@ arranging the harness's own re-invocation.
   the dashboard click lands. Where a harness cannot wake on background completion, the turn
   ends honestly and L1/L2 resume on the next poke.
 
-Taught behavior at a gate: report the gate packet in prose, then on the next turn call
-`lifecycle_gate` once and end honestly until the developer response is handled. Unblock
-is an explicit `lifecycle_resume` (with the inferred fallback of §1.2).
+Taught behavior at a gate: report the gate packet in prose, then end the turn honestly
+until the developer response is handled. Unblock is an explicit resume after gate
+resolution (with the inferred fallback of §1.2).
 
 ---
 
@@ -348,7 +351,7 @@ are settled when this tool is implemented.
    space for per-child restart strategies and rebuild-seed sufficiency.
 3. Tool response envelope **v2**: ambient attribution (`lifecycleId`) and a conditional
    `gates` block; the response schema version flips.
-4. The six-signal vocabulary becomes required doctrine (the skills teach it; a session
+4. The lifecycle vocabulary becomes required doctrine (the skills teach it; a session
    that never signals is outside the documented workflow).
 5. The new subsystems that define 3.0: the observer, the event store, the serving layer,
    the dashboard, and the CLI verbs `dashboard` and `gate-wait`.
@@ -398,9 +401,9 @@ it is honored.
 
 | Question | Owner phase |
 | --- | --- |
-| Heartbeat interval / stale multiplier / TTL defaults (configuration) | lifecycle tools |
-| Retention grace windows + archive format | lifecycle tools |
-| Per-harness matrix: ambient scoping, background-wake, sleep/loop | lifecycle tools |
+| Heartbeat interval / stale multiplier / TTL defaults (configuration) | lifecycle surface |
+| Retention grace windows + archive format | lifecycle surface |
+| Per-harness matrix: ambient scoping, background-wake, sleep/loop | lifecycle surface |
 | `waitSeconds` cap + held-call concurrency behavior | gate control plane |
 | `superseded` mechanics (preview re-run wiring; semantics fixed here) | gate control plane |
 | Read-packet tool name, overview front-door, batch/budget caps | read packet |

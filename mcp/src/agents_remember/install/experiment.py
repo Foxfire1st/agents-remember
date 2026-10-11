@@ -724,7 +724,7 @@ def experiment_rollback_plan(
 
     ``install_roots`` is for a **separate** ``skills_install`` run and is never populated by the
     runtime install: ``install_runtime`` copies runtime assets and nothing else, so a row for a
-    harness skill root is rendered only when the caller actually ran that other tool, and its action
+    harness skill root is rendered only when the caller actually ran that other install operation, and its action
     and undo text say so.
     """
 

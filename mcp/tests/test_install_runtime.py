@@ -96,14 +96,21 @@ class InstallRuntimeTests(unittest.TestCase):
             write_file(providers_root / "old.txt")
             write_file(old_script)
 
-            summary = install_runtime.install_runtime(
-                source_root,
-                coordination_root,
-                dry_run=False,
-                provider_deps=install_runtime.ProviderDependencyInstall(
-                    settings={}, timeout=1800, enabled=False
-                ),
-            )
+            # The stop is always attempted (MIK-R112 F03); keep this fixture
+            # hermetic with an ok stop and no watcher side effects.
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=lambda args, action: watcher_result(action),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings={}, timeout=1800, enabled=False
+                    ),
+                )
 
             self.assertEqual(summary.dependency_runs, 0)
             self.assertFalse((providers_root / "_bin" / "grepai.exe").exists())
@@ -116,10 +123,13 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertFalse((providers_root / "old.txt").exists())
             self.assertTrue((providers_root / "requirements" / "grepai.txt").exists())
             self.assertFalse((coordination_root / "scripts").exists())
+            leftovers = {item["path"] for item in summary.leftover_provider_folders}
+            self.assertIn((providers_root / "runners").as_posix(), leftovers)
+            self.assertIn((providers_root / "data").as_posix(), leftovers)
+            self.assertIn("leftover_provider_bytes=", summary.report())
 
-    def test_runtime_install_provider_dependency_failure_attempts_watcher_recovery(
-        self,
-    ) -> None:
+    def test_runtime_install_attempts_only_the_old_watcher_stop(self) -> None:
+        """MIK-R112 F02: knobs on, prior watcher settings — stop only, zero install/start/restart."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             source_root = create_runtime_source(root)
@@ -130,44 +140,109 @@ class InstallRuntimeTests(unittest.TestCase):
                 events.append(f"watchers:{action}")
                 return watcher_result(action)
 
-            def fake_grepai_install(args):
-                events.append("grepai:install")
-                return {"ok": False, "provider": "grepai", "error": "boom"}
-
-            with (
-                patch.object(
-                    install_provider_watchers.lifecycle,
-                    "watchers_run",
-                    side_effect=fake_watchers,
-                ),
-                patch.object(
-                    install_runtime.lifecycle,
-                    "grepai_install",
-                    side_effect=fake_grepai_install,
-                ),
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "attempted non-destructive watcher recovery",
-                ),
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=fake_watchers,
             ):
-                install_runtime.install_runtime(
+                summary = install_runtime.install_runtime(
                     source_root,
                     coordination_root,
                     dry_run=False,
                     provider_deps=install_runtime.ProviderDependencyInstall(
-                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                        settings=enabled_provider_settings("grepai-memory"),
+                        timeout=1800,
+                        enabled=True,
                     ),
                 )
 
-            self.assertEqual(
-                events,
-                [
-                    "watchers:stop",
-                    "grepai:install",
-                    "watchers:start",
-                    "watchers:status",
-                ],
+            self.assertEqual(events, ["watchers:stop"])
+            self.assertEqual(summary.dependency_runs, 0)
+            self.assertEqual(summary.unused_provider_keys, ["grepai-memory"])
+            self.assertIn("unused_provider_keys=[grepai-memory]", summary.report())
+            # The install itself completed: scaffold files landed.
+            self.assertTrue((coordination_root / "AGENTS.md").exists())
+
+    def test_runtime_install_failed_stop_continues_and_reports_the_process(self) -> None:
+        """MIK-R112 F03: a failed old-watcher stop is reported, not fatal; install continues."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            events: list[str] = []
+
+            def fake_watchers(args, action):
+                events.append(f"watchers:{action}")
+                return {
+                    **watcher_result(action, ok=False),
+                    "process": "process12345",
+                    "error": "stop refused",
+                }
+
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=fake_watchers,
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("codegraphcontext-code"),
+                        timeout=1800,
+                        enabled=True,
+                    ),
+                )
+
+            self.assertEqual(events, ["watchers:stop"])
+            self.assertTrue((coordination_root / "AGENTS.md").exists())
+            assert summary.provider_watcher_rebind is not None
+            self.assertIs(summary.provider_watcher_rebind.ok, False)
+            self.assertTrue(summary.provider_watcher_rebind.recovery_actions)
+            self.assertTrue(
+                any(
+                    "process12345" in message
+                    for message in summary.provider_watcher_rebind.messages
+                ),
+                "the failed stop's process must be named in the install result",
             )
+            self.assertEqual(summary.unused_provider_keys, ["codegraphcontext-code"])
+
+    def test_runtime_install_stop_is_independent_of_dependency_knobs(self) -> None:
+        """MIK-R112 F03: knobs off with a prior watcher still attempts the stop; keys still reported."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            events: list[str] = []
+            settings = enabled_provider_settings("grepai-memory", "codegraphcontext-code")
+            before = json.loads(json.dumps(settings))
+
+            def fake_watchers(args, action):
+                events.append(f"watchers:{action}")
+                return watcher_result(action)
+
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=fake_watchers,
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=settings, timeout=1800, enabled=False
+                    ),
+                )
+
+            self.assertEqual(events, ["watchers:stop"])
+            self.assertEqual(
+                summary.unused_provider_keys,
+                ["codegraphcontext-code", "grepai-memory"],
+            )
+            self.assertEqual(settings, before)
 
 
 class AgenticSettingsSeedTests(unittest.TestCase):
@@ -182,14 +257,19 @@ class AgenticSettingsSeedTests(unittest.TestCase):
             developer_content = '{"orchestration": {"spawn": {"harness": "codex"}}}\n'
             write_file(settings_path, developer_content)
 
-            install_runtime.install_runtime(
-                source_root,
-                coordination_root,
-                dry_run=False,
-                provider_deps=install_runtime.ProviderDependencyInstall(
-                    settings={}, timeout=1800, enabled=False
-                ),
-            )
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=lambda args, action: watcher_result(action),
+            ):
+                install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings={}, timeout=1800, enabled=False
+                    ),
+                )
 
             self.assertEqual(settings_path.read_text(encoding="utf-8"), developer_content)
 
@@ -199,14 +279,19 @@ class AgenticSettingsSeedTests(unittest.TestCase):
             source_root = create_runtime_source(root)
             coordination_root = root / "ar-coordination"
 
-            summary = install_runtime.install_runtime(
-                source_root,
-                coordination_root,
-                dry_run=True,
-                provider_deps=install_runtime.ProviderDependencyInstall(
-                    settings={}, timeout=1800, enabled=False
-                ),
-            )
+            with patch.object(
+                install_provider_watchers.lifecycle,
+                "watchers_run",
+                side_effect=lambda args, action: watcher_result(action),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=True,
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings={}, timeout=1800, enabled=False
+                    ),
+                )
 
             self.assertFalse(user_agentic_settings_path().exists())
             self.assertGreater(summary.copied_files, 0)

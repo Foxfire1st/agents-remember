@@ -15,12 +15,10 @@ from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
 from ..tools import (
     context_packet_payload,
-    ping_payload,
     read_ar_files_payload,
     resolve_context_payload,
     runtime_install_payload,
     server_info_payload,
-    skills_install_payload,
 )
 
 
@@ -37,23 +35,11 @@ def _register_identity_tools(
     """What this server is and how it was configured."""
 
     @server.tool()
-    def ping() -> dict[str, Any]:
-        """Liveness check. Returns server name, version, and transport. Read-only; no side effects."""
-        return ping_payload()
-
-    @server.tool(
-        annotations=ToolAnnotations(
-            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
-        )
-    )
     def server_info() -> dict[str, Any]:
-        """Report the resolved configuration: coordination/workspace/transcript roots, allowed
-        repo ids, allowed provider ids, full tool list, and the boot-resolved package identity.
-        A server that a role launch started for one agent also reports toolServer, the name
-        under which that agent was given this server (server is the package's own name), and
-        agentBinding: that agent's id, role, task references, request id and report path.
-        Read-only; reflects the settings and exact runtime loaded at startup (settings-file or
-        package changes need a harness restart to take effect)."""
+        """Report the resolved configuration: build, roots, allowed repos, provider keys left
+        unused, and, on a role-launched server, the tool server name and agent binding.
+        Read-only; reflects the settings and runtime loaded at startup. Longer explanation:
+        docs/tool-details.md."""
         return server_info_payload(config, serving_build)
 
 
@@ -64,13 +50,12 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
     @server.tool()
     def context_packet(
         repo_id: str,
-        include_providers: bool = True,
         include_drift: bool = False,
         include_freshness: bool = False,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """Bundle a repository's current state into one packet: repo/git state, resolved paths,
-        memory mode/storage, worktree state, and (optionally) provider status, drift, and branch
+        memory mode/storage, worktree state, and (optionally) drift, and branch
         freshness (include_freshness fetches remote-tracking refs and reports ahead/behind for the
         code and memory checkouts plus whether the ledger maps code HEAD). Read-only apart from
         that optional fetch. `include_drift` measures the reference anchors of onboarding cards
@@ -86,7 +71,6 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
             config,
             ContextPacketRequest(
                 repo_id=repo_id,
-                include_providers=include_providers,
                 include_drift=include_drift,
                 include_freshness=include_freshness,
             ),
@@ -163,30 +147,14 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         no_cache: bool = False,
         experiment: str | None = None,
     ) -> dict[str, Any]:
-        """Install/refresh the packaged coordinator runtime into the coordination root. Safe to
-        re-run over an existing install.
-
-        PRESERVES user data: memory-repos/ (onboarding) and providers/data/ (DBs, Ollama model,
-        FalkorDB graph). REPLACES managed scaffold: skills/, AGENTS.md templates, provider
-        compose/docker/requirements ("shape"), and with install_provider_deps=true may refresh
-        providers/runners/ after stopping watchers so containers rebind cleanly. Removes the
-        legacy scripts/ dir. The final host part reads the one shared paseoRuntime block at
-        each call and provisions the build-pinned host/plugin on checked product Node. It never
-        writes shared settings or stops a running host; needed transitions return restartRequired.
-        A preview downloads/writes/starts nothing; absent block reports no host configured.
-        A dry run files no report either.
-
-        With install_provider_deps=true (default) it also builds provider images, but SKIPS any
-        image whose tag already exists, then starts/rechecks watchers without rebuilding indexes.
-        Pass no_cache=true to force a true from-scratch rebuild (bypasses that skip AND adds
-        --no-cache to docker build). include_benchmarks=true also installs benchmark fixtures.
-        ALWAYS preview with dry_run=true first.
-
-        experiment="role-capsules" installs the experimental instruction cutover for THIS run: the
-        legacy AR startup chain is withheld and the pinned eve application is installed beside the
-        canonical assets. It is a per-call input, never a setting: the same parameter omitted (and
-        no AR_EXPERIMENT in the server environment) installs the unmodified runtime, and the returned
-        record's selectionSource names which input supplied the mode. Leave it unset for production."""
+        """Install or refresh the packaged coordinator runtime into the coordination root, safe
+        to re-run. Preserves user data (memory-repos/, providers/data/); replaces the scaffold
+        (skills/, docs/) and prunes legacy binaries. No provider install/start/watch
+        path remains: the install stops leftover watchers and reports enabled provider keys
+        once as unused. The final host part provisions the build-pinned host/plugin from the
+        shared paseoRuntime block; it never writes shared settings and defers needed restarts.
+        Preview first with dry_run=true: it changes nothing. Longer explanation:
+        docs/tool-details.md."""
         return runtime_install_payload(
             config,
             RuntimeInstallRequest(
@@ -196,22 +164,4 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
                 no_cache=no_cache,
                 experiment=experiment,
             ),
-        )
-
-    @server.tool()
-    def skills_install(
-        dry_run: bool = False,
-        overwrite: bool = False,
-        archive_existing: bool = False,
-    ) -> dict[str, Any]:
-        """Copy the packaged skills into the harness skill root (e.g. .claude/skills) so the harness
-        can discover them. The packaged skills are flat (one folder per skill), so each is copied by
-        its frontmatter name. overwrite replaces existing skill files; archive_existing backs them up
-        first. Most harnesses only discover newly-installed skills after a restart. Preview with
-        dry_run=true."""
-        return skills_install_payload(
-            config,
-            dry_run=dry_run,
-            overwrite=overwrite,
-            archive_existing=archive_existing,
         )

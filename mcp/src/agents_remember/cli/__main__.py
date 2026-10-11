@@ -33,6 +33,7 @@ from agents_remember.cli import (
     memory_backfill,
     memory_citations,
     paseo_runtime,
+    providers_remove,
     tool_log_stats,
     upgrade_user_settings,
 )
@@ -143,6 +144,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade_user_settings.add_arguments(upgrade)
     upgrade.set_defaults(func=upgrade_user_settings.run)
+    removal = sub.add_parser(
+        "providers-remove",
+        help="Stop provider watchers and remove leftover provider runtime folders.",
+    )
+    providers_remove.add_arguments(removal)
+    removal.set_defaults(func=providers_remove.run)
     return parser
 
 

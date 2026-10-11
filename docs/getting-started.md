@@ -157,12 +157,8 @@ Benchmark fixtures are optional and not installed by default. Install or refresh
 ## Skills And Hooks
 
 The package-based first-run path gets skills and hooks/rules/instructions from
-the copied harness starter package. Do not run `skills_install()` for initial
-setup.
-
-`skills_install()` remains available as a maintenance/manual MCP tool for
-non-package setups or later refreshes. See the [MCP tool reference](reference/mcp-tools.md)
-for that capability; it is not part of the quickstart.
+the copied harness starter package. Do not install skills for initial
+setup; the starter package already carries them.
 
 ## Set Up Memory
 
@@ -198,13 +194,12 @@ route to re-point it at its external memory root.
 
 For a new memory repo, the `c-13-install-and-onboard` skill runs `c-03-repo-bootstrap` for the target repository. A thin `overview.md` is enough to start. Larger repositories can grow route-local overviews and file-level onboarding as work touches new areas. For token-conscious bootstraps of large repos, see [Cost-aware Bootstrap](guides/cost-aware-bootstrap.md).
 
-## Start Providers (Optional)
+## Providers (Retired Operation)
 
-If you enabled `codegraphcontext-code` or `grepai-memory`, the `c-13-install-and-onboard` skill starts the watchers so the providers index your configured code and memory. You can also do this directly:
+MIK-R112 removed the provider tools: no product path installs, starts, or watches the `codegraphcontext-code` / `grepai-memory` providers. The `c-13-install-and-onboard` skill stops leftover watcher processes during install and reports old provider keys once as unused; verify with `server_info`. There is nothing to start:
 
 ```text
-provider_watchers(action="start")
-provider_status()
+server_info()
 ```
 
 Providers are optional — memory, onboarding, drift, and task workflows all work without them. See [Providers](guides/providers.md).

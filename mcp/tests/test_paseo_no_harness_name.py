@@ -44,6 +44,18 @@ INHERITED_MODULES = {
 # the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
 # go without changing that help text.
 NAMED_EXCEPTIONS = {"cli/dashboard.py": ".claude/mcp/agents-remember-settings.json"}
+# Modules where a harness's name IS this build's launch decision, ruled by the architect
+# (MIK-R112 rule 6, choice b): the one-launch exclusion table that keeps the product's
+# other server out of a role agent. Unlike INHERITED_MODULES these are scanned (they stay
+# in the file list) but their harness names are admitted: the mapping cannot name the
+# harness it excludes without naming it.
+RULE6_MODULES = {
+    "application/agent_binding.py": (
+        "the rule-6 exclusion table (harness_tool_exclusion_argv, harness_carries_one_server, "
+        "with_server_exclusion): per-harness one-launch argv plus the mapping the brief gating "
+        "and the role-start answer read; Architect ruling L112-RULE6-MECHANISM-RULING.json"
+    ),
+}
 HARNESS_NAMES = ("codex", "claude", "pi", "hermes", "eve", "opencode", "copilot", "omp")
 # A word ends at anything that is not a letter, at an underscore and at a change of case, so a
 # harness's name is found inside an identifier too.
@@ -142,6 +154,10 @@ class NoHarnessNameTests(unittest.TestCase):
             sorted(INHERITED_MODULES),
             ["application/role_capsules/launch.py", "errors.py", "serving/launch_capsule.py"],
         )
+        # The ruled exception is exactly one module: an entry that no longer applies has to go.
+        self.assertEqual(sorted(RULE6_MODULES), ["application/agent_binding.py"])
+        for _name, reason in RULE6_MODULES.items():
+            self.assertGreater(len(reason), 40)
         imported_by_the_seam = {
             name
             for pattern in LAUNCH_CODE_PATTERNS
@@ -160,7 +176,10 @@ class NoHarnessNameTests(unittest.TestCase):
             with self.subTest(name):
                 text = path.read_text(encoding="utf-8")
                 found = sorted(set(harness_names_in(text, NAMED_EXCEPTIONS.get(name, ""))))
-                self.assertEqual(found, [], f"{name} names a harness: {found}")
+                if name in RULE6_MODULES:
+                    self.assertNotEqual(found, [], f"{name} no longer names a harness")
+                else:
+                    self.assertEqual(found, [], f"{name} names a harness: {found}")
         # The scan sees what it is meant to catch, inside an identifier too, and passes the one
         # inherited identifier and words that merely contain a harness's letters.
         caught: dict[str, list[str]] = {

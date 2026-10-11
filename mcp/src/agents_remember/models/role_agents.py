@@ -108,6 +108,10 @@ class RoleStartResponse(ToolResponse):
     requestId: str | None = None
     role: str | None = None
     agentId: str | None = None
+    # Rule 6 (MIK-R112): whether this agent also carries the product's other server. True on
+    # harnesses with no one-launch exclusion; the brief keeps the server-choice sentence
+    # for those.
+    secondCopyLoaded: bool = False
     parentAgentId: str | None = None
     reportPath: str | None = None
     handoverArtifactPath: str | None = None

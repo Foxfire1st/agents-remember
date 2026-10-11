@@ -29,9 +29,10 @@ from agents_remember.application.skill_resources import (
     build_skill_catalog,
     compile_task_capsule,
     read_served_file,
-    role_capsule_compile_tool,
-    skill_catalog_list_tool,
-    skill_catalog_read_tool,
+    require_servable,
+    role_capsule_response,
+    skill_catalog_list_response,
+    skill_catalog_read_response,
 )
 from agents_remember.application.task_projection import (
     ProjectionScopeRequest,
@@ -511,7 +512,30 @@ class World:
         )
 
     def response(self, request: CapsuleOperationRequest, *, corpus: Path | None = None) -> Any:
-        return role_capsule_compile_tool(self.config, request, sources=self.sources(corpus))
+        return role_capsule_response(self.compile(request, corpus=corpus))
+
+    def catalog_response(self, request: SkillCatalogRequest) -> Any:
+        """The discovery response for one catalog request, without the removed tool."""
+
+        selected = request or SkillCatalogRequest()
+        catalog = build_skill_catalog(
+            SkillSourceTree(root=selected.root or self.corpus, origin=selected.origin)
+        )
+        return skill_catalog_list_response(catalog)
+
+    def read_response(self, uri: str, request: SkillCatalogRequest | None = None) -> Any:
+        """One served skill file for one catalog request, without the removed tool."""
+
+        selected = request or SkillCatalogRequest()
+        catalog = build_skill_catalog(
+            SkillSourceTree(root=selected.root or self.corpus, origin=selected.origin)
+        )
+        require_servable(catalog, action="reading a skill file")
+        served = read_served_file(catalog, uri)
+        root = served.entry.root
+        return skill_catalog_read_response(
+            served, skill_revision="" if root is None else root.revision
+        )
 
     def tree_digest(self) -> str:
         """The digest of every byte under the coordination root and both corpora."""
@@ -840,7 +864,7 @@ def test_a_resource_read_leaves_the_tool_surface_and_response_registry_unchanged
     models_before = tuple(sorted(PUBLIC_TOOL_RESPONSE_MODELS))
     catalog = world.catalog
     read_served_file(catalog, catalog.entries[0].uri)
-    skill_catalog_read_tool(catalog.entries[0].uri, world.catalog_request(corpus=world.corpus))
+    world.read_response(catalog.entries[0].uri, world.catalog_request(corpus=world.corpus))
     assert tuple(PUBLIC_TOOLS) == roster_before
     assert tuple(sorted(PUBLIC_TOOL_RESPONSE_MODELS)) == models_before
 
@@ -874,7 +898,7 @@ def test_the_discovery_registry_is_not_the_model_visible_catalog(world: World) -
     nested_body = (world.corpus / "shared" / "nested" / "inner-skill" / "SKILL.md").read_text(
         encoding="utf-8"
     )
-    listing = skill_catalog_list_tool(world.catalog_request(corpus=world.corpus))
+    listing = world.catalog_response(world.catalog_request(corpus=world.corpus))
     payload = listing.to_payload()
     serialized = json.dumps(payload)
     assert "SKILL BODY for the synthetic corpus." not in serialized
@@ -887,7 +911,7 @@ def test_the_discovery_registry_is_not_the_model_visible_catalog(world: World) -
     assert shared.uri in listed_uris
     assert _entry_named(catalog, "inner-skill").uri in listed_uris
 
-    selected = skill_catalog_read_tool(
+    selected = world.read_response(
         shared.uri, world.catalog_request(corpus=world.corpus)
     ).to_payload()
     assert body == selected["content"]
@@ -930,13 +954,13 @@ def test_a_skill_directory_whose_root_file_is_not_conforming_is_recorded_not_ser
     assert "broken-skill" not in catalog.names()
     # The listing still works and says what it could not serve: a discovery surface
     # that failed closed on a sister skill's defect would hide the good ones.
-    listing = skill_catalog_list_tool(world.catalog_request(corpus=world.corpus)).to_payload()
+    listing = world.catalog_response(world.catalog_request(corpus=world.corpus)).to_payload()
     assert [row["skillPath"] for row in listing["unreadable"]] == ["broken-skill"]
     assert "shared" in {row["name"] for row in listing["skills"]}
     # Delivery refuses while an unreadable skill exists, so a tree edit cannot make a
     # published skill disappear from the served surface without saying so.
     with pytest.raises(Exception) as raised:
-        skill_catalog_read_tool(
+        world.read_response(
             _entry_named(catalog, "shared").uri, world.catalog_request(corpus=world.corpus)
         )
     assert "cannot be served" in str(raised.value)

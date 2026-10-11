@@ -236,8 +236,8 @@ def benchmark_mcp_config(workspace: BenchmarkWorkspace) -> McpRuntimeConfig:
     )
 
 
-def benchmark_lifecycle_settings(workspace: BenchmarkWorkspace) -> dict[str, Any]:
-    return lifecycle_settings_from_config(benchmark_mcp_config(workspace))
+def benchmark_lifecycle_settings() -> dict[str, Any]:
+    return lifecycle_settings_from_config()
 
 
 def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
@@ -268,7 +268,7 @@ def prepare_configured_providers(
             )
         return
 
-    settings_path = write_temp_provider_settings(benchmark_lifecycle_settings(workspace))
+    settings_path = write_temp_provider_settings(benchmark_lifecycle_settings())
     if dry_run:
         print(
             "Would run provider setup service for "

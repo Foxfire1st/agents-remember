@@ -163,7 +163,7 @@ class StdioTransportTests(unittest.TestCase):
             self.assertEqual(payload["state"], "would-carryover")
             self.assertEqual(payload["counts"], {"auto-carry": 1})
 
-    def test_ping_returns_over_stdio(self) -> None:
+    def test_server_info_returns_over_stdio(self) -> None:
         """Baseline: a trivial tool proves the harness itself is sound."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -173,7 +173,7 @@ class StdioTransportTests(unittest.TestCase):
             write_json(settings_path, harness_settings_payload(root))
 
             payload = asyncio.run(
-                call_tool_over_stdio(settings_path, "ping", {}, timeout=CALL_TIMEOUT)
+                call_tool_over_stdio(settings_path, "server_info", {}, timeout=CALL_TIMEOUT)
             )
 
             self.assertTrue(payload["ok"], msg=payload)

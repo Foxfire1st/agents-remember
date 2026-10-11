@@ -3,23 +3,12 @@ import { forwardRef } from "react";
 import {
   attnBadge,
   attnText,
-  engineDiv,
-  engineReindexCharge,
-  engineSpine,
   fxOverlaySvg,
   warpSurge,
 } from "./styles";
 
-type Point = {
-  x: number;
-  y: number;
-};
-
 type EngineFxOverlayProps = {
   attention: boolean;
-  engineHeight: number;
-  engineWidth: number;
-  reindexAt?: Point;
   surgeXs: readonly number[];
 };
 
@@ -56,48 +45,6 @@ function SurgeLines({ xs }: { xs: readonly number[] }) {
   );
 }
 
-function ReindexGroup({
-  at,
-  engineWidth,
-  engineHeight,
-}: {
-  at: { x: number; y: number };
-  engineWidth: number;
-  engineHeight: number;
-}) {
-  return (
-    <g transform={`translate(${at.x},${at.y})`}>
-      <rect
-        className={engineReindexCharge}
-        data-fx="reindex"
-        data-testid="engine-reindex-fx"
-        x={2}
-        y={2}
-        width={engineWidth - 4}
-        height={engineHeight - 4}
-        rx={3}
-      />
-      {[14, 26, 38, 50, 62, 74, 86].map((y) => (
-        <line
-          className={engineDiv}
-          key={y}
-          x1={0}
-          y1={y}
-          x2={engineWidth}
-          y2={y}
-        />
-      ))}
-      <line
-        className={engineSpine}
-        x1={engineWidth / 2}
-        y1={4}
-        x2={engineWidth / 2}
-        y2={engineHeight - 4}
-      />
-    </g>
-  );
-}
-
 function AttentionGroup() {
   return (
     <g data-testid="attention-breath-fx">
@@ -126,7 +73,7 @@ function AttentionGroup() {
  */
 export const EngineFxOverlay = forwardRef<SVGSVGElement, EngineFxOverlayProps>(
   function EngineFxOverlay(
-    { attention, engineHeight, engineWidth, reindexAt, surgeXs },
+    { attention, surgeXs },
     ref,
   ) {
     return (
@@ -139,9 +86,6 @@ export const EngineFxOverlay = forwardRef<SVGSVGElement, EngineFxOverlayProps>(
         data-testid="engine-fx-overlay"
       >
         <SurgeLines xs={surgeXs} />
-        {reindexAt ? (
-          <ReindexGroup at={reindexAt} engineWidth={engineWidth} engineHeight={engineHeight} />
-        ) : null}
         {attention ? <AttentionGroup /> : null}
       </svg>
     );

@@ -1,15 +1,11 @@
-"""`citation_migrate` is reachable as an MCP tool, not only as a CLI subcommand.
+"""`citation_migrate` lives on as an application operation and CLI subcommand.
 
 Recorded defect (S0 of `260915-CAPS-L21`): ``application/memory_tools.citation_migrate_tool``
 existed with exactly one caller, the ``memory-citations --migrate`` CLI subcommand, and no MCP
-registration. A running server could therefore not reach it at all, and the CLI could not reach
-a live leaf either: from the primary checkout it is refused outright, and from a linked worktree
-it is confined to a disposable coordination root that cannot contain a leaf contract. The result
-was 481 superseded citation tables that no governed route could convert for six weeks.
-
-These tests pin the two halves of the repair -- the tool is registered and advertised, and the
-registered handler actually reaches ``migrate_onboarding_root`` -- so the wiring cannot be
-dropped again without a failure that names it.
+registration. The repair registered it as an MCP tool; MIK-R112 removes the tool again while
+the function stays until MIK-R65 removes the legacy path, so the wiring pin below now covers
+``citation_fix`` (which stays a tool) and the application-level migration reachability that
+the CLI still needs.
 """
 
 from __future__ import annotations
@@ -34,7 +30,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
 )
 from agents_remember.mcp.registration.memory import register_memory_tools
-from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload, citation_migrate_payload
+from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload
 from agents_remember.models.tools.tool_registry import (
     PUBLIC_TOOL_RESPONSE_MODELS,
 )
@@ -59,10 +55,10 @@ def _config(tmp: Path, *, code_root: Path, memory_root: Path) -> McpRuntimeConfi
 
 
 class CitationMigrateRegistrationTests(unittest.TestCase):
-    """The server advertises the tool, and the handler is the application entry point."""
+    """The tool is gone; the sibling wiring pin stays."""
 
-    def test_the_tool_is_registered_advertised_and_has_a_response_model(self) -> None:
-        """All three surfaces together: a name in one and not another is the recorded defect."""
+    def test_the_tool_is_not_registered_advertised_or_modelled(self) -> None:
+        """MIK-R112 removed the `citation_migrate` tool; the function stays till MIK-R65."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
@@ -71,44 +67,16 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
             register_memory_tools(server, config)
 
             names = {tool.name for tool in asyncio.run(server.list_tools())}
-        self.assertIn("citation_migrate", names)
-        self.assertIn("citation_migrate", PUBLIC_TOOLS)
-        self.assertIn("citation_migrate", PUBLIC_TOOL_RESPONSE_MODELS)
-
-    def test_the_payload_builder_reaches_the_application_tool(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            tmp = Path(raw)
-            config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
-            with mock.patch(
-                "agents_remember.mcp.tools.memory.citation_migrate_tool",
-                # The real tool validates its scope before resolving anything, so the double
-                # answers the same shape the application entry point returns.
-                return_value={
-                    "ok": False,
-                    "repoId": "agents-remember",
-                    "operation": "citation_migrate",
-                    "declinedCount": 0,
-                },
-            ) as reached:
-                payload = citation_migrate_payload(
-                    config,
-                    "agents-remember",
-                    contract_path="tasks/x/enclosures/leaf/series-contract.md",
-                    dry_run=True,
-                )
-        reached.assert_called_once()
-        self.assertEqual(reached.call_args.kwargs["dry_run"], True)
-        self.assertEqual(payload["operation"], "citation_migrate")
+        self.assertNotIn("citation_migrate", names)
+        self.assertNotIn("citation_migrate", PUBLIC_TOOLS)
+        self.assertNotIn("citation_migrate", PUBLIC_TOOL_RESPONSE_MODELS)
 
     def test_citation_tools_name_a_configured_contract_authority_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
             contract = "tasks/x/enclosures/leaf/series-contract.md"
-            for tool, payload_builder in (
-                ("citation_fix", citation_fix_payload),
-                ("citation_migrate", citation_migrate_payload),
-            ):
+            for tool, payload_builder in (("citation_fix", citation_fix_payload),):
                 with (
                     self.subTest(tool=tool),
                     mock.patch(
@@ -122,7 +90,9 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
                         config, "agents-remember", contract_path=contract, dry_run=True
                     )
                     self.assertFalse(payload["ok"])
-                    self.assertEqual(payload["operation"], tool)
+                    # The delivered answer carries the envelope strip: no
+                    # operation key rides to the agent (rule 2).
+                    self.assertNotIn("operation", payload)
                     self.assertEqual(payload["status"], "configured-contract-authority-invalid")
                     self.assertEqual(payload["repoId"], "agents-remember")
                     self.assertEqual(payload["contractPath"], contract)
@@ -133,10 +103,7 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
-            for tool, payload_builder in (
-                ("citation_fix", citation_fix_payload),
-                ("citation_migrate", citation_migrate_payload),
-            ):
+            for tool, payload_builder in (("citation_fix", citation_fix_payload),):
                 error = AuthorityError("unrelated authority failure")
                 with (
                     self.subTest(tool=tool),

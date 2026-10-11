@@ -19,8 +19,6 @@ from agents_remember.models.memory import (
 
 from ..tools import (
     citation_fix_payload,
-    citation_migrate_payload,
-    drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_apply_payload,
@@ -49,27 +47,6 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     is what lets a curator check its own change-set before handing it back, instead of the
     manager discovering the findings at the commit gate.
     """
-
-    @server.tool()
-    def drift_check(
-        repo_id: str,
-        detail_limit: int = 50,
-        contract_path: str | None = None,
-    ) -> dict[str, Any]:
-        """Measure the reference anchors of onboarding cards and the validity of the tree.
-
-        Read-only (files no temp drift report). On converted memory the result names
-        how many anchors are current and how many are stale against the code, plus the
-        knowledge validator's refusing findings. Whether an invariant is still current is
-        answered by `knowledge_read` and `knowledge_integrity_check`, not here. A stale
-        reference is reported and never blocks by itself: a leaf that changes a source
-        file must change that file's card or record why not (MIK-R30). Nothing is repaired by this
-        check: `citation_fix` re-records anchors that only moved, and a curator
-        re-authors a stale one. Pass `contract_path` (a leaf enclosure
-        contract) to check that leaf's memory worktree; omit it for the official memory repo."""
-        return drift_check_payload(
-            config, repo_id, detail_limit=detail_limit, contract_path=contract_path
-        )
 
     @server.tool()
     def memory_quality_check(
@@ -126,41 +103,6 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         re-records moved anchors; document then needs no expected_snapshot and scopes the run
         to that one card."""
         return citation_fix_payload(
-            config,
-            repo_id,
-            contract_path=contract_path,
-            operation_scope=CitationOperationScope(
-                document=document,
-                expected_snapshot=expected_snapshot,
-                excludes=tuple(exclude or ()),
-            ),
-            dry_run=dry_run,
-        )
-
-    @server.tool()
-    def citation_migrate(
-        repo_id: str,
-        contract_path: str,
-        *,
-        document: str | None = None,
-        expected_snapshot: str | None = None,
-        dry_run: bool = False,
-        exclude: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Convert a leaf memory worktree from the superseded citation-table format to the
-        anchored one: add the Anchor column, widen the delimiter, turn markdown links into
-        `path:start-end`, and rewrite the old prose spelling into `cit:`. The enclosure contract
-        is mandatory and the application guard refuses the official memory repo. Run this ONCE
-        per repository adopting the format, and again after a curator wave supplies anchors an
-        earlier pass had to decline. `declinedCount` is the complete decline list rather than a
-        sample, and each declined row KEEPS its original evidence verbatim so nothing is lost;
-        `findingsRemaining` is re-measured from the tree after a write and is what `ok` is read
-        off. Preview with dry_run=true. Use document for one onboarding-relative file and
-        expected_snapshot to assert a previously built immutable source generation. `exclude`
-        adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
-        acquisition beyond the register every call already honours: the memory layer's
-        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore."""
-        return citation_migrate_payload(
             config,
             repo_id,
             contract_path=contract_path,

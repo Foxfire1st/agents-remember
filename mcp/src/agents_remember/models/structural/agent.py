@@ -26,19 +26,6 @@ StructuralRole = Literal[
 ]
 """Roles that occupy canonical task-document seats."""
 
-AgentMessageKind = Literal[
-    "message",
-    "gate-response",
-    "turn-report",
-    "master-handover",
-    "nudge",
-    "escalation",
-    "degradation-alert",
-    "decision-item",
-    "decision-ruling",
-]
-"""Agent-authored whole-message kinds; plane-only dispatch/state facts are excluded."""
-
 
 @dataclass(frozen=True)
 class DispatchAgentRequest:
@@ -46,30 +33,6 @@ class DispatchAgentRequest:
     role: StructuralRole
     brief: str
     label: str | None = None
-
-
-@dataclass(frozen=True)
-class StructuralMessageRequest:
-    ask: str
-    response: str
-    task_document_ref: TaskDocumentRef | None = None
-    role: StructuralRole | None = None
-    message_kind: AgentMessageKind = "message"
-    artifact_path: str | None = None
-
-
-@dataclass(frozen=True)
-class RetireChildRequest:
-    task_document_ref: TaskDocumentRef
-    role: StructuralRole
-    reason: str
-
-
-@dataclass(frozen=True)
-class RenameChildRequest:
-    task_document_ref: TaskDocumentRef
-    role: StructuralRole
-    label: str
 
 
 class StructuralTargetResponse(ToolResponse):
@@ -81,12 +44,10 @@ class StructuralTargetResponse(ToolResponse):
     detail: str | None = None
     # The shared ``structural_payload`` projection (application/structural/outcomes.py:36-39):
     # the producer adds these two keys whenever the outcome carries a delivery state, so every
-    # consumer of that producer declares them here rather than per model. ``dispatch_agent``,
-    # ``message_parent`` and ``message_child`` are the three call sites that populate them
-    # today; ``retire_child``, ``rename_child`` and ``rename_self`` pass no delivery state, so
-    # both keys stay None there (excluded by ``exclude_none``). Declaring them on the shared
+    # consumer of that producer declares them here rather than per model. ``dispatch_agent``
+    # is the call site that populates them today. Declaring them on the shared
     # base keeps the projection's declaration total: a strict consumer that omits a key its
-    # own producer can emit is the D53 shape, and there is no fourth consumer to fall through.
+    # own producer can emit is the D53 shape.
     deliveryState: InboxDeliveryState | None = None
     adapterDeliveryState: AdapterDeliveryState | None = None
 
@@ -100,27 +61,3 @@ class DispatchAgentResponse(StructuralTargetResponse):
     operation: Literal["dispatch_agent"] = "dispatch_agent"
     deliveryState: InboxDeliveryState | None = None
     adapterDeliveryState: AdapterDeliveryState | None = None
-
-
-class MessageParentResponse(StructuralTargetResponse):
-    operation: Literal["message_parent"] = "message_parent"
-    deliveryState: InboxDeliveryState | None = None
-    adapterDeliveryState: AdapterDeliveryState | None = None
-
-
-class MessageChildResponse(StructuralTargetResponse):
-    operation: Literal["message_child"] = "message_child"
-    deliveryState: InboxDeliveryState | None = None
-    adapterDeliveryState: AdapterDeliveryState | None = None
-
-
-class RetireChildResponse(StructuralTargetResponse):
-    operation: Literal["retire_child"] = "retire_child"
-
-
-class RenameChildResponse(StructuralTargetResponse):
-    operation: Literal["rename_child"] = "rename_child"
-
-
-class RenameSelfResponse(StructuralTargetResponse):
-    operation: Literal["rename_self"] = "rename_self"

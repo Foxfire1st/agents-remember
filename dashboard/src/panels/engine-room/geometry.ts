@@ -59,8 +59,6 @@ export const POS = {
   featMemory: { x: COL_FEAT_CX - 68, y: 372, w: 136 },
 } as const;
 export const ENGINE = {
-  cgc: { x: 1057, y: 102 }, grepai: { x: 1057, y: 452 }, // worktree (enclosure) engines, right world
-  mcgc: { x: 81, y: 102 }, mgrep: { x: 81, y: 452 }, // official-line (workspace) engines, left world
   w: 54, h: 96,
 } as const;
 export const COUPLER_X = COL_WT_CX; // worktree code↔memory coupler — on the worktree column centre
@@ -71,14 +69,6 @@ export const EDGE_GEOM: Record<string, readonly [number, number, number, number]
   // main right edge (COL_MAIN_CX+90) → worktree left edge (COL_WT_CX-100): the intake lanes spanning the gap.
   "worktree-add": [COL_MAIN_CX + 90, 281, COL_WT_CX - 100, 281],
   "ledger-map": [COL_MAIN_CX + 90, 403, COL_WT_CX - 100, 403],
-  // Provider CLONE arrows ("cloned-from, not re-indexed"): the worktree engines are SEEDED BY
-  // CLONING the official-line engines — a fast copy of the index / vector DB — NOT rebuilt from the
-  // worktree code. So the seed/clone flow runs official-provider -> worktree-provider, sweeping across
-  // the whole stage (CGC arcs over the top, GrepAI under the bottom; see the clone-arc path in Conduit),
-  // and it is TRANSIENT — drawn only while the clone is running, gone at idle. The persistent
-  // worktree-engine -> branch wiring is a separate static wire (worktree-wire), mirroring the left world.
-  "cgc-seed": [135, 150, 1057, 150],
-  "grepai-clone": [135, 500, 1057, 500],
   // sync shares the code intake lane's CENTRELINE with worktree-add (same source→worktree channel,
   // a later phase of it) — collinear, not stacked 8px below, so the blocked sync reads as one
   // centred line on the lane rather than a confusing off-centre double.
@@ -91,18 +81,13 @@ export const EDGE_GEOM: Record<string, readonly [number, number, number, number]
   "integration-mem": [COL_WT_CX - 100, 403, COL_FEAT_CX + 68, 403],
 };
 
-// The conduit path string for an edge — a straight line for settled lanes, the cross-stage BOW for the
-// provider clone arcs (CGC over the top / GrepAI under the bottom). Shared by Conduit and the refused-
-// conduit flash overlay so the flash traces the EXACT same lane geometry (no duplicated arc maths).
+// The conduit path string for an edge — a straight settled lane. Shared by Conduit and the refused-
+// conduit flash overlay so the flash traces the EXACT same lane geometry.
 export function conduitPathD(edge: EngineProcessEdge): string | null {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
-  const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
-  const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
-  return cloneArc
-    ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
-    : `M${x1} ${y1} L ${x2} ${y2}`;
+  return `M${x1} ${y1} L ${x2} ${y2}`;
 }
 
 // Refused-conduit flash polarity (T9B/T9C/T14C), DERIVED from the edge state — never a class, and

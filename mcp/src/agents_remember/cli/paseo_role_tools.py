@@ -29,7 +29,11 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
+from agents_remember.application.agent_binding import (
+    AgentBinding,
+    harness_carries_one_server,
+    read_agent_binding,
+)
 from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
@@ -427,6 +431,34 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "unknown": f"Call {ROLE_START_TOOL} again with the same request id and selection: it "
         "reconciles the same agent and never creates a second.",
     }[launch]
+    # The receipt records the resolved harness id under agent.id; no re-resolution here, so a
+    # repeat answered from its receipt makes no new call. Unknown/absent means two servers.
+    # secondCopyLoaded derives from the launch's applied exclusion mechanism (what the
+    # bridge input actually carries), not the harness name: receipts written before the
+    # record landed fall back to the harness rule. A second copy is loaded exactly when
+    # the agent carries a server the host also lists -- toolServer.applied with a
+    # task-server-only record. Pre-repair receipts (record present, copy still sent)
+    # therefore read True, which is what they did.
+    agent_record = receipt.get("agent")
+    launch_agent = agent_record.get("id") if isinstance(agent_record, dict) else None
+    replay = receipt.get("replayRequest")
+    applied = replay.get("serverExclusion") if isinstance(replay, dict) else None
+    if applied is None:
+        # The receipt drops replayRequest after launch; the applied record survives
+        # top-level (applied_to_agent), so the answer still derives from it.
+        top = receipt.get("serverExclusion")
+        applied = top if isinstance(top, dict) else None
+    if isinstance(applied, dict):
+        tool_server = receipt.get("toolServer")
+        carries = isinstance(tool_server, dict) and bool(tool_server.get("applied"))
+        # (c): derived from what was applied, not the harness name. On the host
+        # route nothing is applied, so every started agent carrying our copy
+        # loads a second one -- task-server-only and host-owned alike.
+        second_copy_loaded = carries
+    else:
+        second_copy_loaded = not harness_carries_one_server(
+            launch_agent if isinstance(launch_agent, str) else None
+        )
     return {
         "ok": launch == "running",
         "status": launch,
@@ -434,6 +466,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "requestId": str(request.request_id),
         "role": request.role,
         "agentId": agent_id,
+        "secondCopyLoaded": second_copy_loaded,
         "parentAgentId": receipt.get("parentAgentId"),
         "reportPath": report.get("path") if isinstance(report, dict) else None,
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,

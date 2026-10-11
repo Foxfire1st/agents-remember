@@ -10,7 +10,6 @@ _EXPORT_MODULES = (
     "agents_remember.providers.context",
     "agents_remember.providers.cgc.lifecycle",
     "agents_remember.providers.grepai.lifecycle",
-    "agents_remember.providers.lifecycle.cli",
     "agents_remember.providers.lifecycle.command_runner",
     "agents_remember.providers.lifecycle.compose_runtime",
     "agents_remember.providers.lifecycle.docker_runtime",
@@ -35,4 +34,4 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | {"main"})
+    return sorted(set(globals()))

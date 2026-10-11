@@ -23,7 +23,7 @@ succeed, the answer is one of exactly four things, each named:
   ``STATEFUL_REFUSALS`` under the same both-directions rule as the other two, with its own case
   asserting the code and the detail, so the shape cannot become a place to hide a silent success;
 * an entry in ``ALWAYS_ANSWERS`` -- a tool whose invocation here legitimately succeeds because
-  it has no failure mode under this fixture (``ping``) or because the refusal path itself is
+  it has no failure mode under this fixture (``server_info``) or because the refusal path itself is
   inexpressible through the argument model. Each entry carries its reason;
 * an entry in ``BARE_RAISERS`` -- a measured, named, counted defect: the call raised and the
   envelope is gone. This is the family `T34` belonged to, and it is pinned so the census can
@@ -43,13 +43,20 @@ stopped naming something rather than describing one.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
+from agents_remember.application.worktree_tool_requests import TaskIdentity
+from agents_remember.application.worktree_tools import worktree_start_tool
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.models.worktree import WorktreeStartResponse
+from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
+from agents_remember.observer.ambient import reset_ambient
 from pydantic import ValidationError
 from test_tool_entry_point_sweep import T34_REPAIRED_TOOLS
 from tool_entry_point_world import EntryPointWorld
@@ -146,9 +153,6 @@ def registered_response_model(tool: str) -> Any:
 # ---------------------------------------------------------------------------------------
 ALWAYS_ANSWERS: frozenset[str] = frozenset(
     {
-        # A liveness probe. It takes no argument that can be wrong and has no precondition, so
-        # "its failure path" is not a path this product has.
-        "ping",
         # Reports the resolved configuration. `repo_id`/`task_name` are optional filters, so a
         # filter that matches nothing narrows the answer instead of refusing.
         "server_info",
@@ -159,43 +163,9 @@ ALWAYS_ANSWERS: frozenset[str] = frozenset(
         # exists with an onboarding scaffold, so this call has nothing to refuse. Its
         # `dry_run=True` form verifies rather than writes.
         "memory_init",
-        # The two installers are driven with `dry_run=True`, which is the only hermetic form.
-        # Both report a complete plan and refuse (raise) only on a real-write collision -- see
-        # `BARE_RAISERS`' comment for the class this leaf measured on the real path.
+        # `runtime_install` is driven with `dry_run=True`, which is the only hermetic form.
+        # It reports a complete plan and refuses (raises) only on a real-write collision.
         "runtime_install",
-        "skills_install",
-        # Status/diagnostics are the CONSTRUCTIVE half of `T34`: with no provider configured
-        # they answer `providers.state: "noProviders"` / `state: "noProviders"`. That is the
-        # behaviour the nine repaired tools were brought up to, so their answering here is the
-        # repair working, not a gap.
-        "provider_status",
-        "provider_diagnostics",
-        # The benchmark family is driven with `dry_run=True` only: its real run executes Codex
-        # agents in a sandbox (minutes, a provider call) and cannot be part of a hermetic
-        # seconds-long census. The dry run answers in an envelope, and its not-being-read-only
-        # is the register's `T12`, owned by this leaf and recorded separately rather than
-        # asserted here.
-        "codex_benchmark_prepare",
-        "codex_benchmark_run",
-        # The lifecycle signal family answers in the state it is called in, and this census
-        # starts a lifecycle first (so `lifecycle_start`'s own "already active" path is the one
-        # measured). `lifecycle_turn_end_notification`, `lifecycle_end`, `switch_lifecycle` and
-        # `lifecycle_phase` are each legal from `running`, so their invocation here succeeds.
-        # What DOES lose the envelope in this family is pinned in `BARE_RAISERS`
-        # (`lifecycle_start`, `lifecycle_resume`) and, over all four states, in the sweep's
-        # `STATE_DEPENDENT_RAISERS`.
-        "lifecycle_turn_end_notification",
-        "lifecycle_end",
-        "switch_lifecycle",
-        "lifecycle_phase",
-        # `skill_catalog_list` enumerates what the catalog publishes; an empty catalog is an
-        # empty list, not a refusal.
-        "skill_catalog_list",
-        # `gate_list` lists the folded gates in the caller's own document scope. A caller
-        # whose document holds no gate gets an empty list, which is an answer, not a refusal --
-        # the `structural-caller-required` path is a different branch and is not reached by a
-        # well-formed `caller`.
-        "gate_list",
         # `closeout_queue(action="status")` answers `ok: true` with a projection whose
         # `sourceProblems` names what it could not read; an unreadable or absent sprint document
         # is REPORTED through that field. Its `structural-caller-required` refusal is a separate
@@ -208,26 +178,29 @@ ALWAYS_ANSWERS: frozenset[str] = frozenset(
 # The measured bare raisers: the call raised and the caller lost `ok`/`status`/`nextAction`.
 #
 # `T34` was this class for nine tools and is REPAIRED (`application/provider_tools.py`,
+# removed by MIK-R112 with its tools,
 # `application/memory_tools.py`). What remains is the same defect on other preconditions,
 # grouped by the mechanism that raises, each already on the register:
 #
-# * ``require_repo`` -- `context_packet`, `resolve_context`, `drift_check`,
+# * ``require_repo`` -- `context_packet`, `resolve_context`,
 #   `memory_baseline_status` answer an unknown `repo_id` by raising the authority error
 #   (`kernel/authority.py`). Its sibling `memory_baseline_adopt` now refuses in the envelope
 #   for the absence this leaf repaired, which is why it is not here.
-# * the worktree contract address -- `citation_fix`, `citation_migrate`, `route_index_refresh`,
+# * the worktree contract address -- `citation_fix`, `route_index_refresh`,
 #   `task_reopen`, `lifecycle_finalize_task`, `task_doc` raise on a contract/document that does
 #   not exist. `T13`'s family (a refusal that does not name its artifact) and this leaf's own
 #   `T34` share the fix direction: answer in the envelope the family already declares.
-# * the lifecycle state precondition -- `lifecycle_start` (already active),
-#   `lifecycle_resume` (not blocked). These two are ALSO pinned by the sweep's
-#   `STATE_DEPENDENT_RAISERS`; their repair needs a refusal shape the strict
-#   `LifecycleResponse` family does not have, which is a product decision this leaf argues
-#   rather than takes.
 # * `worktree_attach`/`worktree_status` (task name resolves no enclosure),
 #   `memory_carryover_plan`/`memory_carryover_apply` (a source path outside the coordination
-#   root), `provider_watchers` (a renamed action), `skill_catalog_read` (an unpublished
-#   resource). Each names its fault in the message and none names a next action.
+#   root). Each names its fault in the message and none names a next action.
+#
+# MIK-R112 removed the tools that raised on other preconditions (`drift_check`,
+# `citation_migrate`, `lifecycle_start`, `lifecycle_resume`, `provider_watchers`,
+# `skill_catalog_read`); their entries leave with them in the same change.
+#
+# `worktree_start` was pinned here for L112-CODE-R1-F12 (C1) and left with the
+# Parent-bound repair: the refusal no longer names a tool and validates, so the
+# entry leaves in the same change per the rule above.
 #
 # Asserted by set equality in both directions. THE RULE, identical to the sweep's:
 # **repaired => remove that entry in the same change; never delete the constant, never widen
@@ -237,22 +210,16 @@ BARE_RAISERS: frozenset[str] = frozenset(
     {
         "context_packet",
         "resolve_context",
-        "drift_check",
         "memory_baseline_status",
         "citation_fix",
-        "citation_migrate",
         "route_index_refresh",
         "task_reopen",
         "lifecycle_finalize_task",
         "task_doc",
-        "lifecycle_start",
-        "lifecycle_resume",
         "worktree_attach",
         "worktree_status",
         "memory_carryover_plan",
         "memory_carryover_apply",
-        "provider_watchers",
-        "skill_catalog_read",
     }
 )
 
@@ -269,6 +236,157 @@ def refusal_axes(payload: dict[str, Any]) -> tuple[bool, bool, bool]:
     reason = any(str(payload.get(key) or "").strip() for key in REASON_KEYS)
     navigation = any(payload.get(key) for key in NAVIGATION_KEYS)
     return identity, reason, navigation
+
+
+# The oracle's path rule (L108, T54, refined by Parent ruling 20ef3396): the
+# path half means a response handing the caller an artifact that is THERE. A
+# path the same response reports as missing/absent is the caller's argument
+# given back -- no declaration, no navigation key, no tool; the producer's
+# human next action stays as stated. Availability is decided from the
+# response's own fields only: an explicit missing report in `observed.state`.
+# No tool-name list, no filesystem guesses. A row whose fields cannot say
+# (a declared path with no missing report and no navigation) fails LOUDLY by
+# name -- the unknown returns to the Owner, never a silent pass.
+_ORACLE_PATH_KEYS = (
+    "contractPath",
+    "contract_path",
+    "enclosurePath",
+    "enclosure_path",
+    "memoryRoot",
+    "memory_root",
+    "docPath",
+    "renderedPath",
+)
+
+# Explicit missing-report vocabulary in `observed.state` (case-insensitive).
+_MISSING_STATES = ("missing", "absent")
+
+
+def _declares_artifact_path(payload: dict[str, Any]) -> bool:
+    """Whether one delivered answer declares an artifact path of its own place."""
+    return any(
+        isinstance(payload.get(key), str) and str(payload.get(key)).strip()
+        for key in _ORACLE_PATH_KEYS
+    )
+
+
+def _addresses_a_tool(payload: dict[str, Any]) -> bool:
+    """Whether one delivered answer machine-addresses a next tool.
+
+    Only keys that name a tool (or its args) count; prose guidance (summary,
+    detail, nextAction sentences, summary-only next hints) names no tool and
+    never counts, per the F12 ruling that the guidance names no tool.
+    """
+    for key in ("nextTool", "nextArgs"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, dict) and len(value) > 0:
+            return True
+    next_hint = payload.get("next")
+    if isinstance(next_hint, dict) and (next_hint.get("tool") or next_hint.get("args")):
+        return True
+    step = payload.get("nextStep")
+    return isinstance(step, dict) and bool(step.get("nextTool") or step.get("nextArgs"))
+
+
+def _reports_path_missing(payload: dict[str, Any]) -> bool:
+    """Whether the response itself reports its path as missing/absent.
+
+    Response-owned availability fact: only an explicit `observed.state` in the
+    missing vocabulary counts. Anything else -- status strings, prose detail --
+    does not decide; a declared path without this report is treated as an
+    available artifact (and then must carry navigation, loudly if not).
+    """
+    observed = payload.get("observed")
+    if isinstance(observed, dict):
+        state = observed.get("state")
+        if isinstance(state, str) and state.strip().lower() in _MISSING_STATES:
+            return True
+    return False
+
+
+def _oracle_failure(tool: str, payload: dict[str, Any]) -> str | None:
+    """The refined oracle verdict for one delivered refusal, or None when it holds.
+
+    Available artifact (declared path, no missing report) requires a
+    tool-addressing navigation key. Missing-path echo (declared path the
+    response reports missing) carries no navigation key and no tool. No path
+    declares none. Producers are never touched by this verdict.
+    """
+    declares = _declares_artifact_path(payload)
+    addressed = _addresses_a_tool(payload)
+    if declares and not _reports_path_missing(payload):
+        if not addressed:
+            return (
+                f"{tool}: available artifact declared but no tool addressed "
+                "(oracle rule: a navigation key where the response hands over "
+                "an artifact that is there)"
+            )
+        return None
+    if addressed:
+        if declares:
+            return (
+                f"{tool}: missing-path echo addresses a tool "
+                "(oracle rule: a path the response reports missing is no declaration)"
+            )
+        return (
+            f"{tool}: no path declared but a tool is addressed "
+            "(oracle rule: none where the response declares none)"
+        )
+    return None
+
+
+class OracleRuleUnitTests:
+    """Pure response-shape cases for the refined oracle (Parent ruling 20ef3396).
+
+    No world, no census, no setup: each case feeds one plain payload dict to
+    the exact oracle helpers. Running this class alone must never drive the
+    39-row census (that drive belongs to FailurePathCensusTests.setup_class
+    and to the separately admitted v3 diagnostic only).
+    """
+
+    def test_available_path_with_navigation_passes(self) -> None:
+        """Parent case 1: a response handing over an artifact that is there carries navigation."""
+        payload = {
+            "ok": False,
+            "state": "refused",
+            "summary": "the enclosure is busy",
+            "contractPath": "/coord/tasks/repo-a/m/enclosures/held/series-contract.md",
+            "nextStep": {
+                "summary": "Retry after the holder releases it.",
+                "nextTool": "worktree_status",
+            },
+        }
+        assert _declares_artifact_path(payload) is True
+        assert _reports_path_missing(payload) is False
+        assert _oracle_failure("case", payload) is None
+
+    def test_missing_path_echo_without_navigation_passes(self) -> None:
+        """Parent case 2: an echo the response reports missing carries no tool; prose stays."""
+        payload = {
+            "ok": False,
+            "state": "refused",
+            "summary": "the canonical enclosure locator is missing",
+            "contractPath": "/coord/tasks/repo-a/m/enclosures/absent/series-contract.md",
+            "observed": {"state": "missing"},
+            "nextAction": "developer-decision",
+        }
+        assert _declares_artifact_path(payload) is True
+        assert _reports_path_missing(payload) is True
+        assert _oracle_failure("case", payload) is None
+
+    def test_available_path_without_navigation_fails(self) -> None:
+        """Parent case 3: a declared available artifact with no navigation fails loudly by name."""
+        payload = {
+            "ok": False,
+            "state": "refused",
+            "summary": "the enclosure is busy",
+            "contractPath": "/coord/tasks/repo-a/m/enclosures/held/series-contract.md",
+        }
+        failure = _oracle_failure("case", payload)
+        assert failure is not None
+        assert failure.startswith("case: available artifact declared but no tool addressed")
 
 
 class FailurePathCensusTests:
@@ -337,7 +455,14 @@ class FailurePathCensusTests:
         self._assert_stateful_refusals()
 
     def test_every_refusal_names_what_refused_why_and_the_next_action(self) -> None:
-        """The three axes, each asserted by name so a regression says which one it broke."""
+        """Identity, reason, and the refined oracle, each asserted by name.
+
+        The oracle (L108, T54, Parent ruling 20ef3396): an available artifact
+        (declared path, no missing report) requires tool-addressing navigation;
+        a missing-path echo carries none and no tool; no path declares none.
+        Availability comes from the response's own fields only, with no tool
+        list. Every refused row is asserted, none skipped.
+        """
 
         failures: list[str] = []
         population = (
@@ -346,19 +471,39 @@ class FailurePathCensusTests:
         for tool in sorted(population):
             payload = self.census[tool]["payload"]
             assert payload.get("ok") is False, f"{tool} answered ok:{payload.get('ok')!r}"
-            identity, reason, navigation = refusal_axes(payload)
+            identity, reason, _navigation = refusal_axes(payload)
             missing = [
                 axis
                 for axis, present in (
                     ("what refused (a refusal identity)", identity),
                     ("why (a non-empty reason)", reason),
-                    ("the next action (machine-readable navigation)", navigation),
                 )
                 if not present
             ]
             if missing:
                 failures.append(f"{tool}: missing {', '.join(missing)}")
+            failure = _oracle_failure(tool, payload)
+            if failure is not None:
+                failures.append(failure)
         assert failures == [], "refusals that do not name themselves:\n" + "\n".join(failures)
+
+    def test_no_path_cases_carry_no_tool_address(self) -> None:
+        """The two named no-path cases and their reason (L108, T54).
+
+        `direct_landing` (absent contract) and `dispatch_agent` (absent task
+        document) declare no artifact path — a taskDocumentRef addresses a
+        missing document, which is what both refusals refuse — so the T54 guard
+        withholds the ambient hint and neither carries a tool-addressing key.
+        """
+        for tool in ("direct_landing", "dispatch_agent"):
+            payload = self.census[tool]["payload"]
+            assert payload.get("ok") is False, f"{tool} answered ok:{payload.get('ok')!r}"
+            assert not _declares_artifact_path(payload), (
+                f"{tool} left the (L108, T54) no-path half: it declares an artifact path"
+            )
+            assert not _addresses_a_tool(payload), (
+                f"{tool} left the (L108, T54) no-path half: it addresses a tool"
+            )
 
     def test_every_stateful_refusal_names_its_code_its_detail_and_its_model(self) -> None:
         """The fourth shape's own axes, so it cannot become a place to hide a silent success.
@@ -472,9 +617,68 @@ class FailurePathCensusTests:
 
 
 class FailurePathControlTests:
-    """The predicate must be able to fail. Each axis is stripped from a REAL refusal."""
+    """MIK-R112 F12 as repaired under the Parent-bound ruling: refusal without a tool.
+
+    The lifecycle-switch-required refusal names no tool (no nextTool /
+    nextOperation / nextArgs at top level or in nextStep, whose summary carries
+    the same sentence) and validates against the narrowed vocabulary. The old
+    removed-tool guidance stays as a negative control: it still fails the same
+    model. No switch tool, model member, or backend is resurrected here, and
+    the emitter returns before any filesystem work, so the cases write nothing.
+    """
+
+    def _bound_config(self, coord: Path) -> McpRuntimeConfig:
+        return McpRuntimeConfig(
+            config_path=coord / "settings.json",
+            coordination_root=coord,
+            workspace_root=coord,
+            transcript_root=coord / "logs",
+            repositories={"repo-a": RepositoryScope(repo_id="repo-a", path=coord)},
+        )
+
+    def test_switch_refusal_names_no_tool_and_validates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            reset_ambient()
+            amb = AmbientLifecycle(EventStore(observer_root(self._bound_config(coord))))
+            install_ambient(amb)
+            amb.start(fleeting=False)
+            try:
+                refusal = worktree_start_tool(
+                    self._bound_config(coord),
+                    TaskIdentity(repo_id="repo-a", task_name="m", worktree_name="w"),
+                )
+            finally:
+                reset_ambient()
+            assert refusal["ok"] is False
+            assert "nextTool" not in refusal
+            assert "nextOperation" not in refusal
+            assert "nextArgs" not in refusal
+            assert set(refusal["nextStep"]) == {"summary"}
+            assert "new session" in refusal["nextStep"]["summary"]
+            assert "new session" in refusal["summary"]
+            WorktreeStartResponse.model_validate(refusal)
+
+    def test_old_removed_tool_guidance_stays_a_negative_control(self) -> None:
+        old_guidance = {
+            "ok": False,
+            "state": "lifecycle-switch-required",
+            "summary": "start a fresh fleeting lifecycle with switch_lifecycle",
+            "nextOperation": "switch_task_lifecycle",
+            "nextTool": "switch_lifecycle",
+            "nextArgs": {},
+            "nextStep": {
+                "summary": "Switch to a fresh fleeting lifecycle, then retry worktree_start.",
+                "nextOperation": "switch_task_lifecycle",
+                "nextTool": "switch_lifecycle",
+                "nextArgs": {},
+            },
+        }
+        with pytest.raises(ValidationError, match="switch_lifecycle"):
+            WorktreeStartResponse.model_validate(old_guidance)
 
     def test_stripping_each_axis_of_a_real_refusal_makes_the_predicate_fail(self) -> None:
+        """The predicate must be able to fail. Each axis is stripped from a REAL refusal."""
         refusal = {
             "ok": False,
             "status": "provider-capability-unavailable",

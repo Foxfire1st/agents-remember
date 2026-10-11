@@ -164,7 +164,7 @@ export function groupEngines(providers: ProviderNode[]): EngineStack[] {
   return stacks;
 }
 
-// ── Memory mirror (the MEM segmented bar, mc2 harvest #2; maps onto drift_check) ──
+// ── Memory mirror (the MEM segmented bar, mc2 harvest #2; maps onto drift reporting) ──
 export interface DriftSegment {
   cls: string;
   count: number;

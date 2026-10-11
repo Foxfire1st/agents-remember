@@ -18,8 +18,6 @@ from agents_remember.application.memory_tools import (
     CitationOperationScope,
     MemoryBranches,
     citation_fix_tool,
-    citation_migrate_tool,
-    drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
     memory_carryover_apply_tool,
@@ -37,24 +35,6 @@ from agents_remember.models.memory import (
 )
 
 from .base import _tool_payload
-
-
-def drift_check_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    *,
-    detail_limit: int = 50,
-    contract_path: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "drift_check",
-        drift_check_tool(
-            config,
-            repo_id=repo_id,
-            detail_limit=detail_limit,
-            contract_path=contract_path,
-        ),
-    )
 
 
 def memory_quality_check_payload(
@@ -175,27 +155,6 @@ def bounded_citation_fix(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(authoring, dict):
         bounded["authoring"] = _bounded_lists(authoring, _AUTHORING_LISTS)
     return bounded
-
-
-def citation_migrate_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    *,
-    contract_path: str,
-    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    try:
-        payload = citation_migrate_tool(
-            config,
-            repo_id=repo_id,
-            contract_path=contract_path,
-            dry_run=dry_run,
-            operation_scope=operation_scope,
-        )
-    except ConfiguredContractAuthorityError as error:
-        payload = _citation_authority_refusal(repo_id, contract_path, error)
-    return _tool_payload("citation_migrate", payload)
 
 
 def route_index_refresh_payload(

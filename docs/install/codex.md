@@ -74,5 +74,4 @@ The copied starter package already includes one flat folder per skill under
 .codex/skills/<skill-name>/
 ```
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Do not install skills for first-run setup; the copied package already carries them.

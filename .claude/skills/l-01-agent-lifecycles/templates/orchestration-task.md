@@ -206,8 +206,6 @@ complete all attachments first, then send one `task_doc.author_execution_graph` 
 - <risk plus evidence limit>
 
 ## Evidence Inventory
-- cgc queries:
-- grepai queries:
 - read_ar_files and route indexes:
 - task docs, decisions, and design citations:
 ````

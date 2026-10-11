@@ -146,19 +146,18 @@ def worktree_start_tool(
             # master five extra calls plus a misleading line in its own record.
             "summary": (
                 "worktree_start binds the session's current lifecycle to the new enclosure, and this "
-                "session's current lifecycle is already bound to another one; start a fresh fleeting "
-                "lifecycle with switch_lifecycle, or resume the enclosure you meant, then retry "
+                "session's current lifecycle is already bound to another one; a session carries one "
+                "started task, so start this task from a new session, then retry "
                 "worktree_start. No other leaf, enclosure or session can block this start"
             ),
-            "nextOperation": "switch_task_lifecycle",
-            "nextTool": "switch_lifecycle",
-            "nextArgs": {},
             "eligibility": dict(_START_ELIGIBILITY),
             "nextStep": {
-                "summary": "Switch to a fresh fleeting lifecycle, then retry worktree_start.",
-                "nextOperation": "switch_task_lifecycle",
-                "nextTool": "switch_lifecycle",
-                "nextArgs": {},
+                "summary": (
+                    "worktree_start binds the session's current lifecycle to the new enclosure, and this "
+                    "session's current lifecycle is already bound to another one; a session carries one "
+                    "started task, so start this task from a new session, then retry "
+                    "worktree_start. No other leaf, enclosure or session can block this start"
+                ),
             },
         }
     # worktree_start promotes the active lifecycle to persistent (design §1.3); with
@@ -170,7 +169,7 @@ def worktree_start_tool(
     # worktree itself is still created. Launch runs on the LIVE providers map.
     authority = None if execution.skip_provider_setup else reload_provider_authority(config)
     settings_path = (
-        write_lifecycle_settings(authority.apply(config))
+        write_lifecycle_settings()
         if authority is not None and authority.providers and authority.error is None
         else None
     )

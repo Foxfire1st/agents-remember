@@ -90,7 +90,6 @@ class ProviderSummary(StrictResponseModel):
         ),
     )
     recoveryActions: list[dict[str, Any]] = Field(default_factory=list)
-    diagnosticsTool: str = "provider_diagnostics"
 
 
 class ProviderStatusResponse(ToolResponse):

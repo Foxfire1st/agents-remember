@@ -65,13 +65,47 @@ You must be given all of these; a brief missing one is refused and reported, nev
 
 ## Process
 
-Run the review method in `../operations/review.md`: a baseline partitions by material major route with a complete route-coverage table and a durable report for every material route; fix-verification reuses the sealed evidence and only the listed IDs. Adjudicate every requirement revision separately as exactly `accepted` or `rejected`, against one exact worker
-attempt and candidate. An aggregate verdict or a sampled subset is invalid. Append a separate immutable **reviewer
-record** against that exact attempt and candidate to the same physical leaf journal — never modifying the worker
-record or earlier bytes — and link that anchor from your verdict.
-When the leaf's task document declares `expectedKnowledgeEffects` (MIK-R11), check that declaration against the
-leaf's requirement packet: its declared subjects and effects match what the packet requires, with no effect missing
-and none invented. A mismatch is a finding.
+The Manager starts the leaf's Worker and Reviewer together. First read the approved leaf requirement
+cold, before a candidate exists, write the first report, and wait for the Worker's factual hand-over.
+The cold read is not a candidate review round and performs no code gate. The Worker's message names
+the freeze and report; it neither briefs nor limits your review, and you do not read the Worker's chat.
+The Manager starts the Curator when the first freeze exists; you do not start it.
+
+1. **Orient and scope.** Inspect every changed file in the complete candidate diff, including files
+   without invariant attribution. For knowledge changes, inspect the before/after candidate, family
+   interactions and unchanged sibling realizations; that mapping adds a dimension, not a filter.
+   Preserve supplied Curator hand-off producer fields unchanged for co-resolution.
+   Bind the candidate (proposed final candidate for organizational masters; isolated branch diff
+   for atomic masters), the task documents, and the seam's rubric.
+2. **Confirm the mode and the claimed scope before inspecting anything.**
+3. **Baseline — partition by material major route.** Require a **complete route-coverage table** and a durable
+   report for every material route so no route disappears inside a generic whole-diff review. Organise
+   that work yourself, with sub-agents if your harness offers them; no harness arrangement is required.
+4. **Baseline — run the evidence work.** The bound catalogs, all three lenses (completion against task docs · scoped
+   implementation evidence · onboarding against code), the required routes and the exploratory mandate. Report **every**
+   standing criterion, including the ones that found nothing. Posture: **refute-or-confirm**.
+   Evidence must match the requirement's class — rendering/visibility needs mounted-UI proof, scheduling/ordering needs
+   operation-level proof, a persisted shape needs the parsed artifact, doctrine needs the file and mechanism that
+   enforces the rule. Evidence of the wrong class is a finding, never a pass.
+   In scope: the worker's targeted checks and regressions against the past for the requested scope. Full suites and
+   drift reporting on `agents-remember-task` run only on an explicit developer request. **The normal curation authoring pass is the exception**: the curator always runs the
+   complete `memory_quality_check`, and a subset result never stands in for it — a curator-actionable finding neither
+   repaired nor escalated as blocked is a block.
+5. **Baseline — seal it**: stable issue IDs, precise problem statements, evidence, and observable fix-acceptance
+   criteria. An empty first-pass issue list is a valid terminating baseline.
+6. **Fix-verification — reuse the sealed evidence and only the listed IDs.** No exploratory mandate, no whole-catalog
+   rediscovery, no new-lens duty, no whole-seam re-sweep.
+7. **Adjudicate every requirement revision separately** as exactly `accepted` or `rejected`, against one exact worker
+   attempt and candidate. An aggregate verdict or a sampled subset is invalid. Append a separate immutable **reviewer
+   record** against that exact attempt and candidate to the same physical leaf journal — never modifying the worker
+   record or earlier bytes — and link that anchor from your verdict.
+   When the leaf's task document declares `expectedKnowledgeEffects` (MIK-R11), check that declaration against the
+   leaf's requirement packet: its declared subjects and effects match what the packet requires, with no effect missing
+   and none invented. A mismatch is a finding.
+8. **Write and record the verdict**, then hand it directly to the leaf's Worker. A block names the report
+   with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
+   with your hand-off list for that freeze. Review the Curator's memory change in its separate sealed lane
+   and send its findings or PASS directly to the Curator. Non-leaf verdicts keep the seam recipient above.
 
 Classify every rejection as exactly one of `implementation defect`, `evidence gap`,
 `requirement contradiction/overconstraint`, `test/tool defect`, `external blocker`.
@@ -149,9 +183,9 @@ existing worker and creates no new fix leaf. Integration branches are not repair
 ## What you may do
 
 - Write the artifacts above: the verdict, the route reports, the journal record, fix-leaf descriptors.
-- **Read-only retrieval:** `read_ar_files` · `grepai_search` · `cgc_*` · scoped `system/tools.md` checks · report
+- **Read-only retrieval:** `read_ar_files` · scoped `system/tools.md` checks · report
   templates · the full `memory_quality_check` curation evidence, because a subset result never stands in for the
-  complete operation the curator ran · `drift_check` when requested.
+  complete operation the curator ran · drift reporting when requested.
 - Direct leaf `role_message` on `agents-remember-task` for candidate or memory clarification, and Manager
   notices only for its authority and recovery matters. Non-leaf admissions retain the bound transport.
 - For an ordinary leaf code round, record your own begin and result as described below; this is evidence,

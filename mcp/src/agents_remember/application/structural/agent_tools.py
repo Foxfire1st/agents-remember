@@ -26,8 +26,6 @@ from agents_remember.application.terminal_tools import (
     SpawnedBy,
     SpawnOverrides,
     SpawnSeat,
-    session_rename_tool,
-    session_retire_tool,
     spawn_agent_session_tool,
 )
 from agents_remember.controlplane.operator_inbox_records import (
@@ -39,7 +37,6 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import (
     AuthorityError,
     HarnessControlError,
-    StructuralDispatchLockError,
 )
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.observer_paths import observer_root
@@ -48,9 +45,6 @@ from agents_remember.models.operator_inbox import AgentRole
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
-    RenameChildRequest,
-    RetireChildRequest,
-    StructuralMessageRequest,
     StructuralRole,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -68,9 +62,6 @@ from agents_remember.serving.operator_inbox_posts import (
 )
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.seat_events import log_retire_event
-from agents_remember.serving.structural_dispatch import (
-    exclusive_structural_dispatch_lock,
-)
 from agents_remember.serving.structural_seats import StructuralSeatError, StructuralSeatResolver
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
@@ -766,196 +757,3 @@ def _curator_route_review_refusal(
             str(exc),
         )
     return None
-
-
-def _message_tool(
-    operation: str,
-    config: McpRuntimeConfig,
-    request: StructuralMessageRequest,
-    runtime: StructuralAgentRuntime,
-) -> dict[str, Any]:
-    catalog, topology, resolver = _structural_context(config)
-    caller_document = request.task_document_ref
-    caller_role = request.role or "parent"
-    try:
-        caller = resolve_ambient_seat(catalog, environ=runtime.environ)
-        if operation == "message_parent":
-            target_document, target_role = resolver.parent_address(caller)
-        else:
-            assert request.task_document_ref is not None and request.role is not None
-            document = topology.resolve(request.task_document_ref).ref
-            target_document, target_role = resolver.child_address(
-                caller, document=document, role=request.role
-            )
-        posted = _post_structural_message(
-            config,
-            StructuralMessageContext(catalog, caller, runtime),
-            StructuralMessageTarget(target_document, target_role),
-            InboxMessage(
-                ask=request.ask,
-                response=request.response,
-                message_kind=request.message_kind,
-                artifact_path=request.artifact_path,
-            ),
-        )
-    except (AmbientSeatError, StructuralSeatError) as exc:
-        return _caller_error(operation, caller_document, caller_role, exc)
-    except ValueError as exc:
-        return _target_payload(
-            StructuralOutcome(
-                operation,
-                False,
-                "message-refused",
-                caller_document,
-                caller_role,
-                str(exc),
-            )
-        )
-    delivery_state = cast(str | None, posted.get("deliveryState"))
-    adapter_state = cast(str | None, posted.get("adapterDeliveryState"))
-    return _target_payload(
-        StructuralOutcome(
-            operation,
-            True,
-            "posted",
-            target_document,
-            target_role,
-            cast(str | None, posted.get("deliveryDetail")),
-            delivery_state,
-            adapter_state,
-        )
-    )
-
-
-def message_parent_tool(
-    config: McpRuntimeConfig,
-    request: StructuralMessageRequest,
-    runtime: StructuralAgentRuntime = _DEFAULT_AGENT_RUNTIME,
-) -> dict[str, Any]:
-    return _message_tool("message_parent", config, request, runtime)
-
-
-def message_child_tool(
-    config: McpRuntimeConfig,
-    request: StructuralMessageRequest,
-    runtime: StructuralAgentRuntime = _DEFAULT_AGENT_RUNTIME,
-) -> dict[str, Any]:
-    return _message_tool("message_child", config, request, runtime)
-
-
-def retire_child_tool(
-    config: McpRuntimeConfig,
-    request: RetireChildRequest,
-    runtime: StructuralAgentRuntime = _DEFAULT_AGENT_RUNTIME,
-) -> dict[str, Any]:
-    catalog, topology, resolver = _structural_context(config)
-    try:
-        document = topology.resolve(request.task_document_ref).ref
-        caller = resolve_ambient_seat(catalog, environ=runtime.environ)
-        with exclusive_structural_dispatch_lock(
-            config.coordination_root,
-            document,
-            request.role,
-        ):
-            target = resolver.child(caller, document=document, role=request.role)
-            retired = session_retire_tool(
-                config,
-                actor_session_id=caller.id,
-                session_id=target.id,
-                reason=request.reason,
-                host=runtime.host,
-            )
-    except (AmbientSeatError, StructuralSeatError) as exc:
-        return _caller_error("retire_child", request.task_document_ref, request.role, exc)
-    except TaskDocumentRefError as exc:
-        return _target_payload(
-            StructuralOutcome(
-                "retire_child",
-                False,
-                exc.status,
-                request.task_document_ref,
-                request.role,
-                str(exc),
-            )
-        )
-    except StructuralDispatchLockError as exc:
-        return _target_payload(
-            StructuralOutcome(
-                "retire_child",
-                False,
-                "retire-serialization-refused",
-                request.task_document_ref,
-                request.role,
-                str(exc),
-            )
-        )
-    return _target_payload(
-        StructuralOutcome(
-            "retire_child",
-            bool(retired["ok"]),
-            str(retired["status"]),
-            document,
-            request.role,
-            cast(str | None, retired.get("detail")),
-        )
-    )
-
-
-def rename_child_tool(
-    config: McpRuntimeConfig,
-    request: RenameChildRequest,
-    runtime: StructuralAgentRuntime = _DEFAULT_AGENT_RUNTIME,
-) -> dict[str, Any]:
-    catalog, topology, resolver = _structural_context(config)
-    try:
-        document = topology.resolve(request.task_document_ref).ref
-        caller = resolve_ambient_seat(catalog, environ=runtime.environ)
-        target = resolver.child(caller, document=document, role=request.role)
-    except (AmbientSeatError, StructuralSeatError) as exc:
-        return _caller_error("rename_child", request.task_document_ref, request.role, exc)
-    except TaskDocumentRefError as exc:
-        return _target_payload(
-            StructuralOutcome(
-                "rename_child",
-                False,
-                exc.status,
-                request.task_document_ref,
-                request.role,
-                str(exc),
-            )
-        )
-    renamed = session_rename_tool(config, session_id=target.id, label=request.label)
-    return _target_payload(
-        StructuralOutcome(
-            "rename_child",
-            bool(renamed["ok"]),
-            str(renamed["status"]),
-            document,
-            request.role,
-        )
-    )
-
-
-def rename_self_tool(
-    config: McpRuntimeConfig,
-    *,
-    label: str,
-    environ: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    catalog = _catalog(config)
-    try:
-        caller = resolve_ambient_seat(catalog, environ=environ)
-    except AmbientSeatError as exc:
-        return _caller_error("rename_self", None, "self", exc)
-    document = caller.binding_task_document_ref
-    assert document is not None
-    renamed = session_rename_tool(config, session_id=caller.id, label=label)
-    return _target_payload(
-        StructuralOutcome(
-            "rename_self",
-            bool(renamed["ok"]),
-            str(renamed["status"]),
-            document,
-            caller.binding_role,
-        )
-    )

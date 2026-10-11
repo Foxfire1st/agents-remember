@@ -126,8 +126,7 @@ precedence. The starter package uses `.openclaw/workspace/skills`.
 
 Do not run `skills_install()` for first-run setup. The copied starter package
 already provides one flat folder per skill under
-`.openclaw/workspace/skills/`. `skills_install()` remains available for manual
-maintenance and non-package installs.
+`.openclaw/workspace/skills/`. The `skills_install` tool has left the surface (MIK-R112); keep starter copies current with the repository's skill-sync script.
 
 You can inspect OpenClaw skill visibility with:
 

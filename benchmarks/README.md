@@ -15,15 +15,26 @@ Benchmarks are not installed by default. Install benchmark fixtures explicitly:
 runtime_install(dry_run=false, include_benchmarks=true)
 ```
 
-Then inspect or run them through the MCP benchmark tools:
+Then inspect or run them through the benchmark runner CLI (the MCP benchmark
+tools left the surface in MIK-R112):
 
 ```text
-codex_benchmark_prepare(target="case", case_id="agents-remember-drift-workflow")
-codex_benchmark_run(target="case", case_id="agents-remember-drift-workflow", dry_run=true)
+python -m agents_remember.benchmarks.runner prepare case agents-remember-drift-workflow
+python -m agents_remember.benchmarks.runner run case agents-remember-drift-workflow
 ```
 
 For source-package debugging, run the package module from a checkout where
 `agents-remember/mcp/src` is on `PYTHONPATH`.
+
+## Provider setup in benchmarks (MIK-R112 F02)
+
+Benchmark commands run providerless: the retired codegraphcontext/grepai
+providers never count as enabled, so `prepare` performs no provider install,
+seed, watcher start or status and returns empty results, which the runner
+treats as a successful no-provider setup. The memory comparison above
+(source-only vs memory-enabled environments) is unaffected — it never
+depended on provider backends. The explicitly required old-watcher stop is a
+separate install-time mechanism and is unchanged.
 
 Benchmark preparation copies the runtime skill tree into the memory-enabled
 workspace by default. Use `--skill-exposure-mode none` only when skill discovery

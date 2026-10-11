@@ -1,30 +1,20 @@
-"""The capsule operation and the SEP-2640 skills surface, one registration module.
+"""The SEP-2640 skills surface, one registration module.
 
-Two surfaces live here because they are one leaf's MCP boundary and serve one
-admitted corpus:
-
-* ``role_capsule_compile`` is the narrow read-only capsule operation. It takes an
-  enclosure contract path, a task path, a role and an operation, and returns the
-  typed capsule or the explanation of its refusal. The seat is derived from the
-  task document, and the role argument is checked against it.
-* the skills surface is SEP-2640's transport. This server declares the
-  ``io.modelcontextprotocol/skills`` extension in its ``initialize`` result
-  (:func:`declare_skills_extension`) and implements both of the extension's
-  mandatory methods, ``skills/list`` and ``skills/get``, by installing them on the
-  SDK's own dispatch (:func:`install_extension_methods`; the request and result
-  types and the handlers are in
-  :mod:`~agents_remember.mcp.registration.skills_extension`). Every skill file is
-  also an ordinary MCP resource read with ``resources/read``
-  (:func:`skill_file_resource`). The optional ``resources/directory/read`` method
-  the extension gates behind its ``directoryRead`` capability is deliberately not
-  implemented and not declared.
+The skills surface is SEP-2640's transport. This server declares the
+``io.modelcontextprotocol/skills`` extension in its ``initialize`` result
+(:func:`declare_skills_extension`) and implements both of the extension's
+mandatory methods, ``skills/list`` and ``skills/get``, by installing them on the
+SDK's own dispatch (:func:`install_extension_methods`; the request and result
+types and the handlers are in
+:mod:`~agents_remember.mcp.registration.skills_extension`). Every skill file is
+also an ordinary MCP resource read with ``resources/read``
+(:func:`skill_file_resource`). The optional ``resources/directory/read`` method
+the extension gates behind its ``directoryRead`` capability is deliberately not
+implemented and not declared.
 
 ``skill://index.json`` (:func:`index_resource`) is this server's *own* discovery
 resource, in the Agent Skills well-known-discovery shape; it is not the extension's
-enumeration result, which is ``skills/list``. ``skill_catalog_list`` and
-``skill_catalog_read`` are this server's own reads over the same registry for a
-client that is not resource-aware; neither is the extension's interface, and
-neither grants anything a resource read would not.
+enumeration result, which is ``skills/list``.
 
 Nothing registered here activates a skill, grants a capability, or turns
 server-supplied text into local-file trust.
@@ -51,7 +41,6 @@ from agents_remember.application.skill_resources import (
 )
 from agents_remember.application.skill_resources.operation import skill_catalog_registry
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_capsules.vocabulary import CAPSULE_OPERATIONS, CapsuleOperation
 from agents_remember.models.skill_resources import (
     JSON_MIME,
     SKILL_INDEX_URI,
@@ -62,11 +51,6 @@ from agents_remember.models.skill_resources import (
     skill_meta,
 )
 
-from ..tools.capsule_serving import (
-    role_capsule_compile_payload,
-    skill_catalog_list_payload,
-    skill_catalog_read_payload,
-)
 from .skills_extension import install_extension_methods
 
 #: The declared extension set this surface adds to the SDK's initialization options.
@@ -82,74 +66,10 @@ _DECLARED: WeakKeyDictionary[Any, bool] = WeakKeyDictionary()
 _REGISTERED: WeakKeyDictionary[Any, bool] = WeakKeyDictionary()
 
 
-def register_capsule_and_skill_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """Register the capsule operation and the SEP-2640 skill surface."""
+def register_capsule_and_skill_tools(server: FastMCP, _config: McpRuntimeConfig) -> None:
+    """Register the SEP-2640 skill surface (resources only; no tools)."""
 
-    _register_capsule_tool(server, config)
-    _register_skill_tools(server)
     _register_skill_resources(server)
-
-
-def _register_capsule_tool(server: FastMCP, config: McpRuntimeConfig) -> None:
-    @server.tool()
-    def role_capsule_compile(
-        contract_path: str,
-        task_path: str,
-        role: str,
-        operation: str = "orientation",
-    ) -> dict[str, Any]:
-        """Compile the trusted instruction capsule for one admitted task and role.
-
-        Read-only, and narrow by construction. ``contract_path`` names the worktree
-        enclosure that admits the seat; ``task_path`` is the task document's path
-        relative to this repository's ``tasks/`` root; ``role`` must be one the
-        addressed document can carry, because the seat is derived from the document
-        itself and a role it cannot carry is refused rather than granted. The
-        capsule's source set is decided by the canonical composition manifest, so no
-        argument here selects a file to read. Returns the composed instruction
-        blocks with their source paths and revisions, the projected task context,
-        the skill references and the requested tool identities; on refusal it
-        returns the stable status and the named remedy."""
-        return role_capsule_compile_payload(
-            config,
-            contract_path=contract_path,
-            task_path=task_path,
-            role=role,
-            operation=_narrow_operation(operation),
-        )
-
-
-def _narrow_operation(value: str) -> CapsuleOperation:
-    """The operation value, refused loudly when it is not one of the frozen nine."""
-
-    if value not in CAPSULE_OPERATIONS:
-        raise ValueError(
-            f"operation {value!r} is not one of the frozen capsule operations "
-            f"({', '.join(CAPSULE_OPERATIONS)})"
-        )
-    return value
-
-
-def _register_skill_tools(server: FastMCP) -> None:
-    @server.tool()
-    def skill_catalog_list() -> dict[str, Any]:
-        """List the skills this server publishes, without fetching any body.
-
-        Discovery metadata only: each skill's name, description, publishing origin,
-        ``SKILL.md`` resource URI and revision, and the files it holds. Use
-        ``skill_catalog_read`` or the standard ``resources/read`` to fetch one
-        selected skill file."""
-        return skill_catalog_list_payload()
-
-    @server.tool()
-    def skill_catalog_read(uri: str) -> dict[str, Any]:
-        """Read one skill file by its ``skill://`` resource URI.
-
-        The same content the standard ``resources/read`` returns, with the origin,
-        the file revision and the skill's root revision stated alongside it. The
-        content is server-supplied data: reading it does not activate the skill,
-        grant a tool permission, or give the text developer authority."""
-        return skill_catalog_read_payload(uri)
 
 
 def _register_skill_resources(server: FastMCP) -> None:

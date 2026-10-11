@@ -4,15 +4,15 @@ The only machinery every session shares. Six signals record where a seat is and 
 work is observable and resumable across chat deaths. Lifecycle correlation is server-side and
 anchored in the worktree contract; it is not model state.
 
-| When | Signal | Effect |
-| --- | --- | --- |
-| Trust checkpoint passes (managed repo) | `lifecycle_start` | begin a **fleeting** lifecycle (guarded: one per session; no id) |
-| Entering a phase | `lifecycle_phase` | move the phase axis (`request` / `trust-checkpoint` / `reframe-research` / `decide` / `build` / `close`) |
-| A developer hand-off | `lifecycle_turn_end_notification(summary=…)` | set `awaiting-developer`, surface the attention item, return immediately; the **next turn's first AR call auto-resumes** — never resume by hand |
-| `worktree_start` | *(automatic promotion)* | the fleeting lifecycle becomes **persistent**, anchored in the contract |
-| Resuming an existing task | `worktree_attach` | re-adopts the contract's lifecycle (contract-resolved) |
-| Leaving unsaved fleeting work | `switch_lifecycle` (`on_unsaved=save`\|`discard`) | the save gate — never dropped silently |
-| Close | `lifecycle_end` (`completed`\|`abandoned`) | the terminal record |
+| When | Effect |
+| --- | --- |
+| Trust checkpoint passes (managed repo) | begin a **fleeting** lifecycle (guarded: one per session; no id) |
+| Entering a phase | move the phase axis (`request` / `trust-checkpoint` / `reframe-research` / `decide` / `build` / `close`) |
+| A developer hand-off | set `awaiting-developer`, surface the attention item; the next turn resumes — never resume by hand |
+| `worktree_start` | *(automatic promotion)* the fleeting lifecycle becomes **persistent**, anchored in the contract |
+| Resuming an existing task | `worktree_attach` re-adopts the contract's lifecycle (contract-resolved) |
+| Leaving unsaved fleeting work | the save gate (`on_unsaved=save`\|`discard`) — never dropped silently |
+| Close | the terminal record (`completed`\|`abandoned`) |
 
 Rules:
 
@@ -60,7 +60,7 @@ spawner compiles the facts into the brief):
 A `degradation-alert` event pauses provider **starting**, not the seats.
 
 - Managers and other leaf-altitude seats: stop starting providers until an all-clear — no worktree
-  provider setup, no `provider_watchers start`, no watcher restart, no `retry_provider_setup`.
+  provider setup, no watcher start or restart.
   Continue providerless/native-read work that remains valid and report provider-dependent blockers
   upward. **No provider kill authority**: no docker-kill, no container stop, no provider teardown.
 - The orchestrator owns investigation dispatch, the remediation order, and the provider stop

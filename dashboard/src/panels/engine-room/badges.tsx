@@ -32,7 +32,6 @@ import {
 import {
   COL_WT_CX,
   EDGE_GEOM,
-  ENGINE,
   conduitPathD,
   truncate,
 } from "./geometry";
@@ -134,34 +133,6 @@ export function MovedBadge({ cx, cy, text }: { cx: number; cy: number; text: str
       {/* the ▲ "moved" pointer (an up-triangle): origin advanced AHEAD of the held worktree */}
       <path className={movedTriangle} d={`M${px + 15} ${cy + 6} L${px + 21} ${cy + 16} L${px + 9} ${cy + 16} Z`} />
       <text className={movedText} x={px + 30} y={cy + 15}>{label}</text>
-    </g>
-  );
-}
-
-// T7B — the provider-plan block (podstage P4). The runtime setup config is missing, so the provider
-// engines never light. UNLIKE T1B/T3B this does NOT gate a repository node: the alarm bar sits BESIDE the
-// worktree CGC provider engine (podstage `gate(1004,150,w108)` — the barred provider runtime), and the reason
-// rides the TOP EDGE of the worktree enclosure as a header alert for the whole containment,
-// not a node pointer. The two engine slots stay unlit; the dropout halos (rendered separately) mark them held.
-export function ProviderBlock({ reason }: { reason: string }) {
-  // enclosure box mirrors the dashed border / FleetingEnclosure (x = COL_WT_CX-126, y 76, right edge 1148).
-  const enclosureCx = (COL_WT_CX - 126 + 1148) / 2;
-  return (
-    <g data-testid="provider-block">
-      {/* the alarm bar — a VERTICAL bar attached to the LEFT side of the top provider engine slot,
-          not a horizontal bar across it and not on the code node; the provider runtime is barred
-          so the engines never light. Right edge meets the engine's left edge (1057); full slot height. */}
-      <rect
-        className={gateBar}
-        x={ENGINE.cgc.x - 12}
-        y={ENGINE.cgc.y - 6}
-        width={12}
-        height={ENGINE.h + 12}
-        rx={3}
-        data-testid="gate"
-      />
-      {/* the reason rides the enclosure's TOP edge — a containment header, not a node gate. */}
-      <ReasonBadge reason={reason} cx={enclosureCx} cy={65} />
     </g>
   );
 }

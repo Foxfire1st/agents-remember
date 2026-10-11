@@ -54,10 +54,7 @@ from agents_remember.application.skill_resources import (
     CapsuleCompileRequest,
     compile_task_capsule,
 )
-from agents_remember.application.skill_resources.operation import (
-    CapsuleOperationRequest,
-    role_capsule_compile_tool,
-)
+from agents_remember.application.skill_resources.responses import role_capsule_response
 from agents_remember.application.task_projection import parse_task_reference
 from agents_remember.application.terminal_tools import (
     SpawnOverrides,
@@ -1020,11 +1017,11 @@ def test_the_free_agent_capsule_identity_moves_with_the_seat(tmp_path: Path) -> 
 async def test_the_registered_capsule_operation_resolves_a_repository_through_its_schema(
     world: tuple[Path, McpRuntimeConfig, _FakeHost, Path],
 ) -> None:
-    """D13: a call through the REGISTERED tool returns an admitted capsule.
+    """D13: the capsule operation is no longer a registered tool; the path stays usable.
 
-    The repository is resolved out of the enclosure contract the tool already receives, because the
-    tool's declared schema exposes no repository field at all. L4's suite built the request object
-    in Python, which is exactly why it could not see that its own shipped boundary was unusable.
+    MIK-R112 removed the ``role_capsule_compile`` tool; registration now serves only the
+    skill resources. The repository is still resolved out of the enclosure contract by the
+    application entry point role launch uses, which is what the second half pins.
     """
 
     tmp_path, config, _host, _repo = world
@@ -1032,36 +1029,25 @@ async def test_the_registered_capsule_operation_resolves_a_repository_through_it
     register_capsule_and_skill_tools(server, config)
 
     tools = await server.list_tools()
-    declared = next(tool for tool in tools if tool.name == "role_capsule_compile")
-    properties = set(declared.inputSchema.get("properties", {}))
-    required = set(declared.inputSchema.get("required", []))
-    # The case fails if the declared schema loses the field the resolution depends on.
-    assert "contract_path" in properties, properties
-    assert {"contract_path", "task_path", "role"} <= required, required
+    assert all(tool.name != "role_capsule_compile" for tool in tools), [tool.name for tool in tools]
 
     contract = tmp_path / "tasks" / REPO / MASTER / "enclosures" / LEAF_ID / "series-contract.md"
     assert contract.is_file(), f"the scratch world must have a real enclosure: {contract}"
-    result = await server.call_tool(
-        "role_capsule_compile",
-        {"contract_path": str(contract), "task_path": LEAF_REF.path, "role": "worker"},
-    )
-    body = _tool_payload(result)
-    assert body["ok"] is True, body
-    assert body["repositoryId"] == REPO
-    assert body["instructions"], "the registered tool returned no compiled instruction blocks"
 
     # And the hand-built request object L4's own suite used still answers identically.
-    direct = role_capsule_compile_tool(
-        config,
-        CapsuleOperationRequest(
-            enclosure_contract_path=str(contract),
-            task_path=LEAF_REF.path,
-            role="worker",
-            operation="orientation",
-        ),
+    direct = role_capsule_response(
+        compile_task_capsule(
+            config,
+            CapsuleCompileRequest(
+                enclosure=EnclosureSelector(contract_path=Path(contract)),
+                task_path=LEAF_REF.path,
+                role="worker",
+                operation="orientation",
+            ),
+        )
     )
     assert direct.ok
-    assert direct.semanticDigest == body["semanticDigest"]
+    assert direct.instructions, "the capsule path returned no compiled instruction blocks"
 
 
 # --------------------------------------------------------------------------------------------

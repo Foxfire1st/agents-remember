@@ -91,7 +91,7 @@ fast."
 
 1. Notice the alarm                     → top-bar master-caution / AttentionQueue   → ok
 2. Open the enclosure                   → Engine Room (select enclosure)            → ok
-3. Read root cause                      → DiagnosticsPanel (refs, fact-state chips, missing-observability notice, failed phases) + engine gauge + conduits + boot timeline → ok
+3. Read root cause                      → DiagnosticsPanel (refs, fact-state chips, missing-observability notice, failed phases) + warp coupler + conduits + boot timeline → ok
 4. **Take the safe action**             → recovery chip                             → ⚠ **GAP**: recovery chips are display-only
 
 **Forced states:** nominal · booting · saturated · failed (**flicker ≠ blocked-steady**) · dormant · stale-disconnected

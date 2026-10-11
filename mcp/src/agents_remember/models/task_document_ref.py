@@ -16,13 +16,14 @@ MAX_TASK_DOCUMENT_PATH_LENGTH = 4096
 
 
 class TaskDocumentRef(BaseModel):
-    """One JSON-primary task document under ``tasks/<repository>``.
+    """Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root."""
 
-    ``path`` is coordination-root-relative *inside* the repository task root.  Keeping
-    the root out of the value makes the reference stable when the same coordination
-    tree is mounted at another absolute location, while ``repository`` prevents two
-    repositories with the same task-folder layout from colliding.
-    """
+    # Design rationale (not published in input schemas; kept short for callers
+    # per Parent ruling 0a408a8a): ``path`` is coordination-root-relative
+    # *inside* the repository task root. Keeping the root out of the value
+    # makes the reference stable when the same coordination tree is mounted at
+    # another absolute location, while ``repository`` prevents two
+    # repositories with the same task-folder layout from colliding.
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

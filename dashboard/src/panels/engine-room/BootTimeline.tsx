@@ -16,19 +16,6 @@ interface Step {
   state: StepState;
 }
 
-// Edge state -> a boot-timeline step state (the timeline reads the same facts as the map).
-const EDGE_TO_STEP: Record<string, StepState> = {
-  complete: "complete",
-  nominal: "complete",
-  running: "running",
-  stale: "failed",
-  failed: "failed",
-  blocked: "blocked",
-  skipped: "skipped",
-  planned: "pending",
-  unknown: "pending",
-};
-
 const STATE_LABEL: Record<StepState, string> = {
   complete: "done",
   current: "current",
@@ -43,24 +30,10 @@ function materialized(exists: boolean | undefined): StepState {
   return exists === true ? "complete" : "pending";
 }
 
-function steadyState(node: EngineProcessNode): StepState {
-  if (node.health === "failed") return "failed";
-  if (node.health === "blocked") return "blocked";
-  if (node.health === "running") return "running";
-  if (node.health === "complete" || node.health === "nominal") {
-    return node.providers.some((provider) => provider.factState !== "missing") ? "complete" : "pending";
-  }
-  return "pending";
-}
-
 function bootSteps(node: EngineProcessNode): Step[] {
-  const edge = (kind: string): StepState => {
-    const found = node.edges.find((candidate) => candidate.kind === kind);
-    return found ? (EDGE_TO_STEP[found.state] ?? "pending") : "pending";
-  };
   // Contract anchor LEADS the boot sequence (dev directive): the task contract is the precondition the
-  // worktree is created from, so it heads the list — before the code / memory worktrees materialise and the
-  // providers seed — rather than sitting in the middle.
+  // worktree is created from, so it heads the list — before the code / memory worktrees materialise.
+  // Provider seed/clone/watcher steps left the surface (MIK-R112).
   const steps: Step[] = [
     { label: "Contract anchor", state: "complete" },
     { label: "Code worktree", state: materialized(node.codeWorktree.exists) },
@@ -73,11 +46,6 @@ function bootSteps(node: EngineProcessNode): Step[] {
   } else {
     steps.push({ label: `Memory (${node.memoryMode})`, state: "skipped" });
   }
-  steps.push({ label: "CGC seed", state: edge("cgc-seed") });
-  if (node.memoryMode === "external") {
-    steps.push({ label: "GrepAI clone", state: edge("grepai-clone") });
-  }
-  steps.push({ label: "Watchers · steady state", state: steadyState(node) });
   return steps;
 }
 

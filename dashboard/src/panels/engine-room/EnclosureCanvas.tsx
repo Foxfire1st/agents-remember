@@ -13,7 +13,6 @@ import type {
   EngineProcessNode,
   GateNode,
   LedgerNode,
-  ProviderNode,
 } from "../../types/projection";
 import { isBlocked } from "./geometry";
 import { resolveScene } from "./scene";
@@ -21,7 +20,6 @@ import {
   BranchTier,
   CloseoutTrainLayer,
   ConduitLayer,
-  DropoutOverlay,
   EnclosureShell,
   FleetingOverlay,
   FxOverlay,
@@ -42,12 +40,10 @@ import { useShouldAnimate } from "./useShouldAnimate";
 export function EnclosureCanvas({
   node,
   gateNode,
-  workspaceEngines = [],
   officialLedger,
 }: {
   node: EngineProcessNode;
   gateNode?: GateNode;
-  workspaceEngines?: ProviderNode[];
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
@@ -57,7 +53,7 @@ export function EnclosureCanvas({
   const rootRef = useRef<SVGSVGElement>(null);
   const fxRootRef = useRef<SVGSVGElement>(null);
   useEngineTimeline(rootRef, node, fxRootRef);
-  const scene = resolveScene(node, workspaceEngines);
+  const scene = resolveScene(node);
 
   return (
     <>
@@ -75,8 +71,8 @@ export function EnclosureCanvas({
         <EnclosureShell animate={animate} hasMemory={scene.hasMemory} fleeting={scene.fleeting} codeWtMaterialised={scene.codeWtMaterialised} />
         <ConduitLayer node={node} retiring={scene.retiring} memGated={scene.memGated} memSyncMoved={scene.memSyncMoved} />
         <BranchTier node={node} hasMemory={scene.hasMemory} showLanding={scene.showLanding} animate={animate} retiring={scene.retiring} baseStale={scene.baseStale} />
-        <OfficialLineLayer node={node} officialCode={scene.officialCode} officialMemory={scene.officialMemory} hasMemory={scene.hasMemory} officialLedger={officialLedger} />
-        <WorktreeEngineLayer node={node} code={scene.code} memory={scene.memory} hasMemory={scene.hasMemory} codeRuntimePredicted={scene.codeRuntimePredicted} memoryRuntimePredicted={scene.memoryRuntimePredicted} memWtMaterialised={scene.memWtMaterialised} />
+        <OfficialLineLayer node={node} hasMemory={scene.hasMemory} officialLedger={officialLedger} />
+        <WorktreeEngineLayer node={node} hasMemory={scene.hasMemory} memWtMaterialised={scene.memWtMaterialised} />
         <LaneFlagLayer hasMemory={scene.hasMemory} memWtMaterialised={scene.memWtMaterialised} retiring={scene.retiring} cleanupTip={scene.cleanupTip} />
         <CloseoutTrainLayer node={node} animate={animate} />
         <LandingDockLayer showLanding={scene.showLanding} animate={animate} retiring={scene.retiring} landingRefs={scene.landingRefs} />
@@ -84,10 +80,9 @@ export function EnclosureCanvas({
         <FleetingOverlay fleeting={scene.fleeting} summary={node.summary} recovery={scene.recovery} />
         <RefusedOverlay fleeting={scene.fleeting} refusedEdges={scene.refusedEdges} />
         <StopAttentionOverlay animate={animate} fleeting={scene.fleeting} terminalEdge={scene.terminalEdge} terminal={scene.terminal} blocked={isBlocked(node)} recovery={scene.recovery} />
-        <DropoutOverlay animate={animate} providerPlanBlocked={scene.providerPlanBlocked} />
-        <PointerOverlays animate={animate} scanCenter={scene.scanCenter} blockNode={scene.blockNode} providerPlanBlocked={scene.providerPlanBlocked} fleeting={scene.fleeting} gatedEdges={scene.gatedEdges} reasonCenter={scene.reasonCenter} summary={node.summary} movedAt={scene.movedAt} />
+        <PointerOverlays animate={animate} scanCenter={scene.scanCenter} blockNode={scene.blockNode} fleeting={scene.fleeting} gatedEdges={scene.gatedEdges} reasonCenter={scene.reasonCenter} summary={node.summary} movedAt={scene.movedAt} />
       </svg>
-      <FxOverlay fxRef={fxRootRef} animate={animate} blocked={isBlocked(node)} node={node} code={scene.code} hasMemory={scene.hasMemory} memWtMaterialised={scene.memWtMaterialised} />
+      <FxOverlay fxRef={fxRootRef} animate={animate} blocked={isBlocked(node)} hasMemory={scene.hasMemory} memWtMaterialised={scene.memWtMaterialised} />
     </>
   );
 }

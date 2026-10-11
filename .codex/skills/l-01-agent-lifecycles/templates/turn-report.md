@@ -190,8 +190,8 @@ These are diagnostic worker checks, separate from certification and review-round
 | Strategy | Calls | Files/anchors inspected | Remaining gap |
 | -------- | ----- | ----------------------- | ------------- |
 | Intent (`read_ar_files`) | <count> | <paths> | <none or gap> |
-| Semantics (`grepai_search`) | <count> | <results> | <none, gap, or unavailable> |
-| Relationship (`cgc_*`) | <count> | <symbols/routes> | <none, gap, or unavailable> |
+| Semantics (onboarding) | <count> | <results> | <none, gap, or unavailable> |
+| Relationship (route indexes) | <count> | <symbols/routes> | <none, gap, or unavailable> |
 
 ## Escalations
 - <plan delta beyond blank-filling raised to the manager> | none

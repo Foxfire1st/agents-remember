@@ -30,8 +30,9 @@ The truth boundary this template obeys is authored once in `../core/acceptance.m
    proposed candidate before deciding the handover. A missing, stale, unresolvable, or
    candidate-mismatched Git/operation ref blocks; summaries never substitute for this evidence.
    Cache availability and attribution gaps for unchanged memory do not block a proven pair.
-5. Do not address an orchestrator occupant. `message_parent` is available for clarification or a
-   blocking issue; rule 4's validation is what accepts the packet.
+5. Do not address an orchestrator occupant. `role_message` (by role plus task references) is available for clarification or a
+   blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth, and that
+   terminal outcome attests only that the turn ended — rule 4's validation is what accepts it.
 
 ## Shape
 

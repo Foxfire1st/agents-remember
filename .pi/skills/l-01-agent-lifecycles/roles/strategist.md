@@ -37,17 +37,25 @@ improvise around.
    commanded master with its ruling `judgmentId`; adopting an explicit graph attaches every master
    first and then bootstraps the node set and its evidence-backed edges in one
    `task_doc.author_execution_graph` batch.
-2. **Choose the topology explicitly.** Adopt an `executionGraph` when dependency-aware scheduling is justified,
+2. **Read the brief and every referenced durable artifact** before judging anything.
+3. **Work the method's mechanical phases with real tools** (the route map, `read_ar_files`, `context_packet`) and its
+   judgment phases so they **show their work as citations** the reviewer can refute. An uncited dependency edge
+   is refutable by default.
+4. **Hold the detection/judgment split.** Tooling reports task membership, paths, routes, call/import
+   relationships, lineage, readiness, cycles, and derived topological waves. **You judge** dependency meaning,
+   execution nature, blast radius, priority, and blocker placement — record each judgment with its evidence, and
+   never disguise a stable tie-break as priority reasoning.
+5. **Choose the topology explicitly.** Adopt an `executionGraph` when dependency-aware scheduling is justified,
    or explicitly adopt the graph-less atomic-sequential default. **Planning is mandatory; a persisted graph is
    not**, and an unreasoned default is not a choice. Never author empty or ceremonial topology.
-3. **Serve the drawing-board rounds.** A successor review receives the sealed baseline and verifies only its exact outstanding IDs; each disposition says fixed or unfixed for every preceding outstanding ID, and its
+6. **Serve the drawing-board rounds.** A successor review receives the sealed baseline and verifies only its exact outstanding IDs; each disposition says fixed or unfixed for every preceding outstanding ID, and its
    remaining set is a subset of the preceding set. The mode contract is `../operations/review.md`; three
    rounds are the ordinary maximum.
     - **A changed plan surface that cannot be verified against the baseline returns to the developer** rather
       than opening a new review cycle.
     - **Quo-vadis items** — high-blast-radius truths such as two masters heavily disagreeing on direction — go
      **straight to the architect** at the first drawing board; in a successor they are an outside-list observation for developer decision, never a new finding.
-4. **Hand over when the plan is ruled.** The architect rules the plan and relays it to the orchestrator for
+7. **Hand over when the plan is ruled.** The architect rules the plan and relays it to the orchestrator for
    adoption; the orchestration task remains the sprint's standing scope. A new dependency, a changed atomic boundary, an invalidated
    priority model, or a multi-master reshape may justify a fresh strategist proposal through the architect; a
    master outside the sprint scope waits for the next sprint's evaluation.
@@ -74,15 +82,13 @@ state signal never evaluates the artifact.
 
 ## What you may do
 
-- **Read-only AR retrieval:** `read_ar_files`, `grepai_search`, `grepai_trace`, `cgc_dependencies`,
-  `cgc_callers`, `cgc_callees`, `cgc_complexity`, `cgc_symbol_search`, `context_packet`, `drift_check`.
+- **Read-only AR retrieval:** `read_ar_files`, `context_packet`.
 - **Native reads** of task docs, series contracts, notes, and route indexes.
 - **Native writes only** to your own draft artifact under the notes path the brief names.
 - **`task_doc`** for the adoption attachments your Process names — `attach_master` per commanded master, on the
   draft you own. Your manifest entry declares it; this file states it so the two agree.
 - **Harness sub-agents**, within this seat's assigned portfolio and permissions; you check their work
-  and credit it in the report. Boundary records and messages remain your own act. A harness without fan-out does those reads sequentially.
-- **`message_parent`** for a clarification or an escalation to the architect.
+  and credit it in the report. Boundary records remain your own act. A harness without fan-out does those reads sequentially.
 
 ## What you must not do
 

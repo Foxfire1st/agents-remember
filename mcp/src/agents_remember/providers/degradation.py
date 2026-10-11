@@ -268,11 +268,12 @@ class ProviderDegradationStore:
 ProviderStopper = Callable[["McpRuntimeConfig"], dict[str, Any]]
 """The critical failsafe's one action, as a PORT this package declares and never implements.
 
-Stopping the provider stacks is a tool call, and the tool lives at the edge
-(``application.provider_tools.provider_watchers_tool``). This module used to import it for a
+Stopping the provider stacks runs through the provider runtime (install refresh or the
+``providers-remove`` command), never through an agent tool: the provider tools left the
+surface (MIK-R112). This module used to import the tool for a
 default, which is a rank-10 package importing a rank-15 one (``layers.toml``) so that a
 degradation VERDICT could not be computed without loading the tool surface. The caller that
-owns the tool now supplies the action, which is also the only caller that can say whether a
+owns the runtime now supplies the action, which is also the only caller that can say whether a
 failsafe should be able to fire at all.
 """
 

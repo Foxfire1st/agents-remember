@@ -10,9 +10,8 @@ import shutil
 import stat
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
@@ -37,9 +36,8 @@ from agents_remember.install.experiment import (
 from agents_remember.install.provider_watchers import (
     ProviderWatcherRebind,
     ProviderWatcherRebindReport,
-    complete_provider_watcher_rebind,
+    provider_watcher_lifecycle_ok,
     stop_provider_watchers_before_refresh,
-    write_temp_provider_settings,
 )
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
@@ -50,9 +48,7 @@ from agents_remember.kernel.agentic_settings import (
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
-    reload_provider_authority,
 )
-from agents_remember.providers import lifecycle
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 AGENTS_MD_TARGETS = {
@@ -205,9 +201,11 @@ class InstallSummary:
     dependency_runs: int = 0
     provider_watcher_rebind: ProviderWatcherRebindReport | None = None
     experiment: ExperimentInstall | None = None
+    leftover_provider_folders: list[dict[str, Any]] = field(default_factory=list)
+    unused_provider_keys: list[str] = field(default_factory=list)
 
     def report(self) -> str:
-        return (
+        base = (
             f"created_dirs={self.created_dirs} "
             f"copied_files={self.copied_files} "
             f"unchanged_files={self.unchanged_files} "
@@ -215,11 +213,45 @@ class InstallSummary:
             f"removed_paths={self.removed_paths} "
             f"dependency_runs={self.dependency_runs}"
         )
+        if self.leftover_provider_folders:
+            total = sum(item["bytes"] for item in self.leftover_provider_folders)
+            names = ", ".join(
+                f"{item['path']} ({item['bytes']} bytes)" for item in self.leftover_provider_folders
+            )
+            base += f" leftover_provider_folders=[{names}] leftover_provider_bytes={total}"
+        if self.unused_provider_keys:
+            base += f" unused_provider_keys=[{', '.join(self.unused_provider_keys)}]"
+        return base
 
     def provider_watcher_report(self) -> dict[str, Any] | None:
         if self.provider_watcher_rebind is None:
             return None
         return self.provider_watcher_rebind.payload()
+
+
+def _tree_bytes(root: Path) -> int:
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
+    """Provider runtime folders the install preserves, with sizes (MIK-R112 rule 3).
+
+    The install never deletes these; only the explicit ``providers-remove``
+    command does. Reporting them here is the leftover notice.
+    """
+    found: list[dict[str, Any]] = []
+    for dirname in ("runners", "data", "logs", "_venvs", "_bin"):
+        path = coordination_root / "providers" / dirname
+        if path.is_dir() and not path.is_symlink():
+            found.append({"path": path.as_posix(), "bytes": _tree_bytes(path)})
+    return found
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -460,96 +492,24 @@ def install_benchmarks(
     copy_tree(sync, summary, dry_run)
 
 
-def configured_provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
+def enabled_provider_names(settings: dict[str, Any]) -> list[str]:
+    """The enabled provider key names, reported once as unused (MIK-R112).
+
+    Enabled keys no longer drive installation; the install result carries
+    them here so an older installation's keys are visible exactly once
+    instead of acting. Legacy settings still parse.
+    """
     context_providers = settings.get("contextProviders")
     if not isinstance(context_providers, dict) or context_providers.get("enabled") is not True:
-        return False
-
+        return []
     providers = context_providers.get("providers")
     if not isinstance(providers, dict):
-        return False
-
-    provider = providers.get(provider_id)
-    return isinstance(provider, dict) and provider.get("enabled") is True
-
-
-def any_provider_enabled(settings: dict[str, Any]) -> bool:
-    context_providers = settings.get("contextProviders")
-    if not isinstance(context_providers, dict) or context_providers.get("enabled") is not True:
-        return False
-    providers = context_providers.get("providers")
-    if not isinstance(providers, dict):
-        return False
-    return any(
-        isinstance(provider, dict) and provider.get("enabled") is True
-        for provider in providers.values()
+        return []
+    return sorted(
+        provider_id
+        for provider_id, provider in providers.items()
+        if isinstance(provider, dict) and provider.get("enabled") is True
     )
-
-
-def install_provider_dependencies(
-    coordination_root: Path,
-    provider_deps: ProviderDependencyInstall,
-    summary: InstallSummary,
-    dry_run: bool,
-) -> None:
-    if not any_provider_enabled(provider_deps.settings):
-        if dry_run:
-            print("Would skip provider dependency install; no providers enabled")
-        return
-
-    install_provider_dependencies_from_settings(
-        coordination_root,
-        provider_deps,
-        summary,
-        dry_run=dry_run,
-    )
-
-
-def install_provider_dependencies_from_settings(
-    coordination_root: Path,
-    provider_deps: ProviderDependencyInstall,
-    summary: InstallSummary,
-    *,
-    dry_run: bool,
-) -> list[dict[str, Any]]:
-    settings = provider_deps.settings
-    settings_path = write_temp_provider_settings(settings)
-    results: list[dict[str, Any]] = []
-    try:
-        if configured_provider_enabled(settings, "grepai-memory"):
-            summary.dependency_runs += 1
-            grepai_args = SimpleNamespace(
-                coordination_root=coordination_root,
-                from_settings=settings_path,
-                dry_run=dry_run,
-                timeout=provider_deps.timeout,
-                json=True,
-                force=False,
-                root=None,
-                runtime_root=None,
-                no_cache=provider_deps.no_cache,
-            )
-            results.append(lifecycle.grepai_install(grepai_args))
-        if configured_provider_enabled(settings, "codegraphcontext-code"):
-            summary.dependency_runs += 1
-            cgc_args = SimpleNamespace(
-                coordination_root=coordination_root,
-                from_settings=settings_path,
-                dry_run=dry_run,
-                timeout=provider_deps.timeout,
-                json=True,
-                repo_id=None,
-                code_repo_root=None,
-                no_cache=provider_deps.no_cache,
-            )
-            results.append(lifecycle.cgc_install_all(cgc_args))
-    finally:
-        settings_path.unlink(missing_ok=True)
-
-    failed = [result for result in results if not result.get("ok")]
-    if failed:
-        raise RuntimeError(f"provider dependency install failed: {json.dumps(failed, indent=2)}")
-    return results
 
 
 def install_eve_application(
@@ -738,6 +698,7 @@ def _install_assets(
     )
     prune_tree(providers_sync, summary, dry_run)
     copy_tree(providers_sync, summary, dry_run)
+    summary.leftover_provider_folders = leftover_provider_folders(coordination_root)
 
     if delivery.mode == "capsule":
         # One delivery path. The coordinator ``skills/`` tree copied above is the authored
@@ -766,8 +727,10 @@ def _install_assets(
     if scope.include_benchmarks:
         install_benchmarks(source_root, coordination_root, summary, dry_run)
 
-    if install_provider_deps:
-        install_provider_dependencies(coordination_root, scope.provider_deps, summary, dry_run)
+    # MIK-R112 removed the provider dependency install: enabled provider keys
+    # no longer drive installation. They are reported once as unused by the
+    # install result (see InstallSummary.unused_provider_keys); the legacy
+    # settings still parse so older installations keep loading.
 
 
 def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
@@ -790,7 +753,6 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
             "selected mode is preserved."
         )
 
-    install_provider_deps = scope.provider_deps.enabled
     provider_settings = scope.provider_deps.settings
     summary = InstallSummary()
     if record is not None:
@@ -811,34 +773,40 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
     )
     prune_tree(skills_sync, summary, dry_run)
     copy_tree(skills_sync, summary, dry_run)
+    # The shipped tool-detail docs (MIK-R112 rule 7): the short tool
+    # descriptions name docs/tool-details.md, and this copy is what an
+    # installed runtime reads.
+    docs_sync = RuntimeTreeSync(
+        source_root=runtime_root / "docs",
+        destination_root=coordination_root / "docs",
+        preserve=frozenset(),
+    )
+    prune_tree(docs_sync, summary, dry_run)
+    copy_tree(docs_sync, summary, dry_run)
     remove_path(coordination_root / "scripts", summary, dry_run)
     rebind: ProviderWatcherRebind | None = None
 
-    if install_provider_deps and any_provider_enabled(provider_settings):
-        rebind = ProviderWatcherRebind(
-            coordination_root=coordination_root,
-            settings=provider_settings,
-            dry_run=dry_run,
-            timeout=scope.provider_deps.timeout,
+    # MIK-R112: the required old-watcher stop is attempted independently of the
+    # dependency-install knobs. Enabled provider keys are reported once as
+    # unused; they drive nothing. A failed stop is recorded in the rebind
+    # report and the install continues.
+    rebind = ProviderWatcherRebind(
+        coordination_root=coordination_root,
+        settings=provider_settings,
+        dry_run=dry_run,
+        timeout=scope.provider_deps.timeout,
+    )
+    summary.provider_watcher_rebind = rebind.report
+    summary.unused_provider_keys = enabled_provider_names(provider_settings)
+    stop_result = stop_provider_watchers_before_refresh(rebind)
+    if not provider_watcher_lifecycle_ok(stop_result):
+        summary.provider_watcher_rebind.messages.append(
+            "Provider watcher stop failed before runtime provider refresh; "
+            "the install continued without watcher recovery. Failed stop: "
+            f"{json.dumps(stop_result)}"
         )
-        summary.provider_watcher_rebind = rebind.report
-        stop_provider_watchers_before_refresh(rebind)
 
-    try:
-        _install_assets(scope, runtime_root, summary, delivery)
-    except Exception as error:
-        if rebind is not None:
-            complete_provider_watcher_rebind(rebind)
-            raise RuntimeError(
-                "runtime install failed after provider watchers were stopped; "
-                "attempted non-destructive watcher recovery. "
-                f"original error: {error}; provider watcher recovery: "
-                f"{json.dumps(summary.provider_watcher_report(), indent=2)}"
-            ) from error
-        raise
-
-    if rebind is not None:
-        complete_provider_watcher_rebind(rebind)
+    _install_assets(scope, runtime_root, summary, delivery)
 
     return summary
 
@@ -859,7 +827,7 @@ def install_runtime_from_config(
     # boot snapshot. An empty (or unreadable: fail-closed) live map disables the
     # rebind while the runtime install itself proceeds.
     provider_deps = ProviderDependencyInstall(
-        settings=lifecycle_settings_from_config(reload_provider_authority(config).apply(config)),
+        settings=lifecycle_settings_from_config(),
         timeout=request.provider_deps_timeout
         or config.timeout_caps.get("providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS),
         enabled=request.install_provider_deps,
@@ -910,6 +878,7 @@ def install_runtime_from_config(
             "replacedLinks": summary.replaced_links,
             "removedPaths": summary.removed_paths,
             "dependencyRuns": summary.dependency_runs,
+            "unusedProviderKeys": summary.unused_provider_keys,
         },
     }
     if summary.experiment is not None:

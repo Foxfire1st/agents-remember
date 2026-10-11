@@ -40,12 +40,6 @@ class AgentBindingPayload(BaseModel):
     taskDocumentRef: TaskDocumentRef | None = None
 
 
-class PingResponse(ResponseModel):
-    server: str
-    version: str
-    transport: Transport
-
-
 class ServerInfoResponse(ResponseModel):
     server: str
     version: str
@@ -56,9 +50,9 @@ class ServerInfoResponse(ResponseModel):
     transcriptRoot: str
     harnessSkillRoot: str | None = None
     allowedRepoIds: list[str] = Field(default_factory=list)
-    allowedProviderIds: list[str] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list)
-    reservedTools: list[str] = Field(default_factory=list)
+    # Provider ids still present in settings, named once as no longer used: no tool
+    # reports on the CGC or GrepAI providers anymore and nothing starts them.
+    unusedProviderKeys: list[str] = Field(default_factory=list)
     servingBuild: ServingBuildPayload
     # Both present only on a tool server that a role launch started for one agent: the name
     # under which the launch gave that agent this server, and the agent's binding.

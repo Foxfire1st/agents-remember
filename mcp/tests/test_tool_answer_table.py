@@ -32,6 +32,10 @@ from typing import Any
 from unittest import mock
 
 import agents_remember.application.tool_answer_log as tool_log_module
+from agents_remember.application.runtime.install import (
+    RuntimeInstallRequest,
+    run_runtime_install,
+)
 from agents_remember.application.task_docs.task_doc_tools import VALID_OPERATIONS
 from agents_remember.application.tool_answer_log import (
     ENCLOSURE_LOGS_DIRNAME,
@@ -53,6 +57,7 @@ from agents_remember.application.tool_answer_log import (
 )
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.cli import tool_log_stats
+from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.kernel.primitives.runtime_config import (
     TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT,
     TOOL_LOG_KEEP_DAYS_DEFAULT,
@@ -61,11 +66,15 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     parse_tool_log_settings,
 )
+from agents_remember.mcp.tools.core import compact_runtime_install_payload
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
     INTERIM_LEAVES,
+    INTERIM_TOOL_LEAF,
+    L112_FINAL_BOUNDS,
     LOG_ERROR_LOCATION_OMITTED,
+    RUNTIME_INSTALL_ANSWER_FIELDS,
     TOOL_ANSWER_ERROR_MAX_CHARS,
     TOOL_ANSWER_EXCEPTION_MAX_TOKENS,
     TOOL_ANSWER_EXCEPTIONS,
@@ -95,6 +104,7 @@ from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
+from tool_entry_point_world import REPO as ENTRY_POINT_WORLD_REPO
 from tool_entry_point_world import EntryPointWorld
 
 
@@ -140,10 +150,10 @@ ROW_CASE_FRAMEWORK_KEYS = frozenset(
 
 # The authored roster (rules 6-7): every registered tool named under its
 # exact rule-7 leaf. A newly registered tool has no entry here, so the
-# roster check below fails instead of silently manufacturing its row. A leaf
-# that lands later moves its tools to shaped rows with fields, uses and
-# cases; until then each row below is interim (or an unshaped exception
-# passthrough) and the guard holds it to the bound.
+# roster check below fails instead of silently manufacturing its row. Tools
+# of L109, L110 and L111 stand below as interim rows until their leaf lands
+# and shapes them; L112 has landed (MIK-R112 rule 9), so its three retained
+# tools hold final rows in L112_FINAL_ROWS and no entry names L112.
 AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     # L109: a read names where a thing is.
     "read_ar_files": "L109",
@@ -152,10 +162,8 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     "context_packet": "L109",
     "resolve_context": "L109",
     # L110: the memory tools answer with a status.
-    "drift_check": "L110",
     "memory_quality_check": "L110",
     "citation_fix": "L110",
-    "citation_migrate": "L110",
     "route_index_refresh": "L110",
     "memory_init": "L110",
     "memory_baseline_status": "L110",
@@ -186,53 +194,239 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
-    # L112: every other tool, named explicitly so a reassignment is visible.
-    "lifecycle_start": "L112",
-    "lifecycle_resume": "L112",
-    "lifecycle_turn_end_notification": "L112",
-    "lifecycle_end": "L112",
-    "switch_lifecycle": "L112",
-    "lifecycle_phase": "L112",
-    "lifecycle_gate": "L112",
-    "server_info": "L112",
-    "ping": "L112",
-    "dispatch_agent": "L112",
-    "retire_child": "L112",
-    "rename_child": "L112",
-    "rename_self": "L112",
-    "gate_decide": "L112",
-    "gate_list": "L112",
-    "message_parent": "L112",
-    "message_child": "L112",
-    "provider_status": "L112",
-    "provider_diagnostics": "L112",
-    "provider_watchers": "L112",
-    "runtime_install": "L112",
-    "skills_install": "L112",
-    "skill_catalog_list": "L112",
-    "skill_catalog_read": "L112",
-    "role_capsule_compile": "L112",
-    "grepai_search": "L112",
-    "grepai_trace": "L112",
-    "cgc_symbol_search": "L112",
-    "cgc_callers": "L112",
-    "cgc_callees": "L112",
-    "cgc_dependencies": "L112",
-    "cgc_complexity": "L112",
-    "cgc_visualize": "L112",
-    "codex_benchmark_prepare": "L112",
-    "codex_benchmark_run": "L112",
+    "worktree_enclosure_adopt": "L111",
+}
+
+
+def _l112_shaped_row(
+    tool: str,
+    fields: dict[str, str],
+    bound: int,
+    ordinary_case: dict[str, Any],
+    largest_case: dict[str, Any],
+) -> ToolAnswerRow:
+    """One MIK-R112 rule-9 final row: named fields with caller-step uses,
+    the tool's own bound set from its largest case, and measured payloads."""
+    return ToolAnswerRow(
+        tool=tool,
+        operations=(None,),
+        fields=frozenset(fields),
+        uses=dict(fields),
+        bound=bound,
+        interim_leaf=None,
+        ordinary_case=ordinary_case,
+        largest_case=largest_case,
+    )
+
+
+_CASE_ROOT = "/tmp/ar-answer-cases/coord"
+
+# The ordinary case the operation produces: a dry run on a fresh root with an
+# ok watcher stop. Produced by run_runtime_install + the row projection
+# (compact_runtime_install_payload), paths normalized to _CASE_ROOT; the
+# producer test below pins it byte-for-byte. Measured 251 tokens against the
+# row bound 600. No host settings file exists, so the host step reports its
+# error shape and ok is false.
+_INSTALL_ORDINARY_CASE = {
+    "coordinationRoot": f"{_CASE_ROOT}",
+    "dryRun": True,
+    "experiment": {
+        "delivery": {
+            "mode": "legacy",
+            "reason": "no experiment was selected for this run; the installation is the unmodified one",
+        },
+        "record": None,
+        "selection": {
+            "experiment": None,
+            "reason": "no experiment was selected for this run; the installation is the unmodified one",
+            "requested": "",
+            "selected": False,
+            "source": "unselected",
+        },
+    },
+    "host": {
+        "changed": False,
+        "error": {
+            "code": "settings_invalid",
+            "detail": None,
+            "message": f"MCP settings file does not exist: {_CASE_ROOT}/mcp.settings.json",
+            "step": "host",
+        },
+        "ok": False,
+        "settingsPath": f"{_CASE_ROOT}/system/settings.json",
+    },
+    "includeBenchmarks": False,
+    "installProviderDeps": True,
+    "ok": False,
+    "providerWatcherRebind": {
+        "attempted": True,
+        "ok": None,
+        "phases": [{"action": "stop", "ok": True, "phase": "pre-provider-refresh-stop"}],
+    },
+    "reportPath": f"{_CASE_ROOT}/report.json",
+    "summary": {
+        "copiedFiles": 105,
+        "createdDirs": 156,
+        "dependencyRuns": 0,
+        "removedPaths": 0,
+        "replacedLinks": 0,
+        "unchangedFiles": 0,
+        "unusedProviderKeys": [],
+    },
+}
+
+# The largest case the operation produces: the same dry run with a failed
+# watcher stop, which records the stop, the failure message and the recovery
+# action. Post-retirement the rebind holds the single stop phase only.
+# Measured 357 tokens; the row bound 600 sits between it and twice it.
+_INSTALL_LARGEST_CASE = {
+    "coordinationRoot": f"{_CASE_ROOT}",
+    "dryRun": True,
+    "experiment": {
+        "delivery": {
+            "mode": "legacy",
+            "reason": "no experiment was selected for this run; the installation is the unmodified one",
+        },
+        "record": None,
+        "selection": {
+            "experiment": None,
+            "reason": "no experiment was selected for this run; the installation is the unmodified one",
+            "requested": "",
+            "selected": False,
+            "source": "unselected",
+        },
+    },
+    "host": {
+        "changed": False,
+        "error": {
+            "code": "settings_invalid",
+            "detail": None,
+            "message": f"MCP settings file does not exist: {_CASE_ROOT}/mcp.settings.json",
+            "step": "host",
+        },
+        "ok": False,
+        "settingsPath": f"{_CASE_ROOT}/system/settings.json",
+    },
+    "includeBenchmarks": False,
+    "installProviderDeps": True,
+    "messages": [
+        'Provider watcher stop failed before runtime provider refresh; the install continued without watcher recovery. Failed stop: {"provider": "watchers", "action": "stop", "partial": false, "recoveryActions\u2026'
+    ],
+    "ok": False,
+    "providerWatcherRebind": {
+        "attempted": True,
+        "ok": False,
+        "phases": [{"action": "stop", "ok": False, "phase": "pre-provider-refresh-stop"}],
+    },
+    "recoveryActions": [
+        {
+            "action": "restart",
+            "provider": "watchers",
+            "recoveryAction": "Stop the named leftover process and rerun the install; no product path restarts provider watchers. Only the providers-remove command deletes leftover provider runtime folders, and server_info reports enabled provider keys once as unused.",
+        }
+    ],
+    "reportPath": f"{_CASE_ROOT}/report.json",
+    "summary": {
+        "copiedFiles": 105,
+        "createdDirs": 156,
+        "dependencyRuns": 0,
+        "removedPaths": 0,
+        "replacedLinks": 0,
+        "unchangedFiles": 0,
+        "unusedProviderKeys": [],
+    },
+}
+
+_INSTALL_FIELDS = {
+    "ok": "stop when the run failed; continue to provider cleanup when it passed",
+    "coordinationRoot": "confirm the run targeted this coordination root",
+    "dryRun": "confirm the run wrote nothing before treating it as a preview",
+    "experiment": "confirm which experiment selection the run applied",
+    "host": "check the host settings step before starting agents on it",
+    "includeBenchmarks": "confirm the knobs that ran before rerunning with different ones",
+    "installProviderDeps": "confirm the knobs that ran before rerunning with different ones",
+    "summary": "read how many paths the run created, copied, replaced, or removed",
+    "messages": "read the step notes the summary counts omit",
+    "reportPath": "open the full install report",
+    "providerWatcherRebind": "see whether watcher recovery was attempted and which phases ran",
+    "recoveryActions": "perform the recovery actions the run lists",
+    "log": "open the detail file holding the whole install result",
+}
+
+_DISPATCH_ORDINARY_CASE = {
+    "ok": False,
+    "status": "task-document-not-found",
+    "role": "worker",
+    "taskDocumentRef": {"repository": "agents-remember", "path": "m.json"},
+    "detail": f"task document does not exist: {_CASE_ROOT}/tasks/agents-remember/m.json",
+    "log": f"{_CASE_ROOT}/logs/mcp/ar-tools-2026-10-10/042700000000-dispatch_agent-00000000.json",
+}
+
+# The largest case the tool's own limits allow: the refusal detail carries
+# the longest task-document path the model accepts (4,096 canonical
+# characters). Measured 1,114 tokens; the row bound is the 1,500 default
+# ceiling, between it and twice it.
+_DISPATCH_LONG_PATH = "t/" + "a" * 4080 + ".json"
+_DISPATCH_LARGEST_CASE = {
+    "ok": False,
+    "status": "task-document-not-found",
+    "role": "worker",
+    "taskDocumentRef": {"repository": "agents-remember", "path": _DISPATCH_LONG_PATH},
+    "detail": f"task document does not exist: {_CASE_ROOT}/tasks/agents-remember/{_DISPATCH_LONG_PATH}",
+    "log": f"{_CASE_ROOT}/logs/mcp/ar-tools-2026-10-10/042700000000-dispatch_agent-00000000.json",
+}
+
+_DISPATCH_FIELDS = {
+    "ok": "branch on whether a child was briefed or the dispatch was refused",
+    "status": "name the refusal when the dispatch did not succeed",
+    "role": "confirm the child runs the requested role",
+    "taskDocumentRef": "address the child's document in follow-up role_message calls",
+    "detail": "report why the dispatch was refused",
+    "deliveryState": "tell whether the brief reached the child",
+    "adapterDeliveryState": "tell whether the host harness accepted the child session",
+    "log": "open the detail file holding the whole dispatch result",
+}
+
+# MIK-R112 rule 9 final rows: every tool rule 7 gives L112 that is not
+# removed. server_info is an exception passthrough (the rule-4 table bounds
+# it at 4,000 with its reason); runtime_install and dispatch_agent hold
+# shaped rows with fields, caller-step uses, and measured cases.
+L112_FINAL_ROWS: dict[str, ToolAnswerRow] = {
+    "server_info": ToolAnswerRow(
+        tool="server_info",
+        operations=(None,),
+        fields=None,
+        uses={},
+        bound=bound_for("server_info"),
+        interim_leaf=None,
+        ordinary_case=None,
+        largest_case=None,
+    ),
+    "runtime_install": _l112_shaped_row(
+        "runtime_install",
+        _INSTALL_FIELDS,
+        bound_for("runtime_install"),
+        _INSTALL_ORDINARY_CASE,
+        _INSTALL_LARGEST_CASE,
+    ),
+    "dispatch_agent": _l112_shaped_row(
+        "dispatch_agent",
+        _DISPATCH_FIELDS,
+        bound_for("dispatch_agent"),
+        _DISPATCH_ORDINARY_CASE,
+        _DISPATCH_LARGEST_CASE,
+    ),
 }
 
 
 def build_tool_answer_table() -> dict[tuple[str, str | None], ToolAnswerRow]:
     """The rule-6 table: one row per authored tool (and per operation).
 
-    Rows come only from the authored roster above, never synthesized from
-    the registry: a tool without an authored entry has no row. A leaf that
-    lands later and adds or changes a tool edits that roster, setting
-    ``fields`` to the answer's field list with every use, the case sizes,
-    and clearing ``interim_leaf``.
+    Rows come only from the authored roster above plus the L112 final rows,
+    never synthesized from the registry: a tool without an authored entry
+    has no row. A leaf that lands later and adds or changes a tool edits
+    that roster, setting ``fields`` to the answer's field list with every
+    use, the case sizes, and clearing ``interim_leaf``.
     """
     table: dict[tuple[str, str | None], ToolAnswerRow] = {}
     for tool in sorted(AUTHORED_INTERIM_OWNERS):
@@ -250,10 +444,20 @@ def build_tool_answer_table() -> dict[tuple[str, str | None], ToolAnswerRow]:
                 ordinary_case=None,
                 largest_case=None,
             )
+    for tool in sorted(L112_FINAL_ROWS):
+        table[(tool, None)] = L112_FINAL_ROWS[tool]
     return table
 
 
-def check_tool_answer_roster(registered: set[str], owners: dict[str, str]) -> None:
+def authored_row_owners() -> dict[str, str | None]:
+    """Every authored row's owner: the interim leaf, or None for L112 finals."""
+    owners: dict[str, str | None] = dict(AUTHORED_INTERIM_OWNERS)
+    for tool in L112_FINAL_ROWS:
+        owners[tool] = None
+    return owners
+
+
+def check_tool_answer_roster(registered: set[str], owners: Mapping[str, str | None]) -> None:
     """Fail unless every registered tool has exactly one authored row."""
     missing = sorted(registered - set(owners))
     extra = sorted(set(owners) - registered)
@@ -265,6 +469,17 @@ def validate_tool_answer_row(key: tuple[str, str | None], row: ToolAnswerRow) ->
     """Check one row against the rule-6 gates; return failure strings."""
     failures = _validate_row_identity(key, row)
     if row.fields is None:
+        if row.interim_leaf is None:
+            # Unshaped exception passthrough (rule 4): the exception table
+            # already bounds it with its reason, so the rule-6 row carries
+            # no fields, uses, or cases. Anything else without a leaf fails.
+            if key not in TOOL_ANSWER_EXCEPTIONS:
+                failures.append(f"row {key}: interim row with no owning leaf")
+            if row.uses:
+                failures.append(f"row {key}: interim row with stated uses")
+            if row.ordinary_case is not None or row.largest_case is not None:
+                failures.append(f"row {key}: interim row with case payloads")
+            return failures
         if row.interim_leaf not in INTERIM_LEAVES:
             failures.append(f"row {key}: interim row with no owning leaf")
         if row.uses:
@@ -339,6 +554,23 @@ def _big_blob() -> str:
     return "".join(f"{index:08d}-abcdefgh;" for index in range(3000))
 
 
+def _server_info_case() -> dict[str, Any]:
+    # The smallest call of a server (MIK-R112: `ping` is removed,
+    # `server_info` answers the same and more): a valid server_info
+    # payload with the fields its response model requires.
+    return {
+        "ok": True,
+        "server": "Agents Remember",
+        "version": "1",
+        "transport": "stdio",
+        "configPath": "c",
+        "coordinationRoot": "r",
+        "workspaceRoot": "w",
+        "transcriptRoot": "t",
+        "servingBuild": {"version": "1", "bootedAt": "2026-10-10T00:00:00+00:00"},
+    }
+
+
 def _stub_config(
     coord_root: Path,
     *,
@@ -364,12 +596,14 @@ def _stub_config(
 
 class ToolAnswerTableTests(unittest.TestCase):
     def test_every_registered_tool_has_an_authored_row_and_no_extras(self) -> None:
-        check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), AUTHORED_INTERIM_OWNERS)
+        check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), authored_row_owners())
         rowed = {tool for tool, _operation in TOOL_ANSWER_TABLE}
         self.assertEqual(rowed, set(PUBLIC_TOOL_RESPONSE_MODELS))
 
     def test_missing_authored_row_fails(self) -> None:
-        reduced = {tool: leaf for tool, leaf in AUTHORED_INTERIM_OWNERS.items() if tool != "ping"}
+        reduced = {
+            tool: leaf for tool, leaf in authored_row_owners().items() if tool != "server_info"
+        }
         with self.assertRaises(AssertionError):
             check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), reduced)
 
@@ -403,17 +637,27 @@ class ToolAnswerTableTests(unittest.TestCase):
         for key, row in TOOL_ANSWER_TABLE.items():
             if key in TOOL_ANSWER_EXCEPTIONS:
                 continue
+            if row.fields is not None:
+                continue  # L112 final shaped rows hold their own bound and cases
             self.assertEqual(row.bound, TOOL_ANSWER_EXCEPTION_MAX_TOKENS, f"row {key}")
             self.assertIsNone(row.fields, f"row {key}")
             self.assertIn(row.interim_leaf, INTERIM_LEAVES, f"row {key}")
 
     def test_each_later_leaf_still_owns_rows(self) -> None:
-        # A leaf does not land while a row names it: L109-L112 each still own
-        # interim rows, and each of the four adds its own test that says so
-        # for itself when it lands.
+        # A leaf does not land while a row names it: L109, L110 and L111
+        # each still own interim rows. L112 has landed (MIK-R112 rule 9)
+        # and owns none; the next test says so for it.
         owners = {row.interim_leaf for row in TOOL_ANSWER_TABLE.values()}
-        for leaf in INTERIM_LEAVES:
+        for leaf in ("L109", "L110", "L111"):
             self.assertIn(leaf, owners, f"{leaf} owns no row")
+
+    def test_no_row_names_l112(self) -> None:
+        # MIK-R112 rule 9: L112 has landed. No interim row names it -- not
+        # in the authored roster, not in the built table, and not in the
+        # implementation's interim map.
+        self.assertNotIn("L112", set(AUTHORED_INTERIM_OWNERS.values()))
+        self.assertNotIn("L112", {row.interim_leaf for row in TOOL_ANSWER_TABLE.values()})
+        self.assertNotIn("L112", set(INTERIM_TOOL_LEAF.values()))
 
     def test_field_allowlist_mechanism(self) -> None:
         self.assertEqual(fields_outside_row({"ok": True, "x": 1}, None), set())
@@ -562,18 +806,35 @@ class ToolAnswerRowGateTests(unittest.TestCase):
 
 
 class ToolAnswerOwnershipTests(unittest.TestCase):
-    """Every current row names its exact rule-7 leaf, exception rows included."""
+    """Every current interim row names its exact rule-7 leaf; L112 finals name none."""
 
     def test_implementation_matches_the_authored_roster(self) -> None:
+        owners = authored_row_owners()
         mismatches = [
             tool
             for tool in PUBLIC_TOOL_RESPONSE_MODELS
-            if interim_leaf_for(tool) != AUTHORED_INTERIM_OWNERS[tool]
+            if interim_leaf_for(tool) != owners.get(tool)
         ]
         self.assertEqual(mismatches, [])
 
-    def test_lifecycle_and_gate_tools_belong_to_l112(self) -> None:
+    def test_removed_tools_have_no_row_and_no_owner(self) -> None:
         for tool in (
+            "cgc_symbol_search",
+            "cgc_callers",
+            "cgc_callees",
+            "cgc_dependencies",
+            "cgc_complexity",
+            "cgc_visualize",
+            "grepai_search",
+            "grepai_trace",
+            "provider_status",
+            "provider_diagnostics",
+            "provider_watchers",
+            "message_parent",
+            "message_child",
+            "retire_child",
+            "rename_child",
+            "rename_self",
             "lifecycle_start",
             "lifecycle_resume",
             "lifecycle_turn_end_notification",
@@ -581,12 +842,28 @@ class ToolAnswerOwnershipTests(unittest.TestCase):
             "switch_lifecycle",
             "lifecycle_phase",
             "lifecycle_gate",
+            "gate_decide",
+            "gate_list",
+            "ping",
+            "role_capsule_compile",
+            "skill_catalog_list",
+            "skill_catalog_read",
+            "codex_benchmark_prepare",
+            "codex_benchmark_run",
+            "skills_install",
+            "citation_migrate",
+            "drift_check",
         ):
-            self.assertEqual(interim_leaf_for(tool), "L112", tool)
+            with self.subTest(tool=tool):
+                self.assertNotIn((tool, None), TOOL_ANSWER_TABLE)
+                self.assertNotIn(tool, authored_row_owners())
+                self.assertIsNone(interim_leaf_for(tool))
 
     def test_exception_rows_name_their_leaf(self) -> None:
         self.assertEqual(interim_leaf_for("role_message"), "L111")
-        self.assertEqual(interim_leaf_for("server_info"), "L112")
+        # server_info is a landed L112 exception passthrough: bounded by the
+        # rule-4 table, with no interim owner.
+        self.assertIsNone(interim_leaf_for("server_info"))
 
 
 class ToolAnswerGuardTests(unittest.TestCase):
@@ -751,8 +1028,8 @@ class ToolAnswerGuardTests(unittest.TestCase):
             config = _stub_config(coord)
             bad = "y" * 121
             payload = {"ok": False, "code": bad, "error": "what to do.", "blob": _big_blob()}
-            with tool_call_context("grepai_search", {"query": "q"}, config=config):
-                answer = complete_tool_response("grepai_search", dict(payload))
+            with tool_call_context("memory_quality_check", {"query": "q"}, config=config):
+                answer = complete_tool_response("memory_quality_check", dict(payload))
             self.assertEqual(answer["code"], "invalid-code")
             self.assertIn("log", answer)
             detail = json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
@@ -801,9 +1078,9 @@ class ToolAnswerGuardTests(unittest.TestCase):
             answer_in = {"ok": False, "code": "start-blocked"}
             answer_in.update({f"f{index:03d}": f"value-{index}" for index in range(500)})
             answer_in["error"] = "what to do next. " * 3000
-            self.assertEqual(bound_for("grepai_search"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
-            with tool_call_context("grepai_search", {"query": "q"}, config=config):
-                answer = complete_tool_response("grepai_search", answer_in)
+            self.assertEqual(bound_for("memory_quality_check"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+            with tool_call_context("memory_quality_check", {"query": "q"}, config=config):
+                answer = complete_tool_response("memory_quality_check", answer_in)
             self.assertTrue(answer["overflow"])
             self.assertEqual(answer["code"], "start-blocked")
             self.assertTrue(answer["errorCut"])
@@ -824,13 +1101,8 @@ class ToolAnswerGuardTests(unittest.TestCase):
 
     def test_envelope_stripped_from_every_answer(self) -> None:
         answer = complete_tool_response(
-            "ping",
-            {
-                "ok": True,
-                "server": "Agents Remember",
-                "version": "1",
-                "transport": "stdio",
-            },
+            "server_info",
+            _server_info_case(),
         )
         for field in ENVELOPE_STRIPPED_FIELDS:
             self.assertNotIn(field, answer)
@@ -842,8 +1114,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
             config = _stub_config(coord)
-            with tool_call_context("grepai_search", {"query": "q"}, config=config):
-                answer = complete_tool_response("grepai_search", {"ok": True, "blob": _big_blob()})
+            with tool_call_context("memory_quality_check", {"query": "q"}, config=config):
+                answer = complete_tool_response(
+                    "memory_quality_check", {"ok": True, "blob": _big_blob()}
+                )
             self.assertTrue(answer["overflow"])
             self.assertNotIn("blob", answer)
             self.assertIn("log", answer)
@@ -877,8 +1151,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
             deep.mkdir(parents=True)
             self.assertGreater(len(deep.as_posix()), 1900)
             config = _stub_config(coord, transcript_root=deep)
-            with tool_call_context("grepai_search", {"query": "q"}, config=config):
-                answer = complete_tool_response("grepai_search", {"ok": True, "blob": _big_blob()})
+            with tool_call_context("memory_quality_check", {"query": "q"}, config=config):
+                answer = complete_tool_response(
+                    "memory_quality_check", {"ok": True, "blob": _big_blob()}
+                )
             self.assertTrue(answer["overflow"])
             self.assertNotIn("log", answer)
             self.assertEqual(answer["logError"], LOG_ERROR_LOCATION_OMITTED)
@@ -1302,9 +1578,7 @@ class ToolAnswerLogTests(unittest.TestCase):
             )
             self.assertIsNotNone(outcome.log_error)
             self.assertIn("not recorded", outcome.log_error or "")
-            answer = complete_tool_response(
-                "ping", {"ok": True, "server": "s", "version": "v", "transport": "stdio"}
-            )
+            answer = complete_tool_response("server_info", _server_info_case())
             self.assertTrue(answer["ok"])
 
     def test_no_coordination_root_writes_no_log_and_does_not_fail(self) -> None:
@@ -1321,15 +1595,10 @@ class ToolAnswerLogTests(unittest.TestCase):
             config = _stub_config(coord, transcript_root=custom)
             dest = resolve_log_roots(config)
             self.assertEqual(dest.coord_log_dir, custom)
-            with tool_call_context("ping", {}, config=config):
+            with tool_call_context("server_info", {}, config=config):
                 answer = complete_tool_response(
-                    "ping",
-                    {
-                        "ok": True,
-                        "server": "Agents Remember",
-                        "version": "1",
-                        "transport": "stdio",
-                    },
+                    "server_info",
+                    _server_info_case(),
                 )
             self.assertTrue(answer["log"].startswith(custom.as_posix()))
             detail = Path(answer["log"])
@@ -1398,14 +1667,14 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
     def test_exact_edge_answer_guarded_by_its_log_location(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
-            bound = bound_for("grepai_search")
+            bound = bound_for("memory_quality_check")
             whole = {"ok": True, "blob": ""}
             size = 0
             while not bound - 40 <= count_response_tokens(whole) <= bound - 5:
                 size += 64
                 whole["blob"] = "x" * size
             self.assertLessEqual(count_response_tokens(whole), bound)
-            answer, seen = self._complete(coord, "grepai_search", whole)
+            answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertTrue(answer.get("overflow"))
             self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
@@ -1417,13 +1686,8 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
     def test_ordinary_answer_observer_matches_delivered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
-            whole = {
-                "ok": True,
-                "server": "Agents Remember",
-                "version": "1",
-                "transport": "stdio",
-            }
-            answer, seen = self._complete(coord, "ping", whole)
+            whole = _server_info_case()
+            answer, seen = self._complete(coord, "server_info", whole)
             delivered = count_response_tokens(answer)
             self.assertNotIn("code", answer)
             (line,) = [self._read_line(coord)]
@@ -1456,7 +1720,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                 mock.patch.object(tool_log_module.os, "write", side_effect=flaky_write),
                 mock.patch.object(tool_log_module, "_evict_older_days", side_effect=flaky_evict),
             ):
-                answer, seen = self._complete(coord, "grepai_search", whole)
+                answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertEqual(line_failures, [1], "the line failure never fired")
             self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
@@ -1485,10 +1749,10 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             # the largest blob whose final mapping still fits the bound: the
             # predicate is monotone, so binary search always terminates and
             # never skips past the edge.
-            probe, _ = self._complete(coord, "grepai_search", {"ok": True, "blob": ""})
+            probe, _ = self._complete(coord, "memory_quality_check", {"ok": True, "blob": ""})
             assert probe["log"] is not None
             location_tokens = count_response_tokens({"log": probe["log"]})
-            bound = bound_for("grepai_search")
+            bound = bound_for("memory_quality_check")
             low, high = 0, 200000
             while low < high:
                 mid = (low + high + 1) // 2
@@ -1504,7 +1768,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertGreater(final_before_failure, bound - 40)
             reset_log_budgets()
             with mock.patch.object(tool_log_module.os, "write", side_effect=flaky_once):
-                answer, seen = self._complete(coord, "grepai_search", whole)
+                answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertEqual(failed, [1], "the line failure never fired")
             self.assertTrue(answer.get("overflow"))
@@ -1521,7 +1785,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             whole: dict[str, Any] = {"ok": False, "error": error, "blob": _big_blob()}
             for index in range(500):
                 whole[f"f{index:03d}"] = f"scalar-value-{index}"
-            answer, seen = self._complete(coord, "grepai_search", whole)
+            answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertTrue(answer.get("overflow"))
             self.assertTrue(answer.get("errorCut"))
@@ -1553,7 +1817,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                 whole[f"f{index:03d}"] = f"scalar-value-{index}"
             reset_log_budgets()
             with mock.patch.object(tool_log_module.os, "write", side_effect=flaky_once):
-                answer, seen = self._complete(coord, "grepai_search", whole)
+                answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertEqual(failed, [1], "the line failure never fired")
             self.assertTrue(answer.get("overflow"))
@@ -1582,7 +1846,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             coord = Path(tmp)
             whole = {"ok": True, "blob": _big_blob()}
             with mock.patch.object(tool_log_module.os, "write", side_effect=flaky):
-                answer, seen = self._complete(coord, "grepai_search", whole)
+                answer, seen = self._complete(coord, "memory_quality_check", whole)
             delivered = count_response_tokens(answer)
             self.assertEqual(failed, [1], "the line failure never fired")
             self.assertLessEqual(delivered, TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
@@ -2170,6 +2434,194 @@ class ToolAnswerReaderChangeTests(unittest.TestCase):
             code_tree = group / "code-worktree"
             code_tree.mkdir()
             self.assertFalse((code_tree / ENCLOSURE_LOGS_DIRNAME).exists())
+
+
+_PACKAGE_DATA = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "package_data"
+
+
+def _produced_install_compact(*, stop_ok: bool) -> tuple[dict[str, Any], str]:
+    """Run the real install and project it: the operation-produced answer.
+
+    A disposable dry run from the packaged tree with the watcher stop mocked
+    at the lifecycle boundary (ok or failed with a fixed process); returns
+    the projected compact and the coordination root for normalization.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        root = Path(tmp_dir)
+        coord = (root / "coord").resolve()
+        coord.mkdir(parents=True, exist_ok=True)
+        config = McpRuntimeConfig(
+            config_path=coord / "mcp.settings.json",
+            coordination_root=coord,
+            workspace_root=(root / "ws").resolve(),
+            transcript_root=coord / "logs",
+            repositories={},
+        )
+        request = RuntimeInstallRequest(dry_run=True, source_root=_PACKAGE_DATA.resolve())
+        if stop_ok:
+            stop_result: dict[str, Any] = {
+                "provider": "watchers",
+                "action": "stop",
+                "partial": False,
+                "recoveryActions": [],
+                "ok": True,
+            }
+        else:
+            stop_result = {
+                "provider": "watchers",
+                "action": "stop",
+                "partial": False,
+                "recoveryActions": [],
+                "ok": False,
+                "process": {"pid": 1234, "command": "cgc watch"},
+            }
+
+        def stop_watcher(args: Any, action: str) -> dict[str, Any]:
+            return {"provider": "watchers", **stop_result, "action": action}
+
+        with mock.patch.object(
+            install_provider_watchers.lifecycle,
+            "watchers_run",
+            side_effect=stop_watcher,
+        ):
+            full = run_runtime_install(config, request)
+        compact = compact_runtime_install_payload(full, f"{_CASE_ROOT}/report.json")
+        normalized = json.loads(json.dumps(compact).replace(coord.as_posix(), _CASE_ROOT))
+        return normalized, coord.as_posix()
+
+
+class L112FinalRowProductionTests(unittest.TestCase):
+    """MIK-R112 F11: the two final rows govern their production answers.
+
+    The row bounds come from the production lookup (bound_for), the row
+    fields match the production projection, the cases are operation-produced
+    and pinned byte-for-byte, over-bound answers overflow through the
+    unchanged L108 guard, and L109-L111 ownership is untouched.
+    """
+
+    def test_final_bounds_live_in_the_production_lookup(self) -> None:
+        self.assertEqual(L112_FINAL_BOUNDS, {"runtime_install": 600, "dispatch_agent": 1500})
+        for tool, row in L112_FINAL_ROWS.items():
+            if tool in L112_FINAL_BOUNDS:
+                self.assertEqual(row.bound, bound_for(tool))
+
+    def test_row_fields_match_the_production_projection(self) -> None:
+        self.assertEqual(set(_INSTALL_FIELDS), set(RUNTIME_INSTALL_ANSWER_FIELDS))
+
+    def test_l109_l111_ownership_is_unchanged(self) -> None:
+        self.assertNotIn("L112", set(INTERIM_TOOL_LEAF.values()))
+        self.assertNotIn("runtime_install", INTERIM_TOOL_LEAF)
+        self.assertNotIn("dispatch_agent", INTERIM_TOOL_LEAF)
+
+    def test_ordinary_install_case_is_operation_produced(self) -> None:
+        produced, _ = _produced_install_compact(stop_ok=True)
+        self.assertEqual(produced, _INSTALL_ORDINARY_CASE)
+        self.assertLessEqual(
+            count_response_tokens(dict(_INSTALL_ORDINARY_CASE)),
+            bound_for("runtime_install"),
+        )
+
+    def test_largest_install_case_is_operation_produced(self) -> None:
+        produced, _ = _produced_install_compact(stop_ok=False)
+        self.assertEqual(produced, _INSTALL_LARGEST_CASE)
+        self.assertLessEqual(
+            count_response_tokens(dict(_INSTALL_LARGEST_CASE)),
+            bound_for("runtime_install"),
+        )
+
+    def test_projection_forwards_no_undeclared_fields(self) -> None:
+        for stop_ok in (True, False):
+            produced, _ = _produced_install_compact(stop_ok=stop_ok)
+            self.assertNotIn("operation", produced)
+            self.assertEqual(set(produced) - set(RUNTIME_INSTALL_ANSWER_FIELDS), set())
+            for message in produced.get("messages", []):
+                self.assertLessEqual(len(message), 201)
+
+    def test_dispatch_cases_are_operation_produced(self) -> None:
+        world = EntryPointWorld()
+        try:
+            status, ordinary = world.call(
+                "dispatch_agent",
+                {
+                    "role": "worker",
+                    "task_document_ref": {"repository": ENTRY_POINT_WORLD_REPO, "path": "m.json"},
+                    "brief": "do the thing",
+                },
+            )
+            self.assertEqual(status, "RETURNED")
+            assert ordinary is not None
+            status, largest = world.call(
+                "dispatch_agent",
+                {
+                    "role": "worker",
+                    "task_document_ref": {
+                        "repository": ENTRY_POINT_WORLD_REPO,
+                        "path": _DISPATCH_LONG_PATH,
+                    },
+                    "brief": "do the thing",
+                },
+            )
+            self.assertEqual(status, "RETURNED")
+            assert largest is not None
+
+            def normalize(answer: dict[str, Any]) -> dict[str, Any]:
+                raw = json.dumps(answer)
+                raw = raw.replace(world.coord.as_posix(), _CASE_ROOT)
+                raw = raw.replace(ENTRY_POINT_WORLD_REPO, "agents-remember")
+                data = json.loads(raw)
+                if isinstance(data.get("log"), str):
+                    data["log"] = _DISPATCH_ORDINARY_CASE["log"]
+                return data
+
+            self.assertEqual(normalize(ordinary), _DISPATCH_ORDINARY_CASE)
+            normalized_largest = normalize(largest)
+            normalized_largest["log"] = _DISPATCH_LARGEST_CASE["log"]
+            self.assertEqual(normalized_largest, _DISPATCH_LARGEST_CASE)
+        finally:
+            world.close()
+            reset_ambient()
+
+    def test_row_bound_governs_install_overflow(self) -> None:
+        # Over the 600 row bound but under the 4,000 net: only the row bound
+        # overflows this answer, through the unchanged L108 guard.
+        whole = dict(_INSTALL_LARGEST_CASE)
+        whole["messages"] = [f"note {index:04d}-abcdefgh;" * 8 for index in range(5)]
+        measured = count_response_tokens(whole)
+        self.assertGreater(measured, bound_for("runtime_install"))
+        self.assertLess(measured, TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            config = _stub_config(coord)
+            with tool_call_context("runtime_install", {"dry_run": True}, config=config):
+                answer = complete_tool_response("runtime_install", whole)
+            self.assertTrue(answer.get("overflow"))
+            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
+            lines = [
+                json.loads(line)
+                for file in sorted(
+                    (coord / "logs" / "mcp").glob(f"{TOOL_LOG_BASENAME_PREFIX}*.jsonl")
+                )
+                for line in file.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(lines[0]["guardCut"])
+
+    def test_row_bound_governs_dispatch_overflow(self) -> None:
+        whole = dict(_DISPATCH_LARGEST_CASE)
+        # Varied text: long runs of one character compress under the product
+        # counter, so the overflow detail uses varied text.
+        whole["detail"] = "".join(f"{index:08d}-abcdefgh;" for index in range(300))
+        measured = count_response_tokens(whole)
+        self.assertGreater(measured, bound_for("dispatch_agent"))
+        self.assertLess(measured, TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            config = _stub_config(coord)
+            with tool_call_context("dispatch_agent", {"role": "worker"}, config=config):
+                answer = complete_tool_response("dispatch_agent", whole)
+            self.assertTrue(answer.get("overflow"))
+            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
 
 if __name__ == "__main__":

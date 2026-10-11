@@ -18,17 +18,11 @@ from mcp.server.fastmcp import FastMCP
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from .benchmarks import register_benchmark_tools
 from .capsule_serving import register_capsule_and_skill_tools
 from .closeout import register_closeout_tools
-from .code_search import register_code_search_tools
 from .core import register_core_tools
-from .gates import register_gate_tools
 from .knowledge import register_knowledge_tools
-from .lifecycle import register_lifecycle_tools
 from .memory import register_memory_tools
-from .orchestration import register_orchestration_tools
-from .providers import register_provider_tools
 from .role_agents import register_role_agent_tools
 from .sessions import register_session_tools
 from .tasks import register_task_tools
@@ -40,15 +34,9 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_core_tools,
     register_session_tools,
     register_memory_tools,
-    register_provider_tools,
-    register_code_search_tools,
     register_worktree_tools,
     register_closeout_tools,
     register_task_tools,
-    register_benchmark_tools,
-    register_lifecycle_tools,
-    register_gate_tools,
-    register_orchestration_tools,
     register_capsule_and_skill_tools,
     register_role_agent_tools,
     register_knowledge_tools,

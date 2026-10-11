@@ -318,7 +318,6 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                                 "context_packet": {
                                     "repo_id": repo_id,
                                     "task_context": reader_context,
-                                    "include_providers": False,
                                 },
                                 "read_ar_files": {
                                     "repo_id": repo_id,
@@ -542,6 +541,53 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
         )
         self.assertTrue(prepared["taskReportPath"].endswith(f"/{request_id}.md"))
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
+
+    def test_taskless_prompt_carries_composed_instructions_not_the_baseline(self) -> None:
+        # MIK-R112 CUR-C04: the prompt delivers the composed instructions (choice notes
+        # folded in), never the un-composed capsule baseline.
+        marker = "composed-note-marker-c04"
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = McpRuntimeConfig(
+                config_path=root / "settings" / "ar.json",
+                coordination_root=root / "coordination",
+                workspace_root=root / "projects",
+                transcript_root=root / "coordination" / "logs" / "mcp",
+            )
+            workspace_root = config.workspace_root
+            workspace_root.mkdir(parents=True)
+            request_id = uuid.uuid4()
+            context = resolve_role_launch_context(
+                config,
+                RoleSelection(role="architect"),
+            )
+            workspace = {"path": workspace_root.as_posix()}
+            defaults = {"agent": "codex", "model": None, "effort": None}
+            session_options = {"choices": {"notes": {"value": marker, "source": "test"}}}
+
+            with (
+                patch.object(role_launch_preparation, "_resolve_workspace", return_value=workspace),
+                patch.object(
+                    role_launch_preparation,
+                    "_role_defaults",
+                    return_value=(defaults, ("codex",)),
+                ),
+                patch.object(
+                    role_launch_preparation,
+                    "resolve_agent_selection",
+                    return_value=("codex", session_options),
+                ),
+            ):
+                role_handover = prepare_role_handover(
+                    config,
+                    context,
+                    agent_override=None,
+                    request_id=request_id,
+                )
+            prepared = role_handover.handover
+
+        self.assertIn(marker, prepared["prompt"])
+        self.assertEqual(prepared["instructionComposition"]["blocks"][-1]["kind"], "user addition")
 
 
 def _bridge_whose_first_creation_gets_no_answer(

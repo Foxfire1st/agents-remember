@@ -265,88 +265,14 @@ class McpConfigTests(unittest.TestCase):
                 / config.providers["codegraphcontext-code"].instance_id,
             )
 
-            lifecycle_settings = lifecycle_settings_from_config(config)
+            lifecycle_settings = lifecycle_settings_from_config()
             providers = lifecycle_settings["contextProviders"]["providers"]
-            grepai = providers["grepai-memory"]
-            grepai_instance = config.providers["grepai-memory"].instance_id
-            cgc_instance = config.providers["codegraphcontext-code"].instance_id
-            self.assertEqual(
-                grepai["runtimeRoot"],
-                (
-                    root / "ar-coordination" / "providers" / "runners" / "grepai" / grepai_instance
-                ).as_posix(),
-            )
-            self.assertEqual(grepai["instance"]["id"], grepai_instance)
-            self.assertEqual(grepai["instance"]["scope"], "workspace")
-            self.assertEqual(
-                grepai["instance"]["labels"]["agents-remember.instance-id"],
-                grepai_instance,
-            )
-            self.assertEqual(
-                grepai["instance"]["labels"]["agents-remember.provider"],
-                "grepai-memory",
-            )
-            self.assertEqual(grepai["runtime"]["mode"], "docker")
-            self.assertEqual(
-                grepai["runtime"]["composeProject"],
-                f"agents-remember-grepai-{grepai_instance}",
-            )
-            self.assertEqual(
-                grepai["runtime"]["network"]["name"],
-                f"ar-grepai-memory-{grepai_instance}",
-            )
-            self.assertEqual(grepai["runtime"]["runner"]["image"], "agents-remember/grepai:0.35.0")
-            self.assertEqual(
-                grepai["runtime"]["runner"]["containerName"],
-                f"ar-grepai-watcher-{grepai_instance}",
-            )
-            self.assertEqual(
-                grepai["backend"]["runtimeRoot"],
-                (
-                    root
-                    / "ar-coordination"
-                    / "providers"
-                    / "data"
-                    / "grepai"
-                    / grepai_instance
-                    / "postgres"
-                ).as_posix(),
-            )
-            self.assertEqual(grepai["embedder"]["provider"], "ollama")
-            self.assertEqual(grepai["embedder"]["backend"]["image"], "ollama/ollama:latest")
-            self.assertEqual(
-                grepai["embedder"]["backend"]["containerName"],
-                f"ar-grepai-ollama-{grepai_instance}",
-            )
-            self.assertEqual(providers["codegraphcontext-code"]["instance"]["id"], cgc_instance)
-            self.assertEqual(
-                providers["codegraphcontext-code"]["instance"]["scope"],
-                "workspace",
-            )
-            self.assertEqual(
-                providers["codegraphcontext-code"]["runtime"]["composeProject"],
-                f"agents-remember-cgc-{cgc_instance}",
-            )
-            self.assertEqual(
-                providers["codegraphcontext-code"]["runtime"]["runner"]["containerNameTemplate"],
-                f"ar-cgc-watcher-{cgc_instance}-<repoId>",
-            )
-            self.assertEqual(
-                providers["codegraphcontext-code"]["backend"]["runtimeRoot"],
-                (
-                    root
-                    / "ar-coordination"
-                    / "providers"
-                    / "data"
-                    / "codegraphcontext"
-                    / cgc_instance
-                    / "falkordb"
-                ).as_posix(),
-            )
-            self.assertEqual(
-                providers["codegraphcontext-code"]["backend"]["network"]["name"],
-                f"ar-cgc-code-{cgc_instance}",
-            )
+            # MIK-R112 F02: generated lifecycle settings emit no retired
+            # provider blocks, however the legacy authority above still parses
+            # both keys (config.providers assertions stand). Readers treat both
+            # as never-enabled, so no product install/start/watch can follow.
+            self.assertEqual(providers, {})
+            self.assertFalse(lifecycle_settings["contextProviders"]["enabled"])
 
     def test_repository_certification_profile_reference_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

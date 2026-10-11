@@ -148,13 +148,12 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
 
                 base_packet_result = await client.call_tool(
                     "context_packet",
-                    {"repo_id": self.repo_id, "include_providers": False},
+                    {"repo_id": self.repo_id},
                 )
                 leaf_packet_result = await client.call_tool(
                     "context_packet",
                     {
                         "repo_id": self.repo_id,
-                        "include_providers": False,
                         "task_context": self.task_context,
                     },
                 )

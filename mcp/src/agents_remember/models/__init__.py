@@ -16,7 +16,7 @@ from agents_remember.models.benchmarks import (
     CodexBenchmarkRunResponse,
 )
 from agents_remember.models.context_packet import ContextPacketV2
-from agents_remember.models.core import PingResponse, ServerInfoResponse, Transport
+from agents_remember.models.core import ServerInfoResponse, Transport
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.memory import (
     DriftCheckResponse,
@@ -123,7 +123,6 @@ __all__ = [
     "MemoryQualityCheckResponse",
     "NextOperation",
     "NextTool",
-    "PingResponse",
     "ProviderDiagnosticsItem",
     "ProviderDiagnosticsResponse",
     "ProviderIdentity",

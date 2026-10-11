@@ -7,22 +7,22 @@ description: "Choose retrieval strategies across memory substrates: semantics fo
 
 Use this skill when repository work needs context before source decisions. The
 job is to choose the retrieval contract first, then the cheapest substrate that
-can satisfy it. Providers are fast discovery accelerators.
+can satisfy it.
 
 ## Retrieval Substrates
 
 Choose the next substrate by the missing context bundle:
 
-- `Semantics`: a fuzzy concept or request is known, but structure, route, 
-  or file location is unknown. Prefer GrepAI over the memory repos when available.
+- `Semantics`: a fuzzy concept or request is known, but structure, route,
+  or file location is unknown. Search onboarding and overviews with the harness's
+  own tools.
 - `Relationship`: an anchor is known, but callers, callees, dependencies,
-  ownership, inheritance, impact paths, or neighboring code are unknown. Prefer
-  CodeGraphContext over the configured code repo when available.
+  ownership, inheritance, impact paths, or neighboring code are unknown. Search
+  the configured code repo with the harness's own tools.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation. Prefer the `read_ar_files` MCP tool for the
-  paired onboarding + source read (mirrors how Semantics prefers GrepAI and Relationship
-  prefers CodeGraphContext). The same call also carries the repository's **published intent**:
+  paired onboarding + source read. The same call also carries the repository's **published intent**:
   the invariants a previous task already recorded about the paths you asked for, at their exact
   snapshot and without needing a task (see _Published Intent Before Planning_ below).
 
@@ -31,103 +31,26 @@ the neighborhood around a ticket anchor, then switch to Intent to prove the
 contract and fix direction from source. A vague concept may start with
 Semantics, then switch to Intent once candidate routes are known.
 
-## Semantics: GrepAI
+## Semantics: Onboarding Search
 
-Use Semantics when the request is vague or fuzzy. Semantics will retrieve from onboardings which
-allows to discover the symbols/routes/files hints to relevant source code.
+Use Semantics when the request is vague or fuzzy. Semantics retrieves from
+onboardings, which allows discovering the symbols/routes/files hints to relevant
+source code. Search the overviews and sidecars with the harness's own tools;
+confirm candidates with bounded `read_ar_files` paired reads.
 
-First request an MCP `context_packet(repo_id="<repoId>", include_providers=true)`
-when the MCP server is configured. Use provider results only when the packet
-reports healthy provider state and the MCP exposes an appropriate provider
-query tool. Coordinator-local provider lifecycle scripts are not installed
-runtime tools.
+Use a semantic hit as a route hint. Open the selected overview, sidecar, or source
+file next; do not treat the semantic result as proof.
 
-The two highest-value GrepAI patterns are broad semantic routing and scoped
-memory-project search. Examples here are synthetic response shapes only; do not
-copy private repository names, symbols, paths, snippets, or results into
-reusable skill examples.
+## Relationship: Harness-Native Code Search
 
-Synthetic answer shape:
-
-```text
-results[3]{project,path,lines,score}:
-  1 | <memoryProject> | onboarding/src/jobs/retry-policy.ts.md | 18-34 | 0.84
-  2 | <memoryProject> | onboarding/src/http/client.ts.md | 41-59 | 0.78
-  3 | <memoryProject> | onboarding/overview.md | 72-81 | 0.73
-```
-
-Use this when the route is unknown and the next step is choosing which
-overview, sidecar, or source area to confirm.
-
-Synthetic answer shape:
-
-```json
-{
-  "query": "validation rules for imported records",
-  "results": [
-    {
-      "project": "<memoryProject>",
-      "path": "onboarding/src/import/record-validator.ts.md",
-      "startLine": 22,
-      "endLine": 46,
-      "score": 0.86
-    }
-  ]
-}
-```
-
-Use `--project` after the relevant memory root is known. Use `--path` after
-route discovery narrows the search further. For the full GrepAI usage catalog
-with synthetic example outputs, read
-[grepai-high-leverage-usage.md](./grepai-high-leverage-usage.md) beside this skill.
-
-## Relationship: CodeGraphContext
-
-Use CGC (CodeGraphContext) when an anchor/symbol is known to find relationships and structure. One CGC query
-can replace multiple direct `rg` reads. CGC is a powerful substrate for relationship questions:
-callers, callees, dependencies, ownership, inheritance, impact paths, or neighboring code.
-
-First request an MCP `context_packet(repo_id="<repoId>", include_providers=true)`
-when the MCP server is configured. Use CGC only when the packet reports healthy
-CGC state and the MCP exposes an appropriate relationship query tool.
-
-The two highest-value CGC patterns are impact tracing and complexity triage.
-Examples here are synthetic response shapes only; do not copy private
-repository names, symbols, or paths into reusable skill examples.
-
-Synthetic answer shape:
-
-```text
-Function 'handleRequest' calls:
-validateRequest      <repo>/src/http/validation.ts:42
-loadSession          <repo>/src/auth/session.ts:18
-dispatchCommand      <repo>/src/app/command-router.ts:77
-
-Total: 3 function(s)
-```
-
-Use `analyze callers` for the reverse direction and `analyze chain` when two
-symbols are known and the missing question is whether one can reach the other.
-
-Synthetic answer shape:
-
-```text
-Most Complex Functions (threshold: 10):
-Function             Complexity  Location
-renderDashboard              42  <repo>/src/ui/dashboard.tsx:88
-buildReport                  37  <repo>/src/reports/report-builder.ts:114
-syncExternalState            31  <repo>/src/sync/state-sync.ts:57
-```
-
-Use `analyze complexity` as an early risk map before touching large or tangled
-functions. Use `deps` with the module import string recorded in code, not
-necessarily the source file path. For the full CGC method catalog with
-synthetic example outputs, read
-[codegraphcontext-high-level-methods.md](./codegraphcontext-high-level-methods.md) beside this skill.
+Use the harness's own search over the configured code repo when an
+anchor/symbol is known to find relationships and structure: callers, callees,
+dependencies, ownership, inheritance, impact paths, or neighboring code. Confirm
+every candidate anchor with a bounded source read.
 
 ### Rules:
-Use CGC first for structure and relationships.
-Use direct source reads only to confirm specific anchors CGC surfaced.
+Use harness search first for structure and relationships.
+Use direct source reads only to confirm specific anchors the search surfaced.
 
 
 ## Intent: Onboarding And Source
@@ -168,7 +91,7 @@ names an unresolved source question.
   batched and observable).
 - Native read is reserved as the edit precondition once building begins.
 - Keep a running count of your `read_ar_files` calls and list them as research evidence,
-  alongside Semantics (GrepAI) and Relationship (CGC) queries.
+  alongside Semantics and Relationship harness searches.
 
 ## Published Intent Before Planning
 

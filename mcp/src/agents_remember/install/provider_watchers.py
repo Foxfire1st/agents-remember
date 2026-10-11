@@ -125,42 +125,22 @@ def add_provider_watcher_recovery_actions(
     )
 
 
-def stop_provider_watchers_before_refresh(rebind: ProviderWatcherRebind) -> None:
+def stop_provider_watchers_before_refresh(rebind: ProviderWatcherRebind) -> dict[str, Any]:
+    """Stop leftover provider watchers before the runtime tree is refreshed.
+
+    MIK-R112 removed every product install/start/watch path: this stop is the
+    only watcher lifecycle action a runtime install performs, and a failed
+    stop is recorded in the rebind report for the install result instead of
+    aborting the install. The caller continues the install either way and
+    reports the failed stop's process from the returned result.
+    """
     result = record_provider_watcher_lifecycle(
         rebind,
         phase="pre-provider-refresh-stop",
         action="stop",
     )
     if provider_watcher_lifecycle_ok(result):
-        return
+        return result
     rebind.report.ok = False
     add_provider_watcher_recovery_actions(rebind.report, result)
-    raise RuntimeError(
-        "provider watcher stop failed before runtime provider refresh: "
-        f"{json.dumps(result, indent=2)}"
-    )
-
-
-def complete_provider_watcher_rebind(rebind: ProviderWatcherRebind) -> None:
-    report = rebind.report
-    record_provider_watcher_lifecycle(rebind, phase="post-install-start", action="start")
-    status = record_provider_watcher_lifecycle(
-        rebind,
-        phase="post-install-status",
-        action="status",
-    )
-    if not provider_watcher_lifecycle_ok(status):
-        report.messages.append(
-            "Provider watchers were still degraded after runtime reinstall; "
-            "attempted one non-destructive restart/rebind."
-        )
-        record_provider_watcher_lifecycle(rebind, phase="recovery-stop", action="stop")
-        record_provider_watcher_lifecycle(rebind, phase="recovery-start", action="start")
-        status = record_provider_watcher_lifecycle(
-            rebind,
-            phase="recovery-status",
-            action="status",
-        )
-    report.ok = provider_watcher_lifecycle_ok(status)
-    if not report.ok:
-        add_provider_watcher_recovery_actions(report, status)
+    return result

@@ -1,14 +1,11 @@
 import type { RefObject } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { engineState } from "../../data/selectors";
 import type {
   EngineProcessEdge,
   EngineProcessNode,
   LandingRefNode,
   LedgerNode,
-  ProviderBootNode,
-  ProviderNode,
 } from "../../types/projection";
 import {
   Attention,
@@ -19,50 +16,31 @@ import {
   LaneFlag,
   MovedBadge,
   NodeBlock,
-  ProviderBlock,
   ReasonBadge,
   RecoveryChips,
   RefusedConduit,
   TerminalStop,
 } from "./badges";
 import { Conduit, LandingFlows } from "./conduits";
-import { BranchNode, EngineGauge } from "./engines";
+import { BranchNode } from "./engines";
 import { EngineFxOverlay } from "./EngineFxOverlay";
 import {
-  COL_MAIN_CX,
   COL_WT_CX,
   COUPLER_X,
-  ENGINE,
   OFFICIAL_COUPLER_X,
   POS,
   alertProps,
-  runtimeState,
   short,
-  type RuntimeState,
 } from "./geometry";
 import { WarpCoupler } from "./ledger";
 import { RemoteStrip } from "./remote";
 import type { EnclosureScene } from "./scene";
 import {
   enclosureBorder,
-  engineDropout,
-  officialWire,
   scanRing,
   svgNodeMeta,
-  worktreeWire,
   worldLabel,
 } from "./styles";
-
-function wireMotion(animate: boolean, visible: boolean) {
-  return {
-    initial: animate ? { opacity: visible ? 0.8 : 0 } : false,
-    animate: { opacity: visible ? 0.8 : 0 },
-    transition: {
-      duration: animate ? 0.45 : 0,
-      delay: animate ? (visible ? 0 : 0.2) : 0,
-    },
-  };
-}
 
 export function SceneHeader() {
   return (
@@ -206,42 +184,20 @@ export function BranchTier({
   );
 }
 
-function OfficialWires({
-  officialCode,
-  officialMemory,
+export function OfficialLineLayer({
+  node,
   hasMemory,
+  officialLedger,
 }: {
-  officialCode: ProviderNode | undefined;
-  officialMemory: ProviderNode | undefined;
+  node: EngineProcessNode;
   hasMemory: boolean;
+  officialLedger?: LedgerNode;
 }) {
   return (
     <>
-      {officialCode ? (
-        <line className={officialWire} x1={135} y1={198} x2={COL_MAIN_CX - 90} y2={281} data-testid="official-wire" />
-      ) : null}
-      {officialMemory && hasMemory ? (
-        <line className={officialWire} x1={135} y1={452} x2={COL_MAIN_CX - 90} y2={403} data-testid="official-wire" />
-      ) : null}
-    </>
-  );
-}
-
-function OfficialGauges({
-  officialCode,
-  officialMemory,
-}: {
-  officialCode: ProviderNode | undefined;
-  officialMemory: ProviderNode | undefined;
-}) {
-  return (
-    <>
-      {officialCode ? (
-        <EngineGauge at={ENGINE.mcgc} label="CGC" runtime={runtimeState(engineState(officialCode))} />
-      ) : null}
-      {officialMemory ? (
-        <EngineGauge at={ENGINE.mgrep} label="GrepAI" runtime={runtimeState(engineState(officialMemory))} />
-      ) : null}
+      {/* Official-line (left world): the official code↔memory coupler.
+          Provider engines and their wiring left the surface (MIK-R112). */}
+      <OfficialCoupler node={node} hasMemory={hasMemory} officialLedger={officialLedger} />
     </>
   );
 }
@@ -269,107 +225,19 @@ function OfficialCoupler({
   );
 }
 
-export function OfficialLineLayer({
-  node,
-  officialCode,
-  officialMemory,
-  hasMemory,
-  officialLedger,
-}: {
-  node: EngineProcessNode;
-  officialCode: ProviderNode | undefined;
-  officialMemory: ProviderNode | undefined;
-  hasMemory: boolean;
-  officialLedger?: LedgerNode;
-}) {
-  return (
-    <>
-      {/* Official-line (left world): the workspace engines + their wiring + the official code↔memory
-          coupler, ported from podstage.html (m-cgc / m-grep / w-m-* / cpl-main). Real providers. */}
-      <OfficialWires officialCode={officialCode} officialMemory={officialMemory} hasMemory={hasMemory} />
-      <OfficialGauges officialCode={officialCode} officialMemory={officialMemory} />
-      <OfficialCoupler node={node} hasMemory={hasMemory} officialLedger={officialLedger} />
-    </>
-  );
-}
-
-function WorktreeWires({
-  code,
-  memory,
-  hasMemory,
-  animate,
-}: {
-  code: ProviderBootNode | undefined;
-  memory: ProviderBootNode | undefined;
-  hasMemory: boolean;
-  animate: boolean;
-}) {
-  return (
-    <>
-      {/* Worktree engine → branch wiring (mirror of the official-line wires): the cloned engine serves
-          its own branch. This is the PERSISTENT structural link — present once the engine materialises,
-          and it stays at idle — distinct from the transient clone arrows that copy the index across from
-          the official engines (which vanish when the clone completes). */}
-      <motion.line
-        className={worktreeWire}
-        x1={1057}
-        y1={198}
-        x2={COL_WT_CX + 100}
-        y2={281}
-        data-testid="worktree-wire"
-        {...wireMotion(animate, !!code)}
-      />
-      {hasMemory ? (
-        <motion.line
-          className={worktreeWire}
-          x1={1057}
-          y1={452}
-          x2={COL_WT_CX + 100}
-          y2={403}
-          data-testid="worktree-wire"
-          {...wireMotion(animate, !!memory)}
-        />
-      ) : null}
-    </>
-  );
-}
-
 export function WorktreeEngineLayer({
   node,
-  code,
-  memory,
   hasMemory,
-  codeRuntimePredicted,
-  memoryRuntimePredicted,
   memWtMaterialised,
 }: {
   node: EngineProcessNode;
-  code: ProviderBootNode | undefined;
-  memory: ProviderBootNode | undefined;
   hasMemory: boolean;
-  codeRuntimePredicted: RuntimeState;
-  memoryRuntimePredicted: RuntimeState;
   memWtMaterialised: boolean;
 }) {
   return (
     <>
-      <WorktreeWires code={code} memory={memory} hasMemory={hasMemory} animate />
-      <EngineGauge
-        at={ENGINE.cgc}
-        label="CGC"
-        runtime={codeRuntimePredicted}
-        reindex={node.seedFallback}
-        present={!!code}
-      />
-      {hasMemory ? (
-        <EngineGauge
-          at={ENGINE.grepai}
-          label="GrepAI"
-          runtime={memoryRuntimePredicted}
-          present={!!memory}
-        />
-      ) : null}
-
+      {/* Provider worktree engines left the surface (MIK-R112): the layer keeps
+          the worktree code↔memory warp coupler (task/ledger state). */}
       <WarpCoupler
         x={COUPLER_X}
         bound={hasMemory}
@@ -596,30 +464,10 @@ export function StopAttentionOverlay({
   );
 }
 
-export function DropoutOverlay({
-  animate,
-  providerPlanBlocked,
-}: {
-  animate: boolean;
-  providerPlanBlocked: boolean;
-}) {
-  return (
-    <AnimatePresence>
-      {providerPlanBlocked ? (
-        <motion.g key="engine-dropout" {...alertProps(animate)} data-testid="engine-dropout">
-          <rect className={engineDropout} x={ENGINE.cgc.x - 6} y={ENGINE.cgc.y - 6} width={ENGINE.w + 12} height={ENGINE.h + 12} rx={6} />
-          <rect className={engineDropout} x={ENGINE.grepai.x - 6} y={ENGINE.grepai.y - 6} width={ENGINE.w + 12} height={ENGINE.h + 12} rx={6} />
-        </motion.g>
-      ) : null}
-    </AnimatePresence>
-  );
-}
-
 export function PointerOverlays({
   animate,
   scanCenter,
   blockNode,
-  providerPlanBlocked,
   fleeting,
   gatedEdges,
   reasonCenter,
@@ -629,7 +477,6 @@ export function PointerOverlays({
   animate: boolean;
   scanCenter: EnclosureScene["scanCenter"];
   blockNode: EnclosureScene["blockNode"];
-  providerPlanBlocked: boolean;
   fleeting: boolean;
   gatedEdges: EngineProcessEdge[];
   reasonCenter: EnclosureScene["reasonCenter"];
@@ -638,8 +485,8 @@ export function PointerOverlays({
 }) {
   return (
     <>
-      {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node, or AT the worktree
-          engine for the T7B provider-plan verify) and the block gate + reason badge (at the node's top edge).
+      {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node) and the block
+          gate + reason badge (at the node's top edge).
           Rendered dead last so the node's opaque rect can never cover them; centring a pointer on a node and
           painting it BEHIND the node defeats the pointer. The scan group fades via Motion (opacity
           only — its inner circle's r/opacity expand-fade is GSAP). */}
@@ -654,10 +501,6 @@ export function PointerOverlays({
         {blockNode ? (
           <motion.g key="block" {...alertProps(animate)}>
             <NodeBlock cx={blockNode.cx} top={blockNode.top} reason={summary} />
-          </motion.g>
-        ) : providerPlanBlocked ? (
-          <motion.g key="provider-block" {...alertProps(animate)}>
-            <ProviderBlock reason={summary} />
           </motion.g>
         ) : !fleeting && gatedEdges.length ? (
           <motion.g key="edge-gate" {...alertProps(animate)}>
@@ -685,16 +528,12 @@ export function FxOverlay({
   fxRef,
   animate,
   blocked,
-  node,
-  code,
   hasMemory,
   memWtMaterialised,
 }: {
   fxRef: RefObject<SVGSVGElement | null>;
   animate: boolean;
   blocked: boolean;
-  node: EngineProcessNode;
-  code: ProviderBootNode | undefined;
   hasMemory: boolean;
   memWtMaterialised: boolean;
 }) {
@@ -703,9 +542,6 @@ export function FxOverlay({
     <EngineFxOverlay
       ref={fxRef}
       attention={blocked}
-      engineHeight={ENGINE.h}
-      engineWidth={ENGINE.w}
-      reindexAt={node.seedFallback && code ? ENGINE.cgc : undefined}
       surgeXs={
         hasMemory
           ? [

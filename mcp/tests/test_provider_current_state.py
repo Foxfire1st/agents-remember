@@ -97,7 +97,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertEqual(repo_state["containerState"], "exited")
             self.assertEqual(repo_state["indexingState"], "unknown")
 
-    def test_provider_status_reports_restart_recovery_for_grepai_no_workspace(
+    def test_provider_status_reports_stop_only_recovery_for_grepai_no_workspace(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,7 +122,10 @@ class ProviderCurrentStateTests(unittest.TestCase):
 
             recovery = packet["providers"]["recoveryActions"][0]
             self.assertEqual(recovery["provider"], "grepai-memory")
-            self.assertIn("provider_watchers(action='restart')", recovery["recoveryAction"])
+            # MIK-R112 F02/F03: no product path restarts provider watchers; the
+            # remedy names the leftover stop and rerun, never a restart action.
+            self.assertIn("no product path restarts provider watchers", recovery["recoveryAction"])
+            self.assertNotIn("action='restart'", recovery["recoveryAction"])
             self.assertEqual(diagnostics["recoveryActions"], packet["providers"]["recoveryActions"])
 
     def test_current_state_ignores_disabled_providers_for_aggregate_readiness(self) -> None:

@@ -102,5 +102,4 @@ and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders.
 The copied starter package already provides the Agents Remember skills in
 `.cursor/skills/`.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Do not install skills for first-run setup; the copied package already carries them.

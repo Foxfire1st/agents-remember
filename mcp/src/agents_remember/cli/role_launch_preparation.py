@@ -13,7 +13,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from agents_remember.application.agent_binding import TOOL_SERVER_NAME
+from agents_remember.application.agent_binding import (
+    TOOL_SERVER_NAME,
+    launch_server_exclusion,
+)
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.role_launch_context import (
@@ -30,8 +33,10 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
+from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     launcher_options,
+    provider_accepts_tool_servers,
     read_host_role,
     resolve_agent_selection,
 )
@@ -89,8 +94,7 @@ _PREFIXED_TOOL_EXAMPLE = f"{_PREFIXED_TOOL_SERVER}__server_info"
 # Where a launched agent finds its AR tools. The first message says it twice: in plain text
 # before the capsule, and as host.arMcpUsage of the handover. It names no harness and no
 # harness's tool: every harness shows a tool server's tools in its own way.
-_AR_TOOL_SERVER_USAGE = (
-    f"First call server_info on {TOOL_SERVER_NAME}. "
+_AR_TOOL_SERVER_USAGE_HEAD = (
     f"Call every Agents Remember tool on the tool server named {TOOL_SERVER_NAME}: the AR build "
     "that launched this agent started it for this agent, and its tools are in this session. A "
     "harness shows them in its own way, so find them by the server's name in either spelling, "
@@ -103,11 +107,19 @@ _AR_TOOL_SERVER_USAGE = (
     "or proxies tool servers holds only the servers it was configured with. When it does not "
     f"list {TOOL_SERVER_NAME} itself, do not use it for AR tools at all, not even to search for "
     "or describe a tool by its name: what it answers then comes from another installation, and "
-    'its answer "server not found" speaks only for that tool. Do not '
-    "connect to, list, describe or call a tool server named "
+    'its answer "server not found" speaks only for that tool. '
+)
+# The server-choice sentence (MIK-R112 rule 6, last line). It stays only in a brief for a
+# harness that carries two servers: where the launch offers a one-launch exclusion the
+# agent sees one server and this goes away.
+_AR_OTHER_SERVER_CHOICE = (
+    "Do not connect to, list, describe or call a tool server named "
     f"{OTHER_INSTALLATION_TOOL_SERVER} or any of its tools, nor an AR tool server under any "
     "other name: it belongs to another installation, its tools carry the same tool names, and "
-    "nothing found there serves this assignment. After a start or a resume a tool server can "
+    "nothing found there serves this assignment. "
+)
+_AR_TOOL_SERVER_USAGE_TAIL = (
+    "After a start or a resume a tool server can "
     f"take some seconds to appear: look once more before reporting {TOOL_SERVER_NAME} missing, "
     "and report that instead of substituting another. For a leaf, pass the exact "
     "arMcpContext.readerArguments; add the requested files to read_ar_files as a list of "
@@ -115,6 +127,40 @@ _AR_TOOL_SERVER_USAGE = (
     "schema lacks the declared task_context fields, stop and report the missing AR reader "
     "capability; do not drop task_context or substitute another root."
 )
+_AR_TOOL_SERVER_USAGE = (
+    f"{_AR_TOOL_SERVER_USAGE_HEAD}{_AR_OTHER_SERVER_CHOICE}{_AR_TOOL_SERVER_USAGE_TAIL}"
+)
+
+
+def _ar_tool_server_usage(
+    harness_id: str | None,
+    *,
+    servers: tuple[str, ...] | None = None,
+    exclusion_applied: bool = False,
+) -> str:
+    """The AR-tool guidance for one launch: choice sentence only with two servers.
+
+    The wording derives from the launch capability predicate for (harness,
+    servers-listed) -- the same inputs the exclusion record carries -- plus
+    whether the exclusion was applied on the launch's route. servers=None
+    means the launch's tool-server acceptance is unknown: the sentence stays, so
+    the brief claims no exclusion it cannot know. The choice sentence leaves
+    only where the exclusion was actually applied (terminal route); on the host
+    route nothing is applied, so it stays. What the launch actually applies
+    as mechanism is the bridge input/terminal spawn argv, not this sentence.
+    """
+    if servers is None:
+        return _AR_TOOL_SERVER_USAGE
+    if exclusion_applied and launch_server_exclusion(harness_id, servers=servers) is not None:
+        return f"{_AR_TOOL_SERVER_USAGE_HEAD}{_AR_TOOL_SERVER_USAGE_TAIL}"
+    return _AR_TOOL_SERVER_USAGE
+
+
+def _brief_servers(accepts_tool_servers: bool | None) -> tuple[str, ...] | None:
+    """The servers tuple the brief exclusion predicate reads, if known."""
+    if accepts_tool_servers is None:
+        return None
+    return (TOOL_SERVER_NAME,) if accepts_tool_servers else ()
 
 
 def role_start_operation(role: LauncherRole) -> CapsuleOperation:
@@ -134,6 +180,14 @@ class RoleHandoverRequest:
     # The role agent that starts this role; none when the launcher starts it.
     started_by: StartingAgent | None = None
     session_options: dict[str, Any] = field(default_factory=dict)
+    # The resolved agent (harness id) this launch will run on; none when unresolved. The
+    # brief keeps the server-choice sentence unless the harness carries the product's
+    # tools once (MIK-R112 rule 6).
+    harness_id: str | None = None
+    # Whether the launch's provider accepts tool servers (None when the cached
+    # catalog cannot say without a live call): the brief exclusion predicate reads
+    # this, never the harness name alone.
+    accepts_tool_servers: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +218,12 @@ def prepare_role_handover(
     agent_id, session_options = resolve_agent_selection(
         config, defaults, harness_order, agent_override
     )
+    try:
+        handover_accepts = provider_accepts_tool_servers(config, agent_id)
+    except PaseoBridgeFailure:
+        # The cached catalog cannot say without a live call that is not made
+        # here: the brief keeps the server-choice sentence (no claim).
+        handover_accepts = None
     workspace = _resolve_workspace(config, context)
     _prepare_role_folders(context, workspace, request_id)
     if context.role in LEAF_ROLES:
@@ -182,6 +242,8 @@ def prepare_role_handover(
             request_id=request_id,
             started_by=started_by,
             session_options=session_options,
+            harness_id=agent_id,
+            accepts_tool_servers=handover_accepts,
         )
     )
     return PreparedRoleHandover(
@@ -344,7 +406,6 @@ def _ar_mcp_context(
                 "context_packet": {
                     "repo_id": context.task.ref.repository,
                     "task_context": task_context_args,
-                    "include_providers": False,
                 },
                 "read_ar_files": {
                     "repo_id": context.task.ref.repository,
@@ -370,7 +431,7 @@ def _ar_mcp_context(
         raise ValueError("The selected Projects repository is not admitted by MCP settings.")
     reader_arguments = (
         {
-            "context_packet": {"repo_id": repository_id, "include_providers": False},
+            "context_packet": {"repo_id": repository_id},
             "read_ar_files": {"repo_id": repository_id},
         }
         if repository_id
@@ -504,12 +565,12 @@ def _compile_handover(
     if context.role in LEAF_ROLES and context.task is not None:
         context_packet = build_context_packet(
             role_config,
-            ContextPacketRequest(repo_id=context.task.ref.repository, include_providers=False),
+            ContextPacketRequest(repo_id=context.task.ref.repository),
         )
     elif primary and primary.ref.repository in config.repositories:
         context_packet = build_context_packet(
             config,
-            ContextPacketRequest(repo_id=primary.ref.repository, include_providers=False),
+            ContextPacketRequest(repo_id=primary.ref.repository),
         )
     repository_context = None
     if context.effective_task is None:
@@ -615,7 +676,13 @@ def _compile_handover(
                 )
             ),
             "arToolServer": TOOL_SERVER_NAME,
-            "arMcpUsage": _AR_TOOL_SERVER_USAGE,
+            "arMcpUsage": _ar_tool_server_usage(
+                request.harness_id,
+                servers=_brief_servers(request.accepts_tool_servers),
+                # Host route: the handover briefs a host-started agent, where no
+                # exclusion is applied, so the choice sentence stays.
+                exclusion_applied=False,
+            ),
             "roleTools": {
                 "toolServer": TOOL_SERVER_NAME,
                 "start": ROLE_START_TOOL,
@@ -703,9 +770,8 @@ def _compile_handover(
         "Preserve system/developer instructions, approvals, sandbox policy, and "
         "repository-specific coding/tool rules.\n\n"
         # Before the capsule, which names AR tools: where this session holds them.
-        f"AR tools, before your first tool call: {_AR_TOOL_SERVER_USAGE}\n\n"
-        + first_read
-        + "\n\n"
+        # Host route (exclusion_applied=False): the choice sentence stays.
+        f"AR tools, before your first tool call: {_ar_tool_server_usage(request.harness_id, servers=_brief_servers(request.accepts_tool_servers), exclusion_applied=False)}\n\n"
         + instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))

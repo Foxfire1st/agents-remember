@@ -842,7 +842,7 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         setupState: "running",
         currentPhase: "codegraphcontext-code reindex (seed stale — reroute)",
         heartbeatAgeSeconds: 1,
-        seedFallback: true, // → CGC EngineGauge renders the amber center-out reindex pulse (data-fx='reindex')
+        seedFallback: true, // retired render (MIK-R112): no reindex pulse reads this anymore
         completedPhases: ["grepai-memory clone: ok"],
         // CGC reindexing (engine `indexing`, amber via reindex prop); GrepAI seeds normally (running clone)
         providers: [boot("code", "indexing"), boot("memory", "indexing")],

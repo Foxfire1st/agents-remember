@@ -16,8 +16,8 @@ render the copied package with its `render-starter` script or by hand, restart
 the harness, and invoke this skill again.
 
 The MCP layer still exposes deterministic maintenance tools such as
-`runtime_install()` and `skills_install()`. In the normal first-run path,
-`skills_install()` is not used because the starter package already placed the
+`runtime_install()`. In the normal first-run path, no skills installation step
+is used because the starter package already placed the
 skills where the harness can discover them. `runtime_install()` remains the first
 runtime action this skill performs because it creates or refreshes the
 coordinator scaffold under `ar-coordination/`.
@@ -82,8 +82,8 @@ failed check, give the exact fix and stop when the developer must act.
 
 Check, in order:
 
-1. **MCP reachable.** Confirm the MCP responds (`ping`, `server_info`, or the
-   equivalent available tool). If not, the harness did not load the server; tell
+1. **MCP reachable.** Confirm the MCP responds (`server_info`). If not, the harness did not load
+   the server; tell
    the developer to verify the MCP registration path and restart the harness.
 2. **Harness package present.** Confirm this skill is running from a
    harness-discoverable skill root and that the active harness package includes
@@ -170,9 +170,8 @@ package-owned runtime files. `runtime_install()` may also prepare provider
 runtime assets when providers are enabled, but it does not create memory repos,
 bootstrap onboarding, or start provider indexing.
 
-Do not run `skills_install()` as part of first-run setup. The harness starter
-package already carries the skills. `skills_install()` remains available for
-manual maintenance or non-package setups, but it is not the default path.
+Do not install skills as part of first-run setup. The harness starter
+package already carries the skills.
 
 ## Stage 2 - Agentic Settings: Interview The Developer
 
@@ -402,30 +401,15 @@ the one who decides when the bootstrap directory is removed.
 Skip the onboarding and baseline halves when an existing memory repo was adopted. The knowledge
 half is not skipped with them: see Stage 4 case 2.
 
-## Stage 6 - Configure Providers To Index
+## Stage 6 - Retire Providers
 
-If providers are enabled, make them index the configured code and memory:
+MIK-R112 removed every product install/start/watch path for the two providers. Do not start watchers and do not verify with the removed provider tools:
 
-1. Confirm the target repo is in MCP provider scope.
-2. Start watchers:
+1. Confirm the install stopped leftover watcher processes: the install result's watcher report holds the single `stop` phase.
+2. Confirm old provider keys are reported once as unused: the install result's `unusedProviderKeys` and `server_info` carry them. Enabled keys drive nothing.
+3. Remove the keys from settings when the older installation is retired.
 
-   ```text
-   provider_watchers(action="start")
-   ```
-
-   Use `provider_watchers(action="start", dry_run=true)` only when a preview is
-   requested or workflow policy requires one. `action="refresh"` no longer exists --
-   it force-rebuilt every index while reading like a harmless restart, so it was split
-   in two. Use `action="restart"` to stop and start the watchers without touching their
-   indexes, or `action="invalidate-indexes"` to delete and rebuild every index from
-   scratch (a slow full re-embed and re-graph).
-3. Verify with `provider_status` or
-   `context_packet(repo_id=..., include_providers=true)` that providers are
-   `ready`, watchers are up, and the target repo is covered.
-4. Use `provider_diagnostics` when a provider reports `stopped` or `degraded`.
-
-Providers are accelerators. If they are deferred, say that core by-path memory
-still works and list the provider recovery action separately.
+Providers are accelerators. Core by-path memory works without them; a provider gap is reported from the install result and `server_info`, never polled.
 
 ## Report Result
 
@@ -481,8 +465,8 @@ longer installs hooks.
    per-harness installer.
 2. It must not install, overwrite, or invent harness hooks, rules, instruction
    files, skills, or MCP registration files during first-run setup.
-3. It must not call `skills_install()` as part of the package-based first-run
-   path. Mention it only as a maintenance/manual option.
+3. It must not install skills as part of the package-based first-run
+   path.
 4. It must not scaffold a memory repo without asking unless memory already
    exists and resolves cleanly.
 5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to

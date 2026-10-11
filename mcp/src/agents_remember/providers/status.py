@@ -240,7 +240,7 @@ def _provider_status_projection(
 
 
 def _watchers_status(config: McpRuntimeConfig) -> dict[str, Any]:
-    settings_path = write_lifecycle_settings(config)
+    settings_path = write_lifecycle_settings()
     try:
         args = argparse.Namespace(
             coordination_root=config.coordination_root,

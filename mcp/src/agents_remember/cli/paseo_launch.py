@@ -31,7 +31,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import agents_remember
-from agents_remember.application.agent_binding import TOOL_SERVER_NAME, AgentBinding
+from agents_remember.application.agent_binding import (
+    OTHER_PRODUCT_TOOL_SERVER,
+    TOOL_SERVER_NAME,
+    AgentBinding,
+    launch_server_exclusion,
+)
 from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.cli import role_launch_progress
 from agents_remember.cli.paseo_bridge import (
@@ -403,10 +408,24 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         agent["modeId"] = launch.session_options["mode"]
     if launch.session_options.get("featureValues"):
         agent["featureValues"] = dict(launch.session_options["featureValues"])
+    if launch.session_options.get("serviceTier"):
+        # Merge, never replace: L71's accepted featureValues reach the create, and the
+        # legacy tier knob only sets its own key (it wins that key as the explicit choice).
+        agent["featureValues"] = {
+            **(agent.get("featureValues") or {}),
+            "service_tier": launch.session_options["serviceTier"],
+        }
+    # The applied one-launch server exclusion, recorded beside the host payload (MIK-R112
+    # rule 6): what this launch carries, not the harness name. run_launch_call forwards
+    # only workspace/agent, so host configuration bytes are unchanged; the receipt keeps
+    # this record (replayRequest) and the role-start answer derives from it.
+    servers = [TOOL_SERVER_NAME] if launch.accepts_tool_servers else []
+    server_exclusion = launch_server_exclusion(launch.provider, servers=tuple(servers))
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
         "workspace": workspace_call(launch.context, launch.folder),
         "agent": agent,
+        **({"serverExclusion": server_exclusion} if server_exclusion is not None else {}),
     }
 
 
@@ -428,10 +447,45 @@ def workspace_call(context: RoleLaunchContext, folder: str) -> dict[str, Any]:
     return workspace
 
 
+def exclusion_applied_agent(call: dict[str, Any]) -> dict[str, Any]:
+    """The agent definition as the native bridge input carries it.
+
+    MIK-R112 rule 6: a task-server-only exclusion retains the task server and
+    suppresses only the other product copy. The map our launch builds holds
+    only our copy, but a caller-supplied map may also hold user servers or a
+    stale other-server entry: the other key goes, everything else (task entry,
+    user servers, identity, configuration) is preserved byte-identical. An
+    emptied map is dropped as meaningless; the exclusion record still travels.
+    """
+
+    agent = dict(call.get("agent") or {})
+    exclusion = call.get("serverExclusion")
+    if isinstance(exclusion, dict) and exclusion.get("mode") == "task-server-only":
+        servers = agent.get("mcpServers")
+        if isinstance(servers, dict):
+            pared = {k: v for k, v in servers.items() if k != OTHER_PRODUCT_TOOL_SERVER}
+            if pared:
+                agent["mcpServers"] = pared
+            else:
+                agent.pop("mcpServers", None)
+    return agent
+
+
+def agent_create_input(call: dict[str, Any], workspace_id: str) -> dict[str, Any]:
+    """The exact native agent-create input: applied agent, workspace, record."""
+
+    exclusion = call.get("serverExclusion")
+    return {
+        **exclusion_applied_agent(call),
+        "workspaceId": workspace_id,
+        **({"serverExclusion": exclusion} if isinstance(exclusion, dict) else {}),
+    }
+
+
 def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
     """What a launch call gives the agent beside its first message, as the receipt records it."""
 
-    agent = call["agent"]
+    agent = exclusion_applied_agent(call)
     definition = (agent.get("mcpServers") or {}).get(TOOL_SERVER_NAME)
     if definition is None:
         tool_server = {
@@ -458,6 +512,11 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
             if "toolPolicy" in agent
             else "not applied: this provider has no supported per-tool route that retains the role server's other tools",
         },
+        **(
+            {"serverExclusion": call["serverExclusion"]}
+            if isinstance(call.get("serverExclusion"), dict)
+            else {}
+        ),
     }
 
 
@@ -497,7 +556,7 @@ def run_launch_call(
                 predecessor_settled=predecessor_settled,
             )
         role_launch_progress.starting()
-        created = bridge_call(config, "agent-create", {**agent, "workspaceId": workspace_id})
+        created = bridge_call(config, "agent-create", agent_create_input(call, workspace_id))
         return replace(
             _created_outcome(created, agent_id, workspace_id),
             workspace_preparation=opened.get("preparation"),

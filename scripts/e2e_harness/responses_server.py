@@ -178,16 +178,30 @@ class ScriptedResponses:
                     "brief": "ROLE BRIEF — worker\n\nPost the fixture parent message.",
                 },
             ),
-            "worker-initial": ("message_parent", _message_arguments(PRE_REPLACEMENT)),
+            "worker-initial": (
+                "role_message",
+                {
+                    "text": PRE_REPLACEMENT,
+                    "role": "manager",
+                    "task_document_ref": address.master,
+                },
+            ),
             "orchestrator-retire": (
-                "retire_child",
+                "dispatch_agent",
                 {
                     "task_document_ref": address.master,
                     "role": "manager",
-                    "reason": "ARSPAWN E2E replacement boundary",
+                    "brief": "ROLE BRIEF — manager B\n\nReplacement fixture manager.",
                 },
             ),
-            "worker-mid": ("message_parent", _message_arguments(MID_REPLACEMENT)),
+            "worker-mid": (
+                "role_message",
+                {
+                    "text": MID_REPLACEMENT,
+                    "role": "manager",
+                    "task_document_ref": address.master,
+                },
+            ),
             "orchestrator-replace": (
                 "dispatch_agent",
                 {
@@ -196,7 +210,14 @@ class ScriptedResponses:
                     "brief": "ROLE BRIEF — manager B\n\nReplacement fixture manager.",
                 },
             ),
-            "worker-post": ("message_parent", _message_arguments(POST_REPLACEMENT)),
+            "worker-post": (
+                "role_message",
+                {
+                    "text": POST_REPLACEMENT,
+                    "role": "manager",
+                    "task_document_ref": address.master,
+                },
+            ),
         }
         try:
             return actions[route]
@@ -392,7 +413,7 @@ def _has_completed_tool_search(body: dict[str, Any], suffix: str) -> bool:
 
     Codex retains earlier tool-search items in later turns. A generic "some search output
     exists" check therefore mistakes the prior ``dispatch_agent`` result for proof that a
-    later ``retire_child`` search ran. Correlate query and output by the response call id.
+    later ``role_message`` search ran. Correlate query and output by the response call id.
     """
 
     inputs = body.get("input")
@@ -497,7 +518,7 @@ def _is_relevant_tool(namespace: str | None, tool: dict[str, Any]) -> bool:
     qualified = f"{namespace or ''}{name}"
     return any(
         candidate == name or name.endswith(f"__{candidate}") or qualified.endswith(f"__{candidate}")
-        for candidate in ("dispatch_agent", "message_parent", "retire_child")
+        for candidate in ("dispatch_agent", "role_message")
     )
 
 
@@ -505,14 +526,6 @@ def _tool_search_output_count(inputs: list[object]) -> int:
     return sum(
         1 for item in inputs if isinstance(item, dict) and item.get("type") == "tool_search_output"
     )
-
-
-def _message_arguments(response: str) -> dict[str, object]:
-    return {
-        "ask": "ARSPAWN E2E structural delivery",
-        "response": response,
-        "message_kind": "message",
-    }
 
 
 def _function_output(body: dict[str, Any], call_id: str) -> object:

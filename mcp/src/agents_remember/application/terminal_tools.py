@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import uuid4
 
+from agents_remember.application.agent_binding import with_server_exclusion
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
     InboxAddress,
@@ -777,7 +778,7 @@ def _spawn_launch_request(
         harnesses=plan.harnesses,
         env=_spawn_env(plan.model, plan.effort, seat.env),
         knobs=SpawnKnobs(
-            launch_args=plan.launch_args,
+            launch_args=with_server_exclusion(plan.harness, plan.launch_args),
             prompt_keywords=plan.prompt_keywords,
             session_commands=plan.session_commands or None,
         ),

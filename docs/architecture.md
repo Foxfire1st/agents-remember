@@ -90,7 +90,7 @@ Once memory is resolved, agents reach into memory and code through three substra
 
 The meaning and relationship substrates are served by **opt-in providers** — GrepAI for semantic memory search, CodeGraphContext for the code graph. They run as local Docker services under `ar-coordination/providers/` (shown above) and index code and memory in the background.
 
-These providers are accelerators for *finding* knowledge; they are not the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, regardless of which substrate surfaced it. `runtime_install` builds the provider images and `provider_watchers` drive indexing — see the [Providers guide](guides/providers.md) and [MCP tool reference](reference/mcp-tools.md).
+These providers are accelerators for *finding* knowledge; they are not the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, regardless of which substrate surfaced it. No product path installs or starts provider processes (MIK-R112): `runtime_install` stops leftover watchers and reports old provider keys once as unused — see the [Providers guide](guides/providers.md) and [MCP tool reference](reference/mcp-tools.md).
 
 ## Ownership Boundaries
 

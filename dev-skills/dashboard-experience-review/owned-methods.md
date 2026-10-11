@@ -73,7 +73,7 @@ Grade the dashboard as a *monitoring surface*:
    without drilling? Flag if the top-level view buries faults.
 3. **Symptoms over causes** salience; **inverted-pyramid drill-down** — every red/fault state must
    link to its cause and to the control that addresses it.
-4. **Observability-parity** — diff what `provider_status` / `worktree_status` / `server_info` / the
+4. **Observability-parity** — diff what `worktree_status` / `server_info` / the
    chat event stream expose against what the dashboard surfaces. Anything visible upstream but absent
    on the dashboard is a parity-gap finding.
 5. **Stale-data honesty** — there must be a last-updated / connection / reconnect indicator; a frozen

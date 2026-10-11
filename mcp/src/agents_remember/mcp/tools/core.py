@@ -8,28 +8,19 @@ from agents_remember.application.agent_binding import TOOL_SERVER_NAME, read_age
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
-from agents_remember.application.runtime.skills import skills_install_tool
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
+from agents_remember.models.tools.tool_answer import (
+    RUNTIME_INSTALL_ANSWER_FIELDS,
+    TOOL_ANSWER_SHORT_STRING_MAX,
+)
 
 from .. import SERVER_NAME, SERVER_VERSION
-from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
-
-
-def ping_payload() -> dict[str, Any]:
-    return _tool_payload(
-        "ping",
-        {
-            "ok": True,
-            "server": SERVER_NAME,
-            "version": SERVER_VERSION,
-            "transport": TRANSPORT,
-        },
-    )
+from .base import TRANSPORT, _tool_payload
 
 
 def server_info_payload(
@@ -54,9 +45,7 @@ def server_info_payload(
                 config.harness_skill_root.as_posix() if config.harness_skill_root else None
             ),
             "allowedRepoIds": list(config.allowed_repo_ids),
-            "allowedProviderIds": list(config.allowed_provider_ids),
-            "tools": list(PUBLIC_TOOLS),
-            "reservedTools": list(RESERVED_TOOLS),
+            "unusedProviderKeys": list(config.allowed_provider_ids),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
             **(
                 {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
@@ -117,15 +106,28 @@ def runtime_install_payload(
     )
 
 
-def compact_runtime_install_payload(
-    full: dict[str, Any], report_path: str | None
-) -> dict[str, Any]:
-    """Keep the install outcome inline; the rebind runs (compose renders, docker
-    argv, container transcripts — historically >50k chars) live in the report."""
-    compact = {key: value for key, value in full.items() if key != "providerWatcherRebind"}
+def compact_runtime_install_payload(full: dict[str, Any], report_path: str | None) -> dict[str, Any]:
+    """Project the whole install result onto the row's final answer fields.
+
+    Only the row's fields ride (``operation`` and any undeclared field stay
+    in the whole result for the report and the log); messages keep the first
+    five entries cut to the short-string bound each, with the rest counted
+    into the report; the rebind digest keeps attempted/ok and
+    phase/action/ok per run. ``log`` is attached by the response boundary.
+    """
+    compact = {key: value for key, value in full.items() if key in RUNTIME_INSTALL_ANSWER_FIELDS}
     messages = full.get("messages")
-    if isinstance(messages, list) and len(messages) > 5 and report_path is not None:
-        compact["messages"] = [*messages[:5], f"... {len(messages) - 5} more in the report"]
+    if "messages" in full and isinstance(messages, list):
+        kept = [message for message in messages[:5] if isinstance(message, str)]
+        cut = [
+            message
+            if len(message) <= TOOL_ANSWER_SHORT_STRING_MAX
+            else message[:TOOL_ANSWER_SHORT_STRING_MAX] + "…"
+            for message in kept
+        ]
+        if len(messages) > 5:
+            cut.append(f"... {len(messages) - 5} more in the report")
+        compact["messages"] = cut
     rebind = full.get("providerWatcherRebind")
     if isinstance(rebind, dict):
         compact["providerWatcherRebind"] = {
@@ -156,22 +158,4 @@ def resolve_context_payload(
     return _tool_payload(
         "resolve_context",
         resolve_context_tool(config, task, worktree_name=worktree_name, topology=topology),
-    )
-
-
-def skills_install_payload(
-    config: McpRuntimeConfig,
-    *,
-    dry_run: bool = False,
-    overwrite: bool = False,
-    archive_existing: bool = False,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "skills_install",
-        skills_install_tool(
-            config,
-            dry_run=dry_run,
-            overwrite=overwrite,
-            archive_existing=archive_existing,
-        ),
     )

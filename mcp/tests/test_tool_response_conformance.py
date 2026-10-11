@@ -77,9 +77,7 @@ from agents_remember.models.base import FlexibleResponseModel, StrictResponseMod
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.operator_inbox import OperatorInboxPostResponse
 from agents_remember.models.structural.agent import (
-    RenameChildResponse,
-    RenameSelfResponse,
-    RetireChildResponse,
+    DispatchAgentResponse,
 )
 from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.models.terminal import SessionRetireResponse
@@ -220,17 +218,25 @@ def advertised_tool_names() -> set[str]:
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
 #
-# Role start and role messaging remain public; database-only change and projection do not.
-# MIK-R82 rule 4 restores `worktree_enclosure_adopt`: 73.
-# D124 reads rendered task files; the MCP tool roster remains unchanged.
-ROSTER_SIZE = 73
+# 39 on the merged line: the official line holds 73 (74 minus `knowledge_change` and
+# `knowledge_project`, removed upstream by MIK-R26 rule 5), and the leaf removes the 11
+# provider/code-search tools and the 23 table tools (all of rule 5 except
+# `dispatch_agent`), 73 - 11 - 23 = 39.
+ROSTER_SIZE = 39
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
-TOOL_MODULE_COUNT = 22
-TOOL_HANDLER_COUNT = 97
+#
+# 19 modules and 63 handlers on the merged line: the official line adds the
+# enclosure-adoption adapter module beside the leaf's deletions, and the leaf
+# deletes the `providers`, `benchmark` and `capsule_serving` adapter modules
+# with their tools, and the payload builders only the 23 removed tools
+# called. (A `*_payload`-suffixed helper that only shapes a dict, such as
+# the install compactor, is not a handler: it never reaches the choke point.)
+TOOL_MODULE_COUNT = 19
+TOOL_HANDLER_COUNT = 63
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -406,9 +412,6 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         for tool, model in (
             ("lifecycle_finalize_task", LifecycleFinalizeTaskResponse),
             ("operator_inbox_post", OperatorInboxPostResponse),
-            ("retire_child", RetireChildResponse),
-            ("rename_child", RenameChildResponse),
-            ("rename_self", RenameSelfResponse),
             ("session_retire", SessionRetireResponse),
             ("task_doc", TaskDocResponse),
             ("worktree_operation_control", WorktreeOperationControlResponse),
@@ -961,21 +964,20 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
     # -- T4: the shared structural delivery projection ---------------------------------
 
     def test_the_structural_delivery_projection_is_declared_on_every_consumer(self) -> None:
-        """T4: one producer, six consumers, three of which did not declare its keys.
+        """T4: one producer, and the staying consumer declares its keys.
 
         ``structural_payload`` adds ``deliveryState`` and ``adapterDeliveryState`` whenever
-        the outcome carries them. ``retire_child``, ``rename_child`` and ``rename_self``
-        reach the producer through call sites that pass no delivery state today, so the keys
-        are latent rather than live -- but the producer *can* emit them, and a model that
-        forbids a key its own producer can emit is D53's shape. The witness is the guard:
-        the outcome below carries both states, and the case fails if the producer drops
+        the outcome carries them. The removed structural tools are gone with their models
+        (MIK-R112); the staying ``dispatch_agent`` model is the witness that a model
+        forbidding a key its own producer can emit is D53's shape. The guard: the
+        outcome below carries both states, and the case fails if the producer drops
         them, which is the only way this could pass vacuously.
         """
 
         outcome = StructuralOutcome(
-            operation="rename_self",
+            operation="dispatch_agent",
             ok=True,
-            status="renamed",
+            status="dispatched",
             document=None,
             role="worker",
             detail=None,
@@ -986,15 +988,13 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         self.assertIn("deliveryState", emitted, "fixture did not reach the emitting branch")
         self.assertIn("adapterDeliveryState", emitted, "fixture did not reach the emitting branch")
 
-        for model in (RetireChildResponse, RenameChildResponse, RenameSelfResponse):
-            with self.subTest(model=model.__name__):
-                declared = set(model.model_fields)
-                self.assertEqual(set(), {"deliveryState", "adapterDeliveryState"} - declared)
-                response = model.model_validate(
-                    {
-                        **emitted,
-                        "operation": model.model_fields["operation"].default,
-                    }
-                )
-                self.assertEqual("delivered", response.deliveryState)
-                self.assertEqual("accepted", response.adapterDeliveryState)
+        declared = set(DispatchAgentResponse.model_fields)
+        self.assertEqual(set(), {"deliveryState", "adapterDeliveryState"} - declared)
+        response = DispatchAgentResponse.model_validate(
+            {
+                **emitted,
+                "operation": DispatchAgentResponse.model_fields["operation"].default,
+            }
+        )
+        self.assertEqual("delivered", response.deliveryState)
+        self.assertEqual("accepted", response.adapterDeliveryState)

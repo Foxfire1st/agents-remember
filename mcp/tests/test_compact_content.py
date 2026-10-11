@@ -58,7 +58,7 @@ class CompactContentShimTests(unittest.TestCase):
             config = load_config(path)
             server = create_server(config)
 
-            result = anyio.run(self._call_ping, server)
+            result = anyio.run(self._call_server_info, server)
 
         text_blocks = [b for b in result.content if isinstance(b, TextContent)]
         self.assertTrue(text_blocks, "expected a text content block")
@@ -74,9 +74,9 @@ class CompactContentShimTests(unittest.TestCase):
         self.assertTrue(parsed["ok"])
 
     @staticmethod
-    async def _call_ping(server):
+    async def _call_server_info(server):
         async with create_connected_server_and_client_session(server._mcp_server) as client:
-            return await client.call_tool("ping", {})
+            return await client.call_tool("server_info", {})
 
 
 if __name__ == "__main__":

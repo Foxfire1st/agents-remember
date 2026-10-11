@@ -10,7 +10,7 @@ the spawning agent's main loop.
 1. Cover **two axes**: planned-vs-planned (does this change collide with another master/leaf, present or
    future?) and planned-vs-past (does it regress something already landed — the "fixed one, broke two"
    surface?).
-2. Evidence-first: cite the route indexes, `cgc_*` queries, `grepai_search` queries, and
+2. Evidence-first: cite the route indexes and
    `read_ar_files` reads that back each finding.
 3. State limits per finding — what the evidence does **not** prove.
 4. This is a report, not a decision: it feeds the orchestrator's spirit test / reshape proposals or the
@@ -38,13 +38,11 @@ the spawning agent's main loop.
 - Recommended resolution: up-front foundation-master extraction | leaf move | sequential ordering | none needed
 
 ## Planned-vs-Past (regression surface)
-| Risk | Landed thing at risk | Evidence (cgc/grepai/route index) | Limits |
+| Risk | Landed thing at risk | Evidence (route index) | Limits |
 | ---- | -------------------- | --------------------------------- | ------ |
 
 ## Evidence Inventory
 - Route indexes read:
-- cgc queries (callers/callees/deps/impact):
-- grepai queries:
 - read_ar_files reads (paired source+onboarding):
 
 ## Bottom Line (for the spawning agent's main loop)

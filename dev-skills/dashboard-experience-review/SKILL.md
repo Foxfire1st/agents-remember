@@ -54,7 +54,7 @@ in `owned-methods.md`; per-delegate constraints in `delegation-map.md`; output s
   (a doctrine violation scores a higher severity than a generic nit). Set findings-only. Build the
   delegation table for this run.
 - **Stage 1 — Ground-truth entity + scenario model (OWNED).** Enumerate every entity and every state
-  it can reach from the *running system*, not from guesswork: call `provider_status`,
+  it can reach from the *running system*, not from guesswork: call
   `worktree_status`, `server_info` and skim the dashboard's `observer/` + `data/` + `types/projection`
   code. Author or refresh the **Workflow Scenario Catalog** (`docs/design/dashboard/scenario-catalog.md`)
   as operator-language job-stories. Mark **orphan views** (a view serving no job) and **orphan jobs**

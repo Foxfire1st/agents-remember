@@ -9,9 +9,8 @@ finding.** This is the diff no installed skill performs.
 Build the row set from:
 
 - **Scenario steps** — every step from `docs/design/dashboard/scenario-catalog.md`.
-- **Reachable entity states** (enumerated in Stage 1 from `provider_status` / `worktree_status` /
+- **Reachable entity states** (enumerated in Stage 1 from `worktree_status` /
   `server_info` + observer/projection code):
-  - provider: booting · nominal · saturated · failed · dormant
   - lifecycle: phase × state (request → … → close)
   - worktree: active · closing · abandoned · blocked
   - session/TUI: idle · busy · awaiting-input · disconnected

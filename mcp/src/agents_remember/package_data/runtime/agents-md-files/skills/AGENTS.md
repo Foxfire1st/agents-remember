@@ -45,5 +45,5 @@ invocation from an MCP tool call:
   without the word "skill". Skill directory names match the installed lowercase
   ids (e.g. `runtime/skills/c-12-closeout/`).
 - **MCP tools** — the snake_case tool name qualified with "MCP tool":
-  e.g. *the `context_packet` MCP tool*, *the `grepai_search` MCP tool*. Never
+  e.g. *the `context_packet` MCP tool*, *the `knowledge_read` MCP tool*. Never
   label a tool a skill or a skill a tool.

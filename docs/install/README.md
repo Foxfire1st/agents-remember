@@ -71,8 +71,7 @@ settings upgrade (`agents-remember upgrade-user-settings --coordination-root
 from another Node. `runtime_install` only reads this authority and defers a restart.
 
 Initial skills and hooks/rules/instructions come from the copied package. Do not
-run `skills_install()` for first-run setup; that MCP tool remains available for
-manual maintenance and non-package installs.
+install skills for first-run setup; the copied package already carries them.
 
 **Native Windows note:** enable long paths before working with worktree-backed
 tasks — worktree folders nest deeply enough that repos with deep trees exceed

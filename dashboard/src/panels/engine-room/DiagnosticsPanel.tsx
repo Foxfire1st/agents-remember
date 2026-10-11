@@ -46,8 +46,8 @@ export function DiagnosticsPanel({
   lifecycleId?: string;
   gateNode?: GateNode;
 }) {
-  // 5k F3 — during the power-down (cleanup-pending / abandon) the providers are being torn down, so the
-  // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale) provider
+  // 5k F3 — during the power-down (cleanup-pending / abandon) the runtimes are being torn down, so the
+  // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale)
   // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
   const poweringDown = node.phase === "cleanup-pending" || node.phase === "abandoned";
   const setupLine = setupLineFor(node, poweringDown);
@@ -73,18 +73,12 @@ export function DiagnosticsPanel({
       ) : null}
       {setupLine ? (
         <div className={diagRow}>
-          <span className={diagKey}>Provider setup</span>
+          <span className={diagKey}>Setup</span>
           <span className={diagValue}>{setupLine}</span>
         </div>
       ) : null}
       {node.completedPhases.length > 0 || node.failedPhases.length > 0 ? (
         <PhaseLineList node={node} poweringDown={poweringDown} />
-      ) : null}
-      {node.seedFallback ? (
-        <div className={diagRow}>
-          <span className={diagKey}>Seed</span>
-          <span className={diagValue}>reroute → reindex fallback</span>
-        </div>
       ) : null}
       <DiagnosticActionRow node={node} lifecycleId={lifecycleId} gateNode={gateNode} />
       {node.missingFacts.length > 0 ? <MissingFacts facts={node.missingFacts} /> : null}

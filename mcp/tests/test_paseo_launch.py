@@ -29,7 +29,7 @@ from agents_remember.cli import (
 )
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
-from agents_remember.cli.paseo_launch import agent_title
+from agents_remember.cli.paseo_launch import RoleLaunch, agent_title, build_launch_call
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
 from agents_remember.cli.role_launch_workspace import _start_leaf_enclosure
@@ -618,6 +618,11 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                             "prompt": self.first_message(request),
                             "systemPrompt": note,
                             "mcpServers": {"agents-remember-task": definition},
+                            "serverExclusion": {
+                                "harness": "codex",
+                                "mode": "task-server-only",
+                                "servers": ["agents-remember-task"],
+                            },
                         },
                     ),
                 )
@@ -1246,6 +1251,40 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 kept = path if status == "starting" else history
                 self.assertEqual(json.loads(kept.read_text(encoding="utf-8")), competitor)
                 kept.unlink()
+
+
+class LaunchFeatureValuesTests(unittest.TestCase):
+    """MIK-R112 CUR-C03: accepted featureValues and the legacy tier knob merge, never clobber."""
+
+    def launch(self, session_options: dict[str, Any]) -> RoleLaunch:
+        context = RoleLaunchContext("architect", None, None, None, None)
+        return RoleLaunch(
+            agent_id="agent-1",
+            request_id=uuid.uuid4(),
+            context=context,
+            folder="/tmp",
+            provider="codex",
+            session_options=session_options,
+            prompt="prompt",
+            report_path="/tmp/report.md",
+            handover_artifact={"path": "/tmp/report.md", "sha256": "0" * 64},
+            settings_file=Path("/tmp/settings.json"),
+            accepts_tool_servers=False,
+        )
+
+    def test_service_tier_merges_into_accepted_feature_values(self) -> None:
+        call = build_launch_call(
+            self.launch({"featureValues": {"a": "1", "service_tier": "old"}, "serviceTier": "new"})
+        )
+        self.assertEqual(call["agent"]["featureValues"], {"a": "1", "service_tier": "new"})
+
+    def test_feature_values_pass_through_without_tier(self) -> None:
+        call = build_launch_call(self.launch({"featureValues": {"a": "1"}}))
+        self.assertEqual(call["agent"]["featureValues"], {"a": "1"})
+
+    def test_tier_alone_sets_only_its_key(self) -> None:
+        call = build_launch_call(self.launch({"serviceTier": "new"}))
+        self.assertEqual(call["agent"]["featureValues"], {"service_tier": "new"})
 
 
 if __name__ == "__main__":

@@ -86,9 +86,16 @@ from typing import cast
 
 import pytest
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
+from agents_remember.application.skill_resources.catalog import (
+    read_served_file,
+    require_servable,
+)
 from agents_remember.application.skill_resources.operation import (
-    skill_catalog_list_tool,
-    skill_catalog_read_tool,
+    skill_catalog_registry,
+)
+from agents_remember.application.skill_resources.responses import (
+    skill_catalog_list_response,
+    skill_catalog_read_response,
 )
 from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.dashboard import serving_collaborators
@@ -182,7 +189,7 @@ def served_body(skill_name: str) -> str:
     delivery the server does not make.
     """
 
-    listing = skill_catalog_list_tool()
+    listing = skill_catalog_list_response(skill_catalog_registry())
     assert listing.unreadable == [], (
         "the shipped skills tree carries unservable skill(s), so no body can be served: "
         + "; ".join(f"{item.skillPath}: {item.reason}" for item in listing.unreadable)
@@ -192,9 +199,19 @@ def served_body(skill_name: str) -> str:
         f"the shipped catalog publishes {len(entries)} entries named {skill_name!r}; a fresh session "
         "discovers what it may read through this list"
     )
-    read = skill_catalog_read_tool(entries[0].uri)
+    read = _read_shipped_skill(entries[0].uri)
     assert read.skillName == skill_name, read.skillName
     return read.content
+
+
+def _read_shipped_skill(uri: str):
+    """One shipped skill file through the staying registry path (no removed tool)."""
+
+    catalog = skill_catalog_registry()
+    require_servable(catalog, action="reading a skill file")
+    served = read_served_file(catalog, uri)
+    root = served.entry.root
+    return skill_catalog_read_response(served, skill_revision="" if root is None else root.revision)
 
 
 def free_agent_instructions(role: str) -> tuple[str, str]:
@@ -424,7 +441,7 @@ def test_the_served_catalog_publishes_the_bootstrap_procedure() -> None:
     content is compared with the canonical file rather than trusted.
     """
 
-    listing = skill_catalog_list_tool()
+    listing = skill_catalog_list_response(skill_catalog_registry())
     entries = [entry for entry in listing.skills if entry.name == PROCEDURE_SKILL]
     assert entries, (
         f"the shipped catalog publishes no {PROCEDURE_SKILL!r} skill, so no fresh session can "

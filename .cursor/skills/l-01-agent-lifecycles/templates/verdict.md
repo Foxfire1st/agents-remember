@@ -252,7 +252,7 @@ The master owner records its review begin and result on the canonical master doc
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
 - affected c-05 onboarding checks + full `memory_quality_check` curation result: pass | failed | blocked | not-run — <finding/returned codes>
-- drift_check when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
+- drift reporting when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - master-side route overviews current: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
@@ -320,7 +320,7 @@ reviewer does not.
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
 - affected c-05 onboarding checks + full `memory_quality_check` curation result: pass | failed | blocked | not-run — <finding/returned codes>
-- drift_check when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
+- drift reporting when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - route overviews describe the accumulated behavior: yes | <finding>
 - C-11 carry-over and ledger mapping coherent for the final super branch: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>

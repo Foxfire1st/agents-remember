@@ -204,7 +204,7 @@ import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const COMMANDS = {
   catalog: readCatalog,
@@ -263,7 +263,18 @@ const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error:
 const STILL_LOADING = Symbol('providers still loading')
 console.log = console.info = console.debug = console.error
 
-await main()
+await (async () => {
+  // Importing this module (for the exported pure row builders) must not start
+  // the bridge: main runs only when node executes this file as the script.
+  let invoked = false
+  try {
+    invoked = process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+  } catch {
+    invoked = false
+  }
+  if (invoked) await main()
+})()
 
 async function main() {
   const command = process.argv[2]
@@ -597,19 +608,41 @@ function agentCreation(input, agentId) {
       'The Paseo bridge payload needs mcpServers as stdio definitions with command, args and env.'
     )
   }
+  const serverExclusion = input.serverExclusion ?? null
+  if (serverExclusion !== null && !isRecord(serverExclusion)) {
+    throw failure('invalid_bridge_payload', 'The Paseo bridge payload needs serverExclusion as a record when present.')
+  }
+  // MIK-R112 rule 6: the launch record travels with the call. A task-server-only
+  // exclusion retains the task server and suppresses only the other product
+  // copy (agents-remember, cf. OTHER_PRODUCT_TOOL_SERVER in
+  // application/agent_binding.py): that key goes, every other entry (task
+  // entry, user servers) is preserved byte-identical. Same filter as the
+  // Python shaper: applied here, idempotent with it. An emptied map is
+  // dropped as meaningless; the exclusion record still travels.
+  let appliedServers = mcpServers
+  if (isRecord(serverExclusion) && serverExclusion.mode === 'task-server-only' && isRecord(mcpServers)) {
+    const pared = Object.fromEntries(
+      Object.entries(mcpServers).filter(([name]) => name !== 'agents-remember')
+    )
+    appliedServers = Object.keys(pared).length > 0 ? pared : null
+  }
   // What the runtime keeps with the agent and applies again on every resume of its session.
+  // (d): nothing crosses to the host that the host does not read -- the
+  // serverExclusion record leaves what is handed to the host. It stays in the
+  // product's own receipt (applied_to_agent). The map carries what is retained.
   const kept = {
     ...(modeId ? { modeId } : {}),
     ...(toolPolicy ? { toolPolicy } : {}),
     ...(thinkingOptionId ? { thinkingOptionId } : {}),
     ...(featureValues ? { featureValues } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
-    ...(mcpServers ? { mcpServers } : {})
+    ...(appliedServers ? { mcpServers: appliedServers } : {}),
   }
   return {
     prompt,
     firstMessageId: `${idempotencyKey}${FIRST_MESSAGE_SUFFIX}`,
-    hasToolServers: mcpServers !== null && Object.keys(mcpServers).length > 0,
+    hasToolServers: appliedServers !== null && Object.keys(appliedServers).length > 0,
+    kept,
     // The agent is created without a message; `sendFirstMessage` sends `prompt` afterwards.
     async create(api, daemon) {
       const workspace = api.workspaces.ref(workspaceId)
@@ -1250,3 +1283,5 @@ function nonEmpty(value) {
 function text(value) {
   return String(value ?? '').slice(0, MESSAGE_LIMIT)
 }
+
+export { agentCreation };

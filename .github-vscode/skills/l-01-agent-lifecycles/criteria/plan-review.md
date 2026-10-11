@@ -4,8 +4,8 @@ The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) MUST 
 **orchestration task** (`../templates/orchestration-task.md`) — the strategist's sprint plan —
 before the developer's drawing board. This is the portfolio loop's review type: owner = architect,
 builder = strategist when approved or orchestrator on a sanctioned strategist skip, reviewer =
-this catalog. The reviewer holds the same read-only
-analysis tools the strategist used (`cgc_*`, `grepai_*`, `read_ar_files`), so the plan's mechanical
+this catalog. The reviewer holds the same retained read-only
+analysis tools the strategist used (`read_ar_files`, `knowledge_read`, `knowledge_diff`), so the plan's mechanical
 claims are re-derivable, not just readable. Criteria are never made up on the spot: the standing
 list below is the regression floor for a baseline review; the exploratory mandate and promotion
 ratchet apply there. A fix-verification uses only the sealed baseline evidence needed for its
@@ -34,8 +34,7 @@ intersections has a hole exactly where collisions happen.
 
 **Challenge every atomic classification and high/critical priority judgment.** Partial exposure
 must be demonstrably invalid or unsafe; large size alone is not enough. Re-derive at least the
-HIGH-blast-radius entries with the cgc tools (`cgc_dependencies` /
-`cgc_callers` / `cgc_callees`, capped depth) — and spot-check a sample of the low/medium entries.
+HIGH-blast-radius entries by reading the implicated dependents directly (`read_ar_files`, capped depth) — and spot-check a sample of the low/medium entries.
 A register entry whose derivation cannot be reproduced, or whose classification drops the doctrine
 propagation / migration / user-visible unions, is a finding; the register parameterizes every
 downstream loop tier, so an understated radius under-reviews a leaf. A priority row without a

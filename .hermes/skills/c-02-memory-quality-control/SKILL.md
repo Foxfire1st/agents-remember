@@ -33,7 +33,7 @@ resolved by `c-08-ar-coordination-context-resolver` or MCP `resolve_context`.
 
 | Phase | Check | Purpose |
 | --- | --- | --- |
-| Task start (when requested) | `drift_check` | Qualify existing onboarding before planning against it. |
+| Task start (when requested) | drift reporting via `context_packet`/`memory_quality_check` | Qualify existing onboarding before planning against it. |
 | Curator handoff | complete `c-05-create-or-update-onboarding-files` checks + `memory_quality_check` | Maintain affected sidecars, overviews, indexes, and entity entries for this change, then run the full memory-quality operation and repair or escalate every curator-actionable finding. |
 | Checklist requires it | `curator_coherence` | Publish the coherence authority for the exact checklist result the curator produced. |
 | Targeted style repair | `history_order_fix.py` | Fix an identified ordering issue only after the report names it. |
@@ -77,21 +77,12 @@ context and applies memory quality control.
 
 ### 2. Run Task-Start Drift Control
 
-At task start, request the MCP drift tool for repo-wide checks instead of
-rewriting shell loops:
+At task start, request drift reporting (`context_packet` with `include_drift`, or
+`memory_quality_check`) for repo-wide checks instead of rewriting shell loops. Inside a
+worktree-backed leaf, add the leaf's enclosure contract path so the check reads that
+leaf's memory worktree rather than the official memory repo.
 
-```text
-drift_check(repo_id="<repo-id>", detail_limit=50)
-```
-
-Inside a worktree-backed leaf, add the leaf's enclosure contract path so the check reads that
-leaf's memory worktree rather than the official memory repo:
-
-```text
-drift_check(repo_id="<repo-id>", detail_limit=50, contract_path="<enclosure-contract-path>")
-```
-
-By default the MCP drift tool writes the Markdown report to
+By default the drift report is written to
 `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`.
 That keeps temporary drift artifacts out of task contract folders while still
 keeping them under the local coordination root.
@@ -259,7 +250,7 @@ check.
 
 ## Rules
 
-1. Task-start memory diagnostics begin with `c-08-ar-coordination-context-resolver` skill context and the `drift_check` MCP tool when that diagnostic is requested by the workflow.
+1. Task-start memory diagnostics begin with `c-08-ar-coordination-context-resolver` skill context and drift reporting (`context_packet`/`memory_quality_check`) when that diagnostic is requested by the workflow.
 2. Closeout and integration do not rerun memory-quality tools; they consume
    the curator's complete memory-quality result together with the prepared
    memory-content and ledger Git legs.

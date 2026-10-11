@@ -62,7 +62,7 @@ const tearDown: Scenario = {
     erFrame("engine-landing-ffonly", "D2 · integrate — worktree → feat/fix source (push feat → origin/feat, PR open)"),
     erFrame("engine-landing-pushed", "D3 · code lands — PR merged → origin/main advances → local main pulls"),
     erFrame("engine-landing-merged", "D4 · memory carryover — feat → local mem-main, then push → origin/mem-main"),
-    erFrame("engine-cleanup-pending", "D5 · de-materialise — providers power down, the worktree detaches, the border collapses", 2200),
+    erFrame("engine-cleanup-pending", "D5 · de-materialise — the worktree detaches, the border collapses", 2200),
     erFrame("engine-retired", "D6 · stack removed — only the main constellation remains (+ a dim historical contract chip)"),
   ],
 };
@@ -79,9 +79,9 @@ const seedFault: Scenario = {
     erFrame("engine-boot-2-memory-contract", "S2 · memory worktree copies in; the contract coupler binds"),
     erFrame("engine-boot-3-providers-dim", "S3 · provider runtime — engines materialise dim, cloned from main"),
     erFrame("engine-boot-4-seeding", "S4 · seed / clone — both engines charge cyan (center-out boot-fill)"),
-    erFrame("engine-boot-seed-fault", "S5 · FAULT · GrepAI — seed failed: the seed arrow flashes RED and the engine flickers red (CGC unaffected)", 2400),
-    erFrame("engine-boot-seed-retry", "S6 · retry — re-seed GrepAI; the conduit redraws, the fault clears and the engine charges again"),
-    erFrame("engine-boot-5-nominal", "S7 · running — recovered after the seed fault; both engines green → nominal"),
+    erFrame("engine-boot-seed-fault", "S5 · FAULT · GrepAI — seed failed (retired seed visuals, MIK-R112: the failure reads in diagnostics, not on a seed arrow or engine)", 2400),
+    erFrame("engine-boot-seed-retry", "S6 · retry — re-seed GrepAI clears the fault; the failure lines clear"),
+    erFrame("engine-boot-5-nominal", "S7 · running — recovered after the seed fault; settled nominal, coupler bound"),
   ],
 };
 
@@ -96,9 +96,9 @@ const reindexReroute: Scenario = {
     erFrame("engine-boot-1-code-worktree", "R1 · code worktree copies in from main (branch-copy)"),
     erFrame("engine-boot-2-memory-contract", "R2 · memory worktree copies in; the contract coupler binds"),
     erFrame("engine-boot-3-providers-dim", "R3 · provider runtime — engines materialise dim; clone conduits seed from main"),
-    erFrame("engine-cgc-seed-refused", "R4 · CGC seed STALE → reindex reroute — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
-    erFrame("engine-cgc-fallback", "R5 · indexing completes — the amber reindex finishes (not terminal); engine ready to lock"),
-    erFrame("engine-boot-5-nominal", "R6 · running — recovered via reindex; both engines green → nominal"),
+    erFrame("engine-cgc-seed-refused", "R4 · CGC seed STALE → reindex reroute (a fallback record in diagnostics, not a failure); GrepAI seeds normally", 2000),
+    erFrame("engine-cgc-fallback", "R5 · seed settles — the stale seed resolves (not terminal); ready to lock"),
+    erFrame("engine-boot-5-nominal", "R6 · running — recovered via reindex; settled nominal, coupler bound"),
   ],
 };
 
@@ -112,10 +112,10 @@ const providerBlock: Scenario = {
     erFrame("engine-boot-0-main-only", "P0 · provider-block start — the official line (main) is at rest"),
     erFrame("engine-boot-1-code-worktree", "P1 · code worktree copies in from main (branch-copy)"),
     erFrame("engine-boot-2-memory-contract", "P2 · memory worktree + coupler bind — code & memory ready, contract NOT yet written"),
-    erFrame("engine-boot-provider-verify", "P3 · provider plan — checking the runtime setup config (the scan ring sweeps AT the engine, pre-contract)"),
-    erFrame("engine-boot-provider-blocked", "P4 · BLOCK — setup config missing: a gate drops BEFORE the contract anchors and the engines never light; choices → retry / disabled / abandon", 2400),
-    erFrame("engine-boot-3-providers-dim", "P5 · recover — config supplied; the contract anchors, the gate lifts, the provider runtime deploys (engines materialise dim, clone arrows begin)"),
-    erFrame("engine-boot-4-seeding", "P6 · seed / clone — CGC seeds over the top, GrepAI clones under the bottom; the engines charge cyan"),
+    erFrame("engine-boot-provider-verify", "P3 · provider plan — checking the runtime setup config (pre-contract; no engine-anchored sweep)"),
+    erFrame("engine-boot-provider-blocked", "P4 · BLOCK — setup config missing BEFORE the contract anchors: the pre-contract fleeting state; choices → retry / disabled / abandon", 2400),
+    erFrame("engine-boot-3-providers-dim", "P5 · recover — config supplied; the contract anchors, the gate lifts"),
+    erFrame("engine-boot-4-seeding", "P6 · worktrees bind — no provider seed/clone arrows; the coupler binds"),
     erFrame("engine-boot-5-nominal", "P7 · running — recovered after the provider-plan block; settled nominal, coupler bound"),
   ],
 };
@@ -128,7 +128,7 @@ const liveSync: Scenario = {
   name: "live-sync",
   label: "Live sync · memory moved → merge (T12B)",
   frames: [
-    erFrame("engine-sync-recovered", "Y0 · live · running — the worktree is working; both lanes bound, engines nominal"),
+    erFrame("engine-sync-recovered", "Y0 · live · running — the worktree is working; both lanes bound, worktrees nominal"),
     erFrame("engine-sync-moved", "Y1 · upstream memory moves — origin/mem-main advances; a soft “moved ▲” badge announces the sync choice"),
     erFrame("engine-sync-memory-blocked", "Y2 · BLOCKED · memory sync — a steady gate drops on the memory lane only; the code lane keeps advancing (commit ●)", 2400),
     erFrame("engine-sync-recovered", "Y3·Y4 · recover · merge-memory — the gate lifts, the ghost clears, the memory worktree fast-forwards; back in sync"),

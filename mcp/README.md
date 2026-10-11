@@ -37,12 +37,11 @@ Setup is agent-driven. Ask your agent to:
    and package hooks/rules/instructions.
 3. **Onboard your project** — Invoke the copied skill
    `c-13-install-and-onboard`. It runs or verifies `runtime_install()`, asks
-   whether to scaffold a new memory repo or use an existing one, bootstraps
-   onboarding when needed, and starts provider indexing when providers are
-   enabled.
+   whether to scaffold a new memory repo or use an existing one, and bootstraps
+   onboarding when needed. (Provider indexing is retired: no provider install,
+   index, or watch step runs.)
 
-That is the normal first-run path. `skills_install()` remains available as a
-maintenance/manual MCP tool, but the starter packages already provide the
+That is the normal first-run path. The starter packages already provide the
 initial skills and harness files. Your only required first-run restart is after
 copying the harness package and wiring the MCP server.
 
@@ -56,8 +55,11 @@ The requirements here describe the current checkout and wheels built from it: Py
 - Git for repository and memory ledger operations (configure `user.name` /
   `user.email`; without them, memory/worktree commits fall back to a placeholder
   identity so work can proceed).
-- Docker (running) when provider tools are enabled. The grepai embedder runs
-  Ollama as a Docker container and pulls an embedding model (`nomic-embed-text`)
+- Docker (running) only for leftover pre-retirement provider containers. The two
+  providers (`codegraphcontext-code`, `grepai-memory`) are retired and never
+  count as enabled: no provider install, index, or watch runs, and old enabled
+  keys are reported once as unused. The grepai embedder used to run
+  Ollama as a Docker container and pull an embedding model (`nomic-embed-text`)
   on first setup — no host Ollama install is required.
 
 Claude Code hooks do not require `jq`. Older starter packages used a `jq`
@@ -146,7 +148,7 @@ The config path must be **absolute**, the settings file must live **outside the
 `ar-coordination/` runtime folder**, and it should live **under your harness's
 registration folder in an `mcp/` subdirectory** (see
 [Settings file location](#settings-file-location)). The server reads this file
-**only at startup** — if you edit it later (enable providers, add repos, change
+**only at startup** — if you edit it later (add repos, change
 `timeoutCaps`), **restart the harness** for the change to take effect; run
 `server_info()` to confirm what the running server actually loaded.
 
@@ -169,22 +171,29 @@ A minimal starter `agents-remember-settings.json` (your agent can fill this in):
 }
 ```
 
+(The `providers` block is retired: both providers never count as enabled, old
+keys are reported once as unused, and the block may be omitted or emptied.)
+
 `coordinationRoot` is where the runtime and memory repos live (populated by
 the `runtime_install` MCP tool); **default it to `<workspace>/ar-coordination/`** — inside the
 workspace, never the user's home directory. `workspaceRoot` is the workspace itself (it holds your
 code repos). The `c-13-install-and-onboard` skill treats the workspace as the first assumption for
 every install location and shows each resolved default for you to accept or override, so placement
 is never silent or guessed. List each repo you
-want Agents Remember to manage under `repositories`. Omit or empty the
-`providers` block if you do not want the Docker-backed providers. Full field
+want Agents Remember to manage under `repositories`. The `providers` block is
+unused and may be omitted or emptied: both former providers are retired, old
+enabled keys are reported once as unused, and no provider install, index, or
+watch runs. Full field
 reference:
 [settings-json.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/settings-json.md).
 
 > **Upgrading?** `timeoutCaps.providerSeconds` was renamed to
 > `providerSetupSeconds`. The old key is rejected with a fail-loud `ConfigError`
 > at startup, so rename it in any existing settings file. `providerSetupSeconds`
-> caps only provider **image build / dependency install**; indexing and database
-> seed/clone are never time-capped. A cap value of `0` means unlimited.
+caps only provider **image build / dependency install**; indexing and database
+seed/clone are never time-capped. A cap value of `0` means unlimited.
+(Retired in practice: no provider image build runs anymore; the install only
+stops leftover watchers and reports enabled provider keys once as unused.)
 
 ### Settings file location
 
@@ -249,10 +258,7 @@ page, don't guess:
 | OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/openclaw.md) |
 
 **One flat folder per skill.** The copied starter package already includes the
-skills in the harness-native skill root. `skills_install()` remains available for
-manual maintenance and non-package setups; it copies packaged skills into a
-skill root as `<skill-root>/<name>/` (matching the skill's lowercase frontmatter
-`name`).
+skills in the harness-native skill root.
 
 ## Install Order And First Operations
 
@@ -262,14 +268,16 @@ one harness restart → runtime and onboarding**.
 ```text
 server_info()                      # confirm resolved roots / allowed providers
 runtime_install(dry_run=true)      # preview, then apply:
-runtime_install(dry_run=false)     # scaffold coordinator; build provider images if enabled
-context_packet(repo_id="<repo-id>", include_providers=true)
+runtime_install(dry_run=false)     # scaffold coordinator (no provider image
+                                 # build remains: the install only stops leftover
+                                 # watchers and reports enabled provider keys
+                                 # once as unused)
+context_packet(repo_id="<repo-id>")
 ```
 
 The copied `c-13-install-and-onboard` skill owns this post-restart phase. It
-runs or verifies `runtime_install()`, sets up the memory repo, bootstraps
-onboarding, and **starts provider indexing** (`provider_watchers(action="start")`)
-when providers are enabled.
+runs or verifies `runtime_install()`, sets up the memory repo, and bootstraps
+onboarding. (Provider indexing is retired: it starts nothing.)
 
 Why this order:
 
@@ -279,15 +287,14 @@ Why this order:
 2. **Runtime scaffolding after restart.** The MCP server must be loaded before
    the agent can run `runtime_install()`. The runtime tool creates the
    coordinator directory and records the provider-runner integrity manifest.
-3. **Providers last.** They are heavy (Docker, plus Ollama for grepai),
-   per-repo, and optional. Note the split: `runtime_install()` builds provider
-   images when `install_provider_deps=true`, but indexing only starts later via
-   `c-13-install-and-onboard`. Pass `install_provider_deps=false` to refresh
-   scaffold/docs without rebuilding images or disturbing running watchers; pass
-   `no_cache=true` to force a from-scratch image rebuild (it otherwise skips
-   images whose tag already exists). If providers report `degraded`, check that
-   Docker is running and (for grepai) that the Ollama model pulled, then
-   `provider_watchers(action="restart")`; `provider_diagnostics()` shows the gap.
+3. **Providers retired.** The two former providers were heavy (Docker, plus
+   Ollama for grepai), per-repo, and optional; both are retired and never count
+   as enabled, so nothing in this section runs anymore. Note the retained
+   parameters: `install_provider_deps` now only scopes the providers-tree copy
+   (dependency-skipped copies preserve live runner state), and `no_cache`
+   rebuilds nothing provider-side — neither starts any provider install, index,
+   or watch. Old enabled keys are reported once as unused, and leftover
+   watchers are stopped; remove leftover Docker containers only if asked.
 
 ## Troubleshooting
 
@@ -298,22 +305,19 @@ after that version is published. Wait 2–5 minutes and retry, run
 `uvx --refresh …` to bypass uv's cache, or drop the `==X.Y.Z` pin to take the
 latest the index currently serves.
 
-**Providers report `degraded` and indexing/search returns nothing.** Both
-providers need Docker running; grepai additionally needs its Ollama container and
-embedding model. Check and recover:
+**Leftover pre-retirement provider containers (historical; both providers are retired).** Both
+providers needed Docker running; grepai additionally needed its Ollama container and
+embedding model. Read-only inspection only — nothing below starts or recovers anything:
 
-- Docker: `docker ps` — if the daemon is down, start it (`sudo systemctl start
-  docker` on Linux, or Docker Desktop), then `provider_watchers(action="restart")`.
+- Docker: `docker ps` shows leftover containers (start the daemon only to inspect them for asked-only removal).
 - grepai/Ollama: `docker logs ar-grepai-ollama` and
-  `docker exec ar-grepai-ollama ollama list` to confirm the model is present. The
-  model (`nomic-embed-text`) is pulled automatically on first setup; if that
-  timed out, re-run `runtime_install()` or pull it manually with
-  `docker exec ar-grepai-ollama ollama pull nomic-embed-text`.
-- `provider_diagnostics()` shows the precise failing resource (backend, embedder,
-  watcher) for either provider.
+  `docker exec ar-grepai-ollama ollama list` shows whether the old model is present. The
+  model (`nomic-embed-text`) was pulled automatically on pre-retirement first setup; nothing pulls it now. To clear leftovers, re-run `runtime_install()`, which stops leftover watchers and
+  reports the old enabled keys once as unused; remove containers only if asked. (The former provider-diagnostics
+  tool is removed; `server_info()` confirms what the running server loaded.)
 
-Providers are optional — core by-path memory and onboarding work without them, so
-you can defer this and the rest of setup continues.
+Providers are retired — core by-path memory and onboarding work without them, so
+nothing here blocks setup.
 
 **Memory/worktree commits and git identity.** Closeout and carryover operations
 commit to the memory repo and ledger, so git needs an author identity. Configure
@@ -329,16 +333,16 @@ The server exposes tools for:
 - startup context and drift checks
 - runtime and skill installation
 - memory initialization, memory quality checks, and route index refresh
-- provider status, watcher control, GrepAI search, and CodeGraphContext queries
 - worktree-backed closeout and task workflows
 - benchmark preparation and execution (opt-in; see the note below)
 
-Provider tools only work when the MCP settings enable the provider and the
-required Docker services are available. Full tool list:
+The provider tools (provider status, watcher control, GrepAI search,
+CodeGraphContext queries) were removed (MIK-R112) and are no longer served;
+old enabled provider keys are reported once as unused. Full tool list:
 [MCP Tool Reference](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/mcp-tools.md).
 
-> **Benchmark execution is opt-in and runs untrusted code.** The `codex_benchmark_prepare`
-> and `codex_benchmark_run` MCP tools are refused unless the MCP settings set
+> **Benchmark execution is opt-in and runs untrusted code.** The benchmark runner
+> refuses unless the MCP settings set
 > `"benchmarksEnabled": true`. A real run (`dry_run=false`) clones third-party
 > repositories and executes the Codex CLI against them. `codex_sandbox` defaults to
 > Codex's own `default` sandbox; pass `"danger-full-access"` only for trusted local

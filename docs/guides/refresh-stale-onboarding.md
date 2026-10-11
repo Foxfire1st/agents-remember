@@ -4,11 +4,8 @@ Stale onboarding is expected. The important rule is that agents should detect it
 
 ## Detect Drift
 
-Run the `c-02-memory-quality-control` skill for the target repository:
-
-```text
-drift_check(repo_id="<repo-id>", detail_limit=50)
-```
+Run the `c-02-memory-quality-control` skill for the target repository, requesting drift
+reporting (`context_packet` with `include_drift`, or `memory_quality_check`).
 
 The helper writes drift reports under the resolved coordination root, usually:
 

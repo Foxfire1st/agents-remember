@@ -6,8 +6,8 @@
 
 For file-level sidecar onboarding, the `c-02-memory-quality-control` skill reads verification metadata and compares the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
 
-The task-start `drift_check` writes its temporary drift report under the resolved coordination
-root:
+Before MIK-R112, the task-start `drift_check` wrote its temporary drift report under the resolved coordination
+root (the tool has since left the surface):
 
 ```text
 ar-coordination/temp/drift-reports/<repo>/

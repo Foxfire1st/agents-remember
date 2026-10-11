@@ -97,8 +97,7 @@ Antigravity discovers workspace skills in
 The copied starter package already provides one flat folder per skill under
 `.agents/skills/`.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Do not install skills for first-run setup; the copied package already carries them.
 
 Antigravity can invoke skills automatically or on request once they are discovered.
 

@@ -108,8 +108,8 @@ watch settings internally.
 }
 ```
 
-`benchmarksEnabled` (optional, default `false`) gates the `codex_benchmark_prepare`
-and `codex_benchmark_run` tools. They are refused unless this is `true`, because a
+`benchmarksEnabled` (optional, default `false`) gated the removed `codex_benchmark_prepare`
+and `codex_benchmark_run` tools; it is retained for settings compatibility and gates nothing now. Benchmark cases run through the benchmark runner CLI instead. A
 real run clones third-party repositories and executes the Codex CLI against them.
 Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pass
 `"danger-full-access"` only for trusted local runs.
@@ -332,14 +332,12 @@ succeeds. When absent, 268435456 bytes (256 MiB) apply.
 enclosure in bytes (MIK-R108 rule 3, D1-D4), the only removal there before
 cleanup. When absent, 67108864 bytes (64 MiB) apply.
 
-`harnessSkillRoot` is optional. It is only needed for the `skills_install`
-maintenance/manual tool. By default, when the MCP settings file lives under
-`<registration-root>/mcp/`, `skills_install` copies packaged skills into
+`harnessSkillRoot` is optional. It was only needed for the removed `skills_install`
+tool and is retained for settings compatibility; nothing else reads it. By default, when the MCP settings file lives under
+`<registration-root>/mcp/`, skills come from
 `<registration-root>/skills/`. Set `harnessSkillRoot` only for non-standard
 harness layouts where the registration folder and skill folder are not siblings.
-When neither inference nor the override is available, the MCP server can still
-run, but `skills_install` refuses to install because the target root is not
-configured. The package-based first-run path gets skills from the copied
+The package-based first-run path gets skills from the copied
 harness starter package and does not need this field.
 
 `repositories` is an allow-list keyed by repo id. The MCP server derives each

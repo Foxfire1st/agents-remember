@@ -22,20 +22,10 @@ from agents_remember.application.gate_tools import (
     raise_lifecycle_gate,
     record_gate_decision,
 )
-from agents_remember.application.structural.gate_tools import (
-    StructuralGateRuntime,
-    structural_gate_decide_tool,
-    structural_gate_list_tool,
-    structural_lifecycle_gate_tool,
-)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
-)
-from agents_remember.models.structural.gates import (
-    StructuralGateDecisionRequest,
-    StructuralLifecycleGateRequest,
 )
 
 from .base import _tool_payload
@@ -74,21 +64,6 @@ def registered_lifecycle_gate_payload(
     )
 
 
-def structural_lifecycle_gate_payload(
-    config: McpRuntimeConfig,
-    request: StructuralLifecycleGateRequest,
-    **overrides: Any,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "lifecycle_gate",
-        structural_lifecycle_gate_tool(
-            config,
-            request,
-            StructuralGateRuntime(**overrides),
-        ),
-    )
-
-
 def gate_decide_payload(
     config: McpRuntimeConfig,
     *,
@@ -117,21 +92,6 @@ def registered_gate_decide_payload(
     return _tool_payload(
         "gate_decide_internal",
         record_gate_decision(config, request),
-    )
-
-
-def structural_gate_decide_payload(
-    config: McpRuntimeConfig,
-    request: StructuralGateDecisionRequest,
-    **overrides: Any,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "gate_decide",
-        structural_gate_decide_tool(
-            config,
-            request,
-            StructuralGateRuntime(**overrides),
-        ),
     )
 
 
@@ -194,10 +154,3 @@ def gate_list_payload(
     lifecycle_id: str | None,
 ) -> dict[str, Any]:
     return _tool_payload("gate_list_internal", gate_list_tool(config, lifecycle_id=lifecycle_id))
-
-
-def structural_gate_list_payload(
-    config: McpRuntimeConfig,
-    **overrides: Any,
-) -> dict[str, Any]:
-    return _tool_payload("gate_list", structural_gate_list_tool(config, **overrides))

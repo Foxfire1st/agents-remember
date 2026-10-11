@@ -665,6 +665,69 @@ class BridgeScriptTests(unittest.TestCase):
             self.assertEqual(self.refusal(**healthy), "paseo_client_unavailable")
 
 
+@unittest.skipUnless(shutil.which("node"), "the bridge script needs Node.js")
+class BridgeExclusionConsumerTests(unittest.TestCase):
+    """MIK-R112 F07: agentCreation applies the task-server-only record (model-free)."""
+
+    PROBE = (
+        "import(process.env.BRIDGE_URL).then(async m => {"
+        " const stdio = (command) => ({type:'stdio',command,args:[],env:{}});"
+        " const base = {agentId:'a', idempotencyKey:'k', workspaceId:'w',"
+        " provider:'codex', title:'t', labels:{},"
+        " mcpServers:{'agents-remember-task':stdio('x'),"
+        " 'user-server':stdio('u'), 'agents-remember':stdio('o')}};"
+        " const tso = {...base, serverExclusion:{harness:'codex',"
+        " mode:'task-server-only', servers:['agents-remember-task']}};"
+        " const eve = {...base, serverExclusion:{harness:'eve',"
+        " mode:'host-owned', servers:['agents-remember-task']}};"
+        " let bad = null;"
+        " try { m.agentCreation({...base, serverExclusion:'nope'}, 'a'); }"
+        " catch (e) { bad = (e && e.code) || String(e); }"
+        " const keys = (r) => Object.keys(r.kept.mcpServers || {}).sort();"
+        " const stubApi = { workspaces: { ref: () => ({ refresh: async () => ({ workspaceDirectory: '/w' }) }) } };"
+        " const captured = [];"
+        " const stubDaemon = { createAgent: async (payload) => { captured.push(payload); return {}; } };"
+        " await m.agentCreation(tso, 'a').create(stubApi, stubDaemon);"
+        " const cfg = captured[0].config || {};"
+        " process.stdout.write(JSON.stringify({"
+        " plain: m.agentCreation(base, 'a').hasToolServers,"
+        " kept: keys(m.agentCreation(tso, 'a')),"
+        " crossedServers: Object.keys(cfg.mcpServers || {}).sort(),"
+        " crossedRecord: (cfg.serverExclusion && cfg.serverExclusion.mode) || null,"
+        " eve: m.agentCreation(eve, 'a').hasToolServers,"
+        " bad}));"
+        "}).catch(e => { process.stdout.write('IMPORT-FAIL ' + e.message); process.exit(1); });"
+    )
+
+    def test_task_server_only_retains_task_and_user_suppresses_other(self) -> None:
+        node = shutil.which("node")
+        assert node is not None
+        env = {
+            **os.environ,
+            "BRIDGE_URL": BRIDGE_SCRIPT.resolve().as_uri(),
+        }
+        completed = subprocess.run(
+            [node, "--input-type=module", "-e", self.PROBE],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=HANG_GUARD_SECONDS,
+            env=env,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "plain": True,
+                "kept": ["agents-remember-task", "user-server"],
+                "crossedServers": ["agents-remember-task", "user-server"],
+                "crossedRecord": None,
+                "eve": True,
+                "bad": "invalid_bridge_payload",
+            },
+        )
+
+
 class BridgeScriptHeaderTests(unittest.TestCase):
     """The header of the script is its contract; the single-path scan is test_paseo_single_path.py."""
 

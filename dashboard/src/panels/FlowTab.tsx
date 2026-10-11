@@ -55,7 +55,7 @@ const rundownLine = cva({ base: { fontSize: "0.74rem", color: "ink", paddingLeft
 const divider = css({ alignSelf: "center", fontSize: "0.7rem", color: "muted", fontStyle: "italic", paddingBlock: "0.3rem", textAlign: "center" });
 
 const DEFAULT_RIDES_NOTE = (rides: string) =>
-  `⊘ auto-fires lifecycle_turn_end_notification · ${rides} — rides this call (agent never fires it); next AR tool clears it`;
+  `⊘ awaiting-developer · ${rides} — rides this call (agent never fires it); the next turn clears it`;
 
 function ToolNode({ n }: { n: FlowNode }) {
   const Cls = n.rides ? ridesNode : toolNode;

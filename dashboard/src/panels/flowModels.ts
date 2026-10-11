@@ -170,7 +170,7 @@ const STRATEGIST: FlowModel = {
       title: "the eight-phase method — mechanical phases use real tools; judgment phases cite",
       lines: [
         { line: "1 inventory (task docs · contracts · notes) · 2 touch surfaces, TWO-SIDED: existing → route map; NEW → declared parent + shape" },
-        { line: "3 structural edges — cgc_dependencies/callers/callees · grepai search/trace → ORDER / CONFLICT / INDEPENDENT (new surfaces: declaration cross-reference)" },
+        { line: "3 structural edges — route indexes · onboarding · read_ar_files → ORDER / CONFLICT / INDEPENDENT (new surfaces: declaration cross-reference)" },
         { line: "4 doctrine edges, cited — an uncited edge is refutable by default · 5 blast-radius register (low/med/high — feeds the loop-tier scoring)" },
         { line: "6 cross-master coherence/contradiction sweep · 7 topological order + leaf moves (from→to + rationale) + parallel waves" },
         { line: "⟁ a leaf naming neither existing surfaces nor a parent anchor → finding: unplannable as scoped — never a silent guess", junction: true },
@@ -214,7 +214,7 @@ const ORCHESTRATOR: FlowModel = {
       kind: "rundown",
       title: "portfolio phase · streamline before sequencing (non-linear)",
       lines: [
-        { line: "route-coherence scan — route indexes · onboarding · grepai · cgc; sub-agents write durable reports" },
+        { line: "route-coherence scan — route indexes · onboarding · read_ar_files; sub-agents write durable reports" },
         { line: "conflict / regression scan — planned-vs-planned AND planned-vs-past (the integrity bulwark)" },
         { line: "reshape proposals — leaf moves (planning-status only) · foundation-master extraction · mixed masters first-or-last" },
         { line: "⟁ interleaved leaf-level cross-deps? → reshape master boundaries — NEVER interleave dispatch", junction: true },
@@ -233,8 +233,8 @@ const ORCHESTRATOR: FlowModel = {
     { kind: "node", phase: "seam 2", tool: "super-exit adversarial review", detail: "wholesale verdict on the super branch: completion vs tasks · quality · onboarding-vs-code", rides: "super-exit seam", ridesNote: "⊘ adversarial review seam 2 of 2 — before the backend orchestrator hands evidence to the architect", next: "architect handover", nextStatus: "proposed" },
     { kind: "node", phase: "handover", tool: "architect-mediated developer review — super level", detail: "the developer's SINGLE review point (integrations below are orchestrator-delegated): visible-behavior-first in a REVIEWABLE ENVIRONMENT (the dashboard) with demo notes (what changed visibly), code second · ⟁ rejected? → decompose feedback into fix leaves ↺ reactive dispatch", rides: "integration-approval", next: "super → main PR", nextStatus: "proposed" },
     { kind: "node", phase: "land", tool: "super → main PR + carry-over", detail: "remote merge · memory carried to main-memory · push (git-workflow.md tail)", next: "close + propose", nextStatus: "current" },
-    { kind: "node", phase: "close", tool: "self-improvement report", detail: "did x/y/z · hit a/b/c · a,b solved on the spot · c PROPOSES this change — grounded in the accumulated backdrop", next: "lifecycle_end", nextStatus: "proposed" },
-    { kind: "node", phase: "close", tool: "lifecycle_end", detail: "terminal — durable notes/reports remain the record" },
+    { kind: "node", phase: "close", tool: "self-improvement report", detail: "did x/y/z · hit a/b/c · a,b solved on the spot · c PROPOSES this change — grounded in the accumulated backdrop", next: "turn end", nextStatus: "proposed" },
+    { kind: "node", phase: "close", tool: "turn end", detail: "terminal — durable notes/reports remain the record" },
   ],
 };
 
@@ -335,7 +335,7 @@ const COMMS: FlowModel = {
         { line: "chats — sprint roles bind to sprint, managers to masters, leaf roles to leaves; the developer can walk in at any level" },
       ],
     },
-    { kind: "node", phase: "message", tool: "message_parent / message_child", detail: "sender names only the structural relation; the plane persists and resolves the current occupant", next: "push delivery", nextStatus: "proposed" },
+    { kind: "node", phase: "message", tool: "role_message", detail: "sender names the role plus task references; the plane persists and resolves the current occupant", next: "push delivery", nextStatus: "proposed" },
     { kind: "node", phase: "message", tool: "stdin push delivery", detail: "serving injects the message (or a mail hint) into the target PTY · delivery status recorded", next: "target acts → artifact / response", nextStatus: "proposed" },
     { kind: "node", phase: "message", tool: "response / artifact", detail: "the reply is itself an inbox row or a turn-report artifact — never an untracked side channel", next: "(loop)", nextStatus: "proposed" },
     { kind: "divider", label: "— the nudge loop (needs trustworthy staleness — the attention/river reform series) —" },
@@ -376,7 +376,7 @@ const DESIGNER: FlowModel = {
     "otherwise the architect may use the same method inline. At the front of the pipeline AND mid-flight it helps the developer think a master through — the tasks/AGENTS.md doctrine (meta-questioning, reframe before execution, " +
     "front of the pipeline AND mid-flight, helping the developer think a master through — the tasks/AGENTS.md doctrine (meta-questioning, reframe before execution, " +
     "evidence-first) given a distinct, optimized shape. It shares the architect's bird's-eye " +
-    "toolkit (route indexes · onboarding · grepai · cgc · blast radius) but is SCOPED to one master — " +
+    "toolkit (route indexes · onboarding · read_ar_files · blast radius) but is SCOPED to one master — " +
     "collisions with other or FUTURE masters can slip. That residual risk is owned downstream: at " +
     "portfolio streamlining the BACKEND ORCHESTRATOR doubles as the designer's adversarial reviewer.",
   segments: [

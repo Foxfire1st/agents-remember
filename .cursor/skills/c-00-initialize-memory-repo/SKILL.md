@@ -45,9 +45,8 @@ runtime_install(include_benchmarks=false, install_provider_deps=false)
 
 Use `memory_init` for creating or repairing the configured memory root for a
 repo. Use `runtime_install` only when the coordinator runtime scaffold itself is
-missing or stale. Do not use `skills_install` as part of package-based first-run
-setup; copied starter packages already carry the harness skills. `skills_install`
-remains available only for manual maintenance or non-package installs. The skill
+missing or stale. Do not install skills as part of package-based first-run
+setup; copied starter packages already carry the harness skills. The skill
 tree is instruction-only; installed and development workflows use the
 MCP/package route.
 

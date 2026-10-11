@@ -12,10 +12,10 @@ things only:
 
 | Job        | Opening move (in `reframe-research`)                       | Retrieval lean (`c-04-retrieval-strategy-router`) | `decide` default            |
 | ---------- | ----------------------------------------------- | ---------------------------------- | --------------------------- |
-| `bug`      | reproduce the failure; prove the root cause     | Relationship (cgc) + Intent        | -> build                    |
+| `bug`      | reproduce the failure; prove the root cause     | Relationship + Intent              | -> build                    |
 | `feature`  | clarify intent, scope, and explicit non-goals   | design doctrine + Intent           | -> build                    |
 | `triage`   | assess severity, blast radius, and ownership    | breadth scan (Semantics first)     | may exit (route or spawn)   |
-| `research` | state the question precisely                    | Semantics (grepai) + onboarding    | research-only exit          |
+| `research` | state the question precisely                    | Semantics + onboarding             | research-only exit          |
 
 ## bug
 
@@ -39,7 +39,7 @@ build when triage itself is the cheapest place to fix it.
 
 ## research
 
-Lead by stating the question precisely. Semantics (grepai over onboarding) plus committed-state
+Lead by stating the question precisely. Semantics over onboarding plus committed-state
 onboarding usually answers it; reach for source only as bounded Intent confirmation. Research
 **exits research-only** by design: it produces an answer, and may recommend a follow-up build job, but
 performs none itself.

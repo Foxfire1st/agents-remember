@@ -57,8 +57,7 @@ VS Code discovers project skills from `.github/skills`, `.claude/skills`, and
 `~/.claude/skills`, and `~/.agents/skills`. The copied starter package already
 provides Agents Remember skills in the installed `.github/skills/` folder.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Do not install skills for first-run setup; the copied package already carries them.
 
 If you prefer to point VS Code directly at the installed runtime, add the
 installed skill roots in the workspace settings:

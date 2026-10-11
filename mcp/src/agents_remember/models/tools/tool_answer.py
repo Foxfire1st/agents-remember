@@ -109,10 +109,8 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "context_packet": "L109",
     "resolve_context": "L109",
     # L110: the memory tools answer with a status.
-    "drift_check": "L110",
     "memory_quality_check": "L110",
     "citation_fix": "L110",
-    "citation_migrate": "L110",
     "route_index_refresh": "L110",
     "memory_init": "L110",
     "memory_baseline_status": "L110",
@@ -142,27 +140,50 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
-    # L112: every other tool. The lifecycle and gate tools below live in
-    # mcp/registration/lifecycle.py and gates.py, which rule 7 does not name
-    # for L111, so they stand here explicitly rather than by fallback alone.
-    "lifecycle_start": "L112",
-    "lifecycle_resume": "L112",
-    "lifecycle_turn_end_notification": "L112",
-    "lifecycle_end": "L112",
-    "switch_lifecycle": "L112",
-    "lifecycle_phase": "L112",
-    "lifecycle_gate": "L112",
-    "server_info": "L112",
+    "worktree_enclosure_adopt": "L111",
 }
 INTERIM_LEAVES = ("L109", "L110", "L111", "L112")
+
+
+# Rule 9 (L112): the landed leaf's final rows carry their own bounds. The
+# guard stays the net L108 built: it holds every answer to its row's bound
+# through this lookup, and the overflow short form is unchanged.
+L112_FINAL_BOUNDS = {
+    "runtime_install": 600,
+    "dispatch_agent": TOOL_ANSWER_MAX_TOKENS,
+}
+
+
+# Rule 9 (L112): the final answer projection for runtime_install. The
+# delivered answer holds exactly these fields: the outcome, what the caller
+# needs for its next step, and where the record lies. The whole result keeps
+# everything (``operation``, untruncated runs) for the report and the log.
+RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
+    {
+        "ok",
+        "coordinationRoot",
+        "dryRun",
+        "experiment",
+        "host",
+        "includeBenchmarks",
+        "installProviderDeps",
+        "summary",
+        "messages",
+        "reportPath",
+        "providerWatcherRebind",
+        "recoveryActions",
+        "log",
+    }
+)
 
 
 def bound_for(tool_name: str, operation: str | None = None) -> int:
     """Return the answer bound in tokens for one tool (and operation).
 
     Exceptions first, then the interim 4,000 for tools whose leaf has not
-    landed yet (rules 4 and 7), then the 1,500 default for shaped answers.
-    Tools L112 owns -- every other tool -- are interim until L112 lands.
+    landed yet (rules 4 and 7), then L112's final rows (rule 9), then the
+    4,000 net for anything without an entry: L112's final rows carry their
+    own bounds in this table, and the guard stays the net L108 built.
     """
     if (tool_name, operation) in TOOL_ANSWER_EXCEPTIONS:
         return TOOL_ANSWER_EXCEPTIONS[(tool_name, operation)][0]
@@ -170,7 +191,8 @@ def bound_for(tool_name: str, operation: str | None = None) -> int:
         return TOOL_ANSWER_EXCEPTIONS[(tool_name, None)][0]
     if tool_name in INTERIM_TOOL_LEAF:
         return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
-    # L112 owns every other tool and has not landed: interim bound.
+    if tool_name in L112_FINAL_BOUNDS:
+        return L112_FINAL_BOUNDS[tool_name]
     return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
 
 
@@ -178,8 +200,9 @@ def interim_leaf_for(tool_name: str) -> str | None:
     """Return the leaf that owns one tool's answer, while it is interim.
 
     Every interim row names its exact rule-7 leaf, exception rows included:
-    ``role_message`` answers from ``role_agents.py`` (L111) and
-    ``server_info`` is every-other-tool (L112).
+    ``role_message`` answers from ``role_agents.py`` (L111). A tool with no
+    interim row -- a landed leaf's final tool, or an exception passthrough
+    like ``server_info`` -- has no owning leaf.
     """
     if tool_name in INTERIM_TOOL_LEAF:
         return INTERIM_TOOL_LEAF[tool_name]
@@ -187,7 +210,7 @@ def interim_leaf_for(tool_name: str) -> str | None:
         name for name, _op in TOOL_ANSWER_EXCEPTIONS
     ):
         return None
-    return "L112"
+    return None
 
 
 def strip_envelope(answer: Mapping[str, Any]) -> dict[str, Any]:

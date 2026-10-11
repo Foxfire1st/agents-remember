@@ -106,8 +106,7 @@ exact review seam adjudicates).
 1. Resolve the canonical JSON-primary task document and the role being claimed.
 2. Compile the role's complete canonical brief and call `dispatch_agent` once with that document,
    role, and brief.
-3. Optionally call `rename_self(label=...)` once the hosted role chat is active.
-4. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
+3. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
 
 An identity-free developer chat uses ambient-launcher mode: it does not submit caller identity,
 call a terminal attach/session primitive, or read, request, paste, or retain a
@@ -180,7 +179,7 @@ reform is part of it.
 
 ## Notify-and-stop is safe by design
 
-Ending a turn on `lifecycle_turn_end_notification` — or simply stopping once your artifact is
+Ending a turn — simply stopping once your artifact is
 written and nothing is pending — is **never a liveness gap**. Silence is supervised: the HFX2-L2
 agent-notifier sweep evaluates seat-state facts on its own mechanical tick and relays them to owners
 (turn-ended/completed state-signals, compound-idle, non-reaction residue); owners interpret and act.

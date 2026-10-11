@@ -17,8 +17,9 @@ grepai answers "where is the memory about X" over onboarding content.
 - **Ollama** with a pulled embedding model for `grepai-memory` (grepai's embedder
   runs against Ollama). CGC does not need Ollama.
 
-If Docker is not running, provider install and start will fail; if Ollama is not
-reachable, grepai will report `degraded` and index nothing.
+If Docker is not running, nothing provider-side starts; if Ollama is not
+reachable, grepai indexes nothing. Operation is retired (see below); these
+requirements matter only for leftover processes from older installations.
 
 ## Enable
 
@@ -36,58 +37,34 @@ Add the providers you want to the MCP settings `providers` block:
 Omit a provider (or the whole block) to run without it. See the
 [settings reference](../reference/settings-json.md) for the full shape.
 
-## Install the runtimes
+## Operation retired (MIK-R112)
 
-`runtime_install` builds/pulls the provider images for the enabled providers
-(it installs provider dependencies by default):
-
-```text
-runtime_install()
-```
-
-This builds the images but does **not** start indexing on its own.
-
-## Start indexing and verify
-
-Start the watchers so the providers index the configured repos and memory, then
-confirm they are healthy:
+The provider tools left the surface: no product path installs, starts, or
+watches the two providers, and the provider lifecycle CLI is removed.
+`runtime_install` stops leftover watcher processes as its only watcher
+action and reports enabled provider keys once as unused; verify with
+`server_info`:
 
 ```text
-provider_watchers(action="start")               # start watchers
-provider_watchers(action="restart")             # stop and start, indexes untouched
-provider_watchers(action="invalidate-indexes")  # delete and rebuild every index (slow)
-provider_status()                               # compact readiness summary
-provider_diagnostics()                          # raw provider-native detail
+server_info()
 ```
 
-`provider_watchers` actions: `status`, `start`, `stop`, `restart`, `refresh`,
-`shutdown-all`. `context_packet(repo_id=..., include_providers=true)` also
-reports per-provider readiness, watcher state, and the target repo.
-
-The `c-13-install-and-onboard` skill performs this start/verify step
-(stage 4) as part of first-run setup.
-
-## Use them
-
-Once indexing, the search tools are available:
-
-- **grepai** — `grepai_search` (semantic search), `grepai_trace` (relationship trace).
-- **CGC** — `cgc_symbol_search`, `cgc_callers`, `cgc_callees`, `cgc_dependencies`,
-  `cgc_complexity`, `cgc_visualize`.
-
-See the [MCP tool reference](../reference/mcp-tools.md) for arguments.
+The settings `providers` block still parses so older installations keep
+loading, but enabled keys drive nothing. Keep the block only to document
+which keys an older installation carried; omit it (or the whole block)
+for a clean installation. If Docker is not running, nothing provider-side
+starts; grepai simply indexes nothing.
 
 ## Troubleshooting
 
-- **Provider `degraded` / indexes nothing** — run `provider_diagnostics()` for the
-  exact gap. Usual causes: Docker not running, or (grepai) Ollama/model not
-  available.
-- **"run runtime_install before provider operations"** — the provider runner
-  integrity check failed; run `runtime_install()` first.
-- **Changed repo or memory not reflected** —
-  `provider_watchers(action="invalidate-indexes")` rebuilds every index from scratch.
-  Use `action="restart"` instead when the watchers themselves are stuck but their
-  indexes are fine; it is far cheaper.
+- **Old provider keys present** — `server_info` reports them once as
+  unused, and the install result carries the same list. Remove them from
+  settings when the older installation is retired.
+- **Leftover watcher processes** — `runtime_install` stops them before
+  refreshing the runtime tree; a failed stop is recorded in the install
+  result and the install continues.
+- **\"run runtime_install before provider operations\"** — the provider
+  runner integrity check failed; run `runtime_install()` first.
 
 Providers are optional: Agents Remember's memory, onboarding, drift, and task
 workflows all work without them. They add faster code/memory search on top.

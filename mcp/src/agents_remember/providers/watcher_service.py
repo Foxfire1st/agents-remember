@@ -24,7 +24,7 @@ def run_configured_watchers(
 ) -> dict[str, Any]:
     """Run one watcher action against temporary settings derived from live config."""
 
-    settings_path = write_lifecycle_settings(config)
+    settings_path = write_lifecycle_settings()
     try:
         data = run_watchers_lifecycle(
             ProviderLifecycleServiceConfig(

@@ -145,9 +145,9 @@ master's leaf loop to the master-exit seam, then hand over.
   (config-gated, default ON) only after each exact session has posted its durable turn report for
   that exact leaf. Retirement kills tmux but preserves reports and transcripts; missing-report
   seats remain live and are returned as deferred. `retirement.autoCloseCompletedSeats=false`
-  restores the previous landed/archive behavior. Manager/orchestrator seats are excluded. Use
-  `retire_child` only for a stuck/abandoned worker/reviewer/curator seat of YOUR OWN master,
-  addressed by canonical leaf document plus role; server policy refuses any other target.
+  restores the previous landed/archive behavior. Manager/orchestrator seats are excluded. A
+  stuck/abandoned worker/reviewer/curator seat of YOUR OWN master is reported, never force-retired
+  by hand; server policy refuses any other target.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the

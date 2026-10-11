@@ -16,7 +16,6 @@ from unittest.mock import patch
 
 from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
-    ROLE_VARIABLE,
     SPRINT_REF_VARIABLE,
     TOOL_SERVER_NAME,
     AgentBinding,
@@ -31,7 +30,7 @@ from agents_remember.cli import (
     role_launch_routes,
     role_launch_workspace,
 )
-from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.paseo_launch import StartingAgent, exclusion_applied_agent
 from agents_remember.cli.paseo_role_tools import (
     MAY_START,
     send_role_message,
@@ -423,6 +422,7 @@ class RoleStartTests(RoleToolsTestCase):
                 "requestId": str(request_id),
                 "role": "worker",
                 "agentId": receipt["agentId"],
+                "secondCopyLoaded": True,
                 "parentAgentId": self.architect.agent_id,
                 "reportPath": receipt["report"]["path"],
                 "handoverArtifactPath": receipt["handoverArtifact"]["path"],
@@ -436,10 +436,18 @@ class RoleStartTests(RoleToolsTestCase):
         self.assertEqual(create["parentAgentId"], self.architect.agent_id)
         self.assertEqual(receipt["parentAgentId"], self.architect.agent_id)
         self.assertEqual(create["agentId"], receipt["agentId"])
-        bound = create["mcpServers"][TOOL_SERVER_NAME]["env"]
+        # MIK-R112 F07: codex is task-server-only, so the native agent-create input
+        # retains our task-server entry and carries the exclusion record (the other
+        # copy is suppressed, user entries preserved). The receipt derives from the
+        # applied input: applied, copy sent; the host also lists it, so a second
+        # copy is loaded.
         self.assertEqual(
-            (bound[AGENT_ID_VARIABLE], bound[ROLE_VARIABLE]), (receipt["agentId"], "worker")
+            create["serverExclusion"],
+            {"harness": "codex", "mode": "task-server-only", "servers": [TOOL_SERVER_NAME]},
         )
+        self.assertIn("agents-remember-task", create["mcpServers"])
+        self.assertTrue(receipt["toolServer"]["applied"])
+        self.assertEqual(receipt["serverExclusion"], create["serverExclusion"])
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(
             [command for command, _payload in self.runtime.calls],
@@ -623,7 +631,8 @@ class RoleStartTests(RoleToolsTestCase):
         unknown = self.start(self.architect, "worker", request_id=request_id)
         self.assertEqual((unknown["status"], self.runtime.agents), ("unknown", {}))
         request = self.request("worker", request_id)
-        stored = self.receipt(request)["replayRequest"]["agent"]
+        replay_request = self.receipt(request)["replayRequest"]
+        stored = replay_request["agent"]
         self.assertEqual(stored["parentAgentId"], self.architect.agent_id)
         with self.subTest("another agent is refused and nothing is created"):
             other = binding("architect")
@@ -645,7 +654,13 @@ class RoleStartTests(RoleToolsTestCase):
             created = [
                 payload for command, payload in self.runtime.calls if command == "agent-create"
             ]
-            self.assertEqual([{key: call[key] for key in stored} for call in created], [stored])
+            # MIK-R112 F07: the replay sends the exclusion-applied input -- the stored
+            # agent minus only the other product copy, everything else byte-identical.
+            applied = exclusion_applied_agent(replay_request)
+            self.assertEqual([{key: call[key] for key in applied} for call in created], [applied])
+            if "serverExclusion" in replay_request:
+                for call in created:
+                    self.assertEqual(call["serverExclusion"], replay_request["serverExclusion"])
             self.assertEqual(self.receipt(request)["parentAgentId"], self.architect.agent_id)
             self.assertEqual(list(self.runtime.agents), [unknown["agentId"]])
             # The launcher's bar offers this Retry: the result route says so with the same payload.

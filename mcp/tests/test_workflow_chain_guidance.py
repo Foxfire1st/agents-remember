@@ -829,8 +829,9 @@ class WorkflowChainObservation:
         # walk hands its lifecycle back before the sibling takes one -- which is exactly the live
         # shape: two seats, two lifecycles, one process-global ambient slot.
         self.world.author_sibling_master()
-        ended = self.world.call("lifecycle_end", {"outcome": "completed"})
-        assert ended[1] is not None and ended[1].get("ok"), ended
+        current = ambient()
+        if current is not None and current.current is not None:
+            current.end("completed")
         kind, payload = self.world.start_leaf(LEAF_ID, SIBLING_WORKTREE, task_name=SIBLING_MASTER)
         assert kind == "RETURNED" and payload is not None, (kind, payload)
         assert payload.get("state") == "started", payload
@@ -956,8 +957,9 @@ class WorkflowChainObservation:
         stale_contract = self.sibling_contract
         assert stale_contract is not None
         world = self.world
-        ended = world.call("lifecycle_end", {"outcome": "completed"})
-        assert ended[1] is not None and ended[1].get("ok"), ended
+        current = ambient()
+        if current is not None and current.current is not None:
+            current.end("completed")
 
         contract = load_contract(stale_contract)
         progress = setup_progress_path(contract.worktree_group)
@@ -1034,7 +1036,7 @@ class WorkflowChainObservation:
 
         current = ambient()
         if current is not None and current.current is not None:
-            self.world.call("lifecycle_end", {"outcome": "completed"})
+            current.end("completed")
         self.world.close()
 
 

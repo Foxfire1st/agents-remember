@@ -29,15 +29,16 @@ from agents_remember.providers.context import (
 )
 
 
-def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:
+def lifecycle_settings_from_config() -> dict[str, Any]:
+    # MIK-R112 F02: the two retired providers are never emitted into generated
+    # lifecycle settings, however the authority map reads. Readers already
+    # treat them as never-enabled (setup_common.provider_enabled); emitting no
+    # blocks keeps generated documents truthful. Legacy user settings files
+    # still parse (parse_providers is untouched) and old installations keep
+    # loading; the explicitly required old-watcher stop does not read this.
+    # MIK-R112 F14: the config parameter went away with the retired branches;
+    # callers pass nothing (the settings no longer depend on configuration).
     providers: dict[str, Any] = {}
-    if "grepai-memory" in config.providers:
-        providers["grepai-memory"] = _grepai_settings(config.providers["grepai-memory"], config)
-    if "codegraphcontext-code" in config.providers:
-        providers["codegraphcontext-code"] = _cgc_settings(
-            config.providers["codegraphcontext-code"],
-            config,
-        )
     return {
         "contextProviders": {
             "enabled": bool(providers),
@@ -46,7 +47,7 @@ def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:
     }
 
 
-def write_lifecycle_settings(config: McpRuntimeConfig) -> Path:
+def write_lifecycle_settings() -> Path:
     with tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
@@ -54,7 +55,7 @@ def write_lifecycle_settings(config: McpRuntimeConfig) -> Path:
         suffix="-agents-remember-provider-settings.json",
     ) as handle:
         path = Path(handle.name)
-        json.dump(lifecycle_settings_from_config(config), handle, indent=2)
+        json.dump(lifecycle_settings_from_config(), handle, indent=2)
     return path
 
 

@@ -43,9 +43,6 @@ from .frontmatter import SkillFrontmatter, SkillFrontmatterError, parse_skill_fr
 from .operation import (
     CapsuleOperationRequest,
     SkillCatalogRequest,
-    role_capsule_compile_tool,
-    skill_catalog_list_tool,
-    skill_catalog_read_tool,
     skill_catalog_registry,
 )
 from .provider import (
@@ -85,16 +82,13 @@ __all__ = [
     "parse_skill_frontmatter",
     "read_served_file",
     "require_servable",
-    "role_capsule_compile_tool",
     "role_capsule_response",
     "routed_admission_for",
     "routed_admission_request",
     "shipped_composition_corpus",
     "shipped_skill_tree",
     "skill_catalog_list_response",
-    "skill_catalog_list_tool",
     "skill_catalog_read_response",
-    "skill_catalog_read_tool",
     "skill_catalog_registry",
     "unreadable_skills",
 ]

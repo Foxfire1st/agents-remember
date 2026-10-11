@@ -76,8 +76,7 @@ project package self-contained.
 
 Pi can discover `SKILL.md` directories recursively, but skill names should still match their parent folder for clean validation.
 
-Do not run `skills_install()` for first-run setup. It remains available for
-manual maintenance and non-package installs.
+Do not install skills for first-run setup; the copied package already carries them.
 
 ## MCP
 

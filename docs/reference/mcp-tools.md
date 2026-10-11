@@ -1,18 +1,17 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 72 public tools (`PUBLIC_TOOLS`, which `server_info` reports for the running process). Tools **apply by default** — pass
-`dry_run=true` to preview first (for the read-only `cgc_*`/`grepai_*` query tools,
-`dry_run=true` returns the planned provider command without running it). The two
-`codex_benchmark_*` tools are the exception: they default to `dry_run=true`
-because a real run clones repos and executes Codex agents. Repository-scoped tools
-take a `repo_id` that must be an allowed repo in the MCP settings.
+The Agents Remember MCP server exposes 40 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
+`dry_run=true` to preview first. Repository-scoped tools
+take a `repo_id` that must be an allowed repo in the MCP settings. Search the code with
+the harness's own tools: the former `cgc_*`, `grepai_*` and `provider_*` code-search tools
+were removed (MIK-R112) and are not answered by any text on this page.
 
 This page is a map of the surface, not a complete index of it: the tables below name a subset
 of the roster above. Behavior detail lives in the linked skill and reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
 procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-02-memory-quality-control` skill
-drives the `drift_check` / `memory_quality_check` MCP tools, the `c-09-git-worktree-manager` skill drives the `worktree_*`
+drives drift reporting (`context_packet` / `memory_quality_check`), the `c-09-git-worktree-manager` skill drives the `worktree_*`
 MCP tools, and the `c-12-closeout` skill drives the `*_closeout_*` MCP tools. When the docs say "run a core skill,"
 the agent runs the skill, which calls the matching tool with the right
 preconditions. Call the raw tool directly only when you do not need the skill's
@@ -22,24 +21,22 @@ surrounding procedure. See the [Skills reference](skills.md).
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `ping` | Liveness check; returns server name/version/transport. | — |
-| `server_info` | Report resolved roots, allowed repos/providers, and the tool list. A server that a role launch started for one agent also reports `toolServer`, the name under which that agent was given this server (`agents-remember-task`; `server` stays the package's own name), and `agentBinding`: that agent's id, role, task references, request id and report path. | — |
+| `server_info` | Report the resolved configuration: build, roots, allowed repos, provider keys left unused, and, on a role-launched server, the tool server name and agent binding. It does not list the tools. | — |
 | `resolve_context` | Resolve a repository's coordination/memory context (topology, roots, settings, storage, pathRules). | `repo_id`, optional `task_name` / `contract_path` / `worktree_name` / `topology` |
-| `context_packet` | Bundle repo state, paths, memory, worktree, and provider status into one packet. | `repo_id`, `include_providers=true`, `include_drift=false` |
+| `context_packet` | Bundle repo state, paths, memory, worktree, drift and freshness into one packet. | `repo_id`, `include_drift=false`, `include_freshness=false` |
 
 ## Structural role control
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `dispatch_agent` | Create or replace one canonical role seat and durably pin its exact initial brief. Plane-hosted callers use injected seat identity plus direct-child scope; identity-free developer launchers use target-document resolution plus role-altitude validation. | `task_document_ref`, `role`, `brief`, optional `label` |
-| `message_parent` | Send one durable whole-message submission to the caller's structurally current parent. | `ask`, `response`, optional agent-visible `message_kind` |
-| `message_child` | Send one durable whole-message submission to an authorized structurally current child. | `task_document_ref`, `role`, `ask`, `response`, optional agent-visible `message_kind` |
-| `retire_child` | Retire an authorized child seat without exposing its occupant address. | `task_document_ref`, `role`, `reason` |
-| `rename_child` | Rename an authorized child chat by document and role. | `task_document_ref`, `role`, `label` |
-| `rename_self` | Rename the caller's ambient structural chat. | `label` |
-| `lifecycle_gate` | Raise a gate on the caller's ambient task document. | `kind`, optional `ask`/`packet`/`evidence_refs`, `wait` |
-| `gate_decide` | Decide exactly one open gate matching an authorized child document and kind; zero or multiple matches fail closed. | `task_document_ref`, `kind`, `decision`, optional `note`/`evidence_refs` |
-| `gate_list` | List document-projected gate state in the caller's authorized structural scope. | — |
+
+Structural messaging, seat retirement/rename, lifecycle signals, and gates left the public
+surface (MIK-R112): `message_parent`, `message_child`, `retire_child`, `rename_child`,
+`rename_self`, `lifecycle_start`, `lifecycle_resume`, `lifecycle_turn_end_notification`,
+`lifecycle_end`, `switch_lifecycle`, `lifecycle_phase`, `lifecycle_gate`, `gate_decide`,
+`gate_list`. Messaging between seats goes through `role_message` (by agent id or by role
+plus task references); lifecycle moves are session-driven.
 
 Runtime session, lifecycle, inbox-row, adapter, vendor, and gate identifiers are private
 control-plane correlations. The plane may use exact addressing internally for the initial brief,
@@ -58,7 +55,7 @@ plane authorization failure remains a refusal and never retries as ambient. `dis
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, provider defaults, runtime folders) into the coordinator; optionally install provider deps and benchmark fixtures. The final `host` part provisions the build-pinned host/plugin and checked product Node from the per-use user configuration `agents-remember/settings.json` block; shared authority is never written and needed restarts are deferred. Missing block is named; dry run has no host mutations. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** the managed scaffold (`skills/`, provider compose/shape). With `install_provider_deps=true` it builds provider images but **skips** any image whose tag already exists; pass `no_cache=true` to force a from-scratch rebuild (bypasses that skip and adds `--no-cache`). | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
+| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, docs, runtime folders) into the coordinator; optionally install benchmark fixtures. The final `host` part provisions the build-pinned host/plugin from the per-use shared `system/settings.json` block; shared authority is never written and needed restarts are deferred. Missing block is named; dry run has no host mutations. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** the managed scaffold (`skills/`, `docs/`). No provider install/start/watch path remains (MIK-R112): the install stops leftover watcher processes as its only watcher action and reports enabled provider keys once as unused (`unusedProviderKeys`); `install_provider_deps` no longer drives installation. Leftover provider runtime folders are reported with sizes; only the `providers-remove` command deletes them. `experiment` is a per-call input (never a setting) selecting an experimental cutover for one run; its source is named in the record. | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
 | `skills_install` | Maintenance/manual install tool for non-package setups: copy the packaged (already flat) skills into the harness skill root — one folder per skill `name`; no layout option. The package-based first-run path gets skills from the copied harness starter package instead. | `dry_run=false`, `overwrite=false`, `archive_existing=false` |
 
 ## Memory & onboarding
@@ -66,7 +63,6 @@ plane authorization failure remains a refusal and never retries as ambient. `dis
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
-| `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50`, `contract_path=None` |
 | `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
 | `citation_fix` | Regenerate anchored citation ranges only inside a contract-selected leaf memory worktree; official memory, ambiguous anchors, renames, and deletions refuse. | `repo_id`, `contract_path`, `document=None`, `expected_snapshot=None`, `dry_run=false` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
@@ -155,6 +151,10 @@ application operation, not an agent-facing route around MCP.
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory commit messages |
 | `worktree_closeout_apply` | Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
 | `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
+| `worktree_sync` | Pull the moved official line into a live worktree: fetch, merge code, fast-forward memory, advance the recorded base pair. Conflicts are retained for agent resolution (`continue` / `cancel` / `reconcile`). | `contract_path`, `memory_sync_choice`, `resolution_action`, `knowledge_resolution`, `dry_run=false` |
+| `worktree_pause` | Pause an atomic master and hand control back to the developer; publishes nothing. | `contract_path` |
+| `worktree_checkpoint_landing` | Land an unfinished atomic master's accumulated line into its super branch and keep the master open; requires developer approval. | `contract_path`, `strategy`, `dry_run=false` |
+| `worktree_record_landing` | Record a task's code landing through a pull request with the landed commit. | `contract_path`, `landed_code_commit`, `landed_memory_content_commit`, `dry_run=false` |
 | `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact closeout/integrate/direct-landing generation. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; revise/retire/supersede are evidence-aware. | `contract_path`, `operation_kind`, `action`, `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
 | `worktree_legacy_operation` | Explicitly inspect, migrate, or archive one exact schema-1 operation. Migration is limited to the proven blank-message incident; normal readers remain current-schema-only. | `contract_path`, `operation_kind`, `action`, inspect-bound `expected_digest`, action-specific messages/reason, `dry_run=false` |
 | `direct_landing` | Policy-gated branch-addressed memory-content landing for an already verified series code commit. Persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path`, `code_commit`, explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `dry_run=false` |
@@ -204,40 +204,113 @@ strand accepted operation evidence.
 | `task_doc` | Author JSON-primary task documents and deterministic markdown. Every intrinsically valid mutation publishes during every queue/operation phase and returns per-sprint `projectionEffects`; an incomplete effect carries its exact rebuild `nextAction`. `skip_step` requires a nonblank reason; `discard-unstarted` removes only centrally proven never-started planning work without completion fiction; `Completed` refuses unresolved units. | `repo_id`, task/contract target, `operation`, edit payload, `dry_run=false` |
 | `task_reopen` | Reopen a fully landed leaf under the same leaf id so new work can be declared explicitly. | `contract_path`, `dry_run=false` |
 
+### task_doc operations
+
+`task_doc` authors the JSON-primary task document (`ar-task-document/v1`); `task.md` /
+`<slug>.md` is generated and never parsed back. Mutating, except `operation='get'` and
+`read_steps`. Locate the doc by `task_name` (also resolves the contract for the lifecycle key)
+or `contract_path`; pass `slug` for a series sub-task (`<slug>.json`), omit for a standalone
+task (`task.json`). `dry_run=true` builds, validates and returns rendered/diff/wouldLose
+without writing.
+
+- `create`: new doc from `fields` (`id`, `slug`, `title`, `kind` `subTask`|`master` — the old
+`light` kind is refused — `repo`, `type`, `createdAt`, `objective`, `requirements`, `steps`,
+...). A master takes `subTasks` plus ordered sections instead of steps; an orchestration
+sprint is scaffolded with empty canonical Judgment and Priority Register sections.
+- `replace`: whole-document rewrite from `fields` after schema validation.
+- `get`: read the document. `read_steps`: read-only focused checklist (`id`/`title`/`status`/
+`note` plus nested substeps). `set_status`: set `fields.status`. `set_field`: scalar/list
+field updates. `append_decision`: append `decision={at, decision, rationale}`.
+- Step plane (one exact existing unit, addressed by `step={id, parent?}`; `parent` selects top
+level when absent or that parent's substeps): `set_step` updates exactly one unit
+(`{id, title?, status?, note?, parent?}`) and never creates — an explicit status clears an
+earlier skip. `add_step` creates exactly one unit, requires `{id, title}`, refuses a
+duplicate id. `remove_step` deletes exactly one unit, requires nonblank `step.reason`,
+records a decision entry, and may remove a done unit or operate on a Completed document.
+`skip_step` takes `{id, reason, parent?}`, sets only that unit done, records intentional-skip
+provenance without cascading.
+- Master rows: `set_subtask` writes `subtask={number, name, file?, status?, scope?}`;
+`remove_subtask` takes `{number, keep_file?}` for a terminal row and drops the row plus its
+leaf doc (`json`+`md`) unless `keep_file=true`. `disposition:'discard-unstarted'` with a
+reason discards planning work that never started: forbids `keep_file`, proves absence of
+canonical enclosure/operation/seat/review/commit evidence, removes the child sources, keeps a
+typed parent audit; started or ambiguous evidence refuses with the next lifecycle route.
+- `set_section` writes `section={heading, kind?, body?}`; a canonical register heading must
+keep the exact register table shape (write-time validation).
+- Review: `begin_review` takes an empty review object (or bounded `developerApproval` /
+`additionalRounds`) and increments the round before reviewer work — a repeat resumes the
+pending round. `record_review` takes `{verdict, findings:[{findingId, description}]}` first,
+then `remainingFindingIds:[...]`; successors only shrink the sealed set. `record_route_review`
+takes `{verdict, verdictRef, routes:[{route, verdict, evidenceRef}]}`; the plane stamps the
+candidate tree and time, every evidence path must be a real task-relative file, and it
+overwrites the prior candidate's review.
+- Atomic masters: the operation targets the task-root master document and binds the accumulated
+candidate, membership and evidence; a child publishes no independent review; master review is
+required only at master-to-parent integration. `branch_addressed=true` (policy-gated,
+sanctioned direct execution only) binds the task-root series contract and stamps the candidate
+tree from the branch HEAD.
+- Execution graph (orchestration sprint): `author_execution_graph` applies one validated atomic
+batch of `mutations` (`add_node`, `remove_node`, `add_edge`, `remove_edge`, `move_leaf`,
+`set_nature`); judgment-bearing mutations need a `judgmentId` from the sprint Judgment
+Register. `attach_master` attaches one master as a single validated batch
+(`masterRef`, `number`, `name?`, `scope?`, `status?`, `executionNature?`, `judgmentId?`);
+`detach_master` takes `{masterRef}` and refuses while any edge touches the node.
+`linkage_report` is the read-only drift report (seat-doc rows, slug-only membership,
+mismatches, uncommanded masters).
+- `Completed` refuses while any declared step/substep or master row stays unresolved.
+
 See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
+
+## Knowledge operations
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `knowledge_read` | Read one named view (source_context, invariant, family, review_matrix, curation_queue) at one snapshot, paged; records carry authored/mechanical provenance. | `databasePath`, `repositoryId`, `view`, subject + paging selectors |
+| `knowledge_change` | Always refuses with `registration_absent` and names the writer that can record; record through `knowledge-ingest` / `knowledge-bootstrap`, read back with `knowledge_read`. | `databasePath`, `repositoryId`, `recordKind` |
+| `knowledge_diff` | Field and record changes between exact states; semantic labels only when an identified agent or assessment supplied them. | `databasePath`, `repositoryId`, `beforePath`, `afterPath` |
+| `knowledge_integrity_check` | Structural-rule violations, matched review conditions, scope and limits; no verdict, no causal explanation. | dataset/scope selectors, `runId` / `inputDigest`, `contractPath` |
+| `knowledge_project` | Render read-only views into an authorized destination; provenance copied, never invented. | `databasePath`, `repositoryId`, `destinationRoot`, profile/formats/views, `authorizedOverwrites` |
+| `curator_coherence` | Author, publish, inspect or validate one leaf's curator-coherence authority (`prepare` → `publish` → `validate`). | one action's request shape at a time |
+
+## Role agents
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `role_start` | Start one role agent for one canonical selection, caller as parent; repeating `request_id` reconciles the same agent. | `role`, `request_id`, the role's task references, `agent` / `model` / `effort` |
+| `role_message` | Send one text message to one role agent; with `wait`, return its reply. | `text`, `agent_id` or role + task references, `wait=false`, `timeout_seconds` |
+
+The capsule operation and skill catalog left the surface with the skills surface tools
+(MIK-R112): `role_capsule_compile`, `skill_catalog_list`, `skill_catalog_read`. Skills are
+read through the `skill://` resources and the `skills/list` extension instead.
+
+`role_message` refusals name one reason: `recipient-busy` (mid-turn handoff failed, or the
+recipient waits for a permission decision — a message would deny it — or its start has not
+finished), `recipient-not-found`, `recipient-archived`, `recipient-ambiguous`,
+`recipient-cannot-be-resumed`, `scope-check-failed`, `caller-has-no-binding`,
+`no-paseo-runtime-configured`, `host-unreachable`. A finished turn is a fact about the
+recipient's turn, never AR acceptance of a requirement. `role_start` calls run one at a time
+(60s); only the starter repeats its `request_id`.
+
+## Session lifecycle
+
+The lifecycle signal tools left the surface (MIK-R112): `lifecycle_start`,
+`lifecycle_resume`, `lifecycle_turn_end_notification`, `lifecycle_end`, `switch_lifecycle`,
+`lifecycle_phase`. Lifecycle moves are session-driven; states and the ambient correlation
+are described in the lifecycle frame.
 
 ## Providers
 
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `provider_status` | Compact provider readiness summary. | `detail_limit=20` |
-| `provider_diagnostics` | Raw provider-native diagnostic detail. | `detail_limit=20` |
-| `provider_watchers` | Start/stop/report provider watchers. | `action`, `dry_run=false` |
-
-## Semantic memory search (grepai)
-
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `grepai_search` | Semantic search over memory/onboarding. | `query`, `repo_ids=None`, `all_repos=true`, `limit=10`, `output_format="json"`, `dry_run=false` |
-| `grepai_trace` | Trace relationships in the semantic graph. | `trace_action`, `symbol`, scope + `output_format`, `dry_run=false` |
-
-## Code-relationship search (CodeGraphContext)
-
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `cgc_symbol_search` | Find a symbol in the code graph. | `repo_id`, `name`, `dry_run=false` |
-| `cgc_callers` | Who calls a function. | `repo_id`, `function`, `file=None`, `dry_run=false` |
-| `cgc_callees` | What a function calls. | `repo_id`, `function`, `dry_run=false` |
-| `cgc_dependencies` | A module's dependencies. | `repo_id`, `module`, `dry_run=false` |
-| `cgc_complexity` | Complexity metrics from the code graph. | `repo_id`, `dry_run=false` |
-| `cgc_visualize` | Produce a graph visualization. | `repo_id`, `dry_run=false` |
+The CGC, GrepAI and provider tools were removed (MIK-R112): `cgc_symbol_search`, `cgc_callers`,
+`cgc_callees`, `cgc_dependencies`, `cgc_complexity`, `cgc_visualize`, `grepai_search`,
+`grepai_trace`, `provider_status`, `provider_diagnostics`, `provider_watchers`. Nothing starts,
+installs or watches those provider processes anymore; search the code with the harness's own
+tools. A settings file that still holds their keys loads without error; `server_info`
+names the keys once as no longer used.
 
 ## Benchmarks
 
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `codex_benchmark_prepare` | Prepare resettable benchmark case workspaces. | case/scope options |
-| `codex_benchmark_run` | Run a Codex benchmark case. | case + optional sandbox |
+The benchmark tools left the surface (MIK-R112): `codex_benchmark_prepare`,
+`codex_benchmark_run`. Benchmark cases run through the benchmark runner CLI instead.
 
 ---
 

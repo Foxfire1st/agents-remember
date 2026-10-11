@@ -89,13 +89,13 @@ C04 = CheckpointDefinition(
     "L5-C04",
     requirement="L5-R4",
     expected="pre-replacement worker message uses canonical master+manager address",
-    owner="message_parent canonical resolver",
+    owner="role_message role+task resolver",
 )
 C05 = CheckpointDefinition(
     "L5-C05",
     requirement="L5-R4",
-    expected="public retire_child creates a real vacant manager seat",
-    owner="orchestrator retire_child",
+    expected="dispatch replacement creates the replacement manager seat",
+    owner="orchestrator dispatch_agent replacement",
 )
 C06 = CheckpointDefinition(
     "L5-C06",
@@ -104,7 +104,7 @@ C06 = CheckpointDefinition(
         "vacancy message remains a canonical no-hosted-session row with no occupant address and "
         "is eligible for replacement-aware redelivery"
     ),
-    owner="message_parent durable inbox",
+    owner="role_message durable inbox",
 )
 C07 = CheckpointDefinition(
     "L5-C07",
@@ -116,7 +116,7 @@ C08 = CheckpointDefinition(
     "L5-C08",
     requirement="L5-R4",
     expected="post-replacement message resolves directly to replacement manager",
-    owner="message_parent canonical resolver",
+    owner="role_message role+task resolver",
 )
 
 

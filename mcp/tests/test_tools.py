@@ -19,12 +19,6 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.provider_tools import (
-    GrepaiRepoScope,
-    GrepaiSearchQuery,
-    GrepaiTraceQuery,
-    ProviderQueryScope,
-)
 from agents_remember.kernel import memory_init as memory_init_module
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -34,12 +28,7 @@ from agents_remember.mcp import SERVER_VERSION
 from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,
-    cgc_callees_payload,
-    cgc_callers_payload,
-    grepai_search_payload,
-    grepai_trace_payload,
     memory_init_payload,
-    ping_payload,
     server_info_payload,
 )
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
@@ -48,8 +37,6 @@ from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.serving.build_info import ServingBuild
 from test_config import settings_payload
 
-DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
-
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,17 +44,6 @@ def write_json(path: Path, data: dict) -> None:
 
 
 class McpToolTests(unittest.TestCase):
-    def test_ping_payload(self) -> None:
-        payload = ping_payload()
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], SERVER_VERSION)
-        self.assertEqual(payload["transport"], "stdio")
-        self.assertGreater(payload["tokens"], 0)
-        self.assertEqual(payload["tokenizer"], "tiktoken:o200k_base")
-        self.assertIs(payload["tokenCountExact"], True)
-
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -95,14 +71,11 @@ class McpToolTests(unittest.TestCase):
             )
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember"])
             self.assertEqual(
-                payload["allowedProviderIds"],
+                payload["unusedProviderKeys"],
                 ["codegraphcontext-code", "grepai-memory"],
             )
-            self.assertEqual(
-                payload["tools"],
-                list(PUBLIC_TOOLS),
-            )
-            self.assertEqual(payload["reservedTools"], [])
+            self.assertNotIn("tools", payload)
+            self.assertNotIn("reservedTools", payload)
             self.assertEqual(
                 payload["servingBuild"],
                 {
@@ -156,48 +129,6 @@ class McpToolTests(unittest.TestCase):
                 text=True,
             ).stdout.strip()
             self.assertEqual(configured, "memory")
-
-    def test_typed_cgc_payloads_reject_invalid_inputs_before_provider_execution(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            with self.assertRaisesRegex(ValueError, "not allowed"):
-                cgc_callers_payload(config, "other-repo", "resolve_context")
-            with self.assertRaisesRegex(ValueError, "function"):
-                cgc_callees_payload(config, "agents-remember", "")
-
-    def test_grepai_payloads_reject_invalid_scope_and_trace_inputs(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            initialize_context_fixture(root)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            with self.assertRaisesRegex(ValueError, "unknown repo_ids"):
-                grepai_search_payload(
-                    config,
-                    GrepaiSearchQuery(query="provider lifecycle"),
-                    repos=GrepaiRepoScope(repo_ids=["unknown-repo"]),
-                )
-            with self.assertRaisesRegex(ValueError, "repo_ids is required"):
-                grepai_search_payload(
-                    config,
-                    GrepaiSearchQuery(query="provider lifecycle"),
-                    repos=GrepaiRepoScope(all_repos=False),
-                )
-            with self.assertRaisesRegex(ValueError, "trace_action"):
-                grepai_trace_payload(
-                    config, GrepaiTraceQuery(trace_action="neighbors", symbol="resolve_context")
-                )
-            with self.assertRaisesRegex(ValueError, "depth"):
-                grepai_trace_payload(
-                    config,
-                    GrepaiTraceQuery(trace_action="callers", symbol="resolve_context", depth=2),
-                )
 
 
 REAL_MCP_CONFIG = os.environ.get("AGENTS_REMEMBER_REAL_MCP_CONFIG")

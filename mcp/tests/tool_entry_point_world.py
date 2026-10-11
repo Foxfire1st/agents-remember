@@ -51,29 +51,21 @@ AMBIENT_STATES = ("none", "running", "blocked", "awaiting-developer")
 # The population the matrix is measured over, derived by RULE from the roster rather than from
 # the pin: every lifecycle-state tool. Measuring the matrix over the pin itself would make the
 # pin self-confirming — deleting a tool from it would delete the measurement that would have
-# failed. Three members of this population answer in an envelope in all four states
-# (`lifecycle_finalize_task`, `switch_lifecycle`, `lifecycle_gate`) and are therefore not
-# entries; only the raising subset is pinned.
+# failed. The member of this population answers in an envelope in all four states
+# (`lifecycle_finalize_task`) and is therefore not an entry; only the raising subset is pinned.
 LIFECYCLE_STATE_POPULATION = tuple(
     tool for tool in PUBLIC_TOOLS if tool.startswith("lifecycle_") or tool == "switch_lifecycle"
 )
 
 # ...and the population the rule above must produce, written out. The rule alone cannot be
 # checked by a subset assertion: `population == pin` satisfies "the pin is inside the
-# population", so a weakened predicate would silently stop measuring the three members that do
+# population", so a weakened predicate would silently stop measuring the member that does
 # not raise. This constant is the second, visible edit a weakening requires, and the case
 # asserts the derived population EQUALS it and that the population is STRICTLY larger than the
 # pin.
 EXPECTED_LIFECYCLE_STATE_POPULATION = frozenset(
     {
-        "lifecycle_start",
-        "lifecycle_resume",
-        "lifecycle_turn_end_notification",
-        "lifecycle_end",
-        "lifecycle_phase",
-        "lifecycle_gate",
         "lifecycle_finalize_task",
-        "switch_lifecycle",
     }
 )
 

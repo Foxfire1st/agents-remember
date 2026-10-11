@@ -37,9 +37,10 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
 ## Tool surface
 - Native file tools inside the two worktrees; shell for the checks below.
 - Read-only AR retrieval: `read_ar_files` (serves the OFFICIAL baseline, never your worktree —
-  final verification uses native reads), `grepai_search` / `cgc_*` (provider stack key:
-  `<stack-key-or-NONE>`), `context_packet`.
-- When the master line moves, run the supported sync and resolve memory-file conflicts as `../operations/implementation.md` §Boundaries states. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
+  final verification uses native reads), `context_packet`.
+- When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
+  freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a
+  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.

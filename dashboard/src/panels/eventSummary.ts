@@ -63,21 +63,10 @@ const PHASE_LABELS: Record<Phase, string> = {
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  cgc_callers: "Checked callers",
-  cgc_callees: "Checked callees",
-  cgc_complexity: "Checked code complexity",
-  cgc_dependencies: "Checked dependencies",
-  cgc_symbol_search: "Found code symbol",
   context_packet: "Checked workspace context",
-  drift_check: "Checked onboarding drift",
   gate_create: "Opened approval request",
   gate_response_wait: "Waited for approval",
   gate_wait: "Waited for approval",
-  grepai_search: "Searched onboarding",
-  lifecycle_gate: "Asked for approval",
-  lifecycle_phase: "Updated phase",
-  lifecycle_resume: "Resumed lifecycle",
-  lifecycle_start: "Started lifecycle",
   memory_quality_check: "Checked memory quality",
   read_ar_files: "Read source with onboarding",
   role_message: "Sent message",

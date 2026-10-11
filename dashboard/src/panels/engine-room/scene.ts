@@ -2,36 +2,25 @@ import type {
   EngineProcessEdge,
   EngineProcessNode,
   LandingRefNode,
-  ProviderBootNode,
-  ProviderNode,
 } from "../../types/projection";
 import {
   COL_MAIN_CX,
   COL_WT_CX,
   EDGE_GEOM,
-  ENGINE,
   LANDING_PHASES,
   NODE_H,
   POS,
   isBlocked,
   refusedPolarityOf,
-  runtimeState,
-  type RuntimeState,
 } from "./geometry";
 
 export interface EnclosureScene {
-  code: ProviderBootNode | undefined;
-  memory: ProviderBootNode | undefined;
-  codeRuntimePredicted: RuntimeState;
-  memoryRuntimePredicted: RuntimeState;
   hasMemory: boolean;
   codeWtMaterialised: boolean;
   memWtMaterialised: boolean;
   memChecking: boolean;
   baseChecking: boolean;
   memGated: boolean;
-  providerPlanBlocked: boolean;
-  providerScanAt: { x: number; y: number } | null;
   fleeting: boolean;
   baseStale: boolean;
   scanAt: { x: number; y: number } | null;
@@ -41,8 +30,6 @@ export interface EnclosureScene {
   memSyncMoved: boolean;
   blockNode: { cx: number; top: number } | null;
   refusedEdges: { edge: EngineProcessEdge; polarity: "amber" | "red" }[];
-  officialCode: ProviderNode | undefined;
-  officialMemory: ProviderNode | undefined;
   terminal: boolean;
   terminalEdge: EngineProcessEdge | undefined;
   gatedEdges: EngineProcessEdge[];
@@ -56,55 +43,18 @@ export interface EnclosureScene {
   cleanupTip: LandingRefNode | undefined;
 }
 
-function predictedRuntime(
-  seedRunning: boolean,
-  runtime: string | undefined,
-): RuntimeState {
-  return runtimeState(
-    seedRunning && (runtime === "configured" || !runtime) ? "indexing" : runtime,
-  );
-}
-
 function ledgerMapBlocked(node: EngineProcessNode): boolean {
   return node.edges.some(
     (edge) => edge.kind === "ledger-map" && edge.state === "blocked",
   );
 }
 
-export function resolveEngines(
-  node: EngineProcessNode,
-  workspaceEngines: ProviderNode[],
-) {
-  const code = node.providers.find((p) => p.role === "code");
-  const memory = node.providers.find((p) => p.role === "memory");
-  // PREDICTIVE BOOT — the clone arrow draws toward the worktree engine for ~0.6s; the engine should
-  // start filling at the same moment the arrow begins drawing, not after the data says "indexing". When
-  // cgc-seed / grepai-clone is running and the engine is still configured (not yet self-reported), treat
-  // it as indexing so the fill animates in sync with the arrow and arrives when the arrow does.
-  const cgcSeedRunning = node.edges.some(
-    (e) => e.kind === "cgc-seed" && e.state === "running",
-  );
-  const grepaiCloneRunning = node.edges.some(
-    (e) => e.kind === "grepai-clone" && e.state === "running",
-  );
-  const codeRuntimePredicted = predictedRuntime(cgcSeedRunning, code?.runtimeState);
-  const memoryRuntimePredicted = predictedRuntime(
-    grepaiCloneRunning,
-    memory?.runtimeState,
-  );
+export function resolveEngines(node: EngineProcessNode) {
+  // Provider engines left the surface (MIK-R112): only the memory-lane
+  // presence (external memory worktree) still drives the scene.
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
-  // Official-line (workspace) engines — the real shared CGC/GrepAI feeding the official line (left
-  // world); runtime derived like the OfficialStrip so the two surfaces always agree.
-  const officialCode = workspaceEngines.find((engine) => engine.role === "code");
-  const officialMemory = workspaceEngines.find((engine) => engine.role === "memory");
   return {
-    code,
-    memory,
-    codeRuntimePredicted,
-    memoryRuntimePredicted,
     hasMemory,
-    officialCode,
-    officialMemory,
   };
 }
 
@@ -140,63 +90,22 @@ export function resolveMaterialisation(node: EngineProcessNode) {
   return { codeWtMaterialised, memWtMaterialised, memChecking, baseChecking, memGated };
 }
 
-function isProviderPlanBlocked(
-  node: EngineProcessNode,
-  codeWtMaterialised: boolean,
-  memWtMaterialised: boolean,
-): boolean {
-  if (!isBlocked(node)) return false;
-  if (node.setupState !== "blocked") return false;
-  if (node.providers.length !== 0) return false;
-  if (!codeWtMaterialised || !memWtMaterialised) return false;
-  return node.missingFacts.some((fact) =>
-    /provider (plan|setup|runtime)|setup config/i.test(fact),
-  );
-}
-
-export function resolveBlocks(
-  node: EngineProcessNode,
-  material: ReturnType<typeof resolveMaterialisation>,
-) {
-  // T7B — the provider-plan block: PRE-CONTRACT, but distinct from T1B/T3B (which gate a SOURCE lane).
-  // Here BOTH worktrees already materialised (observed), NO provider boot nodes exist yet (engines unlit),
-  // and the runtime setup config is missing → the alarm bar sits BESIDE the worktree provider engine (the
-  // barred runtime, NOT the code node — see ProviderBlock) and the engines never light. Signal off the
-  // projection: blocked + setupState 'blocked' + zero providers + both worktrees on disk + a
-  // provider-plan/setup-config missing fact. Derived ABOVE `fleeting` because a T7B block must NOT fall
-  // into the big red FleetingEnclosure box (it shares the 'contract not yet written' fact).
-  const providerPlanBlocked = isProviderPlanBlocked(
-    node,
-    material.codeWtMaterialised,
-    material.memWtMaterialised,
-  );
-  // the provider-plan VERIFY sweep (P3): setupState 'running' with no boot nodes yet (pre-contract provider
-  // check) → a cyan scan ring AT the worktree CGC engine centre, not on a source lane.
-  const providerChecking =
-    node.setupState === "running" &&
-    node.providers.length === 0 &&
-    material.codeWtMaterialised &&
-    material.memWtMaterialised;
-  const providerScanAt = providerChecking
-    ? { x: ENGINE.cgc.x + ENGINE.w / 2, y: ENGINE.cgc.y + ENGINE.h / 2 }
-    : null;
-  // a born-blocked (pre-contract) enclosure — the reducer marks it "contract not yet written"; it renders the
-  // big red FleetingEnclosure box (stale-base / pre-contract). A T7B provider-plan block carries the same
-  // fact but anchors a node gate + unlit engines instead, so it is excluded here.
-  const fleeting =
-    node.missingFacts.some((fact) => /contract not yet written/i.test(fact)) &&
-    !providerPlanBlocked;
+export function resolveBlocks(node: EngineProcessNode) {
+  // A born-blocked (pre-contract) enclosure — the reducer marks it "contract not yet written"; it renders the
+  // big red FleetingEnclosure box (stale-base / pre-contract). Provider setup states left the surface
+  // (MIK-R112): without provider engines there is no separate engine-anchored block, so a missing
+  // setup config reads as the same pre-contract state.
+  const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
   // a stale-base block is the FLEETING (pre-contract) preflight case — `&& fleeting` keeps it distinct from a
   // live sync-needed block (which is also `behindSource > 0` but has a real worktree).
   const baseStale =
     (node.codeSource.behindSource ?? 0) > 0 && isBlocked(node) && fleeting;
-  return { providerPlanBlocked, providerChecking, providerScanAt, fleeting, baseStale };
+  return { fleeting, baseStale };
 }
 
 export function resolveScanPointers(
   memChecking: boolean,
   baseChecking: boolean,
-  providerScanAt: { x: number; y: number } | null,
 ) {
   // The verify/block indicators anchor ON the checked REPOSITORY node (its rectangle), never the
   // connector lane: T1B points at the official-line CODE base (stale), T3B at the official-line MEMORY base
@@ -206,8 +115,8 @@ export function resolveScanPointers(
     : baseChecking
       ? { x: COL_MAIN_CX, y: POS.codeSource.y + NODE_H / 2 }
       : null;
-  // the topmost scan ring lights for a source-lane verify (T1B/T3B) OR the provider-plan verify-at-engine (T7B)
-  const scanCenter = scanAt ?? providerScanAt;
+  // the topmost scan ring lights for a source-lane verify (T1B/T3B).
+  const scanCenter = scanAt;
   return { scanAt, scanCenter };
 }
 
@@ -256,36 +165,26 @@ export function resolveBlockPointer(
   return null;
 }
 
-export function resolveGates(
-  node: EngineProcessNode,
-  code: ProviderBootNode | undefined,
-  memory: ProviderBootNode | undefined,
-) {
+export function resolveGates(node: EngineProcessNode) {
   // failure overlays — `fleeting` is derived above (it gates `baseStale`).
   // t14c — a terminal integration conflict draws a STOP (not the recoverable Gate) and no recovery chips.
   const terminal = node.phase === "integration-blocked";
   const terminalEdge = terminal
     ? node.edges.find((e) => e.kind === "integration" && e.state === "blocked")
     : undefined;
-  // blocked = STEADY gate (a choice required); failed/down = FAULT → the engine flickers, no gate.
+  // blocked = STEADY gate (a choice required); failed = FAULT → flicker, no gate.
   // The terminal-conflict integration edge is excluded — it renders as a STOP instead of a Gate.
   const gatedEdges = node.edges.filter(
     (e) => e.state === "blocked" && e !== terminalEdge,
   );
   const firstGated = gatedEdges.length ? EDGE_GEOM[gatedEdges[0].kind] : undefined;
   const stopGeom = terminalEdge ? EDGE_GEOM[terminalEdge.kind] : undefined;
-  const memoryDown = memory?.runtimeState === "down";
-  const codeDown = code?.runtimeState === "down";
-  // the reason badge anchors at the STOP / blocked lane, else beside the faulting (down) engine
+  // the reason badge anchors at the STOP / blocked lane, else beside the faulting lane.
   const reasonCenter = stopGeom
     ? { cx: (stopGeom[0] + stopGeom[2]) / 2, cy: (stopGeom[1] + stopGeom[3]) / 2 + 16 }
     : firstGated
       ? { cx: (firstGated[0] + firstGated[2]) / 2, cy: (firstGated[1] + firstGated[3]) / 2 + 14 }
-      : memoryDown
-        ? { cx: 1084, cy: 562 }
-        : codeDown
-          ? { cx: 1084, cy: 88 }
-          : undefined;
+      : undefined;
   return { terminal, terminalEdge, gatedEdges, firstGated, stopGeom, reasonCenter };
 }
 
@@ -321,24 +220,20 @@ export function resolveLanding(node: EngineProcessNode) {
   return { landingRefs, showLanding, retiring, cleanupTip };
 }
 
-export function resolveScene(
-  node: EngineProcessNode,
-  workspaceEngines: ProviderNode[],
-): EnclosureScene {
-  const engines = resolveEngines(node, workspaceEngines);
+export function resolveScene(node: EngineProcessNode): EnclosureScene {
+  const engines = resolveEngines(node);
   const material = resolveMaterialisation(node);
-  const blocks = resolveBlocks(node, material);
+  const blocks = resolveBlocks(node);
   const scans = resolveScanPointers(
     material.memChecking,
     material.baseChecking,
-    blocks.providerScanAt,
   );
   const movement = resolveMemoryMovement(
     node,
     blocks.fleeting,
     material.memWtMaterialised,
   );
-  const gates = resolveGates(node, engines.code, engines.memory);
+  const gates = resolveGates(node);
   const recovery = resolveRecovery(node);
   const landing = resolveLanding(node);
   // T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed or stale).

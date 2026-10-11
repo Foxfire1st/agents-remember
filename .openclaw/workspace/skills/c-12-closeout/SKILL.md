@@ -133,14 +133,12 @@ its remedy — and nothing here runs the operation. Older tasks without code cha
 do not need a profile merely to be read or resumed.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
-preview/dry-run first, then call
-`lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the **last tool
-call**, then deliver the preview facts and proposed messages as plain
-chat output ending with the commit ask, and **STOP / end your
-turn**. The notification sets the `awaiting-developer` lifecycle state, surfaces a dashboard attention item, and
-returns immediately (no wait, no inbox). The developer approves on the dashboard or in the leaf's
-attached chat; the **first AR tool call of your next turn** auto-resumes the lifecycle (`running`),
-clears the attention item, and runs `worktree_closeout_apply` — you send no explicit `lifecycle_resume`.
+preview/dry-run first, then deliver
+the preview facts and proposed messages as plain chat output ending with the commit ask, and
+**STOP / end your turn**. The handoff sets the `awaiting-developer` lifecycle state and surfaces a
+dashboard attention item. The developer approves on the dashboard or in the leaf's
+attached chat; your next turn resumes the lifecycle (`running`),
+clears the attention item, and runs `worktree_closeout_apply` — no explicit resume step is needed.
 Never invoke `worktree_closeout_apply` in the same turn as the relay; the preview report is what the
 developer sees.
 
@@ -225,10 +223,9 @@ External-memory closeout order is:
 
 Push behavior is not automatic. Closeout commits code and memory only;
 it never pushes. Pushing the integration branch is part of the landing tail the
-`c-09-git-worktree-manager` skill owns: call
-`lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent as
+`c-09-git-worktree-manager` skill owns: present the push intent as
 your final prose, and **STOP**; push only after the developer approves and
-your next turn auto-resumes. A separately raised human-pinned `push-approval` gate, when present,
+your next turn resumes. A separately raised human-pinned `push-approval` gate, when present,
 must be decided by the developer; it is not a closeout recovery route.
 
 Closeout does not mark the task `Completed`. Continue with

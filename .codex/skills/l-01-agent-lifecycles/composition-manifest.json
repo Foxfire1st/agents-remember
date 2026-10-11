@@ -159,8 +159,6 @@
       "altitude": "sprint",
       "tools": [
         "context_packet",
-        "gate_decide",
-        "gate_list",
         "knowledge_diff",
         "knowledge_read",
         "read_ar_files",
@@ -255,9 +253,7 @@
       "file": "roles/designer.md",
       "altitude": "sprint",
       "tools": [
-        "read_ar_files",
-        "grepai_search",
-        "cgc_symbol_search"
+        "read_ar_files"
       ],
       "skills": [
         "l-01-agent-lifecycles"
@@ -282,8 +278,6 @@
       "file": "roles/strategist.md",
       "altitude": "sprint",
       "tools": [
-        "grepai_search",
-        "cgc_symbol_search",
         "read_ar_files",
         "task_doc"
       ],
@@ -314,11 +308,13 @@
       "tools": [
         "context_packet",
         "knowledge_read",
+        "lifecycle_finalize_task",
         "read_ar_files",
         "role_message",
         "role_start",
         "task_doc",
         "worktree_attach",
+        "worktree_cleanup",
         "worktree_closeout_apply",
         "worktree_closeout_preview",
         "worktree_integrate",
@@ -365,15 +361,11 @@
       "file": "roles/worker.md",
       "altitude": "leaf",
       "tools": [
-        "cgc_callees",
-        "cgc_callers",
-        "cgc_dependencies",
-        "cgc_symbol_search",
         "context_packet",
-        "grepai_search",
         "knowledge_read",
         "read_ar_files",
         "role_message",
+        "server_info",
         "task_doc",
         "worktree_status"
       ],
@@ -405,6 +397,7 @@
       "file": "roles/curator.md",
       "altitude": "leaf",
       "tools": [
+        "citation_fix",
         "context_packet",
         "curator_coherence",
         "knowledge_diff",
@@ -414,7 +407,10 @@
         "read_ar_files",
         "role_message",
         "route_index_refresh",
-        "task_doc"
+        "server_info",
+        "task_doc",
+        "worktree_status",
+        "worktree_sync"
       ],
       "skills": [
         "l-01-agent-lifecycles"
@@ -442,16 +438,13 @@
       "file": "roles/reviewer.md",
       "altitude": "leaf | master | sprint, by seam",
       "tools": [
-        "cgc_callees",
-        "cgc_callers",
-        "cgc_dependencies",
-        "cgc_symbol_search",
         "context_packet",
-        "grepai_search",
+        "curator_coherence",
         "knowledge_diff",
         "knowledge_read",
         "read_ar_files",
         "role_message",
+        "server_info",
         "task_doc",
         "worktree_status"
       ],
@@ -489,15 +482,8 @@
       "altitude": "sprint",
       "tools": [
         "context_packet",
-        "provider_diagnostics",
-        "provider_status",
         "read_ar_files",
         "role_message",
-        "cgc_callees",
-        "cgc_callers",
-        "cgc_dependencies",
-        "cgc_symbol_search",
-        "grepai_search",
         "knowledge_diff",
         "knowledge_read",
         "task_doc",
@@ -526,8 +512,7 @@
         "runtime_install",
         "memory_init",
         "memory_baseline_status",
-        "memory_baseline_adopt",
-        "provider_status"
+        "memory_baseline_adopt"
       ],
       "skills": [
         "l-01-agent-lifecycles"

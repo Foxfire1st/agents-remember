@@ -143,14 +143,12 @@ visible: leaf work branches integrate into the pushable integration/source branc
 recorded by their enclosure; protected targets are reached later through the
 repo's PR flow.
 
-For developer-gated starts, run the applicable dry-run/preflight first, then **hand off**: call
-`lifecycle_turn_end_notification(summary={…the intent packet + the approve/revise ask…})` as the **last
-tool call**, then deliver the intent packet as your final prose and **STOP / end your turn**. The
-notification sets the `awaiting-developer` lifecycle state, surfaces a
-dashboard attention item, and returns immediately (no wait, no inbox). The developer approves from the
-dashboard or in the leaf's attached chat; the **first AR tool call of your next turn** auto-resumes the
-lifecycle (`running`), clears the attention item, and proceeds to `worktree_start` — you send no explicit
-`lifecycle_resume`.
+For developer-gated starts, run the applicable dry-run/preflight first, then **hand off**: deliver
+the intent packet as your final prose and **STOP / end your turn**. The handoff sets the
+`awaiting-developer` lifecycle state and surfaces a dashboard attention item. The developer
+approves from the dashboard or in the leaf's attached chat; your next turn resumes the
+lifecycle (`running`), clears the attention item, and proceeds to `worktree_start` — no explicit
+resume step is needed.
 
 For subordinate orchestrated-series starts, do the same dry-run/preflight, record the accepted
 planner/series authority in the task decision log or worktree intent note, and continue. Do not add
@@ -414,9 +412,8 @@ warning.
 
 Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,
 record the standing series authority and then run the real integration without a developer stop.
-For developer-gated integrations, **hand off**: call
-`lifecycle_turn_end_notification(summary={…the integration plan…})` as the **last tool call**, then
-deliver the integration preview as your final prose and **STOP**.
+For developer-gated integrations, **hand off**: deliver
+the integration preview as your final prose and **STOP**.
 The developer approves on the dashboard or in chat; the first AR tool call of your next turn auto-resumes
 and runs `worktree_integrate`; the agent never self-approves a human-pinned durable gate.
 
@@ -499,9 +496,8 @@ Task completion is not the evidence that authorizes enclosure deletion, and dele
 to erase the evidence that proves task completion.
 
 Run `lifecycle_finalize_task(..., dry_run=true)` first. For subordinate accepted-series cleanup,
-record the standing authority and run the real finalizer. For developer-gated cleanup, **hand off**: call
-`lifecycle_turn_end_notification(summary={…what cleanup removes…})` as the **last tool call**, then relay
-the landed-commit proof, cleanup plan, and task-document updates as your final prose and **STOP**. The developer approves
+record the standing authority and run the real finalizer. For developer-gated cleanup, **hand off**:
+deliver the landed-commit proof, cleanup plan, and task-document updates as your final prose and **STOP**. The developer approves
 on the dashboard or in chat; the first AR tool call of your next turn auto-resumes and runs
 `lifecycle_finalize_task`; a model-attributed decision is never developer approval for a
 human-pinned durable gate.

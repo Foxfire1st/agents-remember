@@ -55,10 +55,8 @@ class ContextPacketError(AuthorityError):
 @dataclass(frozen=True)
 class ContextPacketRequest:
     repo_id: str
-    include_providers: bool = True
     include_drift: bool = False
     include_freshness: bool = False
-    provider_detail_limit: int = 20
     drift_detail_limit: int = 10
     fetch_timeout: int = 30
 
@@ -99,8 +97,7 @@ def build_context_packet(
         providers=ProviderSummary.model_validate(
             provider_summary_packet(
                 config,
-                include_providers=request.include_providers,
-                detail_limit=request.provider_detail_limit,
+                include_providers=False,
                 target_repo_id=repo_scope.repo_id,
             )
         ),
