@@ -14,7 +14,6 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
 )
 from agents_remember.models.lifecycles.review_assessment import AssessmentEvidenceReference
-from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout import (
     curator_coherence_publication as publication,
 )
@@ -22,7 +21,11 @@ from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_paths,
     require_current_curator_coherence,
 )
-from curator_coherence_test_support import write_curator_evidence
+from curator_coherence_test_support import (
+    prepared_publish_inputs,
+    read_prepared_candidate_set,
+    write_curator_evidence,
+)
 from test_knowledge_review_evidence_channels import (
     EVIDENCE_RELATIVE,
     _assessment_revision,
@@ -55,7 +58,7 @@ def _request(recorded, label: str, judgment_ref: str, assessment_ref=None):
         contract,
         CuratorCoherenceRequest(action="prepare", contract_path=str(contract.contract_path)),
     )
-    candidates = prepared["candidates"]
+    candidates = read_prepared_candidate_set(prepared)["candidates"]
     assert isinstance(candidates, list) and candidates
     revision = _assessment_revision(recorded.endpoint).model_copy(update={"assessmentId": label})
     if assessment_ref is not None:
@@ -75,12 +78,7 @@ def _request(recorded, label: str, judgment_ref: str, assessment_ref=None):
             for value in candidates
         ],
         review_assessments=[revision],
-        expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-        expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-        expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-        expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-        expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-        expected_attestation_sha256=str(prepared["attestationSha256"]),
+        **prepared_publish_inputs(prepared),
         caller=DeclaredCaller(role="architect", task_document_ref=recorded.sprint),
     )
 

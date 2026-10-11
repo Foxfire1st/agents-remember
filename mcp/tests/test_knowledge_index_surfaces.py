@@ -713,10 +713,18 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
         len(expected.reports),
     )
     assert sum(one["count"] for one in validation["byRule"]) == len(expected.violations)
-    assert validation["violations"] == [
-        one.to_document() for one in (*expected.refusals, *expected.reports)
-    ]
-    assert validation["violationsTruncated"] is False
+    # The answer keeps the first findings up to the status entry cap with the
+    # full count; the whole result with every finding is in the log's detail
+    # file (MIK-R110 rule 6, status-answer ruling). Refusals list first, so
+    # the cut never hides one behind report-only findings.
+    ordered = [one.to_document() for one in (*expected.refusals, *expected.reports)]
+    assert validation["violations"] == {
+        "count": len(ordered),
+        "items": ordered[:10],
+        "truncated": True,
+    }
+    assert validation["violationsTruncated"] is True
+    assert validation["violations"]["items"][0]["reportOnly"] is False
     assert "worklistState" not in reported  # no leaf was named
 
     # Against its own commit as the base nothing changed, so no anchor is checked for a path.
@@ -725,10 +733,13 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
     assert based["validation"]["refusalCount"] < validation["refusalCount"]
 
     monkeypatch.setattr(knowledge_tools, "MAX_LISTED_VIOLATIONS", 1)
-    bounded = check(memoryRoot=str(root), codeRoot=str(code))["validation"]
-    assert len(bounded["violations"]) == 1 and bounded["violationsTruncated"] is True
-    assert bounded["violations"][0]["reportOnly"] is False  # a refusal is listed first
-    assert bounded["refusalCount"] == validation["refusalCount"]
+    flagged = check(memoryRoot=str(root), codeRoot=str(code))["validation"]
+    # The listing stays whole whatever the bound says: the bound only flips the flag
+    # that tells the answer's first-entries cut dropped rows.
+    assert flagged["violations"] == validation["violations"]
+    assert flagged["violationsTruncated"] == (validation["violations"]["count"] > 1)
+    assert flagged["violations"]["items"][0]["reportOnly"] is False  # a refusal is listed first
+    assert flagged["refusalCount"] == validation["refusalCount"]
 
     for too_little in ({}, {"memoryRoot": str(root)}, {"codeRoot": str(code)}):
         refused = check(**too_little)

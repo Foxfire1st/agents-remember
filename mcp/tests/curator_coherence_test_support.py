@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
@@ -102,18 +104,17 @@ def write_curator_task_topology(contract: WorktreeContract) -> TaskDocumentRef:
     return sprint_ref
 
 
-def write_curator_evidence(
+def write_curator_attestation(
     contract: WorktreeContract,
     *,
-    caller_ref: TaskDocumentRef,
     report_text: str | None = None,
     source_candidates: list[dict[str, str]] | None = None,
-) -> None:
-    """Publish exact structured fixture evidence for the current candidate.
+) -> Path:
+    """Write the exact fixture memory-quality report and attestation, without publishing.
 
-    When a task-only mutation invalidates an existing fixture authority, omitted
-    report and candidate inputs are retained from the current attestation. That
-    makes the refresh explicit without fabricating a different semantic review.
+    The coherence observation reads these files; the authority publication is a separate
+    step, so a caller that needs an observation without an authority (a task document
+    with no parent, a stale source) stops here.
     """
 
     report = contract.worktree_group / "reports" / "curator-memory-quality.md"
@@ -164,6 +165,32 @@ def write_curator_evidence(
         json.dumps(attestation, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
+    return attestation_path
+
+
+def write_curator_evidence(
+    contract: WorktreeContract,
+    *,
+    caller_ref: TaskDocumentRef,
+    report_text: str | None = None,
+    source_candidates: list[dict[str, str]] | None = None,
+) -> None:
+    """Publish exact structured fixture evidence for the current candidate.
+
+    When a task-only mutation invalidates an existing fixture authority, omitted
+    report and candidate inputs are retained from the current attestation. That
+    makes the refresh explicit without fabricating a different semantic review.
+    """
+
+    write_curator_attestation(
+        contract, report_text=report_text, source_candidates=source_candidates
+    )
+    previous = _previous_attestation(
+        contract.worktree_group / "reports" / "curator-memory-quality.json"
+    )
+    candidates = (
+        source_candidates if source_candidates is not None else _previous_candidates(previous)
+    )
     evidence = (
         contract.task_root / "notes" / "reports" / f"{contract.leaf_id}-fixture-curator-evidence.md"
     )
@@ -190,16 +217,42 @@ def write_curator_evidence(
             semantic_requirement_revision="FIXTURE-R01@v1",
             delivery_attempt="A001",
             judgments=judgments,
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(role="architect", task_document_ref=caller_ref),
         ),
     )
     assert published["state"] in {"published", "already-current"}
+
+
+def read_prepared_candidate_set(prepared: Mapping[str, object]) -> dict[str, Any]:
+    """Read the candidate-set file a ``prepare`` answer names (MIK-R110 rule 3).
+
+    The answer carries the counts, the digest and the locations; the candidates and the
+    publish identities live in the file. The agreement between the two is asserted here,
+    so every fixture that publishes through this helper proves it.
+    """
+
+    envelope = json.loads(Path(str(prepared["candidatesPath"])).read_text(encoding="utf-8"))
+    assert isinstance(envelope, dict)
+    assert envelope.get("candidateSetDigest") == prepared.get("candidateSetDigest")
+    assert envelope.get("candidateCount") == prepared.get("candidateCount")
+    assert envelope["candidateCount"] == len(envelope["candidates"])
+    return envelope
+
+
+def prepared_publish_inputs(prepared: Mapping[str, object]) -> dict[str, Any]:
+    """The publish identity inputs for the set a ``prepare`` answer names."""
+
+    expected = read_prepared_candidate_set(prepared)["expected"]
+    assert isinstance(expected, dict)
+    return {
+        "expected_predecessor_digest": expected["predecessorAuthorityDigest"],
+        "expected_code_candidate_tree": expected["codeCandidateTree"],
+        "expected_memory_candidate_tree": expected["memoryCandidateTree"],
+        "expected_task_topology_fingerprint": expected["taskTopologyFingerprint"],
+        "expected_task_intent": TaskIntentIdentity.model_validate(expected["taskIntent"]),
+        "expected_attestation_sha256": expected["attestationSha256"],
+    }
 
 
 def _previous_attestation(path: Path) -> dict[str, object]:

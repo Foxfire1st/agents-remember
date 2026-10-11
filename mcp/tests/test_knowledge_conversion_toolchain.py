@@ -860,11 +860,14 @@ def test_a_leftover_evidence_line_is_refused_and_only_the_named_card_loses_refer
     assert set(json.loads(sidecar.read_text())["references"]) == {"1", "3"}  # never renumbered
 
 
-def test_one_documents_fix_reports_its_own_stale_references_and_the_response_is_bounded(
+def test_one_documents_fix_reports_its_own_stale_references_and_the_status_counts(
     tmp_path: Path,
 ) -> None:
-    """L37 P1c, C1: a fix of one document lists that document's stale references, not the tree's;
-    and the MCP response caps every list, says so, and keeps the full counts."""
+    """L37 P1c, C1, as MIK-R110 rules 1-2 keep it: a fix of one document lists that document's
+    stale references, not the tree's; the payload carries the whole result with the status
+    counts, and the answer carries the first entries up to the status entry cap with the
+    full count where the cap cut rows. The rewritten sidecars and the authoring report
+    stay in the whole result the log records."""
 
     code = code_repository(tmp_path / "code")
     memory = tmp_path / "memory"
@@ -881,16 +884,21 @@ def test_one_documents_fix_reports_its_own_stale_references_and_the_response_is_
     assert other["ok"] is True and other["stale"] == []  # a current card reports nothing
     assert check_references(memory, code.root, only=overview)["states"] == {"stale": 1}
 
-    limit = memory_tool_payloads.MAX_INLINE_CITATION_ITEMS
-    many = [{"path": f"onboarding/{index}.json"} for index in range(limit + 70)]
+    many = [{"path": f"onboarding/{index}.json"} for index in range(70)]
     full = {
-        "ok": True,
+        "ok": False,
         "status": "converted",
+        "dryRun": False,
+        "documentCount": 70,
+        "rewrittenCount": 70,
+        "staleCount": 70,
+        "unreadableCount": 0,
+        "refusedCount": 0,
         "stale": many,
         "rewrittenSidecars": [one["path"] for one in many],
         "unreadableSidecars": [],
         "authoring": {
-            "authoredCards": ["a.md"] * (limit + 1),
+            "authoredCards": ["a.md"] * 3,
             "unresolvedTargets": many,
             "refused": [],
             "dryRun": False,
@@ -900,23 +908,20 @@ def test_one_documents_fix_reports_its_own_stale_references_and_the_response_is_
         sent = memory_tool_payloads.citation_fix_payload(
             cast(Any, None), "demo", contract_path="contract.md"
         )
-    assert (len(sent["stale"]), sent["staleCount"]) == (limit, limit + 70)
-    assert sent["stale"] == many[:limit] and sent["unreadableSidecarsCount"] == 0
-    assert (len(sent["rewrittenSidecars"]), sent["rewrittenSidecarsCount"]) == (limit, limit + 70)
-    assert (
-        sent["truncated"] == ["stale", "rewrittenSidecars"] and "first 50" in sent["truncatedNote"]
-    )
-    assert sent["authoring"]["truncated"] == ["authoredCards", "unresolvedTargets"]
-    assert sent["authoring"]["authoredCardsCount"] == limit + 1
-    assert sent["authoring"]["unresolvedTargetsCount"] == limit + 70
-    assert len(sent["authoring"]["unresolvedTargets"]) == limit
-    small = {"ok": True, "status": "converted", "stale": many[:3], "rewrittenSidecars": []}
-    bounded = memory_tool_payloads.bounded_citation_fix(small)
-    assert (
-        bounded["stale"] == many[:3] and bounded["staleCount"] == 3 and "truncated" not in bounded
-    )
+    # The payload is the delivered answer: the status counts beside the first entries up
+    # to the status entry cap, with the full count where the cap cut rows. The rewritten
+    # sidecars and the authoring report stay in the whole result the log records.
+    assert sent["documentCount"] == 70
+    assert (sent["rewrittenCount"], sent["staleCount"]) == (70, 70)
+    assert sent["stale"] == many[:10]
+    assert "authoring" not in sent
+    assert "rewrittenSidecars" not in sent
     legacy = {"ok": True, "findings": many}  # an unconverted tree's result keeps its own shape
-    assert memory_tool_payloads.bounded_citation_fix(legacy) is legacy
+    with mock.patch.object(memory_tool_payloads, "citation_fix_tool", return_value=legacy):
+        sent_legacy = memory_tool_payloads.citation_fix_payload(
+            cast(Any, None), "demo", contract_path="contract.md"
+        )
+    assert "findings" not in sent_legacy
 
 
 def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(tmp_path: Path) -> None:

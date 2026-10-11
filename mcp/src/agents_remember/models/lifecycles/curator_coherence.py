@@ -370,6 +370,15 @@ JUDGMENTS_MEMBER = "judgments"
 # is content a leaf may legitimately have none of.
 REVIEW_ASSESSMENTS_MEMBER = "review_assessments"
 
+# The file transport for the two content collections above (MIK-R110 rule 3): a leaf whose
+# judgments do not fit an inline tool payload publishes from one JSON file holding both lists
+# instead. It is named here rather than added to `PUBLICATION_MEMBERS` for the same reason as
+# the two lists it carries -- a publication without it is complete, and making it required
+# would force every existing caller to change. Like the lists it is refused on
+# ``status``/``prepare``/``validate`` by the shape validator below, so the four actions keep
+# one input shape each.
+JUDGMENTS_FILE_MEMBER = "judgments_file"
+
 
 def _declared_publication_members(
     members: tuple[PublicationMember, ...] | None,
@@ -443,6 +452,10 @@ def publication_input_statement(
             f"; {_names_in_english(identities)} are caller-supplied delivery identities prepare"
             " does not derive from the observation it returns"
         )
+    statement += (
+        "; judgments and review assessments may be supplied inline or from one JSON file "
+        "(judgments_file) holding both lists, whose SHA-256 the publish answer carries"
+    )
     return statement + "."
 
 
@@ -469,6 +482,10 @@ class CuratorCoherenceRequest(_StrictModel):
     review_assessments: list[ReviewAssessmentRevision] = Field(
         default_factory=list, max_length=MAX_CURATOR_REVIEW_ASSESSMENTS
     )
+    # MIK-R110 rule 3: the file transport for the two content lists above. An absolute path to
+    # one JSON file holding ``judgments`` and ``review_assessments``; read once at publish, its
+    # SHA-256 answered. Supplying either list both inline and by file is refused at publish.
+    judgments_file: str | None = Field(default=None, max_length=8192)
     expected_predecessor_digest: str | None = Field(default=None, pattern=r"^$|^[0-9a-f]{64}$")
     expected_code_candidate_tree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     expected_memory_candidate_tree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
@@ -496,15 +513,26 @@ class CuratorCoherenceRequest(_StrictModel):
             raise ValueError("semantic requirement revision and delivery attempt must not be blank")
         return cleaned
 
+    @field_validator("judgments_file")
+    @classmethod
+    def _strip_judgments_file(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("judgments_file must not be blank")
+        return cleaned
+
     def _publication_inputs_supplied(self) -> tuple[str, ...]:
         """The publication-only request fields this request actually supplied, in model order.
 
-        ``judgments`` and ``review_assessments`` are included when non-empty so the sibling refusal
-        can name them too; neither is one of the nine members ``publish`` requires to be non-``None``.
+        ``judgments``, ``review_assessments`` and ``judgments_file`` are included when non-empty
+        so the sibling refusal can name them too; none is one of the nine members ``publish``
+        requires to be non-``None``.
         """
 
         declared = {member.name for member in PUBLICATION_MEMBERS}
-        content = (JUDGMENTS_MEMBER, REVIEW_ASSESSMENTS_MEMBER)
+        content = (JUDGMENTS_MEMBER, REVIEW_ASSESSMENTS_MEMBER, JUDGMENTS_FILE_MEMBER)
         return tuple(
             name
             for name in type(self).model_fields
@@ -563,6 +591,19 @@ class CuratorCoherenceResponse(ToolResponse):
     candidates: list[CuratorSourceCandidate] | None = Field(
         default=None, max_length=MAX_CURATOR_SOURCE_CANDIDATES
     )
+    # MIK-R110 rule 3: the status answer to a candidate set. ``prepare`` writes the set to a file
+    # and answers with the counts by kind, the set digest and the locations; the full candidate
+    # list stays in that file, not in the answer.
+    candidatesByKind: dict[str, int] | None = Field(default=None, max_length=512)
+    candidateSetDigest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    candidatesPath: str | None = Field(default=None, max_length=8192)
+    candidatesRenderingPath: str | None = Field(default=None, max_length=8192)
+    # MIK-R110 rule 3: the published counts. ``publish`` answers the outcome with the count of
+    # published judgments (and of bound assessments) instead of the recorded lists.
+    publishedJudgmentCount: int | None = Field(default=None, ge=0)
+    assessmentCount: int | None = Field(default=None, ge=0)
+    # MIK-R110 rule 3: the SHA-256 of the judgments file a publish read, when it read one.
+    judgmentsFileSha256: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reviewAssessments: list[ReviewAssessment] | None = Field(
         default=None, max_length=MAX_CURATOR_REVIEW_ASSESSMENTS
     )

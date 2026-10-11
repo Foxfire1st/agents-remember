@@ -137,9 +137,9 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
     ``validation`` is the knowledge validator's report (MIK-R22) over the tree at ``memoryRoot``,
     against ``bases`` (memory commits) and the code checkout ``codeRoot``: ``ok``, ``refusalCount``,
     ``reportCount``, ``byRule`` (every rule that fired, with its count and whether it only reports),
-    and ``violations`` -- a bounded listing, refusing violations first, with
-    ``violationsTruncated`` set when the report holds more. The counts always cover the whole
-    report. ``ok`` is the validator's own answer for this tree and these inputs; it is not a
+    and ``violations`` -- every finding, refusing violations first, with ``violationsTruncated``
+    set when the answer's list bound drops rows (the whole result stays whole: the log's detail
+    file is the report's location). The counts always cover the whole report. ``ok`` is the validator's own answer for this tree and these inputs; it is not a
     statement about the code, and a report-only finding never makes it false.
 
     ``worklistState`` and ``worklist`` are present when the caller named a leaf: the leaf's latest

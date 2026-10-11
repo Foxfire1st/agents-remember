@@ -71,13 +71,16 @@ from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessmentRevision,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from curator_coherence_test_support import write_curator_task_topology
+from curator_coherence_test_support import (
+    prepared_publish_inputs,
+    read_prepared_candidate_set,
+    write_curator_task_topology,
+)
 from test_review_git_trees import (
     FAMILY,
     INVARIANT,
@@ -574,7 +577,7 @@ def _publish_assessments(
         contract,
         CuratorCoherenceRequest(action="prepare", contract_path=contract.contract_path.as_posix()),
     )
-    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
     published = curator_coherence_action(
         contract,
         CuratorCoherenceRequest(
@@ -627,12 +630,7 @@ def _publish_assessments(
                     (SELECTED_ID,),
                 ),
             ],
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(role="architect", task_document_ref=sprint),
         ),
     )

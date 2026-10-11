@@ -15,6 +15,11 @@ from agents_remember.application.knowledge_worklist import (
     recompute_leaf_worklist,
 )
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
+from agents_remember.application.memory_quality.answer import (
+    failed_quality_error,
+    quality_result_answer,
+    quality_run_next_args,
+)
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
@@ -169,7 +174,13 @@ def _start_memory_quality_request(
             "operation": "memory_quality_check",
             "repoId": execution.scope.repo_id,
             "status": "capacity-reached",
+            # MIK-R110 rule 4: a not-ok answer holds the reason as a code, a
+            # one-sentence error, and the next action.
+            "code": "capacity-reached",
+            "error": "The check server is at its run capacity; start the check again shortly.",
             "guidance": _CAPACITY_GUIDANCE,
+            "nextAction": "memory_quality_check",
+            "nextArgs": quality_run_next_args(request, mode="start"),
             **_scope_projection(execution.scope.identity),
         }
     if admission.run_id is None:
@@ -198,8 +209,17 @@ def _poll_memory_quality_request(
             "operation": "memory_quality_check",
             "repoId": repo_id,
             "status": "run-not-found",
+            # MIK-R110 rule 4: a not-ok answer holds the reason as a code, a
+            # one-sentence error, and the next action.
+            "code": "run-not-found",
+            "error": (
+                "The run id is unknown, evicted, or belongs to another repository; "
+                "start the check again."
+            ),
             "runId": request.run_id,
             "guidance": _RUN_NOT_FOUND_GUIDANCE,
+            "nextAction": "memory_quality_check",
+            "nextArgs": quality_run_next_args(request, mode="start"),
         }
     scope_identity = snapshot.identity.scope
     mismatch = _poll_scope_mismatch(request, scope_identity)
@@ -242,7 +262,7 @@ def _poll_memory_quality_request(
                 "runId": snapshot.run_id,
             }
     if snapshot.status != "completed":
-        return _unfinished_poll_payload(repo_id, snapshot, scope_identity)
+        return _unfinished_poll_payload(repo_id, snapshot, scope_identity, request)
     result = dict(snapshot.result or {})
     if result.get("status") == "scope-refused":
         return {**result, "runId": snapshot.run_id}
@@ -292,6 +312,7 @@ def _unfinished_poll_payload(
     repo_id: str,
     snapshot: QualityRunSnapshot,
     scope_identity: MemoryScopeIdentity,
+    request: MemoryQualityPollRequest,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "ok": True,
@@ -303,6 +324,10 @@ def _unfinished_poll_payload(
     }
     if snapshot.status == "failed":
         result["error"] = snapshot.error
+        # MIK-R110 rule 4: the failed run names its recovery beside its error.
+        result["code"] = "quality-run-failed"
+        result["nextAction"] = "memory_quality_check"
+        result["nextArgs"] = quality_run_next_args(request, mode="start")
     return result
 
 
@@ -319,6 +344,10 @@ def _pair_refusal(repo_id: str, error: MemoryCandidatePairError) -> dict[str, ob
         "operation": "memory_quality_check",
         "repoId": repo_id,
         "status": "scope-refused",
+        # MIK-R110 rule 4: the refusal's identity doubles as the answer's code
+        # and its detail as the one-sentence error, beside the next action.
+        "code": error.status,
+        "error": error.detail,
         **error.response_fields(),
     }
     result["status"] = "scope-refused"
@@ -481,7 +510,9 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         )
     response.update(_knowledge_briefs(worklist, gate))
     if not execution.publish_curator_report:
-        return _bounded_quality_response(response, execution.detail_limit)
+        return _answered_quality_response(
+            _bounded_quality_response(response, execution.detail_limit)
+        )
     _attach_curator_checklist(
         execution,
         payload,
@@ -489,7 +520,23 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         candidate_inputs=candidate_inputs,
         prepared=_PreparedInputs(census=census, worklist=worklist, gate=gate),
     )
-    return _bounded_quality_response(response, execution.detail_limit)
+    return _answered_quality_response(_bounded_quality_response(response, execution.detail_limit))
+
+
+def _answered_quality_response(response: dict[str, object]) -> dict[str, object]:
+    """Keep the computed status in the whole result the log records.
+
+    MIK-R110 rule 4 computes the agent-facing answer once from the whole
+    check result; the whole result carries its keys (status, reason, and
+    blocking selection) so the log, the command line, and the delivered
+    status reason from one set of entries.
+    """
+
+    answer = quality_result_answer(dict(response))
+    for key, value in answer.items():
+        if key not in ("ok", "repoId", "onboardingRoot"):
+            response[key] = value
+    return response
 
 
 @dataclass(frozen=True)
@@ -562,31 +609,21 @@ def _knowledge_worklist(scope: MemoryScope) -> tuple[dict[str, Any], str | None]
     return None if contract is None else recompute_leaf_worklist(contract)
 
 
-def _bounded_quality_response(response: dict[str, object], detail_limit: int) -> dict[str, object]:
-    """Bound transport samples after complete checklist and catalog publication."""
+def _bounded_quality_response(response: dict[str, object], _detail_limit: int) -> dict[str, object]:
+    """Keep the complete computed populations in the whole result the log records.
 
-    def sampled(payload: dict[str, Any]) -> dict[str, Any]:
-        result = dict(payload)
-        for field, count_field in (
-            ("findings", "findingSampleCount"),
-            ("surfacedFindings", "surfacedSampleCount"),
-            ("debtFindings", "debtSampleCount"),
-            ("reportOnlySample", "reportOnlySampleCount"),
-        ):
-            findings = result.get(field)
-            if isinstance(findings, list):
-                result[field] = findings[:detail_limit]
-                result[count_field] = len(result[field])
-        return result
+    The logger, the command line, and the internal lane all read this whole
+    result, so no finding population is cut here: the detail file must recover
+    every row, including rows a subset or failed-report delivery sample leaves
+    out. Delivery sampling lives in the answer projection --
+    ``quality_result_answer`` carries counts and the blocking entries capped
+    at ``TOOL_ANSWER_LIST_MAX`` -- while ``_detail_limit`` (retained for the
+    pinned call shape) still bounds the census and catalog publication the
+    callers request elsewhere. Failed-report recovery reads these same
+    complete rows.
+    """
 
-    result = sampled(response)
-    checks = result.get("checks")
-    if isinstance(checks, dict):
-        result["checks"] = {
-            name: sampled(check) if isinstance(check, dict) else check
-            for name, check in checks.items()
-        }
-    return result
+    return dict(response)
 
 
 def _attach_curator_checklist(
@@ -750,17 +787,26 @@ def _prepared_findings(prepared: _PreparedInputs) -> list[dict[str, Any]]:
     """The census's blockers, as repair findings."""
 
     assert prepared.census is not None
-    findings: list[dict[str, Any]] = [
-        {
-            "check": "memory-census",
-            "code": blocker.code,
-            "path": blocker.identity.memoryRootRelativePath
+    findings: list[dict[str, Any]] = []
+    for blocker in prepared.census.result.blockers:
+        path = (
+            blocker.identity.memoryRootRelativePath
             if blocker.identity
-            else blocker.sourcePath or "",
-            "message": blocker.detail,
-        }
-        for blocker in prepared.census.result.blockers
-    ]
+            else blocker.sourcePath or ""
+        )
+        findings.append(
+            {
+                "check": "memory-census",
+                "code": blocker.code,
+                "path": path,
+                "message": blocker.detail,
+                # MIK-R110 rule 4: what the repair loop opens (document),
+                # what motivated it (place), and why it blocks (reason).
+                "document": path,
+                "place": blocker.sourcePath or "",
+                "reason": blocker.detail,
+            }
+        )
     return findings
 
 
@@ -1108,13 +1154,20 @@ def _attach_coherence_readiness(scope: MemoryScope, response: dict[str, object])
     try:
         validated = require_current_curator_coherence(scope.contract)
     except CuratorCoherenceError as exc:
+        # MIK-R110 rule 4: an answer with ``ok`` false holds the reason as a code and the
+        # next action. A refusal taken over from the coherence check keeps that check's
+        # next action -- including ``task_doc`` when the task document has no parent, as
+        # ``curator_coherence`` names for the same state.
         response["ok"] = False
         response["checklistStatus"] = "coherence-required"
         response["coherenceStatus"] = exc.status
+        response["code"] = exc.status
         response["guidance"] = (
             "Memory repairs are complete, but closeout is not ready: publish or refresh the "
             "exact structured curator-coherence authority with curator_coherence, then validate it."
         )
+        response["error"] = failed_quality_error(response, {"code": exc.status}, 0)
+        response["nextAction"] = exc.next_action or "curator_coherence"
         return
     response["coherenceStatus"] = "current"
     response["coherenceRecordDigest"] = validated.record_digest

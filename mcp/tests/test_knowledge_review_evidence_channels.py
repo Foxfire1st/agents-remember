@@ -43,7 +43,6 @@ from agents_remember.models.lifecycles.review_assessment_binding import (
     no_currentness_measurement,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_paths,
 )
@@ -51,7 +50,11 @@ from agents_remember.worktrees.integration.closeout.curator_coherence_publicatio
     curator_coherence_action,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from curator_coherence_test_support import write_curator_task_topology
+from curator_coherence_test_support import (
+    prepared_publish_inputs,
+    read_prepared_candidate_set,
+    write_curator_task_topology,
+)
 from pydantic import ValidationError
 from test_review_git_trees import INVARIANT, World, _resolve, _seed, build_world, commit
 from test_worktree_support import write_passing_route_review
@@ -134,7 +137,7 @@ def _publish_assessment(
         contract,
         CuratorCoherenceRequest(action="prepare", contract_path=contract.contract_path.as_posix()),
     )
-    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
     published = curator_coherence_action(
         contract,
         CuratorCoherenceRequest(
@@ -152,12 +155,7 @@ def _publish_assessment(
                 for candidate in candidates
             ],
             review_assessments=[_assessment_revision(endpoint)],
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(role="architect", task_document_ref=sprint),
         ),
     )

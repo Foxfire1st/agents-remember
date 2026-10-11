@@ -12,6 +12,7 @@ preserve every byte outside the selected citation span.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -113,6 +114,7 @@ class Result:
     written: int = 0
     remaining: int | None = 0
     projections: list[deterministic_projection.Projection] = field(default_factory=list)
+    refused_documents: list[dict[str, Any]] = field(default_factory=list)
 
 
 def table_sites(lines: list[str]) -> list[tuple[model.Claim, Site]]:
@@ -271,7 +273,7 @@ def fix_onboarding_root(
     code_repository_root: Path | Trees,
     *,
     dry_run: bool = False,
-    only: str | None = None,
+    only: str | Sequence[str] | None = None,
     expected_snapshot: str | None = None,
 ) -> dict[str, Any]:
     """Regenerate every repairable range in the memory tree, and report the rest.
@@ -279,18 +281,42 @@ def fix_onboarding_root(
     THE CALLER OWNS THE WRITE GUARD. This function writes wherever it is pointed; that
     ``onboarding_root`` is a leaf's memory worktree and never the official memory repo is
     established before the call, by the enclosure contract.
+
+    ``only`` names the run's scope: one onboarding-relative file as a string, several
+    as a sequence (MIK-R110 rule 2), or nothing for the whole tree. Each named card is
+    resolved exactly as a call naming it alone resolves it. A string naming nothing is
+    refused as today; a sequence resolves card by card, so a name that matches nothing
+    is a refusal of that document and does not stop the others. An empty sequence is
+    refused and changes nothing.
     """
+    names = list(only) if isinstance(only, Sequence) and not isinstance(only, str) else None
+    if names is not None and len(names) == 0:
+        raise ValueError(
+            "citation_fix with an empty documents list is refused and changes nothing."
+        )
+    selection = only if isinstance(only, str) or only is None else names
     source_index.validate_operation_scope(
-        only,
+        selection,
         expected_snapshot,
         leased_index=False,
     )
     trees = operation_trees(onboarding_root, code_repository_root)
-    selected = model.documents_in(onboarding_root, only)
+    result = Result()
+    if names is None:
+        assert only is None or isinstance(only, str)
+        selected = model.documents_in(onboarding_root, only)
+    else:
+        selected = []
+        for name in names:
+            try:
+                selected.extend(model.documents_in(onboarding_root, name))
+            except ValueError as error:
+                result.refused_documents.append(
+                    {"document": name, "code": "document_not_found", "message": str(error)}
+                )
     with source_index.open_repository_index(trees, expected_snapshot=expected_snapshot) as index:
         sources = Sources()
         document_cache = Documents()
-        result = Result()
         walk = Walk(
             trees=trees,
             index=index,
@@ -315,7 +341,13 @@ def fix_onboarding_root(
             )
             _decide(one, outcome, walk, staging, onboarding_root)
         _publish(staging, walk, dry_run=dry_run)
-        result.remaining = _postcheck(onboarding_root, code_repository_root, walk, selected, only)
+        result.remaining = _postcheck(
+            onboarding_root,
+            code_repository_root,
+            walk,
+            selected,
+            only,
+        )
         return payload(
             onboarding_root,
             trees.code_root,
@@ -330,15 +362,19 @@ def _postcheck(
     code_repository_root: Path | Trees,
     walk: Walk,
     selected: list[Path],
-    only: str | None,
+    only: str | Sequence[str] | None,
 ) -> int | None:
     """Keep a detected disappearance refusal when its admitted scope cannot be rechecked.
 
     Initial selection still refuses nonexistent input. An absent selected document after
     an observed publication conflict is unmeasurable, not a successful empty scan.
+
+    A named selection is rechecked document by document under the run's index: the total
+    remaining in the named set. The rechecked names are the resolved selection, so a
+    refused name the run never read is simply not among them.
     """
     if (
-        only is not None
+        isinstance(only, str)
         and not selected[0].exists()
         and any(
             refused.path == only and refused.code == deterministic_projection.PROJECTION_CONFLICT
@@ -346,9 +382,21 @@ def _postcheck(
         )
     ):
         return None
-    return range_resolution.check_onboarding_root(
-        onboarding_root, code_repository_root, only=only, index=walk.index
-    )["findingCount"]
+    if only is None:
+        return range_resolution.check_onboarding_root(
+            onboarding_root, code_repository_root, only=None, index=walk.index
+        )["findingCount"]
+    names = (
+        [only]
+        if isinstance(only, str)
+        else [path.relative_to(onboarding_root).as_posix() for path in selected]
+    )
+    return sum(
+        range_resolution.check_onboarding_root(
+            onboarding_root, code_repository_root, only=name, index=walk.index
+        )["findingCount"]
+        for name in names
+    )
 
 
 def _decide(
@@ -562,14 +610,18 @@ def payload(
     ``documentsWritten`` counts only completed publications and remains zero for previews.
     When an observed conflict removed the admitted selected document, the recheck is
     unavailable: ``findingsRemaining`` is null and the conflict keeps ``ok`` false.
+    A named document that matches nothing is a refusal of that document: it is named
+    in ``refusedDocuments``, keeps ``ok`` false, and never stops the others.
     """
+    refused_list = [dict(entry) for entry in result.refused_documents]
     return {
-        "ok": not result.refused and result.remaining == 0,
+        "ok": not result.refused and not refused_list and result.remaining == 0,
         "operation": OPERATION,
         "onboardingRoot": onboarding_root.as_posix(),
         "codeRoot": code_repository_root.as_posix(),
         "dryRun": dry_run,
         "documentsScanned": result.documents,
+        "refusedDocuments": refused_list,
         "failingClaims": result.candidates,
         "claimsRepaired": sum(one.repairing for one in result.applied),
         "claimsNormalised": sum(not one.repairing for one in result.applied),

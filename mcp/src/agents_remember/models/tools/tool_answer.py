@@ -28,10 +28,20 @@ TOOL_ANSWER_EXCEPTION_MAX_TOKENS = 4000
 # first entries in the order the next step needs, and the location of the
 # whole list (the answer-level ``log`` names the detail file).
 TOOL_ANSWER_LIST_MAX = 20
+# Status-answer ruling: a status answer keeps the default bound of 1,500.
+# The five landed status answers whose full entry lists exceed it carry at
+# most this many entries per list instead -- smaller entries first, then
+# fewer entries -- with the total count and the whole-list location beside
+# them, so the caller still sizes the work and opens the full rows.
+TOOL_ANSWER_STATUS_ENTRY_MAX = 10
 # Rule 2: answer fields that hold a location name a file the caller can open
 # as written. Strings at most this long stay inline in the overflow short
 # form; the guard (rule 4) keeps numbers, booleans and short strings.
 TOOL_ANSWER_SHORT_STRING_MAX = 200
+# Status-answer ruling: blocking-entry reasons longer than this are shortened
+# at a word boundary in the answer; the full sentence stays in the whole
+# result the log records.
+TOOL_ANSWER_REASON_MAX_CHARS = 200
 # Rule 4: the short form of the guard has a bound of its own, for every tool
 # and every row, an interim row included. A row with a lower bound does not
 # lower it: the short form is what a caller gets in place of an answer that
@@ -85,7 +95,9 @@ ENVELOPE_STRIPPED_FIELDS = ("tokens", "tokenizer", "tokenCountExact", "operation
 # is above TOOL_ANSWER_EXCEPTION_MAX_TOKENS; the test suite proves it.
 # Its first rows are ``role_message`` with ``wait`` (the answer is another
 # agent's reply) and ``server_info`` (the designated place for roots, build
-# and identity -- rule 2, second point).
+# and identity -- rule 2, second point). A status answer keeps the default
+# bound of 1,500: no landed memory tool stands here, by the Architect's
+# status-answer ruling (an exception row comes to the Architect first).
 TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
     ("role_message", None): (
         4000,
@@ -97,28 +109,40 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
     ),
 }
 
+# MIK-R110 rule 6: the governed per-tool answer bounds for the landed memory
+# tools. Each bound equals its shaped row's bound in the answer table, and the
+# guard enforces it on every answer the tool delivers -- the table's measured
+# bounds and the production bounds are one number, not two.
+SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
+    ("citation_fix", None): 1500,
+    ("memory_quality_check", None): 1500,
+    ("knowledge_integrity_check", None): 1500,
+    ("route_index_refresh", None): 400,
+    ("drift_check", None): 1500,
+    ("citation_migrate", None): 1500,
+    ("memory_init", None): 800,
+    ("memory_baseline_status", None): 600,
+    ("memory_baseline_adopt", None): 700,
+    ("memory_carryover_plan", None): 500,
+    ("memory_carryover_apply", None): 800,
+    ("curator_coherence", None): 850,
+}
+
 # Rule 7: until its leaf lands, a tool stands in the table as an interim row
 # (bound 4,000, no list of fields, the name of its leaf). The guard holds it
 # to the bound. This leaf builds rules 1-6 and 8 and changes the envelope;
 # the answers themselves are rebuilt by L109-L112.
 INTERIM_TOOL_LEAF: dict[str, str] = {
+    # L100: native tools land with their own leaf; until it lands they stand
+    # as interim rows here.
+    "retire_child": "L100",
+    "role_start_set": "L100",
     # L109: a read names where a thing is.
     "read_ar_files": "L109",
     "knowledge_read": "L109",
     "knowledge_diff": "L109",
     "context_packet": "L109",
     "resolve_context": "L109",
-    # L110: the memory tools answer with a status.
-    "memory_quality_check": "L110",
-    "citation_fix": "L110",
-    "route_index_refresh": "L110",
-    "memory_init": "L110",
-    "memory_baseline_status": "L110",
-    "memory_baseline_adopt": "L110",
-    "memory_carryover_plan": "L110",
-    "memory_carryover_apply": "L110",
-    "knowledge_integrity_check": "L110",
-    "curator_coherence": "L110",
     # L111: the task and landing tools answer with the state and the next step.
     "worktree_start": "L111",
     "worktree_attach": "L111",
@@ -127,6 +151,7 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "worktree_pause": "L111",
     "worktree_closeout_preview": "L111",
     "worktree_closeout_apply": "L111",
+    "worktree_enclosure_adopt": "L111",
     "worktree_integrate": "L111",
     "worktree_checkpoint_landing": "L111",
     "worktree_record_landing": "L111",
@@ -140,9 +165,8 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
-    "worktree_enclosure_adopt": "L111",
 }
-INTERIM_LEAVES = ("L109", "L110", "L111", "L112")
+INTERIM_LEAVES = ("L100", "L109", "L110", "L111", "L112")
 
 
 # Rule 9 (L112): the landed leaf's final rows carry their own bounds. The
@@ -180,20 +204,31 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
 def bound_for(tool_name: str, operation: str | None = None) -> int:
     """Return the answer bound in tokens for one tool (and operation).
 
-    Exceptions first, then the interim 4,000 for tools whose leaf has not
-    landed yet (rules 4 and 7), then L112's final rows (rule 9), then the
-    4,000 net for anything without an entry: L112's final rows carry their
-    own bounds in this table, and the guard stays the net L108 built.
+    Exceptions first, then the governed shaped bound for tools whose leaf has
+    landed (MIK-R110 rule 6: this leaf), then the interim 4,000 for tools
+    whose leaf has not landed yet (rules 4 and 7), then L112's final rows
+    (rule 9), then the 4,000 net for anything without an entry: the guard
+    stays the net L108 built.
     """
-    if (tool_name, operation) in TOOL_ANSWER_EXCEPTIONS:
-        return TOOL_ANSWER_EXCEPTIONS[(tool_name, operation)][0]
-    if (tool_name, None) in TOOL_ANSWER_EXCEPTIONS:
-        return TOOL_ANSWER_EXCEPTIONS[(tool_name, None)][0]
+    for key in ((tool_name, operation), (tool_name, None)):
+        if key in TOOL_ANSWER_EXCEPTIONS:
+            return TOOL_ANSWER_EXCEPTIONS[key][0]
+    if (tool_name, operation) in SHAPED_TOOL_BOUNDS:
+        return SHAPED_TOOL_BOUNDS[(tool_name, operation)]
+    if (tool_name, None) in SHAPED_TOOL_BOUNDS:
+        return SHAPED_TOOL_BOUNDS[(tool_name, None)]
     if tool_name in INTERIM_TOOL_LEAF:
         return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
     if tool_name in L112_FINAL_BOUNDS:
         return L112_FINAL_BOUNDS[tool_name]
     return TOOL_ANSWER_EXCEPTION_MAX_TOKENS
+
+
+def shaped_bound_for(tool_name: str, operation: str | None = None) -> int | None:
+    """Return the governed shaped bound for one landed tool, else None."""
+    if (tool_name, operation) in SHAPED_TOOL_BOUNDS:
+        return SHAPED_TOOL_BOUNDS[(tool_name, operation)]
+    return SHAPED_TOOL_BOUNDS.get((tool_name, None))
 
 
 def interim_leaf_for(tool_name: str) -> str | None:
@@ -202,10 +237,15 @@ def interim_leaf_for(tool_name: str) -> str | None:
     Every interim row names its exact rule-7 leaf, exception rows included:
     ``role_message`` answers from ``role_agents.py`` (L111). A tool with no
     interim row -- a landed leaf's final tool, or an exception passthrough
-    like ``server_info`` -- has no owning leaf.
+    like ``server_info`` -- has no owning leaf. A tool with a governed shaped
+    bound has landed and owns its answer itself, so it names no leaf either.
     """
     if tool_name in INTERIM_TOOL_LEAF:
         return INTERIM_TOOL_LEAF[tool_name]
+    if (tool_name, None) in SHAPED_TOOL_BOUNDS or tool_name in (
+        name for name, _op in SHAPED_TOOL_BOUNDS
+    ):
+        return None
     if (tool_name, None) in TOOL_ANSWER_EXCEPTIONS or tool_name in (
         name for name, _op in TOOL_ANSWER_EXCEPTIONS
     ):

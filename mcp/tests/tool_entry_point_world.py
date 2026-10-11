@@ -84,13 +84,12 @@ KNOWN_MEMORY_SCAFFOLD_ADDITIONS = frozenset({"system/sources.md", "system/tools.
 # change that introduces it.
 #
 # T64's citation-preview repair remains; its original bare-not-ok entries were removed.
-# Since b52adc8b (L26's landing), the admitted sweep reaches memory_quality_check's
-# coherence-required result without a standard refusal identity or next action. L110 owns
-# that product answer (MIK-R110 rule 4). Repair it and remove this entry in the same change;
-# the sweep compares the pin with the actual unmarked population in both directions.
-UNMARKED_NOT_OK: dict[str, str] = {
-    "memory_quality_check": "coherence-required without a refusal identity or next action (L110)",
-}
+# The sweep used to reach memory_quality_check's coherence-required result without a
+# standard refusal identity or next action. L110 repaired that product answer under
+# MIK-R110 rule 4 (the taken-over coherence refusal carries its code and next action),
+# and emptied this pin in the same change; the sweep compares the pin with the actual
+# unmarked population in both directions.
+UNMARKED_NOT_OK: dict[str, str] = {}
 
 REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus", "code")
 # Shaped `next` is judged only by _actionable_next below, never by the generic
@@ -218,9 +217,7 @@ def _unknown_in_mapping(
     return None
 
 
-def _unknown_in_truncated(
-    answer: dict[str, Any], whole: list[Any], *, path: str
-) -> str | None:
+def _unknown_in_truncated(answer: dict[str, Any], whole: list[Any], *, path: str) -> str | None:
     """The first key of one truncated-list wrapper the shaping does not own."""
 
     if len(whole) <= TOOL_ANSWER_LIST_MAX:
@@ -238,9 +235,7 @@ def _unknown_in_truncated(
     for index, item in enumerate(items):
         if index >= len(whole):
             return f"{path}.items[{index}]"
-        hit = _unknown_delivered_path(
-            item, whole[index], top=False, path=f"{path}.items[{index}]"
-        )
+        hit = _unknown_delivered_path(item, whole[index], top=False, path=f"{path}.items[{index}]")
         if hit is not None:
             return hit
     return None
@@ -252,9 +247,7 @@ def _unknown_in_list(answer: list[Any], whole: list[Any], *, path: str) -> str |
     for index, item in enumerate(answer):
         if index >= len(whole):
             return f"{path}[{index}]"
-        hit = _unknown_delivered_path(
-            item, whole[index], top=False, path=f"{path}[{index}]"
-        )
+        hit = _unknown_delivered_path(item, whole[index], top=False, path=f"{path}[{index}]")
         if hit is not None:
             return hit
     return None

@@ -15,11 +15,16 @@ from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
+    MAX_CURATOR_REVIEW_ASSESSMENTS,
+    MAX_CURATOR_SOURCE_CANDIDATES,
     CuratorCoherenceAuthority,
+    CuratorCoherenceJudgment,
     CuratorCoherenceRecord,
     CuratorCoherenceRecordedJudgment,
     CuratorCoherenceRequest,
     CuratorCoherenceSnapshot,
+    CuratorSourceCandidate,
+    ValidatedCuratorCoherenceGeneration,
     publication_input_statement,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
@@ -64,12 +69,25 @@ from .curator_coherence_judgments import (
     retain_judgment_evidence,
 )
 from .curator_coherence_render import render_curator_coherence
+from .curator_judgments_file import (
+    _parse_judgments_payload,
+    _read_judgments_bytes,
+    _validate_file_entries,
+)
 
 # The resolver and policy versions one assessment's binding declares. They are named as versioned
 # constants rather than spelled inline at the one call site so a change to either is a visible change
 # to this module's own contract, and so a stored assessment's declared resolver version is greppable.
 ASSESSMENT_RESOLVER_VERSION = "curator-evidence-resolver/v1"
 ASSESSMENT_POLICY_VERSION = "review-assessment-policy/v1"
+
+# MIK-R110 rule 3: the prepared candidate set lives in the enclosure's reports directory under
+# these names, with a reading rendering beside the machine set. The curator reads the
+# candidates from the file; the prepare answer carries only the counts, the digest and these
+# locations.
+CANDIDATES_FILE_NAME = "curator-coherence-candidates.json"
+CANDIDATES_RENDERING_NAME = "curator-coherence-candidates.md"
+CANDIDATES_FILE_SCHEMA = "ar-curator-coherence-candidates/v1"
 
 
 @dataclass(frozen=True)
@@ -150,19 +168,128 @@ def _status(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dic
 def _prepare(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
     observation = observe_curator_coherence_source(contract)
     predecessor = current_curator_coherence_predecessor(contract)
-    return _observation_payload(
+    json_path, md_path, set_digest, by_kind = _write_candidate_set(
+        contract, observation, predecessor
+    )
+    paths = curator_coherence_paths(contract)
+    return _success(
         request,
         contract,
-        observation,
-        _ObservationView(
-            state="prepared",
-            summary=(
-                "Exact source candidates and optimistic-concurrency identities are prepared; "
-                + publication_input_statement()
-            ),
-            predecessor=predecessor,
+        state="prepared",
+        summary=(
+            "Exact source candidates and optimistic-concurrency identities are prepared; "
+            + publication_input_statement()
+            + f" The candidate set is written to {json_path.as_posix()}, with a reading "
+            "rendering beside it; read the candidates from the file."
         ),
+        canonicalPath=paths.canonical.as_posix(),
+        candidateCount=len(observation.source_candidates),
+        candidatesByKind=by_kind,
+        candidateSetDigest=set_digest,
+        candidatesPath=json_path.as_posix(),
+        candidatesRenderingPath=md_path.as_posix(),
     )
+
+
+def _candidates_by_kind(
+    candidates: list[CuratorSourceCandidate],
+) -> dict[str, int]:
+    """Count one candidate set by classification, in first-seen order (rule 3)."""
+
+    by_kind: dict[str, int] = {}
+    for candidate in candidates:
+        by_kind[candidate.classification] = by_kind.get(candidate.classification, 0) + 1
+    return by_kind
+
+
+def _write_candidate_set(
+    contract: WorktreeContract,
+    observation: CuratorCoherenceObservation,
+    predecessor: str,
+) -> tuple[Path, Path, str, dict[str, int]]:
+    """Write the prepared candidate set and its reading rendering; answer their digest.
+
+    Returns the JSON path, the rendering path, the set digest and the by-kind counts. The
+    digest covers the canonical bytes of the candidate list alone, so it is stable whatever
+    envelope surrounds it. A set that cannot be written refuses ``prepare``: no judgment can
+    be published against a set that was not written.
+    """
+
+    candidate_dicts = [
+        candidate.model_dump(mode="json") for candidate in observation.source_candidates
+    ]
+    set_digest = _digest(_json_bytes(candidate_dicts))
+    by_kind = _candidates_by_kind(observation.source_candidates)
+    envelope = {
+        "schema": CANDIDATES_FILE_SCHEMA,
+        "leafId": contract.leaf_id,
+        "contractPath": contract.contract_path.as_posix(),
+        "candidateCount": len(candidate_dicts),
+        "candidatesByKind": by_kind,
+        "candidateSetDigest": set_digest,
+        "expected": {
+            "predecessorAuthorityDigest": predecessor,
+            "codeCandidateTree": observation.code_candidate_tree,
+            "memoryCandidateTree": observation.memory_candidate_tree,
+            "taskTopologyFingerprint": observation.task_topology_fingerprint,
+            "taskIntent": observation.task_intent.model_dump(mode="json", by_alias=True),
+            "attestationSha256": observation.attestation_sha256,
+        },
+        "candidates": candidate_dicts,
+    }
+    reports = contract.worktree_group / "reports"
+    json_path = reports / CANDIDATES_FILE_NAME
+    md_path = reports / CANDIDATES_RENDERING_NAME
+    try:
+        reports.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(json_path, _json_bytes(envelope).decode("utf-8"))
+        atomic_write_text(
+            md_path,
+            _render_candidate_set(contract, observation, predecessor, set_digest, by_kind),
+        )
+    except OSError as exc:
+        raise CuratorCoherenceError(
+            "curator-coherence-candidates-unwritable",
+            f"the prepared candidate set could not be written: {exc}",
+            next_action="prepare",
+        ) from exc
+    return json_path, md_path, set_digest, by_kind
+
+
+def _render_candidate_set(
+    contract: WorktreeContract,
+    observation: CuratorCoherenceObservation,
+    predecessor: str,
+    set_digest: str,
+    by_kind: dict[str, int],
+) -> str:
+    """Render the prepared set for reading beside the machine file (rule 3)."""
+
+    kinds = ", ".join(f"{kind}: {count}" for kind, count in by_kind.items())
+    lines = [
+        f"# {contract.leaf_id} Curator Coherence — prepared candidates",
+        "",
+        "> Generated projection. The JSON set beside this file is canonical; this Markdown is",
+        "> never parsed as input. Read either in parts: one line names one candidate.",
+        "",
+        f"- Candidate set digest: `{set_digest}`",
+        f"- Candidates: {len(observation.source_candidates)}" + (f" ({kinds})" if kinds else ""),
+        f"- Predecessor authority digest: `{predecessor or '(none)'}`",
+        f"- Code candidate tree: `{observation.code_candidate_tree}`",
+        f"- Memory candidate tree: `{observation.memory_candidate_tree}`",
+        f"- Task topology fingerprint: `{observation.task_topology_fingerprint}`",
+        f"- Attestation SHA-256: `{observation.attestation_sha256}`",
+        "",
+        "## Candidates",
+        "",
+    ]
+    for candidate in observation.source_candidates:
+        lines.append(
+            f"- `{candidate.sourceFile}` <- `{candidate.onboardingFile}` "
+            f"({candidate.classification})"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _validate(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
@@ -172,6 +299,26 @@ def _validate(contract: WorktreeContract, request: CuratorCoherenceRequest) -> d
 
 def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
     observation = observe_curator_coherence_source(contract)
+    judgments_file_sha256: str | None = None
+    if request.judgments_file is not None:
+        # Both-ways transport is refused on explicit supply, not on truthiness:
+        # an explicitly passed empty list is still a second source for that
+        # list, while an omitted field (the default) leaves the file the sole
+        # source.
+        if (
+            "judgments" in request.model_fields_set
+            or "review_assessments" in request.model_fields_set
+        ):
+            raise CuratorCoherenceError(
+                "curator-coherence-input-both-inline-and-file",
+                "judgments and review assessments were supplied both inline and in "
+                "judgments_file; supply each list once",
+                next_action="publish",
+            )
+        judgments, assessments, judgments_file_sha256 = _read_judgments_file(request)
+        request = request.model_copy(
+            update={"judgments": judgments, "review_assessments": assessments}
+        )
     _require_expected_observation(request, observation)
     judgments = exact_curator_judgments(contract, observation.source_candidates, request.judgments)
     caller = _authorized_publisher(contract, observation, request)
@@ -180,7 +327,13 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
     predecessor = current_curator_coherence_predecessor(contract)
     replay = _idempotent_replay(contract, publication_fingerprint)
     if replay is not None:
-        return _validated_payload(request, contract, replay, state="already-current")
+        return _validated_payload(
+            request,
+            contract,
+            replay,
+            state="already-current",
+            judgments_file_sha256=judgments_file_sha256,
+        )
     if predecessor != request.expected_predecessor_digest:
         raise CuratorCoherenceError(
             "curator-coherence-predecessor-stale",
@@ -221,7 +374,13 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
         )
     replay = _idempotent_replay(current_contract, publication_fingerprint)
     if replay is not None:
-        return _validated_payload(request, current_contract, replay, state="already-current")
+        return _validated_payload(
+            request,
+            current_contract,
+            replay,
+            state="already-current",
+            judgments_file_sha256=judgments_file_sha256,
+        )
     _require_predecessor(current_contract, request)
     _require_observation_unchanged(observation, observe_curator_coherence_source(current_contract))
     require_recorded_judgments_current(current_contract, judgments)
@@ -250,10 +409,43 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
         _json_bytes(authority.model_dump(mode="json")).decode("utf-8"),
     )
     validated = require_current_curator_coherence(contract)
-    payload = _validated_payload(request, contract, validated, state="published")
+    payload = _validated_payload(
+        request,
+        contract,
+        validated,
+        state="published",
+        judgments_file_sha256=judgments_file_sha256,
+    )
     if snapshot_path is not None:
         payload["snapshotPath"] = snapshot_path.as_posix()
     return payload
+
+
+def _read_judgments_file(
+    request: CuratorCoherenceRequest,
+) -> tuple[list[CuratorCoherenceJudgment], list[ReviewAssessmentRevision], str]:
+    """Read the publish content lists from one JSON file, exactly as inline lists are checked.
+
+    MIK-R110 rule 3: the file holds the two lists under ``judgments`` and
+    ``review_assessments``. It is read once; the SHA-256 of those bytes is answered. Every
+    entry is validated by the same models as an inline entry, and a file with one judgment
+    too many is refused as the inline list is.
+    """
+
+    raw = request.judgments_file
+    assert raw is not None
+    content, file_digest = _read_judgments_bytes(raw)
+    judgments_raw, assessments_raw = _parse_judgments_payload(content)
+    judgments = _validate_file_entries(
+        judgments_raw, CuratorCoherenceJudgment, "judgments", MAX_CURATOR_SOURCE_CANDIDATES
+    )
+    assessments = _validate_file_entries(
+        assessments_raw,
+        ReviewAssessmentRevision,
+        "review_assessments",
+        MAX_CURATOR_REVIEW_ASSESSMENTS,
+    )
+    return judgments, assessments, file_digest
 
 
 def _exact_review_assessments(
@@ -809,36 +1001,48 @@ def _observation_payload(
     observation: CuratorCoherenceObservation,
     view: _ObservationView,
 ) -> dict[str, object]:
+    """Answer one observed (not validated) state with the state, the counts and what blocks.
+
+    MIK-R110 rule 3: no candidate list, no pair identity, no trees, no intent, no attestation
+    bytes in the answer. The publish inputs live in the file ``prepare`` writes; a caller
+    that needs them prepares first.
+    """
+
     paths = curator_coherence_paths(contract)
+    candidates = observation.source_candidates
     return _success(
         request,
         contract,
         state=view.state,
         summary=view.summary,
         canonicalPath=paths.canonical.as_posix(),
-        pairIdentity=observation.pair_identity.model_dump(mode="json"),
-        codeCandidateTree=observation.code_candidate_tree,
-        memoryCandidateTree=observation.memory_candidate_tree,
-        taskTopologyFingerprint=observation.task_topology_fingerprint,
-        taskIntent=observation.task_intent.model_dump(mode="json", by_alias=True),
+        candidateCount=len(candidates),
+        candidatesByKind=_candidates_by_kind(candidates),
         **(
             {"currentnessStatus": view.currentness_status}
             if view.currentness_status is not None
             else {}
         ),
         **({"nextAction": view.next_action} if view.next_action is not None else {}),
-        attestationPath=observation.attestation_path.resolve().as_posix(),
-        attestationSha256=observation.attestation_sha256,
-        attestationReportSha256=observation.attestation.reportSha256,
-        predecessorAuthorityDigest=view.predecessor,
-        candidateCount=len(observation.source_candidates),
-        candidates=[
-            candidate.model_dump(mode="json") for candidate in observation.source_candidates
-        ],
     )
 
 
-def _validated_payload(request, contract, validated, *, state: str) -> dict[str, object]:
+def _validated_payload(
+    request: CuratorCoherenceRequest,
+    contract: WorktreeContract,
+    validated: ValidatedCuratorCoherenceGeneration,
+    *,
+    state: str,
+    judgments_file_sha256: str | None = None,
+) -> dict[str, object]:
+    """Answer one validated authority with the state, the counts and the record locations.
+
+    MIK-R110 rule 3: the outcome, the count of published judgments (and of bound
+    assessments), and the record locations. The recorded lists stay in the generation
+    record and report the answer names; a refusal names which expectation no longer holds
+    through the refusal fields instead.
+    """
+
     record = validated.record
     return _success(
         request,
@@ -848,40 +1052,16 @@ def _validated_payload(request, contract, validated, *, state: str) -> dict[str,
         canonicalPath=curator_coherence_paths(contract).canonical.as_posix(),
         recordPath=validated.record_path.as_posix(),
         reportPath=validated.report_path.as_posix(),
-        semanticRequirementRevision=record.semanticRequirementRevision,
-        deliveryAttempt=record.deliveryAttempt,
-        pairIdentity=record.pairIdentity.model_dump(mode="json"),
-        codeCandidateTree=record.codeCandidateTree,
-        memoryCandidateTree=record.memoryCandidateTree,
-        taskTopologyFingerprint=record.taskTopologyFingerprint,
-        taskIntent=record.taskIntent.model_dump(mode="json", by_alias=True),
-        attestationPath=record.attestationPath,
-        attestationSha256=record.attestationSha256,
-        attestationReportSha256=record.attestationReportSha256,
-        predecessorAuthorityDigest=record.predecessorAuthorityDigest,
+        candidateCount=len(record.sourceCandidates),
+        publishedJudgmentCount=len(record.judgments),
+        assessmentCount=len(record.assessments),
         recordDigest=validated.record_digest,
         reportDigest=record.reportSha256,
-        candidateCount=len(record.sourceCandidates),
-        candidates=[candidate.model_dump(mode="json") for candidate in record.sourceCandidates],
-        reviewAssessments=[
-            assessment.model_dump(mode="json", by_alias=True) for assessment in record.assessments
-        ],
-        validationResult={
-            "state": "valid",
-            "candidateCount": len(record.sourceCandidates),
-            "checked": [
-                "code-candidate",
-                "memory-candidate",
-                "code-memory-pair",
-                "task-topology",
-                "task-intent",
-                "attestation",
-                "candidate-judgments",
-                "authority-record",
-                "generated-projection",
-                *(["review-assessments"] if record.assessments else []),
-            ],
-        },
+        **(
+            {"judgmentsFileSha256": judgments_file_sha256}
+            if judgments_file_sha256 is not None
+            else {}
+        ),
     )
 
 

@@ -90,13 +90,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--document",
+        action="append",
         default=None,
-        help="Scope every mode to ONE document, given as the work order writes it -- "
-        "relative to the onboarding root. A curator wave shares one memory worktree, so a "
+        metavar="PATH",
+        help="Scope every mode to documents, given as the work order writes them -- "
+        "relative to the onboarding root. Repeat for more than one document: one call "
+        "checks or repairs them all. A curator wave shares one memory worktree, so a "
         "tree-wide --fix can rewrite another curator's document mid-edit. A name matching "
         "no document is refused rather than checking nothing. On converted memory --fix takes "
-        "--document alone (one card and its sidecar); on unconverted memory it comes with "
-        "--expected-snapshot.",
+        "--document alone (those cards and their sidecars); on unconverted memory it comes with "
+        "--expected-snapshot. Several --document flags need --fix.",
     )
     parser.add_argument(
         "--expected-snapshot",
@@ -127,18 +130,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> int:
     build_index = getattr(args, "build_index", False)
     expected_snapshot = getattr(args, "expected_snapshot", None)
-    document = getattr(args, "document", None)
+    named = getattr(args, "document", None) or []
     caller_excludes = tuple(getattr(args, "exclude", None) or ())
     selected_modes = sum((build_index, args.fix, args.migrate))
     if selected_modes > 1:
         print("--build-index, --fix, and --migrate are different operations; pass one.")
         return 1
-    if build_index and (document is not None or args.dry_run or expected_snapshot is not None):
+    if build_index and (named or args.dry_run or expected_snapshot is not None):
         print(
             "--build-index is repository-wide and cannot use --document, --dry-run, or "
             "--expected-snapshot. Build once, then pass its snapshot to document commands."
         )
         return 1
+    if len(named) > 1 and not args.fix:
+        print("several --document flags name cards for one call and need --fix.")
+        return 1
+    document = named[0] if len(named) == 1 else None
+    documents = tuple(named) if len(named) > 1 else None
     try:
         if args.contract is None and not args.fix:
             raise ValueError(
@@ -147,15 +155,12 @@ def run(args: argparse.Namespace) -> int:
             )
         operation_scope = CitationOperationScope(
             document=document,
+            documents=documents,
             expected_snapshot=expected_snapshot,
             excludes=caller_excludes,
         )
-    except ValueError as error:
-        print(str(error))
-        return 1
-    try:
         config = load_config(args.config if args.config else discover_config(Path.cwd()))
-    except (ConfigDiscoveryError, ConfigError) as error:
+    except (ValueError, ConfigDiscoveryError, ConfigError) as error:
         print(str(error))
         return 1
     try:

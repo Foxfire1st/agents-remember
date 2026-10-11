@@ -19,6 +19,13 @@ RESERVED_TOOLS: tuple[str, ...] = ()
 __all__ = ["PUBLIC_TOOLS", "RESERVED_TOOLS", "TRANSPORT"]
 
 
-def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Convert one application result into its protocol-ready response."""
-    return complete_tool_response(tool_name, payload)
+def _tool_payload(
+    tool_name: str, payload: dict[str, Any], *, answer: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Convert one application result into its protocol-ready response.
+
+    ``payload`` is the tool's whole computed result and is what the log
+    records; ``answer``, when given, is the compact status projected from it
+    that the caller receives.
+    """
+    return complete_tool_response(tool_name, payload, answer=answer)

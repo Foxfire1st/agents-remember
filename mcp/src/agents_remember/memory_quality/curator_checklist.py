@@ -210,6 +210,15 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         "sourceChangeCandidateCount": len(source_candidates),
         "closeoutOwnedFindingCount": len(commit_owned),
         "noteworthyFindingCount": len(report_only),
+        # MIK-R110 rule 4: the complete blocking populations beside their
+        # counts, in the order the repair loop works them -- repairable
+        # findings (including census and gate blockers), missing onboarding,
+        # then stale route indexes. The answer projects the first entries up
+        # to the list bound; the checklist report above renders every row and
+        # the log records this whole result.
+        "repairFindings": repair,
+        "missingOnboardingRows": missing,
+        "staleRouteIndexes": stale,
     }
 
 

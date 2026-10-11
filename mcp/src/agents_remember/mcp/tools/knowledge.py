@@ -34,6 +34,7 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,11 @@ from agents_remember.memory_quality.knowledge_validator.validator import validat
 from agents_remember.models.knowledge.review_trees import ReviewKnowledgeTreeDiff
 from agents_remember.models.knowledge.view import require_admitted_ordering_input
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.models.tools.tool_answer import (
+    ENVELOPE_STRIPPED_FIELDS,
+    TOOL_ANSWER_LIST_MAX,
+    TOOL_ANSWER_STATUS_ENTRY_MAX,
+)
 from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -665,9 +671,11 @@ def _resolve_tree(root: Path, revision: str) -> _ResolvedTree | str:
     return _ResolvedTree(tree, marker.returncode == 0)
 
 
-# How many violations one response lists. The validator's report of a whole tree checked without a
-# base can hold thousands of rows (every anchor of every card); the counts always cover all of them.
-MAX_LISTED_VIOLATIONS = 100
+# How many violations one answer lists. The validator's report of a whole tree checked without a
+# base can hold thousands of rows (every anchor of every card); the whole result carries all of
+# them -- the log's detail file is the report's location -- while the answer keeps the first
+# entries up to this bound. The bound is the tool-answer list bound, no second number.
+MAX_LISTED_VIOLATIONS = TOOL_ANSWER_LIST_MAX
 
 
 @dataclass(frozen=True)
@@ -701,7 +709,53 @@ def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[st
     result = _integrity_check_result(request)
     if request.contractPath is not None:
         result.update(leaf_worklist_fields(request.contractPath))
-    return _tool_payload("knowledge_integrity_check", result)
+    answer = None if result.get("state") == "refused" else _integrity_answer(result)
+    return _tool_payload("knowledge_integrity_check", result, answer=answer)
+
+
+def _integrity_answer(full: Mapping[str, Any]) -> dict[str, Any]:
+    """MIK-R110 rule 6: one integrity whole result answered within the default bound.
+
+    The outcome, the comparison bases, the validation outcome with its counts
+    by rule and first findings, and the worklist state. The envelope fields
+    stay with the whole result, as on every other projection. The violation
+    rows are capped at the status entry cap with the total count beside them;
+    the full listing stays in the whole result the log records.
+    """
+
+    answer = {
+        key: value
+        for key, value in full.items()
+        if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
+    }
+    validation = full.get("validation")
+    if isinstance(validation, dict):
+        violations = validation.get("violations")
+        if isinstance(violations, list):
+            if len(violations) > TOOL_ANSWER_STATUS_ENTRY_MAX:
+                answer["validation"] = {
+                    **validation,
+                    "violations": {
+                        "count": len(violations),
+                        "items": violations[:TOOL_ANSWER_STATUS_ENTRY_MAX],
+                        "truncated": True,
+                    },
+                }
+        elif isinstance(violations, dict) and isinstance(violations.get("items"), list):
+            items = violations["items"]
+            count = violations.get("count", len(items))
+            if len(items) > TOOL_ANSWER_STATUS_ENTRY_MAX or bool(
+                count > TOOL_ANSWER_STATUS_ENTRY_MAX
+            ):
+                answer["validation"] = {
+                    **validation,
+                    "violations": {
+                        **violations,
+                        "items": items[:TOOL_ANSWER_STATUS_ENTRY_MAX],
+                        "truncated": True,
+                    },
+                }
+    return answer
 
 
 def _refused_check(memory_root: str | None, code: str, detail: str) -> dict[str, Any]:
@@ -789,17 +843,20 @@ def _integrity_check_result(request: IntegrityCheckRequest) -> dict[str, Any]:
 
 
 def _validation_block(report: ValidationReport) -> dict[str, Any]:
-    """The validator's report as the response carries it: every count, and a bounded listing.
+    """The validator's report as the response carries it: every count, and every finding.
 
-    Refusing violations are listed before report-only findings, so a truncated listing never hides
-    a refusal behind findings that refuse nothing.
+    Refusing violations are listed before report-only findings, so a truncated answer never
+    hides a refusal behind findings that refuse nothing. The whole result carries the full
+    listing -- the log's detail file is the report's location -- while the answer keeps the
+    first findings up to the list bound (MIK-R110 rule 6); ``violationsTruncated`` says
+    whether the bound dropped rows. The counts always cover the whole report.
     """
 
     counts: dict[tuple[str, bool], int] = {}
     for violation in report.violations:
         key = (violation.rule, violation.report_only)
         counts[key] = counts.get(key, 0) + 1
-    listed = [*report.refusals, *report.reports][:MAX_LISTED_VIOLATIONS]
+    listed = [*report.refusals, *report.reports]
     return {
         "candidate": report.candidate,
         "ok": report.ok,
@@ -810,5 +867,5 @@ def _validation_block(report: ValidationReport) -> dict[str, Any]:
             for (rule, report_only), count in sorted(counts.items())
         ],
         "violations": [violation.to_document() for violation in listed],
-        "violationsTruncated": len(report.violations) > len(listed),
+        "violationsTruncated": len(listed) > MAX_LISTED_VIOLATIONS,
     }

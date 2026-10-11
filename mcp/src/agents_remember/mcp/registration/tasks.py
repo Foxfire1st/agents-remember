@@ -42,9 +42,17 @@ def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig)
         """Author, publish, inspect, or validate one leaf's curator-coherence authority.
         The structured stable manifest selects exactly one live content-addressed record;
         Markdown is a generated digest-bound projection and is never parsed as authority.
-        `prepare` returns the exact code, memory, task-topology, attestation, predecessor, and
-        source-candidate identities. `publish` requires those unchanged identities plus one
-        curator/architect-authored disposition, rationale, and evidenceRef for every candidate.
+        `prepare` writes the exact candidate set to the enclosure's
+        `reports/curator-coherence-candidates.json` (with a `.md` reading rendering beside
+        it) and answers with the count of candidates by kind, the set's digest and the
+        locations; the curator reads the candidates from the file. `status` and `validate`
+        answer with the state, the counts and what blocks. `publish` requires the unchanged
+        identities plus one curator/architect-authored disposition, rationale, and evidenceRef
+        for every candidate, and answers the outcome with the count of published judgments;
+        on a refusal it names which expectation no longer holds. `publish` takes `judgments`
+        and `review_assessments` inline, as before, or from one JSON file (`judgments_file`,
+        an absolute path) holding the two lists; the file is read once and its SHA-256 is
+        answered, and a call that supplies a list both ways is refused.
         `publish` also requires every one of `semantic_requirement_revision`, `delivery_attempt`,
         `expected_predecessor_digest`, `expected_code_candidate_tree`,
         `expected_memory_candidate_tree`, `expected_task_topology_fingerprint`,

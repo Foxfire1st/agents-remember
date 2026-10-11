@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import TracebackType
@@ -329,7 +330,7 @@ def validate_expected_snapshot(expected_snapshot: str) -> None:
 
 
 def validate_operation_scope(
-    document: str | None,
+    document: str | Sequence[str] | None,
     expected_snapshot: str | None,
     *,
     leased_index: bool,
@@ -340,6 +341,9 @@ def validate_operation_scope(
     exact document paired with one canonical frozen snapshot. A caller that already holds a
     repository-index lease may select one document for a postcheck, but cannot also provide an
     acquisition identity: the live lease is the sole source-generation authority in that arm.
+
+    ``document`` also takes a named selection (MIK-R110 rule 2): several documents come
+    with the snapshot exactly as one document does.
     """
     if leased_index:
         if expected_snapshot is not None:

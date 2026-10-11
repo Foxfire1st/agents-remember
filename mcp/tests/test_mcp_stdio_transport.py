@@ -159,7 +159,8 @@ class StdioTransportTests(unittest.TestCase):
             )
 
             self.assertTrue(payload["ok"], msg=payload)
-            self.assertEqual(payload["operation"], "memory_carryover_plan")
+            # The delivered answer strips the envelope (MIK-R108 rule 2: `operation`
+            # repeats the tool's name, which the protocol already tells the caller).
             self.assertEqual(payload["state"], "would-carryover")
             self.assertEqual(payload["counts"], {"auto-carry": 1})
 

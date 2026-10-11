@@ -223,13 +223,16 @@ memory, which reports a successful `prepare` with `candidateCount 0` and still
 requires the record to be published. Carry the leaf's `contract_path` through
 `status` → `prepare` → `publish` → `validate`, and supply one
 curator/architect-authored disposition, rationale, and evidence reference for
-every candidate `prepare` names:
+every candidate in the set `prepare` wrote. `prepare` answers with the count by kind,
+the set's digest and the locations -- it does not return the candidates. Read them from
+the file it names (`candidatesPath`, with a rendering for reading beside it), in parts
+when the set is large, and confirm the digest before judging:
 
 ```text
 curator_coherence(request={"action":"prepare", "contract_path":"<enclosure-contract-path>"})
 ```
 
-Publish only the exact identities `prepare` returned, then `validate`. A refusal,
+Publish only the exact identities in the set `prepare` wrote, then `validate`. A refusal,
 a missing or extra candidate, or a validator failure is a blocked curation finding
 with its exact returned code, reported to the owning seat. A hand-written
 certification file is never a substitute for this record, and the record never

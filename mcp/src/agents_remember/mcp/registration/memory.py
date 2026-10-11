@@ -56,8 +56,9 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         It never changes code or memory. A full contract-scoped call atomically replaces the one
         operational checklist at `<worktree enclosure>/reports/curator-memory-quality.md` and its
         structured, report-digest-bound `.json` attestation; subset and unscoped calls write
-        neither. Every contract-scoped execution also publishes the complete structural
-        census to reports/memory-census.json and returns bounded memoryCensus diagnostics.
+        operation. Every contract-scoped execution also publishes the complete structural
+        census to reports/memory-census.json; the answer carries the counts and the
+        checklist's location instead of the census, the sample and the catalogue.
         This worklist requires no code-gate results and does not certify semantic decisions.
         ok=false means findings exist (e.g. dirty-source
         drift), not that the tool failed. `curatorActionableCount` and
@@ -87,6 +88,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         contract_path: str | None = None,
         *,
         document: str | None = None,
+        documents: list[str] | None = None,
         expected_snapshot: str | None = None,
         dry_run: bool = False,
         exclude: list[str] | None = None,
@@ -100,20 +102,28 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         In every other case a call without a contract refuses and names the leaf route;
         once the baseline exists, the refusal says so. A
         pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
-        Preview with dry_run=true. Use document for one onboarding-relative file and
-        expected_snapshot to assert a previously built immutable source generation. `exclude`
+        Preview with dry_run=true. Check the cards of a change in one call and repair them in
+        one call: pass `documents` with every onboarding-relative file, or `document` for one
+        file (a list of one). A call that names both is refused, and so is an empty list; a
+        call that names more documents than one leaf may hold changed files with cards is
+        refused before anything is read. A named document that does not exist is a refusal
+        of that document and does not stop the others. Pass `expected_snapshot` to assert a
+        previously built immutable source generation. `exclude`
         adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
         acquisition beyond the register every call already honours: the memory layer's
         settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore.
-        On converted memory it authors the cards' citation rows into sidecar references and
-        re-records moved anchors; document then needs no expected_snapshot and scopes the run
-        to that one card."""
+        The answer is a status -- whether the step went well, with the counts (rewritten,
+        stale, unreadable, refused) -- and the whole result with every list is in the log's
+        detail file. On converted memory it authors the cards' citation rows into sidecar
+        references and re-records moved anchors; a document then needs no expected_snapshot
+        and scopes the run to those cards."""
         return citation_fix_payload(
             config,
             repo_id,
             contract_path=contract_path,
             operation_scope=CitationOperationScope(
                 document=document,
+                documents=tuple(documents) if documents is not None else None,
                 expected_snapshot=expected_snapshot,
                 excludes=tuple(exclude or ()),
             ),

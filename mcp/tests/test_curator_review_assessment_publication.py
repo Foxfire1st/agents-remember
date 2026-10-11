@@ -46,7 +46,6 @@ from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessmentRevision,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.integration.closeout.curator_assessment_evidence import (
@@ -70,6 +69,8 @@ from agents_remember.worktrees.route_review import build_route_review
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from curator_coherence_test_support import (
+    prepared_publish_inputs,
+    read_prepared_candidate_set,
     write_curator_evidence,
     write_curator_task_topology,
 )
@@ -227,7 +228,7 @@ def _publish(
     attempt: str = "A001",
 ) -> dict[str, object]:
     prepared = _prepared(contract)
-    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
     evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
     judgments = [
         CuratorCoherenceJudgment(
@@ -247,12 +248,7 @@ def _publish(
             delivery_attempt=attempt,
             judgments=judgments,
             review_assessments=assessments,
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(role="architect", task_document_ref=sprint),
         ),
     )
@@ -275,7 +271,7 @@ def _tool_publish(
     config = load_config(config_path)
     prepared = _prepared(contract)
     evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
-    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
     judgments = [
         CuratorCoherenceJudgment(
             **dict(CuratorSourceCandidate.model_validate(candidate).model_dump(mode="json")),
@@ -294,12 +290,7 @@ def _tool_publish(
             delivery_attempt="A001",
             judgments=judgments,
             review_assessments=assessments,
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(role="architect", task_document_ref=sprint),
         ),
     )
@@ -611,7 +602,7 @@ class TestAssessmentRefusals:
         contract, sprint = enclosure
         prepared = _prepared(contract)
         evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
-        candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+        candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
         judgments = [
             CuratorCoherenceJudgment(
                 **dict(CuratorSourceCandidate.model_validate(candidate).model_dump(mode="json")),
@@ -641,12 +632,7 @@ class TestAssessmentRefusals:
                         }
                     ],
                 ),
-                expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-                expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-                expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-                expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-                expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-                expected_attestation_sha256=str(prepared["attestationSha256"]),
+                **prepared_publish_inputs(prepared),
                 caller=DeclaredCaller(role="architect", task_document_ref=sprint),
             )
 
@@ -814,7 +800,7 @@ class TestPublisherCallerAddress:
         # The task directory's own name, which is what a canonical ref path is relative to.
         canonical = f"{contract.task_root.name}/{contract.leaf_id}.json"
         prepared = _prepared(contract)
-        candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+        candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
         evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
         judgments = [
             CuratorCoherenceJudgment(
@@ -834,12 +820,7 @@ class TestPublisherCallerAddress:
                 semantic_requirement_revision="KS-R15@v1",
                 delivery_attempt="A001",
                 judgments=judgments,
-                expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-                expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-                expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-                expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-                expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-                expected_attestation_sha256=str(prepared["attestationSha256"]),
+                **prepared_publish_inputs(prepared),
                 caller=DeclaredCaller(
                     role="curator",
                     task_document_ref=TaskDocumentRef(
@@ -884,7 +865,7 @@ def _tool_publish_bare_name(
     config_path = contract.code_repo_path.parent / "settings.json"
     config = load_config(config_path)
     prepared = _prepared(contract)
-    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    candidates = list(read_prepared_candidate_set(prepared)["candidates"])  # type: ignore[arg-type]
     evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
     judgments = [
         CuratorCoherenceJudgment(
@@ -903,12 +884,7 @@ def _tool_publish_bare_name(
             semantic_requirement_revision="KS-R15@v1",
             delivery_attempt="A001",
             judgments=judgments,
-            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
-            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
-            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
-            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
-            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
-            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            **prepared_publish_inputs(prepared),
             caller=DeclaredCaller(
                 role="curator",
                 task_document_ref=TaskDocumentRef(repository=REPO, path=bare_path),

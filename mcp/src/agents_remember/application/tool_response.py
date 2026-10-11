@@ -301,7 +301,11 @@ def _write_delivered_line(
 
 
 def complete_tool_response(
-    tool_name: str, payload: dict[str, Any], *, config: Any | None = None
+    tool_name: str,
+    payload: dict[str, Any],
+    *,
+    config: Any | None = None,
+    answer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate, enrich, count, shape the answer, log, and observe one result.
 
@@ -316,6 +320,12 @@ def complete_tool_response(
     overflow short form with the whole result in the detail file (rule 4).
     Every call is recorded to the daily log (rule 3); a log write that fails
     does not fail the call.
+
+    ``answer``, when given, is the tool's own compact status projection of
+    that whole result: the caller receives the projection, while the detail
+    file still records the whole result it was projected from. The guard
+    still binds the projection, and the log line still carries the whole
+    result's digest and byte size.
     """
     amb = ambient()
     finalized = finalize_tool_response(
@@ -334,7 +344,10 @@ def complete_tool_response(
     if not isinstance(operation, str):
         operation = None
     bound = _answer_bound(tool_name, arguments)
-    answer = truncate_lists(strip_envelope(finalized))
+    shaped: dict[str, Any] = (
+        dict(answer) if answer is not None else truncate_lists(strip_envelope(finalized))
+    )
+    answer = shaped
     raw_next_step = answer.pop("nextStep", None)
     next_value = next_from_next_step(raw_next_step if isinstance(raw_next_step, dict) else None)
     if next_value is not None:

@@ -46,15 +46,19 @@ A converted card is two files at the mirrored path:
      it exactly once in a file cited with a `path:start-end` range.
    - A bare path becomes a `code` (or `test`) target with a `file` locator, and a URL an `external` target. A row
      with nothing to cite (`n/a` in both cells) stays as prose.
-3. Run the fixer on this one card. On converted memory `--document` needs no `--expected-snapshot`:
+3. Run the fixer on the cards of your change in one call -- one call to check them
+   (dry run first), one call to repair them, never one call per card. On converted memory
+   `--document` needs no `--expected-snapshot`; repeat it for every card, or pass the paths
+   as the `citation_fix` tool's `documents`:
 
    ```text
    agents-remember memory-citations --fix --repo <repo> --contract <this leaf's enclosure contract> \
-       --document <source path>.md
+       --document <first source path>.md --document <second source path>.md
    ```
 
-   The `citation_fix` MCP tool takes the same `document` (the card's path relative to the onboarding root). With a
-   document, the run touches that card and its sidecar only. Without one it runs over every card that holds a
+   The `citation_fix` MCP tool takes the same paths as `documents` (the cards' paths relative to
+   the onboarding root). With documents named, the run touches those cards and their sidecars
+   only. Without one it runs over every card that holds a
    citation table, and re-records moved anchors across the tree. On a converted tree it:
    - turns each table row into `- <finding> [n]`, where `n` is the card's next free reference number;
    - resolves the row's targets against the **code working tree**, through the conversion's own rules;

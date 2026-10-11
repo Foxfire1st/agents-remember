@@ -86,6 +86,9 @@ response — it must be this leaf's memory worktree — and preview any write wi
      `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
    - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
      `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
+   Check the cards of your change in one `citation_fix` call and repair them in one call: pass
+   every card's onboarding-relative path as `documents` (one call, dry run first to preview),
+   never one call per card.
 3. **Author the durable knowledge through the real writer** as `../operations/curation.md`
    §Normal workflow states: scope and rationale per target, the shipped writer command with this
    leaf's contract, report-not-exit-status reading, and history rows answering the leaf's worklist

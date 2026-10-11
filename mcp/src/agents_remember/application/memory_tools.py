@@ -53,6 +53,7 @@ from agents_remember.memory_quality.style.citations.exclusion_register import (
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
+from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
 from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
 from agents_remember.worktrees.integration.configured_contract_authority import (
     require_configured_contract_repositories,
@@ -77,13 +78,30 @@ class CitationOperationScope:
     """
 
     document: str | None = None
+    documents: tuple[str, ...] | None = None
     expected_snapshot: str | None = None
     excludes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        self.validate(document_alone=True)
+        # Structural shape only: both/empty/bound are refused here, before anything is read,
+        # for every operation. Whether the operation takes a list is the operation's own
+        # validation at its call (``allow_documents``): only ``citation_fix`` passes it.
+        self.validate(document_alone=True, allow_documents=True)
 
-    def validate(self, *, document_alone: bool = False) -> None:
+    @property
+    def selected_documents(self) -> tuple[str, ...] | None:
+        """The named documents as one list, with ``document`` meaning a list of one.
+
+        None is the form without a document: every card of the worktree in one run.
+        """
+
+        if self.document is not None:
+            return (self.document,)
+        if self.documents is not None:
+            return self.documents
+        return None
+
+    def validate(self, *, document_alone: bool = False, allow_documents: bool = False) -> None:
         """Enforce the indivisible document-plus-generation frozen-wave contract.
 
         The caller's own excludes ride with the scope because they scope the same acquisition
@@ -96,12 +114,44 @@ class CitationOperationScope:
         the code working tree and reads no source index, so a curator names one card and nothing
         else. Construction validates in that form, because the tree's format is unknown until the
         leaf is resolved; every legacy operation then validates strictly before it does any work.
+
+        ``documents`` names several cards for one ``citation_fix`` call (MIK-R110 rule 2):
+        ``document`` stays and means a list of one. Naming both, or naming an empty list, is
+        refused; so is a list longer than one leaf may hold changed files with cards
+        (``MAX_CURATOR_SOURCE_CANDIDATES``, taken from that constant, no second number).
+        Only ``citation_fix`` takes the list: every other operation validates with
+        ``allow_documents`` false and refuses it, so a list can never silently narrow a
+        check, a migration or an index build to its members.
         """
-        if document_alone and self.document is not None and self.expected_snapshot is None:
+
+        if self.document is not None and self.documents is not None:
+            raise ValueError(
+                "citation_fix takes document or documents, not both: document names one "
+                "onboarding-relative file, documents names several in one call."
+            )
+        if self.documents is not None:
+            if not allow_documents:
+                raise ValueError(
+                    "documents names several cards in one call and only citation_fix takes "
+                    "it: name one document, or run citation_fix for the list."
+                )
+            if len(self.documents) == 0:
+                raise ValueError(
+                    "citation_fix with an empty documents list is refused and changes "
+                    "nothing: name at least one onboarding-relative file."
+                )
+            if len(self.documents) > MAX_CURATOR_SOURCE_CANDIDATES:
+                raise ValueError(
+                    f"citation_fix takes at most {MAX_CURATOR_SOURCE_CANDIDATES} documents in "
+                    f"one call (one leaf's changed files with cards); this call names "
+                    f"{len(self.documents)}. Split the wave across calls."
+                )
+        selected = self.selected_documents
+        if document_alone and selected is not None and self.expected_snapshot is None:
             validate_caller_excludes(self.excludes)
             return
         source_index.validate_operation_scope(
-            self.document,
+            selected,
             self.expected_snapshot,
             leased_index=False,
         )
@@ -367,14 +417,16 @@ def citation_fix_tool(
     register every other document reads.
 
     On converted memory one document needs no frozen generation (``--document`` alone); on
-    unconverted memory a document still comes with its snapshot.
+    unconverted memory a document still comes with its snapshot. ``documents`` names
+    several cards for one call (MIK-R110 rule 2); each is handled exactly as a call
+    naming it alone handles it.
 
     Two admissions: a leaf enclosure contract (the ordinary write route), or no contract on
     the configured memory root while that root has no attributed baseline (the pre-baseline
     bootstrap admission, MIK-R45 rule 2). In every other case a call without a contract
     refuses and names the leaf route.
     """
-    operation_scope.validate(document_alone=True)
+    operation_scope.validate(document_alone=True, allow_documents=True)
     if contract_path is None:
         scope = _pre_baseline_official_scope(config, repo_id=repo_id, operation="citation_fix")
         memory_root = scope.onboarding_root.parent
@@ -394,26 +446,105 @@ def citation_fix_tool(
     )
     memory_root = scope.onboarding_root.parent
     if reference_state.is_converted_memory(memory_root):
-        return {
-            "repoId": scope.repo_id,
-            **_converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run),
-            **measuring_build_stamp(),
-        }
-    operation_scope.validate()
+        full = _converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run)
+        return _citation_fix_result(
+            {
+                "repoId": scope.repo_id,
+                # MIK-R110 rule 1: the answer's locations name where the call wrote.
+                "onboardingRoot": scope.onboarding_root.as_posix(),
+                **full,
+                **_citation_fix_status(
+                    full,
+                    document_count=_citation_fix_document_count(memory_root, operation_scope, full),
+                ),
+            }
+        )
+    operation_scope.validate(allow_documents=True)
     trees = _citation_trees(scope, operation_scope.excludes)
-    return {
-        "repoId": scope.repo_id,
-        **fixer.fix_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            dry_run=dry_run,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
+    full = fixer.fix_onboarding_root(
+        scope.onboarding_root,
+        trees,
+        dry_run=dry_run,
+        only=(
+            operation_scope.document
+            if operation_scope.documents is None
+            else list(operation_scope.documents)
         ),
-        # D-33: the repair engine is part of the measuring machinery, so the response names the
-        # build whose rules produced these counts rather than leaving the reader to assume it is
-        # the candidate's own code.
-        **measuring_build_stamp(),
+        expected_snapshot=operation_scope.expected_snapshot,
+    )
+    return _citation_fix_result(
+        {
+            "repoId": scope.repo_id,
+            **full,
+            **_citation_fix_status(
+                full,
+                document_count=_citation_fix_document_count(memory_root, operation_scope, full),
+            ),
+        }
+    )
+
+
+def _citation_fix_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Name the recovery on a failed run beside its entries.
+
+    MIK-R110 rule 1: a failed run is recovered by working the actionable
+    entries, then running the tool again.
+    """
+
+    if not result.get("ok", False):
+        result["nextAction"] = "citation_fix"
+    return result
+
+
+def _citation_fix_document_count(
+    memory_root: Path, operation_scope: CitationOperationScope, full: dict[str, Any]
+) -> int:
+    """How many documents one ``citation_fix`` call covered (MIK-R110 rule 2).
+
+    The named selection, with ``document`` meaning a list of one; without a named
+    document, the documents the run scanned.
+    """
+
+    selected = operation_scope.selected_documents
+    if selected is not None:
+        return len(selected)
+    scanned = full.get("documentsScanned")
+    if isinstance(scanned, int):
+        return scanned
+    onboarding = memory_root / ONBOARDING_ROOT
+    return sum(
+        1
+        for path in onboarding.rglob("*.md")
+        if path.is_file() and not any(part.startswith(".") for part in path.parts)
+    )
+
+
+def _citation_fix_status(full: dict[str, Any], *, document_count: int) -> dict[str, Any]:
+    """One ``citation_fix`` result answered as a status (MIK-R110 rules 1-2).
+
+    The outcome, how many documents the call covered, and the counts: rewritten,
+    stale, unreadable, refused. The lists themselves stay in the whole result --
+    the answer keeps the first entries up to the list bound and the log names the
+    detail file holding the rest.
+    """
+
+    if full.get("status") == "converted":
+        authoring = full.get("authoring")
+        refused = authoring.get("refused") if isinstance(authoring, dict) else None
+        return {
+            "documentCount": document_count,
+            "rewrittenCount": len(full.get("rewrittenSidecars") or []),
+            "staleCount": len(full.get("stale") or []),
+            "unreadableCount": len(full.get("unreadableSidecars") or []),
+            "refusedCount": len(refused or []),
+        }
+    refused_documents = full.get("refusedDocuments") or []
+    return {
+        "documentCount": document_count,
+        "rewrittenCount": int(full.get("claimsRepaired") or 0),
+        "staleCount": int(full.get("declinedCount") or 0),
+        "unreadableCount": 0,
+        "refusedCount": len(refused_documents),
     }
 
 
@@ -424,14 +555,105 @@ def _converted_citation_fix(
     references (:mod:`...memory.conversion.card_authoring`), then re-record the mechanically moved
     anchors (MIK-R24 rule 5); a stale anchor is left to the curator. With one document named, both
     steps touch that card and its sidecar only. A refused card is written by neither stage:
-    its sidecar stays out of the mechanical re-recording as well (MIK-R45 failure behavior)."""
+    its sidecar stays out of the mechanical re-recording as well (MIK-R45 failure behavior).
 
+    With ``documents`` (MIK-R110 rule 2) each named card is handled exactly as a call naming
+    it alone handles it -- author then re-record, one card at a time -- so the bytes on
+    disk are the same either way. A name that matches no card is a refusal of that card
+    and does not stop the others. A call with ``document`` behaves as today, including
+    its refusal of a name that matches nothing.
+    """
+
+    if scope.documents is None:
+        return _converted_single_citation_fix(memory_root, code_root, scope.document, dry_run)
+    merged_authoring: dict[str, Any] | None = None
+    merged_fixed: dict[str, Any] | None = None
+    for name in dict.fromkeys(scope.documents):
+        try:
+            authoring = card_authoring.author_card_references(
+                memory_root, code_root, only=name, dry_run=dry_run
+            )
+        except ValueError as error:
+            authoring = {
+                "dryRun": dry_run,
+                "authoredReferences": 0,
+                "reauthoredReferences": 0,
+                "removedReferences": 0,
+                "authoredCards": [],
+                "createdSidecars": [],
+                "unresolvedTargets": [],
+                "refused": [{"card": f"{ONBOARDING_ROOT}/{name}", "reason": str(error)}],
+            }
+            fixed = {
+                "ok": False,
+                "status": "converted",
+                "dryRun": dry_run,
+                "refreshedAnchors": 0,
+                "rewrittenSidecars": [],
+                "unreadableSidecars": [],
+                "stale": [],
+            }
+        else:
+            sidecar = card_sidecar_path(f"{ONBOARDING_ROOT}/{name}")
+            refused_sidecars = {
+                card_sidecar_path(entry["card"])
+                for entry in authoring["refused"]
+                if isinstance(entry, dict) and isinstance(entry.get("card"), str)
+            }
+            fixed = reference_state.fix_references(
+                memory_root,
+                code_root,
+                dry_run=dry_run,
+                only=sidecar,
+                exclude=refused_sidecars,
+            )
+        merged_authoring = (
+            authoring if merged_authoring is None else _merge_authoring(merged_authoring, authoring)
+        )
+        merged_fixed = fixed if merged_fixed is None else _merge_converted_fix(merged_fixed, fixed)
+    assert merged_authoring is not None and merged_fixed is not None
+    return {
+        **merged_fixed,
+        "ok": merged_fixed["ok"] and not merged_authoring["refused"],
+        "authoring": merged_authoring,
+    }
+
+
+def _merge_authoring(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """Two per-card authoring reports as one call's report: summed counts, joined lists."""
+
+    merged = dict(first)
+    for key in ("authoredReferences", "reauthoredReferences", "removedReferences"):
+        merged[key] = int(first.get(key, 0)) + int(second.get(key, 0))
+    for key in ("authoredCards", "createdSidecars", "unresolvedTargets", "refused"):
+        merged[key] = list(first.get(key, [])) + list(second.get(key, []))
+    return merged
+
+
+def _merge_converted_fix(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """Two per-card re-record reports as one call's report."""
+
+    return {
+        "ok": bool(first.get("ok")) and bool(second.get("ok")),
+        "status": "converted",
+        "dryRun": bool(first.get("dryRun")) and bool(second.get("dryRun")),
+        "refreshedAnchors": int(first.get("refreshedAnchors", 0))
+        + int(second.get("refreshedAnchors", 0)),
+        "rewrittenSidecars": list(first.get("rewrittenSidecars", []))
+        + list(second.get("rewrittenSidecars", [])),
+        "unreadableSidecars": list(first.get("unreadableSidecars", []))
+        + list(second.get("unreadableSidecars", [])),
+        "stale": list(first.get("stale", [])) + list(second.get("stale", [])),
+    }
+
+
+def _converted_single_citation_fix(
+    memory_root: Path, code_root: Path, document: str | None, dry_run: bool
+) -> dict[str, Any]:
     authoring = card_authoring.author_card_references(
-        memory_root, code_root, only=scope.document, dry_run=dry_run
+        memory_root, code_root, only=document, dry_run=dry_run
     )
-    sidecar = (
-        None if scope.document is None else card_sidecar_path(f"{ONBOARDING_ROOT}/{scope.document}")
-    )
+    sidecar = None if document is None else card_sidecar_path(f"{ONBOARDING_ROOT}/{document}")
     refused_sidecars = {
         card_sidecar_path(entry["card"])
         for entry in authoring["refused"]
@@ -474,9 +696,6 @@ def citation_migrate_tool(
             only=operation_scope.document,
             expected_snapshot=operation_scope.expected_snapshot,
         ),
-        # Same ruler problem as ``citation_fix``: this rewrites ranges with the serving build's
-        # rules, so the response has to say which build that was (D-33).
-        **measuring_build_stamp(),
     }
 
 

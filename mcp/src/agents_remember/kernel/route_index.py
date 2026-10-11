@@ -95,6 +95,11 @@ class RouteIndexBuildResult:
             "routes": self.routes,
             "written": self.written,
             "unchanged": self.unchanged,
+            # MIK-R110 rule 5: the answer carries the counts with the lists, so the
+            # caller can read refreshed/unchanged/stale without counting entries.
+            "refreshedCount": self.written,
+            "unchangedCount": self.unchanged,
+            "staleCount": len(self.stale_indexes),
             "indexes": self.indexes,
             "staleIndexes": self.stale_indexes,
         }

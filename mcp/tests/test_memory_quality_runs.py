@@ -661,26 +661,28 @@ class MeasuringBuildStampTests(unittest.TestCase):
                 self.assertTrue(stamp.commit)
 
     def test_the_stamp_is_declared_on_the_responses_that_carry_it(self) -> None:
-        """The field is part of the declared contract, not tolerated drift.
+        """The controller still stamps its whole result (D-33 at that layer), while the
+        delivered memory-quality answer carries no ``servingBuild`` (MIK-R110 rule 1).
 
         ``FlexibleToolResponse`` sets ``extra="allow"``, so an undeclared key would validate and
-        still be invisible in the tool's own schema. Red if the declaration is removed, or if the
-        stamp stops resolving to the shared boot payload.
+        still be invisible in the tool's own schema. Red if the controller stops stamping its
+        result, or if the stamp leaks back into the shaped answer.
         """
 
         for model in (MemoryQualityCheckResponse,):
             self.assertIn("servingBuild", model.model_fields)
-        stamp = memory_tools.measuring_build_stamp()["servingBuild"]
+        stamp = controller._stamped({"ok": True})["servingBuild"]
         self.assertEqual(
             ServingBuildPayload.model_validate(stamp), process_serving_build().payload()
         )
 
-    def test_the_citation_repair_response_names_its_ruler(self) -> None:
-        """``citation_fix`` rewrites ranges with the serving build's rules.
+    def test_the_citation_repair_response_answers_a_status_without_its_ruler(self) -> None:
+        """``citation_fix`` answers whether the step went well, with counts (MIK-R110 rules 1-2).
 
-        The repair engine is part of the measuring machinery this leaf changes, so its response
-        must name the build too. Red if the tool's return stops including the stamp: the counts it
-        reports would then be attributable to no build at all.
+        The repair engine's build stamp (D-33) no longer rides the tool's answer: the answer
+        holds the outcome, the document count and the rewritten/stale/unreadable/refused
+        counts, while the whole result with every list is in the log's detail file. Red if
+        the stamp returns to the answer, or if the status counts go missing.
         """
 
         scope = SimpleNamespace(repo_id="repo", onboarding_root=Path("/memory/onboarding"))
@@ -692,10 +694,11 @@ class MeasuringBuildStampTests(unittest.TestCase):
             response = memory_tools.citation_fix_tool(
                 mock.Mock(), repo_id="repo", contract_path="/contract"
             )
+        self.assertNotIn("servingBuild", response)
         self.assertEqual(
-            response["servingBuild"], memory_tools.measuring_build_stamp()["servingBuild"]
+            {key: response[key] for key in ("documentCount", "rewrittenCount", "staleCount")},
+            {"documentCount": 0, "rewrittenCount": 0, "staleCount": 0},
         )
-        self.assertEqual(response["servingBuild"]["commit"], process_serving_build().commit)
 
 
 class CloseoutOwnedProvenanceRoutingTests(unittest.TestCase):

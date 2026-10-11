@@ -108,11 +108,12 @@ def _missing_detail(message: str) -> str:
     return message.removeprefix(_REFUSAL_PREFIX)
 
 
-def _prepared_payload() -> dict[str, Any]:
+def _prepared_payload(tmp_path: Path) -> dict[str, Any]:
     """The real ``prepare`` response over one stubbed observation boundary.
 
     ``_prepare`` owns the shipped text; only the observation it summarizes and the paths it echoes
-    are stubbed, so the summary asserted here is the one a caller receives.
+    are stubbed, so the summary asserted here is the one a caller receives. The candidate set
+    itself is really written, into the scratch group the stubbed contract names.
     """
 
     observation = SimpleNamespace(
@@ -128,7 +129,11 @@ def _prepared_payload() -> dict[str, Any]:
         attestation=SimpleNamespace(reportSha256="b" * 64),
         source_candidates=[],
     )
-    contract: Any = SimpleNamespace(contract_path=Path(_CONTRACT_PATH))
+    contract: Any = SimpleNamespace(
+        contract_path=Path(_CONTRACT_PATH),
+        leaf_id="L1",
+        worktree_group=tmp_path / "group",
+    )
     with mock.patch.multiple(
         curator_coherence_publication,
         observe_curator_coherence_source=mock.Mock(return_value=observation),
@@ -191,6 +196,7 @@ def test_publish_with_every_publication_member_validates() -> None:
     request = CuratorCoherenceRequest.model_validate(_publication_request())
     declared = tuple(member.name for member in PUBLICATION_MEMBERS)
     content_members = {JUDGMENTS_MEMBER, REVIEW_ASSESSMENTS_MEMBER}
+    content_members |= {coherence_models.JUDGMENTS_FILE_MEMBER}
     excluded = {"action", "contract_path", "freeze_snapshot"} | content_members
     assert content_members.isdisjoint(declared)
     model_order = tuple(
@@ -201,10 +207,10 @@ def test_publish_with_every_publication_member_validates() -> None:
     assert declared == _PUBLICATION_INPUT_NAMES == model_order
 
 
-def test_prepare_states_the_complete_publication_input_set() -> None:
+def test_prepare_states_the_complete_publication_input_set(tmp_path: Path) -> None:
     """2.1 and 2.3: the prepare response names the judgments and every member, and invents none."""
 
-    payload = _prepared_payload()
+    payload = _prepared_payload(tmp_path)
     summary = cast(str, payload["summary"])
     named = summary.split("publish requires: ", 1)[1]
 

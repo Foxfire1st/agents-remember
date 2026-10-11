@@ -46,9 +46,9 @@ its tools document — so it would otherwise read green over those five.
 
 The current nonempty pins record the measured surface since `b52adc8b` under the
 architect's pin handover: four lifecycle preconditions that raise (owner `L111`,
-repaired under MIK-R111 rule 7) and one bare ``memory_quality_check`` (owner
-`L110`, repaired under MIK-R110 rule 4) — see the copied comments at the
-constants. They are records of what the sweep observes, not waivers: each owner's
+repaired under MIK-R111 rule 7). The fifth pin, one bare ``memory_quality_check``
+(owner `L110`), was emptied by its repair under MIK-R110 rule 4 in the same change —
+see the copied comments at the constants. They are records of what the sweep observes, not waivers: each owner's
 rule binds it to empty its pin with its repair.
 
 **The rule for the pins:** when the owning leaf repairs one of these tools, delete

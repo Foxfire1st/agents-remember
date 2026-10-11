@@ -338,6 +338,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -508,6 +509,7 @@ consumers = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_curator_coherence_file_transport.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_emptied_sprint.py",
@@ -533,6 +535,7 @@ consumers = [
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_memory_opt_out_refused_routes.py",
   "mcp/tests/test_memory_opt_out_refused_start.py",
+  "mcp/tests/test_memory_quality_coherence_takeover.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
@@ -563,6 +566,9 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
+  "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
@@ -1111,6 +1117,7 @@ consumers = [
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_citation_cache_reclamation.py",
   "mcp/tests/test_citation_document_transaction.py",
+  "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_citation_index_resilience.py",
   "mcp/tests/test_citation_migrate_registration.py",
   "mcp/tests/test_citation_source_index_membership.py",
@@ -1164,6 +1171,7 @@ consumers = [
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_cross_store_lock_order.py",
+  "mcp/tests/test_curator_coherence_file_transport.py",
   "mcp/tests/test_curator_coherence_judgment_evidence.py",
   "mcp/tests/test_curator_coherence_publication_discoverability.py",
   "mcp/tests/test_curator_realization_refusals.py",
@@ -1332,6 +1340,7 @@ consumers = [
   "mcp/tests/test_memory_opt_out_refused_routes.py",
   "mcp/tests/test_memory_opt_out_refused_start.py",
   "mcp/tests/test_memory_quality.py",
+  "mcp/tests/test_memory_quality_coherence_takeover.py",
   "mcp/tests/test_memory_quality_is_independent_of_the_closeout_plane.py",
   "mcp/tests/test_memory_quality_runs.py",
   "mcp/tests/test_memory_scope_task_derivation.py",
@@ -1517,6 +1526,11 @@ consumers = [
   "mcp/tests/test_terminal_paste.py",
   "mcp/tests/test_terminal_preview_expectation.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
+  "mcp/tests/test_tool_answer_guard.py",
+  "mcp/tests/test_tool_answer_log.py",
+  "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_descriptions.py",
   "mcp/tests/test_tool_entry_point_controls.py",
@@ -1728,6 +1742,7 @@ permanence_rationale = "The conversion, crossing and toolchain cases convert the
 replacement_contract = "node:mcp/tests/test_knowledge_conversion.py::test_a_card_becomes_prose_one_evidence_section_and_numbered_references"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_citation_fix_documents.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
@@ -1791,6 +1806,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -1898,6 +1914,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -2412,6 +2429,32 @@ replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegis
 consumer_scope = "all-tests"
 
 [[artifact]]
+path = "mcp/tests/tool_answer_l110_rows.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "tool-answer-table-port"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "MIK-R110 landed row data (fields, uses, bounds, production paths) plus the production-answer proof helpers and the relocated table-test helpers"
+introduced_by = "260928-MIK-L110"
+lifetime = "permanent"
+permanence_rationale = "The twelve landed rows and their proof helpers need one shared home outside the table, guard, log, and row-derivation test modules; cases are derived live, never stored."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_every_registered_tool_has_an_authored_row_and_no_extras"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_guard.py",
+  "mcp/tests/test_tool_answer_log.py",
+  "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_rows_quality.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
 path = "mcp/tests/tool_entry_point_world.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -2427,6 +2470,7 @@ replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPoin
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",

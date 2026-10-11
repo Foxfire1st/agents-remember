@@ -45,9 +45,11 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     repoId: str | None = None
     onboardingRoot: str | None = None
     # Async run envelope: start admits background work and poll reads it by runId;
-    # the completed envelope carries the full result.
+    # the completed envelope carries the full result. MIK-R110 rule 4 answers the check
+    # outcome as passed, failed, or running (with the operation to poll).
     status: (
         Literal[
+            "passed",
             "started",
             "running",
             "completed",
@@ -103,6 +105,15 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     observed: dict[str, Any] | None = Field(default=None, max_length=32)
     nextAction: str | None = Field(default=None, max_length=8192)
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
+    # MIK-R110 rule 4: the status answer. The count of findings by kind, the blocking
+    # findings (up to the list bound) with their total, and the files that hold the rest.
+    # Declared rather than left to `extra="allow"`: what this package writes, this
+    # package declares.
+    findingCountsByKind: dict[str, int] | None = None
+    blockingCount: int | None = Field(default=None, ge=0)
+    blocking: list[dict[str, Any]] | None = None
+    censusPath: str | None = Field(default=None, max_length=8192)
+    code: str | None = Field(default=None, max_length=120)
 
 
 class _MemoryQualityExecutionRequest(BaseModel):
@@ -149,9 +160,14 @@ class CitationFixResponse(FlexibleToolResponse):
     operation: Literal["citation_fix"] = "citation_fix"
     repoId: str | None = None
     dryRun: bool | None = None
-    # The repair engine's rules are part of the measuring machinery, so a count this response
-    # reports names the build that applied them (D-33).
-    servingBuild: ServingBuildPayload | None = None
+    # MIK-R110 rule 2: the status. How many documents the call covered, and the counts:
+    # rewritten, stale, unreadable, refused. The lists themselves stay in the whole
+    # result; the answer keeps the first entries up to the list bound.
+    documentCount: int | None = Field(default=None, ge=0)
+    rewrittenCount: int | None = Field(default=None, ge=0)
+    staleCount: int | None = Field(default=None, ge=0)
+    unreadableCount: int | None = Field(default=None, ge=0)
+    refusedCount: int | None = Field(default=None, ge=0)
 
 
 class CitationMigrateResponse(FlexibleToolResponse):
@@ -171,8 +187,6 @@ class CitationMigrateResponse(FlexibleToolResponse):
     tablesConverted: int | None = Field(default=None, ge=0)
     declinedCount: int | None = Field(default=None, ge=0)
     findingsRemaining: int | None = Field(default=None, ge=0)
-    # Same ruler requirement as `CitationFixResponse` (D-33).
-    servingBuild: ServingBuildPayload | None = None
 
 
 class RouteIndexRefreshResponse(FlexibleToolResponse):

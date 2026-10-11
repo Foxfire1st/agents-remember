@@ -91,7 +91,8 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
                     )
                     self.assertFalse(payload["ok"])
                     # The delivered answer carries the envelope strip: no
-                    # operation key rides to the agent (rule 2).
+                    # operation key rides to the agent (rule 2); the refusal
+                    # proof reads the surviving identity fields.
                     self.assertNotIn("operation", payload)
                     self.assertEqual(payload["status"], "configured-contract-authority-invalid")
                     self.assertEqual(payload["repoId"], "agents-remember")

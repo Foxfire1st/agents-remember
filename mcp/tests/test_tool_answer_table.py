@@ -2,10 +2,12 @@
 
 Rule 6: the test suite has one table with a row for every registered tool,
 and for every operation of a tool that has operations. A row holds the fields
-the answer may hold, the bound, an ordinary case and the largest case the
-tool's own limits allow. The test fails when a registered tool has no row,
-when an answer holds a field outside its row, or when a case is larger than
-the bound. A leaf of this master that lands later and adds or changes a tool
+the answer may hold and the bound. Rows whose leaf proves cases through live
+tool runs name those real paths instead of carrying static payloads; rows
+with static payloads hold an ordinary case and the largest case the tool's
+own limits allow. The test fails when a registered tool has no row, when an
+answer holds a field outside its row, or when a case is larger than the
+bound. A leaf of this master that lands later and adds or changes a tool
 adds or changes the row.
 
 This leaf (L108) builds rules 1-6 and 8 and changes the envelope of every
@@ -88,6 +90,7 @@ from agents_remember.models.tools.tool_answer import (
     interim_leaf_for,
     is_valid_tool_code,
     next_from_next_step,
+    shaped_bound_for,
     short_form,
     strip_envelope,
     truncate_lists,
@@ -104,6 +107,7 @@ from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
+from tool_answer_l110_rows import L110_ROW_DATA
 from tool_entry_point_world import REPO as ENTRY_POINT_WORLD_REPO
 from tool_entry_point_world import EntryPointWorld
 
@@ -114,9 +118,12 @@ class ToolAnswerRow:
 
     ``fields=None`` with empty ``uses`` is an interim row (rule 7) or an
     unshaped exception passthrough: no field list, held to the bound by the
-    guard alone. A shaped row names every field, the caller step using it
-    (a non-empty string), and its ordinary/largest case payloads, measured
-    by the product counter -- never claimed integers.
+    guard alone. A shaped row names every field and the caller step using it
+    (a non-empty string). Rows whose owning leaf proves cases through live
+    tool runs carry no static payloads (``ordinary_case``/``largest_case``
+    None) and instead name the real tool paths their cases are derived
+    through in ``production_paths``; rows with static payloads keep them,
+    measured by the product counter -- never claimed integers.
     """
 
     tool: str
@@ -127,6 +134,7 @@ class ToolAnswerRow:
     interim_leaf: str | None
     ordinary_case: dict[str, Any] | None
     largest_case: dict[str, Any] | None
+    production_paths: tuple[str, ...] = ()
 
 
 # Answer keys the row framework itself adds around row fields: a row case
@@ -151,27 +159,22 @@ ROW_CASE_FRAMEWORK_KEYS = frozenset(
 # The authored roster (rules 6-7): every registered tool named under its
 # exact rule-7 leaf. A newly registered tool has no entry here, so the
 # roster check below fails instead of silently manufacturing its row. Tools
-# of L109, L110 and L111 stand below as interim rows until their leaf lands
-# and shapes them; L112 has landed (MIK-R112 rule 9), so its three retained
-# tools hold final rows in L112_FINAL_ROWS and no entry names L112.
+# of L109, L111 and L100 stand below as interim rows until their leaf lands and
+# shapes them; L110's ten retained memory tools have landed (their rows are
+# shaped in tool_answer_l110_rows.py and the implementation names no interim
+# leaf for them, so they stand outside this roster); L112 has landed
+# (MIK-R112 rule 9), so its three retained tools hold final rows in
+# L112_FINAL_ROWS and no entry names L112. No entry names a removed tool.
 AUTHORED_INTERIM_OWNERS: dict[str, str] = {
+    # L100: native tools stand as interim rows until their leaf lands.
+    "retire_child": "L100",
+    "role_start_set": "L100",
     # L109: a read names where a thing is.
     "read_ar_files": "L109",
     "knowledge_read": "L109",
     "knowledge_diff": "L109",
     "context_packet": "L109",
     "resolve_context": "L109",
-    # L110: the memory tools answer with a status.
-    "memory_quality_check": "L110",
-    "citation_fix": "L110",
-    "route_index_refresh": "L110",
-    "memory_init": "L110",
-    "memory_baseline_status": "L110",
-    "memory_baseline_adopt": "L110",
-    "memory_carryover_plan": "L110",
-    "memory_carryover_apply": "L110",
-    "knowledge_integrity_check": "L110",
-    "curator_coherence": "L110",
     # L111: the task and landing tools (worktrees.py, closeout.py,
     # role_agents.py) plus the four named tools.
     "worktree_start": "L111",
@@ -181,6 +184,7 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     "worktree_pause": "L111",
     "worktree_closeout_preview": "L111",
     "worktree_closeout_apply": "L111",
+    "worktree_enclosure_adopt": "L111",
     "worktree_integrate": "L111",
     "worktree_checkpoint_landing": "L111",
     "worktree_record_landing": "L111",
@@ -194,7 +198,6 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
-    "worktree_enclosure_adopt": "L111",
 }
 
 
@@ -446,15 +449,52 @@ def build_tool_answer_table() -> dict[tuple[str, str | None], ToolAnswerRow]:
             )
     for tool in sorted(L112_FINAL_ROWS):
         table[(tool, None)] = L112_FINAL_ROWS[tool]
+    for key, shaped in _shaped_answer_rows().items():
+        table[key] = shaped
     return table
 
 
 def authored_row_owners() -> dict[str, str | None]:
-    """Every authored row's owner: the interim leaf, or None for L112 finals."""
+    """Every authored row's owner: the interim leaf, or None for landed finals."""
     owners: dict[str, str | None] = dict(AUTHORED_INTERIM_OWNERS)
     for tool in L112_FINAL_ROWS:
         owners[tool] = None
+    for tool in L110_SHAPED_TOOLS:
+        owners[tool] = None
     return owners
+
+
+# MIK-R110's ten retained landed rows: fields, uses, bounds, and the real
+# tool paths their ordinary and largest cases are derived through live in
+# tool_answer_l110_rows.py. The derivation and its proofs live in the three
+# test_tool_answer_rows_* modules; this table carries no static payloads for
+# them, so no hand-authored dictionary can drift from production.
+# MIK-R112 retired drift_check and citation_migrate as registered tools, so
+# they hold no table row; L110_ROW_DATA keeps their entries for the
+# builder-level derivation proofs, and L110_SHAPED_TOOLS is the rowed ten.
+L110_SHAPED_TOOLS: tuple[str, ...] = tuple(
+    tool for tool in L110_ROW_DATA if tool not in ("drift_check", "citation_migrate")
+)
+
+
+def _shaped_answer_rows() -> dict[tuple[str, str | None], ToolAnswerRow]:
+    """The rows whose owning leaf has landed: shaped answers with fields and uses."""
+
+    rows: dict[tuple[str, str | None], ToolAnswerRow] = {}
+    for tool in L110_SHAPED_TOOLS:
+        fields, uses, bound, paths = L110_ROW_DATA[tool]
+        rows[(tool, None)] = ToolAnswerRow(
+            tool=tool,
+            operations=(None,),
+            fields=fields,
+            uses=dict(uses),
+            bound=bound,
+            interim_leaf=None,
+            ordinary_case=None,
+            largest_case=None,
+            production_paths=tuple(paths),
+        )
+    return rows
 
 
 def check_tool_answer_roster(registered: set[str], owners: Mapping[str, str | None]) -> None:
@@ -522,7 +562,7 @@ def validate_row_case(
 
 
 def _validate_shaped_row(key: tuple[str, str | None], row: ToolAnswerRow) -> list[str]:
-    """Check one shaped row: no interim owner, uses, measured cases."""
+    """Check one shaped row: no interim owner, uses, and proven cases."""
     assert row.fields is not None
     failures: list[str] = []
     if row.interim_leaf is not None:
@@ -535,7 +575,11 @@ def _validate_shaped_row(key: tuple[str, str | None], row: ToolAnswerRow) -> lis
         if field not in row.fields:
             failures.append(f"row {key}: use for unknown field {field!r}")
     if row.ordinary_case is None or row.largest_case is None:
-        failures.append(f"row {key}: shaped row without case payloads")
+        # A production-proven row names the real tool paths its cases are
+        # derived through instead of carrying static payloads; the derivation
+        # tests prove fields, uses, bounds, and guard behavior live.
+        if not row.production_paths:
+            failures.append(f"row {key}: shaped row without case payloads")
         return failures
     failures.extend(validate_row_case(key, row, "ordinary case", row.ordinary_case))
     failures.extend(validate_row_case(key, row, "largest case", row.largest_case))
@@ -638,17 +682,28 @@ class ToolAnswerTableTests(unittest.TestCase):
             if key in TOOL_ANSWER_EXCEPTIONS:
                 continue
             if row.fields is not None:
-                continue  # L112 final shaped rows hold their own bound and cases
+                continue  # landed shaped rows (L110, L112 finals) hold their own bound
             self.assertEqual(row.bound, TOOL_ANSWER_EXCEPTION_MAX_TOKENS, f"row {key}")
             self.assertIsNone(row.fields, f"row {key}")
             self.assertIn(row.interim_leaf, INTERIM_LEAVES, f"row {key}")
 
+    def test_curator_coherence_row_is_shaped(self) -> None:
+        # MIK-R110 rule 3: the first row whose leaf landed is shaped, with fields, uses,
+        # named production paths and no interim owner.
+        row = TOOL_ANSWER_TABLE[("curator_coherence", None)]
+        self.assertIsNone(row.interim_leaf)
+        self.assertIsNotNone(row.fields)
+        self.assertEqual(
+            [failure for failure in validate_tool_answer_row(("curator_coherence", None), row)],
+            [],
+        )
+
     def test_each_later_leaf_still_owns_rows(self) -> None:
-        # A leaf does not land while a row names it: L109, L110 and L111
-        # each still own interim rows. L112 has landed (MIK-R112 rule 9)
-        # and owns none; the next test says so for it.
+        # A leaf does not land while a row names it: L109 and L111 each still
+        # own interim rows. L110 and L112 have landed (MIK-R110 rule 6,
+        # MIK-R112 rule 9) and own none; the next tests say so for each.
         owners = {row.interim_leaf for row in TOOL_ANSWER_TABLE.values()}
-        for leaf in ("L109", "L110", "L111"):
+        for leaf in ("L109", "L111"):
             self.assertIn(leaf, owners, f"{leaf} owns no row")
 
     def test_no_row_names_l112(self) -> None:
@@ -658,6 +713,18 @@ class ToolAnswerTableTests(unittest.TestCase):
         self.assertNotIn("L112", set(AUTHORED_INTERIM_OWNERS.values()))
         self.assertNotIn("L112", {row.interim_leaf for row in TOOL_ANSWER_TABLE.values()})
         self.assertNotIn("L112", set(INTERIM_TOOL_LEAF.values()))
+
+    def test_no_built_row_names_the_landed_l110(self) -> None:
+        # MIK-R110 rule 6: L110 has landed. No row names it -- not in the
+        # authored roster, not in the built table (interim or shaped), and
+        # not in the implementation's interim map.
+        self.assertNotIn("L110", set(AUTHORED_INTERIM_OWNERS.values()))
+        named = sorted(
+            f"{tool}:{operation}"
+            for (tool, operation), row in TOOL_ANSWER_TABLE.items()
+            if row.interim_leaf == "L110"
+        )
+        self.assertEqual(named, [])
 
     def test_field_allowlist_mechanism(self) -> None:
         self.assertEqual(fields_outside_row({"ok": True, "x": 1}, None), set())
@@ -764,6 +831,13 @@ class ToolAnswerRowGateTests(unittest.TestCase):
         failures = validate_tool_answer_row(("shaped", None), row)
         self.assertTrue(any("without case payloads" in failure for failure in failures))
 
+    def test_production_proven_row_without_case_payloads_passes(self) -> None:
+        # A shaped row that names the real tool paths its cases are derived
+        # through needs no static payloads; the derivation tests prove it live.
+        row = self._shaped_row(ordinary_case=None, largest_case=None, production_paths=("sync",))
+        failures = validate_tool_answer_row(("shaped", None), row)
+        self.assertEqual(failures, [])
+
     def test_invalid_code_case_fails_the_row(self) -> None:
         row = self._shaped_row()
         failures = validate_row_case(
@@ -806,7 +880,7 @@ class ToolAnswerRowGateTests(unittest.TestCase):
 
 
 class ToolAnswerOwnershipTests(unittest.TestCase):
-    """Every current interim row names its exact rule-7 leaf; L112 finals name none."""
+    """Every current interim row names its exact rule-7 leaf; landed finals name none."""
 
     def test_implementation_matches_the_authored_roster(self) -> None:
         owners = authored_row_owners()
@@ -816,6 +890,10 @@ class ToolAnswerOwnershipTests(unittest.TestCase):
             if interim_leaf_for(tool) != owners.get(tool)
         ]
         self.assertEqual(mismatches, [])
+        for tool in L110_ROW_DATA:
+            self.assertIsNone(interim_leaf_for(tool), tool)
+            _fields, _uses, bound, _paths = L110_ROW_DATA[tool]
+            self.assertEqual(shaped_bound_for(tool), bound, tool)
 
     def test_removed_tools_have_no_row_and_no_owner(self) -> None:
         for tool in (
@@ -832,7 +910,6 @@ class ToolAnswerOwnershipTests(unittest.TestCase):
             "provider_watchers",
             "message_parent",
             "message_child",
-            "retire_child",
             "rename_child",
             "rename_self",
             "lifecycle_start",
@@ -1068,9 +1145,10 @@ class ToolAnswerGuardTests(unittest.TestCase):
         )
         self.assertLessEqual(count_response_tokens(short), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
-    def test_both_on_an_interim_row_through_the_choke(self) -> None:
-        # Rule 4, E2: 500 short fields and a 50,000-character error on an
-        # interim row (bound 4,000): the measured short form keeps the exact
+    def test_both_on_a_shaped_row_through_the_choke(self) -> None:
+        # Rule 4, E2: 500 short fields and a 50,000-character error on a
+        # landed shaped row (MIK-R110: memory_quality_check carries the
+        # governed 1,500 bound): the measured short form keeps the exact
         # code with droppedFields and errorCut.
         with tempfile.TemporaryDirectory() as tmp:
             coord = Path(tmp)
@@ -1078,7 +1156,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
             answer_in = {"ok": False, "code": "start-blocked"}
             answer_in.update({f"f{index:03d}": f"value-{index}" for index in range(500)})
             answer_in["error"] = "what to do next. " * 3000
-            self.assertEqual(bound_for("memory_quality_check"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+            self.assertEqual(bound_for("memory_quality_check"), 1500)
             with tool_call_context("memory_quality_check", {"query": "q"}, config=config):
                 answer = complete_tool_response("memory_quality_check", answer_in)
             self.assertTrue(answer["overflow"])
