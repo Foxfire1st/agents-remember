@@ -1,6 +1,6 @@
 import type { PluginPage } from "./page";
 
-// Pinned, unsupported Paseo 0.11.0-beta.2 DOM adapter. The public plugin SDK has no native
+// Pinned, unsupported Paseo 0.11.1 DOM adapter. The public plugin SDK has no native
 // tab-selection event. Agent tab identities are workspace-tab-agent_<opaque agent id> and
 // aria-selected is per pane, so every visible selected chat belongs to this set. Cached
 // workspace tabs remain selected with zero bounds; they are excluded. These are DOM candidates;

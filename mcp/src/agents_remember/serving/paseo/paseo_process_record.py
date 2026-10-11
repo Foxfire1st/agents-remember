@@ -1,8 +1,11 @@
 """Prove that the home's process record names this home's Paseo supervisor.
 
 ``<home>/paseo.pid`` records the supervisor's process id. Paseo's own ``daemon stop`` sends
-SIGTERM to whatever live process that id names (``stopDaemonInstance`` in Paseo 0.11.0-beta.2
-checks only that the id is alive and the record is not older than this boot), and its ``status``
+SIGTERM to whatever live process that id names (``stopDaemonInstance`` in Paseo 0.11.1
+prefers matching boot identity first: a lock written during another boot is abandoned,
+and only without boot ids on both sides does it fall back to checking that the id is
+alive and the record is not older than this boot; on platforms without a readable boot
+id the age fallback decides), and its ``status``
 and ``start`` take any live id for a running daemon. After a crash the operating system hands the
 id to another process, so the record alone identifies nothing.
 

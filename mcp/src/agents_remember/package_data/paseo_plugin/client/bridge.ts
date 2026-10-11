@@ -12,7 +12,7 @@ import type { PluginPage } from "./page";
 //
 // A document page names the agent's workspace in `ar.open` for the record; navigation itself
 // carries the agent alone, because the supported `navigation.openAgent({agentId})` resolves the
-// agent's workspace from the application's own session (pinned @getpaseo/server 0.11.0-beta.2:
+// agent's workspace from the application's own session (pinned @getpaseo/server 0.11.1:
 // resolveNavigateToAgent reads sessions/agents before navigating to that workspace with the
 // agent target). The bridge never invents a workspace hop of its own.
 //
@@ -258,8 +258,8 @@ export function installBridge(
    * It only reads; it writes nothing into the application's storage and calls nothing of
    * the application.
    *
-   * Pinned @getpaseo/server 0.11.0-beta.2, web build
-   * index-a43718759ebeb27df202e8b9fc2fe58a.js: the agent route is
+   * Pinned @getpaseo/server 0.11.1, web build
+   * index-32cec38dd4de4493a1d5392537c1e464.js: the agent route is
    * `/h/<server>/workspace/<workspace>` with the intent `open=agent:<id>`; the app persists
    * its tab store under the localStorage name `workspace-layout-state` as `{ state, version }`,
    * with `state.layoutByWorkspace[<serverId>:<workspaceId>]` holding `focusedPaneId` and a tree
@@ -268,8 +268,9 @@ export function installBridge(
    * `agent_<agent id>` (buildDeterministicWorkspaceTabId), the same identity the wide strip
    * shows as `workspace-tab-agent_<id>`. Comparisons are exact: route path segments, never a
    * search of the whole address (a workspace id in the query names nothing); the whole stored
-   * key, never its ending (another server's key never matches). Re-read this adapter and
-   * client/selection.ts on the new release before the pin moves (also on the 0.11.1 upgrade).
+   * key, never its ending (another server's key never matches). Re-read on 0.11.1
+   * for the pin move (MIK-R123): route, store name/shape and tab/scroll signs confirmed
+   * in index-32cec38d…; the chat was seen in the dashboard's frame in the task's sandbox.
    *
    * NATIVE MEASUREMENT 2026-10-09 (sandbox ar-l121-witness, pinned bundle, real Chromium,
    * no live roles): the state lies in the page's localStorage under `workspace-layout-state`

@@ -42,7 +42,7 @@ import { arEmbedList } from "./shared/rpc";
  * Supported navigation: a contributed screen receives its params and the client-owned
  * `navigation` prop, and forwards to the agent or workspace it was opened for. The agent
  * travels alone: `navigation.openAgent({agentId})` resolves its workspace from the
- * application's own session (pinned @getpaseo/server 0.11.0-beta.2 `resolveNavigateToAgent`),
+ * application's own session (pinned @getpaseo/server 0.11.1 `resolveNavigateToAgent`),
  * so the bridge performs no workspace hop of its own.
  */
 function OpenTarget({ params, navigation, theme }: PluginScreenProps) {

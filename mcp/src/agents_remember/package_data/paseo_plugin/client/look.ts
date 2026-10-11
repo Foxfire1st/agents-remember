@@ -285,7 +285,10 @@ export function openNativeSidebarOnce(page: PluginPage): void {
   }
   let attempts = 0;
   const onMenuClick = (event: Event) => {
-    if ((event.target as Element | null)?.closest?.('[data-testid="menu-button"]')) {
+    // Structural probe, not the DOM lib (this package compiles without it):
+    // identical runtime shape to `Element.closest?.(...)`.
+    const target = event.target as unknown as { closest?(selector: string): unknown } | null;
+    if (target?.closest?.('[data-testid="menu-button"]')) {
       finish();
       try { mark(); } catch { /* No automatic click without the marker. */ }
     }

@@ -5,7 +5,7 @@
 // The page models a Paseo application with two workspaces and runs the REAL plugin client part
 // (`startClientPart` → `installBridge`) against a stubbed SDK, so the dashboard side under test
 // talks to genuine bridge code. Navigation follows the native truth (pinned @getpaseo/server
-// 0.11.0-beta.2 `resolveNavigateToAgent`): an open names the agent alone and the application
+// 0.11.1 `resolveNavigateToAgent`): an open names the agent alone and the application
 // resolves its workspace from its own session. Display uses native-faithful markup: visible
 // selected agent tabs on wide layouts, and below the desktop breakpoint the switcher trigger
 // with the mounted agent chat scroll (`nativeID agent-chat-scroll-native-virtualized`).
@@ -77,7 +77,7 @@ function createFakeClient(hooks: FakeHooks): BridgeClient {
         } else if (params.workspaceId && !params.agentId && !WORKSPACES.includes(params.workspaceId)) {
           result = "stalled-unknown-workspace";
         } else {
-          // Native navigation truth (pinned @getpaseo/server 0.11.0-beta.2
+          // Native navigation truth (pinned @getpaseo/server 0.11.1
           // resolveNavigateToAgent): the application resolves the agent's workspace from its
           // own session and navigates there with the agent target. The fake models that, not
           // a workspace-scoped open that can only succeed where the frame stands.

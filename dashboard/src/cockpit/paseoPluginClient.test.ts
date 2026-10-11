@@ -385,7 +385,7 @@ describe("the control channel inside the frame", () => {
    * The compact layout below the desktop breakpoint: a switcher trigger instead of tabs, with
    * the mounted agent chat scroll node (live web id `agent-chat-scroll-web-dom-scroll`; the
    * bundle also carries the native literal), and optionally the loading pane instead of the
-   * chat. Pinned @getpaseo/server 0.11.0-beta.2.
+   * chat. Pinned @getpaseo/server 0.11.1.
    */
   const showCompact = (mode: "chat" | "loading" = "chat") => {
     document.body.innerHTML = `<button data-testid="workspace-tab-switcher-trigger" aria-label="tabs"></button>` +
