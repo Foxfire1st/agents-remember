@@ -52,13 +52,15 @@ observed_uv="$(uv --version | awk '{print $2}')"
 
 backup=""
 backup_root="${XDG_CACHE_HOME:-$HOME/.cache}/agents-remember/venv-backups"
-mkdir -p "$backup_root"
 if [ -e "$venv" ]; then
+  # The backup root is created only when a previous environment is actually
+  # moved aside: a fresh build writes nothing outside the worktree for this.
+  mkdir -p "$backup_root"
   $replace || {
     echo "[python-runtime] $venv already exists; pass --replace for an explicit recreation" >&2
     exit 1
   }
-  backup="$backup_root/agents-remember-mcp-$(date -u +%Y%m%dT%H%M%SZ)"
+  backup="$backup_root/agents-remember-mcp-$(basename -- "$repo_root")-$(date -u +%Y%m%dT%H%M%SZ)"
   mv -- "$venv" "$backup"
 fi
 
@@ -67,7 +69,8 @@ restore_previous() {
   trap - EXIT
   if [ "$status" -ne 0 ]; then
     if [ -e "$venv" ]; then
-      failed="$backup_root/agents-remember-mcp-failed-$(date -u +%Y%m%dT%H%M%SZ)"
+      failed="$backup_root/agents-remember-mcp-failed-$(basename -- "$repo_root")-$(date -u +%Y%m%dT%H%M%SZ)"
+      mkdir -p "$backup_root"
       mv -- "$venv" "$failed"
       echo "[python-runtime] failed candidate retained for diagnosis at $failed" >&2
     fi
@@ -98,6 +101,7 @@ uv pip check --python "$venv/bin/python"
 
 trap - EXIT
 if [ -n "$backup" ]; then
-  echo "[python-runtime] previous venv retained for bounded rollback at $backup"
+  rm -rf -- "$backup"
+  echo "[python-runtime] removed replaced venv at $backup after successful recreation"
 fi
 echo "[python-runtime] canonical MCP venv ready at $venv"

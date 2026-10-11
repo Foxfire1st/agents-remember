@@ -1484,6 +1484,7 @@ consumers = [
   "mcp/tests/test_worktree_candidate_capture.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
+  "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",

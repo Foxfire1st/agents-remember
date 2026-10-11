@@ -44,8 +44,10 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.
-- Interpreter: `<venv-python-path>` with `PYTHONPATH=<code-worktree>/mcp/src` — there is no
-  `python` shim in this environment.
+- Candidate environment: build the worktree's environment as the repository's tool notes
+  (`system/tools.md`) say, and run every command on the candidate in it — there is no
+  `python` shim in this environment. Where the tool notes name no command, say so in your
+  record. A record of a run names the interpreter it used.
 
 ## The task
 Leaf spec: `<leaf-doc-path>` (read it first). <One-paragraph task statement: the bug/feature, the

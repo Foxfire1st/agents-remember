@@ -328,6 +328,7 @@ unit-regression = [
   "mcp/tests/test_witness_driver_helpers.py",
   "mcp/tests/test_workflow_chain_guidance.py",
   "mcp/tests/test_worktree_candidate_capture.py",
+  "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 public-contract = [
