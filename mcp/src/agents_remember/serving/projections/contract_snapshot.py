@@ -26,7 +26,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -87,25 +90,27 @@ class ContractSnapshotCache:
         for path in iter_leaf_enclosure_contracts(tasks_root):
             seen.add(path)
             stat = _safe_stat(path)
-            cached = self._cached_contract(path, stat)
-            if cached is not None:
-                contracts[path] = cached
-                continue
-            try:
-                contract = load_contract(path)
-            except (ContractError, OSError):
+            contract = self._cached_contract(path, stat)
+            if contract is None:
+                try:
+                    contract = load_contract(path)
+                except (ContractError, OSError):
+                    self._entries.pop(path, None)
+                    skipped.add(path)
+                    continue
+                if stat is not None:
+                    self._entries[path] = _ParseCacheEntry(
+                        mtime_ns=stat.st_mtime_ns,
+                        size=stat.st_size,
+                        ctime_ns=stat.st_ctime_ns,
+                        contract=contract,
+                    )
+                else:
+                    self._entries.pop(path, None)
+            if is_foreign_enclosure_contract(path, contract.task_artifact):
                 self._entries.pop(path, None)
                 skipped.add(path)
                 continue
-            if stat is not None:
-                self._entries[path] = _ParseCacheEntry(
-                    mtime_ns=stat.st_mtime_ns,
-                    size=stat.st_size,
-                    ctime_ns=stat.st_ctime_ns,
-                    contract=contract,
-                )
-            else:
-                self._entries.pop(path, None)
             contracts[path] = contract
         for stale in [path for path in self._entries if path not in seen]:
             del self._entries[stale]

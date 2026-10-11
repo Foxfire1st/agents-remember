@@ -27,6 +27,7 @@ a repository.
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -58,8 +59,13 @@ from agents_remember.memory.knowledge_index import (
 )
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.serving.scope import FileScope, resolve_scope
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "PUBLISHED",
@@ -405,6 +411,13 @@ def _leaves(config: McpRuntimeConfig, repository_id: str) -> list[dict[str, Any]
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
+            continue
+        if is_foreign_enclosure_contract(path, contract.task_artifact):
+            logger.warning(
+                "knowledge selection: skipping enclosure contract whose task "
+                "document lies outside its repository tasks: %s",
+                path.as_posix(),
+            )
             continue
         if (
             contract.repo_name != repository_id

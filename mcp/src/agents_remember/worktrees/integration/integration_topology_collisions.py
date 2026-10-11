@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,8 +24,13 @@ from agents_remember.worktrees.scheduling_mode import (
     commanded_sprint_masters,
     effective_execution_nature,
 )
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+
+logger = logging.getLogger(__name__)
 
 _PublicationMasterAuthority = dict[
     TaskDocumentRef,
@@ -79,7 +85,15 @@ def require_no_live_leaf_collisions(
     context = _collision_context(request, services)
     enclosure_root = request.scope.coordination_root / "tasks" / request.scope.repo_name
     for path in iter_leaf_enclosure_contracts(enclosure_root):
-        _require_no_live_leaf_collision(context, services.load_contract(path))
+        contract = services.load_contract(path)
+        if is_foreign_enclosure_contract(path, contract.task_artifact):
+            logger.warning(
+                "topology collisions: skipping enclosure contract whose task "
+                "document lies outside its repository tasks: %s",
+                path.as_posix(),
+            )
+            continue
+        _require_no_live_leaf_collision(context, contract)
 
 
 def _collision_context(

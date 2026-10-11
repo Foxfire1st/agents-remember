@@ -14,6 +14,7 @@ contracts.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,12 +38,17 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
     load_contract,
 )
+
+logger = logging.getLogger(__name__)
 
 _LANG_BY_EXT = {
     ".py": "python",
@@ -134,6 +140,13 @@ def _iter_active_contracts(config: McpRuntimeConfig) -> Iterator[WorktreeContrac
             contract = load_contract(path)
         except (ContractError, OSError):
             continue  # one malformed contract never aborts the catalog
+        if is_foreign_enclosure_contract(path, contract.task_artifact):
+            logger.warning(
+                "scope: skipping enclosure contract whose task document lies "
+                "outside its repository tasks: %s",
+                path.as_posix(),
+            )
+            continue
         if contract.cleanup == "abandoned":
             continue
         if not contract.code_worktree.exists():

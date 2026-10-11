@@ -37,6 +37,7 @@ from agents_remember.worktrees.leaf_refs import (
 )
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
+    is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
     leaf_enclosure_path,
     resolve_active_task_root,
@@ -522,14 +523,13 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
     """
     healed: list[dict[str, str]] = []
     errors: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     canonical = 0
     unchanged = 0
     doc_id_index: dict[Path, frozenset[str]] = {}
     for path in iter_leaf_enclosure_contracts(coordination_root / "tasks"):
-        try:
-            contract = load_contract(path)
-        except (ContractError, OSError) as error:
-            errors.append({"contract": path.as_posix(), "error": str(error)})
+        contract = _load_sweep_contract(path, errors, skipped)
+        if contract is None:
             continue
         if contract.kind != "leaf" or not contract.leaf_id:
             unchanged += 1
@@ -559,12 +559,10 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
             healed_contract.leaf_id,
             " (dry run)" if dry_run else "",
         )
-        if not dry_run:
-            try:
-                write_contract(path, healed_contract)
-            except Exception as error:  # a failed rewrite is reported, never fatal to the sweep
-                errors.append({"contract": path.as_posix(), "error": str(error)})
-                continue
+        rewrite_error = _maybe_rewrite_healed_contract(path, healed_contract, dry_run)
+        if rewrite_error is not None:
+            errors.append({"contract": path.as_posix(), "error": rewrite_error})
+            continue
         healed.append(
             {
                 "contract": path.as_posix(),
@@ -577,8 +575,50 @@ def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) ->
         "canonical": canonical,
         "unchanged": unchanged,
         "errors": errors,
+        "skipped": skipped,
         "dryRun": dry_run,
     }
+
+
+def _load_sweep_contract(
+    path: Path,
+    errors: list[dict[str, str]],
+    skipped: list[dict[str, str]],
+) -> WorktreeContract | None:
+    """Load one sweep contract, routing problems to their report lists.
+
+    Unloadable files land in ``errors``; a foreign contract is never read as
+    an enclosure and lands in ``skipped``.
+    """
+
+    try:
+        contract = load_contract(path)
+    except (ContractError, OSError) as error:
+        errors.append({"contract": path.as_posix(), "error": str(error)})
+        return None
+    if is_foreign_enclosure_contract(path, contract.task_artifact):
+        skipped.append(
+            {
+                "contract": path.as_posix(),
+                "reason": "task document lies outside its repository tasks",
+            }
+        )
+        return None
+    return contract
+
+
+def _maybe_rewrite_healed_contract(
+    path: Path, healed_contract: WorktreeContract, dry_run: bool
+) -> str | None:
+    """Write one healed contract; the error text, or None on success."""
+
+    if dry_run:
+        return None
+    try:
+        write_contract(path, healed_contract)
+    except Exception as error:  # a failed rewrite is reported, never fatal to the sweep
+        return str(error)
+    return None
 
 
 def normalize_contract_leaf_id(

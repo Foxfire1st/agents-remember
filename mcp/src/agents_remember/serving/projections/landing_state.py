@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Protocol
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.worktrees.modules.landing import landing_refs, unobserved_landing_refs
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import (
+    is_foreign_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -270,6 +273,13 @@ class LandingStateRefresher:
             try:
                 contract = load_contract(path)
             except (ContractError, OSError):
+                continue
+            if is_foreign_enclosure_contract(path, contract.task_artifact):
+                logger.warning(
+                    "landing observation: skipping enclosure contract whose task "
+                    "document lies outside its repository tasks: %s",
+                    path.as_posix(),
+                )
                 continue
             if not self._needs_live_probe(contract):
                 continue
