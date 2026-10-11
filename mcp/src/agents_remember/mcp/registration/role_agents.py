@@ -81,46 +81,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         replaces_agent_id: str | None = None,
         replaces_interrupt_turn: bool = False,
     ) -> dict[str, object]:
-        """Start one role agent for one canonical AR selection, with the caller as its parent.
-
-        Only a role agent that AR launched can call this: the caller is the agent this tool
-        server was started for. An architect may start every role except architect; an
-        orchestrator may start manager, worker, reviewer, curator and investigator, and a manager
-        worker, reviewer, curator and investigator, each only under its own sprint or master;
-        worker, reviewer, curator and investigator may start none.
-
-        An investigator accepts no task reference, a sprint, or a sprint and master; never a leaf.
-        Give the other roles their required references: sprint for orchestrator, sprint and
-        master for manager, sprint, master and leaf for worker, reviewer and curator. request_id is a UUID the caller chooses: the same id with
-        the same selection reconciles the same agent and never creates a second; a new id is a
-        new start. A selected investigator admits at most eight open request-addressed executions;
-        the other task-bound roles refuse a new start while an execution is open. agent, model and
-        effort override the role default and are checked against the host's catalog at the time
-        of the call. feature_values supplies speed features (service_tier or fast_mode), using the
-        host's exact option IDs/booleans. A start call cannot state a mode or a permission-bearing
-        feature; configure those in the user's coordination settings or host profile.
-
-        One call resolves or creates the leaf enclosure, compiles the role's first message,
-        records the launch and creates the agent in Paseo. It returns agentId, reportPath,
-        handoverArtifactPath and status: running (the agent exists), rejected (the launch is
-        closed; no usable agent exists) or unknown (no usable answer; repeat the same
-        request_id). A call that is not carried out answers status refused with the reason in
-        refusal and detail.
-
-        A leaf seat is held by its agent while that agent is not archived (MIK-R100 rule 9):
-        a new request id for an occupied seat is refused naming the holder, and a start with
-        the holder's own request id reconciles it. A start that says it replaces the holder
-        in replaces_agent_id retires the holder first, in the same call; only the agent that
-        started the seat, or the launcher, may replace it, and the successor's handover names
-        the earlier report paths. A holder in a turn is not replaced without
-        replaces_interrupt_turn saying its turn may be interrupted, as in retirement.
-
-        Starts run one at a time. A call waits up to 60 seconds for another start of this tool
-        server to end; after that it is refused as launch-refused and nextAction says to call
-        again with the same arguments. Only the agent that started an execution repeats its
-        request_id. A repeat whose agent is archived or gone is refused as launch-refused with
-        the agentId: start again with a new request_id.
-        """
+        """Start one role agent for one canonical selection with the caller as parent, starting in Paseo. Only a role agent that AR launched can call this. A request id reconciles the same agent, never a second. Only the agent that started an execution repeats its request_id. Answers ok, the agent id and the handover location; rejected (the launch is closed; no usable agent exists). Starts run one at a time. A call waits up to 60 seconds for another start to end, then is refused; nextAction says to call again with the same arguments. Reference: docs/reference/mcp-tools.md."""
         call = RoleStartCall(
             role=role,
             request_id=request_id,
@@ -211,48 +172,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
         withdraw_held_message_id: str | None = None,
     ) -> dict[str, object]:
-        """Send one text message to one role agent; with wait, return its reply.
-
-        Only a role agent that AR launched can call this. Name the recipient either by agent_id
-        (the id a role start returned, or the id in the first line of a message you received), or
-        by role plus the task references its class requires. A role that matches several live
-        agents is refused with their ids in candidateAgentIds; the tool never picks one. On a
-        leaf's seat two live agents refuse the same way: one seat holds one agent.
-
-        The recipient reads the text behind one line that names the sender:
-        "From <role> · <task id or Projects> · agent <sender agent id>". A message to a held
-        seat delivers the seat's handover and the message in one turn, and the answer says
-        that the seat was opened; a held seat is refused neither as busy nor as unfinished.
-
-        Every message the host cannot take now is held by the product instead of refused:
-        a recipient whose start has not finished, that waits for a permission decision, or
-        that is in a turn the host cannot write into. The answer says that the message is
-        held and why, and names the permission as the host names it, or "not supplied"; it
-        does not say accepted. When the recipient can be written to, the product hands over
-        everything it holds for that recipient in one delivery, in the order taken. At most
-        twenty held messages wait for one recipient; a message beyond that is refused as
-        busy and none is dropped. The answer names how many messages of the sender wait for
-        the recipient, and a sender withdraws an earlier one with withdraw_held_message_id.
-        A recipient whose session is closed is resumed first; an archived or missing recipient
-        is refused and stays as it is. A new turn on a completed task-bound Investigator
-        needs one of that selection's eight open slots before delivery or resume; a full selection
-        refuses with the eight request IDs and the close/archive remedy. An address by role
-        never means the caller itself.
-
-        Without wait the call returns status accepted once the host accepted the message, or
-        status held once the product held it. With wait it returns when the turn that consumed
-        the message ends: turn-finished with its final text in text, turn-failed or turn-cancelled;
-        or permission-pending when the recipient waits for a permission decision; or timeout after
-        timeout_seconds (default 300, at most 1800), with the message still delivered and the reply
-        to be read later. A wait on a held message at a permission answers permission-pending as
-        well. When the host cannot say which turn consumed the message, the call returns accepted
-        without a text and detail says that the reply must be read later. A reply to a message
-        delivered during a turn can be that running turn's text; detail says so then.
-        Refusals: recipient-busy, recipient-not-found, recipient-archived, recipient-ambiguous,
-        recipient-cannot-be-resumed, investigator-capacity, scope-check-failed, caller-has-no-binding,
-        no-paseo-runtime-configured, host-unreachable. A finished turn is a fact about the
-        recipient's turn, never AR acceptance of a requirement.
-        """
+        """Send one text message to one role agent. Name the recipient by agent_id or by role plus task references. Only the host request is promised: without wait the call answers once the host accepted the message; with wait it answers when the consuming turn ends (finished, failed, cancelled, permission, timeout). A mid-turn recipient gets the message in its turn, which the host may cancel; a waiting, unstarted or unwritable recipient is answered `held` with reason, permission, counts and id. Only a full hold store (twenty) is refused as `recipient-busy`. Reference: docs/reference/mcp-tools.md."""
         call = RoleMessageCall(
             text=text,
             agent_id=agent_id,

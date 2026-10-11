@@ -30,13 +30,13 @@ surrounding procedure. See the [Skills reference](skills.md).
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `dispatch_agent` | Create or replace one canonical role seat and durably pin its exact initial brief. Plane-hosted callers use injected seat identity plus direct-child scope; identity-free developer launchers use target-document resolution plus role-altitude validation. | `task_document_ref`, `role`, `brief`, optional `label` |
-
 Structural messaging, seat retirement/rename, lifecycle signals, and gates left the public
 surface (MIK-R112): `message_parent`, `message_child`, `retire_child`, `rename_child`,
 `rename_self`, `lifecycle_start`, `lifecycle_resume`, `lifecycle_turn_end_notification`,
 `lifecycle_end`, `switch_lifecycle`, `lifecycle_phase`, `lifecycle_gate`, `gate_decide`,
 `gate_list`. Messaging between seats goes through `role_message` (by agent id or by role
-plus task references); lifecycle moves are session-driven.
+plus task references); lifecycle moves are session-driven. `role_start` and `role_message`
+stay public; see Role agents below for their rows.
 
 Runtime session, lifecycle, inbox-row, adapter, vendor, and gate identifiers are private
 control-plane correlations. The plane may use exact addressing internally for the initial brief,
@@ -50,6 +50,36 @@ altitude. The request never supplies caller identity or selects a mode. Both mod
 internal creation/readiness, exact brief pinning, rollback, and canonical seat publication. A
 plane authorization failure remains a refusal and never retries as ambient. `dispatched` and
 `dispatch-queued` both mean the brief is durable; callers do not poll readiness or send it again.
+
+`role_start` answers `ok`, the agent id, and the handover location; the rest rides in the
+detail file. Only a role agent that AR launched can call it, and only roles its rule allows
+under its own sprint or master. A `request_id` reconciles the same agent, never a second: only
+the agent that started an execution repeats its `request_id`. Starts run one at a time; a call
+waits up to 60 seconds for another start to end, then is refused with a `nextAction` that says
+to call again with the same arguments. A finished, canceled, or rejected recipient is reconciled,
+never relaunched; an archived recipient is refused. Requests that already have a receipt are
+answered from that receipt.
+
+`role_message` names its recipient either by `agent_id` or by `role` plus the task references
+its class requires; an address by role never means the caller itself. The recipient reads the
+text behind one line naming the sender: `From <role> · <task id or Projects> · agent <sender
+agent id>`. A mid-turn recipient is handed the message in its running turn, which the host may
+cancel. A recipient waiting on a permission decision, whose start has not finished,
+or that is in a turn the host cannot write into is answered `held`, not refused: the
+answer carries `status` `held`, the reason (`heldReason`), what waits and why (`detail`),
+the permission as the host names it or null when unnamed (`permission`), the sender's
+waiting counts (`waitingMine`, `waitingTotal`), and the issued id (`heldMessageId`), which a
+later call can withdraw with `withdraw_held_message_id`. Delivery happens in the order taken
+when the recipient can be written to; nothing has to be sent again. Code `recipient-busy`
+is refused outright only when the recipient already holds twenty messages; that refusal
+names waiting for a delivery or withdrawing a waiting message instead. Without `wait` the call
+answers `ok`, the status, and how the
+recipient took the message once the host accepted it. With `wait` it returns when the turn that
+consumed the message ends. When the host cannot say which turn consumed the message, the call
+returns `accepted` without a text and detail says the reply must be read later. A reply to a
+message delivered during a turn can be the running turn's text; detail says so then. A reply
+over the exception bound rides as its beginning with the whole in the detail file. Never wait on
+an agent that may be waiting on you.
 
 ## Install & scaffolding
 
@@ -147,6 +177,10 @@ application operation, not an agent-facing route around MCP.
 | `worktree_start` | Create/load a task contract and code (+ external-memory) worktrees. | `repo_id`, `task_name`, `worktree_name`, `workflow_kind="light-task"`, `dry_run=false`, `memory_choice` |
 | `worktree_enclosure_adopt` | Explicitly adopt one exact readable pre-locator enclosure. Validates the configured contract/root pair and writes an audited locator receipt; normal readers never invoke it. Dry-run by default. | `contract_path`, `expected_worktree_group`, nonblank `rationale`, `dry_run=true`, `approved=false`, optional `expected_publication_request_id` |
 | `worktree_attach` | Re-attach to an existing task contract without mutating Git. | `repo_id`, `task_name` / `contract_path` |
+| `worktree_sync` | Pull the moved official line into a live worktree. | `contract_path`, `dry_run=false` |
+| `worktree_pause` | Pause an atomic master and hand control back; publishes nothing. | `contract_path` |
+| `worktree_checkpoint_landing` | Partially publish an unfinished series master by landing its finished leaves; not a pause. | `contract_path`, `strategy`, `dry_run=false` |
+| `worktree_record_landing` | Record a commit the landing target already holds. | `contract_path`, `code_commit`, `memory_commit`, dry-run options |
 | `worktree_status` | Report strict task-addressed lifecycle status without queue input. A live locator resolves to the root manifest/journal and its executable controls; a terminal locator resolves to the exact external archive/receipt plus surviving contract truth, distinguishes archive-ready from cleanup-completed, and returns the archived `cleanupArguments` with exact retry `nextArgs`. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory commit messages |
 | `worktree_closeout_apply` | Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
@@ -185,6 +219,14 @@ atomically changed only when its bytes equal the accepted predecessor tombstone;
 successor bytes are idempotent, and every other byte state refuses. This is a strict successor
 publication transaction, not a generic overwrite or compatibility reader.
 
+Landing and worktree answers carry the state reached plus the next call (`nextTool` with
+`nextArgs`); the whole result stays in the `log` file. `worktree_status` additionally reports one
+line when task-document copies differ from their sources. A task-state refusal answers `ok:false`
+with the state's own sentence, a `code`, and the one following call; it never raises. A dry run
+that names blockers answers a blocked state. Role start writes the leaf document and its
+requirement files and nothing else; a missing requirement file still succeeds, with the INDEX row,
+the handover, and the answer naming it.
+
 ## Closeout scheduling projection
 
 | Tool | Purpose | Key args |
@@ -203,23 +245,29 @@ strand accepted operation evidence.
 | --- | --- | --- |
 | `task_doc` | Author JSON-primary task documents and deterministic markdown. Every intrinsically valid mutation publishes during every queue/operation phase and returns per-sprint `projectionEffects`; an incomplete effect carries its exact rebuild `nextAction`. `skip_step` requires a nonblank reason; `discard-unstarted` removes only centrally proven never-started planning work without completion fiction; `Completed` refuses unresolved units. | `repo_id`, task/contract target, `operation`, edit payload, `dry_run=false` |
 | `task_reopen` | Reopen a fully landed leaf under the same leaf id so new work can be declared explicitly. | `contract_path`, `dry_run=false` |
-
 ### task_doc operations
 
 `task_doc` authors the JSON-primary task document (`ar-task-document/v1`); `task.md` /
-`<slug>.md` is generated and never parsed back. Mutating, except `operation='get'` and
-`read_steps`. Locate the doc by `task_name` (also resolves the contract for the lifecycle key)
-or `contract_path`; pass `slug` for a series sub-task (`<slug>.json`), omit for a standalone
-task (`task.json`). `dry_run=true` builds, validates and returns rendered/diff/wouldLose
-without writing.
+`<slug>.md` is generated and never parsed back. Every operation is a write: `get` and
+`read_steps` are removed operations (calling one is refused with the rendered `.md` and
+JSON file names to read instead). Locate the doc by `task_name` (also resolves the
+contract for the lifecycle key) or `contract_path`; pass `slug` for a series sub-task
+(`<slug>.json`), omit for a standalone task (`task.json`). `dry_run=true` builds,
+validates and returns diff/wouldLose without writing. A write answers `ok` and
+the changed unit in a phrase (`renderedPath` rides `create`, `reviewState` rides reviews);
+the rendered Markdown and per-sprint `projectionEffects` ride the whole result in the log
+file. `linkage_report`
+answers the fact counts with the report location. Long `fields`/`section_body` may ride
+as files (`fields_file`, `section_body_file`). A master-sync failure answers `ok:false`
+with `master-sync-failed` and leaves the leaf unchanged.
 
 - `create`: new doc from `fields` (`id`, `slug`, `title`, `kind` `subTask`|`master` — the old
 `light` kind is refused — `repo`, `type`, `createdAt`, `objective`, `requirements`, `steps`,
 ...). A master takes `subTasks` plus ordered sections instead of steps; an orchestration
 sprint is scaffolded with empty canonical Judgment and Priority Register sections.
 - `replace`: whole-document rewrite from `fields` after schema validation.
-- `get`: read the document. `read_steps`: read-only focused checklist (`id`/`title`/`status`/
-`note` plus nested substeps). `set_status`: set `fields.status`. `set_field`: scalar/list
+- `get` and `read_steps` are removed: calling one is refused with the file names
+to read instead. `set_status`: set `fields.status`. `set_field`: scalar/list
 field updates. `append_decision`: append `decision={at, decision, rationale}`.
 - Step plane (one exact existing unit, addressed by `step={id, parent?}`; `parent` selects top
 level when absent or that parent's substeps): `set_step` updates exactly one unit
