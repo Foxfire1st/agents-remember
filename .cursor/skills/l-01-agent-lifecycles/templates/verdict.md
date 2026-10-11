@@ -150,7 +150,7 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-The Reviewer records its own ordinary CODE round and result as `../roles/reviewer.md` states; the Manager keeps gate acceptance and the developer's recorded approval beyond the ordinary limit. The task document remains the authority.
+The Reviewer records its own ordinary CODE round and result as `../roles/reviewer.md` states; the Manager keeps gate acceptance and the architect's or the developer's recorded approval beyond the settings limit. The task document remains the authority.
 
 Send the verdict directly to the Worker, including the sealed findings report on BLOCK; on PASS,
 send the passed freeze and verdict directly to the Curator. Keep the Curator's MEMORY review sealed and counted apart. Return memory findings/pass directly to the Curator. Only when both
@@ -365,4 +365,4 @@ only the sealed outstanding IDs and their worker fixes, records a fixed/unfixed 
 every preceding ID, and retains earlier accepted adjudications rather than opening a new full
 review. Outside-list observations, changed deliveries, new routes, and newly discovered criteria
 return to the developer rather than becoming successor findings. A successor never adds, reopens,
-or resets an issue. At three rounds, request authorization as `../operations/review.md` states before any extra review. The D107 one-further-look exception for used-up rounds with only repaired items lives in `../operations/review.md`; it names no broader extra-round authority.
+or resets an issue. At the settings limit, request authorization as `../operations/review.md` states before any extra review. Verifying repaired items is an ordinary round; no broader extra-round authority exists beyond the recorded approval.

@@ -19,6 +19,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettingsError,
+    load_agentic_settings,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks import TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -125,6 +129,9 @@ def _record_route_review_bound(
     doc: TaskDocument,
     payload: dict[str, Any] | None,
     binding: _RouteReviewBinding,
+    *,
+    settings_limit: int | None = None,
+    actual_candidate: str | None = None,
 ) -> TaskDocument:
     if payload is None:
         raise TaskDocError("record_route_review requires a review object")
@@ -144,7 +151,9 @@ def _record_route_review_bound(
             )
         except (RouteReviewError, ValidationError) as exc:
             raise TaskDocError(str(exc)) from exc
-        return _with_route_review_state(doc, payload, review)
+        return _with_route_review_state(
+            doc, payload, review, settings_limit=settings_limit, actual_candidate=actual_candidate
+        )
     _require_route_review_binding(binding)
     contract = binding.contract
     assert contract is not None  # _require_route_review_binding proves the binding
@@ -165,27 +174,79 @@ def _record_route_review_bound(
         )
     except (RouteReviewError, ValidationError) as exc:
         raise TaskDocError(str(exc)) from exc
-    return _with_route_review_state(doc, payload, review)
+    return _with_route_review_state(
+        doc, payload, review, settings_limit=settings_limit, actual_candidate=actual_candidate
+    )
+
+
+def repo_root_opt(config: McpRuntimeConfig, repo_id: str) -> Path | None:
+    """Return the repository root for ``repo_id``, or ``None`` when unknown."""
+    try:
+        repository = config.repositories[repo_id]
+    except KeyError:
+        return None
+    path = getattr(repository, "path", None)
+    return Path(path) if path is not None else None
+
+
+def review_settings_limit(coordination_root: Path) -> int:
+    """The review-round number in force: the settings file's, or the default.
+
+    MIK-R116 rule 1: ``begin_review`` takes the limit from
+    ``orchestration.loops.defaults.maxRounds`` as the settings file names it
+    when the round is begun, so a changed number holds for the next round
+    without a server restart. An unreadable settings file refuses the round
+    with the reason the settings give, and no round is counted.
+    """
+
+    try:
+        return load_agentic_settings(coordination_root).loops.defaults.max_rounds
+    except AgenticSettingsError as exc:
+        raise TaskDocError(f"review-settings-unreadable: {exc}") from exc
 
 
 def _begin_task_review_bound(
     doc: TaskDocument,
     payload: dict[str, Any] | None,
     binding: _RouteReviewBinding | None = None,
+    *,
+    limit: int | None = None,
 ) -> TaskDocument:
     """Start or resume the one pending review round owned by the task document."""
 
     del binding
     try:
-        return begin_task_review(doc, payload)
+        return begin_task_review(doc, payload, limit=limit)
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
+
+
+def candidate_root_for_review(
+    contract: WorktreeContract | None,
+    repo_root: Path | None,
+) -> Path | None:
+    """Resolve the candidate root a review record binds through the contract authority.
+
+    A leaf worktree contract binds its exact code worktree; every other shape
+    (series contract, branch-addressed direct execution, no contract) falls
+    back to the repository root, or ``None`` when even that is unknown. The
+    caller resolves the byte identity from the returned root; ``None`` means
+    the identity is unproven and admits no same-round record.
+    """
+    if contract is not None and contract.kind == "leaf":
+        worktree = contract.code_worktree
+        if worktree.is_dir():
+            return worktree
+    return repo_root
 
 
 def _record_task_review_bound(
     doc: TaskDocument,
     payload: dict[str, Any] | None,
     binding: _RouteReviewBinding | None = None,
+    *,
+    settings_limit: int | None = None,
+    actual_candidate: str | None = None,
 ) -> TaskDocument:
     """Record generic review state without authoring code-route evidence."""
 
@@ -193,19 +254,32 @@ def _record_task_review_bound(
     if payload is None:
         raise TaskDocError("record_review requires a review object")
     try:
-        return record_task_review(doc, payload)
+        return record_task_review(
+            doc, payload, settings_limit=settings_limit, actual_candidate=actual_candidate
+        )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
 
 
-def _state_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Keep route evidence out of the shared, generic state transition."""
+def _state_payload(payload: dict[str, Any], review: Any = None) -> dict[str, Any]:
+    """Keep route evidence out of the shared, generic state transition.
 
-    return {
+    L116-F01: the plane-stamped candidate tree the route builder resolved is
+    the reviewer's checked-candidate claim for the generic guard; it travels
+    in the state payload, never in route evidence. The authority binding is
+    resolved separately from the contract and passed alongside.
+    """
+
+    state = {
         key: payload[key]
         for key in ("verdict", "verdictRef", "findings", "remainingFindingIds")
         if key in payload
     }
+    if "candidateTree" not in state:
+        plane_tree = getattr(review, "candidateTree", None)
+        if isinstance(plane_tree, str) and plane_tree:
+            state["candidateTree"] = plane_tree
+    return state
 
 
 def _route_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -222,9 +296,17 @@ def _with_route_review_state(
     doc: TaskDocument,
     payload: dict[str, Any],
     review: Any,
+    *,
+    settings_limit: int | None = None,
+    actual_candidate: str | None = None,
 ) -> TaskDocument:
     try:
-        updated = record_task_review(doc, _state_payload(payload))
+        updated = record_task_review(
+            doc,
+            _state_payload(payload, review),
+            settings_limit=settings_limit,
+            actual_candidate=actual_candidate,
+        )
     except ReviewHistoryError as exc:
         raise TaskDocError(f"{exc.status}: {exc}") from exc
     data = updated.model_dump(by_alias=True)

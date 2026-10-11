@@ -106,10 +106,14 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
                     {"verdict": "block", "findings": [{"findingId": "R99-CHANGED"}]},
                     "review-successor-new-findings",
                 )
-                for expected_round in (2, 3):
-                    if expected_round == 3:
-                        third = await successful("begin_review", {})
-                        assert (third["round"], third["pending"]) == (3, True)
+                for expected_round in (2, 3, 4, 5):
+                    begun = await successful("begin_review", {})
+                    assert (
+                        begun["round"],
+                        begun["pending"],
+                        begun["baselineFindings"],
+                        begun["remainingFindingIds"],
+                    ) == (expected_round, True, baseline, ["R99-F1"])
                     result = await successful(
                         "record_review", {"verdict": "block", "remainingFindingIds": ["R99-F1"]}
                     )
@@ -122,7 +126,7 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
                 await refused(
                     "begin_review",
                     {},
-                    "review-budget-exhausted: review budget exhausted: count=3, limit=3",
+                    "review-budget-exhausted: review budget exhausted: count=5, limit=5",
                 )
 
     try:
@@ -138,6 +142,11 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
             "begin_review",
             "record_review",
             "record_review",
+            "begin_review",
+            "record_review",
+            "begin_review",
+            "record_review",
+            "begin_review",
             "record_review",
             "begin_review",
             "record_review",

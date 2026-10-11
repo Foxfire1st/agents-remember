@@ -105,7 +105,7 @@ master's leaf loop to the master-exit seam, then hand over.
   and worker envelope to the reviewer. For `reviewMode=fix-verification`, carry the sealed
   baseline, preceding result, and exact outstanding IDs; verify listed fixes only. The reviewer
   records its own begin and result; keep acceptance for the gate and record the
-  developer's approval for a CODE round or MEMORY pass beyond the ordinary limit.
+  architect's or the developer's approval for a CODE round or MEMORY pass beyond the settings limit.
   The reviewer adjudicates that exact attempt and candidate `accepted | rejected` in a separately appended
   record with its own rationale. Every requirement verdict must cite evidence of the
   requirement's class (rendering -> mounted-UI proof, scheduling -> operation-level proof, data
@@ -154,7 +154,7 @@ master's leaf loop to the master-exit seam, then hand over.
   exact code/memory transaction, worker targeted-check report, the curator's complete onboarding/
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document
-  and preserve the three-round monotonic rule with the sealed finding list. The verdict is evidence, not a routine transaction gate.
+  and preserve the monotonic sealed finding list across rounds within the settings limit. The verdict is evidence, not a routine transaction gate.
   Raise `master-handover-approval` only as required by the active gate policy; the orchestrator
   decides the matching open gate structurally.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:

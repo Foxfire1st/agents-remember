@@ -184,7 +184,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "record your own begin and result as `../operations/review.md` §Outputs states",
         ),
         "manager acceptance": (
-            "The Manager accepts the verdict for the gate and records the developer's authorization beyond the limit.",
+            "The Manager accepts the verdict for the gate and records the architect's or the developer's authorization beyond the limit.",
         ),
         "sealed memory lane": (
             "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
@@ -196,7 +196,7 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
             "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
         ),
         "memory extra approval": (
-            "the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions",
+            "the task's architect or the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions",
         ),
         "post-pass concern": (
             "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
@@ -231,10 +231,10 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         "preceding result": ("including any preceding result required before the next begin",),
         "manager acceptance": (
-            "The Manager retains gate acceptance and records the developer's approval for any extra round.",
+            "The Manager retains gate acceptance and records the architect's or the developer's approval for any extra round.",
         ),
         "sealed memory lane and count": (
-            "Curator memory checks keep separately sealed reports, IDs and a count with the same ordinary limit as code",
+            "Curator memory checks keep separately sealed reports, IDs and a count with the same settings limit as code",
         ),
         "memory leaves code untouched": (
             "they open no review-state round, reset no passed code review and add no IDs to its baseline",

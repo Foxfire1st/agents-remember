@@ -12,7 +12,7 @@ The Manager starts a leaf's Worker, Reviewer and Curator as a set in one `role_s
 
 Ready leaves land one after the other. Leaves whose reviews have passed land as a train; each synchronises once, to the landing before it. A Manager starts every leaf whose prerequisites have landed, and holds none back for another reason than the number of leaves in work that its starter named.
 
-The Reviewer records begin and result of an ordinary code review round itself, using the supported task-document operations. Memory review uses separate sealed reports, IDs and a pass count, with the same ordinary limit; it opens no code round and resets no code baseline. The Manager records the developer's approval for an extra round or memory pass and accepts verdicts for the gate. Keep the sealed findings and operation refusals unchanged.
+The Reviewer records begin and result of an ordinary code review round itself, using the supported task-document operations. Memory review uses separate sealed reports, IDs and a pass count, with the same settings limit; it opens no code round and resets no code baseline. The Manager records the architect's or the developer's approval for an extra round or memory pass and accepts verdicts for the gate. Keep the sealed findings and operation refusals unchanged.
 
 The Manager receives only what `../roles/manager.md` lists for the Manager. It supplies the occasion for the sender to retry a pending hand-over, without relaying contents or asking for developer confirmation of that occasion. Read reports and task records for routine state and record which seat holds each next step and since when.
 

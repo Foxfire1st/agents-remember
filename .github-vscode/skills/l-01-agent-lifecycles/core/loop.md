@@ -45,14 +45,18 @@ requested.**
 
 ## Rounds and convergence
 
-- A governed review has at most **three rounds**: one thorough baseline and two fix-verification
-  rounds. A pending round may resume; a new review counts the next round. The D107 one-further-look exception lives in `../operations/review.md` and covers only used-up rounds whose remaining items were raised before and have since been repaired.
+- A governed review runs one thorough baseline and fix-verification rounds within **the
+  settings limit**: the number of rounds without an approval that
+  `orchestration.loops.defaults.maxRounds` names. The limit in force is the one the settings
+  file names when the round is begun; a changed number holds for the next round without a
+  restart. The review state that `task_doc` answers carries the limit for the task, with its
+  approved extra rounds. A pending round may resume; a new review counts the next round.
 - Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up
   verification; fix rounds resume the same builder.
-- Reviews 2 and 3 verify **only** the original listed issues. Any outside-list matter goes to the
+- Fix-verification rounds verify **only** the original listed issues. Any outside-list matter goes to the
   developer and is not a successor finding.
 - **The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
-  open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, request authorization as `../operations/review.md` states. The D107 one-further-look exception lives in `../operations/review.md` and covers only used-up rounds whose remaining items were raised before and have since been repaired.
+  open set with fixed/unfixed dispositions. At the settings limit, or when a further round is needed, request authorization as `../operations/review.md` states. Verifying repaired items is an ordinary fix-verification round: when a review's rounds are used up and the only items left were raised before and have since been repaired, the same reviewer verifies exactly those items in the next round, not as an exception.
 
 The simple review rule: if no review state is present, the used-round count is zero and the next
 review is a baseline; do not create a pristine marker or refuse because legacy review history is

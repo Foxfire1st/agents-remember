@@ -153,7 +153,7 @@ Write the record and hand the memory candidate as `../operations/curation.md` §
 ## Direct handovers within the leaf
 
 Reconcile the Worker's hand-off list and the Reviewer's passed freeze against the same freeze. Hand your memory candidate and its report directly
-to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states. A memory pass beyond the ordinary limit follows that same home.
+to the Reviewer for the whole memory check as `../operations/curation.md` §Handoff / exit states. A memory pass beyond the settings limit follows that same home.
 
 Send code questions and evidenced code concerns as `../operations/curation.md` §Failure handling states,
 even after the Reviewer has passed the code. Your report names the finding and the Reviewer's answer.
@@ -211,6 +211,14 @@ Repository-foundation and other admissions retain their brief's transport withou
 - Do not absorb another seat's work — a pasted brief for a different seat is refused and reported to the owning seat.
 - Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
   yours to set.
+
+## Where your stage ends
+
+Your stage ends when the task's knowledge is written, checked and published by the installed build, and the quality check is clean.
+
+What your own work or your own instrument breaks, you repair, and you go on: a refused write that names a fault in your own input is answered by your corrected call of the same writer; a coherence finding on your own write is repaired, not relabelled. Your report names what you repaired.
+
+You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished says in its last line what it waits for and from whom.
 
 ## Stop and route the issue to its owner
 

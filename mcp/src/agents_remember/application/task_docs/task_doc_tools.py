@@ -37,6 +37,7 @@ from agents_remember.tasks.master_sync import MasterSyncError, plan_master_sync
 from agents_remember.tasks.readiness import (
     missing_unresolved_master_rows,
 )
+from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
     require_register_sections_valid,
@@ -63,7 +64,12 @@ from .task_doc_publication import (
     task_doc_publication_transaction,
     validate_task_doc_transaction,
 )
-from .task_doc_response import graph_titles_for, task_doc_preview, task_doc_result
+from .task_doc_response import (
+    graph_titles_for,
+    review_state_payload,
+    task_doc_preview,
+    task_doc_result,
+)
 from .task_doc_route_review import (
     DEFAULT_TASK_DOC_CALL,
     TaskDocCall,
@@ -76,6 +82,9 @@ from .task_doc_route_review import (
     _record_task_review_bound,
     _RouteReviewBinding,
     _validate,
+    candidate_root_for_review,
+    repo_root_opt,
+    review_settings_limit,
 )
 from .task_doc_section_scaffolding import scaffold_register_sections
 from .task_execution_topology import (
@@ -201,6 +210,7 @@ class _PreparedTaskDocEdit:
 
 @dataclass(frozen=True)
 class _TaskDocPrepareRequest:
+    config: McpRuntimeConfig
     operation: str
     payload_fields: dict[str, Any]
     edit: TaskDocEdit
@@ -208,6 +218,7 @@ class _TaskDocPrepareRequest:
     task_root: Path
     slug: str | None
     branch_addressed: bool
+    repo_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -256,6 +267,7 @@ def task_doc_tool(
 
     prepared = _prepare_task_doc_edit(
         _TaskDocPrepareRequest(
+            config,
             operation,
             payload_fields,
             edit,
@@ -263,6 +275,7 @@ def task_doc_tool(
             task_root,
             slug,
             call.branch_addressed,
+            target.repo_id,
         )
     )
     original = prepared.original
@@ -388,18 +401,38 @@ def _prepare_task_doc_edit(
     if request.operation == "replace":
         doc = _replace(request.payload_fields, request.contract, request.task_root, json_path)
     elif request.operation == "begin_review":
-        doc = _begin_task_review_bound(original, request.edit.review)
+        doc = _begin_task_review_bound(
+            original,
+            request.edit.review,
+            limit=review_settings_limit(request.config.coordination_root),
+        )
     elif request.operation == "record_review":
-        doc = _record_task_review_bound(original, request.edit.review)
+        doc = _record_task_review_bound(
+            original,
+            request.edit.review,
+            settings_limit=review_settings_limit(request.config.coordination_root),
+            actual_candidate=resolve_candidate_identity(
+                candidate_root_for_review(
+                    request.contract, repo_root_opt(request.config, request.repo_id)
+                )
+            ),
+        )
     elif request.operation == "record_route_review":
+        binding = _RouteReviewBinding(
+            contract=request.contract,
+            task_root=request.task_root,
+            selected_path=json_path,
+            branch_addressed=request.branch_addressed,
+        )
         doc = _record_route_review_bound(
             original,
             request.edit.review,
-            _RouteReviewBinding(
-                contract=request.contract,
-                task_root=request.task_root,
-                selected_path=json_path,
-                branch_addressed=request.branch_addressed,
+            binding,
+            settings_limit=review_settings_limit(request.config.coordination_root),
+            actual_candidate=resolve_candidate_identity(
+                candidate_root_for_review(
+                    binding.contract, repo_root_opt(request.config, request.repo_id)
+                )
             ),
         )
     else:
@@ -463,23 +496,51 @@ def _sprint_doc_identity(
     }
 
 
+def _get_task_doc_result(context: _TaskDocSpecialContext) -> dict[str, Any]:
+    """Read one task document, carrying the effective settings limit.
+
+    L116-F02: a stored limit of zero means the record predates per-task
+    limits, not a zero-round budget. When the settings file resolves, a
+    recorded state with no stored limit answers the settings number plus its
+    approved extra rounds; historical count, sealed lists, approval and extra
+    rounds are untouched, and the document itself is not rewritten. When the
+    settings file cannot be read, the get stays readable on the stored record.
+    """
+    json_path = _existing_json(context.task_root, context.target.slug)
+    doc = read_task_doc(json_path)
+    try:
+        get_limit: int | None = review_settings_limit(context.config.coordination_root)
+    except TaskDocError:
+        # A get stays readable when the settings file cannot be read; a
+        # recorded state still carries the limit its last begin computed.
+        get_limit = None
+    result = task_doc_result(
+        context.operation,
+        doc,
+        json_path,
+        markdown_path_for(context.task_root, doc),
+    )
+    state = doc.reviewState
+    if get_limit is not None:
+        if state is None:
+            result["reviewState"] = review_state_payload(doc, get_limit)
+        elif state.limit == 0:
+            result["reviewState"] = {
+                **result["reviewState"],
+                "limit": get_limit + state.additionalRounds,
+            }
+    # L14-R5: a sprint's read surface carries its linkage drift facts.
+    facts = task_sprint_linkage.linkage_facts_for_get(
+        context.config.coordination_root, context.target.repo_id, json_path, doc
+    )
+    if facts is not None:
+        result["linkageFacts"] = facts
+    return result
+
+
 def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
     if context.operation == "get":
-        json_path = _existing_json(context.task_root, context.target.slug)
-        doc = read_task_doc(json_path)
-        result = task_doc_result(
-            context.operation,
-            doc,
-            json_path,
-            markdown_path_for(context.task_root, doc),
-        )
-        # L14-R5: a sprint's read surface carries its linkage drift facts.
-        facts = task_sprint_linkage.linkage_facts_for_get(
-            context.config.coordination_root, context.target.repo_id, json_path, doc
-        )
-        if facts is not None:
-            result["linkageFacts"] = facts
-        return result
+        return _get_task_doc_result(context)
     if context.operation == "read_steps":
         return _read_steps(context)
     if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:

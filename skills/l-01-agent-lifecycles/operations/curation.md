@@ -268,8 +268,8 @@ Each handover names the leaf, the thing's exact identity (the Worker's code head
 the memory candidate's identity), its report or verdict path, and the whole next stretch requested.
 The memory check keeps separate sealed reports, finding IDs and its own pass count: it opens
 no code-review round, resets no code verdict and adds no IDs to the code baseline. Its ordinary limit is
-the same number of passes as the code review. A pass beyond its
-ordinary limit needs the developer's word recorded by the Manager. Receive memory findings or PASS
+the same number of passes as the code review. A pass beyond the settings limit
+needs the architect's or the developer's word recorded by the Manager. Receive memory findings or PASS
 directly from the Reviewer and repair within that lane; the Manager carries none of these handovers.
 
 Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.
@@ -277,7 +277,7 @@ Count a hand-over as taken and handle provider, seat, busy and unreachable-Manag
 If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with `role_message` on `agents-remember-task`; do not turn this transport failure into a developer question in your own chat.
 
 The Manager hears from the Curator only for these delivery and seat problems, ownership or authority,
-a pass beyond the ordinary limit, a code finding disputed with the Reviewer, or a sync step assigned
+a pass beyond the settings limit, a code finding disputed with the Reviewer, or a sync step assigned
 to the Manager. It reads ordinary state from reports and never relays the contents. Memory conflicts
 in the Worker's supported leaf sync come directly to the Curator; transaction steps stay with the
 Manager. Contact another leaf only for a dependency named by a requirement or the Manager; other

@@ -121,5 +121,5 @@ The handover names the leaf, exact freeze head/change hash, memory change identi
   directly by their producers; the Curator does not re-request evidence that already exists in
   `notes/reports/`.
 - The Reviewer records the ordinary CODE round and its own result; the Manager keeps gate acceptance
-  and records approval beyond the ordinary limit. The Curator's MEMORY review is sealed and counted
+  and records the architect's or the developer's approval beyond the settings limit. The Curator's MEMORY review is sealed and counted
   separately and writes no code-review state.

@@ -164,15 +164,23 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
         evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
         evidence path must be a real task-relative file. It overwrites the prior candidate's review.
-        'begin_review' takes an empty review object, or the bounded developerApproval and
-        additionalRounds controls, and increments the task review round before reviewer work (a
-        repeated begin resumes the pending round). 'record_review' takes
+        'begin_review' takes an empty review object and increments the task review round before
+        reviewer work (a repeated begin resumes the pending round). The round limit is the
+        settings number (orchestration.loops.defaults.maxRounds) plus approved
+        extra rounds, read from the settings file at each begin. Beyond the limit a round needs an
+        approval with additionalRounds: approval {by architect|developer, text} (the earlier
+        developerApproval words still read); without one the answer is review-budget-exhausted
+        with count and limit. An unreadable settings file refuses the begin with its reason.
+        'record_review' takes
         {verdict, findings:[{findingId, description}] for the first result, or
-        remainingFindingIds:[...] for later results, verdictRef?}; successors may only shrink the
-        sealed finding set. 'record_route_review' uses the same bounded state transition while
+        remainingFindingIds:[...] for later results, verdictRef?, candidateTree?}; successors may
+        only shrink the sealed finding set. A check of a repaired Worker record alone, with the
+        candidate unchanged, is recorded on the last round without a new begin (no round is
+        counted); on a changed candidate the tool refuses and names begin_review as the next step.
+        'record_route_review' uses the same bounded state transition while
         preserving its existing candidate/evidence/currentness checks; call 'begin_review' before
-        either publication. The response includes the small reviewState counter, pending flag,
-        baseline findings, and remaining IDs.
+        either publication. The response reviewState carries round, pending,
+        baseline findings, remaining IDs, and limit.
         Standalone and organizational leaves use their bound leaf contract. For an atomic master,
         the operation targets the canonical task-root master document and binds the accumulated
         master candidate, canonical child membership/intents, and evidence; an atomic child does

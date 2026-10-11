@@ -83,7 +83,7 @@ identity: the sprint's `orchestrates` and `integrationBranch`, every commanded m
 | review mode        | <baseline | fix-verification> |
 | sealed baseline    | <sealed baseline issue-list/verdict ref> |
 | preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
-| round              | <n> (three rounds ordinary maximum; explicit developer authorization required for any extra) |
+| round              | <n> (rounds within the settings limit are ordinary; a round beyond it needs a recorded architect or developer approval) |
 | written            | <YYYY-MM-DDTHH:MM> |
 
 ## Sprint Scope

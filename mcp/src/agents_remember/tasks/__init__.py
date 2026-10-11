@@ -69,6 +69,7 @@ from .execution_graph_titles import (
 from .readiness import CompletionBlocker, completion_blockers, master_is_terminal
 from .render import render_markdown
 from .route_review import (
+    ReviewApproval,
     ReviewFinding,
     ReviewState,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "HeaderNote",
     "LeafPlacement",
     "MasterExecutionNature",
+    "ReviewApproval",
     "ReviewFinding",
     "ReviewState",
     "RouteReviewChildIntent",

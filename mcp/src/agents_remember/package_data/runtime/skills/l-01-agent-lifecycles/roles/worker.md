@@ -37,6 +37,18 @@ Count a hand-over as taken and handle provider, seat and busy refusals as `../op
 
 When the master line moves, run the supported sync of your own leaf as `../operations/implementation.md` §Boundaries states; request that step alone from the Manager and do not take its closeout, integration, status or acceptance writes.
 
+## Where your stage ends
+
+Your stage ends when the candidate meets the requirement; the focused tests, the lint and the type check pass on its final bytes; and the report is with the Reviewer.
+
+What your own work or your own instrument breaks, you repair, and you go on: a failing test of your own, a lint or type finding, a script or check of your own making, a wrong path, a failed command. A refusal that names a fault in your own input is answered by your corrected call of the same tool. Your report names what you repaired. A failed or unrun check remains visible in your report only for a check you cannot make pass on your own ground, and says so.
+
+You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished says in its last line what it waits for and from whom.
+
+Where every finding on the candidate is closed and what remains is a finding on your record alone, repair the record; the candidate unchanged, the same Reviewer checks it on the round it last recorded, with no new round.
+
+Where a finding is still open after a repair, the next repair does not answer the new case. Write the property down for every case, and either show why the construction holds it or change the construction. Your report says which.
+
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.

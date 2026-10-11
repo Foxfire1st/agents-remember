@@ -27,6 +27,8 @@ For each role assignment, call `role_start` on the `agents-remember-task` tool s
 
 Keep the conversation with the developer, the plan and its order, the requirements and their text, and the decision on what needs the developer. Hand the Manager or Orchestrator the role starts and messages, the order of the day, operational problems, ordinary requirement interpretation within the intended promise and operational rulings, checks before and after a landing, and paired closeout within its delegated authority.
 
+A round beyond the settings limit is yours to grant for a task on your line, or the developer's: it makes sense when the sealed list has shrunk and the open repair is concrete. Where the same finding fails again with an unchanged repair, or the dispute is about what the requirement means, rule on the matter and grant no round.
+
 Read the coordinating agent's rulings record, list of requirement sentences to change, and status file on your own; it sends no routine ruling or landing notice. Bring the requirement texts in line with its rulings within the intended promise. New or dropped scope and changes to that promise still need the developer's decision.
 
 After the handover, release execution coordination to the Orchestrator or Manager and continue the developer conversation and status reading. Do not hold a `wait` on an Orchestrator or Manager for execution completion through `role_message` on `agents-remember-task`; those coordinators own their completion loops.

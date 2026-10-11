@@ -4,156 +4,156 @@
   "how": "budget = ceil(size_words * 11 / 10); size = whitespace-split words of render_instructions(), task data and seals excluded",
   "capsules": {
     "architect/orientation": {
-      "size_words": 2508,
-      "budget_words": 2759
+      "size_words": 2666,
+      "budget_words": 2933
     },
     "architect/planning": {
-      "size_words": 1874,
-      "budget_words": 2062
+      "size_words": 2013,
+      "budget_words": 2215
     },
     "architect/review": {
-      "size_words": 2181,
-      "budget_words": 2400
+      "size_words": 2410,
+      "budget_words": 2651
     },
     "architect/coordination": {
-      "size_words": 2838,
-      "budget_words": 3122
+      "size_words": 2980,
+      "budget_words": 3278
     },
     "architect/authorized-closeout": {
-      "size_words": 1779,
-      "budget_words": 1957
+      "size_words": 1918,
+      "budget_words": 2110
     },
     "architect/recovery": {
-      "size_words": 1872,
-      "budget_words": 2060
+      "size_words": 2011,
+      "budget_words": 2213
     },
     "orchestrator/orientation": {
-      "size_words": 1990,
-      "budget_words": 2189
+      "size_words": 2095,
+      "budget_words": 2305
     },
     "orchestrator/planning": {
-      "size_words": 1356,
-      "budget_words": 1492
+      "size_words": 1442,
+      "budget_words": 1587
     },
     "orchestrator/review": {
-      "size_words": 1663,
-      "budget_words": 1830
+      "size_words": 1839,
+      "budget_words": 2023
     },
     "orchestrator/coordination": {
-      "size_words": 2320,
-      "budget_words": 2552
+      "size_words": 2409,
+      "budget_words": 2650
     },
     "orchestrator/authorized-closeout": {
-      "size_words": 1261,
-      "budget_words": 1388
+      "size_words": 1347,
+      "budget_words": 1482
     },
     "orchestrator/recovery": {
-      "size_words": 1354,
-      "budget_words": 1490
+      "size_words": 1440,
+      "budget_words": 1584
     },
     "designer/orientation": {
-      "size_words": 1894,
-      "budget_words": 2084
+      "size_words": 1972,
+      "budget_words": 2170
     },
     "designer/planning": {
-      "size_words": 1260,
-      "budget_words": 1386
+      "size_words": 1319,
+      "budget_words": 1451
     },
     "strategist/orientation": {
-      "size_words": 2174,
-      "budget_words": 2392
+      "size_words": 2262,
+      "budget_words": 2489
     },
     "strategist/planning": {
-      "size_words": 1540,
-      "budget_words": 1694
+      "size_words": 1609,
+      "budget_words": 1770
     },
     "manager/orientation": {
-      "size_words": 2313,
-      "budget_words": 2545
+      "size_words": 2625,
+      "budget_words": 2888
     },
     "manager/review": {
-      "size_words": 1986,
-      "budget_words": 2185
+      "size_words": 2369,
+      "budget_words": 2606
     },
     "manager/curation": {
-      "size_words": 5033,
-      "budget_words": 5537
+      "size_words": 5340,
+      "budget_words": 5874
     },
     "manager/coordination": {
-      "size_words": 2643,
-      "budget_words": 2908
+      "size_words": 2939,
+      "budget_words": 3233
     },
     "manager/authorized-closeout": {
-      "size_words": 1584,
-      "budget_words": 1743
+      "size_words": 1877,
+      "budget_words": 2065
     },
     "manager/recovery": {
-      "size_words": 1677,
-      "budget_words": 1845
+      "size_words": 1970,
+      "budget_words": 2167
     },
     "worker/orientation": {
-      "size_words": 1664,
-      "budget_words": 1831
+      "size_words": 2059,
+      "budget_words": 2265
     },
     "worker/implementation": {
-      "size_words": 1246,
-      "budget_words": 1371
+      "size_words": 1654,
+      "budget_words": 1820
     },
     "worker/recovery": {
-      "size_words": 1028,
-      "budget_words": 1131
+      "size_words": 1404,
+      "budget_words": 1545
     },
     "curator/orientation": {
-      "size_words": 3612,
-      "budget_words": 3974
+      "size_words": 3884,
+      "budget_words": 4273
     },
     "curator/curation": {
-      "size_words": 6332,
-      "budget_words": 6966
+      "size_words": 6599,
+      "budget_words": 7259
     },
     "curator/recovery": {
-      "size_words": 2976,
-      "budget_words": 3274
+      "size_words": 3229,
+      "budget_words": 3552
     },
     "reviewer/orientation": {
-      "size_words": 3232,
-      "budget_words": 3556
+      "size_words": 3583,
+      "budget_words": 3942
     },
     "reviewer/review": {
-      "size_words": 2905,
-      "budget_words": 3196
+      "size_words": 3327,
+      "budget_words": 3660
     },
     "reviewer/recovery": {
-      "size_words": 2596,
-      "budget_words": 2856
+      "size_words": 2928,
+      "budget_words": 3221
     },
     "investigator/orientation": {
-      "size_words": 1525,
-      "budget_words": 1678
+      "size_words": 1603,
+      "budget_words": 1764
     },
     "investigator/recovery": {
-      "size_words": 889,
-      "budget_words": 978
+      "size_words": 948,
+      "budget_words": 1043
     },
     "bootstrap/orientation": {
-      "size_words": 2133,
-      "budget_words": 2347
+      "size_words": 2211,
+      "budget_words": 2433
     },
     "bootstrap/recovery": {
-      "size_words": 1497,
-      "budget_words": 1647
+      "size_words": 1556,
+      "budget_words": 1712
     },
     "bootstrap/bootstrap": {
-      "size_words": 3745,
-      "budget_words": 4120
+      "size_words": 3804,
+      "budget_words": 4185
     },
     "launcher/orientation": {
-      "size_words": 1488,
-      "budget_words": 1637
+      "size_words": 1507,
+      "budget_words": 1658
     },
     "launcher/coordination": {
-      "size_words": 1818,
-      "budget_words": 2000
+      "size_words": 1821,
+      "budget_words": 2004
     }
   },
   "decisions_L101": {
@@ -2212,5 +2212,9 @@
       }
     ],
     "restorations": "see additions_vs_master; wrong referral reverted in full"
+  },
+  "decisions_L116": {
+    "rule": "MIK-R116 rules 6 to 8: every one of the worker, reviewer, curator and manager role texts gains a 'Where your stage ends' section (end state, repair-own-slips, stops, plus the rule 5 and rule 9 sentences where the packet binds them); the settings-limit rewrite touches the loop doctrine, the review/coordination/curation operations, the reviewer/strategist/architect roles and three templates. Refreshed after the reviewer's tool-server naming line. L116-F03 repair: the reviewer role text and the review operation drop number-naming round phrases ('one seam or one loop round' -> 'a single seam or loop round'; 'the one that round' -> 'the candidate that round'); no capsule grew.",
+    "grown_capsules": []
   }
 }

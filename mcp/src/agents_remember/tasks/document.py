@@ -59,6 +59,7 @@ from .execution_graph_validation import (
     validate_execution_graph,
 )
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
+    ReviewApproval,
     ReviewFinding,
     ReviewState,
     RouteReviewChildIntent,

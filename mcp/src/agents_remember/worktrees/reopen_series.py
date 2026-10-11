@@ -442,9 +442,9 @@ def _review_state_carries_history(state: ReviewState | None) -> bool:
 
     The rule is that a reopened master's counter is 0: the rounds that ran belong to the
     completion being reopened, and carrying them forward would bill the next review against a
-    budget it never spent -- and at the cap would make the ordinary three rounds read as an
-    exhausted one, which is the difference between an ordinary first round and a round the
-    developer had to authorize. A document that carries no review state, or an all-zero one, has
+    budget it never spent -- and at the cap would make the settings rounds read as an
+    exhausted one, which is the difference between an ordinary first round and a round that
+    needed an approval. A document that carries no review state, or an all-zero one, has
     nothing to clear and is left exactly as it is.
     """
 
@@ -455,6 +455,7 @@ def _review_state_carries_history(state: ReviewState | None) -> bool:
         or state.pending
         or state.baselineFindings
         or state.remainingFindingIds
+        or state.approval is not None
         or state.developerApproval is not None
         or state.additionalRounds
     )

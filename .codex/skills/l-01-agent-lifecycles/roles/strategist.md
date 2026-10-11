@@ -49,8 +49,7 @@ improvise around.
    or explicitly adopt the graph-less atomic-sequential default. **Planning is mandatory; a persisted graph is
    not**, and an unreasoned default is not a choice. Never author empty or ceremonial topology.
 6. **Serve the drawing-board rounds.** A successor review receives the sealed baseline and verifies only its exact outstanding IDs; each disposition says fixed or unfixed for every preceding outstanding ID, and its
-   remaining set is a subset of the preceding set. The mode contract is `../operations/review.md`; three
-   rounds are the ordinary maximum.
+   remaining set is a subset of the preceding set. The mode contract is `../operations/review.md`; rounds within the settings limit are ordinary, and a round beyond it needs a recorded approval.
     - **A changed plan surface that cannot be verified against the baseline returns to the developer** rather
       than opening a new review cycle.
     - **Quo-vadis items** — high-blast-radius truths such as two masters heavily disagreeing on direction — go

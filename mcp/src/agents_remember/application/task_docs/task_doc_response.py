@@ -19,17 +19,25 @@ from agents_remember.tasks import (
 from agents_remember.tasks.master_sync import MasterSyncPlan
 
 
-def _review_state_payload(doc: TaskDocument) -> dict[str, Any]:
-    """Expose the bounded review counter, treating an absent field as zero."""
+def review_state_payload(doc: TaskDocument, limit: int | None = None) -> dict[str, Any]:
+    """Expose the bounded review counter, treating an absent field as zero.
+
+    MIK-R116 rule 2: the answer carries ``limit``, the number in force for this
+    task. A recorded state carries the limit its last begin computed; a task
+    with no recorded state carries the settings number when the caller read it.
+    """
 
     state = doc.reviewState
     if state is None:
-        return {
+        payload: dict[str, Any] = {
             "round": 0,
             "pending": False,
             "baselineFindings": [],
             "remainingFindingIds": [],
         }
+        if limit is not None:
+            payload["limit"] = limit
+        return payload
     return state.model_dump(mode="json", by_alias=True)
 
 
@@ -53,7 +61,7 @@ def task_doc_result(
         "renderedPath": markdown_path.as_posix(),
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
-        "reviewState": _review_state_payload(doc),
+        "reviewState": review_state_payload(doc),
     }
     sync_payload = _master_sync_payload(master_sync, preview=False)
     if sync_payload is not None:

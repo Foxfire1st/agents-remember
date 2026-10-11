@@ -89,6 +89,27 @@ class ReviewFinding(_RouteReviewDoc):
         return cleaned
 
 
+class ReviewApproval(_RouteReviewDoc):
+    """A recorded beyond-limit approval: who gave it and their words.
+
+    MIK-R116 rule 3: a round beyond the settings limit is granted by the
+    architect of the task's line or by the developer. The tool records it as
+    ``approval`` with ``by`` and ``text``; a record written with the earlier
+    ``developerApproval`` shape stays readable and counts the same way.
+    """
+
+    by: Literal["architect", "developer"]
+    text: str = Field(min_length=1, max_length=8192)
+
+    @field_validator("text")
+    @classmethod
+    def _trim_approval_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("review approval text must not be blank")
+        return trimmed
+
+
 class ReviewState(_RouteReviewDoc):
     """Small persisted state for one monotonic review sequence."""
 
@@ -96,9 +117,25 @@ class ReviewState(_RouteReviewDoc):
     pending: bool = False
     baselineFindings: list[ReviewFinding] = Field(default_factory=list)
     remainingFindingIds: list[str] = Field(default_factory=list)
-    # The ordinary cap is fixed in the transition service.  These two fields carry one
-    # explicit developer answer and its bounded additional allowance without introducing
-    # a second authority or history store.
+    # MIK-R116 rule 2: the number in force for this task — the settings number
+    # plus its approved extra rounds — as the last ``begin_review`` computed it.
+    # 0 means the record predates per-task limits; the next begin recomputes it.
+    limit: int = Field(default=0, ge=0)
+    # MIK-R116 rule 5: the candidate the last recorded round was recorded on.
+    # A check of a repaired Worker record alone is recorded on the same round
+    # only while this identity matches; None predates candidate tracking.
+    candidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
+    # L116-F01: the authority-resolved binding of that candidate (worktree HEAD
+    # tree plus tracked modifications plus untracked bytes, resolved through the
+    # task/contract authority when the round was recorded). The same-round guard
+    # compares this binding, never a caller-supplied string; None means the
+    # round was recorded before binding or the identity was unresolvable, which
+    # proves nothing and admits no same-round record.
+    candidateIdentity: str | None = None
+    # MIK-R116 rule 3: the recorded beyond-limit approval. ``developerApproval``
+    # is the earlier shape: it stays readable, and a new approval clears it so
+    # exactly one authority shape is ever present.
+    approval: ReviewApproval | None = None
     developerApproval: str | None = Field(default=None, max_length=8192)
     additionalRounds: int = Field(default=0, ge=0)
 
@@ -121,16 +158,25 @@ class ReviewState(_RouteReviewDoc):
             self.pending
             or finding_ids
             or self.remainingFindingIds
+            or self.approval is not None
             or self.developerApproval is not None
             or self.additionalRounds
+            or self.candidateTree is not None
+            or self.candidateIdentity is not None
+            or self.limit
         ):
             raise ValueError(
-                "zero-round review state cannot carry pending, finding, or exception data"
+                "zero-round review state cannot carry pending, finding, approval, "
+                "candidate, or limit data"
             )
-        if (self.additionalRounds == 0) != (self.developerApproval is None):
+        if self.approval is not None and self.developerApproval is not None:
             raise ValueError(
-                "review developer approval and additional rounds must be provided together"
+                "review approval holds a single authority: approval or developerApproval, not both"
             )
+        if (self.additionalRounds == 0) != (
+            self.approval is None and self.developerApproval is None
+        ):
+            raise ValueError("review approval and additional rounds must be provided together")
         if len(self.remainingFindingIds) != len(set(self.remainingFindingIds)):
             raise ValueError("review remaining finding IDs must be unique")
         if not set(self.remainingFindingIds).issubset(set(finding_ids)):

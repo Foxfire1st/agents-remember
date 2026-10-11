@@ -29,7 +29,6 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_KNOB_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
-    MAX_REVIEW_ROUNDS,
     AgenticSettingsError,
     AgentNotifierSettings,
     ConcurrencySettings,
@@ -91,14 +90,11 @@ def _parse_loop_defaults(raw: object, *, source: str) -> LoopDefaults:
     _refuse_unknown(defaults, KNOWN_LOOP_DEFAULTS_FIELDS, "orchestration.loops.defaults", source)
     max_rounds = DEFAULT_LOOP_MAX_ROUNDS
     if "maxRounds" in defaults:
+        # MIK-R116: any positive whole number is taken; the refusal of a number
+        # above the old hard limit is gone.
         max_rounds = _require_positive_int(
             defaults["maxRounds"], "orchestration.loops.defaults.maxRounds", source
         )
-        if max_rounds > MAX_REVIEW_ROUNDS:
-            raise AgenticSettingsError(
-                "orchestration.loops.defaults.maxRounds cannot exceed the hard review limit "
-                f"{MAX_REVIEW_ROUNDS}; observed {max_rounds}: {source}"
-            )
     reviewer_reuse = DEFAULT_REVIEWER_REUSE
     if "reviewerReuse" in defaults:
         reviewer_reuse = _require_string(

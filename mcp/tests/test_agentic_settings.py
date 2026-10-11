@@ -109,7 +109,7 @@ class MergePrecedenceTests(unittest.TestCase):
 
         self.assertIsNone(settings.gate_policy.rule_for("closeout-approval").delegated_role)
         self.assertFalse(settings.gate_delegation_configured)
-        self.assertEqual(settings.loops.defaults.max_rounds, 3)
+        self.assertEqual(settings.loops.defaults.max_rounds, 5)
         self.assertEqual(settings.loops.defaults.reviewer_reuse, "delta-verify")
         self.assertEqual(settings.loops.defaults.complexity.full_loop_at, "high")
         self.assertEqual(settings.loops.defaults.complexity.builder_at, "medium")
@@ -168,25 +168,42 @@ class FailLoudTests(unittest.TestCase):
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(path), str(caught.exception))
 
-    def test_review_round_cap_rejects_higher_global_or_local_setting(self) -> None:
-        """R28: settings cannot turn the three-review authority boundary into a preference."""
+    def test_review_round_limit_takes_any_positive_setting_and_refuses_non_positive(
+        self,
+    ) -> None:
+        """MIK-R116: the settings name the review limit; no hard cap stays.
+
+        A file with ``maxRounds`` 4 loads (global and local layers); zero, a
+        negative number and a fraction are refused at load, naming the field.
+        """
         global_path = write_settings(
             self.coordination_root,
             {"orchestration": {"loops": {"defaults": {"maxRounds": 4}}}},
         )
-        with self.assertRaisesRegex(AgenticSettingsError, "hard review limit 3") as global_error:
-            load_agentic_settings(self.coordination_root)
-        self.assertIn(str(global_path), str(global_error.exception))
+        self.assertEqual(load_agentic_settings(self.coordination_root).loops.defaults.max_rounds, 4)
 
         global_path.unlink()
-        local_path = write_settings(
+        write_settings(
             self.repo_root,
             {"orchestration": {"loops": {"defaults": {"maxRounds": 99}}}},
             user=False,
         )
-        with self.assertRaisesRegex(AgenticSettingsError, "hard review limit 3") as local_error:
-            load_agentic_settings(self.coordination_root, self.repo_root)
-        self.assertIn(str(local_path), str(local_error.exception))
+        self.assertEqual(
+            load_agentic_settings(self.coordination_root, self.repo_root).loops.defaults.max_rounds,
+            99,
+        )
+
+        for bad in (0, -2, 2.5):
+            with self.subTest(maxRounds=bad):
+                write_settings(
+                    self.coordination_root,
+                    {"orchestration": {"loops": {"defaults": {"maxRounds": bad}}}},
+                )
+                with self.assertRaisesRegex(
+                    AgenticSettingsError,
+                    r"orchestration\.loops\.defaults\.maxRounds",
+                ):
+                    load_agentic_settings(self.coordination_root)
 
 
 class TypedModelTests(unittest.TestCase):
