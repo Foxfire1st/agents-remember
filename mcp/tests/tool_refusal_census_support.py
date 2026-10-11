@@ -179,6 +179,18 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "master_document_ref": TASK_REF,
             "task_document_ref": LEAF_REF,
         },
+        # The set and the native retirement need the same launch binding: unbound,
+        # both meet caller-has-no-binding before anything else runs.
+        "role_start_set": {
+            "request_id": "00000000-0000-4000-8000-000000000003",
+            "sprint_document_ref": TASK_REF,
+            "master_document_ref": TASK_REF,
+            "task_document_ref": LEAF_REF,
+        },
+        "retire_child": {
+            "task_document_ref": LEAF_REF,
+            "role": "worker",
+        },
         "role_message": {
             "text": "refusal census",
             "agent_id": "00000000-0000-4000-8000-000000000002",

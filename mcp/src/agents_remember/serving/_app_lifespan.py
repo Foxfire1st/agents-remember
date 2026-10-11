@@ -269,6 +269,27 @@ async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
         await asyncio.sleep(settings.agent_notifier.interval_seconds)
 
 
+async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
+    """Deliver durably held role messages on the dashboard's own tick (MIK-R100 rule 4a).
+
+    The dashboard runs without a model, and a start of the product starts this loop with
+    it. While it does not run, messages stay held and are delivered when it runs again.
+    A failed sweep never kills the loop; the store keeps everything that still waits.
+    """
+
+    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
+        HELD_DELIVERY_SWEEP_SECONDS,
+        sweep_held_messages,
+    )
+
+    while True:
+        try:
+            await _to_thread_drained_on_cancel(sweep_held_messages, runtime.config)
+        except Exception:
+            logger.exception("held-message delivery sweep failed; retrying next interval")
+        await asyncio.sleep(HELD_DELIVERY_SWEEP_SECONDS)
+
+
 async def _malloc_trim_loop() -> None:
     # Opt-in glibc arena reclaim. The steady RSS growth is allocator
     # fragmentation from per-tick projection churn (gc object count is flat while RSS climbs);
@@ -325,6 +346,7 @@ def _serving_lifespan(
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
         terminal_observation_task = asyncio.create_task(_terminal_observation_loop(runtime))
         agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
+        held_delivery_task = asyncio.create_task(_held_delivery_loop(runtime))
         relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
         optional: list[asyncio.Task[None]] = []
@@ -339,6 +361,7 @@ def _serving_lifespan(
             terminal_observation_task,
             river_compaction_task,
             agent_notifier_task,
+            held_delivery_task,
             relay_death_watch_task,
             metrics_task,
             projection_task,

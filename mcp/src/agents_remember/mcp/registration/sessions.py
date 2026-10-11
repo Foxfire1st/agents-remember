@@ -7,11 +7,12 @@ from mcp.server.fastmcp import FastMCP
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
+    RetireChildRequest,
     StructuralRole,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
-from ..tools.structural_agent import dispatch_agent_payload
+from ..tools.structural_agent import dispatch_agent_payload, retire_child_payload
 
 
 def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -47,5 +48,33 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
                 role=role,
                 brief=brief,
                 label=label,
+            ),
+        )
+    @server.tool()
+    def retire_child(
+        task_document_ref: TaskDocumentRef,
+        role: StructuralRole,
+        reason: str = "delegated seat retired",
+        agent_id: str | None = None,
+        interrupt_turn: bool = False,
+    ) -> dict[str, Any]:
+        """Retire the receipt-tracked agent in one authorized direct child seat.
+
+        MIK-R100 rule 8: the agent that started the seat retires the agent in it
+        without giving it a turn, and the launch record names the caller and the
+        reason. An agent in a turn is not retired unless interrupt_turn says the
+        turn may be interrupted. Any other role agent is refused with the starter
+        named; an unknown or ambiguous agent id is refused by name and nothing
+        is archived; a repeated call for an already retired agent changes nothing
+        and says so.
+        """
+        return retire_child_payload(
+            config,
+            RetireChildRequest(
+                task_document_ref=task_document_ref,
+                role=role,
+                reason=reason,
+                agent_id=agent_id,
+                interrupt_turn=interrupt_turn,
             ),
         )

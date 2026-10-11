@@ -18,10 +18,12 @@ def test_each_parentable_role_has_question_recovery_and_answer_provenance() -> N
         "what you hold back until it is answered, and what you recommend and why",
         "do not end your turn on the question or hold a wait for the developer",
         "Without a parent, ask the developer in your own chat and end your turn",
-        "If delivery to your parent is refused as busy or at a permission prompt",
+        "If delivery to your parent is refused as busy",
         "**Pending developer questions** in your report",
         "send it again before ending your turn",
         "A second refusal leaves it pending",
+        "If the answer says the message is held",
+        "do not send it again",
         "Having no work left does not open your own chat",
         "Only when your parent cannot be reached at all",
         "archived, not found, not resumable, no runtime configured, or host unreachable",
@@ -53,14 +55,14 @@ def test_each_parent_has_upward_notice_and_unchanged_downward_answer_duties() ->
         "each parent passes that notice up unchanged",
         "tell the developer which chat to open",
         "never give only a count",
-        "Do not ask the developer to confirm an answered prompt or keep resending to the child",
+        "do not ask the developer to confirm an answered prompt or send the message again",
     )
     for clause in notice:
         assert clause in home, ("coordination", clause)
     referral = "give the upward notice as `../operations/coordination.md` states"
     held = (
-        "try your held message once in each turn you take for any reason",
-        "give the parent that occasion when you next take a turn",
+        "The product keeps the message and delivers it when the prompt is answered",
+        "do not send it again",
     )
     for role in STARTERS:
         text = role_text(role)

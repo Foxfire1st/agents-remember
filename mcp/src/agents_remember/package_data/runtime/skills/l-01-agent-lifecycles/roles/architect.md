@@ -41,7 +41,7 @@ Put questions for the developer, and requests for a ruling, in your own chat; th
 
 ## Role agents and messages
 
-Talk to a role agent with `role_message` on `agents-remember-task` as `operations/coordination.md` states. A recipient that waits for a permission decision, or whose start has not finished, is refused as busy; a pending permission is the developer's to answer in that agent's chat. With `wait` you receive the outcome of the turn that took your message: its final text, or that the turn failed or was cancelled, a pending permission, or a timeout; `accepted` without a text means that the reply is to be read later. Do not wait on an agent that may be waiting on you. Never invent a parent, agent ID, task identity, or delivery result. Paseo runs the agents and delivers the messages; AR remains the semantic task and paired-Git authority.
+Talk to a role agent with `role_message` on `agents-remember-task` as `operations/coordination.md` states. A message to a recipient that waits for a permission decision, or whose start has not finished, is held by the product and delivered when the recipient can take it; a pending permission is the developer's to answer in that agent's chat. With `wait` you receive the outcome of the turn that took your message: its final text, or that the turn failed or was cancelled, a pending permission, or a timeout; `accepted` without a text means that the reply is to be read later. Do not wait on an agent that may be waiting on you. Never invent a parent, agent ID, task identity, or delivery result. Paseo runs the agents and delivers the messages; AR remains the semantic task and paired-Git authority.
 
 ## Boundaries
 
@@ -57,6 +57,6 @@ Organise your own work inside the assignment, with whatever your harness offers,
 
 Questions received from children follow `roles/manager.md` §Questions received from children.
 
-When `role_message` on `agents-remember-task` refuses delivery because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. Until MIK-R100 has landed, try your held message once in each turn you take for any reason; at the top, give the parent that occasion when you next take a turn. No observer or automatic held-message service is implied.
+When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. The product keeps the message and delivers it when the prompt is answered; do not send it again.
 
 Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

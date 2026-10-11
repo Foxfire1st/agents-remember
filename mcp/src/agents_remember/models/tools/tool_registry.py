@@ -47,9 +47,13 @@ from agents_remember.models.operator_inbox import (
 from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
-from agents_remember.models.role_agents import RoleMessageResponse, RoleStartResponse
+from agents_remember.models.role_agents import (
+    RoleMessageResponse,
+    RoleStartResponse,
+    RoleStartSetResponse,
+)
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
-from agents_remember.models.structural.agent import DispatchAgentResponse
+from agents_remember.models.structural.agent import DispatchAgentResponse, RetireChildResponse
 from agents_remember.models.structural.gates import (
     GateCreateResponse,
     GateResponseWaitResponse,
@@ -127,6 +131,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "session_retire": SessionRetireResponse,
     "session_rename": SessionRenameResponse,
     "dispatch_agent": DispatchAgentResponse,
+    "retire_child": RetireChildResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
@@ -170,6 +175,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "operator_inbox_supersede": OperatorInboxSupersedeResponse,
     "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
     "role_start": RoleStartResponse,
+    "role_start_set": RoleStartSetResponse,
     "role_message": RoleMessageResponse,
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_diff": KnowledgeDiffResponse,

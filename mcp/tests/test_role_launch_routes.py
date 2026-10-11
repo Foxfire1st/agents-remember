@@ -352,8 +352,19 @@ class RoleExecutionResultTests(unittest.TestCase):
 
         self.assertEqual(public["execution"], host)
         self.assertEqual(
-            set(public), {"role", "status", "execution", "canStart", "canRetry", "canRevive"}
+            set(public),
+            {
+                "role",
+                "status",
+                "execution",
+                "canStart",
+                "canRetry",
+                "canRevive",
+                # Rule 9: a leaf seat names the agent that holds it.
+                "holderAgentId",
+            },
         )
+        self.assertEqual(public["holderAgentId"], host["agentId"])
         # Retry needs the saved call: without it there is nothing to repeat.
         self.assertEqual((public["canStart"], public["canRetry"]), (False, True))
         for status in ("starting", "unknown"):

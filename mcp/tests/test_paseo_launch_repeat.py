@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import unittest
 import uuid
@@ -13,9 +14,10 @@ from unittest.mock import patch
 import test_paseo_launch as launch
 from agents_remember.application.role_launch_context import selection_binding
 from agents_remember.cli import role_launch_receipts, role_launch_routes
-from agents_remember.cli.paseo_launch import agent_title
+from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, agent_title
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
+from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from fastapi import HTTPException
 
@@ -84,6 +86,75 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
             self.dispatch(request)
         return self.receipt(request)
 
+    def free_seat_for(self, role: str) -> None:
+        """Free one seat for the next first launch (MIK-R100 rule 9).
+
+        One seat holds one agent until that agent is archived, so a test that
+        launches one seat after another archives the recorded holder first; an
+        agent-less receipt of a settled launch is archived with it. The next
+        launch still takes over from what is written (rule 9): it names the
+        earlier agent's report paths in its handover.
+        """
+
+        probe = self.request(role)
+        path = self.receipt_path(probe)
+        if not path.exists():
+            return
+        current = self.receipt(probe)
+        execution = current.get("execution")
+        agent_id = (
+            execution.get("agentId")
+            if isinstance(execution, dict) and execution.get("kind") == PASEO_AGENT_KIND
+            else None
+        )
+        if isinstance(agent_id, str) and agent_id in self.runtime.agents:
+            self.runtime.agents[agent_id]["archivedAt"] = "2026-10-02T02:00:00.000Z"
+        elif current.get("status") in {"starting", "unknown"}:
+            role_launch_receipts._archive_receipt(path, current)
+
+    @staticmethod
+    def successor_note(predecessor: dict[str, Any] | None) -> str:
+        """The handover note a launch on a used seat carries (MIK-R100 rule 9)."""
+
+        if predecessor is None:
+            return ""
+        execution = predecessor.get("execution")
+        agent = (
+            execution.get("agentId")
+            if isinstance(execution, dict) and isinstance(execution.get("agentId"), str)
+            else None
+        )
+        earlier = predecessor.get("report")
+        paths = (
+            f"its earlier report paths are {earlier.get('path')} "
+            f"(canonical {earlier.get('canonicalPath')}). "
+            if isinstance(earlier, dict) and earlier.get("path")
+            else f"its earlier request id is {predecessor.get('requestId')}. "
+        )
+        return (
+            f"\nSuccessor start: this seat replaces agent {agent}; {paths}"
+            "Take over from what is written there."
+        )
+
+    def seat_predecessor(self, role: str) -> dict[str, Any] | None:
+        """The receipt waiting at one seat, if any, before the next first launch."""
+
+        path = self.receipt_path(self.request(role))
+        if not path.exists():
+            return None
+        return self.receipt(self.request(role))
+
+    def expected_first_message(self, request: Any, body: str) -> str:
+        """The sent message for one artifact body: the artifact line names its SHA."""
+
+        path = self.artifact(request)["path"]
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        return (
+            f"AR handover artifact: {path} (SHA-256 {digest}). It holds "
+            "everything below this line; read that file again whenever your assignment is no "
+            f"longer in your context.\n{body}"
+        )
+
 
 class RepeatAfterChangeTests(RepeatTestCase):
     def test_a_repeat_is_answered_from_its_receipt_whatever_changed_since_the_launch(self) -> None:
@@ -94,11 +165,16 @@ class RepeatAfterChangeTests(RepeatTestCase):
         ]
         for role, state in cases:
             with self.subTest(role=role, state=state):
+                # One seat holds one agent: free the seat the previous case left.
+                # The next launch still takes over from what is written (rule 9).
+                predecessor = self.seat_predecessor(role)
+                self.free_seat_for(role)
                 request = self.request(role)
                 # What the launch stores and sends: the compiled message behind the line that
                 # names its artifact. The artifact holds the compiled message alone.
                 compiled_at_launch = self.prompt
-                first_message = self.first_message(request)
+                expected_artifact = compiled_at_launch + self.successor_note(predecessor)
+                expected_message = self.expected_first_message(request, expected_artifact)
                 artifact = Path(self.artifact(request)["path"])
                 if state == "unknown":
                     self.runtime.fail("agent-create", "paseo_bridge_timeout", after_effect=True)
@@ -140,7 +216,7 @@ class RepeatAfterChangeTests(RepeatTestCase):
                     # as saved with its artifact line, the saved recovery note and tool server.
                     self.assertEqual(
                         [(call["agentId"], call["prompt"]) for call in created],
-                        [(saved["agentId"], first_message)],
+                        [(saved["agentId"], expected_message)],
                     )
                     stored = saved["replayRequest"]["agent"]
                     self.assertEqual(
@@ -156,9 +232,11 @@ class RepeatAfterChangeTests(RepeatTestCase):
                         ],
                         [saved["replayRequest"]["workspace"]],
                     )
-                # The artifact holds what was compiled at the launch. The repeat neither wrote it
-                # again nor compared it with what a compilation would give now.
-                self.assertEqual(artifact.read_text(encoding="utf-8"), compiled_at_launch)
+                # The artifact holds what was compiled at the launch, with the
+                # successor note when the seat had a predecessor (rule 9). The repeat
+                # neither wrote it again nor compared it with what a compilation
+                # would give now.
+                self.assertEqual(artifact.read_text(encoding="utf-8"), expected_artifact)
                 self.assertNotEqual(self.prompt, compiled_at_launch)
                 self.assertEqual(
                     (artifact.stat().st_ino, artifact.stat().st_mtime_ns),
@@ -529,8 +607,15 @@ class ReusedRequestIdTests(RepeatTestCase):
         self.dispatch(first)
         self.close_execution(first, "completed")
         saved = self.binding_bytes(first)
-        with self.subTest("a newer execution is at the address"):
-            self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
+        with self.subTest("a successor takes the seat by replacing its holder"):
+            previous_agent = self.receipt(first)["agentId"]
+            payload = self.request("worker").model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+            replacing = RoleDispatchRequest.model_validate(
+                {**payload, "replacesAgentId": previous_agent}
+            )
+            self.assertEqual(self.dispatch(replacing)[1]["status"], "running")
             before = self.state()
             refused = self.refused(self.request("worker", first.request_id))
             self.assertEqual(refused.status_code, 409)
@@ -549,8 +634,10 @@ class ReusedRequestIdTests(RepeatTestCase):
             self.assertIn("belongs to an archived execution", str(refused.detail))
             self.assertIn("start again under a new request id", str(refused.detail))
             self.assertEqual(self.state(), before)
-        # The archived execution's binding file is untouched, and a new request id starts.
+        # The archived execution's binding file is untouched. A new request id
+        # starts once the seat's holder is archived (rule 9).
         self.assertEqual(self.binding_bytes(first), saved)
+        self.free_seat_for("worker")
         self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
         with self.subTest("a link at the archived execution's name counts, wherever it leads"):
             linked = self.request("worker")

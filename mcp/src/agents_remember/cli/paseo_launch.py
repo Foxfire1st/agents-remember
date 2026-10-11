@@ -170,6 +170,10 @@ class RoleLaunch:
     replaces_agent_id: str | None = None
     # The agent that started this role, which the runtime records as the new agent's parent.
     parent_agent_id: str | None = None
+    # A held seat (MIK-R100 rule 2): the agent is created without a first message and
+    # takes no turn until its first message opens it (rule 4). The prompt stays stored
+    # as the seat's opening handover.
+    held: bool = False
 
 
 def agent_binding(launch: RoleLaunch) -> AgentBinding:
@@ -373,7 +377,9 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
 
     Model, effort, mode and features go to the runtime at creation. A launch without a model leaves the choice to the
     provider. The first message, the recovery note and the tool-server definition are plain data
-    in the call, so a repeat sends exactly what the first run sent.
+    in the call, so a repeat sends exactly what the first run sent. A held launch carries no
+    first message: the runtime creates the agent and leaves it idle, and the stored prompt
+    opens it later (MIK-R100 rules 2 and 4).
     """
 
     agent: dict[str, Any] = {
@@ -382,9 +388,10 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
         "title": agent_title(launch.context),
         "labels": agent_labels(launch.context, launch.request_id),
         "provider": launch.provider,
-        "prompt": launch.prompt,
         "systemPrompt": recovery_note(launch.context, launch.handover_artifact),
     }
+    if not launch.held:
+        agent["prompt"] = launch.prompt
     if launch.accepts_tool_servers:
         agent["mcpServers"] = {
             TOOL_SERVER_NAME: tool_server_definition(launch.settings_file, agent_binding(launch))

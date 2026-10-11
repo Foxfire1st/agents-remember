@@ -7,14 +7,21 @@ only when the row changes what it holds, and never when the host cannot be reach
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
+from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.cli.paseo_status import AgentReading, read_agent, resume_agent, status_row
+from agents_remember.cli.role_held_messages import (
+    end_waiting_as,
+    record_lines,
+    recount_waiting_for,
+)
 from agents_remember.cli.role_launch_receipts import (
     _archive_receipt,
     _execute_prepared_launch,
@@ -49,11 +56,22 @@ class HostUnreachableRefusal(HTTPException):
 _ROW_FIELDS = ("status", "detail", "canRevive", "result", "resumeRefused")
 
 
+@dataclass(frozen=True, slots=True)
+class _Replacement:
+    """The replacement a start asks for: who asks, and which holder goes first."""
+
+    started_by: Any | None = None
+    replaces_agent_id: str | None = None
+    interrupt_turn: bool = False
+    request_id: str | None = None
+
+
 def _reconcile_prior_execution(
     config: McpRuntimeConfig,
     path: Path,
     request: RoleDispatchRequest,
     request_digest: str,
+    replacement: _Replacement | None = None,
 ) -> JSONResponse | None:
     current = _read_receipt(path)
     if current is None:
@@ -72,6 +90,10 @@ def _reconcile_prior_execution(
         if current.get("status") in {"starting", "unknown"}:
             return _execute_prepared_launch(config, path, current)
         return JSONResponse(_refresh_execution(config, path, current))
+    if str(current.get("role")) in LEAF_ROLES or str(request.role) in LEAF_ROLES:
+        return _reconcile_leaf_occupancy(
+            config, path, current, replacement or _Replacement(),
+        )
     # The open-execution rule is applied to what the agent is doing now, not to the saved status.
     status = _refresh_execution(config, path, current)
     if status.get("hostUnreachable") is True:
@@ -94,6 +116,148 @@ def _reconcile_prior_execution(
         )
     _archive_receipt(path, current)
     return None
+
+
+def _reconcile_leaf_occupancy(
+    config: McpRuntimeConfig,
+    path: Path,
+    current: dict[str, Any],
+    replacement: _Replacement,
+) -> JSONResponse | None:
+    """One seat holds one agent (MIK-R100 rule 9): the occupied-seat contract.
+
+    A leaf seat is held by its recorded agent as long as that agent is not archived,
+    whether it is in a turn, idle, held or closed -- a finished turn does not free it.
+    A start with the holder's own request id already reconciled above; here a new
+    request id for an occupied seat is refused naming the holder, and a start that
+    says it replaces the holder retires it first, in the same call, by rule 8. Only
+    an archived or vanished holder frees the seat. An unreadable holder refuses as
+    the host being unreachable, never as free.
+    """
+
+    holder = _recorded_agent_id(current)
+    if holder is None:
+        if str(current.get("status")) in {"starting", "unknown"}:
+            # The seat is held by no agent yet, but a launch of it is still in
+            # flight: archiving its receipt would steal the seat mid-launch.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A launch of this leaf seat is still in flight (request "
+                    f"{current.get('requestId')}, status {current.get('status')}); "
+                    "nothing was started or archived. Start again after that launch settles."
+                ),
+            )
+        _archive_receipt(path, current)
+        return None
+    reading = read_agent(config, holder)
+    if not reading.reachable:
+        raise HostUnreachableRefusal(
+            "The Paseo runtime cannot be reached, so the holder of this leaf seat "
+            f"(agent {holder}) cannot be read; nothing was started or archived. "
+            f"{reading.unreachable_reason}"
+        )
+    if not reading.found or reading.archived:
+        _archive_receipt(path, current)
+        return None
+    replaces_agent_id = replacement.replaces_agent_id
+    started_by = replacement.started_by
+    if replaces_agent_id is not None:
+        if replaces_agent_id != holder:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Agent {replaces_agent_id} holds no seat of this leaf selection; "
+                    f"its holder is agent {holder}. Nothing was archived. Start again "
+                    "with the holder's agent id, or without a replacement."
+                ),
+            )
+        starter = current.get("parentAgentId")
+        if started_by is None:
+            caller = "the launcher"
+        elif getattr(started_by, "agent_id", None) == starter:
+            caller = f"agent {started_by.agent_id}"
+        else:
+            owner = f"agent {starter}" if isinstance(starter, str) and starter else "the launcher"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Agent {getattr(started_by, 'agent_id', '?')} did not start the holder "
+                    f"(agent {holder}) and cannot replace it; only {owner} can. "
+                    "Nothing was archived."
+                ),
+            )
+        if (reading.turn_active or reading.lifecycle == "running") and not replacement.interrupt_turn:
+            # Rule 8, as in retirement: a holder in a turn is replaced only with
+            # the word that its turn may be interrupted.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Agent {holder} is in a turn; it is not replaced without the word that "
+                    "the turn may be interrupted. Nothing was archived. Start again naming "
+                    "the interruption, or retire it first with retire_child."
+                ),
+            )
+        current["replaceAuthorizedBy"] = caller
+        current["replaceAuthorizedAt"] = _now_iso()
+        _record_holder_replacement(current, holder, caller, replacement.request_id)
+        _write_receipt(path, current)
+        _archive_receipt(path, current)
+        return None
+    owner = current.get("parentAgentId")
+    started = f"agent {owner}" if isinstance(owner, str) and owner else "the launcher"
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"This leaf seat is held by agent {holder}, started by {started}. A start with "
+            f"the holder's own request id ({current.get('requestId')}) reconciles it; a new "
+            "request id is refused while the holder is not archived. To replace the holder, "
+            "start again with replacesAgentId naming it; a start by hand from the launcher "
+            "follows the same rule and offers the replacing start on this line."
+        ),
+    )
+
+
+def _record_holder_replacement(
+    current: dict[str, Any],
+    holder: str,
+    caller: str,
+    request_id: str | None,
+) -> None:
+    """Record the holder's retirement by replacement on its receipt (rules 8/9).
+
+    The archived copy then carries who replaced it and why, like a native
+    retirement: the host archival that follows needs no turn of its own.
+    """
+
+    reason = (
+        f"replaced by a new start (request {request_id}) authorized by {caller}"
+        if request_id
+        else f"replaced by a new start authorized by {caller}"
+    )
+    now = _now_iso()
+    current.update(
+        status="stopped",
+        detail=f"Replaced by {caller}: {reason}.",
+        retiredBy={
+            "caller": caller,
+            "callerAgentId": None,
+            "reason": reason,
+            "at": now,
+        },
+        retireReason=reason,
+        updatedAt=now,
+    )
+    workspace = current.get("workspace")
+    folder = workspace.get("path") if isinstance(workspace, dict) else None
+    if isinstance(folder, str) and folder:
+        try:
+            ended = end_waiting_as(folder, holder)
+        except ValueError:
+            ended = []
+        if ended:
+            record_lines(current, ended, "not-delivered-archived-or-gone")
+    recount_waiting_for(current)
 
 
 def _refresh_execution(
@@ -128,6 +292,8 @@ def _recorded_agent_id(receipt: dict[str, Any]) -> str | None:
 def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -> dict[str, Any]:
     """Write what the matching row says into the receipt and return the public execution."""
 
+    if str(receipt.get("status")) == "held":
+        return _apply_held_reading(path, receipt, reading)
     refusal = receipt.get("resumeRefused")
     row = status_row(
         reading,
@@ -161,6 +327,32 @@ def _apply_reading(path: Path, receipt: dict[str, Any], reading: AgentReading) -
         )
         if closed_now and receipt["status"] in _CLOSED_STATUSES:
             receipt["terminalObservedAt"] = now
+        _write_receipt(path, receipt)
+    return _public_execution(receipt)
+
+
+def _apply_held_reading(
+    path: Path, receipt: dict[str, Any], reading: AgentReading
+) -> dict[str, Any]:
+    """A held seat stays held until its first message opens it (MIK-R100 rules 2/4).
+
+    The host's idle state never rewrites the product's word. Only an archived or
+    vanished holder frees the seat.
+    """
+
+    if not reading.reachable:
+        return {
+            **_public_execution(receipt),
+            "hostUnreachable": True,
+            "hostUnreachableReason": reading.unreachable_reason,
+        }
+    if not reading.found or reading.archived:
+        now = _now_iso()
+        receipt.update(
+            status="stopped",
+            detail="The holder is archived or gone; the seat is free.",
+            updatedAt=now,
+        )
         _write_receipt(path, receipt)
     return _public_execution(receipt)
 

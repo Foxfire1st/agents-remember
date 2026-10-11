@@ -34,6 +34,49 @@ class RoleStartCall:
     model: str | None = None
     effort: str | None = None
     feature_values: dict[str, bool | str] = field(default_factory=dict)
+    # The holder this start replaces on its seat (MIK-R100 rule 9): the start retires
+    # that agent first, in the same call, by rule 8. Absent for an ordinary start.
+    replaces_agent_id: str | None = None
+    # The word that the holder's turn, if it is in one, may be interrupted by the
+    # replacement (rule 8). Without it a running holder is refused, as in retirement.
+    replaces_interrupt_turn: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SeatLaunchOverride:
+    """The launch choices of one seat of a set start, as any start of its role takes them."""
+
+    agent: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    feature_values: dict[str, bool | str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class RoleStartSetCall:
+    """The inputs of one set start: the leaf, the set request id, and per-seat choices.
+
+    The Manager names a leaf and the product starts its Worker, Reviewer and Curator
+    in this one call (MIK-R100 rule 1). Per-seat request ids derive deterministically
+    from ``request_id``, so a repeat with the same set id reconciles the same three
+    agents and creates no fourth. ``reviewer_message`` is the Reviewer's first work
+    (rule 3): carried, the Reviewer opens at once; absent, Reviewer and Curator are
+    held (rule 2). ``replaces`` names, per seat role, the holder a replacing start
+    retires first (rule 9).
+    """
+
+    request_id: uuid.UUID
+    sprint_document_ref: TaskDocumentRef | None = None
+    master_document_ref: TaskDocumentRef | None = None
+    task_document_ref: TaskDocumentRef | None = None
+    reviewer_message: str | None = None
+    worker: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
+    reviewer: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
+    curator: SeatLaunchOverride = field(default_factory=SeatLaunchOverride)
+    replaces: dict[str, str] = field(default_factory=dict)
+    # The word, for the whole set, that a replaced holder's turn may be
+    # interrupted (rule 8). Without it a running holder is refused, as in retirement.
+    replaces_interrupt_turn: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +91,14 @@ class RoleMessageCall:
     task_document_ref: TaskDocumentRef | None = None
     wait: bool = False
     timeout_seconds: int = DEFAULT_WAIT_SECONDS
+    # One held message of this sender for this recipient to end as withdrawn
+    # (MIK-R100 rules 4a/4b): the id a held answer named in heldMessageId. The text
+    # is still processed normally, so withdrawing with a new text replaces the
+    # earlier one in one call.
+    withdraw_held_message_id: str | None = None
 
 
-RoleStartStatus = Literal["running", "rejected", "unknown", "refused"]
+RoleStartStatus = Literal["running", "held", "rejected", "unknown", "refused"]
 RoleStartRefusal = Literal[
     "caller-has-no-binding",
     "no-paseo-runtime-configured",
@@ -62,6 +110,7 @@ RoleStartRefusal = Literal[
 
 RoleMessageStatus = Literal[
     "accepted",
+    "held",
     "turn-finished",
     "turn-failed",
     "turn-cancelled",
@@ -94,7 +143,8 @@ class RoleEnvironmentPreparation(BaseModel):
 class RoleStartResponse(ToolResponse):
     """One role agent started for a canonical selection, or why it was not.
 
-    ``status`` is the launch status: ``running`` (the host has the agent), ``rejected`` (the
+    ``status`` is the launch status: ``running`` (the host has the agent), ``held`` (a held
+    seat: the agent exists and has taken no turn), ``rejected`` (the
     launch is closed; ``agentId`` names no usable agent) or ``unknown`` (no usable answer; the same
     ``requestId`` reconciles the same agent). ``executionStatus`` is what the execution's receipt
     says now, which differs from the launch status once the agent has finished a turn.
@@ -128,7 +178,11 @@ class RoleMessageResponse(ToolResponse):
 
     ``senderLine`` is the first line of the delivered text. ``taken`` says how the recipient took
     the message: it ``started`` a turn with it, or its running turn took it up (``steered``).
-    ``text`` is the recipient's final text of the turn that consumed the message.
+    ``text`` is the recipient's final text of the turn that consumed the message. A message
+    the product holds (MIK-R100 rules 4a/4b) answers ``held`` instead of ``accepted``:
+    ``heldReason`` says why, ``heldMessageId`` names the waiting message, and
+    ``waitingMine``/``waitingTotal`` say how many messages of this sender, and in all,
+    wait for the recipient.
     """
 
     operation: Literal["role_message"] = "role_message"
@@ -147,3 +201,29 @@ class RoleMessageResponse(ToolResponse):
     waitedSeconds: int | None = None
     warning: str | None = None
     reportCollection: dict[str, Any] | None = None
+    heldReason: str | None = None
+    heldMessageId: str | None = None
+    waitingMine: int | None = None
+    waitingTotal: int | None = None
+    recentTerminal: list[dict[str, Any]] | None = None
+    openedHeldSeat: bool | None = None
+    withdrawnHeldMessageId: str | None = None
+
+
+class RoleStartSetResponse(ToolResponse):
+    """Three seats of a leaf from one call (MIK-R100 rule 1), or why the set is partial.
+
+    ``seats`` carries worker, reviewer and curator in that order: each names its agent,
+    its seat request id, whether the seat is held (no turn yet) or opened at once, and
+    whether the host records a turn for it. ``ok`` is true only when all three seats
+    have an agent; a partial set names the failed seat, leaves the others as they are,
+    and a repeat with the same set request id completes it.
+    """
+
+    operation: Literal["role_start_set"] = "role_start_set"
+    status: str
+    detail: str
+    refusal: RoleStartRefusal | None = None
+    nextAction: str | None = None
+    requestId: str | None = None
+    seats: dict[str, Any] | None = None

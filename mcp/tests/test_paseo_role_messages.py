@@ -134,13 +134,16 @@ class RoleMessageTests(RoleToolsTestCase):
                 [command for command, _p in self.runtime.calls], ["agent-state", "agent-send"]
             )
             self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
-        with self.subTest("failing that, the most recent execution whose agent is live"):
+        with self.subTest("a completed holder still holds the seat until archived"):
             self.close_execution(first, "completed")
-            # The next start is refused by the host before it archived the closed execution's agent.
-            self.runtime.fail("agent-archive", "paseo_call_failed", "archive refused")
+            # A finished turn does not free the seat (MIK-R100 rule 9): the new
+            # request id is refused naming the holder, and nothing is archived.
             second = self.request("worker")
-            self.assertEqual(self.dispatch(second)[1]["status"], "rejected")
-            self.assertNotEqual(self.receipt(second)["agentId"], old_agent)
+            refusal = self.refused(second)
+            self.assertEqual(refusal.status_code, 409)
+            self.assertIn(old_agent, str(refusal.detail))
+            self.assertIn("held by agent", str(refusal.detail))
+            self.assertEqual(self.receipt(second)["agentId"], old_agent)
             self.runtime.agents[old_agent].update(status="idle", received=[])
             result = self.message(self.architect, **to_worker)
             self.assertEqual(
@@ -232,8 +235,9 @@ class RoleMessageTests(RoleToolsTestCase):
             result = self.refusal(self.message(caller, agent_id=one), "recipient-not-found")
             self.assertIn("is the calling agent itself", result["detail"])
 
-    def test_a_recipient_whose_start_has_not_finished_is_refused_as_busy(self) -> None:
+    def test_a_recipient_whose_start_has_not_finished_is_held(self) -> None:
         # Until its start has answered, an agent may not have its first message yet.
+        # The product holds the message and delivers it once the start has answered running.
         request, worker = self.started(status="idle")
         saved = self.receipt(request)
         for status in ("starting", "unknown"):
@@ -243,24 +247,24 @@ class RoleMessageTests(RoleToolsTestCase):
                         self.receipt_path(request), {**saved, "status": status}
                     )
                     self.runtime.calls.clear()
-                    result = self.refusal(self.message(self.architect, **address), "recipient-busy")
-                    self.assertEqual(
-                        result["detail"],
-                        f"Agent {worker} is not ready for a message: its start has not finished "
-                        f"(execution status {status}).",
-                    )
-                    self.assertIn("answered running", result["nextAction"])
+                    result = self.message(self.architect, **address)
+                    self.assertEqual(result["status"], "held")
+                    self.assertIn("start has not finished", result["detail"])
+                    self.assertIn("nothing has to be sent again", result["detail"])
+                    self.assertEqual(result["heldReason"], "start-unfinished")
                     self.assertEqual(result["recipientAgentId"], worker)
-                    self.assertNotIn("permission", result)
+                    self.assertNotIn("permission", result["detail"])
                     # Nothing was sent, resumed or waited for.
                     self.assertEqual(
                         {command for command, _p in self.runtime.calls} - {"agent-state"}, set()
                     )
                     self.assertEqual(self.received(worker), [])
-        with self.subTest("once the start has answered, the message is delivered"):
+        with self.subTest("once the start has answered, the held messages deliver"):
             role_launch_receipts._write_receipt(self.receipt_path(request), saved)
             result = self.message(self.architect, agent_id=worker)
-            self.assertEqual((result["status"], len(self.received(worker))), ("accepted", 1))
+            self.assertEqual(result["status"], "accepted")
+            # Both held messages and the new one go in one delivery, in order.
+            self.assertEqual(len(self.received(worker)), 1)
 
     def asked_about(self) -> list[str]:
         return [
@@ -334,13 +338,20 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual(len(self.asked_about()), 24)
             self.assertNotIn("the list was cut", result["detail"])
 
-    def test_a_task_bound_selection_has_one_recipient_however_many_agents_are_live(self) -> None:
+    def test_a_leaf_seat_with_two_live_agents_refuses_by_role(self) -> None:
+        # One seat holds one agent (MIK-R100 rule 9): where two live agents hold one
+        # leaf seat, the address by role is refused with the candidates. The tool never
+        # picks one.
         to_worker = {"role": "worker", **selection_of("worker")}
         agents: list[str] = []
         for _execution in range(3):
             request, agent_id = self.started(status="idle")
             agents.append(agent_id)
             self.close_execution(request, "completed")
+            # A finished turn does not free the seat (MIK-R100 rule 9): archive the
+            # holder before the next start, as the launch does for a freed seat.
+            if _execution < 2:
+                self.runtime.agents[agent_id].update(archivedAt=ARCHIVED_AT)
         first, second, current = agents
         # Two earlier executions and the current one; the launches archived the earlier agents.
         self.assertEqual(
@@ -349,18 +360,31 @@ class RoleMessageTests(RoleToolsTestCase):
         )
         for agent_id in (first, second):
             self.runtime.agents[agent_id].update(status="idle", archivedAt=None, received=[])
-        with self.subTest("the current execution's agent is the recipient and no other is asked"):
+        with self.subTest("two live agents in one leaf seat are refused with both ids"):
+            self.runtime.calls.clear()
+            result = self.refusal(self.message(self.architect, **to_worker), "recipient-ambiguous")
+            self.assertEqual(sorted(result["candidateAgentIds"]), sorted(agents))
+            self.assertIn("The tool never picks one", result["detail"])
+            self.assertEqual(self.received(current), [])
+        with self.subTest("one live agent is still the recipient"):
+            self.runtime.agents[first].update(archivedAt=ARCHIVED_AT)
+            self.runtime.agents[second].update(archivedAt=ARCHIVED_AT)
             self.runtime.calls.clear()
             result = self.message(self.architect, **to_worker)
             self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", current))
-            self.assertEqual(self.asked_about(), [current])
-        with self.subTest("failing that, the most recent earlier execution that is live"):
-            self.runtime.agents[current].update(status="closed", archivedAt=ARCHIVED_AT)
+        with self.subTest("a non-leaf seat still takes the newest live agent"):
+            launched: list[tuple[Any, str]] = []
+            for _execution in range(2):
+                manager_request = self.launched("manager", status="idle")
+                launched.append((manager_request, self.receipt(manager_request)["agentId"]))
+                self.close_execution(manager_request, "completed")
+            (_first_request, first), (_second_request, second) = launched
+            self.runtime.agents[first].update(status="idle", archivedAt=None, received=[])
             self.runtime.calls.clear()
-            result = self.message(self.architect, **to_worker)
+            result = self.message(
+                self.architect, role="manager", **selection_of("manager")
+            )
             self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", second))
-            self.assertEqual(self.asked_about(), [current, second])
-            self.assertEqual(self.received(first), [])
 
     def test_only_an_agent_id_of_this_lines_receipts_is_a_recipient(self) -> None:
         _request, worker = self.started(status="idle")
@@ -424,30 +448,39 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual(len(self.received(worker)), 1)
         with self.subTest("the host cannot hand a message to this recipient's running turn"):
             self.runtime.agents[worker].update(steers=False, received=[])
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
-            self.assertIn("the message was not delivered", result["detail"])
+            result = self.message(self.architect, agent_id=worker, text="held-in-turn")
+            self.assertEqual(result["status"], "held")
+            self.assertEqual(result["heldReason"], "recipient-in-turn")
+            self.assertIn("nothing has to be sent again", result["detail"])
             self.assertEqual(
                 (self.received(worker), self.runtime.agents[worker]["status"]), ([], "running")
             )
         with self.subTest("the host cancelled the turn all the same: the result says so"):
             self.runtime.agents[worker].update(steers=True, taken="replaced")
-            result = self.message(self.architect, agent_id=worker)
+            result = self.message(self.architect, agent_id=worker, text="after-turn")
             self.assertEqual(result["status"], "accepted")
             self.assertIn("cancelled the recipient's running turn", result["warning"])
+            # The held message and the new one went in one delivery, in order.
+            (combined,) = self.received(worker)
+            self.assertTrue(combined.index("held-in-turn") < combined.index("after-turn"))
         with self.subTest("the host does not accept the message"):
             self.runtime.calls.clear()
-            for _attempt in range(2):
+            for _attempt in range(4):
                 self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
+            result = self.message(self.architect, agent_id=worker, text="still-held")
+            self.assertEqual(result["status"], "held")
             self.assertIn("Active turn changed", result["detail"])
-            self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"] * 2)
+            self.assertEqual(
+                [command for command, _p in self.runtime.calls],
+                ["agent-send", "agent-send", "agent-state", "agent-send", "agent-send"],
+            )
         with self.subTest("a turn that changed under the send is tried once more"):
             self.runtime.agents[worker].update(taken=None, received=[])
             self.runtime.calls.clear()
             self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
             self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
             self.assertEqual(len(self.received(worker)), 1)
-            # Both attempts carry the one id of the message: the host records a message once.
+            # Both attempts carry the one id of the combined delivery: the host records it once.
             attempts = [
                 payload for command, payload in self.runtime.calls if command == "agent-send"
             ]
@@ -460,44 +493,65 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertNotEqual(first, second)
             self.assertEqual(str(uuid.UUID(second)), second)
 
-    def test_a_recipient_that_waits_for_a_permission_decision_is_not_sent_to(self) -> None:
+    def test_a_recipient_that_waits_for_a_permission_decision_is_held_not_sent_to(self) -> None:
         _request, worker = self.started(status="running")
         pending = [{"id": "perm-1", "name": "Bash", "kind": "tool"}]
         self.runtime.agents[worker].update(pendingPermissions=pending)
         self.runtime.calls.clear()
 
-        result = self.refusal(
-            self.message(self.architect, agent_id=worker, wait=True), "recipient-busy"
-        )
+        result = self.message(self.architect, agent_id=worker, text="first")
 
-        # A message would deny what the developer was asked: it is not sent, and not tried again.
+        # A message would deny what the developer was asked: it is not sent to the host.
+        # The product holds it and says so, naming the permission; it does not say accepted.
+        self.assertEqual(result["status"], "held")
+        self.assertIn("waits for a permission decision (Bash)", result["detail"])
+        self.assertNotIn("nextAction", result)
         self.assertEqual(
-            result["detail"],
-            f"Agent {worker} waits for a permission decision (Bash). A message would answer it "
-            "with a denial, so the message was not delivered.",
+            (result["recipientAgentId"], result["permission"], result["heldReason"]),
+            (worker, "Bash", "permission-pending"),
         )
+        self.assertTrue(result["heldMessageId"])
+        self.assertEqual((result["waitingMine"], result["waitingTotal"]), (1, 1))
+        # The message itself goes to the host once and is refused; the drain's one
+        # read changes nothing: it confirms the prompt still waits.
         self.assertEqual(
-            result["nextAction"],
-            "The developer answers the permission in the recipient's chat; send the message "
-            "again afterwards.",
+            [command for command, _p in self.runtime.calls], ["agent-send", "agent-state"]
         )
-        self.assertEqual((result["recipientAgentId"], result["permission"]), (worker, "Bash"))
-        self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"])
         self.assertEqual(self.received(worker), [])
         self.assertEqual(self.runtime.agents[worker]["pendingPermissions"], pending)
         with self.subTest("the host names no permission"):
             self.runtime.agents[worker].update(pendingPermissions=[{"id": "perm-2"}])
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
-            self.assertIn("waits for a permission decision. A message would", result["detail"])
-            self.assertNotIn("permission", result)
-        with self.subTest("once the permission is answered the message is delivered"):
+            result = self.message(self.architect, agent_id=worker, text="second")
+            self.assertEqual(result["status"], "held")
+            self.assertIn("waits for a permission decision (not supplied)", result["detail"])
+            self.assertIsNone(result["permission"])
+            self.assertEqual((result["waitingMine"], result["waitingTotal"]), (2, 2))
+        with self.subTest("a wait on the held message answers permission-pending"):
+            result = self.message(self.architect, agent_id=worker, wait=True, text="third")
+            self.assertEqual(result["status"], "permission-pending")
+            self.assertEqual(result["permission"], "a tool")
+        with self.subTest("once the permission is answered the held messages deliver in order"):
             self.runtime.agents[worker].update(pendingPermissions=[])
-            self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
-        with self.subTest("another busy recipient is told to send again later"):
+            result = self.message(self.architect, agent_id=worker, text="fourth")
+            self.assertEqual(result["status"], "accepted")
+            received = self.received(worker)
+            self.assertEqual(len(received), 1)
+            self.assertEqual(
+                [received[0].count(text) for text in ("first", "second", "third", "fourth")],
+                [1, 1, 1, 1],
+            )
+            self.assertTrue(
+                received[0].index("first")
+                < received[0].index("second")
+                < received[0].index("third")
+                < received[0].index("fourth")
+            )
+        with self.subTest("a recipient in a turn is held, not refused"):
             self.runtime.agents[worker].update(steers=False, received=[])
-            result = self.refusal(self.message(self.architect, agent_id=worker), "recipient-busy")
-            self.assertIn("left running", result["nextAction"])
-            self.assertNotIn("permission", result["detail"])
+            result = self.message(self.architect, agent_id=worker)
+            self.assertEqual(result["status"], "held")
+            self.assertEqual(result["heldReason"], "recipient-in-turn")
+            self.assertIn("nothing has to be sent again", result["detail"])
 
     def test_a_task_bound_execution_that_says_stopped_is_found_while_its_agent_is_live(
         self,
@@ -854,6 +908,7 @@ class RoleMessageTests(RoleToolsTestCase):
             set(get_args(RoleMessageStatus)),
             {
                 "accepted",
+                "held",
                 "turn-finished",
                 "turn-failed",
                 "turn-cancelled",

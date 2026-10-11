@@ -25,10 +25,12 @@ from agents_remember.cli import (
     paseo_catalog,
     paseo_role_tools,
     paseo_role_wait,
+    role_held_messages,
     role_launch_preparation,
     role_launch_receipts,
     role_launch_routes,
     role_launch_workspace,
+    role_retire,
 )
 from agents_remember.cli.paseo_launch import StartingAgent, exclusion_applied_agent
 from agents_remember.cli.paseo_role_tools import (
@@ -119,6 +121,10 @@ class RoleToolsTestCase(StatusTestCase):
         super().setUp()
         self.replace(paseo_role_tools, "bridge_call", self.runtime)
         self.replace(paseo_role_wait, "bridge_call", self.runtime)
+        # The held-message store and native retirement call the bridge from their own
+        # modules (MIK-R100 rules 4/8): the fake runtime answers there too.
+        self.replace(role_held_messages, "bridge_call", self.runtime)
+        self.replace(role_retire, "bridge_call", self.runtime)
         self.replace(paseo_role_tools, "resolve_role_launch_context", side_effect=self.context)
         self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
         self.runtime._agent_send = self.agent_send
@@ -563,8 +569,10 @@ class RoleStartTests(RoleToolsTestCase):
             self.assertIn("connection refused", unread["detail"])
             self.assertEqual(list(self.runtime.agents), [first["agentId"]])
             again = self.refusal(self.start(self.architect, "worker"), "launch-refused")
+            # One seat holds one agent (MIK-R100 rule 9): the open seat's holder is named.
             self.assertIn(
-                f"already has an open execution (request {first['requestId']}", again["detail"]
+                f"held by agent {first['agentId']}, started by agent",
+                again["detail"],
             )
             self.assertEqual(list(self.runtime.agents), [first["agentId"]])
 
@@ -1055,7 +1063,7 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
             register_role_agent_tools(server, self.config)
             return [tool.name for tool in await server.list_tools()]
 
-        self.assertEqual(asyncio.run(names()), ["role_start", "role_message"])
+        self.assertEqual(asyncio.run(names()), ["role_start", "role_start_set", "role_message"])
         leaf = {key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()}
         start = {"role": "worker", "request_id": str(uuid.uuid4()), **leaf}
         # This process was not started by a launch: no binding, whatever the settings hold.
@@ -1068,6 +1076,11 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         _loop, refused = self.call("role_message", message)
         self.assertEqual(
             (refused["operation"], refused["refusal"]), ("role_message", "caller-has-no-binding")
+        )
+        _loop, refused = self.call("role_start_set", {"request_id": str(uuid.uuid4()), **leaf})
+        self.assertEqual(
+            (refused["operation"], refused["refusal"]),
+            ("role_start_set", "caller-has-no-binding"),
         )
         with (
             self.subTest("a wait longer than the maximum is refused by the argument model"),

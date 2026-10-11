@@ -35,6 +35,19 @@ class DispatchAgentRequest:
     label: str | None = None
 
 
+@dataclass(frozen=True)
+class RetireChildRequest:
+    task_document_ref: TaskDocumentRef
+    role: StructuralRole
+    reason: str
+    # The receipt-tracked agent to retire (MIK-R100 rule 8): the starter retires the
+    # agent in its seat without giving it a turn. An empty id is refused by name.
+    agent_id: str | None = None
+    # The retiring call may interrupt the agent's turn; without it an agent in a turn
+    # is not retired.
+    interrupt_turn: bool = False
+
+
 class StructuralTargetResponse(ToolResponse):
     """A response that identifies work and role but never a runtime occupant."""
 
@@ -61,3 +74,7 @@ class DispatchAgentResponse(StructuralTargetResponse):
     operation: Literal["dispatch_agent"] = "dispatch_agent"
     deliveryState: InboxDeliveryState | None = None
     adapterDeliveryState: AdapterDeliveryState | None = None
+
+
+class RetireChildResponse(StructuralTargetResponse):
+    operation: Literal["retire_child"] = "retire_child"

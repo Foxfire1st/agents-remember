@@ -241,9 +241,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "The Architect's first delegation for one master is one Manager on that canonical master. For two or more masters worked on at the same time, it is one Orchestrator on the canonical sprint, which starts one Manager per master. This delegation rule applies only to the Architect; Designers and Strategists do not start a coordinating role. Direct coordination by the Architect is only the developer-chosen exception; in that case, the Architect directly coordinates distinct Workers, Reviewers, and Curators. The developer may also ask for an Orchestrator above a single master. Keep one explicit owner per task and preserve the agent IDs of started roles. Do not fabricate a sprint/master for a taskless project role or an agent identity to satisfy an old hierarchy."
             ],
             "operations/coordination.md": [
-                "The Manager starts a leaf's Worker and Reviewer together and its Curator at the first freeze. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
+                "The Manager starts a leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call on `agents-remember-task`: the Worker opens at once, and the Reviewer and the Curator are held until their first message opens them, unless the call carries the Reviewer's first work. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
                 "The Architect delegates coordination first to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master; each Manager coordinates its distinct Workers, Reviewers, and Curators. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. If the Architect's coordinating-agent start is refused, the Architect tells the developer the refusal and its reason; it does not fall back to direct coordination.",
-                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches the newest live agent; an empty or doubled-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled, or the call is refused as busy. A recipient that waits for a permission decision is refused as busy as well, because a message would answer the permission with a denial: the developer answers it in that agent's chat, then send again. So is a recipient whose start has not finished. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
+                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
             ],
             "SKILL.md": [
                 "Use the agent IDs these tools return and the sender line of each message you receive; never invent a sender, recipient, parent, or delivery result.",
@@ -492,10 +492,16 @@ class InstructionFileWordingTests(unittest.TestCase):
             "A role started from the dashboard works directly with the developer and needs no parent.",
             # What the message tool answers, as its own description says it.
             "A role address never means you yourself.",
-            "A recipient that waits for a permission decision is refused as busy as well, "
-            "because a message would answer the permission with a denial: the developer answers "
-            "it in that agent's chat, then send again.",
-            "So is a recipient whose start has not finished.",
+            "when the host cannot hand a message to the running turn, the message is held, and "
+            "while anything is held for a recipient a further message is held behind it.",
+            "A message to a recipient that waits for a permission decision, or whose start has "
+            "not finished, is held the same way: the answer says `held` and why, and the product "
+            "delivers what it holds in the order it took it once the recipient can take it.",
+            "The host is never sent a message for a recipient that waits at a permission prompt, "
+            "because it would answer the permission with a denial; only the developer answers "
+            "the prompt, in that agent's chat.",
+            "or it returns a pending permission, also for a wait on a held message, or a timeout "
+            "with the message still delivered.",
             "saying that the turn failed or was cancelled",
             "It can also return `accepted` without a text, when the host cannot say which turn "
             "took the message; read the reply later then.",
@@ -508,8 +514,8 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertIn(sentence, coordination)
         architect = " ".join(role_text("architect").split())
         for sentence in (
-            "A recipient that waits for a permission decision, or whose start has not finished, "
-            "is refused as busy",
+            "A message to a recipient that waits for a permission decision, or whose start has "
+            "not finished, is held by the product and delivered when the recipient can take it",
             "its final text, or that the turn failed or was cancelled, a pending permission, or "
             "a timeout; `accepted` without a text means that the reply is to be read later.",
             "Do not wait on an agent that may be waiting on you.",
@@ -920,11 +926,19 @@ class HandoverTextWordingTests(unittest.TestCase):
             "It never interrupts a running turn.",
             "repeat the same id to reconcile an uncertain start",
             "an agent created another way has no capsule and no binding",
-            "A recipient that waits for a permission decision is refused as busy, because a "
-            "message would answer the permission with a denial: the developer answers it in "
-            "that agent's chat.",
-            "A recipient whose start has not finished is refused as busy as well, and a role "
-            "address never means the caller itself.",
+            "A message the host cannot take now is held by the product instead of refused: to "
+            "a recipient that waits for a permission decision, whose start has not finished, "
+            "or that is in a turn the host cannot write into.",
+            "The answer says held and why, and the product delivers what it holds in the order "
+            "it took it once the recipient can take it.",
+            "The host is never sent a message for a recipient that waits at a permission "
+            "prompt, because it would answer the permission with a denial: the developer "
+            "answers it in that agent's chat.",
+            "A role address never means the caller itself.",
+            "Without wait the call answers accepted once the host took the message, or held "
+            "once the product held it.",
+            "or it says that a permission is pending, also for a wait on a held message, or "
+            "that the time was up, and the message stays delivered then.",
             "the recipient's final text, or that the turn failed or was cancelled",
             "It can answer accepted without a text when the host cannot say which turn took "
             "the message, and the text of a message delivered during a turn can be the running "
@@ -976,14 +990,14 @@ class HandoverTextWordingTests(unittest.TestCase):
 
 
 class RoleToolDescriptionWordingTests(unittest.TestCase):
-    def test_the_two_tool_descriptions_name_no_forbidden_host_string(self) -> None:
+    def test_the_three_tool_descriptions_name_no_forbidden_host_string(self) -> None:
         async def descriptions() -> dict[str, str]:
             server = FastMCP("role-tool-descriptions")
             register_role_agent_tools(server, None)  # type: ignore[arg-type]
             return {tool.name: tool.description or "" for tool in await server.list_tools()}
 
         described = asyncio.run(descriptions())
-        self.assertEqual(sorted(described), ["role_message", "role_start"])
+        self.assertEqual(sorted(described), ["role_message", "role_start", "role_start_set"])
         for name, text in described.items():
             with self.subTest(tool=name):
                 self.assertEqual(forbidden_in(text), [])
@@ -1000,18 +1014,42 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
             ),
             (
                 "role_message",
-                "A reply to a message delivered during a turn can be the running turn's text; "
+                "A reply to a message delivered during a turn can be that running turn's text; "
                 "detail says so then.",
             ),
             (
                 "role_message",
-                "A recipient that waits for a permission decision is refused as recipient-busy, "
-                "because a message would answer the permission with a denial: the developer "
-                "answers it in the recipient's chat, then send again.",
+                "Every message the host cannot take now is held by the product instead of "
+                "refused: a recipient whose start has not finished, that waits for a permission "
+                "decision, or that is in a turn the host cannot write into.",
             ),
             (
                 "role_message",
-                "A recipient whose start has not finished is refused as recipient-busy as well.",
+                "The answer says that the message is held and why, and names the permission as "
+                "the host names it",
+            ),
+            (
+                "role_message",
+                "At most twenty held messages wait for one recipient; a message beyond that is "
+                "refused as busy and none is dropped.",
+            ),
+            (
+                "role_message",
+                "Without wait the call returns status accepted once the host accepted the "
+                "message, or status held once the product held it.",
+            ),
+            (
+                "role_message",
+                "A wait on a held message at a permission answers permission-pending as well.",
+            ),
+            (
+                "role_start_set",
+                "Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).",
+            ),
+            (
+                "role_start_set",
+                "A repeat with the same request id reconciles the same three agents: it "
+                "creates no fourth and opens no held seat.",
             ),
             ("role_message", "An address by role never means the caller itself."),
             ("role_start", "rejected (the launch is closed; no usable agent exists)"),

@@ -97,6 +97,9 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         "freeze to reviewer": (
             "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
         ),
+        "set start": (
+            "the Manager starts the leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call",
+        ),
         "identity and whole stretch": (
             "Freeze the candidate and send it directly to the leaf's Reviewer as `../operations/implementation.md` §Outputs states.",
         ),

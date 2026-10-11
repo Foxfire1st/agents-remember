@@ -194,21 +194,29 @@ class StatusTableTests(StatusTestCase):
             "stopped": {"status": "idle", "lastTurn": {"state": "unreplied"}},
             "interrupted": {"status": "closed"},
         }
-        for previous, state in closed_by.items():
-            with self.subTest(previous=previous):
+        previous_agent: str | None = None
+        for prev_status, state in closed_by.items():
+            with self.subTest(previous=prev_status):
+                if previous_agent is not None:
+                    # Rule 9: one seat holds one agent; the archived holder frees
+                    # the seat for the next launch.
+                    self.runtime.agents[previous_agent]["archivedAt"] = (
+                        "2026-10-02T02:00:00.000Z"
+                    )
                 request = self.launched(**state)
                 before = self.refresh(request)
-                self.assertEqual(before["status"], previous)
+                self.assertEqual(before["status"], prev_status)
                 self.agent_of(request).update(status="closed", lastError=None)
 
                 public = self.refresh(request)
 
                 self.assert_row(
-                    public, request, status=previous, detail="session closed", can_revive=True
+                    public, request, status=prev_status, detail="session closed", can_revive=True
                 )
                 # Nothing about the last turn can be read from a closed session: the summary stays.
                 self.assertEqual(public.get("result"), before.get("result"))
-                self.assertEqual(public["canStart"], previous in {"completed", "failed", "stopped"})
+                self.assertEqual(public["canStart"], prev_status in {"completed", "failed", "stopped"})
+                previous_agent = self.receipt(request)["execution"]["agentId"]
 
     def test_row_06_a_pending_permission_request_is_running_and_names_the_tool(self) -> None:
         request = self.launched(pendingPermissions=[{"name": "Bash", "kind": "tool"}])
@@ -268,17 +276,27 @@ class StatusTableTests(StatusTestCase):
                 '{"type": "error"',
             ),
         }
+        previous_agent: str | None = None
         for label, (state, detail) in failures.items():
             with self.subTest(label):
+                if previous_agent is not None:
+                    # Rule 9: one seat holds one agent; the archived holder frees
+                    # the seat for the next launch.
+                    self.runtime.agents[previous_agent]["archivedAt"] = (
+                        "2026-10-02T02:00:00.000Z"
+                    )
                 request = self.launched(**state)
 
                 public = self.refresh(request)
 
                 self.assert_row(public, request, status="failed", detail=detail, can_revive=False)
                 self.assertTrue(public["canStart"])
+                previous_agent = self.receipt(request)["execution"]["agentId"]
         with self.subTest(
             "the error mark alone, on a turn that ended with a reply, is not a failure"
         ):
+            assert previous_agent is not None
+            self.runtime.agents[previous_agent]["archivedAt"] = "2026-10-02T02:00:00.000Z"
             request = self.launched(status="idle", lastTurn=REPLIED, attentionReason="error")
             self.assertEqual(self.refresh(request)["status"], "completed")
 
@@ -599,19 +617,16 @@ class RefreshTests(StatusTestCase):
             old_agent = self.receipt(previous)["agentId"]
             self.assertEqual(self.receipt(previous)["status"], "running")
 
-            status, public = self.dispatch(self.request("worker"))
+            # Rule 9: the finished agent still holds its leaf seat; a new request
+            # id is refused naming the holder instead of archiving it.
+            error = self.refused(self.request("worker"))
 
-            self.assertEqual((status, public["status"]), (200, "running"))
-            self.assertEqual(
-                self.commands(), ["agent-state", "agent-archive", "workspace-open", "agent-create"]
-            )
-            self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
-            self.assertNotEqual(public["execution"]["agentId"], old_agent)
-            history = self.receipt_path(previous).parent / "history"
-            archived = json.loads(
-                (history / f"{previous.request_id}.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual((archived["status"], archived["agentId"]), ("completed", old_agent))
+            self.assertEqual(error.status_code, 409)
+            self.assertIn(f"held by agent {old_agent}", str(error.detail))
+            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
+            # The refusal changes nothing on disk.
+            self.assertEqual(self.receipt(previous)["status"], "running")
         with self.subTest("the saved status is completed, the agent runs a further turn"):
             previous = self.launched("manager", status="idle", lastTurn=REPLIED)
             self.assertEqual(self.refresh(previous)["status"], "completed")
@@ -643,8 +658,8 @@ class RefreshTests(StatusTestCase):
 
         self.assertEqual(status, 409)
         self.assertIs(body["hostUnreachable"], True)
-        self.assertIn("the open-execution rule cannot be applied", body["detail"])
-        self.assertIn(f"request {previous.request_id}, last known status completed", body["detail"])
+        self.assertIn("the holder of this leaf seat", body["detail"])
+        self.assertIn(f"agent {self.receipt(previous)['agentId']}", body["detail"])
         self.assertIn("paseo_bridge_timeout: The bridge call ran out of time.", body["detail"])
         # Nothing was archived or created, in the runtime or on disk.
         self.assertEqual(self.commands(), ["agent-state"])
@@ -673,9 +688,9 @@ class RefreshTests(StatusTestCase):
             self.assertEqual(repeated["status"], "completed")
             self.assertEqual(self.commands(), ["agent-state"])
             self.assertEqual(self.saved(previous), saved)
-        with self.subTest("once the host answers, the rule is applied to what the agent is doing"):
+        with self.subTest("once the host answers, the holder still holds the seat"):
             error = self.refused(self.request("worker"))
-            self.assertIn("status running", str(error.detail))
+            self.assertIn("held by agent", str(error.detail))
 
     def test_without_a_configured_runtime_refresh_and_revive_refuse_naming_that(self) -> None:
         request = self.launched(status="closed")
@@ -812,11 +827,31 @@ class ReviveTests(StatusTestCase):
                 self.revive(request)
             self.assertIn(NO_ROLLOUT, str(refused.exception.detail))
             self.assertEqual(self.commands(), ["agent-state"])
-        with self.subTest("a new agent comes only from a new start, which archives this one"):
+        with self.subTest("a new agent comes only from a replacing start"):
+            # Rule 9: the failed agent still holds its leaf seat; a plain new
+            # request id is refused, and only a replacing start archives it.
             self.runtime.calls.clear()
-            started = self.dispatch(self.request("worker"))[1]
+            error = self.refused(self.request("worker"))
+            self.assertIn(f"held by agent {old_agent}", str(error.detail))
+            self.assertEqual(self.commands(), ["agent-state"])
+            self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
+            payload = self.request("worker").model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+            replacing = RoleDispatchRequest.model_validate(
+                {**payload, "replacesAgentId": old_agent}
+            )
+            status, started = self.dispatch(replacing)
+            self.assertEqual((status, started["status"]), (200, "running"))
             self.assertEqual(
-                self.commands(), ["agent-state", "agent-archive", "workspace-open", "agent-create"]
+                [command for command, _payload in self.runtime.calls],
+                [
+                    "agent-state",
+                    "agent-state",
+                    "agent-archive",
+                    "workspace-open",
+                    "agent-create",
+                ],
             )
             self.assertNotEqual(started["execution"]["agentId"], old_agent)
             self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])

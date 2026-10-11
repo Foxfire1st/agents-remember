@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,19 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.role_held_messages import (
+    MAX_HELD_PER_RECIPIENT,
+    HeldMessage,
+    HeldMessageCommitted,
+    HeldStoreFull,
+    _read_store_counts,
+    apply_drain_to_receipt,
+    drain_held,
+    hold_message,
+    sender_terminal_lines,
+    waiting_total,
+    withdraw_message,
+)
 from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_preparation import (
     ROLE_MESSAGE_TOOL,
@@ -69,13 +83,19 @@ from agents_remember.cli.role_launch_receipts import (
     _taskless_execution_receipts,
     _write_receipt,
 )
-from agents_remember.cli.role_launch_routes import LaunchLockBusy, _role_launch_dispatch_endpoint
+from agents_remember.cli.role_launch_routes import (
+    SET_SEAT_ROLES,
+    LaunchLockBusy,
+    _role_launch_dispatch_endpoint,
+    dispatch_leaf_set,
+)
 from agents_remember.errors import RolePreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import (
     MAX_WAIT_SECONDS,
     RoleMessageCall,
     RoleStartCall,
+    RoleStartSetCall,
 )
 from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
@@ -134,6 +154,23 @@ class _Refused(Exception):
 class _Recipient:
     agent_id: str
     receipt: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _MessageSend:
+    """One message send: who sends what to whom, and what the sender takes along.
+
+    ``located`` is the recipient's receipt path, receipt and working folder, or None
+    when the recipient has no receipt with a store (then nothing can be held for it).
+    """
+
+    config: McpRuntimeConfig
+    call: RoleMessageCall
+    sender: StartingAgent
+    recipient: _Recipient
+    located: tuple[Path, dict[str, Any], str] | None
+    withdrawn: str | None
+    collection: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -238,6 +275,87 @@ def _key(reference: TaskDocumentRef | None) -> str:
     return reference.key if reference is not None else "none"
 
 
+def start_leaf_set(
+    config: McpRuntimeConfig,
+    call: RoleStartSetCall,
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1)."""
+
+    try:
+        binding = _caller(config, environment)
+        if binding.role != "manager":
+            # Rule 1: the set is the owning Manager's transaction. Single-role
+            # permission is unchanged; only the set is restricted.
+            raise _Refused(
+                "role-may-not-start-role",
+                f"Only the leaf's owning Manager starts Worker, Reviewer and Curator in one "
+                f"call (caller role: {binding.role}).",
+                "Start single roles with role_start, or have the owning Manager start the set.",
+            )
+        selections = _set_selections(call)
+        for selection in selections:
+            violated = start_rule_violation(binding, selection)
+            if violated is not None:
+                raise _Refused(
+                    violated[0],
+                    violated[1],
+                    "Start only roles this rule allows; anything else is the developer's or the "
+                    "parent's to start.",
+                )
+        sender = starting_agent(config, binding)
+        reviewer_opening = (
+            f"{sender_line(sender)}\n{call.reviewer_message}"
+            if call.reviewer_message
+            else None
+        )
+        return dispatch_leaf_set(
+            config, call, sender, reviewer_opening=reviewer_opening,
+            lock_wait_seconds=LOCK_WAIT_SECONDS,
+        )
+    except _Refused as refused:
+        return {**refused.payload(), "requestId": str(call.request_id)}
+    except LaunchLockBusy:
+        return {
+            "ok": False,
+            "status": "refused",
+            "refusal": "launch-refused",
+            "detail": (
+                "Another start of this tool server was still running after "
+                f"{LOCK_WAIT_SECONDS} seconds, so this set was not begun. Nothing was recorded "
+                "for this request."
+            ),
+            "nextAction": "Call role_start_set again with the same arguments; sets run one at a time.",
+            "requestId": str(call.request_id),
+        }
+
+
+def _set_selections(call: RoleStartSetCall) -> list[RoleSelection]:
+    """The three seat selections of a set, validated before anything is prepared for them."""
+
+    unknown = sorted(set(call.replaces or ()) - set(SET_SEAT_ROLES))
+    if unknown:
+        raise _launch_refused(
+            f"The set names replacements for no seat of a leaf: {', '.join(unknown)}. "
+            "A set replaces only worker, reviewer or curator."
+        )
+    try:
+        return [
+            RoleSelection.model_validate(
+                {
+                    "role": role,
+                    "sprintDocumentRef": call.sprint_document_ref,
+                    "masterDocumentRef": call.master_document_ref,
+                    "taskDocumentRef": call.task_document_ref,
+                }
+            )
+            for role in SET_SEAT_ROLES
+        ]
+    except (ValidationError, ValueError) as error:
+        raise _launch_refused(f"The set selection is not valid: {error}") from error
+
+
 def start_role(
     config: McpRuntimeConfig,
     call: RoleStartCall,
@@ -271,6 +389,8 @@ def _start_role(
                 "taskDocumentRef": call.task_document_ref,
                 "requestId": call.request_id,
                 "agentOverride": _agent_override(call),
+                "replacesAgentId": call.replaces_agent_id,
+                "replacesInterruptTurn": call.replaces_interrupt_turn,
             }
         )
     except (ValidationError, ValueError) as error:
@@ -398,6 +518,18 @@ def _projects_preparation_note(receipt: dict[str, Any]) -> str:
     return ""
 
 
+def _started_agent_id(receipt: dict[str, Any]) -> str | None:
+    """The agent a saved receipt's execution names, as _public_execution reports it."""
+
+    reference = receipt.get("execution")
+    if isinstance(reference, dict):
+        agent_id = reference.get("agentId")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+    agent_id = receipt.get("agentId")
+    return agent_id if isinstance(agent_id, str) and agent_id else None
+
+
 def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str, Any]:
     """The tool's answer, read from the receipt the start path wrote for this request."""
 
@@ -412,12 +544,14 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
     if receipt is None or receipt.get("requestId") != str(request.request_id):
         raise _launch_refused("The start was answered but its receipt cannot be read back.")
     execution = str(receipt.get("status"))
-    agent_id = receipt.get("agentId")
+    agent_id = _started_agent_id(receipt)
     launch = (
         "rejected"
         if execution == "rejected"
         else "unknown"
         if execution in {"starting", "unknown"}
+        else "held"
+        if execution == "held"
         else "running"
     )
     if execution == "stopped" and isinstance(agent_id, str):
@@ -426,6 +560,8 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
     artifact = receipt.get("handoverArtifact")
     next_action = {
         "running": None,
+        "held": "The seat is held and takes its first turn with the first message addressed "
+        "to it; no new start is needed.",
         "rejected": "The launch is closed and agentId names no agent that can be used. Resolve "
         "the reason in detail, then start again with a new request id.",
         "unknown": f"Call {ROLE_START_TOOL} again with the same request id and selection: it "
@@ -518,6 +654,7 @@ def send_role_message(
 ) -> dict[str, Any]:
     """Send one message to one role agent and, with ``wait``, return the turn's outcome."""
 
+    sender: StartingAgent | None = None
     try:
         binding = _caller(config, environment)
         selection = RoleSelection.model_validate(
@@ -535,27 +672,54 @@ def send_role_message(
         )
         own_receipt = _read_receipt(own_path)
         sender = starting_agent(config, binding)
-        recipient = _resolve_recipient(config, call, binding)
+        try:
+            recipient = _resolve_recipient(config, call, binding)
+        except _Refused as unresolved:
+            if unresolved.refusal == "recipient-busy" and unresolved.fields.get("holdReason"):
+                return _hold_for_unresolved(config, call, sender, unresolved)
+            raise
         _carry_resolved_target_role(call, recipient)
-        collection = None
-        if own_receipt and own_receipt.get("agentId") == binding.agent_id:
-            try:
-                collection = collect_execution_reports(own_receipt)
-            except RoleReportCollectionError as error:
-                collection = {"state": "failed", "detail": str(error), "sourcesPreserved": True}
-                own_receipt["reportCollection"] = collection
-            try:
-                _write_receipt(own_path, own_receipt)
-            except OSError as error:
-                collection = {**collection, "recordError": str(error)}
-        result = _deliver(config, call, sender, recipient)
+        collection = _collect_own_reports(config, binding, own_path, own_receipt)
+        located = _locate_recipient_store(config, call, recipient.agent_id)
+        withdrawn, withdrawal_note = _withdraw_requested(config, call, sender, recipient, located)
+        result = _deliver_or_hold(
+            _MessageSend(config, call, sender, recipient, located, withdrawn, collection)
+        )
         if collection is not None:
             result["reportCollection"] = collection
+        if withdrawn is not None:
+            result["withdrawnHeldMessageId"] = withdrawn
+        if withdrawal_note is not None and isinstance(result.get("detail"), str):
+            result["detail"] = f"{result['detail']} {withdrawal_note}"
+        result.update(_held_readback(located[0] if located else None, sender.agent_id))
     except _Refused as refused:
-        result = refused.payload()
+        result = _refusal_answer(config, call, sender, refused)
     if call.role == "system-specialist":
         result["warning"] = ROLE_ALIAS_NOTICE
     return result
+
+
+def _collect_own_reports(
+    config: McpRuntimeConfig,
+    binding: AgentBinding,
+    own_path: Path,
+    own_receipt: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Collect the sender's execution reports; failures ride along, never abort."""
+
+    _ = config
+    if not own_receipt or own_receipt.get("agentId") != binding.agent_id:
+        return None
+    try:
+        collection = collect_execution_reports(own_receipt)
+    except RoleReportCollectionError as error:
+        collection = {"state": "failed", "detail": str(error), "sourcesPreserved": True}
+        own_receipt["reportCollection"] = collection
+    try:
+        _write_receipt(own_path, own_receipt)
+    except OSError as error:
+        collection = {**collection, "recordError": str(error)}
+    return collection
 
 
 def _carry_resolved_target_role(call: RoleMessageCall, recipient: _Recipient) -> None:
@@ -573,6 +737,512 @@ def _carry_resolved_target_role(call: RoleMessageCall, recipient: _Recipient) ->
         role = call.role
     if isinstance(role, str) and role:
         call_target_role.set(role)
+
+
+def _locate_recipient_store(
+    config: McpRuntimeConfig, call: RoleMessageCall, agent_id: str
+) -> tuple[Path, dict[str, Any], str] | None:
+    """The current receipt and working folder of one recipient, when both name it.
+
+    History receipts never locate a store: a replaced agent's message is refused as
+    archived by the delivery, not held behind its successor.
+    """
+
+    candidates: list[tuple[Path, dict[str, Any]]] = []
+    if call.role is not None:
+        try:
+            selection = RoleSelection.model_validate(
+                {
+                    "role": call.role,
+                    "sprintDocumentRef": call.sprint_document_ref,
+                    "masterDocumentRef": call.master_document_ref,
+                    "taskDocumentRef": call.task_document_ref,
+                }
+            )
+        except (ValidationError, ValueError):
+            return None
+        if selection.role in TASKLESS_ROLES:
+            try:
+                candidates = [
+                    (path, receipt)
+                    for path, receipt in _taskless_execution_receipts(config, selection)
+                ]
+            except (ValueError, TaskDocumentRefError, HTTPException):
+                return None
+        else:
+            try:
+                path = _receipt_path(config, selection)
+                receipt = _read_receipt(path)
+            except HTTPException:
+                return None
+            candidates = [(path, receipt)] if receipt is not None else []
+    else:
+        candidates = [
+            (path, receipt)
+            for path, receipt in _line_receipts(config)
+            if path.parent.name != "history" and receipt.get("agentId") == agent_id
+        ]
+        if not candidates:
+            return None
+        # The current receipt first, as the recipient lookup prefers it.
+        candidates.sort(key=lambda item: item[0].parent.name == "history")
+    for path, receipt in candidates:
+        if receipt.get("agentId") != agent_id:
+            continue
+        workspace = receipt.get("workspace")
+        folder = workspace.get("path") if isinstance(workspace, dict) else None
+        if isinstance(folder, str) and folder:
+            return path, receipt, folder
+    return None
+
+
+def _withdraw_requested(
+    config: McpRuntimeConfig,
+    call: RoleMessageCall,
+    sender: StartingAgent,
+    recipient: _Recipient,
+    located: tuple[Path, dict[str, Any], str] | None,
+) -> tuple[str | None, str | None]:
+    """End the sender's named waiting message as withdrawn, before the text is handled.
+
+    Returns the withdrawn id with no note, or no id with the note when the message
+    is already committed to delivery: the new text is still held behind it.
+    """
+
+    _ = config
+    message_id = call.withdraw_held_message_id
+    if not message_id:
+        return None, None
+    if located is None:
+        raise _not_found(
+            f"Agent {recipient.agent_id} keeps no held-message store to withdraw from.",
+            recipientAgentId=recipient.agent_id,
+        )
+    path, _receipt, folder = located
+    try:
+        ended = withdraw_message(folder, recipient.agent_id, message_id, sender.agent_id)
+    except ValueError as error:
+        raise _not_found(str(error), recipientAgentId=recipient.agent_id) from error
+    except HeldMessageCommitted as committed:
+        return None, (
+            f"The withdrawal of waiting message {committed.message_id} was refused: it is "
+            "already committed to delivery and will be delivered once."
+        )
+    if ended is None:
+        raise _not_found(
+            f"No waiting message {message_id} of this sender for agent {recipient.agent_id}.",
+            recipientAgentId=recipient.agent_id,
+        )
+    _record_held_lines(path, [ended], "withdrawn")
+    return message_id, None
+
+
+def _record_held_lines(
+    path: Path, ended: list[dict[str, Any]], how: str
+) -> None:
+    """Write terminal lines for messages ended outside a drain (withdrawal)."""
+
+    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
+        record_lines,
+        recount_waiting_for,
+    )
+
+    try:
+        current = _read_receipt(path)
+    except HTTPException:
+        return
+    if current is None:
+        return
+    record_lines(current, ended, how)
+    recount_waiting_for(current)
+    with suppress(OSError):
+        _write_receipt(path, current)
+
+
+def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
+    """Deliver one message, or hold it behind what waits (MIK-R100 rules 4/4a/4b)."""
+
+    located = send.located
+    if located is not None and located[1].get("status") == "held":
+        return _hold_for_seat(send, reason="held-seat-unopened")
+    if located is not None and waiting_total(located[2], send.recipient.agent_id) > 0:
+        # Nothing overtakes (MIK-R100 rule 4b): while anything is held for the
+        # recipient, a further message is held behind it, even when the host
+        # could take it at that moment.
+        return _hold_for_seat(send, reason="held-behind-waiting")
+    try:
+        return _deliver(send.config, send.call, send.sender, send.recipient)
+    except _Refused as undelivered:
+        if undelivered.refusal == "recipient-busy" and undelivered.fields.get("holdReason"):
+            if located is None:
+                raise
+            permission = undelivered.fields.get("permission")
+            return _hold_for_seat(
+                send,
+                reason=str(undelivered.fields["holdReason"]),
+                permission=permission if isinstance(permission, str) else None,
+            )
+        raise
+
+
+def _hold_for_unresolved(
+    config: McpRuntimeConfig,
+    call: RoleMessageCall,
+    sender: StartingAgent,
+    unresolved: _Refused,
+) -> dict[str, Any]:
+    """Hold a message whose recipient's start has not finished (MIK-R100 rule 4b)."""
+
+    agent_id = str(unresolved.fields.get("recipientAgentId") or "")
+    located = _locate_recipient_store(config, call, agent_id)
+    if located is None:
+        raise unresolved
+    path, _receipt, _folder = located
+    _ = path
+    recipient = _Recipient(agent_id, _receipt)
+    withdrawn, _withdrawal_note = _withdraw_requested(config, call, sender, recipient, located)
+    return _hold_for_seat(
+        _MessageSend(config, call, sender, recipient, located, withdrawn, None),
+        reason="start-unfinished",
+    )
+
+
+def _hold_for_seat(
+    send: _MessageSend, *, reason: str, permission: str | None = None
+) -> dict[str, Any]:
+    """Queue one message for its recipient and drain what waits (MIK-R100 rules 4/4a/4b)."""
+
+    located = send.located
+    assert located is not None, "held for a recipient without a store"
+    path, _receipt, folder = located
+    line = sender_line(send.sender)
+    try:
+        taken = hold_message(
+            folder,
+            send.recipient.agent_id,
+            HeldMessage(
+                sender_line=line,
+                sender_agent_id=send.sender.agent_id,
+                text=send.call.text,
+                reason=reason,
+                permission=permission,
+            ),
+        )
+    except HeldStoreFull as full:
+        raise _Refused(
+            "recipient-busy",
+            f"Agent {send.recipient.agent_id} already holds {MAX_HELD_PER_RECIPIENT} messages: "
+            f"{full}",
+            "Wait for a delivery or withdraw a waiting message; none was dropped.",
+            recipientAgentId=send.recipient.agent_id,
+        ) from full
+    except ValueError as error:
+        raise _not_found(str(error), recipientAgentId=send.recipient.agent_id) from error
+    _note_waiting(path, taken["waitingTotal"])
+    try:
+        drain = drain_held(send.config, path, _receipt)
+    except Exception as error:
+        drain = {"outcome": "drain-failed", "detail": str(error)}
+    outcome = str(drain.get("outcome") or "")
+    if outcome in {"delivered", "opened"}:
+        apply_drain_to_receipt(path, drain)
+        return _held_then_delivered(send, taken, drain)
+    if outcome == "partially-delivered":
+        apply_drain_to_receipt(path, drain)
+        return _held_partial_progress(send, taken, drain)
+    if outcome == "recipient-gone":
+        apply_drain_to_receipt(path, drain)
+        raise _archived(send.recipient.agent_id)
+    if outcome == "permission-pending" and send.call.wait:
+        apply_drain_to_receipt(path, drain)
+        return _held_wait_permission(send, drain)
+    apply_drain_to_receipt(path, drain)
+    drain_permission = drain.get("permission")
+    final_reason = reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
+    if final_reason == "permission-pending" and reason == "permission-pending":
+        # Rule 4a names the permission as the refused send named it: the send met the
+        # prompt first, so its naming (or "not supplied") stands over the drain's.
+        final_permission = permission
+    else:
+        final_permission = drain_permission if isinstance(drain_permission, str) else permission
+    return _held_answer(
+        send,
+        taken,
+        reason=final_reason,
+        permission=final_permission,
+        detail=str(drain.get("detail") or ""),
+    )
+
+
+def _trigger_delivery(
+    drain: dict[str, Any], taken: dict[str, Any]
+) -> dict[str, Any]:
+    """The split part carrying the triggering message; the last part as fallback."""
+
+    deliveries = [
+        delivery for delivery in drain.get("deliveries", []) if isinstance(delivery, dict)
+    ]
+    mine = taken.get("heldMessageId")
+    for delivery in deliveries:
+        if mine in (delivery.get("ids") or []):
+            return delivery
+    return deliveries[-1] if deliveries else {}
+
+
+def _held_partial_progress(
+    send: _MessageSend, taken: dict[str, Any], drain: dict[str, Any]
+) -> dict[str, Any]:
+    """The held answer when only some waiting messages fit the host's admission.
+
+    The delivered parts are recorded; the rest stay held with fresh counts, and
+    nothing has to be sent again.
+    """
+
+    located = send.located
+    assert located is not None, "held for a recipient without a store"
+    mine, total = _read_store_counts(located[2], send.recipient.agent_id, send.sender.agent_id)
+    fresh = {**taken, "waitingMine": mine, "waitingTotal": total}
+    permission = drain.get("permission")
+    return _held_answer(
+        send,
+        fresh,
+        reason="still-held",
+        permission=permission if isinstance(permission, str) else None,
+        detail=str(drain.get("detail") or ""),
+    )
+
+
+def _held_then_delivered(
+    send: _MessageSend, taken: dict[str, Any], drain: dict[str, Any]
+) -> dict[str, Any]:
+    """The answer when a drain delivered everything held, this message with it."""
+
+    line = sender_line(send.sender)
+    if drain.get("outcome") == "opened":
+        result: dict[str, Any] = {
+            "ok": True,
+            "status": "accepted",
+            "detail": str(drain.get("detail") or "The held seat opened."),
+            "recipientAgentId": send.recipient.agent_id,
+            "senderLine": line,
+            "taken": "started",
+            "openedHeldSeat": True,
+        }
+    else:
+        delivery = _trigger_delivery(drain, taken)
+        taken_word = delivery.get("taken")
+        turn_id = delivery.get("turnId")
+        message_id = delivery.get("messageId")
+        result = {
+            "ok": True,
+            "status": "accepted",
+            "detail": str(
+                drain.get("detail") or "The held messages were delivered in one delivery."
+            ),
+            "recipientAgentId": send.recipient.agent_id,
+            "senderLine": line,
+            "taken": "steered" if taken_word == "steered" else "started",
+            **({"turnId": turn_id} if isinstance(turn_id, str) else {}),
+        }
+        if taken_word == "replaced":
+            result["warning"] = (
+                "The Paseo runtime cancelled the recipient's running turn to deliver "
+                "this message although it was asked to hand the message to that turn."
+            )
+    if send.collection is not None:
+        result["reportCollection"] = send.collection
+    if send.withdrawn is not None:
+        result["withdrawnHeldMessageId"] = send.withdrawn
+    if (
+        send.call.wait
+        and drain.get("outcome") == "delivered"
+        and isinstance(message_id, str)
+    ):
+        result.update(
+            wait_for_turn(
+                send.config,
+                SentMessage(
+                    send.recipient.agent_id,
+                    message_id,
+                    turn_id if isinstance(turn_id, str) else None,
+                    steered=taken_word == "steered",
+                ),
+                min(max(1, send.call.timeout_seconds), MAX_WAIT_SECONDS),
+            )
+        )
+    return result
+
+
+def _held_wait_permission(send: _MessageSend, drain: dict[str, Any]) -> dict[str, Any]:
+    """A wait on a held message answers permission-pending as today (rule 4a)."""
+
+    name = drain.get("permission")
+    permission = name if isinstance(name, str) and name else "a tool"
+    result: dict[str, Any] = {
+        "ok": True,
+        "status": "permission-pending",
+        "detail": (
+            f"Agent {send.recipient.agent_id} waits for a permission decision: {permission}. "
+            "The message stays held and is delivered when the prompt is answered; "
+            "the reply is read later."
+        ),
+        "recipientAgentId": send.recipient.agent_id,
+        "senderLine": sender_line(send.sender),
+        "permission": permission,
+    }
+    if send.collection is not None:
+        result["reportCollection"] = send.collection
+    if send.withdrawn is not None:
+        result["withdrawnHeldMessageId"] = send.withdrawn
+    located = send.located
+    assert located is not None, "held for a recipient without a store"
+    result.update(_held_readback(located[0], send.sender.agent_id))
+    return result
+
+
+def _held_answer(
+    send: _MessageSend,
+    taken: dict[str, Any],
+    *,
+    reason: str,
+    permission: str | None,
+    detail: str,
+) -> dict[str, Any]:
+    """The held answer: what waits, why, and what the sender has waiting (rules 4a/4b)."""
+
+    why = {
+        "held-seat-unopened": "the seat is held and takes its first turn with its first message",
+        "held-behind-waiting": "earlier messages still wait for the recipient",
+        "start-unfinished": "the recipient's start has not finished",
+        "permission-pending": "the recipient waits for a permission decision",
+        "recipient-in-turn": "the recipient is in a turn the host cannot write into",
+    }.get(reason, detail or reason)
+    if reason == "permission-pending":
+        # Rule 4a names the permission as the host names it, or "not supplied":
+        # the reading's fallback word for an unnamed prompt counts as unnamed.
+        if permission and permission != "a tool":
+            why = f"the recipient waits for a permission decision ({permission})"
+        else:
+            why = "the recipient waits for a permission decision (not supplied)"
+            permission = None
+    result: dict[str, Any] = {
+        "ok": True,
+        "status": "held",
+        "detail": (
+            f"The message is held for agent {send.recipient.agent_id}: {why}. It is delivered "
+            "when the recipient can be written to, in the order it was taken; nothing has "
+            "to be sent again."
+            + (f" The last delivery attempt said: {detail}" if detail else "")
+        ),
+        "recipientAgentId": send.recipient.agent_id,
+        "senderLine": sender_line(send.sender),
+        "heldReason": reason,
+        "heldMessageId": taken.get("heldMessageId"),
+        "waitingMine": taken.get("waitingMine"),
+        "waitingTotal": taken.get("waitingTotal"),
+    }
+    if permission:
+        result["permission"] = permission
+    else:
+        result["permission"] = None
+    if send.withdrawn is not None:
+        result["withdrawnHeldMessageId"] = send.withdrawn
+    if send.collection is not None:
+        result["reportCollection"] = send.collection
+    located = send.located
+    assert located is not None, "held for a recipient without a store"
+    result.update(_held_readback(located[0], send.sender.agent_id))
+    # waitingMine/Total from the take stay authoritative over a recount race.
+    result["waitingMine"] = taken.get("waitingMine")
+    result["waitingTotal"] = taken.get("waitingTotal")
+    return result
+
+
+def _refusal_answer(
+    config: McpRuntimeConfig,
+    call: RoleMessageCall,
+    sender: StartingAgent | None,
+    refused: _Refused,
+) -> dict[str, Any]:
+    """The refusal answer, with the sender's terminal lines when its recipient is gone."""
+
+    result = refused.payload()
+    if (
+        sender is not None
+        and refused.refusal in {"recipient-archived", "recipient-not-found"}
+    ):
+        result.update(
+            _held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id)
+        )
+    return result
+
+
+def _refusal_receipt_path(
+    config: McpRuntimeConfig, call: RoleMessageCall, refused: _Refused
+) -> Path | None:
+    """The receipt holding a refused recipient's ends, for the sender's readback.
+
+    Best-effort and read-only: when the recipient is archived or gone, the lines
+    its receipt recorded are still the sender's terminal history with it. Nothing
+    is sent and the recipient is not reopened.
+    """
+
+    agent_id = refused.fields.get("recipientAgentId")
+    if isinstance(agent_id, str) and agent_id:
+        fallback = None
+        for path, receipt in _line_receipts(config):
+            if receipt.get("agentId") == agent_id:
+                if path.parent.name != "history":
+                    return path
+                fallback = fallback or path
+        return fallback
+    if call.role is None:
+        return None
+    try:
+        selection = RoleSelection.model_validate(
+            {
+                "role": call.role,
+                "sprintDocumentRef": call.sprint_document_ref,
+                "masterDocumentRef": call.master_document_ref,
+                "taskDocumentRef": call.task_document_ref,
+            }
+        )
+        path = _receipt_path(config, selection)
+    except (ValidationError, ValueError, HTTPException):
+        return None
+    return path if path.is_file() else None
+
+
+def _held_readback(path: Path | None, sender_agent_id: str) -> dict[str, Any]:
+    """What a sender reads about its held messages: its waiting ends and terminal lines.
+
+    Empty readback adds no key: an ordinary delivery answers exactly as it did.
+    """
+
+    if path is None:
+        return {}
+    try:
+        current = _read_receipt(path)
+    except HTTPException:
+        return {}
+    if current is None:
+        return {}
+    recent = sender_terminal_lines(current, sender_agent_id)
+    return {"recentTerminal": recent} if recent else {}
+
+
+def _note_waiting(path: Path, total: int) -> None:
+    """Recount the recipient's waiting messages after one was taken."""
+
+    try:
+        current = _read_receipt(path)
+    except HTTPException:
+        return
+    if current is None:
+        return
+    current["heldWaiting"] = total
+    with suppress(OSError):
+        _write_receipt(path, current)
 
 
 def _resolve_recipient(
@@ -593,15 +1263,17 @@ def _resolve_recipient(
     if recipient.agent_id == binding.agent_id:
         raise _not_found("The recipient this resolves to is the calling agent itself.")
     if recipient.receipt.get("status") in _UNFINISHED_START_STATUSES:
-        # Until its start has answered, an agent may not have its first message; a message
-        # that reaches it first would take that message's place.
+        # Until its start has answered, an agent may not have its first message; the
+        # product holds the message and delivers it when the start has answered
+        # running (MIK-R100 rule 4b), instead of refusing it as busy.
         raise _Refused(
             "recipient-busy",
             f"Agent {recipient.agent_id} is not ready for a message: its start has not finished "
             f"(execution status {recipient.receipt.get('status')}).",
-            "Send the message again once the start of that agent has answered running. A start "
-            f"that answered unknown is repeated with {ROLE_START_TOOL} by the agent that made it.",
+            "The message is held and delivered once the start of that agent has answered "
+            "running; nothing has to be sent again.",
             recipientAgentId=recipient.agent_id,
+            holdReason="start-unfinished",
         )
     return recipient
 
@@ -688,11 +1360,12 @@ def _recipient_by_selection(
     """The live agent of the selection's executions; several live agents are never chosen among.
 
     A task-bound selection has one current execution; its agent is the recipient when it is live,
-    and otherwise the most recent earlier execution whose agent is live. A taskless role can have
-    several live agents; then the recipient is ambiguous. Of a taskless role every execution that
-    is not already stopped or rejected is asked about; when there are more of those than are
-    asked about, the address is ambiguous as well. The caller's own execution is no candidate:
-    a role address means another agent of that role.
+    and otherwise the most recent earlier execution whose agent is live -- except on a leaf's
+    seat, where two live agents refuse with both ids instead (MIK-R100 rule 9: there is one
+    resolver). A taskless role can have several live agents; then the recipient is ambiguous.
+    Of a taskless role every execution that is not already stopped or rejected is asked about;
+    when there are more of those than are asked about, the address is ambiguous as well. The
+    caller's own execution is no candidate: a role address means another agent of that role.
     """
 
     try:
@@ -715,7 +1388,10 @@ def _recipient_by_selection(
     if taskless:
         # An execution already stopped or rejected has no live agent to ask about.
         receipts = [r for r in receipts if r.get("status") not in _NO_AGENT_STATUSES]
-    live, archived = _live_agents(config, receipts[:_CANDIDATE_LIMIT], first_only=not taskless)
+    leaf_seat = not taskless and selection.role in LEAF_ROLES
+    live, archived = _live_agents(
+        config, receipts[:_CANDIDATE_LIMIT], first_only=not taskless and not leaf_seat
+    )
     cut = taskless and len(receipts) > _CANDIDATE_LIMIT
     if len(live) > 1 or cut:
         ids = [recipient.agent_id for recipient in live]
@@ -932,23 +1608,29 @@ def _undelivered(agent_id: str, delivery: dict[str, Any]) -> _Refused:
     detail = str(delivery.get("detail") or "")
     if reason == "busy" and delivery.get("permissionPending") is True:
         # The host answers a pending permission with a denial when it delivers a message.
+        # The product holds the message and delivers it when the prompt is answered
+        # (MIK-R100 rule 4a); the guard that nothing is sent stays.
         name = delivery.get("permission")
         named = f" ({name})" if isinstance(name, str) and name else ""
         return _Refused(
             "recipient-busy",
-            f"Agent {agent_id} waits for a permission decision{named}. A message would answer "
-            "it with a denial, so the message was not delivered.",
-            "The developer answers the permission in the recipient's chat; send the message "
-            "again afterwards.",
+            f"Agent {agent_id} waits for a permission decision{named}. The message was not "
+            "delivered to the host; the product holds it and delivers it when the prompt "
+            "is answered.",
+            "Nothing has to be sent again. Only the developer can answer the prompt, in the "
+            "recipient's chat.",
             recipientAgentId=agent_id,
+            holdReason="permission-pending",
             **({"permission": name} if named else {}),
         )
     if reason == "busy":
         return _Refused(
             "recipient-busy",
             f"Agent {agent_id} is busy and the message was not delivered: {detail}",
-            "Send the message again later; the recipient's turn was left running.",
+            "The message is held and delivered when the recipient's turn ends; nothing has "
+            "to be sent again.",
             recipientAgentId=agent_id,
+            holdReason="recipient-in-turn",
         )
     if reason == "archived":
         return _archived(agent_id)

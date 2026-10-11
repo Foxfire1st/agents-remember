@@ -516,6 +516,70 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
         probe="Do not forward role agents' messages",
         reason="MIK-R93@v1: developer questions and permission notices must be forwarded through the parent chain",
     ),
+    RetiredCurationStatement(
+        statement="When `role_message` on `agents-remember-task` refuses delivery because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. Until MIK-R100 has landed, try your held message once in each turn you take for any reason; at the top, give the parent that occasion when you next take a turn. No observer or automatic held-message service is implied.",
+        sources=(
+            "skills/l-01-agent-lifecycles/roles/manager.md",
+            "skills/l-01-agent-lifecycles/roles/architect.md",
+            "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+        ),
+        probe="try your held message once in each turn you take for any reason",
+        reason="MIK-R100@v1: the product holds a message the host cannot take and delivers it; the sender's retry round and the no-observer sentence go",
+    ),
+    RetiredCurationStatement(
+        statement="A recipient that waits for a permission decision, or whose start has not finished, is refused as busy; a pending permission is the developer's to answer in that agent's chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="whose start has not finished, is refused as busy",
+        reason="MIK-R100@v1: a message the host cannot take is held by the product, not refused as busy",
+    ),
+    RetiredCurationStatement(
+        statement="A recipient that waits for a permission decision is refused as busy as well, because a message would answer the permission with a denial: the developer answers it in that agent's chat, then send again. So is a recipient whose start has not finished.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="then send again. So is a recipient whose start has not finished",
+        reason="MIK-R100@v1: a message the host cannot take is held by the product, not refused as busy",
+    ),
+    RetiredCurationStatement(
+        statement="When `role_message` on `agents-remember-task` refuses delivery because a child waits at a permission prompt, or its wait returns `permission-pending`, tell your parent at once. Name the child's role, task number and what the task does, agent ID, and the permission as supplied, or \"not supplied\" when none is named; each parent passes that notice up unchanged. At the top, tell the developer which chat to open. Whenever you say agents wait for the developer, list each role, task number and what the task does, and agent ID, plus a dashboard chat number if one is shown; never give only a count. Only the developer answers the prompt in that child's chat. Do not ask the developer to confirm an answered prompt or keep resending to the child. No observer or automatic held-message service is implied.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="keep resending to the child. No observer or automatic held-message service is implied",
+        reason="MIK-R100@v1: a held answer replaces the refusal, and the product delivers the held message when the prompt is answered",
+    ),
+    RetiredCurationStatement(
+        statement="If delivery to your parent is refused as busy or at a permission prompt, keep the question under **Pending developer questions** in your report, continue independent work, and send it again before ending your turn.",
+        sources=("skills/l-01-agent-lifecycles/operations/orientation.md",),
+        probe="refused as busy or at a permission prompt",
+        reason="MIK-R100@v1: a message held for a permission prompt is delivered by the product and is never sent again",
+    ),
+    RetiredCurationStatement(
+        statement="The Manager starts a leaf's Worker and Reviewer together and its Curator at the first freeze.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="its Curator at the first freeze",
+        reason="MIK-R100@v1: the Manager starts a leaf's Worker, Reviewer and Curator as a set; the Reviewer and the Curator are held until their first message",
+    ),
+    RetiredCurationStatement(
+        statement="The Manager starts Worker and Reviewer together, and starts the Curator at the first freeze.",
+        sources=("skills/l-01-agent-lifecycles/roles/worker.md",),
+        probe="starts Worker and Reviewer together",
+        reason="MIK-R100@v1 rule 1: the Manager starts the leaf's Worker, Reviewer and Curator as a set in one role_start_set call",
+    ),
+    RetiredCurationStatement(
+        statement="Supply the Manager the first freeze needed to start the Curator, rather than ask it to relay a hand-over.",
+        sources=("skills/l-01-agent-lifecycles/roles/worker.md",),
+        probe="first freeze needed to start the Curator",
+        reason="MIK-R100@v1 rule 1: the Curator is held from the set call; the Worker hands its freeze to the Reviewer directly",
+    ),
+    RetiredCurationStatement(
+        statement="The current leaf resolver reaches the newest live agent.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="reaches the newest live agent",
+        reason="MIK-R100@v1 rule 9: the resolver reaches a seat's single live agent and refuses a doubled seat naming both",
+    ),
+    RetiredCurationStatement(
+        statement="The current leaf resolver reaches the newest live agent; an empty or doubled-seat refusal is reported once to the Manager with its text and no candidate is chosen.",
+        sources=("skills/l-01-agent-lifecycles/operations/coordination.md",),
+        probe="an empty or doubled-seat refusal",
+        reason="MIK-R100@v1 rule 9: a seat with two live occupants is refused naming both, and the tool never picks one",
+    ),
 )
 
 #: The loop-gate field pairing the shipped tool retired from its own instruction prose. The

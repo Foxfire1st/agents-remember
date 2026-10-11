@@ -99,9 +99,7 @@ def _execute_prepared_launch(
         )
     artifact = current.get("handoverArtifact")
     if isinstance(artifact, dict):
-        # The first message names this file; it must hold that message whenever it is sent.
-        _rebind_report_access(current)
-        restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
+        _restore_launch_handover(path, current, launch_call)
     predecessor = current.get("predecessorReports")
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
@@ -126,6 +124,30 @@ def _execute_prepared_launch(
     return _refuse_closing_launch(
         config, path, current, creation_returned=outcome.kind == "created"
     )
+
+
+def _restore_launch_handover(
+    path: Path, current: dict[str, Any], launch_call: dict[str, Any]
+) -> None:
+    """Restore the handover artifact the first message names before creating the agent.
+
+    A held seat has no first message yet: its stored opening handover stands in.
+    """
+
+    artifact = current.get("handoverArtifact")
+    if not isinstance(artifact, dict):
+        return
+    _rebind_report_access(current)
+    if current.get("heldSeat") is True:
+        held_opening = current.get("heldOpeningPrompt")
+        if not isinstance(held_opening, str):
+            raise HTTPException(
+                status_code=409,
+                detail="The held seat has no stored opening handover; start it again.",
+            )
+        restore_handover_artifact(artifact, held_opening, receipt=path)
+    else:
+        restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
 
 
 def _same_request_receipt(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
@@ -184,13 +206,31 @@ def _publish_launch_outcome(
         _observe_launch_choices(receipt, outcome.applied)
         if outcome.warning:
             receipt["warning"] = " ".join(filter(None, (receipt.get("warning"), outcome.warning)))
-        receipt.update(
-            status="running",
-            hostAgentExists=True,
-            detail="The Paseo runtime created the role agent; AR acceptance remains with its owner.",
-            updatedAt=_now_iso(),
+        agent_call = launch_call.get("agent")
+        held = receipt.get("heldSeat") is True and (
+            not isinstance(agent_call, dict) or "prompt" not in agent_call
         )
-        receipt.pop("replayRequest", None)
+        if held:
+            # A held seat (MIK-R100 rule 2): the agent exists and has taken no turn.
+            # The saved call and the opening handover stay recorded for its first message.
+            receipt.update(
+                status="held",
+                hostAgentExists=True,
+                detail=(
+                    "The Paseo runtime created the role agent without a first message; "
+                    "the seat is held and takes its first turn with the first message "
+                    "addressed to it."
+                ),
+                updatedAt=_now_iso(),
+            )
+        else:
+            receipt.update(
+                status="running",
+                hostAgentExists=True,
+                detail="The Paseo runtime created the role agent; AR acceptance remains with its owner.",
+                updatedAt=_now_iso(),
+            )
+            receipt.pop("replayRequest", None)
         _write_receipt(path, receipt)
         return JSONResponse(_public_execution(receipt))
     if outcome.kind == "refused":
@@ -712,6 +752,8 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     public["canRetry"] = status in {"starting", "unknown"} and isinstance(
         receipt.get("replayRequest"), dict
     )
+    if canonical_role(str(receipt.get("role", ""))) in LEAF_ROLES:
+        _apply_leaf_holder(public, receipt, status)
     report = receipt.get("report")
     if isinstance(report, dict):
         path = report.get("path")
@@ -732,12 +774,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
                 retry_payload["agentOverride"] = override
             public["retryPayload"] = retry_payload
     if _leaf_is_closing(receipt) and receipt["leafArchive"].get("startRefused") is True:
-        # Unsettled archive status also prevents a different request moving an in-flight receipt.
-        own = receipt["leafArchive"].get("outcomes", {}).get(receipt.get("agentId"), {})
-        if own.get("state") in {"archived", "gone"}:
-            public["status"] = "rejected"
-        public.update(startRefused=True, canStart=False, canRevive=False, canRetry=False)
-        public.pop("retryPayload", None)
+        _apply_leaf_closing(public, receipt)
     reference = receipt.get("execution")
     if isinstance(reference, dict):
         public["execution"] = {
@@ -746,6 +783,35 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             if isinstance(reference.get(key), str)
         }
     return _public_instruction_fields(public)
+
+
+def _apply_leaf_holder(
+    public: dict[str, Any], receipt: dict[str, Any], status: Any
+) -> None:
+    """Name the leaf seat's holder while it holds the seat (MIK-R100 rule 9).
+
+    The launcher shows the holder and offers the replacing start.
+    """
+
+    holder = _replaced_agent_id(receipt)
+    if holder is not None and status not in {
+        "completed",
+        "failed",
+        "stopped",
+        "rejected",
+        "interrupted",
+    }:
+        public["holderAgentId"] = holder
+
+
+def _apply_leaf_closing(public: dict[str, Any], receipt: dict[str, Any]) -> None:
+    """Unsettled archive status also prevents a different request moving an in-flight receipt."""
+
+    own = receipt["leafArchive"].get("outcomes", {}).get(receipt.get("agentId"), {})
+    if own.get("state") in {"archived", "gone"}:
+        public["status"] = "rejected"
+    public.update(startRefused=True, canStart=False, canRevive=False, canRetry=False)
+    public.pop("retryPayload", None)
 
 
 def _public_instruction_fields(public: dict[str, Any]) -> dict[str, Any]:

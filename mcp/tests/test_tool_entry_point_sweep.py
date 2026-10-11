@@ -717,6 +717,18 @@ class EntryPointWorld:
                 "master_document_ref": self.task_ref,
                 "task_document_ref": self.leaf_ref,
             },
+            # The set and the native retirement need the same launch binding: unbound,
+            # both refuse before anything is prepared, started or archived.
+            "role_start_set": {
+                "request_id": "00000000-0000-4000-8000-000000000003",
+                "sprint_document_ref": self.task_ref,
+                "master_document_ref": self.task_ref,
+                "task_document_ref": self.leaf_ref,
+            },
+            "retire_child": {
+                "task_document_ref": self.leaf_ref,
+                "role": "worker",
+            },
             "role_message": {
                 "text": "entry-point sweep",
                 "agent_id": "00000000-0000-4000-8000-000000000002",

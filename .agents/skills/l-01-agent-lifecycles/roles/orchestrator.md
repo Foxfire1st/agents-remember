@@ -47,6 +47,6 @@ Developer questions and relayed answers follow `operations/orientation.md`.
 
 Questions received from children follow `roles/manager.md` §Questions received from children.
 
-When `role_message` on `agents-remember-task` refuses delivery because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. Until MIK-R100 has landed, try your held message once in each turn you take for any reason; at the top, give the parent that occasion when you next take a turn. No observer or automatic held-message service is implied.
+When `role_message` on `agents-remember-task` answers `held` because a child waits at a permission prompt, or its wait returns `permission-pending`, give the upward notice as `../operations/coordination.md` states. The product keeps the message and delivers it when the prompt is answered; do not send it again.
 
 Write agent-authored temporary files, experiments and working copies only in the real `workspace.scratchRoot` named by your handover. Keep them outside code, memory and task folders. Product/tooling and test-runner temporary files, and an explicitly admitted repository sandbox, follow their own owners. Write reports and evidence in the handover's local report folder; the product copies them to canonical notes before removal.

@@ -80,6 +80,12 @@ class RoleDispatchRequest(RoleSelection):
     request_id: uuid.UUID = Field(alias="requestId")
     action: Literal["start", "revive"] = "start"
     agent_override: RoleAgentOverride | None = Field(default=None, alias="agentOverride")
+    # The holder this start replaces on its leaf seat (MIK-R100 rule 9): the start
+    # retires that agent first, in the same call, by rule 8. Absent for an ordinary start.
+    replaces_agent_id: str | None = Field(default=None, alias="replacesAgentId")
+    # The word that the holder's turn, if it is in one, may be interrupted by the
+    # replacement (rule 8). Without it a running holder is refused, as in retirement.
+    replaces_interrupt_turn: bool = Field(default=False, alias="replacesInterruptTurn")
 
 
 class RoleResultRequest(RoleSelection):

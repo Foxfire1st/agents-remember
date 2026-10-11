@@ -7,6 +7,7 @@ execution reference; they never update AR task, review, curation, or Git state.
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
@@ -43,6 +45,7 @@ from agents_remember.cli.paseo_launch import (
     build_launch_call,
     mint_agent_id,
 )
+from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
@@ -52,6 +55,7 @@ from agents_remember.cli.role_launch_liveness import (
     _reconcile_prior_execution,
     _recorded_agent_id,
     _refresh_execution,
+    _Replacement,
     _revive_agent,
 )
 from agents_remember.cli.role_launch_preparation import (
@@ -84,7 +88,9 @@ from agents_remember.cli.role_launch_receipts import (
 )
 from agents_remember.cli.role_report import register_role_report_route
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_launcher import (
+    RoleAgentOverride,
     RoleDispatchRequest,
     RoleLauncherOptionsRequest,
     RoleResultRequest,
@@ -112,6 +118,11 @@ class _PreparedRoleStart:
     started_by: StartingAgent | None = None
     # Whether this start created the request's message-binding file (it may then take it back).
     created_message_binding: bool = False
+    # A held seat (MIK-R100 rule 2): created without a first message, opened later.
+    held: bool = False
+    # First work carried with the start (MIK-R100 rule 3): appended to the opening
+    # handover when the seat opens at once. Never used with a held seat.
+    opening_message: str | None = None
 
 
 def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
@@ -317,12 +328,19 @@ def _verify_prior_message_binding_projection(
     _verify_message_binding_projection(config, request.request_id, binding, reference)
 
 
+@dataclass(frozen=True, slots=True)
+class _BindingReservation:
+    """Settle the receipt at this address and write the message-binding file."""
+
+    path: Path
+    request: RoleDispatchRequest
+    request_digest: str
+    prepared: dict[str, Any]
+    started_by: StartingAgent | None = None
+
+
 def _reserve_message_binding_projection(
-    config: McpRuntimeConfig,
-    path: Path,
-    request: RoleDispatchRequest,
-    request_digest: str,
-    prepared: dict[str, Any],
+    config: McpRuntimeConfig, reservation: _BindingReservation
 ) -> tuple[dict[str, str], str | None, bool, JSONResponse | None]:
     """Settle the receipt already at this address and write the message-binding file.
 
@@ -331,6 +349,10 @@ def _reserve_message_binding_projection(
     existing receipt instead of a new launch.
     """
 
+    path = reservation.path
+    request = reservation.request
+    request_digest = reservation.request_digest
+    prepared = reservation.prepared
     binding, reference = _prepared_message_binding_projection(prepared, request.request_id)
     current = _read_receipt(path)
     _verify_prior_message_binding_projection(config, current, request, binding, reference)
@@ -343,7 +365,15 @@ def _reserve_message_binding_projection(
         replaces_agent_id = _replaced_agent_id(current)
     else:
         replaces_agent_id = None
-    prior = _reconcile_prior_execution(config, path, request, request_digest)
+    prior = _reconcile_prior_execution(
+        config, path, request, request_digest,
+        _Replacement(
+            reservation.started_by,
+            request.replaces_agent_id,
+            request.replaces_interrupt_turn,
+            str(request.request_id),
+        ),
+    )
     if prior is not None:
         return reference, None, False, prior
     if current and replaces_agent_id:
@@ -410,6 +440,9 @@ def _start_execution(
     config: McpRuntimeConfig,
     request: RoleDispatchRequest,
     started_by: StartingAgent | None = None,
+    *,
+    held: bool = False,
+    opening_message: str | None = None,
 ) -> JSONResponse:
     context = resolve_role_launch_context(config, request)
     binding = selection_binding(request)
@@ -424,7 +457,15 @@ def _start_execution(
     # since the launch cannot turn its repeat into a conflict.
     if _receipt_carries_request(path, request):
         _refuse_another_starter(path, request, started_by)
-        prior = _reconcile_prior_execution(config, path, request, request_digest)
+        prior = _reconcile_prior_execution(
+            config, path, request, request_digest,
+            _Replacement(
+                started_by,
+                request.replaces_agent_id,
+                request.replaces_interrupt_turn,
+                str(request.request_id),
+            ),
+        )
         if prior is not None:
             return prior
     # A request id that belongs to an archived execution, or to another selection, is refused
@@ -442,7 +483,10 @@ def _start_execution(
     # The receipt of this request id may have appeared while the handover was compiled.
     _refuse_another_starter(path, request, started_by)
     projection_reference, replaces_agent_id, created_binding, prior = (
-        _reserve_message_binding_projection(config, path, request, request_digest, prepared)
+        _reserve_message_binding_projection(
+            config,
+            _BindingReservation(path, request, request_digest, prepared, started_by),
+        )
     )
     if prior is not None:
         return prior
@@ -458,6 +502,8 @@ def _start_execution(
         replaces_agent_id=replaces_agent_id,
         started_by=started_by,
         created_message_binding=created_binding,
+        held=held,
+        opening_message=opening_message,
     )
     return _launch_prepared_role_session(start, prompt=prompt)
 
@@ -475,6 +521,24 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     # The agent id is chosen here: before the receipt is written and before the runtime is called.
     agent_id = mint_agent_id()
     # The compiled first message is stored once; what the agent receives names that file first.
+    # A successor names the earlier agent's report paths, so that it takes over from what is
+    # written (MIK-R100 rule 9).
+    if start.replaces_agent_id and isinstance(prepared.get("predecessorReports"), dict):
+        earlier = prepared["predecessorReports"].get("report") or {}
+        earlier_paths = (
+            f"its earlier report paths are {earlier.get('path')} "
+            f"(canonical {earlier.get('canonicalPath')}). "
+            if earlier.get("path")
+            else f"its earlier request id is {prepared['predecessorReports'].get('requestId')}. "
+        )
+        prompt = (
+            f"{prompt}\nSuccessor start: this seat replaces agent {start.replaces_agent_id}; "
+            f"{earlier_paths}Take over from what is written there."
+        )
+    if start.opening_message and not start.held:
+        # First work carried with the start (MIK-R100 rule 3): the seat opens at once
+        # with its handover and that message.
+        prompt = f"{prompt}\n{start.opening_message}"
     artifact = write_handover_artifact(prepared["taskReportPath"], prompt)
     launch_call = build_launch_call(
         RoleLaunch(
@@ -491,6 +555,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
             replaces_agent_id=start.replaces_agent_id,
             parent_agent_id=start.started_by.agent_id if start.started_by else None,
+            held=start.held,
         )
     )
     receipt: dict[str, Any] = {
@@ -545,6 +610,12 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "execution": {},
         "preparation": {"enclosure": workspace.get("enclosurePreparation", "not-applicable")},
         "handoverArtifact": artifact,
+        # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
+        **(
+            {"heldSeat": True, "heldOpeningPrompt": first_message(artifact, prompt)}
+            if start.held
+            else {}
+        ),
         # What the launch call gives the agent: its tool server, or why none, and the note.
         **applied_to_agent(launch_call),
         "replayRequest": launch_call,
@@ -555,7 +626,13 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         try:
             _refuse_another_starter(start.receipt_path, request, start.started_by)
             prior = _reconcile_prior_execution(
-                start.config, start.receipt_path, request, start.request_digest
+                start.config, start.receipt_path, request, start.request_digest,
+                _Replacement(
+                    start.started_by,
+                    request.replaces_agent_id,
+                    request.replaces_interrupt_turn,
+                    str(request.request_id),
+                ),
             )
         except HTTPException:
             _take_back_message_binding(start)
@@ -640,3 +717,195 @@ def _acquire_dispatch_lock(wait_seconds: float = 0.0) -> None:
     )
     if not acquired:
         raise LaunchLockBusy
+
+
+# The seats one set call prepares, in start order: the Worker opens at once, the
+# Reviewer and the Curator are held until their first message (MIK-R100 rules 1/2).
+SET_SEAT_ROLES: tuple[str, ...] = ("worker", "reviewer", "curator")
+
+
+def seat_request_id(set_request_id: uuid.UUID, role: str) -> uuid.UUID:
+    """The deterministic seat request id of one set: a repeat reconciles the same agent."""
+
+    return uuid.uuid5(set_request_id, f"ar-leaf-set-seat:{role}")
+
+
+def dispatch_leaf_set(
+    config: McpRuntimeConfig,
+    call: RoleStartSetCall,
+    started_by: StartingAgent | None,
+    *,
+    reviewer_opening: str | None = None,
+    lock_wait_seconds: float = 60.0,
+) -> dict[str, Any]:
+    """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).
+
+    The three have the calling Manager as their parent and the same leaf as their
+    selection. The Worker opens at once; the Reviewer opens at once with its handover
+    and the carried first message when one is given (rule 3), else held like the
+    Curator (rule 2). If one seat cannot be created the call names it, leaves the
+    others as they are, and a repeat with the same set request id completes the set.
+    """
+
+    _require_paseo_runtime(config)
+    _acquire_dispatch_lock(lock_wait_seconds)
+    try:
+        seats = {
+            role: _start_set_seat(config, call, role, started_by, reviewer_opening)
+            for role in SET_SEAT_ROLES
+        }
+    finally:
+        _DISPATCH_LOCK.release()
+    failed = sorted(role for role, seat in seats.items() if not seat.get("agentId"))
+    ok = not failed
+    return {
+        "ok": ok,
+        "status": "completed" if ok else "partial",
+        "detail": (
+            "The set prepared the leaf's Worker, Reviewer and Curator as siblings."
+            if ok
+            else f"The set left {', '.join(failed)} without an agent; the other seats stand. "
+            "Repeat the call with the same set request id to complete the set."
+        ),
+        "requestId": str(call.request_id),
+        "seats": seats,
+        **(
+            {}
+            if ok
+            else {
+                "nextAction": "Repeat role_start_set with the same request_id and leaf; "
+                "seats that have an agent reconcile it and create no fourth."
+            }
+        ),
+    }
+
+
+def _start_set_seat(
+    config: McpRuntimeConfig,
+    call: RoleStartSetCall,
+    role: str,
+    started_by: StartingAgent | None,
+    reviewer_opening: str | None,
+) -> dict[str, Any]:
+    """Start one seat of a set; a seat that fails names itself and stops no other seat."""
+
+    seat_id = seat_request_id(call.request_id, role)
+    override = getattr(call, role)
+    agent_override = (
+        RoleAgentOverride(
+            agentId=override.agent,
+            modelId=override.model,
+            effortId=override.effort,
+            featureValues=dict(override.feature_values) or None,
+        )
+        if override.agent or override.model or override.effort or override.feature_values
+        else None
+    )
+    try:
+        request = RoleDispatchRequest.model_validate(
+            {
+                "role": role,
+                "sprintDocumentRef": call.sprint_document_ref,
+                "masterDocumentRef": call.master_document_ref,
+                "taskDocumentRef": call.task_document_ref,
+                "requestId": seat_id,
+                "agentOverride": (
+                    agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    if agent_override
+                    else None
+                ),
+                "replacesAgentId": (call.replaces or {}).get(role),
+                "replacesInterruptTurn": call.replaces_interrupt_turn,
+            }
+        )
+    except (ValidationError, ValueError) as error:
+        return {
+            "requestId": str(seat_id),
+            "status": "refused",
+            "agentId": None,
+            "held": False,
+            "opened": False,
+            "hasTurn": False,
+            "detail": f"The seat request is not valid: {error}",
+        }
+    opens_at_once = role == "worker" or (role == "reviewer" and bool(reviewer_opening))
+    try:
+        response = _start_execution(
+            config,
+            request,
+            started_by,
+            held=not opens_at_once,
+            opening_message=reviewer_opening if role == "reviewer" and opens_at_once else None,
+        )
+    except HostUnreachableRefusal as refusal:
+        return {
+            "requestId": str(seat_id),
+            "status": "host-unreachable",
+            "agentId": None,
+            "held": False,
+            "opened": False,
+            "hasTurn": False,
+            "detail": str(refusal.detail),
+        }
+    except HTTPException as error:
+        return {
+            "requestId": str(seat_id),
+            "status": "refused",
+            "agentId": None,
+            "held": False,
+            "opened": False,
+            "hasTurn": False,
+            "detail": str(error.detail),
+        }
+    except (OSError, ValueError, PaseoBridgeFailure) as error:
+        return {
+            "requestId": str(seat_id),
+            "status": "error",
+            "agentId": None,
+            "held": False,
+            "opened": False,
+            "hasTurn": False,
+            "detail": str(error),
+        }
+    try:
+        answer = json.loads(bytes(response.body))
+    except ValueError:
+        answer = {}
+    agent_id = _answer_agent_id(answer)
+    status = str(answer.get("status") or "unknown")
+    held = status == "held"
+    return {
+        "requestId": str(seat_id),
+        "status": status,
+        "agentId": agent_id if isinstance(agent_id, str) else None,
+        "held": held,
+        "opened": isinstance(agent_id, str) and not held,
+        "hasTurn": _seat_has_turn(config, agent_id),
+        "detail": str(answer.get("detail") or ""),
+    }
+
+
+def _answer_agent_id(answer: dict[str, Any]) -> str | None:
+    """The agent a public execution answer names, top level or under execution."""
+
+    agent_id = answer.get("agentId")
+    if isinstance(agent_id, str) and agent_id:
+        return agent_id
+    execution = answer.get("execution")
+    if isinstance(execution, dict):
+        agent_id = execution.get("agentId")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+    return None
+
+
+def _seat_has_turn(config: McpRuntimeConfig, agent_id: Any) -> bool:
+    """Whether the host records any turn for the seat's agent (rule 1 answer)."""
+
+    if not isinstance(agent_id, str) or not agent_id:
+        return False
+    try:
+        reading = read_agent(config, agent_id)
+    except Exception:
+        return False
+    return reading.reachable and reading.last_turn in {"replied", "unreplied"}

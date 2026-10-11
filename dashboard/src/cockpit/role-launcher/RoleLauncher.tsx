@@ -69,7 +69,10 @@ const roleLauncherMeta = css({
   overflowWrap: "anywhere",
 });
 function boundRoleLabel(label: string, selected: boolean, bound: boolean, status: string | undefined): string {
-  return bound && selected && status === "running" ? label + " (running)" : label;
+  if (!bound || !selected) return label;
+  // A held seat is called held and not running, idle or failed (MIK-R100 rule 5).
+  if (status === "held") return label + " (held)";
+  return status === "running" ? label + " (running)" : label;
 }
 
 function boundCanStart(canStart: boolean, bound: boolean, liveOccupant: boolean): boolean {
@@ -219,7 +222,7 @@ export function RoleLauncher({
   };
   const complete = launchSelectionComplete(launchSelection);
   const status = currentScopedExecution?.status.toLowerCase();
-  const liveOccupant = ["accepted", "unknown", "running", "starting"].includes(status ?? "");
+  const liveOccupant = ["accepted", "held", "unknown", "running", "starting"].includes(status ?? "");
   const canRetry = optionsReady && complete && !busy && currentScopedExecution?.canRetry === true && Boolean(retryRequestId);
   const retrySelection = currentScopedExecution?.retryPayload ?? launchSelection;
   const canRetrySelection = sameRoleDocumentScope(roleDocumentScope(retrySelection), roleDocumentScope(launchSelection));

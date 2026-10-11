@@ -1092,7 +1092,7 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             ),
             "new request id while the execution runs": (
                 self.request("worker"),
-                f"open execution (request {running.request_id}, status running)",
+                f"held by agent {self.receipt(running)['agentId']}",
             ),
             "new request id while the execution is unresolved": (
                 self.request("manager"),
@@ -1113,77 +1113,52 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         )
         self.assertEqual(len(self.runtime.agents), 1)
 
-    def test_a_new_start_on_a_closed_execution_archives_the_old_receipt_and_agent(self) -> None:
+    def test_a_new_start_on_a_closed_leaf_execution_is_refused_naming_the_holder(
+        self,
+    ) -> None:
+        # Rule 9: a leaf seat is held by its agent until that agent is archived, even
+        # when its execution closed. A new request id is refused naming the holder; a
+        # repeat with the holder's own request id reconciles it.
         previous = self.request("worker")
         self.dispatch(previous)
         for status in ("completed", "failed", "stopped"):
             with self.subTest(status):
+                # One seat keeps one agent: clear the previous close's error marks so
+                # each status closes the same holder from a clean turn.
+                self.agent_of(previous).update(lastError=None, attentionReason=None)
                 closed = self.close_execution(previous, status)
                 old_agent = closed["execution"]["agentId"]
                 successor = self.request("worker")
-                seen: list[tuple[str, str, str]] = []
-                self.runtime.observer = lambda command, _payload, request=successor, seen=seen: (
-                    seen.append(
-                        (
-                            command,
-                            self.receipt(request)["requestId"],
-                            self.receipt(request)["status"],
-                        )
-                    )
-                )
                 self.runtime.calls.clear()
-
-                status_code, public = self.dispatch(successor)
-
-                self.assertEqual((status_code, public["status"]), (200, "running"))
-                # The old execution is refreshed first; closed, its agent is archived.
+                error = self.refused(successor)
+                self.assertEqual(error.status_code, 409)
+                self.assertIn(f"held by agent {old_agent}", str(error.detail))
+                # A start by hand from the launcher follows the same rule, and the
+                # refusal offers the replacing start on this line.
+                self.assertIn("replacesAgentId naming it", str(error.detail))
+                # Nothing was archived or created: one read of the holder, receipt kept.
                 self.assertEqual(
-                    [call[0] for call in self.runtime.calls],
-                    ["agent-state", "agent-archive", "workspace-open", "agent-create"],
+                    [call[0] for call in self.runtime.calls], ["agent-state"]
                 )
                 self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
-                self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
-                # The new receipt replaced the old one before the runtime was called at all.
+                self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
                 self.assertEqual(
-                    {(request_id, state) for _command, request_id, state in seen},
-                    {(str(successor.request_id), "starting")},
+                    self.receipt(successor)["requestId"], str(previous.request_id)
                 )
-                self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
-                self.assertIsNone(self.runtime.agents[public["execution"]["agentId"]]["archivedAt"])
-                history = self.receipt_path(previous).parent / "history"
-                archived = json.loads(
-                    (history / f"{previous.request_id}.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(archived, closed)
-                previous = successor
-        self.runtime.observer = None
-
-        with self.subTest("the runtime gives no answer for the old agent, then the retry succeeds"):
+                self.assertEqual(self.receipt(successor)["status"], status)
+                # The holder's own request id still reconciles it.
+                self.assertEqual(self.dispatch(previous)[1]["status"], status)
+        with self.subTest("the holder cannot be read"):
             old_agent = self.close_execution(previous, "completed")["execution"]["agentId"]
             successor = self.request("worker")
-            self.runtime.fail("agent-archive", "paseo_daemon_unreachable")
+            self.runtime.fail("agent-state", "paseo_daemon_unreachable")
             self.runtime.calls.clear()
-            self.assertEqual(self.dispatch(successor)[1]["status"], "unknown")
-            self.assertEqual(self.dispatch(successor)[1]["status"], "running")
-            self.assertEqual(
-                [call[0] for call in self.runtime.calls],
-                ["agent-state", "agent-archive", "agent-archive", "workspace-open", "agent-create"],
-            )
-            self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
-            previous = successor
-        with self.subTest(
-            "an old agent the runtime would not archive is archived by the next start"
-        ):
-            old_agent = self.close_execution(previous, "failed")["execution"]["agentId"]
-            rejected = self.request("worker")
-            self.runtime.fail("agent-archive", "paseo_call_failed", "archive refused")
-            self.assertEqual(self.dispatch(rejected)[1]["status"], "rejected")
-            self.assertEqual(self.receipt(rejected)["pendingArchiveAgentId"], old_agent)
+            # The endpoint answers host-unreachable; nothing was started or archived.
+            status_code, public = self.dispatch(successor)
+            self.assertEqual(status_code, 409)
+            self.assertTrue(public["hostUnreachable"])
+            self.assertIn(old_agent, public["detail"])
             self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
-            self.runtime.calls.clear()
-            self.assertEqual(self.dispatch(self.request("worker"))[1]["status"], "running")
-            self.assertEqual(self.runtime.calls[0], ("agent-archive", {"agentId": old_agent}))
-            self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
         with self.subTest("a rejected execution left no agent to archive"):
             self.runtime.fail("agent-create", "paseo_call_failed", "refused")
             rejected = self.request("orchestrator")
@@ -1193,6 +1168,91 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual(
                 [call[0] for call in self.runtime.calls], ["workspace-open", "agent-create"]
             )
+
+    def test_a_replacing_start_retires_the_holder_and_starts_in_one_call(self) -> None:
+        # Rule 9: a start that names the holder retires it first, in the same call,
+        # by rule 8. The successor's handover names the earlier report paths.
+        previous = self.request("worker")
+        self.dispatch(previous)
+        old_agent = self.receipt(previous)["agentId"]
+        self.agent_of(previous).update(status="idle")
+        payload = self.request("worker").model_dump(
+            mode="json", by_alias=True, exclude_none=True
+        )
+        replacing = RoleDispatchRequest.model_validate(
+            {**payload, "replacesAgentId": old_agent}
+        )
+        self.runtime.calls.clear()
+
+        status_code, public = self.dispatch(replacing)
+
+        self.assertEqual((status_code, public["status"]), (200, "running"))
+        new_agent = public["execution"]["agentId"]
+        self.assertNotEqual(new_agent, old_agent)
+        # The holder was retired first, in the same call.
+        self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
+        self.assertIsNone(self.runtime.agents[new_agent]["archivedAt"])
+        self.assertEqual(
+            [call[0] for call in self.runtime.calls],
+            ["agent-state", "agent-archive", "workspace-open", "agent-create"],
+        )
+        self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
+        receipt = self.receipt(replacing)
+        self.assertEqual(
+            receipt["predecessorReports"]["requestId"], str(previous.request_id)
+        )
+        artifact = receipt["handoverArtifact"]
+        text = Path(
+            artifact.get("canonicalPath") or artifact["path"]
+        ).read_text(encoding="utf-8")
+        self.assertIn(f"Successor start: this seat replaces agent {old_agent}", text)
+        self.assertIn("its earlier report paths are", text)
+        self.assertIn("Take over from what is written there.", text)
+        # The archived predecessor receipt carries the replacement record (rule 8).
+        history = self.receipt_path(previous).parent / "history"
+        archived = json.loads(
+            (history / f"{previous.request_id}.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("replaced by a new start", archived["retiredBy"]["reason"])
+        self.assertEqual(archived["replaceAuthorizedBy"], "the launcher")
+
+    def test_a_replacing_start_refuses_a_running_holder_without_the_word(self) -> None:
+        # Rule 8, as in retirement: a holder in a turn is replaced only with the
+        # word that its turn may be interrupted. The refusal leaves everything intact.
+        previous = self.request("worker")
+        self.dispatch(previous)
+        old_agent = self.receipt(previous)["agentId"]
+        self.runtime.agents[old_agent].update(status="running")
+        payload = self.request("worker").model_dump(
+            mode="json", by_alias=True, exclude_none=True
+        )
+        replacing = RoleDispatchRequest.model_validate(
+            {**payload, "replacesAgentId": old_agent}
+        )
+        self.runtime.calls.clear()
+
+        error = self.refused(replacing)
+
+        self.assertEqual(error.status_code, 409)
+        self.assertIn(f"Agent {old_agent} is in a turn", str(error.detail))
+        self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
+        current = self.receipt(replacing)
+        self.assertNotIn("retiredBy", current)
+        self.assertNotIn("replaceAuthorizedBy", current)
+        # With the word, the same replacement retires then starts once.
+        interrupt_payload = self.request("worker").model_dump(
+            mode="json", by_alias=True, exclude_none=True
+        )
+        interrupting = RoleDispatchRequest.model_validate(
+            {
+                **interrupt_payload,
+                "replacesAgentId": old_agent,
+                "replacesInterruptTurn": True,
+            }
+        )
+        status_code, public = self.dispatch(interrupting)
+        self.assertEqual((status_code, public["status"]), (200, "running"))
+        self.assertIsNotNone(self.runtime.agents[old_agent]["archivedAt"])
 
     def test_a_task_bound_receipt_is_created_exclusively(self) -> None:
         with self.subTest("of many simultaneous creations exactly one succeeds"):
@@ -1211,7 +1271,7 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
             self.assertEqual([entry.name for entry in path.parent.iterdir()], [path.name])
         # The other process's receipt is still open, or already closed, when this launch loses.
         losing = {
-            "starting": "open execution (request {theirs}, status starting)",
+            "starting": "still in flight (request {theirs}, status starting)",
             "rejected": "started at the same moment",
         }
         for status, reason in losing.items():

@@ -26,6 +26,8 @@ PUBLIC_TOOLS = (
     "resolve_context",
     "runtime_install",
     "dispatch_agent",
+    # MIK-R100 rule 8 restores only retire_child; the L112 removals otherwise stand.
+    "retire_child",
     "memory_quality_check",
     "citation_fix",
     "route_index_refresh",
@@ -57,6 +59,7 @@ PUBLIC_TOOLS = (
     # The capsule operation and the skill discovery/read surface.
     # Role start and role messaging by role agents.
     "role_start",
+    "role_start_set",
     "role_message",
     # Knowledge operations over a memory tree: read, diff and integrity.
     "knowledge_read",
