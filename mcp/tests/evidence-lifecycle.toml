@@ -222,6 +222,54 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/_user_settings_guard.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "user-settings-write-guard"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the single guard every test-support write of the user's settings file goes through: user_settings_path_for_write refuses the account's real settings path before anything is written"
+introduced_by = "260928-MIK-L135"
+lifetime = "permanent"
+permanence_rationale = "The refusal is only observable where the product's path derivation meets the account database, and the guard must stay the single entry point every support module uses; a second copy of the refusal would let two readings of the user's real path disagree."
+replacement_contract = "node:mcp/tests/test_user_settings_guard.py::test_every_support_write_of_the_user_settings_goes_through_the_guard"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_dashboard_host.py",
+  "mcp/tests/test_host_release_contract.py",
+  "mcp/tests/test_investigator.py",
+  "mcp/tests/test_paseo_agent_tools.py",
+  "mcp/tests/test_paseo_bridge.py",
+  "mcp/tests/test_paseo_bridge_agents.py",
+  "mcp/tests/test_paseo_catalog.py",
+  "mcp/tests/test_paseo_frame.py",
+  "mcp/tests/test_paseo_install_contract.py",
+  "mcp/tests/test_paseo_install_no_stop.py",
+  "mcp/tests/test_paseo_launch.py",
+  "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_bridge.py",
+  "mcp/tests/test_paseo_role_messages.py",
+  "mcp/tests/test_paseo_role_tools.py",
+  "mcp/tests/test_paseo_runtime.py",
+  "mcp/tests/test_paseo_start.py",
+  "mcp/tests/test_paseo_status.py",
+  "mcp/tests/test_paseo_status_bridge.py",
+  "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_role_document_chats.py",
+  "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_structural_dispatch_recovery.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_controls.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+  "mcp/tests/test_user_settings_guard.py",
+  "mcp/tests/test_witness_driver_helpers.py",
+]
+
+[[artifact]]
 path = "mcp/tests/anchor_fixture_models.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -1475,6 +1523,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_unexplained_change_disposition.py",
   "mcp/tests/test_untyped_sprint_rows.py",
+  "mcp/tests/test_user_settings_guard.py",
   "mcp/tests/test_wire_contract.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
@@ -2369,6 +2418,7 @@ consumers = [
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
   "mcp/tests/test_tool_refusal_conformance.py",
+  "mcp/tests/test_user_settings_guard.py",
   "mcp/tests/test_witness_driver_helpers.py",
 ]
 

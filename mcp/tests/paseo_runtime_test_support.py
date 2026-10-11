@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.primitives.paseo_host_contract import (
     HOST_DATA,
     NODE_VERSION,
@@ -91,7 +91,7 @@ def runtime_settings(root: Path, **overrides: Any) -> PaseoRuntimeSettings:
 
 def write_shared_runtime(root: Path, settings: PaseoRuntimeSettings | None) -> None:
     """One fixture authority per installation, with the same layout the product reads."""
-    path = user_agentic_settings_path()
+    path = user_settings_path_for_write()
     if settings is None:
         path.unlink(missing_ok=True)
         return
