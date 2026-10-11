@@ -21,53 +21,34 @@ import agents_remember.kernel.git_freshness as freshness
 import knowledge_writer_test_support as writer_fixture
 import pytest
 from agents_remember.application.context_packet import ContextPacketRequest
-from agents_remember.application.memory_tools import CarryoverSelection
-from agents_remember.application.provider_tools import (
-    GrepaiSearchQuery,
-    GrepaiTraceQuery,
-    ProviderQueryScope,
-)
+from agents_remember.application.memory_tools import CarryoverSelection, drift_check_tool
 from agents_remember.application.published_intent import published_intent_block
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_intent_summary import intent_summary_of
 from agents_remember.application.review_tree_comparison import ReviewTrees, live_review_trees
-from agents_remember.application.skill_resources.catalog import SkillCatalogError
+from agents_remember.application.skill_resources.catalog import SkillCatalogError, read_served_file
+from agents_remember.application.skill_resources.operation import skill_catalog_registry
+from agents_remember.application.skill_resources.responses import (
+    skill_catalog_list_response,
+    skill_catalog_read_response,
+)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import CloseoutCommitMessages, LandedCommits
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope
 from agents_remember.mcp.tools import knowledge as tools
-from agents_remember.mcp.tools.capsule_serving import (
-    skill_catalog_list_payload,
-    skill_catalog_read_payload,
-)
 from agents_remember.mcp.tools.closeout_queue import closeout_queue_payload
 from agents_remember.mcp.tools.core import (
     context_packet_payload,
-    ping_payload,
     resolve_context_payload,
     server_info_payload,
 )
 from agents_remember.mcp.tools.gates import gate_list_payload
 from agents_remember.mcp.tools.memory import (
-    drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_plan_payload,
-)
-from agents_remember.mcp.tools.providers import (
-    cgc_callees_payload,
-    cgc_callers_payload,
-    cgc_complexity_payload,
-    cgc_dependencies_payload,
-    cgc_symbol_search_payload,
-    cgc_visualize_payload,
-    grepai_search_payload,
-    grepai_trace_payload,
-    provider_diagnostics_payload,
-    provider_status_payload,
-    provider_watchers_payload,
 )
 from agents_remember.mcp.tools.read_files import read_ar_files_payload
 from agents_remember.mcp.tools.task_doc import task_reopen_payload
@@ -380,8 +361,8 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
 def test_miscellaneous_description_called_reads_write_nothing(
     tmp_path: Path, worktree_services: Any
 ) -> None:
-    """Rule 6 over the remaining description-called reads: ping, server info, packet, resolver,
-    drift, baseline status, gate list, provider status and the read_ar_files block.
+    """Rule 6 over the remaining description-called reads: server info, resolver,
+    gate list and the read_ar_files block.
 
     Each answers (or names its refusal) on the synthetic seat; every one of them must leave
     refs/HEAD, the index file, the working trees, the task folder, the object stores and the
@@ -407,7 +388,6 @@ def test_miscellaneous_description_called_reads_write_nothing(
     coordination_roots = ("enclosure/ar-coordination",)
     before = _snapshot(roots)
 
-    assert ping_payload()["ok"] is True
     info = server_info_payload(
         config, ServingBuildPayload(version="0", bootedAt="2026-10-02T00:00:00Z")
     )
@@ -422,8 +402,6 @@ def test_miscellaneous_description_called_reads_write_nothing(
     assert isinstance(resolved, dict), resolved
     gates = gate_list_payload(config, lifecycle_id=None)
     assert isinstance(gates, dict), gates
-    providers = provider_status_payload(config)
-    assert isinstance(providers, dict), providers
     code_files = sorted(
         p
         for p in endpoints.contract.code_repo_path.rglob("*.py")
@@ -478,7 +456,7 @@ def test_memory_backed_reads_write_nothing(tmp_path: Path, worktree_services: An
 
     packet = context_packet_payload(config, ContextPacketRequest(repo_id=endpoints.repository_id))
     assert isinstance(packet, dict), packet
-    drift = drift_check_payload(config, endpoints.repository_id)
+    drift = drift_check_tool(config, repo_id=endpoints.repository_id)
     assert isinstance(drift, dict), drift
     # Without onboarding content there is nothing to baseline: the tool names the missing
     # root by raising. A raising read is still a read for rule 6: it must write nothing.
@@ -563,7 +541,7 @@ def test_converted_drift_check_read_writes_nothing(
     roots = {"enclosure": root}
     before = _snapshot(roots)
 
-    drift = drift_check_payload(config, endpoints.repository_id)
+    drift = drift_check_tool(config, repo_id=endpoints.repository_id)
     assert isinstance(drift, dict), drift
     status = memory_baseline_status_payload(config, endpoints.repository_id)
     assert isinstance(status, dict), status
@@ -842,163 +820,51 @@ def test_adopted_seat_status_preview_and_dry_runs(tmp_path: Path, worktree_servi
     assert findings == [], findings
 
 
-# --- the rest of the roster: code search, diagnostics, skills, previews, GETs ----------------
+# --- the rest of the roster: skills, previews, GETs ----------------
 # Mappings R1-R9 above cover the knowledge reads, enclosure review/status/previews/dry runs,
 # three dashboard GETs, readers, miscellaneous/memory reads and adopted-seat dry runs. The
-# mappings below cover every remaining read-described route: code-search tools, diagnostics
-# and watchers, the skill catalog, the remaining worktree preview/dry-run variants, the
-# carryover plan, the closeout-queue inspection and the remaining dashboard GETs. Each names
+# mappings below cover every remaining read-described route: the skill catalog,
+# the remaining worktree preview/dry-run variants, the carryover plan, the
+# closeout-queue inspection and the remaining dashboard GETs. Each names
 # its actual constructor, call and outcome -- answers where the seat admits them, the exact
 # refusal elsewhere -- and classifies the full before/after populations.
 #
-# UNCONSTRUCTIBLE boundaries (named, not run, never waived): live provider executions
-# (grepai/cgc without dry_run need an armed provider; codex/claude/opencode delegates spawn
-# real agents), live-session routes (conversation control, terminal/pty/tmux, harness
-# control, the /api/state projection, unbounded /api/stream and /api/events rivers),
-# mutating watcher/provider actions (non-dry-run, non-status), and the held unauthorized
-# case2/3 drivers, which the Reviewer forbids running. Write tools are not read-described
-# and are outside this roster entirely.
-
-
-def _misc_config(endpoints):  # type: ignore[no-untyped-def]
-    """The endpoint seat plus a repository scope, as the miscellaneous mapping builds it."""
-
-    return dataclasses.replace(
-        endpoints.config,
-        repositories={
-            endpoints.repository_id: RepositoryScope(
-                repo_id=endpoints.repository_id,
-                path=endpoints.contract.code_repo_path,
-                memory_root=(
-                    endpoints.config.coordination_root
-                    / "memory-repos"
-                    / f"ar-{endpoints.repository_id}"
-                ),
-            )
-        },
-    )
-
-
-def test_code_search_reads_plan_or_name_their_refusal(
-    tmp_path: Path, worktree_services: Any
-) -> None:
-    """Rule 6 over the code-search tools: grepai search/trace and the six cgc tools.
-
-    With no provider armed, every one of them -- dry run or live -- answers the exact
-    refusal naming the missing provider. Each refusal must still write nothing.
-    """
-
-    endpoints = build_endpoint_fixture(tmp_path / "search", memory_mode="external")
-    config = _misc_config(endpoints)
-    roots = {"enclosure": tmp_path / "search"}
-    before = _snapshot(roots)
-
-    calls = [
-        (
-            "grepai_search",
-            lambda dry: grepai_search_payload(
-                config,
-                GrepaiSearchQuery(query="review"),
-                scope=ProviderQueryScope(dry_run=dry),
-            ),
-        ),
-        (
-            "grepai_trace",
-            lambda dry: grepai_trace_payload(
-                config,
-                GrepaiTraceQuery(trace_action="callers", symbol="f"),
-                scope=ProviderQueryScope(dry_run=dry),
-            ),
-        ),
-        (
-            "cgc_symbol_search",
-            lambda dry: cgc_symbol_search_payload(
-                config, "repo", "name", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-        (
-            "cgc_callers",
-            lambda dry: cgc_callers_payload(
-                config, "repo", "f", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-        (
-            "cgc_callees",
-            lambda dry: cgc_callees_payload(
-                config, "repo", "f", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-        (
-            "cgc_dependencies",
-            lambda dry: cgc_dependencies_payload(
-                config, "repo", "m", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-        (
-            "cgc_complexity",
-            lambda dry: cgc_complexity_payload(
-                config, "repo", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-        (
-            "cgc_visualize",
-            lambda dry: cgc_visualize_payload(
-                config, "repo", scope=ProviderQueryScope(dry_run=dry)
-            ),
-        ),
-    ]
-    for name, call in calls:
-        for dry_run in (True, False):
-            answer = call(dry_run)
-            assert isinstance(answer, dict) and answer.get("ok") is False, (name, dry_run)
-            # Landed R108 envelope: producers write nextStep, answers carry next.
-            step = answer.get("next", {})
-            summary = step.get("summary", "") if isinstance(step, dict) else ""
-            assert f"{name} did not run" in summary, (name, dry_run, summary)
-
-    after = _snapshot(roots)
-    findings = _classify(
-        before,
-        after,
-        coordination_roots=("enclosure/ar-coordination",),
-        reviewed_prefixes=("enclosure/diff",),
-    )
-    assert findings == [], findings
+# UNCONSTRUCTIBLE boundaries (named, not run, never waived): live-session routes
+# (conversation control, terminal/pty/tmux, harness control, the /api/state
+# projection, unbounded /api/stream and /api/events rivers), and the held
+# unauthorized case2/3 drivers, which the Reviewer forbids running. Write tools
+# are not read-described and are outside this roster entirely.
+# (The code-search tools, provider diagnostics and watcher actions were removed
+# by MIK-R112; their roster entries went with them.)
 
 
 def test_diagnostic_watcher_and_skill_reads_write_nothing(
     tmp_path: Path, worktree_services: Any
 ) -> None:
-    """Rule 6 over provider diagnostics, watcher status/dry runs and the skill catalog.
+    """Rule 6 over the skill catalog reads.
 
-    Diagnostics and watcher status answer on the providerless seat; a dry-run stop plans
-    without touching providers; the catalog lists shipped skills and reads one back by the
-    URI the list itself published. A bogus URI names its refusal. None of it writes.
+    The catalog lists shipped skills and reads one back by the URI the list
+    itself published. A bogus URI names its refusal. None of it writes.
     """
 
-    endpoints = build_endpoint_fixture(tmp_path / "diag", memory_mode="external")
-    config = _misc_config(endpoints)
+    build_endpoint_fixture(tmp_path / "diag", memory_mode="external")
     roots = {"enclosure": tmp_path / "diag"}
     before = _snapshot(roots)
 
-    diagnostics = provider_diagnostics_payload(config)
-    assert diagnostics.get("ok") is True, diagnostics
-    assert diagnostics.get("state") == "noProviders", diagnostics
-    watchers = provider_watchers_payload(config, action="status")
-    assert watchers.get("ok") is True, watchers
-    assert watchers.get("state") == "noProviders", watchers
-    planned = provider_watchers_payload(config, action="stop", dry_run=True)
-    assert isinstance(planned, dict) and planned.get("ok") is True, planned
-
-    listed = skill_catalog_list_payload()
+    catalog = skill_catalog_registry()
+    listed = skill_catalog_list_response(catalog).to_payload()
     assert listed.get("ok") is True, listed
     uris = [skill["uri"] for skill in listed.get("skills", [])]
     assert uris, "the shipped skill catalog lists no skill to read back"
-    read = skill_catalog_read_payload(uris[0])
+    served = read_served_file(catalog, uris[0])
+    root = served.entry.root
+    read = skill_catalog_read_response(
+        served, skill_revision="" if root is None else root.revision
+    ).to_payload()
     assert read.get("ok") is True and isinstance(read.get("content"), str), read
     # A URI the catalog never published raises the catalog's own refusal.
     with pytest.raises(SkillCatalogError, match="not a skill resource"):
-        skill_catalog_read_payload("skill://no/such/skill/SKILL.md")
+        read_served_file(catalog, "skill://no/such/skill/SKILL.md")
 
     after = _snapshot(roots)
     findings = _classify(

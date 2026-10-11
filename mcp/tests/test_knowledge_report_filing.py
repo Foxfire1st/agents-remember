@@ -1,10 +1,10 @@
 """Rule 6: reads, previews and dry runs file no per-call report.
 
-A diagnostic read, a watcher status read, a watcher/install dry-run preview and a
-carryover plan must write nothing under ``temp/tool-reports/`` and must carry no
-``reportPath`` pointer; their answers keep every content key. Only an executed mutating
-action files its report (not adjudicated here: live providers are absent in this seat,
-so executed mutating modes stay proof-pending).
+An install dry-run preview and a carryover plan must write nothing under
+``temp/tool-reports/`` and must carry no ``reportPath`` pointer; their answers
+keep every content key. Only an executed mutating action files its report
+(not adjudicated here: live providers are absent in this seat, so executed
+mutating modes stay proof-pending).
 
 Module rule: ``compact_*`` omits ``reportPath`` when no report is filed (the codebase's
 own drift-check idiom) and keeps it when one is.
@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.memory_tools import CarryoverSelection, drift_check_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -27,14 +27,7 @@ from agents_remember.mcp.tools.core import (
 )
 from agents_remember.mcp.tools.memory import (
     compact_carryover_payload,
-    drift_check_payload,
     memory_carryover_plan_payload,
-)
-from agents_remember.mcp.tools.providers import (
-    compact_diagnostics_payload,
-    compact_watchers_payload,
-    provider_diagnostics_payload,
-    provider_watchers_payload,
 )
 from agents_remember.memory.baseline import base_payload
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
@@ -50,22 +43,6 @@ def _config(root: Path) -> McpRuntimeConfig:
         workspace_root=root / "workspace",
         transcript_root=root / "logs" / "mcp",
     )
-
-
-def test_diagnostics_read_files_nothing(tmp_path: Path) -> None:
-    payload = provider_diagnostics_payload(_config(tmp_path))
-    assert payload.get("ok") is True
-    assert "reportPath" not in payload
-    assert not (tmp_path / "temp").exists()
-
-
-def test_watchers_status_and_dry_run_file_nothing(tmp_path: Path) -> None:
-    config = _config(tmp_path)
-    for dry_run in (False, True):
-        payload = provider_watchers_payload(config, action="status", dry_run=dry_run)
-        assert payload.get("ok") is True
-        assert "reportPath" not in payload
-    assert not (tmp_path / "temp").exists()
 
 
 def test_install_dry_run_files_nothing(tmp_path: Path) -> None:
@@ -96,12 +73,8 @@ def test_carryover_plan_refusal_files_nothing(tmp_path: Path) -> None:
 
 def test_compacts_omit_the_pointer_only_when_nothing_is_filed() -> None:
     full = {"ok": True, "messages": ["m"], "candidates": [], "steps": []}
-    assert "reportPath" not in compact_diagnostics_payload(full, None)
-    assert "reportPath" not in compact_watchers_payload(full, None)
     assert "reportPath" not in compact_runtime_install_payload(full, None)
     assert "reportPath" not in compact_carryover_payload(full, None)
-    assert compact_diagnostics_payload(full, "r").get("reportPath") == "r"
-    assert compact_watchers_payload(full, "r").get("reportPath") == "r"
     assert compact_runtime_install_payload(full, "r").get("reportPath") == "r"
     assert compact_carryover_payload(full, "r").get("reportPath") == "r"
 
@@ -159,7 +132,7 @@ def test_base_payload_omits_drift_report_without_filing(tmp_path: Path) -> None:
 def test_drift_check_refusal_files_nothing(tmp_path: Path) -> None:
     # The synthetic seat holds no memory scope, so the read refuses by authority.
     with pytest.raises(AuthorityError):
-        drift_check_payload(_config(tmp_path), "repo")
+        drift_check_tool(_config(tmp_path), repo_id="repo")
     assert not (tmp_path / "temp").exists()
 
 
