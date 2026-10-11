@@ -12,6 +12,11 @@ from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import TaskIdentity
 from agents_remember.application.worktree_tools import worktree_status_tool
 from agents_remember.cli.leaf_enclosure_start import start_leaf_enclosure_in_child
+from agents_remember.cli.role_message_files import (
+    MESSAGES_LINK,
+    ensure_messages_link,
+    leaf_messages_folder,
+)
 from agents_remember.errors import RolePreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
@@ -83,6 +88,18 @@ def _leaf_contract_path(leaf: ResolvedTaskDocument) -> Path:
     return contract_path
 
 
+def link_leaf_workspace_messages(group: Path, task_dir: Path, leaf_key: str) -> str | None:
+    """Carry a new leaf workspace's ``messages`` link to its leaf folder (F02).
+
+    The real workspace owner calls this while the enclosure group folder is
+    prepared, so the link exists before any message. An occupied non-link or
+    a divergent link is preserved and returned as a warning; the launch goes
+    on, and the first message ensures the link again.
+    """
+    folder = leaf_messages_folder(task_dir, leaf_key)
+    return ensure_messages_link(group, folder)
+
+
 def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> dict[str, str]:
     """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
 
@@ -109,6 +126,12 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
             f"Inspect worktree_status(repo_id={context.task.ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the contract-owned roots before repeating this same request.",
         ) from error
     workspace = workspace_folder(group)
+    messages_warning = link_leaf_workspace_messages(
+        group, context.task.path.parent, context.task.ref.key
+    )
+    workspace["messagesLink"] = (group / MESSAGES_LINK).as_posix()
+    if messages_warning is not None:
+        workspace["messagesLinkWarning"] = messages_warning
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = group / "role-reports"

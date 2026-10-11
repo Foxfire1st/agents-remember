@@ -124,6 +124,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertIsNone(settings.concurrency.max_sub_agents)
         self.assertIsNone(settings.spawn_harness)
         self.assertIsNone(settings.quality_gate.memory_cap_bytes)
+        self.assertEqual(settings.role_message_limit, 1000)
         self.assertEqual(settings.sources, ())
 
 
@@ -420,6 +421,48 @@ class HarnessesFamilyTests(unittest.TestCase):
     def test_reference_to_an_id_known_nowhere_fails_naming_the_manual(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "harnesses.md"):
             self._load({"spawn": {"harness": "hermes"}})
+
+
+class RoleMessageLimitSettingsTests(unittest.TestCase):
+    """``orchestration.roleMessageLimit``: the bound on one message text (MIK-R117)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        self.repo_root = root / "workspace" / "repo-a"
+        self.coordination_root.mkdir(parents=True)
+        self.repo_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_absent_number_means_one_thousand(self) -> None:
+        write_settings(self.coordination_root, {"orchestration": {}})
+        settings = load_agentic_settings(self.coordination_root, self.repo_root)
+        self.assertEqual(settings.role_message_limit, 1000)
+
+    def test_a_positive_whole_number_is_taken_and_the_local_layer_wins(self) -> None:
+        write_settings(
+            self.coordination_root, {"orchestration": {"roleMessageLimit": 600}}
+        )
+        write_settings(
+            self.repo_root, {"orchestration": {"roleMessageLimit": 700}}, user=False
+        )
+        settings = load_agentic_settings(self.coordination_root, self.repo_root)
+        self.assertEqual(settings.role_message_limit, 700)
+
+    def test_zero_negative_or_no_whole_number_is_refused_naming_the_field(self) -> None:
+        for bad in (0, -3, 1.5, "many", True):
+            with self.subTest(bad=bad):
+                write_settings(
+                    self.coordination_root,
+                    {"orchestration": {"roleMessageLimit": bad}},
+                )
+                with self.assertRaisesRegex(
+                    AgenticSettingsError, "orchestration.roleMessageLimit"
+                ):
+                    load_agentic_settings(self.coordination_root, self.repo_root)
 
 
 class QualityGateSettingsTests(unittest.TestCase):

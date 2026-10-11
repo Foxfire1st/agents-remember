@@ -233,6 +233,10 @@ You stop for an open permission prompt; for a refusal by a product guard or an A
   evidenced code concerns to both Worker and Reviewer under the direct-handover rules. Report them without
   repairing code or transaction state. Your completed curation never decides whether a leaf lands.
 
+## Messages
+
+Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
+
 ## Developer questions and answers
 
 Developer questions and relayed answers follow `operations/orientation.md`.

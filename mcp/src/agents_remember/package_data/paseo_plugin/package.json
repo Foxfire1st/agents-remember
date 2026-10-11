@@ -11,7 +11,8 @@
     "shared/"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test server/*.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.11.1",

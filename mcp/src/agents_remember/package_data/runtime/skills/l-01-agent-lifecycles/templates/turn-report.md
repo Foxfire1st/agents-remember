@@ -34,6 +34,7 @@ when reading the gate evidence.
     exact outstanding IDs, then records a fixed/unfixed disposition for every preceding ID. A
     successor may not add, rewrite, reintroduce, or omit an issue, add a route, or reopen a resolved
     ID; an outside-list observation is an owner/developer decision item.
+13. Hand the report over as a file. Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
 
 ## Shape
 

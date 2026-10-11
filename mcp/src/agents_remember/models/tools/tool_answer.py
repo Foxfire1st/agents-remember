@@ -93,15 +93,18 @@ ENVELOPE_STRIPPED_FIELDS = ("tokens", "tokenizer", "tokenCountExact", "operation
 
 # Rule 4: the exception table. Tool (and operation), bound, reason. No bound
 # is above TOOL_ANSWER_EXCEPTION_MAX_TOKENS; the test suite proves it.
-# Its first rows are ``role_message`` with ``wait`` (the answer is another
-# agent's reply) and ``server_info`` (the designated place for roots, build
-# and identity -- rule 2, second point). A status answer keeps the default
+# Its first rows are ``role_message`` with ``wait`` (with wait the answer is
+# another agent's reply cut at the message limit, the whole reply filed beside
+# the message and named by the answer -- MIK-R117 rule 6) and ``server_info``
+# (the designated place for roots, build and identity -- rule 2, second point). A status answer keeps the default
 # bound of 1,500: no landed memory tool stands here, by the Architect's
 # status-answer ruling (an exception row comes to the Architect first).
 TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
     ("role_message", None): (
         4000,
-        "the answer is another agent's reply, not a shaped result",
+        "the answer is another agent's reply, not a shaped result; with wait a reply "
+        "longer than the message limit is cut in the answer and filed whole beside "
+        "the message, named by the answer",
     ),
     ("server_info", None): (
         4000,

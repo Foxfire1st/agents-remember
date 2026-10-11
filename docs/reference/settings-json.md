@@ -7,7 +7,7 @@ Agents Remember has five settings families with stated authorities:
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Host runtime (`paseoRuntime`) | user configuration `agents-remember/settings.json`, shared by every harness | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -734,6 +734,23 @@ runtime prerequisites fail instead of falling back to host execution.
 The memory cap remains a full-master resource policy; deterministic pre-push checks and leaf
 integration run no acceptance. An explicit cap is an opt-in restriction, not the default resource
 policy; the gate treats a capped kill as a failure, never a skip.
+
+### orchestration.roleMessageLimit
+
+`orchestration.roleMessageLimit` is the bound on the characters of one `role_message` text
+(a positive whole number; where the settings name none, 1,000). Only the text counts: neither
+the sender line nor the file line. A longer text is refused as `message-too-long`, and the
+reply to a `wait` is cut at the same limit with the whole reply filed beside the message. The
+full text rides `body` (any length) or `attach`, and every message is filed whole in the
+task's `messages` folder. The number in force is the one the settings file names at the call:
+a changed number holds for the next call without a restart of a tool server. A settings file
+that names zero, a negative number or no whole number is refused at load, naming the field.
+
+```jsonc
+"orchestration": {
+  "roleMessageLimit": 1000
+}
+```
 
 ### orchestration.concurrency, orchestration.spawn
 

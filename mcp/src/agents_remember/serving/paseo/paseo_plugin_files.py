@@ -34,6 +34,11 @@ def embed_path(home: Path) -> Path:
     return home / AR_HOME_DIRECTORY / "embed.json"
 
 
+def role_agents_path(home: Path) -> Path:
+    """Where role starts publish per-agent facts for the plugin (MIK-R117 rule 11)."""
+    return home / AR_HOME_DIRECTORY / "role-agents.json"
+
+
 def loaded_stamp_path(home: Path) -> Path:
     return home / AR_HOME_DIRECTORY / "plugin-loaded.json"
 
@@ -81,6 +86,50 @@ def read_embed(home: Path) -> list[dict[str, str]] | None:
 
 def read_loaded_stamp(home: Path) -> Any:
     return _read_json(loaded_stamp_path(home))
+
+
+def read_role_agents(home: Path) -> dict[str, dict[str, str]]:
+    """The per-agent facts the plugin reads; empty when none were published."""
+    document = _read_json(role_agents_path(home))
+    agents = document.get("agents") if isinstance(document, dict) else None
+    if not isinstance(agents, dict):
+        return {}
+    facts: dict[str, dict[str, str]] = {}
+    for agent_id, record in agents.items():
+        if (
+            isinstance(record, dict)
+            and isinstance(record.get("role"), str)
+            and isinstance(record.get("task"), str)
+            and isinstance(record.get("reportPath"), str)
+        ):
+            facts[str(agent_id)] = {
+                "role": record["role"],
+                "task": record["task"],
+                "reportPath": record["reportPath"],
+            }
+    return facts
+
+
+def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> bool:
+    """Merge one agent's facts for the plugin; report whether the file changed.
+
+    Never raises for filesystem trouble: a start the plugin cannot read about
+    is simply silent, and the next start rewrites the file.
+    """
+    try:
+        document = _read_json(role_agents_path(home))
+        agents: dict[str, Any] = {}
+        if isinstance(document, dict):
+            raw = document.get("agents")
+            if isinstance(raw, dict):
+                agents = {str(key): value for key, value in raw.items()}
+        if agents.get(agent_id) == record:
+            return False
+        merged = {**agents, agent_id: record}
+        atomic_write_text(role_agents_path(home), json.dumps({"agents": merged}, indent=2) + "\n")
+        return True
+    except OSError:
+        return False
 
 
 def write_loaded_stamp(home: Path, stamp: dict[str, str | None]) -> None:

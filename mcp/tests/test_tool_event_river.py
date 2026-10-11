@@ -41,7 +41,7 @@ from agents_remember.application.tool_caller import (
     snapshot_tool_caller,
 )
 from agents_remember.application.tool_response import complete_tool_response
-from agents_remember.cli import paseo_role_tools
+from agents_remember.cli import paseo_role_tools, role_message_delivery
 from agents_remember.cli.paseo_role_tools import _Recipient
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.kernel.primitives.runtime_config import (
@@ -644,10 +644,10 @@ class ToolEventRiverTests(unittest.TestCase):
             mock.patch.object(
                 paseo_role_tools, "starting_agent", return_value=SimpleNamespace(agent_id="agent-1")
             ),
-            mock.patch.object(paseo_role_tools, "_resolve_recipient", return_value=resolve)
+            mock.patch.object(role_message_delivery, "_resolve_recipient", return_value=resolve)
             if not isinstance(receipt, BaseException)
-            else mock.patch.object(paseo_role_tools, "_resolve_recipient", side_effect=receipt),
-            mock.patch.object(paseo_role_tools, "_deliver", return_value=payload),
+            else mock.patch.object(role_message_delivery, "_resolve_recipient", side_effect=receipt),
+            mock.patch.object(role_message_delivery, "_deliver", return_value=payload),
         ):
             return role_agents.role_message_payload(self._role_message_config(), call)
 

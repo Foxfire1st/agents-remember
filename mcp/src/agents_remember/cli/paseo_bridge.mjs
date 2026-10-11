@@ -238,8 +238,8 @@ const TIMELINE_TAIL = 20
 const FINAL_TEXT_LIMIT = 3000
 // agent-send and agent-wait: the provider entries of the runtime's configuration that cannot
 // take a message into a running turn, the default and the reserve of one wait, the timeline
-// entries read for the reply, the length of the reply that is returned, and the runtime's
-// events that end a turn.
+// entries read for the reply, and the runtime's events that end a turn. The reply comes back
+// whole; the role-message tool cuts it at the settings' limit (MIK-R117).
 const DRIVER_WITHOUT_STEERING = 'acp'
 const WAIT_DEFAULT_MS = 30000
 const WAIT_RESERVE_MS = 6000
@@ -249,7 +249,6 @@ const WAIT_POLL_MS = 1000
 const TURN_GAP_MS = 5000
 const TURN_GAP_POLL_MS = 250
 const REPLY_TAIL = 200
-const REPLY_TEXT_LIMIT = 20000
 const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canceled: 'cancelled' }
 // agent-create and agent-send: how long an agent with tool servers is given between the opening
 // of its session and a message, and what makes the first message's id out of the idempotency
@@ -1017,8 +1016,9 @@ async function messageView(api, agentId, messageId) {
   }
 }
 
-// The agent's text behind the last message or tool call of these items, at most REPLY_TEXT_LIMIT
-// characters of it.
+// The agent's text behind the last message or tool call of these items, whole: the
+// role-message tool cuts a longer reply at the settings' limit and files it (MIK-R117),
+// so the bridge no longer owns a bound of its own.
 function closingText(items) {
   let first = items.length
   while (first > 0 && items[first - 1].type === 'assistant_message') first -= 1
@@ -1028,11 +1028,7 @@ function closingText(items) {
     .join('')
     .trim()
   if (!reply) return { text: null, textTruncated: false }
-  const points = Array.from(reply.slice(0, 2 * REPLY_TEXT_LIMIT))
-  return {
-    text: points.slice(0, REPLY_TEXT_LIMIT).join(''),
-    textTruncated: points.length > REPLY_TEXT_LIMIT || reply.length > 2 * REPLY_TEXT_LIMIT
-  }
+  return { text: reply, textTruncated: false }
 }
 
 // The turn an agent runs, as the runtime reports it.

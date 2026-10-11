@@ -30,6 +30,7 @@ from agents_remember.cli import (
     role_launch_receipts,
     role_launch_routes,
     role_launch_workspace,
+    role_message_delivery,
     role_retire,
 )
 from agents_remember.cli.paseo_launch import StartingAgent, exclusion_applied_agent
@@ -120,6 +121,7 @@ class RoleToolsTestCase(StatusTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.replace(paseo_role_tools, "bridge_call", self.runtime)
+        self.replace(role_message_delivery, "bridge_call", self.runtime)
         self.replace(paseo_role_wait, "bridge_call", self.runtime)
         # The held-message store and native retirement call the bridge from their own
         # modules (MIK-R100 rules 4/8): the fake runtime answers there too.
@@ -127,6 +129,8 @@ class RoleToolsTestCase(StatusTestCase):
         self.replace(role_retire, "bridge_call", self.runtime)
         self.replace(paseo_role_tools, "resolve_role_launch_context", side_effect=self.context)
         self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
+        self.replace(role_message_delivery, "resolve_role_launch_context", side_effect=self.context)
+        self.replace(role_message_delivery, "TaskDocumentTopology", self.topology)
         self.runtime._agent_send = self.agent_send
         self.runtime._agent_wait = self.agent_wait
         # What each wait call answers, in order; the clock moves by `waitMs` with every call.

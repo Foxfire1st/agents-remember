@@ -54,6 +54,8 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "supervisor",
         "agentNotifier",
         "qualityGate",
+        # MIK-R117: the bound on the characters of one role_message text.
+        "roleMessageLimit",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -173,6 +175,10 @@ DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
     "briefed-by": 120.0,
     "verdict-by": 1800.0,
 }
+
+# MIK-R117: where the settings name no role-message limit, one text holds this
+# many characters. The message file itself has no limit.
+DEFAULT_ROLE_MESSAGE_LIMIT = 1000
 
 # The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
@@ -340,6 +346,9 @@ class AgenticSettings:
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
     agent_notifier: AgentNotifierSettings = field(default_factory=AgentNotifierSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
+    # MIK-R117: the bound on the characters of one role_message text, read per
+    # call so a changed number holds for the next call without a restart.
+    role_message_limit: int = DEFAULT_ROLE_MESSAGE_LIMIT
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
