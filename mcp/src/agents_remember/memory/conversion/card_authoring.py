@@ -352,7 +352,8 @@ def _cards(memory_root: Path, only: str | None) -> list[str]:
     return [
         path.relative_to(memory_root).as_posix()
         for path in sorted(onboarding.rglob("*.md"))
-        if path.is_file() and not any(part.startswith(".") for part in path.parts)
+        if path.is_file()
+        and not any(part.startswith(".") for part in path.relative_to(memory_root).parts)
     ]
 
 

@@ -75,7 +75,7 @@ def citation_fix_payload(
     config: McpRuntimeConfig,
     repo_id: str,
     *,
-    contract_path: str,
+    contract_path: str | None = None,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -93,7 +93,7 @@ def citation_fix_payload(
 
 
 def _citation_authority_refusal(
-    repo_id: str, contract_path: str, error: ConfiguredContractAuthorityError
+    repo_id: str, contract_path: str | None, error: ConfiguredContractAuthorityError
 ) -> dict[str, Any]:
     return {
         "ok": False,

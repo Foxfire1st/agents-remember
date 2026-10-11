@@ -45,6 +45,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     DriftSummaryOutput,
     run_drift_summary,
 )
+from agents_remember.memory_quality.legacy_cards import find_legacy_cards
 from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
@@ -639,6 +640,7 @@ def _converted_base_payload(
     violation_count = int(summary.get("violationCount") or 0)
     stale = int(summary.get("actionableCount") or 0)
     states = summary.get("states") or {}
+    legacy_cards = find_legacy_cards(context.memory_root)
     state = "ready"
     if ledger.get("state") == "derived" and ledger.get("lastMemoryContentCommit"):
         state = "already-adopted"
@@ -647,6 +649,8 @@ def _converted_base_payload(
         and run_git(context.memory_root, ["rev-parse", "--verify", "HEAD"]).returncode == 0
     ):
         state = "unavailable"
+    elif legacy_cards:
+        state = "blocked-legacy-cards"
     elif violation_count:
         state = "blocked-invalid"
     elif stale:
@@ -660,6 +664,7 @@ def _converted_base_payload(
         "onboarding_root": context.onboarding_root.as_posix(),
         "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
         **({"drift_report": report.as_posix()} if report is not None else {}),
+        "legacyCards": legacy_cards,
         "drift": {
             "status": "checked",
             "basis": CONVERTED_BASIS,
@@ -694,13 +699,21 @@ def baseline_status(request: BaselineRequest) -> dict[str, object]:
 def _converted_adopt_gate(
     payload: dict[str, object], *, accept_drift: bool
 ) -> tuple[int, dict[str, object]] | None:
-    """The converted adoption gate (MIK-R44 rule 7).
+    """The converted adoption gate (MIK-R44 rule 7, MIK-R45 rule 3).
 
     Returns the refusal `(returncode, payload)` when the tree may not be adopted,
     else `None`. `accept_drift` accepts stale anchors only: it never lets a tree
-    with a validator violation through.
+    with a validator violation through, and it never lifts `blocked-legacy-cards`.
     """
 
+    legacy_cards = payload.get("legacyCards")
+    if isinstance(legacy_cards, list) and legacy_cards:
+        payload["message"] = (
+            "old-format cards block adoption: the first baseline of a converted tree "
+            "holds no card with a metadata-table stamp row or an Update History heading -- "
+            "correct the listed cards and run adoption again; accept_drift cannot clear it"
+        )
+        return 2, payload
     drift_section = payload.get("drift")
     drift_info = drift_section if isinstance(drift_section, dict) else {}
     if int(drift_info.get("violationCount") or 0):

@@ -404,6 +404,7 @@ Rules:
 6. Never emit absolute filesystem paths in onboarding output.
 7. Treat `system/sources.md`, search registries, embedding hits, and source lists as routing inputs only. Never cite them as proof.
 8. If no relevant source exists, keep the section and record what was checked plus that no relevant evidence was found.
+9. These tables are the fixer's input: run `citation_fix` on the card, which replaces each table with `- <finding> [n]` lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never choose a reference number. Before the first baseline there is no leaf enclosure to name: run the fixer with no contract and verify the answer admits `pre-baseline`. The leaf-contract-scoped fixer/index commands in `c-05-create-or-update-onboarding-files` apply once an enclosure exists; after adoption a contractless run is refused and names the leaf route.
 
 ---
 
@@ -695,7 +696,7 @@ overview.md
 
 Use `templates/repo-overview-template.md`.
 
-Root overview verification is route-based. Record `sourceRoute` as `<repo-root>` and fill both `lastVerifiedCommitHash` and `lastVerifiedCommitDate` from the source commit that the overview was checked against. The `c-02-memory-quality-control` skill later compares that recorded commit to `HEAD` across the whole repository route and also checks for local staged or unstaged changes.
+Root overview verification comes from the card's reference anchors, not from a recorded commit: the author writes the reference sections as citation tables and runs the fixer on the card.
 
 The synthesis agent reads:
 
@@ -882,7 +883,7 @@ Overview workers write durable route-local overviews:
 
 Use `templates/route-local-overview-template.md`.
 
-Route-local overview verification is also route-based. Record the governed repo-relative source route, then fill `lastVerifiedCommitHash` and `lastVerifiedCommitDate` from the source commit that the overview was checked against. A later change anywhere under that route is allowed to trigger `c-02-memory-quality-control` skill drift even if the prose still turns out to be correct after review.
+Route-local overview verification comes from the card's reference anchors, not from a recorded commit: the author writes the reference sections as citation tables and runs the fixer on the card.
 
 A route-local overview must include:
 
@@ -900,7 +901,6 @@ A route-local overview must include:
 - file-level onboarding map
 - child overviews
 - how to use this area
-- update history
 
 Done when:
 
@@ -1041,7 +1041,8 @@ The curator checks:
 - repo-internal and cross-repo references use correct buckets
 - no source registry or embedding hit is cited as proof
 - no absolute filesystem paths
-- update history is append-only
+- no citation table left in a card after the fixer ran
+- every `[n]` cites a resolved sidecar reference
 - LOW-confidence claims are not stated as facts
 - deferred files are recorded
 - `STATE.md` is updated
@@ -1075,6 +1076,12 @@ Use `templates/bootstrap-handoff-template.md`.
 The handoff lists:
 
 - control mode and bootstrap mode
+- which cards exist (root overview, route-local overviews, file-level onboarding paths)
+- the fixer dry run over the tree: it reports nothing left to author and no refused card
+- the baseline state: whether `c-10-adopt-memory-baseline` has run, and at which commit
+- the knowledge state that `memory_init` reports at that moment — context-not-admitted
+  (`memory_revision_unavailable`) before the first baseline, while the memory line has no
+  commit yet; `not-recorded` after the baseline — with the next step it names
 - trusted coverage
 - route-local overviews created
 - file onboarding created
@@ -1095,9 +1102,7 @@ step is `c-10-adopt-memory-baseline`, which commits this content as the first at
 memory baseline and computes the ledger cache from it. Name that next step in the handoff and
 say whether it has already run.
 
-`bootstrap/` is transient scaffolding and is never part of a memory commit - not the first
-baseline, not a later one. Whether it is removed before adoption is the developer's decision,
-and adoption excludes it either way.
+The `onboarding/bootstrap/` working files (input ledger, scout report, STATE.md) ship with the baseline commit as the run's audit trail: adoption stages the whole onboarding tree. Whether they are removed beforehand is the developer's decision; adoption carries them either way. Only a memory-root-level `bootstrap/` staging directory is transient and excluded from every memory commit.
 
 **Onboarding is not the repository's knowledge foundation, and this skill produces no knowledge
 records.** The foundation - the authored invariants, families and source realizations, stored as
@@ -1107,7 +1112,8 @@ start, and this skill neither requires the foundation to exist first nor claims 
 Name it in the handoff, with the state of the repository's knowledge location where that state is
 known (`not-recorded`; `recorded`, with the identity; or `unusable`, with its code and path), and say
 that it is the curator's step. An unrun or absent foundation is a **named fact of the handoff**, never
-an omission that the handoff's own "trusted coverage" reads as completeness.
+an omission that the handoff's own "trusted coverage" reads as completeness. It never says a knowledge
+foundation exists because cards exist.
 
 ---
 
@@ -1286,5 +1292,5 @@ This skill implementation is successful when:
 13. existing-memory slice maintenance can create, refresh, move, or clean up route-local memory without treating the repo as blank
 14. automated bootstrap ends at handoff and asks whether separate closeout should run
 15. a newly scaffolded memory repo's next step is named: `c-10-adopt-memory-baseline` commits the bootstrap output as the first attributed baseline and creates the ledger row that maps memory content to a code commit
-16. `bootstrap/` scaffolding is stated as transient and is never part of a memory commit
+16. `onboarding/bootstrap/` working files are stated as retained in the memory commit as the run's audit trail (only memory-root-level `bootstrap/` is transient and excluded)
 17. the handoff names the repository's knowledge foundation as the curator's separate step (`c-14-knowledge-bootstrap`), reports the knowledge location's state where it is known, and neither requires onboarding before it nor presents onboarding as that foundation

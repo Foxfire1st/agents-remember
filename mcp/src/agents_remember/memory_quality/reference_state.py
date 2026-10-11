@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -252,7 +252,12 @@ def _refresh_document(document: dict[str, Any], files: _WorkingFiles) -> int:
 
 
 def fix_references(
-    memory_root: Path, code_root: Path, *, dry_run: bool = False, only: str | None = None
+    memory_root: Path,
+    code_root: Path,
+    *,
+    dry_run: bool = False,
+    only: str | None = None,
+    exclude: Collection[str] = (),
 ) -> dict[str, Any]:
     """Re-record mechanically moved reference anchors; leave every stale one to the curator.
 
@@ -261,13 +266,21 @@ def fix_references(
     C1: it listed the whole tree's). A sidecar that cannot be read as one is named in
     ``unreadableSidecars``, never rewritten, and makes the run not ``ok``; the others are still
     fixed.
+
+    ``exclude`` names sidecars (memory-root relative) the run must not touch at all: neither
+    read, rewritten, reported in ``rewrittenSidecars``, nor counted unreadable. The converted
+    fixer passes the sidecars its authoring stage refused, so nothing of a refused card is
+    written by either stage (MIK-R45 failure behavior).
     """
 
+    excluded = set(exclude)
     files = _WorkingFiles(code_root)
     rewritten: list[str] = []
     unreadable: list[str] = []
     refreshed = 0
     for relative, document in _sidecars(memory_root, unreadable, only):
+        if relative in excluded:
+            continue
         try:
             count = _refresh_document(document, files)
         except _MALFORMED:

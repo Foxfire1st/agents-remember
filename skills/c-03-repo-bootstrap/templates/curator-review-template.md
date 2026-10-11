@@ -32,7 +32,8 @@
 | No `system/sources.md` registry rows used as proof | pass / fail | |
 | No embedding hit cited as proof | pass / fail | |
 | No absolute filesystem paths | pass / fail | |
-| Update History is append-only | pass / fail | |
+| No citation table left in a card after the fixer ran | pass / fail | |
+| Every `[n]` cites a resolved sidecar reference | pass / fail | |
 | LOW-confidence claims are not stated as facts | pass / fail | |
 | Deferred files are recorded | pass / fail | |
 | STATE.md updated | pass / fail | |

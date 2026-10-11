@@ -1,15 +1,10 @@
 # <Area Or Route Name> Overview
 
-| Field | Value |
-|---|---|
-| repository | <repo> |
-| doc_type | `route-local-overview` |
-| sourceRoute | `<source route>` |
-| onboardingRoute | `<onboarding route>/overview.md` |
-| parentOverview | [`<parent overview.md>`](../overview.md) |
-| lastUpdated | <YYYY-MM-DDThh:mm> |
-| lastVerifiedCommitHash | `<full 40-char SHA or empty during bootstrap>` |
-| lastVerifiedCommitDate | <YYYY-MM-DDThh:mm:ss+00:00 or empty during bootstrap> |
+<!-- Converted card: kind and source are its place in the tree; currentness comes from the
+card's reference anchors. Write the reference sections below as citation tables (the fixer's
+input) and run `citation_fix` on the card, which replaces each table with `- <finding> [n]`
+lines where the table stood and writes the sidecar. Never write sidecar JSON by hand and never
+choose a reference number. -->
 
 ## What This Area Is
 
@@ -45,7 +40,6 @@
 
 1. <step>
 2. <step>
-3. <step>
 
 ## Load-Bearing Files
 
@@ -106,7 +100,3 @@ When changing files under this route:
 ## Needs Verification
 
 - [LOW] <question or tentative finding>
-
-## Update History
-
-<!-- newest first; append-only -->

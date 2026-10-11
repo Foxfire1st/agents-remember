@@ -25,6 +25,7 @@ from agents_remember.application.published_intent import (
 from agents_remember.application.runtime.startup import measuring_build_stamp
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -197,6 +198,81 @@ def _leaf_memory_writer_scope(
     return scope
 
 
+#: The admission a pre-baseline fixer call carries (MIK-R45 rule 2): the existing fixer
+#: admitted on the configured memory root while that root has no attributed baseline.
+PRE_BASELINE_ADMISSION = "pre-baseline"
+
+
+def _memory_has_linked_worktrees(memory_root: Path) -> bool:
+    """Whether the memory repository owns linked worktrees, read fail-closed.
+
+    Before the first baseline no leaf can exist, because the memory repository has no
+    commit to start a worktree from. A linked worktree beside the main checkout therefore
+    means a leaf may depend on the root, and the pre-baseline admission does not apply.
+    An unreadable worktree list is not an empty one: it refuses the same way.
+    """
+
+    listed = run_git(memory_root, ["worktree", "list", "--porcelain"])
+    if listed.returncode != 0:
+        return True
+    entries = [line for line in listed.stdout.splitlines() if line.startswith("worktree ")]
+    return len(entries) != 1
+
+
+def _pre_baseline_official_scope(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    operation: str,
+) -> MemoryScope:
+    """Admit one fixer call without a contract on the configured memory root (MIK-R45 rule 2).
+
+    All five conditions must hold: the repository is declared in the settings; the resolved
+    memory root is the declared one; the root holds ``knowledge/layout.json``;
+    ``has_adopted_baseline`` is false for it; and the memory repository has no linked
+    worktree, so no leaf depends on the root. Each way out names its missing condition and
+    the leaf route, and writes nothing. Once the baseline exists, the refusal says so.
+    """
+
+    repo = require_repo(config, repo_id)
+    if repo.memory_root is None:
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: repo_id {repo_id!r} declares "
+            f"no external memory root, so no pre-baseline admission applies; it requires a "
+            f"leaf contract_path -- start or attach a worktree and pass its contract path"
+        )
+    scope = _memory_scope(config, repo_id=repo_id, contract_path=None)
+    if scope.onboarding_root.parent.resolve() != repo.memory_root.resolve():
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the resolved memory root "
+            f"({scope.onboarding_root.parent.as_posix()}) is not the declared one "
+            f"({repo.memory_root.as_posix()}), so no pre-baseline admission applies; it "
+            f"requires a leaf contract_path -- start or attach a worktree and pass its "
+            f"contract path"
+        )
+    if not reference_state.is_converted_memory(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the configured memory root "
+            f"({repo.memory_root.as_posix()}) holds no knowledge/layout.json, so no "
+            f"pre-baseline admission applies; it requires a leaf contract_path -- start or "
+            f"attach a worktree and pass its contract path"
+        )
+    if baseline.has_adopted_baseline(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the repository already has an "
+            f"adopted memory baseline, so it requires a leaf contract_path -- start or "
+            f"attach a worktree and pass its contract path"
+        )
+    if _memory_has_linked_worktrees(repo.memory_root):
+        raise AuthorityError(
+            f"{operation} without a leaf contract is refused: the memory repository has "
+            f"linked worktrees (or its worktree list is unreadable), so a leaf may depend "
+            f"on the root and no pre-baseline admission applies; it requires a leaf "
+            f"contract_path -- start or attach a worktree and pass its contract path"
+        )
+    return scope
+
+
 def _citation_trees(
     scope: MemoryScope,
     caller_excludes: Sequence[str] = (),
@@ -280,7 +356,7 @@ def citation_fix_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    contract_path: str,
+    contract_path: str | None = None,
     dry_run: bool = False,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
 ) -> dict[str, Any]:
@@ -292,8 +368,24 @@ def citation_fix_tool(
 
     On converted memory one document needs no frozen generation (``--document`` alone); on
     unconverted memory a document still comes with its snapshot.
+
+    Two admissions: a leaf enclosure contract (the ordinary write route), or no contract on
+    the configured memory root while that root has no attributed baseline (the pre-baseline
+    bootstrap admission, MIK-R45 rule 2). In every other case a call without a contract
+    refuses and names the leaf route.
     """
     operation_scope.validate(document_alone=True)
+    if contract_path is None:
+        scope = _pre_baseline_official_scope(config, repo_id=repo_id, operation="citation_fix")
+        memory_root = scope.onboarding_root.parent
+        # The admission requires a converted root, so this always holds here.
+        assert reference_state.is_converted_memory(memory_root)
+        return {
+            "repoId": scope.repo_id,
+            "admission": PRE_BASELINE_ADMISSION,
+            **_converted_citation_fix(memory_root, scope.code_root, operation_scope, dry_run),
+            **measuring_build_stamp(),
+        }
     scope = _leaf_memory_writer_scope(
         config,
         repo_id=repo_id,
@@ -331,7 +423,8 @@ def _converted_citation_fix(
     """``citation_fix`` on a converted tree: author the cards' citation rows into resolved sidecar
     references (:mod:`...memory.conversion.card_authoring`), then re-record the mechanically moved
     anchors (MIK-R24 rule 5); a stale anchor is left to the curator. With one document named, both
-    steps touch that card and its sidecar only."""
+    steps touch that card and its sidecar only. A refused card is written by neither stage:
+    its sidecar stays out of the mechanical re-recording as well (MIK-R45 failure behavior)."""
 
     authoring = card_authoring.author_card_references(
         memory_root, code_root, only=scope.document, dry_run=dry_run
@@ -339,7 +432,14 @@ def _converted_citation_fix(
     sidecar = (
         None if scope.document is None else card_sidecar_path(f"{ONBOARDING_ROOT}/{scope.document}")
     )
-    fixed = reference_state.fix_references(memory_root, code_root, dry_run=dry_run, only=sidecar)
+    refused_sidecars = {
+        card_sidecar_path(entry["card"])
+        for entry in authoring["refused"]
+        if isinstance(entry, dict) and isinstance(entry.get("card"), str)
+    }
+    fixed = reference_state.fix_references(
+        memory_root, code_root, dry_run=dry_run, only=sidecar, exclude=refused_sidecars
+    )
     return {**fixed, "ok": fixed["ok"] and not authoring["refused"], "authoring": authoring}
 
 
@@ -388,10 +488,25 @@ def route_index_refresh_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     if not dry_run and contract_path is None:
-        raise AuthorityError(
-            "route_index_refresh apply requires a leaf contract_path; the configured "
-            "official memory checkout is read-only outside a journaled landing"
+        scope = _pre_baseline_official_scope(
+            config, repo_id=repo_id, operation="route_index_refresh"
         )
+        result = build_route_indexes(
+            code_root=scope.code_root,
+            onboarding_root=scope.onboarding_root,
+            repository=scope.context.code_repository_name,
+            storage=scope.context.storage,
+            dry_run=dry_run,
+        )
+        return {
+            "ok": True,
+            "operation": "route_index_refresh",
+            "admission": PRE_BASELINE_ADMISSION,
+            "repoId": scope.repo_id,
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "dryRun": dry_run,
+            **result.to_dict(),
+        }
     scope = (
         _leaf_memory_writer_scope(
             config,
@@ -572,7 +687,8 @@ def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> di
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
     return {
-        "ok": payload.get("state") not in {"blocked-drift", "blocked-invalid", "unavailable"},
+        "ok": payload.get("state")
+        not in {"blocked-drift", "blocked-invalid", "blocked-legacy-cards", "unavailable"},
         "operation": "memory_baseline_status",
         **payload,
     }

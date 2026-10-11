@@ -27,7 +27,7 @@ from agents_remember.models.tools.tool_answer import ENVELOPE_STRIPPED_FIELDS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from pydantic import ValidationError
-from tool_entry_point_world import REPO, EntryPointWorld, _ToolCallTimeout, classify, refusal_marks
+from tool_entry_point_world import EntryPointWorld, _ToolCallTimeout, classify, refusal_marks
 
 from mcp import types
 
@@ -294,13 +294,14 @@ class ChokePointControlTests(unittest.TestCase):
     def test_an_invalid_argument_lands_in_its_own_arm_and_names_the_callers_side(self) -> None:
         """The two validation refusals share a message shape; only the model separates them.
 
-        ``citation_fix`` requires a ``contract_path``, so calling it without one is refused by
+        ``citation_fix`` requires a ``repo_id`` (``contract_path`` is optional since the
+        MIK-R45 pre-baseline admission), so calling it without one is refused by
         the generated ``citation_fixArguments`` input model. That must NOT be reported as the
         tool's own response model refusing its payload — the fix exists so the diagnosis stays
         right the first time a benign argument stops being accepted.
         """
 
-        kind, payload = self.world.call("citation_fix", {"repo_id": REPO})
+        kind, payload = self.world.call("citation_fix", {})
         arm, detail = classify("citation_fix", (kind, payload))
         self.assertEqual("argument-validation", arm, detail)
         self.assertIn("citation_fixArguments", detail, "the detail must name the input model")

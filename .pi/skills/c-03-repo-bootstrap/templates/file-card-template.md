@@ -66,13 +66,15 @@
 
 ## Required Onboarding Sections
 
-- metadata including `governingOverview`
+- `# <source path>` title
+- `## Governing Overview` with a relative link to the nearest governing overview
 - Purpose
 - Code Commentary
-- Docs References
-- Repo-Internal References if applicable
-- Cross-Repo References
-- Update History
+- reference sections (`Docs References`, `Repo-Internal References`, `Cross-Repo References`
+  where applicable) written as citation tables in the known `Finding | Anchor | Source` grammar,
+  then the fixer run on the card: it replaces each table with `- <finding> [n]` lines where the
+  table stood and writes the sidecar. Never write sidecar JSON by hand and never choose a
+  reference number.
 
 ## Reference Expectations
 

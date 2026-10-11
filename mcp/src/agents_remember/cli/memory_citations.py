@@ -3,9 +3,11 @@
     agents-remember memory-citations --repo <id> --contract <contract>
         [--build-index | --fix | --migrate]
 
-``--contract`` is REQUIRED and is the write guard: this command resolves the leaf enclosure
-exactly as the worktree verbs do, and there is no argument list that names the official
-memory repo. A whole-tree reflow after a package move is this one command.
+``--contract`` names the leaf enclosure whose memory worktree is rewritten, exactly as the
+worktree verbs do. For ``--fix`` it may be omitted on the configured memory root while that
+root has no attributed baseline (the pre-baseline bootstrap admission, MIK-R45 rule 2); in
+every other case a call without a contract refuses and names the leaf route. There is no
+argument list that names the official memory repo.
 
 ``--exclude GLOB`` adds a caller-supplied pattern to this call's exclusion register, on top of
 the register every call already honours (the memory layer's ``onboarding.pathRules.exclude``
@@ -54,9 +56,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", required=True, help="Repository id from the trusted settings.")
     parser.add_argument(
         "--contract",
-        required=True,
-        help="Path to the leaf enclosure contract. Required: citations are rewritten inside "
-        "a leaf's memory worktree or not at all.",
+        required=False,
+        default=None,
+        help="Path to the leaf enclosure contract. Required except for --fix on the "
+        "configured memory root while that root has no attributed baseline (the "
+        "pre-baseline bootstrap admission): citations are rewritten inside a leaf's "
+        "memory worktree or not at all.",
     )
     parser.add_argument(
         "--config",
@@ -135,6 +140,11 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
     try:
+        if args.contract is None and not args.fix:
+            raise ValueError(
+                "--contract is required without --fix: only --fix is admitted on the "
+                "configured memory root before the first baseline."
+            )
         operation_scope = CitationOperationScope(
             document=document,
             expected_snapshot=expected_snapshot,
@@ -150,6 +160,7 @@ def run(args: argparse.Namespace) -> int:
         return 1
     try:
         if build_index:
+            assert args.contract is not None  # guarded above: only --fix runs unscoped
             payload = citation_source_index_build_tool(
                 config,
                 repo_id=args.repo,
@@ -157,6 +168,7 @@ def run(args: argparse.Namespace) -> int:
                 operation_scope=operation_scope,
             )
         elif args.migrate:
+            assert args.contract is not None  # guarded above: only --fix runs unscoped
             payload = citation_migrate_tool(
                 config,
                 repo_id=args.repo,
@@ -173,6 +185,7 @@ def run(args: argparse.Namespace) -> int:
                 operation_scope=operation_scope,
             )
         else:
+            assert args.contract is not None  # guarded above: only --fix runs unscoped
             payload = citation_check_tool(
                 config,
                 repo_id=args.repo,

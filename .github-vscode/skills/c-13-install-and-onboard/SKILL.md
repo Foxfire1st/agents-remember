@@ -62,8 +62,9 @@ Run this sequence in order:
    and master integration do not enter this stage.
 4. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
-   `c-03-repo-bootstrap`; then reach the repository's knowledge foundation through
-   `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the seat
+   `c-03-repo-bootstrap` (running the fixer on the cards before the baseline),
+   adopt the first baseline through `c-10-adopt-memory-baseline`, then reach the
+   repository's knowledge foundation through `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the seat
    that carries it — a **taskless curator session** (admitted by the developer's
    2026-09-24 ruling), the taskless bootstrap seat before a task exists, or a
    curator opened on a task document — is stated there.
@@ -351,13 +352,29 @@ migrated. If a checkout still carries one, report the exact path and the route o
 worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
 rewrite or delete it, and never treat it as an already-present memory layer.
 
-## Stage 5 - Bootstrap, The Knowledge Foundation, Then The First Baseline
+## Stage 5 - Bootstrap, The First Baseline, Then The Knowledge Foundation
 
 Run this stage's onboarding and baseline halves only when Stage 4 scaffolded a new memory repo; the
 knowledge half applies to **both** memory-repo answers, because a `recorded` knowledge foundation is not
-something an existing memory repo is guaranteed to have. Stage 5 has three parts:
+something an existing memory repo is guaranteed to have. For a new memory repo the order is
+`memory_init`, then the first onboarding through `c-03-repo-bootstrap` with the fixer, then
+`memory_baseline_adopt`, and only then the knowledge foundation, which needs the commit the
+baseline made. Stage 5 has three parts:
 
-1. **Reach the repository's knowledge foundation** - hand off to
+1. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial
+   onboarding. A thin `overview.md` is enough to start; deeper route-local overviews and
+   file-level onboarding should grow as work touches new areas. Run the fixer
+   (`citation_fix` / `memory-citations --fix`) on the cards before the baseline: without a
+   contract it is admitted on the configured memory root while that root has no attributed
+   baseline. Whether the developer wants
+   onboarding at all is their call: `system/` alone is enough to adopt.
+2. **Adopt the first attributed baseline** - hand off to `c-10-adopt-memory-baseline`,
+   which owns the procedure. Read `memory_baseline_status` **before** adoption, put the
+   drift-acceptance decision to the developer rather than assuming it, adopt through
+   `memory_baseline_adopt`, then read `memory_baseline_status` **again** and report both.
+   Baseline adoption is valid only before attributed memory exists, so an
+   `already-adopted` report means this half is already done.
+3. **Reach the repository's knowledge foundation** - hand off to
    `c-14-knowledge-bootstrap`. That procedure is the curator's work and states its own
    carriers; before a task exists, a **taskless curator session** (admitted by the
    developer's 2026-09-24 ruling) authors it and the taskless bootstrap seat reaches
@@ -371,9 +388,10 @@ something an existing memory repo is guaranteed to have. Stage 5 has three parts
    it. A memory tree in the legacy format is refused by the writer as
    `legacy-format`, naming the conversion command.
 
-   This part is **not conditional on the other two**: it needs a memory line that
-   resolves `HEAD`, not an onboarding corpus and not an adopted baseline, and
-   onboarding is optional input to it rather than a precondition. It authors
+   On a new memory repo this part runs after the baseline: the foundation writer needs
+   the memory commit the baseline made, and before the first baseline no leaf can exist.
+   Only a repository whose memory already has a commit may reach its foundation before
+   the onboarding or the baseline. It authors
    knowledge records through the curator's own writer, so this skill never
    writes knowledge records itself, never invents records to make setup look
    finished, and never creates a development leaf, worktree or enclosure to give
@@ -383,20 +401,7 @@ something an existing memory repo is guaranteed to have. Stage 5 has three parts
    states rather than worked around. The knowledge write needs the developer's
    commit word, exactly as the other effectful stages do.
 
-2. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial
-   onboarding. A thin `overview.md` is enough to start; deeper route-local overviews and
-   file-level onboarding should grow as work touches new areas. Whether the developer wants
-   onboarding at all is their call: `system/` alone is enough to adopt.
-3. **Adopt the first attributed baseline** - hand off to `c-10-adopt-memory-baseline`,
-   which owns the procedure. Read `memory_baseline_status` **before** adoption, put the
-   drift-acceptance decision to the developer rather than assuming it, adopt through
-   `memory_baseline_adopt`, then read `memory_baseline_status` **again** and report both.
-   Baseline adoption is valid only before attributed memory exists, so an
-   `already-adopted` report means this half is already done.
-
-`bootstrap/` scaffolding is transient and is never part of a memory commit - not the first
-baseline and not any later one. Say so before the first adoption, because the developer is
-the one who decides when the bootstrap directory is removed.
+The `onboarding/bootstrap/` working files ship with the first baseline commit as the run's audit trail. Say so before the first adoption, because the developer is the one who decides whether they are removed beforehand. Only a memory-root-level `bootstrap/` staging directory is transient and excluded from memory commits.
 
 Skip the onboarding and baseline halves when an existing memory repo was adopted. The knowledge
 half is not skipped with them: see Stage 4 case 2.
@@ -426,12 +431,13 @@ Summarize:
    closeout/integration needs no profile;
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
-6. bootstrap: run via `c-03-repo-bootstrap` or skipped;
-7. knowledge foundation: the state read from `memory_init`'s `knowledge` block,
+6. bootstrap: run via `c-03-repo-bootstrap` or skipped, with the fixer run on the
+   cards before the baseline;
+7. first baseline: `memory_baseline_status` before and after adoption, the adoption
+   result at its memory-content commit, or the exact reason it was not run;
+8. knowledge foundation: the state read from `memory_init`'s `knowledge` block,
    and then either the foundation run carried as `c-14-knowledge-bootstrap`
    states, with the records it wrote, or the exact reason it was not run;
-8. first baseline: `memory_baseline_status` before and after adoption, the adoption
-   result at its memory-content commit, or the exact reason it was not run;
 9. providers: indexing status and any deferred/degraded state;
 10. host: shared settings path, pinned host/product Node, provision result,
     no-change repeat or deferred restart, and any incomplete migration.

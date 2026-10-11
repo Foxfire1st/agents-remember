@@ -57,6 +57,37 @@
 |---|---|---|
 | wave-002 | <area/files> | <reason> |
 
+## Fixer State
+
+A fixer dry run over the tree reports nothing left to author and no refused card.
+Record the exact dry-run result here; the bootstrap is not complete until the run is clean.
+
+| Check | Result | Notes |
+|---|---|---|
+| dry run: nothing left to author | pass / fail | <`citation_fix` dry-run summary> |
+| dry run: no refused card | pass / fail | <refused list, or `none`> |
+
+## Baseline State
+
+| Item | Value |
+|---|---|
+| `c-10-adopt-memory-baseline` run? | yes / no |
+| memory-content commit | <commit or `not adopted yet`> |
+
+## Knowledge Foundation State
+
+The state that `memory_init` reports at that moment — context-not-admitted
+(`memory_revision_unavailable`) before the first baseline, while the memory line has no
+commit yet, and `not-recorded` after the baseline — with the next step
+it names. This skill produces no knowledge records; never say a knowledge foundation exists
+because cards exist.
+
+| Item | Value |
+|---|---|
+| knowledge state | not-recorded / recorded / unusable / context-not-admitted |
+| identity / code and path | <identity, or code and path> |
+| next step | <the next step `memory_init` names> |
+
 ## Closeout Boundary
 
 Automated bootstrap stops at this handoff. Ask whether separate closeout should run.

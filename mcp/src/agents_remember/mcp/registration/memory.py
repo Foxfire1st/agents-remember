@@ -84,15 +84,21 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     @server.tool()
     def citation_fix(
         repo_id: str,
-        contract_path: str,
+        contract_path: str | None = None,
         *,
         document: str | None = None,
         expected_snapshot: str | None = None,
         dry_run: bool = False,
         exclude: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Regenerate anchored citation ranges inside one leaf memory worktree. The enclosure
-        contract is mandatory and the application guard refuses the official memory repo. A
+        """Regenerate anchored citation ranges inside one leaf memory worktree.
+
+        Two admissions: a leaf enclosure contract (the ordinary write route; the
+        application guard refuses the official memory repo), or no contract on the
+        configured memory root while that root has no attributed baseline (the
+        pre-baseline bootstrap admission, which answers with `admission: \"pre-baseline\"`).
+        In every other case a call without a contract refuses and names the leaf route;
+        once the baseline exists, the refusal says so. A
         pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
         Preview with dry_run=true. Use document for one onboarding-relative file and
         expected_snapshot to assert a previously built immutable source generation. `exclude`
@@ -122,7 +128,10 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     ) -> dict[str, Any]:
         """Regenerate the overview.index.json route indexes so they match the current onboarding
         tree. Apply requires a leaf enclosure contract and writes only that leaf's memory
-        worktree. An unscoped call is read-only and therefore requires dry_run=true."""
+        worktree, or no contract on the configured memory root while that root has no
+        attributed baseline (the pre-baseline bootstrap admission, which answers with
+        `admission: \"pre-baseline\"`). Any other unscoped call is read-only and therefore
+        requires dry_run=true."""
         return route_index_refresh_payload(
             config, repo_id, dry_run=dry_run, contract_path=contract_path
         )
