@@ -25,6 +25,9 @@ maintenance**, so the same failure is refused on a new record and only reported 
   blocked by an old record's admission.
 * **Counted** (``R27.4-legacy-unassessed``, report-only): the live records still marked
   ``legacy-unassessed``, until the migration (MIK-R19) assesses or demotes each one.
+* **Refused at every route** (``R27.4-record-kept``, MIK-R52 rule 6): every record ID a
+  comparison base holds still exists in the candidate. A record is never deleted: it leaves use
+  by ``status: retired``, never by removing its file.
 
 Only the two mechanically checkable criteria are checked, plus presence and shape (Exclusions).
 Whether a justification is plausible, and whether ``family_guarantee``, ``prevents_costly_mistake``,
@@ -304,6 +307,26 @@ def check_legacy_unassessed(context: ValidationContext) -> Iterator[Finding]:
     )
 
 
+def check_record_kept(context: ValidationContext) -> Iterator[Finding]:
+    """MIK-R52 rule 6: a record is never deleted -- every record ID a comparison base holds
+    still exists in the candidate. Refuses at every route; a record leaves use by
+    ``status: retired``, never by removing its file."""
+
+    base_ids = _base_record_ids(context.bases)
+    if not base_ids:
+        return
+    candidate_ids = _base_record_ids((context.candidate,)) | {
+        admitted.id for admitted in _admitted_records(context)
+    }
+    for missing in sorted(base_ids - candidate_ids):
+        yield Finding(
+            KNOWLEDGE_ROOT,
+            f"records.{missing}",
+            f"record {missing} is held by a comparison base but absent from this tree; a "
+            "record is never deleted: it leaves use by status: retired",
+        )
+
+
 ADMISSION_RULES = (
     ValidationRule(
         "R27.2-new-record",
@@ -324,6 +347,12 @@ ADMISSION_RULES = (
         "records still legacy-unassessed are counted",
         check_legacy_unassessed,
         report_only=True,
+    ),
+    ValidationRule(
+        "R27.4-record-kept",
+        "MIK-R27 rule 4",
+        "a record a comparison base holds still exists in the candidate",
+        check_record_kept,
     ),
 )
 

@@ -65,6 +65,7 @@ from agents_remember.worktrees.modules import (
     closeout_external,
     finalize,
     integrate,
+    integration_gate,
     pause,
     record_landing,
     sync,
@@ -945,7 +946,7 @@ def test_behind_entry_gate_sites_refuse_a_disabled_contract(
     assert verdict is not None
     assert verdict != closeout_external.GATE_NOT_APPLICABLE
     assert "disabled" in verdict
-    blocked = integrate._knowledge_gate_block(
+    blocked = integration_gate.integration_gate_block(
         contract,
         _route_args(world.coord / "tasks" / REPO / "some-task" / "series-contract.md"),
         IntegratedCommits(code="a" * 40, memory_content="b" * 40),

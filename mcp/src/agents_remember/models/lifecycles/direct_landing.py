@@ -29,6 +29,10 @@ class DirectLandingOperationInput(BaseModel):
     memoryBranch: str
     memoryRef: str = Field(pattern=r"^refs/heads/.+$")
     memoryBefore: GitMutationSnapshot
+    # MIK-R52 rule 8: the leaf whose history file this generation judges and closes (None: the
+    # leaf was inferred from the one open history file). Part of the request identity, so a call
+    # naming another leaf is never a retry of this generation. Older journals load it as None.
+    leafId: str | None = None
 
     @model_validator(mode="after")
     def _accepted_direct_plan_is_exact(self) -> DirectLandingOperationInput:

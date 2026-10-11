@@ -240,7 +240,9 @@ class LandingGateRequest:
     ``frozen`` are the commits whose closed history files an earlier closeout of that leaf closed
     (:class:`LeafPublication`): the caller names them only for the memory commit the leaf's
     contract records as its completed closeout, and a commit made by any other hand freezes
-    nothing (L37 review R5-1).
+    nothing (L37 review R5-1). A master-level landing names ``series_contract`` (the series
+    contract's path): every history file the landed commit newly closes must then be closed,
+    owned by the master, and byte-identical to its owner's recorded publication (MIK-R52 rule 5).
     """
 
     memory_repository: Path
@@ -251,6 +253,7 @@ class LandingGateRequest:
     code_base: str | None = None
     leaf_owner: str | None = None
     frozen: tuple[str, ...] = ()
+    series_contract: str | None = None
 
 
 @dataclass(frozen=True)
@@ -290,6 +293,7 @@ class KnowledgeGatePort(Protocol):
         code_tree: str,
         memory_tree: str,
         parent_memory_tip: str | None,
+        persist_worklist: bool = True,
     ) -> str | None: ...
 
     def direct_verdict(
@@ -299,10 +303,16 @@ class KnowledgeGatePort(Protocol):
         code_commit: str,
         memory_tree: str,
         source: DirectGateSource | None = None,
+        leaf_id: str | None = None,
     ) -> DirectGateVerdict: ...
 
     def direct_source(
-        self, contract: WorktreeContract, *, code_commit: str, memory_tree: str
+        self,
+        contract: WorktreeContract,
+        *,
+        code_commit: str,
+        memory_tree: str,
+        leaf_id: str | None = None,
     ) -> DirectGateVerdict: ...
 
     def landing_refusal(self, request: LandingGateRequest) -> str | None: ...

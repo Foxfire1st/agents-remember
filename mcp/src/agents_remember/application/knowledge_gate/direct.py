@@ -8,10 +8,13 @@ enclosure, so its sides are read from the series lines:
   -- which must be an ancestor of the landed code commit;
 * **C** is the verified code commit's tree, and **K_C** the memory checkout's exact candidate tree.
 
-**The leaf.** The route names no leaf, so the leaf is the owner of the one open leaf history file in
-K_C (``knowledge/history/<leaf-id>.json`` with ``closed: false``). None, or more than one, refuses:
-a direct-mode leaf of a converted repository records its rows -- or an empty ``rows`` -- in its own
-file, which this landing then closes. This is a choice the packet leaves open (see the L09 report).
+**The leaf.** Without ``leaf_id`` (MIK-R52 rule 8) the route names no leaf, so the leaf is the
+owner of the one open leaf history file in K_C (``knowledge/history/<leaf-id>.json`` with
+``closed: false``). None, or more than one, refuses: a direct-mode leaf of a converted repository
+records its rows -- or an empty ``rows`` -- in its own file, which this landing then closes. With
+``leaf_id`` the landing judges and closes that leaf's history file instead, creating it closed
+with no rows when the leaf wrote none, and refusing when another leaf's file is open. This is a
+choice the packet leaves open (see the L09 report).
 
 A replay of an already published landing (the checkout is clean at a head whose trailer names this
 code commit) commits nothing, so it is not gated again.
@@ -47,6 +50,7 @@ from agents_remember.models.knowledge_files.canonical import (
     canonical_text,
     parse_json,
 )
+from agents_remember.models.knowledge_files.documents import history_path, owner_history_attempt
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.services import DirectGateSource, DirectGateVerdict
@@ -84,14 +88,19 @@ def _open_histories(memory_repository: Path, memory_tree: str) -> list[tuple[str
 
 
 def direct_source(
-    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+    contract: WorktreeContract,
+    *,
+    code_commit: str,
+    memory_tree: str,
+    leaf_id: str | None = None,
 ) -> DirectGateVerdict:
     """Bind the unique open history source before the route closes it; run no worklist gate."""
+
     memory = contract.memory_repo_path
     if memory is None:
         return DirectGateVerdict(True, None, "direct landing has no memory repository to gate")
     try:
-        return _source(memory, code_commit, memory_tree)
+        return _source(memory, code_commit, memory_tree, leaf_id)
     except subprocess.SubprocessError as error:
         detail = git_failure(error).detail
         return DirectGateVerdict(True, None, f"the mandatory invariant gate (MIK-R09): {detail}")
@@ -103,6 +112,7 @@ def direct_verdict(
     code_commit: str,
     memory_tree: str,
     source: DirectGateSource | None = None,
+    leaf_id: str | None = None,
 ) -> DirectGateVerdict:
     """The gate's verdict over a direct landing's exact candidate (the caller probed the marker)."""
 
@@ -111,7 +121,7 @@ def direct_verdict(
         return DirectGateVerdict(True, None, "direct landing has no memory repository to gate")
     try:
         selected = _source(
-            memory, code_commit, memory_tree if source is None else source.memory_tree
+            memory, code_commit, memory_tree if source is None else source.memory_tree, leaf_id
         )
         if selected.refusal is not None:
             return selected
@@ -128,7 +138,19 @@ def direct_verdict(
         return DirectGateVerdict(True, None, f"the mandatory invariant gate (MIK-R09): {detail}")
 
 
-def _source(memory: Path, code_commit: str, memory_tree: str) -> DirectGateVerdict:
+@dataclass(frozen=True)
+class _SourceFacts:
+    """What the gate read before binding the landed history source."""
+
+    memory: Path
+    head: str
+    code_commit: str
+    memory_tree: str
+
+
+def _source(
+    memory: Path, code_commit: str, memory_tree: str, leaf_id: str | None
+) -> DirectGateVerdict:
     head = _git(memory, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
     if head is None:
         return DirectGateVerdict(True, None, "the series memory line has no head to land on")
@@ -136,6 +158,9 @@ def _source(memory: Path, code_commit: str, memory_tree: str) -> DirectGateVerdi
     if published == code_commit and _git(memory, "rev-parse", f"{head}^{{tree}}") == memory_tree:
         return DirectGateVerdict(False, None, None)  # a replay commits nothing
     histories = _open_histories(memory, memory_tree)
+    facts = _SourceFacts(memory, head, code_commit, memory_tree)
+    if leaf_id is not None:
+        return _named_source(facts, leaf_id, histories)
     if len(histories) != 1:
         owners = [owner for owner, _path, _data in histories]
         return DirectGateVerdict(
@@ -144,7 +169,8 @@ def _source(memory: Path, code_commit: str, memory_tree: str) -> DirectGateVerdi
             "the mandatory invariant gate (MIK-R09) refuses this direct landing: it names no leaf, "
             f"and the memory candidate holds {len(owners)} open leaf history file(s) "
             f"({', '.join(owners) or 'none'}); exactly one, knowledge/history/<leaf-id>.json with "
-            "closed: false, names the leaf whose rows this landing publishes and closes",
+            "closed: false, names the leaf whose rows this landing publishes and closes, or pass "
+            "leaf_id to land one leaf's rows and close that leaf's history file",
         )
     owner, path, data = histories[0]
     return DirectGateVerdict(
@@ -152,6 +178,68 @@ def _source(memory: Path, code_commit: str, memory_tree: str) -> DirectGateVerdi
         owner,
         None,
         DirectGateSource(memory.resolve(), head, memory_tree, code_commit, owner, path, data),
+    )
+
+
+def _named_source(
+    facts: _SourceFacts, leaf_id: str, histories: list[tuple[str, str, bytes]]
+) -> DirectGateVerdict:
+    """Bind the named leaf's history source for a direct landing (MIK-R52 rule 8).
+
+    The landing judges and closes that leaf's history file: the latest open file naming it when
+    the leaf wrote rows, or the created closed file with no rows when it wrote none. Another
+    leaf's open file, or a ``leaf_id`` that names no history file, refuses, naming the leaves.
+    """
+
+    named = [(owner, path, data) for owner, path, data in histories if owner == leaf_id]
+    others = sorted({owner for owner, _path, _data in histories if owner != leaf_id})
+    if others:
+        return DirectGateVerdict(
+            True,
+            None,
+            "the mandatory invariant gate (MIK-R09) refuses this direct landing: it names leaf "
+            f"{leaf_id!r}, but the memory candidate holds open leaf history file(s) of "
+            f"another leaf ({', '.join(others)}); close those landings through their own leaves "
+            "first, or land them with their own leaf_id",
+        )
+    if named:
+        owner, path, data = max(
+            named, key=lambda entry: owner_history_attempt(entry[1], leaf_id) or 0
+        )
+        return DirectGateVerdict(
+            True,
+            owner,
+            None,
+            DirectGateSource(
+                facts.memory.resolve(),
+                facts.head,
+                facts.memory_tree,
+                facts.code_commit,
+                owner,
+                path,
+                data,
+            ),
+        )
+    try:
+        path = history_path(leaf_id)
+    except ValueError as error:
+        return DirectGateVerdict(
+            True, None, f"direct landing names no valid leaf: {leaf_id!r} ({error})"
+        )
+    data = canonical_text({"schema": HISTORY_SCHEMA, "leaf": leaf_id, "closed": True, "rows": []})
+    return DirectGateVerdict(
+        True,
+        leaf_id,
+        None,
+        DirectGateSource(
+            facts.memory.resolve(),
+            facts.head,
+            facts.memory_tree,
+            facts.code_commit,
+            leaf_id,
+            path,
+            data.encode("utf-8"),
+        ),
     )
 
 

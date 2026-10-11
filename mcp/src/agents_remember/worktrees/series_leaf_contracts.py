@@ -118,7 +118,18 @@ def _row_leaf_document(
         ) from exc
 
 
-def exact_atomic_leaf_contracts(series: WorktreeContract) -> dict[str, WorktreeContract]:
+def exact_atomic_leaf_contracts(
+    series: WorktreeContract, *, require_all: bool = True
+) -> dict[str, WorktreeContract]:
+    """The master's canonical leaf enclosures, keyed by leaf id.
+
+    With ``require_all`` (the final landing) every non-abandoned row needs its exact enclosure.
+    Without it (a checkpoint, a recorded landing, or owner resolution) rows with no enclosure
+    are left out: a row that never opened an enclosure published nothing, so it owns no line
+    range and no history file (MIK-R52 rule 4). A newly closed file naming such a leaf refuses
+    as unowned; a line commit inside no known range refuses as foreign. Foreign, duplicate or
+    unreadable enclosures refuse either way.
+    """
     documents = atomic_leaf_documents(series)
     contracts: dict[str, WorktreeContract] = {}
     for path in sorted((series.task_root / "enclosures").glob("*/series-contract.md")):
@@ -151,9 +162,9 @@ def exact_atomic_leaf_contracts(series: WorktreeContract) -> dict[str, WorktreeC
             )
         contracts[leaf.leaf_id] = leaf
     missing = documents.refs.keys() - contracts.keys()
-    if missing:
+    if missing and require_all:
         raise CloseoutQueueError(
             "atomic-series-leaf-contract-set-incomplete",
             f"master {series.task_id!r} closeout requires one exact enclosure for each non-abandoned row: missing={sorted(missing)!r}; complete those rows through their leaf lifecycle before closeout",
         )
-    return {leaf_id: contracts[leaf_id] for leaf_id in sorted(documents.refs)}
+    return {leaf_id: contracts[leaf_id] for leaf_id in sorted(documents.refs) if leaf_id in contracts}

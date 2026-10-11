@@ -52,6 +52,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
+        leaf_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify one series code commit and durably serialize its memory + ledger writes.
 
@@ -71,6 +72,10 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
         a moved branch from being committed after admission.
+        The landing judges what it lands (MIK-R52): the invariant gate judges the exact
+        candidate pair as a leaf publication and closes that leaf's history file.
+        Pass leaf_id to judge and close that leaf's history file (MIK-R52 rule 8); without it the
+        leaf is inferred from the one open history file, as before.
         The memory_commit_message must be explicit and
         nonblank only when its contract-derived leg is enabled; typed not-applicable
         legs may omit the corresponding message. The verified-existing code commit has
@@ -85,6 +90,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
                 intent_note=intent_note,
                 candidate_tree=candidate_tree,
                 dry_run=dry_run,
+                leaf_id=leaf_id,
             ),
         )
 
@@ -172,6 +178,11 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
         the addressed landing and never blocks task-document authoring.
 
+        The landing judges what it lands (MIK-R52): on a leaf contract it judges the
+        closeout cell's pair once more before any ref moves, in preview and apply; on a
+        series contract it runs the validator, the net staleness check, the landing chain
+        proof, and the history-file check.
+
         Delivered against reviewed: after the integration has committed, the result says whether
         the code and the memory that were delivered are exactly what the leaf's latest recorded
         review showed: the same, different (and on which side), or no review was recorded. It
@@ -206,7 +217,11 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         master's worktrees, branches and enclosure survive for the work that continues. Pausing a
         master is a separate matter and is NOT this call: stopping its work publishes nothing,
         moves no ref, and leaves its branch, worktrees and enclosure private. MUTATING: moves
-        branch refs; preview with dry_run=true."""
+        branch refs; preview with dry_run=true.
+
+        The checkpoint judges what it lands (MIK-R52): the validator, the net staleness
+        check, the landing chain proof over the leaves that have landed, and the
+        history-file check."""
         return worktree_checkpoint_landing_payload(
             config,
             contract_path,
@@ -228,7 +243,12 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         It shares one contract write with worktree_integrate, so the terminal integration cell has
         a single definition on both routes; nothing is inferred afterwards, because inferring would
         mean querying GitHub and this cell gates branch retirement. It refuses a commit that is not
-        reachable from a landing target. MUTATING (contract only); preview with dry_run=true."""
+        reachable from a landing target. MUTATING (contract only); preview with dry_run=true.
+
+        Recording judges what it records (MIK-R52): on a leaf contract the pair judgment
+        over the landed pair, in the dry run too; on a master contract the validator, the
+        net staleness check from the series code base, the chain proof up to the landed
+        commits, and the history-file check."""
         return worktree_record_landing_payload(
             config,
             contract_path,

@@ -42,12 +42,6 @@ from agents_remember.worktrees.integration.integration_resolution_handoff import
 from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
-from agents_remember.worktrees.knowledge_gate import (
-    GateProbeError,
-    converted_memory,
-    landing_gate_refusal,
-    leaf_cutover_refusal,
-)
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -61,6 +55,7 @@ from agents_remember.worktrees.modules.guidance import (
     next_guidance,
     status_payload,
 )
+from agents_remember.worktrees.modules.integration_gate import integration_gate_block
 from agents_remember.worktrees.modules.integration_preflight_results import (
     atomic_landing_blocked_result,
 )
@@ -80,7 +75,6 @@ from agents_remember.worktrees.series_closeout import (
     publish_series_integration_under_authority,
     require_series_checkpoint_authority,
 )
-from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.source_lineage import (
     lineage_block_payload,
     lineage_refusal,
@@ -790,7 +784,7 @@ def _handover_or_apply_integration(
             },
         )
 
-    blocked = _knowledge_gate_block(
+    blocked = integration_gate_block(
         contract,
         args,
         _route_commits(contract, checkpoint),
@@ -825,82 +819,6 @@ def _handover_or_apply_integration(
         handover_warning=handover_warning,
         checkpoint=checkpoint,
     )
-
-
-def _knowledge_gate_block(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: IntegratedCommits,
-    sources: IntegrationSources,
-    *,
-    operation: str,
-) -> WorktreeCommandResult | None:
-    """MIK-R09 rule 4: a master or checkpoint landing waits for valid, current knowledge.
-
-    The validator runs on the master's memory commit against the parent line's memory tip, and
-    every entry at a path the master's net code diff changed must not be stale at its code commit.
-    Preview and apply refuse alike. Unconverted memory is not gated; the cutover lock refuses it
-    instead -- for a leaf's integration as well -- once the repository holds converted memory
-    (MIK-R09 rule 6). A contract that carries the removed mode never reaches the gate: the
-    route entry refuses it with the opt-out refusal first (MIK-R50 R4a), and this
-    function refuses it itself for a direct caller (MIK-R50 R4b).
-    """
-
-    if contract.memory_mode != "external" or contract.memory_repo_path is None:
-        if contract.memory_mode != "external":
-            return opt_out_refusal_result(contract, operation)
-        return None
-    if contract.kind != "series":
-        refusal = _leaf_landing_lock(contract, commits, sources)
-    else:
-        refusal = landing_gate_refusal(
-            LandingGateRequest(
-                memory_repository=contract.memory_repo_path,
-                memory_commit=commits.memory_content,
-                memory_bases=(sources.current_memory_source,),
-                code_repository=contract.code_repo_path,
-                code_commit=commits.code,
-                code_base=sources.current_code_source,
-            )
-        )
-    if refusal is None:
-        return None
-    return WorktreeCommandResult(
-        2,
-        blocked_integration_payload(
-            contract,
-            "knowledge-gate-refused",
-            refusal,
-            persist=not args.dry_run,
-            developer_decision_required=False,
-        ),
-    )
-
-
-def _leaf_landing_lock(
-    contract: WorktreeContract, commits: IntegratedCommits, sources: IntegrationSources
-) -> str | None:
-    """MIK-R09 rule 6 at a leaf's integration: its closed-out memory lands only when converted.
-
-    A leaf's memory commit was gated at its closeout: the worktree closeout runs the mandatory
-    gate over the exact memory tree it commits, over the commit it records when nothing is left to
-    commit, and over a recovered commit (``closeout_external._refuse_ungated_memory``; L37 P1c).
-    Its landing is therefore refused only by the cutover lock, when neither the landed commit nor
-    the line it lands on holds the layout marker and the repository holds converted memory
-    elsewhere.
-    """
-
-    if not commits.memory_content:
-        return None  # no memory lands
-    assert contract.memory_repo_path is not None
-    try:
-        if converted_memory(
-            contract.memory_repo_path, commits.memory_content, sources.current_memory_source
-        ):
-            return None
-    except GateProbeError as error:
-        return str(error)
-    return leaf_cutover_refusal(contract, "the leaf's integration")
 
 
 def _apply_integration(

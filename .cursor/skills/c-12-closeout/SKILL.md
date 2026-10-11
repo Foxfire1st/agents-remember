@@ -37,7 +37,7 @@ worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_n
 worktree_status(repo_id="<repo-id>", contract_path="<enclosure series-contract.md>")
 worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="cancel|resume", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="inspect|migrate|archive", ...)
-direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>")
+direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>", leaf_id="<leaf-id>")
 ```
 
 Worktree closeout records closeout state in the contract the
@@ -61,6 +61,15 @@ mandatory invariant gate (MIK-R09) about the leaf's exact code and memory candid
 - The memory commit records exactly the tree the gate judged. A file written to the memory
   worktree while the closeout runs is either refused ("changed while the gate ran"; rerun) or
   left as an uncommitted change. It is never committed unjudged.
+- `direct_landing` judges the exact candidate pair through the same gate as a leaf publication
+  and closes that leaf's history file: the leaf named by `leaf_id`, or the owner of the one
+  open history file when `leaf_id` is absent. A recovery through `worktree_operation_control`
+  settles the kept closing receipt in the same call, except a direct landing: the control
+  refuses its recover as `lifecycle-control-not-legal` (a direct landing binds no task
+  intent), and the recovery runs through the route's own executor outside the control.
+- Every later landing judges what it lands again (MIK-R52): leaf `worktree_integrate` judges
+  the closeout cell's pair once more before any ref moves, in preview and apply; recording
+  and master-level landings run their own judgments (see `c-09-git-worktree-manager`).
 
 ## Approval Authority
 

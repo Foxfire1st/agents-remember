@@ -29,11 +29,13 @@ class KnowledgeGate:
         code_tree: str,
         memory_tree: str,
         parent_memory_tip: str | None,
+        persist_worklist: bool = True,
     ) -> str | None:
         result = evaluate_leaf_gate(
             contract,
             CandidateTrees(code=code_tree, memory=memory_tree),
             parent_memory_tip=parent_memory_tip,
+            persist_worklist=persist_worklist,
         )
         return None if result is None else result.refusal()
 
@@ -44,15 +46,27 @@ class KnowledgeGate:
         code_commit: str,
         memory_tree: str,
         source: DirectGateSource | None = None,
+        leaf_id: str | None = None,
     ) -> DirectGateVerdict:
         return direct_verdict(
-            contract, code_commit=code_commit, memory_tree=memory_tree, source=source
+            contract,
+            code_commit=code_commit,
+            memory_tree=memory_tree,
+            source=source,
+            leaf_id=leaf_id,
         )
 
     def direct_source(
-        self, contract: WorktreeContract, *, code_commit: str, memory_tree: str
+        self,
+        contract: WorktreeContract,
+        *,
+        code_commit: str,
+        memory_tree: str,
+        leaf_id: str | None = None,
     ) -> DirectGateVerdict:
-        return direct_source(contract, code_commit=code_commit, memory_tree=memory_tree)
+        return direct_source(
+            contract, code_commit=code_commit, memory_tree=memory_tree, leaf_id=leaf_id
+        )
 
     def landing_refusal(self, request: LandingGateRequest) -> str | None:
         return landing_refusal(request)

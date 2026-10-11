@@ -75,7 +75,7 @@ from agents_remember.serving.review_summary import (
     KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
     register_review_summary_route,
 )
-from agents_remember.worktrees.modules import closeout_external
+from agents_remember.worktrees.modules import closeout_external, integration_gate
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import write_contract
@@ -804,9 +804,13 @@ def test_adopted_seat_status_preview_and_dry_runs(tmp_path: Path, worktree_servi
     assert applied["ok"] is True, applied
 
     before = _snapshot(roots)
-    integrated = worktree_integrate_payload(
-        config, contract.contract_path.as_posix(), dry_run=True
-    )
+    # MIK-R52 rule 3 judges the closeout pair once more at integration, with the parent line's
+    # tip as base; this fixture pair is built for read-boundary classification, not for passing
+    # that judgment, so the re-judgment is held passing here as the closeout gate is above.
+    with mock.patch.object(integration_gate, "leaf_pair_refusal", return_value=None):
+        integrated = worktree_integrate_payload(
+            config, contract.contract_path.as_posix(), dry_run=True
+        )
     assert integrated["ok"] is True, integrated
     reopened = task_reopen_payload(config, contract.contract_path.as_posix(), dry_run=True)
     assert isinstance(reopened, dict), reopened

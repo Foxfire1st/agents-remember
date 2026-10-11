@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from agents_remember.worktrees.modules.git import (
     branch_commit,
     is_ancestor,
     repository_identity,
+    require_ancestor,
     require_git,
     worktree_dirty,
 )
@@ -28,7 +30,11 @@ from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutc
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.series_leaf_contracts import exact_atomic_leaf_contracts
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
 
 
 def require_closeout_publication_authority(contract: WorktreeContract) -> None:
@@ -251,6 +257,93 @@ def _exact_atomic_landing_chain(series: WorktreeContract) -> list[WorktreeContra
     return _require_exact_atomic_landing_chain(series, exact_atomic_leaf_contracts(series))
 
 
+def landed_chain_refusal(
+    series: WorktreeContract, *, code_tip: str, memory_tip: str, require_all: bool
+) -> str | None:
+    """Prove the landed leaves form one exact chain up to the given tips (MIK-R52 rule 4).
+
+    The checkpoint landing and the recorded landing of a master prove the chain over the leaves
+    that have landed: leaves that have not landed are left out, and a line without any landed
+    leaf may hold only its base and reconciled parent positions. The final landing requires every
+    non-abandoned canonical leaf landed (``require_all``). The recorded landing proves the chain
+    up to the landed commits, not up to the branch tips, which may be gone.
+
+    ``None`` when the chain proves; otherwise the refusal naming the foreign commits, the
+    unlanded leaves, or the unreadable input. Nothing is moved. A Git read that fails or times out
+    blocks the landing as an unreadable input, named.
+    """
+
+    try:
+        _require_readable_tip(series.code_repo_path, code_tip, "code")
+        if series.memory_mode == "external":
+            _require_readable_tip(_memory_repository(series), memory_tip, "memory")
+        contracts = exact_atomic_leaf_contracts(series, require_all=require_all)
+    except (
+        CloseoutQueueError,
+        ContractError,
+        TaskDocumentRefError,
+        RuntimeError,
+        subprocess.SubprocessError,
+        OSError,
+    ) as error:
+        return str(error)
+    landed = {
+        leaf_id: leaf
+        for leaf_id, leaf in contracts.items()
+        if _leaf_landed(series, leaf)
+    }
+    if require_all:
+        unlanded = sorted(set(contracts) - set(landed))
+        if unlanded:
+            return (
+                f"master {series.task_id!r}: leaves {unlanded!r} have not landed on the master's "
+                "line; land each enclosure with worktree_integrate before the final landing, "
+                "then retry"
+            )
+    try:
+        ordered = _ordered_atomic_landing_chain(series, landed, verify_landed=False)
+        _require_chain_origin(series, ordered)
+        _require_landing_spine_side(series, ordered, side="code", tip=code_tip)
+        if series.memory_mode == "external":
+            _require_landing_spine_side(series, ordered, side="memory", tip=memory_tip)
+    except (
+        CloseoutQueueError,
+        ContractError,
+        TaskDocumentRefError,
+        RuntimeError,
+        subprocess.SubprocessError,
+        OSError,
+    ) as error:
+        return str(error)
+    return None
+
+
+def _require_readable_tip(repository: Path, tip: str, side: str) -> None:
+    """Refuse a landing tip Git cannot read as an unreadable input, named."""
+
+    try:
+        require_git(repository, ["rev-parse", "--verify", tip])
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            f"the landing chain proof (MIK-R52 rule 4) cannot read the master's {side} tip "
+            f"{tip} ({type(error).__name__}: {error}); the landing is blocked until the trees "
+            "can be read"
+        ) from error
+
+
+def _leaf_landed(series: WorktreeContract, leaf: WorktreeContract) -> bool:
+    """Whether a leaf's enclosure records a landed pair (MIK-R52 rule 4 subset).
+
+    The record's own consistency is checked, not the ref tip: the spine proof below proves the
+    recorded landings reach the tip. A leaf still in flight, or a record that does not bind the
+    leaf's pair to this master's line, is not landed and is left out of the chain.
+    """
+
+    if not _atomic_leaf_code_matches(series, leaf):
+        return False
+    return series.memory_mode != "external" or _atomic_leaf_memory_matches(series, leaf)
+
+
 def _require_exact_atomic_landing_chain(
     series: WorktreeContract,
     contracts: dict[str, WorktreeContract],
@@ -279,16 +372,21 @@ def _require_exact_atomic_landing_chain(
 def _ordered_atomic_landing_chain(
     series: WorktreeContract,
     contracts: dict[str, WorktreeContract],
+    *,
+    verify_landed: bool = True,
 ) -> list[WorktreeContract]:
     """The canonical leaves, oldest landing first, each one proved against its enclosure.
 
     The order is the leaves' own landed ancestry, on both sides of the pair, so it survives a
-    reconciliation that moved the recorded base and any leaf created afterwards.
+    reconciliation that moved the recorded base and any leaf created afterwards. With
+    ``verify_landed`` false the caller has already selected the landed leaves (MIK-R52 rule 4:
+    leaves that have not landed are left out) and only the order is proved here.
     """
 
     remaining = dict(contracts)
-    for leaf in remaining.values():
-        _require_atomic_leaf_landed(series, leaf)
+    if verify_landed:
+        for leaf in remaining.values():
+            _require_atomic_leaf_landed(series, leaf)
     ordered: list[WorktreeContract] = []
     while remaining:
         next_ids = [
@@ -484,18 +582,26 @@ def _require_landing_spine_side(
     ordered: list[WorktreeContract],
     *,
     side: str,
+    tip: str | None = None,
 ) -> None:
     """Prove one series ref is exactly the leaf landings, joined by the reconciled source line.
 
     Each leaf's landing must be an ancestor of the ref, each step from one landing to the next must
     add nothing but an official position one of these contracts synced with, and the same holds for
     the step from the last landing to the ref. A ref that simply *is* the last landing -- every
-    master that reconciled before its final leaf landed -- needs no step at all.
+    master that reconciled before its final leaf landed -- needs no step at all. Every merge on the
+    line is admitted by a recorded sync head, a landed leaf's own history or the parent line
+    (MIK-R52 rule 4).
+
+    ``tip`` overrides the live branch tip: a recorded landing proves the chain up to the landed
+    commits, not up to the branch tips, which may be gone. ``None`` proves up to the live ref.
     """
 
     landings, bases, recorded_base, repository, branch = _spine_facts(series, ordered, side=side)
-    positions = _landing_source_positions(series, ordered, side=side)
-    tip = _series_branch_tip(repository, branch)
+    admission = _merge_admission(series, ordered, side=side)
+    task_id = series.task_id
+    if tip is None:
+        tip = _series_branch_tip(repository, branch)
     if not tip:
         raise CloseoutQueueError(
             "atomic-series-ref-unresolved",
@@ -508,7 +614,11 @@ def _require_landing_spine_side(
             else recorded_base
         )
         _require_admitted_step(
-            repository, origin, tip, positions, _SpineStep(side, "the series ref")
+            repository,
+            origin,
+            tip,
+            _SpineStep(side, "the series ref", task_id),
+            admission,
         )
         return
     previous = landings[0]
@@ -525,8 +635,8 @@ def _require_landing_spine_side(
                 repository,
                 previous,
                 bases[index],
-                positions,
-                _SpineStep(side, f"atomic leaf {leaf.leaf_id!r}"),
+                _SpineStep(side, f"atomic leaf {leaf.leaf_id!r}", task_id),
+                admission,
             )
         previous = landings[index]
     if tip != landings[-1]:
@@ -538,7 +648,11 @@ def _require_landing_spine_side(
                 f"recorded {side} base in its series-contract.md, then retry closeout",
             )
         _require_admitted_step(
-            repository, landings[-1], tip, positions, _SpineStep(side, "the series ref")
+            repository,
+            landings[-1],
+            tip,
+            _SpineStep(side, "the series ref", task_id),
+            admission,
         )
 
 
@@ -569,23 +683,171 @@ def _spine_facts(
 
 @dataclass(frozen=True)
 class _SpineStep:
-    """One step on a series spine: the side it is proved on, and what lands after it."""
+    """One step on a series spine: the side it is proved on, what lands after it, and the master."""
 
     side: str
     step: str
+    task_id: str
+
+
+@dataclass(frozen=True)
+class _MergeAdmission:
+    """Which merges one spine side admits (MIK-R52 rule 4).
+
+    ``heads`` are the sync-produced heads the sync log records on this side; ``leaf_ranges`` are
+    ``(leaf_id, base, integrated)`` per landed leaf, whose own history a merge may lie inside;
+    ``positions`` are every official position (the recorded base and each reconciled parent
+    position), which a merge from the parent line descends toward. ``legacy`` is true when some
+    sync log entry has no recorded head: an entry written before this leaf cannot name the merge
+    it produced, so a merge that is already an ancestor of a recorded landing or position stays
+    silent (it predates verifiable history and later judgments covered its content), while a merge
+    past every recorded point is still judged.
+    """
+
+    heads: tuple[str, ...]
+    leaf_ranges: tuple[tuple[str, str, str], ...]
+    positions: tuple[str, ...]
+    legacy: bool
+
+
+def _merge_admission(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+    *,
+    side: str,
+) -> _MergeAdmission:
+    """The merge admission for one spine side, from the chain's own sync evidence."""
+
+    landings, bases, _recorded_base, _repository, _branch = _spine_facts(
+        series, ordered, side=side
+    )
+    positions = _landing_source_positions(series, ordered, side=side)
+    key = "codeHeadTo" if side == "code" else "memoryHeadTo"
+    heads: list[str] = []
+    legacy = False
+    for contract in (series, *ordered):
+        for entry in contract.sync_log:
+            head = entry.get(key, "")
+            if head:
+                heads.append(head)
+            else:
+                legacy = True
+    leaf_ranges = tuple(
+        (leaf.leaf_id, base, landing)
+        for leaf, base, landing in zip(ordered, bases, landings, strict=True)
+        if leaf.leaf_id and base and landing
+    )
+    return _MergeAdmission(
+        heads=tuple(heads),
+        leaf_ranges=leaf_ranges,
+        positions=positions,
+        legacy=legacy,
+    )
+
+
+def _chain_ancestry(
+    repository: Path, ancestor: str, descendant: str, *, step: _SpineStep, what: str
+) -> bool:
+    """Ancestry inside the landing chain proof: rc 1 is a legitimate non-ancestor.
+
+    Any other Git failure refuses as an unreadable input instead of passing as
+    non-membership (MIK-R52 F01): a failed read never silently admits or condemns.
+    """
+
+    try:
+        return require_ancestor(repository, ancestor, descendant, what=what)
+    except RuntimeError as error:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic series {step.side} ref cannot read its landing ancestry ({error}); "
+            "the landing is blocked until the trees can be read",
+        ) from error
+
+
+def _require_admitted_merges(
+    repository: Path,
+    earlier: str,
+    later: str,
+    admission: _MergeAdmission,
+    step: _SpineStep,
+) -> None:
+    """Refuse a merge on the line that no sync, leaf history or parent line admits (MIK-R52 rule 4).
+
+    The non-merge walk lists commits with ``--no-merges``, so a hand-made merge commit with
+    content of its own used to pass: both parents admitted, the merge itself skipped. Every merge
+    in the step is therefore listed too. A merge must be a head that a sync log entry records, lie
+    inside a landed leaf's own history, or come from the parent line. The refusal names each
+    foreign merge.
+    """
+
+    if earlier == later:
+        return
+    try:
+        listed = require_git(repository, ["rev-list", "--merges", "--full-history", later, "--not", earlier])
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic series {step.side} ref cannot list its merges from {earlier} to {later} "
+            f"({type(error).__name__}: {error}); the landing is blocked until the trees can be "
+            "read",
+        ) from error
+    candidates = listed.split()
+    if admission.legacy:
+        # A merge already inside proven history predates verifiable sync heads and stays
+        # silent; a merge past every recorded landing and position is new history and is
+        # still judged. Without this bound a legacy line would admit a hand-made merge at
+        # its tip unexamined.
+        points = {position for position in admission.positions if position}
+        points.update(landing for _leaf_id, _base, landing in admission.leaf_ranges if landing)
+        candidates = [
+            merge
+            for merge in candidates
+            if not any(
+                _chain_ancestry(repository, merge, point, step=step, what=f"the merge {merge}")
+                for point in points
+            )
+        ]
+    foreign = [
+        merge
+        for merge in candidates
+        if merge not in admission.heads
+        and not any(
+            _chain_ancestry(repository, base, merge, step=step, what=f"the merge {merge}")
+            and _chain_ancestry(
+                repository, merge, integrated, step=step, what=f"the merge {merge}"
+            )
+            for _leaf_id, base, integrated in admission.leaf_ranges
+        )
+        and not any(
+            _chain_ancestry(repository, merge, position, step=step, what=f"the merge {merge}")
+            for position in admission.positions
+            if position
+        )
+    ]
+    if foreign:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"master {step.task_id!r}: the series {step.side} line holds merges this proof "
+            f"admits nowhere at {step.step}: {', '.join(foreign)}. A master line holds only leaf "
+            "landings and its parent line; take the commit off the master branch and make the "
+            "change in a leaf",
+        )
 
 
 def _require_admitted_step(
     repository: Path,
     earlier: str,
     later: str,
-    positions: tuple[str, ...],
     step: _SpineStep,
+    merge_admission: _MergeAdmission,
 ) -> None:
     """Refuse a step that adds history beyond the earlier landing and the official positions.
 
     ``--no-merges`` is what makes a merge the reconciliation device rather than a loophole: a merge
-    introduces no commit of its own, so only genuinely new non-merge history is refused.
+    introduces no commit of its own, so only genuinely new non-merge history is refused. The merge
+    commit itself is judged separately (:func:`_require_admitted_merges`, MIK-R52 rule 4), because
+    a hand-made merge with content of its own passes the non-merge walk while both its parents are
+    admitted.
 
     The step's commits are ENUMERATED and each one is tested for membership in the recorded
     positions. They are never subtracted from the revision walk: ``--not <a position>`` removes
@@ -607,7 +869,13 @@ def _require_admitted_step(
 
     if earlier == later:
         return
-    if not is_ancestor(repository, earlier, later):
+    if not _chain_ancestry(
+        repository,
+        earlier,
+        later,
+        step=step,
+        what=f"the step from {earlier} to {later}",
+    ):
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
             f"atomic series {step.side} ref does not carry {step.step} in the leaf landing order "
@@ -624,22 +892,23 @@ def _require_admitted_step(
     ]
     if step.side == "memory":
         revision_args.extend(["--", ".", ":(top,exclude)memory.md"])
-    admitted = set(positions)
-    official = _positions_inside_the_step(repository, earlier, later, admitted)
+    admitted = set(merge_admission.positions)
+    official = _positions_inside_the_step(repository, earlier, later, admitted, step)
     foreign = [
         commit
         for commit in require_git(repository, revision_args).split()
         if commit not in admitted
-        and not _reached_by_an_official_position(repository, commit, official)
+        and not _reached_by_an_official_position(repository, commit, official, step)
     ]
     if foreign:
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
             f"atomic series {step.side} ref adds history beyond the exact leaf landing chain and the "
-            f"reconciled source line at {step.step}: {', '.join(foreign[:5])}. Move those "
+            f"reconciled source line at {step.step}: {', '.join(foreign)}. Move those "
             "commits off the master line (or land them through a leaf), or record the official "
             "position they came from with worktree_sync, then retry closeout",
         )
+    _require_admitted_merges(repository, earlier, later, merge_admission, step)
 
 
 def _positions_inside_the_step(
@@ -647,6 +916,7 @@ def _positions_inside_the_step(
     earlier: str,
     later: str,
     positions: set[str],
+    step: _SpineStep,
 ) -> tuple[str, ...]:
     """The recorded positions INSIDE this step: strictly after its start, at or before its end.
 
@@ -660,8 +930,12 @@ def _positions_inside_the_step(
         position
         for position in sorted(positions)
         if position != earlier
-        and is_ancestor(repository, earlier, position)
-        and is_ancestor(repository, position, later)
+        and _chain_ancestry(
+            repository, earlier, position, step=step, what=f"the position {position}"
+        )
+        and _chain_ancestry(
+            repository, position, later, step=step, what=f"the position {position}"
+        )
     )
 
 
@@ -669,10 +943,14 @@ def _reached_by_an_official_position(
     repository: Path,
     commit: str,
     official: tuple[str, ...],
+    step: _SpineStep,
 ) -> bool:
     """Whether a position inside this step reaches the commit, so the step is that position's line."""
 
-    return any(is_ancestor(repository, commit, position) for position in official)
+    return any(
+        _chain_ancestry(repository, commit, position, step=step, what=f"the commit {commit}")
+        for position in official
+    )
 
 
 def _landing_source_positions(

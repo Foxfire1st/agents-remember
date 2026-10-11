@@ -511,10 +511,13 @@ consumers = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_curator_coherence_closed_out.py",
   "mcp/tests/test_curator_coherence_file_transport.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_direct_landing.py",
+  "mcp/tests/test_direct_landing_leaf_identity.py",
   "mcp/tests/test_emptied_sprint.py",
+  "mcp/tests/test_evidence_dependency_bounds.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
@@ -1052,6 +1055,24 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/old_coherence_record_l39.json"
+kind = "fixture"
+authority = "external-recorded"
+owner = "mcp/tests/test_evidence_dependency_bounds.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "exact bytes of notes/reports/curator-coherence/260928-MIK-L39/generations/407e11c3/record.json (leaf 260928-MIK-L39, MIK-R39 era)"
+introduced_by = "260928-MIK-L52"
+lifetime = "permanent"
+permanence_rationale = "The pre-derivation record pins old-record loading under the derived bound; any byte change is a different record."
+replacement_contract = "node:mcp/tests/test_evidence_dependency_bounds.py::test_old_coherence_record_still_loads"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_evidence_dependency_bounds.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/pi_rpc/activity.jsonl"
 kind = "recording"
 authority = "external-recorded"
@@ -1140,6 +1161,7 @@ consumers = [
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_closeout_queue_abandoned_rows.py",
   "mcp/tests/test_closeout_queue_store.py",
+  "mcp/tests/test_closeout_refusal_aftermath.py",
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_code_quality_check.py",
   "mcp/tests/test_code_quality_check_scope.py",
@@ -1177,6 +1199,7 @@ consumers = [
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_cross_store_lock_order.py",
+  "mcp/tests/test_curator_coherence_closed_out.py",
   "mcp/tests/test_curator_coherence_file_transport.py",
   "mcp/tests/test_curator_coherence_judgment_evidence.py",
   "mcp/tests/test_curator_coherence_publication_discoverability.py",
@@ -1189,6 +1212,7 @@ consumers = [
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
   "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_direct_landing.py",
+  "mcp/tests/test_direct_landing_leaf_identity.py",
   "mcp/tests/test_dispatch_agent_ambient.py",
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_durable_store_contract.py",
@@ -1206,6 +1230,7 @@ consumers = [
   "mcp/tests/test_eve_protocol.py",
   "mcp/tests/test_evidence_catalog_canonical_form.py",
   "mcp/tests/test_evidence_catalog_gate_boundaries.py",
+  "mcp/tests/test_evidence_dependency_bounds.py",
   "mcp/tests/test_evidence_lanes.py",
   "mcp/tests/test_f07_missing_lock_cursor.py",
   "mcp/tests/test_f08_registered_handler_river.py",
@@ -1234,6 +1259,7 @@ consumers = [
   "mcp/tests/test_harness_submission_authority.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
+  "mcp/tests/test_history_ownership.py",
   "mcp/tests/test_host_release_contract.py",
   "mcp/tests/test_hosted_interactions.py",
   "mcp/tests/test_hosted_readiness.py",
@@ -1242,6 +1268,7 @@ consumers = [
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_instrument_discipline.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_integration_refusal_footprint.py",
   "mcp/tests/test_investigator.py",
   "mcp/tests/test_kernel_pure_regressions.py",
   "mcp/tests/test_knowledge_anchor_content.py",
@@ -1310,6 +1337,7 @@ consumers = [
   "mcp/tests/test_knowledge_worklist.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_landing_unreadable_inputs.py",
   "mcp/tests/test_layering.py",
   "mcp/tests/test_leaf_agent_archive.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
@@ -1325,6 +1353,8 @@ consumers = [
   "mcp/tests/test_lifecycle_owned_completion_relay_reviewer.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_lifecycle_turn_truth_doctrine.py",
+  "mcp/tests/test_master_chain_offenders.py",
+  "mcp/tests/test_master_chain_public_routes.py",
   "mcp/tests/test_master_net_generation.py",
   "mcp/tests/test_master_retirement.py",
   "mcp/tests/test_master_retirement_readiness.py",

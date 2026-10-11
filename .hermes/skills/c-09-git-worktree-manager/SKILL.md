@@ -384,6 +384,14 @@ declared merge/fast-forward/replay strategy, moves the recorded code and memory 
 records the actual resulting code/memory pair in the operation journal. It does not run or require
 acceptance, code quality, test suites, or independent review; the curator's complete memory-quality
 result already traveled with the closeout handoff as a prerequisite.
+
+Every landing judges what it lands (MIK-R52). `worktree_integrate` on a leaf contract judges
+the closeout cell's pair once more before any ref moves, in preview and apply; on a series
+contract it runs the validator, the net staleness check, the landing chain proof, and the
+history-file check. `worktree_checkpoint_landing` runs those master-level judgments over the
+leaves that have landed. `worktree_record_landing` judges the landed pair on a leaf contract,
+in the dry run too, and runs the master-level judgments up to the landed commits on a master
+contract.
 A queue projection may be absent or invalid-empty throughout integration; `worktree_status` and
 `worktree_operation_control` remain task-addressed through the locator/manifest/journal chain. If a
 crash occurs before or after protected ref moves, recovery reconciles the live ref and recorded

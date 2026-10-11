@@ -59,7 +59,9 @@ new base … stale or new items reopen." At a merge, a row that agreed with the 
 holding the same file and the same row, and that disagrees only because the other side moved an
 entry, is reported by ``R09-history-rows-merged`` and does not refuse the merge: the leaf's own
 next closeout checks it again, against its new base, and refuses there until the curator re-records
-the row. A row that already disagreed on the leaf's own side still refuses the merge.
+the row. A row that already disagreed on the leaf's own side still refuses the merge. At a leaf
+publication (MIK-R52 rule 7) the report-only treatment does not apply: every disagreeing row
+refuses, whether the merge moved it or not.
 
 The revision and examined-member bindings are *currentness*, not validity: a row whose invariant
 changed revision afterwards reopens its item at the gate (MIK-R09 rule 2) and is not invalid here.
@@ -269,7 +271,10 @@ def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
                 "existing invariant or family (MIK-R07 failure rule)",
             )
     for path, row, mismatched, moved in _mismatches(context):
-        if not moved:
+        # MIK-R52 rule 7: the report-only treatment of a row the merge moved applies only to a
+        # merge that is not a leaf publication. At a leaf publication every disagreeing row
+        # refuses, whether the merge moved it or not.
+        if not moved or context.leaf_publication:
             yield Finding(
                 path,
                 f"rows.{row.id}.covers",
@@ -282,6 +287,10 @@ def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
 
 
 def check_merged_history_rows(context: ValidationContext) -> Iterator[Finding]:
+    # MIK-R52 rule 7: at a leaf publication the refusing rule above already names every
+    # disagreeing row, so the report-only merge treatment stays silent there.
+    if context.leaf_publication:
+        return
     for path, row, mismatched, moved in _mismatches(context):
         if moved:
             yield Finding(

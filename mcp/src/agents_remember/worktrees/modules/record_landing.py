@@ -14,7 +14,10 @@ on the network being reachable.
 
 On converted memory the record route commits no memory but still checks the landed memory commit
 (MIK-R09 rule 3): the validator passes against the parent line the task last synced from, and a
-leaf's history file is ``closed`` in it. A memory commit made before the repository was converted
+leaf's history file is ``closed`` in it. A leaf's landed pair is judged by MIK-R52 rule 1 before
+anything is recorded, in the dry run too: the validator as a leaf publication with the contract's
+memory base commit as base, then the gate with the worklist recomputed over the two commits'
+trees. A memory commit made before the repository was converted
 carries no layout marker and is exempt; a converted memory line whose landing names no memory
 commit is refused.
 
@@ -39,13 +42,16 @@ from agents_remember.worktrees.knowledge_gate import (
     closed_out_memory,
     converted_memory,
     landing_gate_refusal,
+    landing_history_refusal,
     leaf_cutover_refusal,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.closeout_external import leaf_pair_refusal
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     is_ancestor,
     local_branch_ref,
+    require_ancestor,
     require_git,
 )
 from agents_remember.worktrees.modules.landing_record import (
@@ -53,6 +59,7 @@ from agents_remember.worktrees.modules.landing_record import (
     record_landed_integration,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.series_closeout import landed_chain_refusal
 from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -118,6 +125,9 @@ def _knowledge_gate_refusal(
     A contract that carries the removed mode never reaches the gate's reads:
     the route entry refuses it with the opt-out refusal first (MIK-R50 R4a),
     and this function refuses it itself for a direct caller (MIK-R50 R4b).
+
+    A leaf's landed pair is judged by MIK-R52 rule 1 (:func:`_leaf_pair_recorded_refusal`); every
+    other contract keeps the validator and the closed check below.
     """
 
     repository = contract.memory_repo_path
@@ -130,12 +140,151 @@ def _knowledge_gate_refusal(
         return line
     if not line and not (memory_commit and _commit_converted(repository, memory_commit)):
         # Unconverted memory: nothing more is read, exactly as before this master -- unless the
-        # repository holds converted memory, when the cutover lock refuses (MIK-R09 rule 6).
+        # repository holds converted memory, when the cutover lock refuses (MIK-R09 rule 6). The
+        # lock's verdict is the whole answer here: the landed commit is only probed for the
+        # marker, never read (L09 review R1, finding 7).
         return leaf_cutover_refusal(contract, "record_landing")
     if not memory_commit:
         return _unnamed_memory_commit_refusal(line)
+    return _judged_landing_refusal(contract, code_commit, memory_commit)
+
+
+def _judged_landing_refusal(
+    contract: WorktreeContract, code_commit: str, memory_commit: str
+) -> str | None:
+    """The gate judgment after the marker probe and naming checks pass.
+
+    A leaf's landed pair is judged by MIK-R52 rule 1 (:func:`_leaf_pair_recorded_refusal`); a
+    master's recorded landing runs the validator, the net staleness check, the landing chain
+    proof and rule 5 (MIK-R52 rule 4, :func:`_master_recorded_refusal`).
+    """
+
+    if contract.kind == "leaf":
+        return _leaf_pair_recorded_refusal(contract, code_commit, memory_commit)
+    return _master_recorded_refusal(contract, code_commit, memory_commit)
+
+
+def _master_recorded_refusal(
+    contract: WorktreeContract, code_commit: str, memory_commit: str
+) -> str | None:
+    """Judge a master's recorded landing: validator, staleness, chain proof, rule 5 (rule 4).
+
+    The validator runs as today; the net staleness check of MIK-R09 rule 4 takes the code base
+    from the series contract's ``code_base_commit`` and judges at the contract's recorded code
+    commit when the landed commit contains it, otherwise at the landed commit. The landing chain
+    proof runs over the leaves that have landed, up to the landed commits rather than the branch
+    tips. Rule 5 follows inside the gate. Unconverted lines keep the prior behavior (MIK-R46):
+    the validator only.
+    """
+
+    repository = contract.memory_repo_path
+    assert repository is not None
     request = _landing_request(contract, repository, code_commit, memory_commit)
-    return request if isinstance(request, str) else landing_gate_refusal(request)
+    if isinstance(request, str):
+        return request
+    refusal = landing_gate_refusal(request)
+    if refusal is not None:
+        return refusal
+    try:
+        converted = converted_memory(repository, memory_commit, contract.memory_base_commit)
+    except GateProbeError as error:
+        return str(error)
+    if not converted:
+        return None
+    return landed_chain_refusal(
+        contract,
+        code_tip=code_commit,
+        memory_tip=memory_commit,
+        require_all=False,
+    )
+
+
+def _judged_master_code(contract: WorktreeContract, code_commit: str) -> str:
+    """The code commit a recorded master landing judges staleness at (MIK-R52 rule 4).
+
+    The contract's recorded code commit when the landed commit contains it, otherwise the landed
+    commit itself. A recorded commit Git cannot read refuses by name (MIK-R52 F01).
+    """
+
+    recorded = contract.integrated_code_commit or contract.code_commit
+    if recorded and (
+        code_commit == recorded
+        or require_ancestor(
+            contract.code_repo_path,
+            recorded,
+            code_commit,
+            what=f"the recorded code commit {recorded}",
+        )
+    ):
+        return recorded
+    return code_commit
+
+
+def _leaf_pair_recorded_refusal(
+    contract: WorktreeContract, code_commit: str, memory_commit: str
+) -> str | None:
+    """Judge a leaf's landed pair by MIK-R52 rule 1, then keep the closed check (rule 2).
+
+    The memory commit is the landed one and the base is the contract's memory base commit: a leaf
+    contract with no recorded memory base is refused by name, and the fallback to the landed
+    commit's parents is gone. The code commit is the contract's recorded closeout code commit when
+    the landed code commit is that commit or descends from it, else the landed code commit. The
+    check that the leaf's latest history file is closed stays, through
+    :func:`landing_history_refusal`.
+    """
+
+    repository = contract.memory_repo_path
+    assert repository is not None
+    base = contract.memory_base_commit
+    if not base:
+        return (
+            "record_landing refused: the leaf contract records no memory base commit, so the "
+            "landed pair cannot be judged (MIK-R52 rule 2); close the leaf out through the "
+            "tools, which record the base the landed pair is judged against"
+        )
+    try:
+        code = _judged_recorded_code(contract, code_commit)
+        refusal = leaf_pair_refusal(
+            contract, code_commit=code, memory_commit=memory_commit, bases=(base,),
+            persist_worklist=False,
+        )
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        return str(error)
+    if refusal is not None:
+        return refusal
+    return landing_history_refusal(
+        LandingGateRequest(
+            memory_repository=repository,
+            memory_commit=memory_commit,
+            memory_bases=(base,),
+            code_repository=contract.code_repo_path,
+            code_commit=code,
+            leaf_owner=contract.leaf_id or contract.task_name,
+        )
+    )
+
+
+def _judged_recorded_code(contract: WorktreeContract, code_commit: str) -> str:
+    """The code commit rule 1 judges for a recorded leaf landing (MIK-R52 rule 2).
+
+    The contract's recorded closeout code commit when the landed code commit is that commit or
+    descends from it -- the landed squash or fast-forward still carries the judged trees --
+    otherwise the landed code commit itself. A recorded commit Git cannot read refuses by name:
+    a failed ancestry read never silently falls through to the landed commit (MIK-R52 F01).
+    """
+
+    recorded = contract.code_commit
+    if recorded and (
+        code_commit == recorded
+        or require_ancestor(
+            contract.code_repo_path,
+            recorded,
+            code_commit,
+            what=f"the leaf's recorded closeout code commit {recorded}",
+        )
+    ):
+        return recorded
+    return code_commit
 
 
 def _landing_request(
@@ -156,14 +305,22 @@ def _landing_request(
     # frozen. A commit made by any other hand -- a child of it, a merge made afterwards -- freezes
     # nothing, so every row of the leaf is checked against the landed tree (L37 review R5-1).
     recorded = landed in closed_out_memory(contract)
+    try:
+        code = _judged_master_code(contract, code_commit)
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        return f"record_landing refused: the landed code commit cannot be read: {error}"
     return LandingGateRequest(
         memory_repository=repository,
         memory_commit=memory_commit,
         memory_bases=bases,
         code_repository=contract.code_repo_path,
-        code_commit=code_commit,
+        code_commit=code,
+        # MIK-R52 rule 4: the recorded landing judges net staleness from the series contract's
+        # code base, at the recorded code commit when the landed commit contains it.
+        code_base=contract.code_base_commit or None,
         leaf_owner=(contract.leaf_id or contract.task_name) if contract.kind == "leaf" else None,
         frozen=tuple(made_on) if recorded else (),
+        series_contract=contract.contract_path.as_posix(),
     )
 
 

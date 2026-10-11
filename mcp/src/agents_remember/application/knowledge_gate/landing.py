@@ -12,6 +12,13 @@
   be read, blocks it as an unreadable input; any other reason (a locator kind that cannot be
   re-resolved) is named as unverifiable at landing. Nothing is let through unobserved.
 
+**Master history files (MIK-R52 rule 5).** Every history file the landed memory commit holds and
+no base holds closed must be closed, name an owner the master accounts for, and be byte-identical
+to the same path in the owner's recorded publication. Owners are resolved in one function
+(:func:`resolve_history_owners`): a leaf with a landed enclosure under the master, a direct
+landing recorded in the series' operation journal, or a crossing sync whose merge the chain proof
+admits. Each failing file is one finding with its reason.
+
 **Record landing (rule 3).** It commits no memory: it checks that the landed memory commit passes
 the validator (again through ``memory_commit_refusal``) against the parent line the task synced
 from and, for a leaf, that the leaf's history file is ``closed`` in it. A memory commit made before the repository was converted carries no layout marker and is
@@ -20,7 +27,10 @@ exempt; the worktree layer decides that with its marker probe before it asks.
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.application.knowledge_currentness.observe import (
@@ -47,13 +57,36 @@ from agents_remember.models.knowledge_files.documents import (
     owner_history_attempt,
 )
 from agents_remember.models.knowledge_files.history import is_closed_history
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.tasks.document_refs import TaskDocumentRefError
+from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
+    direct_landing_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
+)
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.series_leaf_contracts import exact_atomic_leaf_contracts
 from agents_remember.worktrees.services import LandingGateRequest
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
 
-__all__ = ["STALE_AT_LANDING", "UNVERIFIABLE_AT_LANDING", "landing_refusal", "net_stale_entries"]
+__all__ = [
+    "STALE_AT_LANDING",
+    "UNVERIFIABLE_AT_LANDING",
+    "landing_refusal",
+    "net_stale_entries",
+    "resolve_history_owners",
+]
 
 STALE_AT_LANDING = "knowledge-stale-at-landing"
 UNVERIFIABLE_AT_LANDING = "knowledge-unverifiable-at-landing"
 HISTORY_NOT_CLOSED = "knowledge-history-not-closed"
+HISTORY_UNOWNED = "knowledge-history-unowned"
+HISTORY_NOT_IDENTICAL = "knowledge-history-not-identical"
 
 
 def _git(repository: Path, *args: str) -> str | None:
@@ -98,6 +131,18 @@ def _findings(request: LandingGateRequest) -> list[GateFinding]:
         findings += _history_closed(request)
     if request.code_base:
         findings += net_stale_entries(request)
+    if request.series_contract is not None and request.leaf_owner is None:
+        try:
+            findings += _master_history_ownership(request)
+        except (RuntimeError, subprocess.SubprocessError) as error:
+            findings.append(
+                GateFinding(
+                    RUN_INCOMPLETE,
+                    "history-ownership",
+                    f"the history owner check cannot be read ({type(error).__name__}: {error}); "
+                    "the landing is blocked until the trees can be read",
+                )
+            )
     return findings
 
 
@@ -233,3 +278,390 @@ def _not_current(
 
 def _unreadable(name: str, detail: str) -> GateFinding:
     return GateFinding(RUN_INCOMPLETE, name, f"{detail}; an unreadable tree blocks the landing")
+
+
+def _commit_blob_ids(
+    repository: Path, commit: str, directory: str
+) -> dict[str, str] | None:
+    """Map every blob path under ``directory`` at ``commit`` to its blob id; ``None`` if unreadable."""
+
+    listed = _git(repository, "ls-tree", "-r", commit, "--", directory)
+    if listed is None:
+        return None
+    ids: dict[str, str] = {}
+    for line in listed.splitlines():
+        head, tab, path = line.partition("\t")
+        parts = head.split()
+        if tab and len(parts) == 3 and parts[1] == "blob":
+            ids[path] = parts[2]
+    return ids
+
+
+def _listed_history_blobs(
+    request: LandingGateRequest,
+) -> tuple[dict[str, str], list[dict[str, str]], dict[str, bytes]] | GateFinding:
+    """List the landed and base history blobs and read them in one batch.
+
+    Returns ``(landed_ids, bases, blobs)`` or the finding when a side cannot be listed.
+    """
+
+    landed_ids = _commit_blob_ids(
+        request.memory_repository, request.memory_commit, f"{KNOWLEDGE_ROOT}/history/"
+    )
+    if landed_ids is None:
+        return _unreadable(
+            f"{KNOWLEDGE_ROOT}/history/",
+            "the landed memory commit's history files cannot be listed",
+        )
+    bases = [
+        _commit_blob_ids(request.memory_repository, base, f"{KNOWLEDGE_ROOT}/history/")
+        for base in request.memory_bases
+    ]
+    if any(ids is None for ids in bases):
+        return _unreadable(
+            f"{KNOWLEDGE_ROOT}/history/",
+            "a comparison base's history files cannot be listed",
+        )
+    wanted = {path for path in landed_ids if path.endswith(".json")}
+    blob_ids = [landed_ids[path] for path in wanted]
+    for base in bases:
+        assert base is not None
+        blob_ids += [blob for path, blob in base.items() if path in wanted]
+    try:
+        blobs = read_git_blobs_bytes(request.memory_repository, blob_ids)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        return _unreadable(
+            f"{KNOWLEDGE_ROOT}/history/",
+            f"history blobs cannot be read ({type(error).__name__}: {error})",
+        )
+    return landed_ids, [base for base in bases if base is not None], blobs
+
+
+def _history_owner_id(path: str) -> str | None:
+    """The history owner a ``knowledge/history/`` file names, or ``None`` outside the shape."""
+
+    match = _HISTORY_OWNER_PATTERN.match(path)
+    return match[1] if match else None
+
+
+def resolve_history_owners(
+    request: LandingGateRequest, series: WorktreeContract, paths: list[str]
+) -> dict[str, list[_HistoryOwner]] | GateFinding:
+    """Resolve, in one function, every owner a master-level landing may hold history files from.
+
+    Owners are a leaf with a landed enclosure under the master (its recorded closeout memory
+    commit), a direct landing recorded in the series' operation journal (its recorded memory
+    commit), or a crossing sync whose merge the chain proof admits (a recorded sync head). The map
+    holds, per newly closed history path, the candidate owners in that precedence order: a leaf
+    claims the files naming it, while a direct landing or crossing head claims the landed files
+    it holds on the landed line. An unreadable enclosure contract or operation journal refuses as
+    the returned finding, naming the file.
+    """
+
+    try:
+        # Owner resolution needs only landed enclosures; rows with no enclosure published
+        # nothing and own nothing (MIK-R52 rule 4).
+        enclosures = exact_atomic_leaf_contracts(series, require_all=False)
+    except (CloseoutQueueError, ContractError, TaskDocumentRefError, OSError, ValueError) as error:
+        return GateFinding(
+            RUN_INCOMPLETE,
+            series.contract_path.as_posix(),
+            f"the master's leaf enclosures cannot be read ({type(error).__name__}: {error}); "
+            "the landing is blocked until every enclosure is accounted for",
+        )
+    leaf_commits: dict[str, str] = {}
+    for leaf in enclosures.values():
+        if leaf.integration_status != "completed":
+            continue
+        publication = leaf.memory_content_commit or leaf.integrated_memory_content_commit
+        if leaf.leaf_id and publication:
+            leaf_commits[leaf.leaf_id] = publication
+    direct = _direct_landing_commits(series)
+    if isinstance(direct, GateFinding):
+        return direct
+    heads = _recorded_crossing_heads(series, enclosures)
+    return _claim_history_paths(request, paths, leaf_commits, direct, heads)
+
+
+def _claim_history_paths(
+    request: LandingGateRequest,
+    paths: list[str],
+    leaf_commits: dict[str, str],
+    direct: list[str],
+    heads: list[str],
+) -> dict[str, list[_HistoryOwner]]:
+    """Claim every newly closed history path for its leaf, direct landing or crossing head owners."""
+
+    owners: dict[str, list[_HistoryOwner]] = {}
+    for path in paths:
+        candidates = owners.setdefault(path, [])
+        owner_id = _history_owner_id(path)
+        if owner_id is not None and owner_id in leaf_commits:
+            candidates.append(
+                _HistoryOwner("leaf", f"leaf {owner_id!r}", leaf_commits[owner_id])
+            )
+        for commit in direct:
+            if _commit_holds_path(request, commit, path):
+                candidates.append(
+                    _HistoryOwner("direct", f"the direct landing at {commit}", commit)
+                )
+        for commit in heads:
+            if _commit_holds_path(request, commit, path):
+                candidates.append(
+                    _HistoryOwner("crossing", f"the crossing sync at {commit}", commit)
+                )
+    return owners
+
+
+def _commit_holds_path(request: LandingGateRequest, commit: str, path: str) -> bool:
+    """Whether ``commit`` sits on the landed line and holds ``path``.
+
+    A publication off the landed line owns nothing here: the same bytes from another line would
+    admit a file that never landed on this one. A legitimate non-ancestor therefore answers
+    False and keeps that policy. A commit Git cannot read refuses instead: a failed read never
+    passes as absence (MIK-R52 F01).
+    """
+
+    repository = request.memory_repository
+    ancestry = run_git(
+        repository,
+        ["merge-base", "--is-ancestor", commit, request.memory_commit],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
+    if ancestry.returncode == 1:
+        return False
+    if ancestry.returncode != 0:
+        detail = (ancestry.stderr or "").strip()
+        raise RuntimeError(
+            f"the history owner check cannot read the ancestry of {commit} to the landed "
+            f"memory commit {request.memory_commit} (git merge-base rc {ancestry.returncode}"
+            + (f": {detail}" if detail else "")
+            + "); the landing is not judged"
+        )
+    read = run_git(
+        repository,
+        ["rev-parse", "--verify", "--quiet", f"{commit}:{path}"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
+    if read.returncode == 1:
+        # ``rev-parse --verify --quiet`` answers 1 only for a path the readable commit does
+        # not hold: genuinely absent, which owns nothing here.
+        return False
+    if read.returncode != 0:
+        detail = (read.stderr or "").strip()
+        raise RuntimeError(
+            f"the history owner check cannot read {path} at {commit} "
+            f"(git rev-parse rc {read.returncode}"
+            + (f": {detail}" if detail else "")
+            + "); the landing is not judged"
+        )
+    return True
+
+
+def _direct_landing_commits(series: WorktreeContract) -> list[str] | GateFinding:
+    """The recorded memory commits of the series' direct landings, oldest first.
+
+    The series' operation journal is the current direct-landing record plus every archived
+    generation beside it. A journal that cannot be read refuses as the returned finding, naming
+    the file.
+    """
+
+    try:
+        store = direct_landing_store(series)
+        records: list[dict[str, object]] = []
+        current = store.read()
+        if current is not None:
+            records.append(current.model_dump(mode="json"))
+        archives = sorted(
+            store.path.parent.glob(f"{store.path.stem}.generation-*.json"),
+            key=_generation_number,
+        )
+    except (LifecycleOperationReadError, OSError, RuntimeError, ValueError) as error:
+        return GateFinding(
+            RUN_INCOMPLETE,
+            series.contract_path.as_posix(),
+            f"the series' direct-landing journal cannot be read ({type(error).__name__}: "
+            f"{error}); the landing is blocked until its direct landings are accounted for",
+        )
+    commits: list[str] = []
+    for archive in archives:
+        try:
+            payload = json.loads(archive.read_text(encoding="utf-8"))
+            record = LifecycleOperationRecord.model_validate(payload)
+        except (OSError, ValueError) as error:
+            return GateFinding(
+                RUN_INCOMPLETE,
+                archive.as_posix(),
+                f"the series' direct-landing journal entry cannot be read "
+                f"({type(error).__name__}: {error}); the landing is blocked until its direct "
+                "landings are accounted for",
+            )
+        records.append(record.model_dump(mode="json"))
+    for record in records:
+        result = record.get("result")
+        commit = result.get("memoryContentCommit") if isinstance(result, dict) else None
+        if isinstance(commit, str) and commit and commit not in commits:
+            commits.append(commit)
+    return commits
+
+
+def _recorded_crossing_heads(
+    series: WorktreeContract, enclosures: dict[str, WorktreeContract]
+) -> list[str]:
+    """The recorded memory heads of the chain's own syncs (MIK-R52 rule 4).
+
+    A crossing sync whose merge the chain proof admits owns the history files its merge closed;
+    the bytes are compared with that merge commit. Entries written before this leaf record no
+    head and contribute none.
+    """
+
+    heads: list[str] = []
+    contracts = [series, *enclosures.values()]
+    for contract in contracts:
+        for entry in contract.sync_log:
+            head = entry.get("memoryHeadTo", "")
+            if head and head not in heads:
+                heads.append(head)
+    return heads
+
+
+def _owned_history_finding(
+    request: LandingGateRequest,
+    owners: dict[str, list[_HistoryOwner]],
+    path: str,
+    data: bytes | None,
+) -> list[GateFinding]:
+    """The one finding for a newly closed history file: closed, owned and identical, or why not."""
+
+    if not is_closed_history(data):
+        state = "is absent" if data is None else "is not closed"
+        return [
+            GateFinding(
+                HISTORY_NOT_CLOSED,
+                path,
+                f"the history file {state} in the landed memory commit; every history file a "
+                "master-level landing newly closes is closed by its owner's publication",
+            )
+        ]
+    candidates = owners.get(path, [])
+    if not candidates:
+        return [
+            GateFinding(
+                HISTORY_UNOWNED,
+                path,
+                "the history file names no owner the master accounts for: a leaf with a landed "
+                "enclosure under this master, a direct landing recorded in the series' operation "
+                "journal, or a crossing sync whose merge the chain proof admits; a hand-made "
+                "memory commit, a fabricated or edited closed history file and a commit outside "
+                "a leaf do not pass a landing",
+            )
+        ]
+    unreadable: list[str] = []
+    tried: list[str] = []
+    for owner in candidates:
+        blob = _git(
+            request.memory_repository,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{owner.commit}:{path}",
+        )
+        if blob is None or not blob.strip():
+            # The owner's publication holds no such path: tried, not unreadable.
+            tried.append(f"{owner.name} at {owner.commit} (no such path)")
+            continue
+        try:
+            published = read_git_blobs_bytes(request.memory_repository, [blob.strip()]).get(
+                blob.strip()
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            published = None
+        if published is None:
+            unreadable.append(f"{owner.name} at {owner.commit}")
+        elif published == data:
+            return []
+        else:
+            tried.append(f"{owner.name} at {owner.commit}")
+    if unreadable and not tried:
+        return [
+            GateFinding(
+                RUN_INCOMPLETE,
+                path,
+                f"the owner's recorded publication cannot be read ({'; '.join(unreadable)}); "
+                "an unreadable input blocks the landing",
+            )
+        ]
+    return [
+        GateFinding(
+            HISTORY_NOT_IDENTICAL,
+            path,
+            "the history file differs from the same path in every recorded publication that "
+            f"owns it ({'; '.join(tried + unreadable)}); a fabricated or edited closed history "
+            "file does not pass a landing",
+        )
+    ]
+
+
+_HISTORY_OWNER_PATTERN = re.compile(r"^knowledge/history/(.+?)(?:-attempt-\d+)?\.json$")
+_GENERATION_PATTERN = re.compile(r"\.generation-(\d+)\.json$")
+
+
+def _generation_number(path: Path) -> tuple[int, str]:
+    """Sort a generation archive oldest first (numeric generation, then name)."""
+
+    match = _GENERATION_PATTERN.search(path.name)
+    return (int(match[1]), path.name) if match else (0, path.name)
+
+
+@dataclass(frozen=True)
+class _HistoryOwner:
+    """One recorded publication a master-level landing may hold a history file from (rule 5)."""
+
+    kind: str  # "leaf" | "direct" | "crossing"
+    name: str  # how the refusal names the owner
+    commit: str  # the recorded publication commit the bytes are compared with
+
+
+def _master_history_ownership(request: LandingGateRequest) -> list[GateFinding]:
+    """MIK-R52 rule 5: every newly closed history file is closed, owned and identical.
+
+    Every history file that the landed memory commit holds and no base holds closed must be
+    closed, name an owner the master accounts for, and be byte-identical to the same path in the
+    owner's recorded publication. Each failing file is one finding with its reason.
+    """
+
+    assert request.series_contract is not None
+    listed = _listed_history_blobs(request)
+    if isinstance(listed, GateFinding):
+        return [listed]
+    landed_ids, bases, blobs = listed
+    # Only newly closed files need an owner: a base that already holds a file closed freezes it.
+    # Masters with no new history files never read the contract or the journal here.
+    newly_closed = [
+        path
+        for path in sorted(landed_ids)
+        if path.endswith(".json")
+        and not any(
+            path in base and is_closed_history(blobs.get(base[path])) for base in bases
+        )
+    ]
+    if not newly_closed:
+        return []
+    try:
+        series = load_contract(Path(request.series_contract))
+    except (ContractError, OSError, ValueError) as error:
+        return [
+            GateFinding(
+                RUN_INCOMPLETE,
+                request.series_contract,
+                f"the series contract cannot be read ({type(error).__name__}: {error}); the "
+                "landing is blocked until its enclosures can be accounted for",
+            )
+        ]
+    owners = resolve_history_owners(request, series, newly_closed)
+    if isinstance(owners, GateFinding):
+        return [owners]
+    findings: list[GateFinding] = []
+    for path in newly_closed:
+        findings += _owned_history_finding(request, owners, path, blobs.get(landed_ids[path]))
+    return findings

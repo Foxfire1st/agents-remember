@@ -70,8 +70,14 @@ from agents_remember.worktrees.knowledge_gate import (
     leaf_gate_refusal,
     settle_direct_closing,
 )
-from agents_remember.worktrees.modules import closeout_external, integrate, record_landing
+from agents_remember.worktrees.modules import (
+    closeout_external,
+    integrate,
+    integration_gate,
+    record_landing,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.integration_gate import integration_gate_block
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.services import (
     DirectGateVerdict,
@@ -276,25 +282,29 @@ def test_record_landing_refuses_through_its_route_entry(world: Gated, ports: Non
         _record(world, broken)
 
 
-def test_the_master_and_checkpoint_landings_refuse_through_the_integration_route(
+def test_a_hand_edited_enclosure_contract_refuses_through_the_public_recorded_route(
     world: Gated, ports: None
 ) -> None:
-    """M02: preview and apply share ``_handover_or_apply_integration``; both routes refuse there."""
+    """M02: a hand-edited enclosure contract file (not an in-memory replacement) is what the
+    public recorded route judges: blanking its recorded memory base refuses naming the rule."""
 
-    code_commit = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    memory_commit = commit(world.memory, {}, trailer=code_commit)  # nothing re-anchored: stale
-    series = replace(_series(world), code_commit=code_commit, memory_content_commit=memory_commit)
-    sources = IntegrationSources(world.code_base, world.memory_base, False, False)
-    args = WorktreeArgs(contract_path=series.contract_path, dry_run=True)
-    commits = IntegratedCommits(code=code_commit, memory_content=memory_commit)
-    landing = integrate.CheckpointLanding(refs=cast(Any, None), commits=commits, sources=sources)
-    for checkpoint in (None, landing):
-        blocked = integrate._handover_or_apply_integration(
-            series, args, sources, checkpoint=checkpoint
+    _answer(world)
+    path = world.contract_path()
+    text = path.read_text(encoding="utf-8")
+    edited = text.replace(f"  base_commit: {world.memory_base}", "  base_commit: ", 1)
+    assert edited != text
+    path.write_text(edited, encoding="utf-8")
+    with pytest.raises(RuntimeError) as refused:
+        record_landing.record_landing_result(
+            WorktreeArgs(
+                contract_path=path,
+                dry_run=True,
+                landed_code_commit=world.code_base,
+                landed_memory_content_commit=world.memory_base,
+            )
         )
-        assert blocked.returncode == 2
-        assert blocked.payload["state"] == "knowledge-gate-refused", blocked.payload
-        assert "knowledge-stale-at-landing" in str(blocked.payload["reason"])
+    assert "records no memory base commit" in str(refused.value)
+    assert "MIK-R52 rule 2" in str(refused.value)
 
 
 # -- direct landing: its public entry, with a configured series ----------------------------------
@@ -567,6 +577,11 @@ def test_an_unreadable_closing_receipt_is_a_named_refusal_at_apply_and_at_cancel
 
 
 # --------------------------------------------------------------------------------------------------
+# MIK-R52 rule 8: direct landing names its leaf
+# --------------------------------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------------------------------
 # Finding 4: the master's net staleness refuses on unverifiable entries too
 # --------------------------------------------------------------------------------------------------
 
@@ -580,25 +595,33 @@ def test_a_timed_out_blob_read_or_an_unverifiable_entry_refuses_a_master_landing
     series = replace(_series(world), code_commit=code_commit, memory_content_commit=memory_commit)
     sources = IntegrationSources(world.code_base, world.memory_base, False, False)
     args = WorktreeArgs(contract_path=series.contract_path, dry_run=True)
-    assert (
-        integrate._knowledge_gate_block(
-            series, args, _commits(series), sources, operation="worktree_integrate"
+    # The landing chain proof is pinned separately with real enclosures; this synthetic world has
+    # no task documents, so the chain is held proved here and only the validator and the net
+    # staleness check are exercised.
+    chained = mock.patch.object(integration_gate, "landed_chain_refusal", return_value=None)
+    with chained:
+        assert (
+            integration_gate_block(
+                series, args, _commits(series), sources, operation="worktree_integrate"
+            )
+            is None
         )
-        is None
-    )
 
-    timed_out = subprocess.TimeoutExpired(["git", "cat-file"], 30)
-    with mock.patch.object(observe, "_observed_content", side_effect=timed_out):
-        blocked = integrate._knowledge_gate_block(
-            series, args, _commits(series), sources, operation="worktree_integrate"
-        )
+        timed_out = subprocess.TimeoutExpired(["git", "cat-file"], 30)
+        with mock.patch.object(observe, "_observed_content", side_effect=timed_out):
+            blocked = integration_gate_block(
+                series, args, _commits(series), sources, operation="worktree_integrate"
+            )
     assert blocked is not None
     reason = str(blocked.payload["reason"])
     assert "knowledge-worklist-incomplete" in reason and "a Git read failed" in reason
 
     unsupported = "the locator kind 'symbol' is unsupported for 'pkg/a.py': no shipped grammar"
-    with mock.patch.object(observe, "_unsupported", return_value=unsupported):
-        blocked = integrate._knowledge_gate_block(
+    with (
+        chained,
+        mock.patch.object(observe, "_unsupported", return_value=unsupported),
+    ):
+        blocked = integration_gate_block(
             series, args, _commits(series), sources, operation="worktree_integrate"
         )
     assert blocked is not None
@@ -800,7 +823,9 @@ def test_record_landing_on_unconverted_memory_never_reads_the_landed_commit(
     world: Gated, ports: None
 ) -> None:
     unreadable = "f" * 40
-    refused = pytest.raises(RuntimeError, match="landed memory commit cannot be read")
+    # Converted: an unreadable commit refuses, named -- through the rule-1 pair judgment, which
+    # reads the judged pair where the old probe read the landed commit (MIK-R52 rule 2).
+    refused = pytest.raises(RuntimeError, match="cannot read the judged pair")
     with refused:
         _record(world, unreadable)  # converted: an unreadable commit refuses, named
     for branch in ("main", "leaf"):

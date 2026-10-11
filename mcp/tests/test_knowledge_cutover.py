@@ -48,7 +48,7 @@ from agents_remember.worktrees.knowledge_gate import (
     leaf_gate_refusal,
     prepared_closeout_lock,
 )
-from agents_remember.worktrees.modules import closeout_external, integrate, record_landing
+from agents_remember.worktrees.modules import closeout_external, integration_gate, record_landing
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.services import (
     LandingGateRequest,
@@ -152,9 +152,13 @@ def _direct(probe: _Probe) -> str | None:
 
 def _blocked(probe: _Probe, target: Any, operation: str) -> str | None:
     dry = cast(Any, SimpleNamespace(dry_run=True))
-    result = integrate._knowledge_gate_block(
-        target, dry, probe.commits, probe.sources, operation=operation
-    )
+    # The landing chain proof is pinned separately with real enclosures; this synthetic world has
+    # no task documents, so the chain is held proved here and only the gate is exercised.
+    chained = mock.patch.object(integration_gate, "landed_chain_refusal", return_value=None)
+    with chained:
+        result = integration_gate.integration_gate_block(
+            target, dry, probe.commits, probe.sources, operation=operation
+        )
     return None if result is None else str(result.payload["reason"])
 
 
@@ -363,17 +367,20 @@ def test_the_converting_candidate_is_gated_never_locked(tmp_path: Path, ports: N
     assert sync_transaction._cutover_locked(cast(Any, skipped), {}) is None  # code only
 
     # Review R1, F3: the leaf's own converted commit lands on its unconverted line (X04, X05), and a
-    # repository-level run on a converted checkout is never locked (X07).
+    # repository-level run on a converted checkout is never locked (X07). MIK-R52 rule 3 judges
+    # the converted commit's pair instead of locking it; the fixture pair is refused by the
+    # validator for its own fixture reasons, but never by the cutover lock.
     main = git(world.memory, "rev-parse", "main")
     landed = IntegratedCommits(code=git(world.code, "rev-parse", "HEAD"), memory_content=converted)
     sources = IntegrationSources(world.code_base, main, False, False)
-    assert integrate._leaf_landing_lock(world.contract, landed, sources) is None
+    judged = integration_gate._leaf_landing_lock(world.contract, landed, sources)
+    assert "refuses the unconverted memory" not in str(judged)  # judged, never locked
     recorded = record_landing._knowledge_gate_refusal(world.contract, world.code_base, converted)
     assert "refuses the unconverted memory" not in str(recorded)  # the gate judges it instead
     repository_level = SimpleNamespace(contract=None, onboarding_root=world.memory / "onboarding")
     assert controller._unconverted_refusal(repository_level) is None
     unconverted_landing = IntegratedCommits(code=landed.code, memory_content=main)
-    assert integrate._leaf_landing_lock(world.contract, unconverted_landing, sources) is not None
+    assert integration_gate._leaf_landing_lock(world.contract, unconverted_landing, sources) is not None
 
 
 def test_no_read_selects_the_database_of_a_converted_tree(tmp_path: Path) -> None:

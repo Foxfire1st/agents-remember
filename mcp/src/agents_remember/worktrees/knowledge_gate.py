@@ -94,6 +94,7 @@ __all__ = [
     "forget_direct_closing",
     "keep_direct_closing",
     "landing_gate_refusal",
+    "landing_history_refusal",
     "latest_owner_history",
     "leaf_cutover_refusal",
     "leaf_gate_refusal",
@@ -248,9 +249,17 @@ def prepared_closeout_lock(contract: WorktreeContract) -> str | None:
 
 
 def leaf_gate_refusal(
-    contract: WorktreeContract, *, code_tree: str, memory_tree: str
+    contract: WorktreeContract,
+    *,
+    code_tree: str,
+    memory_tree: str,
+    persist_worklist: bool = True,
 ) -> str | None:
-    """The closeout validator's gate over a leaf's exact candidate; ``None`` when it passes."""
+    """The closeout validator's gate over a leaf's exact candidate; ``None`` when it passes.
+
+    With ``persist_worklist=False`` the recomputed worklist is never written: judging routes
+    that must leave every file untouched (MIK-R52 F02) pass False.
+    """
 
     if is_disabled_contract(contract):
         return opt_out_detail_for_contract(contract, "the closeout validator")
@@ -270,7 +279,11 @@ def leaf_gate_refusal(
             f"({type(error).__name__}: {error})"
         )
     return port.leaf_refusal(
-        contract, code_tree=code_tree, memory_tree=memory_tree, parent_memory_tip=tip
+        contract,
+        code_tree=code_tree,
+        memory_tree=memory_tree,
+        parent_memory_tip=tip,
+        persist_worklist=persist_worklist,
     )
 
 
@@ -292,8 +305,13 @@ def direct_gate_verdict(
     code_commit: str,
     memory_tree: str,
     source: DirectGateSource | None = None,
+    leaf_id: str | None = None,
 ) -> DirectGateVerdict:
-    """The gate at direct landing over its exact candidate (``applies`` is False when unconverted)."""
+    """The gate at direct landing over its exact candidate (``applies`` is False when unconverted).
+
+    ``leaf_id`` names the leaf whose history file the landing judges and closes (MIK-R52 rule 8);
+    without it the leaf is inferred from the one open history file, as before.
+    """
 
     if is_disabled_contract(contract):
         return DirectGateVerdict(
@@ -310,20 +328,35 @@ def direct_gate_verdict(
     if port is None:
         return DirectGateVerdict(True, None, GATE_UNBOUND)
     if source is None:
-        return port.direct_verdict(contract, code_commit=code_commit, memory_tree=memory_tree)
+        return port.direct_verdict(
+            contract, code_commit=code_commit, memory_tree=memory_tree, leaf_id=leaf_id
+        )
     return port.direct_verdict(
-        contract, code_commit=code_commit, memory_tree=memory_tree, source=source
+        contract,
+        code_commit=code_commit,
+        memory_tree=memory_tree,
+        source=source,
+        leaf_id=leaf_id,
     )
 
 
 def direct_gate_source(
-    contract: WorktreeContract, *, code_commit: str, memory_tree: str
+    contract: WorktreeContract,
+    *,
+    code_commit: str,
+    memory_tree: str,
+    leaf_id: str | None = None,
 ) -> DirectGateVerdict:
-    """Select the exact history source without judging an unfinished publication tree."""
+    """Select the exact history source without judging an unfinished publication tree.
+
+    ``leaf_id`` names the leaf whose history file the landing judges and closes (MIK-R52 rule 8).
+    """
     port = _port()
     if port is None:
         return DirectGateVerdict(True, None, GATE_UNBOUND)
-    return port.direct_source(contract, code_commit=code_commit, memory_tree=memory_tree)
+    return port.direct_source(
+        contract, code_commit=code_commit, memory_tree=memory_tree, leaf_id=leaf_id
+    )
 
 
 def landing_gate_refusal(request: LandingGateRequest) -> str | None:
@@ -368,6 +401,21 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
     return "\n".join(named) if named else None
 
 
+def landing_history_refusal(request: LandingGateRequest) -> str | None:
+    """The landed history-file check of a recorded leaf landing, without the validator.
+
+    MIK-R52 rule 2 keeps the leaf's latest-history-file closed check while rule 1 judges the
+    pair (the validator and the gate); calling :func:`landing_gate_refusal` as well would judge
+    the same validator twice. The request carries the leaf owner and no code base, so only the
+    history-file finding is produced.
+    """
+
+    port = _port()
+    if port is None:
+        return GATE_UNBOUND
+    return port.landing_refusal(request)
+
+
 @dataclass(frozen=True)
 class HistoryClosing:
     """One reversible file preparation, with its previous and exact written bytes."""
@@ -376,16 +424,21 @@ class HistoryClosing:
     previous: bytes | None
     written: bytes | None
 
-    def restore(self) -> None:
-        """Undo this preparation on refusal while preserving an edit made afterward."""
+    def restore(self) -> bool:
+        """Undo this preparation on refusal while preserving an edit made afterward.
+
+        Returns whether the file was taken back: ``False`` when the file no longer holds exactly
+        what the closeout wrote, in which case it is left alone (MIK-R52 rule 9).
+        """
 
         current = self.path.read_bytes() if self.path.is_file() else None
         if current != self.written:
-            return
+            return False
         if self.previous is None:
             self.path.unlink(missing_ok=True)
         else:
             self.path.write_bytes(self.previous)
+        return True
 
 
 def latest_owner_history(memory_root: Path, owner: str) -> Path:

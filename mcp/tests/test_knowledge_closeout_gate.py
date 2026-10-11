@@ -54,7 +54,7 @@ from agents_remember.worktrees.knowledge_gate import (
     leaf_memory_converted,
     prepared_closeout_refusal,
 )
-from agents_remember.worktrees.modules import closeout_external, integrate, record_landing
+from agents_remember.worktrees.modules import closeout_external, integration_gate, record_landing
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.services import (
     LandingGateRequest,
@@ -939,7 +939,7 @@ def test_a_master_or_checkpoint_landing_waits_until_no_entry_at_a_changed_path_i
     code_commit = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
     memory_commit = commit(world.memory, {}, trailer=code_commit)  # the master re-anchored nothing
     sources = IntegrationSources(world.code_base, world.memory_base, False, False)
-    blocked = integrate._knowledge_gate_block(
+    blocked = integration_gate.integration_gate_block(
         series,
         cast(Any, SimpleNamespace(dry_run=True)),
         IntegratedCommits(code=code_commit, memory_content=memory_commit),

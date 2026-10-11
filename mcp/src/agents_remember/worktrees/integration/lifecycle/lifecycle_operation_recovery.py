@@ -34,6 +34,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.mutation_evidence import (
     reconcile_closeout_mutations,
 )
+from agents_remember.worktrees.knowledge_gate import (
+    ClosingReceiptError,
+    settle_direct_closing,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
@@ -68,7 +72,32 @@ def recover_direct_landing_under_authority(
             requeued,
             exc,
         ) from exc
-    return _current_record(store, requeued)
+    settled = _current_record(store, requeued)
+    # MIK-R52 rule 8: the recovery settles the kept closing receipt in the same call, as apply
+    # and cancel already do. The receipt of a landed generation is forgotten (its commit holds the
+    # closing); any other kept receipt is decided on its own.
+    _settle_recovered_closing(current_contract, settled)
+    return settled
+
+
+def _settle_recovered_closing(
+    contract: WorktreeContract, record: LifecycleOperationRecord
+) -> None:
+    """Decide the kept closings against the recovered generation (MIK-R52 rule 8).
+
+    Mirrors the apply path's settle: a receipt that cannot be read refuses the recovery by name.
+    """
+
+    if record.status == "completed":
+        state = "landed"
+    else:
+        state = "cancelled" if record.status == "cancelled" else "in-flight"
+    try:
+        settle_direct_closing(contract, current=record.fingerprint, state=state)
+    except ClosingReceiptError as exc:
+        raise LifecycleControlError(
+            "direct-landing-closing-receipt-unreadable", str(exc), next_action="developer-decision"
+        ) from exc
 
 
 def _require_recoverable_direct_state(

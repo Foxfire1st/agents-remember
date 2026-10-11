@@ -259,13 +259,20 @@ def recompute_for_gate(
 
 
 def evaluate_leaf_gate(
-    contract: WorktreeContract, candidate: CandidateTrees, *, parent_memory_tip: str | None = None
+    contract: WorktreeContract,
+    candidate: CandidateTrees,
+    *,
+    parent_memory_tip: str | None = None,
+    persist_worklist: bool = True,
 ) -> GateResult | None:
     """The gate over a leaf's exact closeout candidate; ``None`` when neither side is converted.
 
     ``parent_memory_tip`` is the parent line's memory tip, the validator's comparison base; when it
     is not given it is read from the contract, and only once the gate is known to apply, so an
-    unconverted leaf reads nothing more than before.
+    unconverted leaf reads nothing more than before. With ``persist_worklist=False`` the
+    recomputed worklist is never written beside the contract: a judging route that must leave
+    every file untouched on refusal (MIK-R52 F02) passes False; the verdict is identical either
+    way.
     """
 
     if not _applies(contract, candidate):
@@ -278,11 +285,12 @@ def evaluate_leaf_gate(
     key = None if unreadable else memo.memo_key(contract, candidate, parent_memory_tip, head)
     kept = None if key is None else memo.remembered(key)
     if kept is not None:
-        _persist(contract, kept.worklist)  # the latest worklist beside the contract stays this one
+        if persist_worklist:
+            _persist(contract, kept.worklist)  # the latest worklist beside the contract stays this one
         return kept
     # Every requirement file the evaluation reads for approval state is recorded with the verdict.
     with recorded_reads() as reads:
-        result = _evaluate(contract, candidate, lines, unreadable)
+        result = _evaluate(contract, candidate, lines, unreadable, persist_worklist=persist_worklist)
     if key is not None and result is not None:
         memo.remember(key, result, reads)
     return result
@@ -340,12 +348,14 @@ def _evaluate(
     candidate: CandidateTrees,
     lines: _MemoryLines,
     unreadable: list[GateFinding],
+    *,
+    persist_worklist: bool = True,
 ) -> GateResult | None:
     memory_repository = contract.memory_repo_path or contract.memory_worktree
     document = recompute_for_gate(contract, candidate)
     if document is None or memory_repository is None:
         return None
-    path = _persist(contract, document)
+    path = _persist(contract, document) if persist_worklist else None
     trees = GateTrees(
         code_repository=contract.code_repo_path,
         code_tree=candidate.code,

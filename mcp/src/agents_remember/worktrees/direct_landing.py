@@ -141,6 +141,9 @@ class DirectLandingRequest:
     ``candidate_tree`` is the staged candidate tree the owner gated pre-commit
     through the Dagger ``--source``/``--repository-bundle`` contract; when given,
     the landing verifies the branch HEAD tree equals it before committing.
+    ``leaf_id`` names the leaf whose history file this landing judges and closes
+    (MIK-R52 rule 8); without it the owner is inferred from the one open history
+    file, as before.
     """
 
     contract_path: str
@@ -149,6 +152,7 @@ class DirectLandingRequest:
     intent_note: str = ""
     candidate_tree: str | None = None
     dry_run: bool = False
+    leaf_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -370,7 +374,7 @@ def _direct_landing_preview(
     _verify_code_commit(contract, code_commit, request.candidate_tree)
     memory = _memory_facts(contract)
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
-        _direct_gate_owner(contract, code_commit)  # the preview refuses exactly as the apply
+        _direct_gate_owner(contract, code_commit, leaf_id=request.leaf_id)  # the preview refuses exactly as the apply
     return {
         "ok": True,
         "operation": "direct_landing",
@@ -531,18 +535,22 @@ def _in_flight_retry(
 
 
 def _same_request(accepted: DirectLandingOperationInput, identity: _DirectRequestIdentity) -> bool:
+    # MIK-R52 rule 8: the named leaf is part of the request identity. A call naming another leaf
+    # is not a retry of the in-flight generation, whose kept closing belongs to the admitted leaf.
     return (
         accepted.contractPath,
         accepted.codeCommit,
         accepted.candidateTree,
         accepted.effectiveInput,
         accepted.approvalNote,
+        accepted.leafId,
     ) == (
         identity.contract.contract_path.as_posix(),
         identity.code_commit,
         identity.candidate_tree,
         identity.effective_input,
         identity.request.intent_note.strip(),
+        identity.request.leaf_id,
     )
 
 
@@ -613,7 +621,7 @@ def _prepare_direct_landing_candidate(
     """
     contract = identity.contract
     code_tree = _verify_code_commit(contract, identity.code_commit, identity.candidate_tree)
-    closing = _close_gated_leaf(contract, identity.code_commit)
+    closing = _close_gated_leaf(contract, identity.code_commit, leaf_id=identity.request.leaf_id)
     replayed = _replayed_head_tree(contract) if closing is None else None
     try:
         operation_input, candidate = _operation_candidate(identity, code_tree)
@@ -674,6 +682,7 @@ def _operation_candidate(
         memoryBranch=contract.memory_work_branch,
         memoryRef=memory_before.headRef,
         memoryBefore=memory_before,
+        leafId=identity.request.leaf_id,
     )
     candidate = lifecycle_operation_candidate(
         LifecycleOperationCandidateBinding(
@@ -721,7 +730,9 @@ def _retained_memory_snapshot(contract: WorktreeContract, index_name: str) -> Gi
     return snapshot
 
 
-def _direct_gate_owner(contract: WorktreeContract, code_commit: str) -> str | None:
+def _direct_gate_owner(
+    contract: WorktreeContract, code_commit: str, *, leaf_id: str | None = None
+) -> str | None:
     """MIK-R09 rule 3 over the candidate; the leaf whose history file this landing closes.
 
     ``None`` for unconverted memory, which is probed before anything is captured or written; the
@@ -740,14 +751,19 @@ def _direct_gate_owner(contract: WorktreeContract, code_commit: str) -> str | No
             raise DirectLandingError(f"direct-landing-{CUTOVER_LOCK_CODE}", locked)
         return None
     verdict = direct_gate_verdict(
-        contract, code_commit=code_commit, memory_tree=_memory_content_tree(contract)
+        contract,
+        code_commit=code_commit,
+        memory_tree=_memory_content_tree(contract),
+        leaf_id=leaf_id,
     )
     if verdict.refusal is not None:
         raise DirectLandingError("direct-landing-knowledge-gate-refused", verdict.refusal)
     return verdict.owner if verdict.applies else None
 
 
-def _close_gated_leaf(contract: WorktreeContract, code_commit: str) -> HistoryClosing | None:
+def _close_gated_leaf(
+    contract: WorktreeContract, code_commit: str, *, leaf_id: str | None = None
+) -> HistoryClosing | None:
     """Select an exact history source, prepare the final closed tree, then judge that tree once.
 
     ``None`` for unconverted memory (nothing is written) and for a replay that commits nothing (the
@@ -763,7 +779,7 @@ def _close_gated_leaf(contract: WorktreeContract, code_commit: str) -> HistoryCl
     except RuntimeError as exc:
         raise DirectLandingError("direct-landing-knowledge-gate-refused", str(exc)) from exc
     if not converted:
-        _direct_gate_owner(contract, code_commit)
+        _direct_gate_owner(contract, code_commit, leaf_id=leaf_id)
         return None
     ignore = memory_repo / ".gitignore"
     ignore_previous = ignore.read_bytes() if ignore.is_file() else None
@@ -771,7 +787,10 @@ def _close_gated_leaf(contract: WorktreeContract, code_commit: str) -> HistoryCl
     closing = None
     try:
         selected = direct_gate_source(
-            contract, code_commit=code_commit, memory_tree=_memory_content_tree(contract)
+            contract,
+            code_commit=code_commit,
+            memory_tree=_memory_content_tree(contract),
+            leaf_id=leaf_id,
         )
         if selected.refusal is not None:
             raise DirectLandingError("direct-landing-knowledge-gate-refused", selected.refusal)
@@ -792,6 +811,7 @@ def _close_gated_leaf(contract: WorktreeContract, code_commit: str) -> HistoryCl
             code_commit=code_commit,
             memory_tree=judged.candidateTree,
             source=selected.source,
+            leaf_id=leaf_id,
         )
         if verdict.refusal is not None:
             raise DirectLandingError("direct-landing-knowledge-gate-refused", verdict.refusal)

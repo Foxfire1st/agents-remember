@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -40,7 +40,9 @@ from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     PublicationHooks,
     publish_tree_commit,
+    require_ancestor,
     require_git,
+    require_readable_commit,
     stage_worktree_content,
     worktree_candidate_tree,
     worktree_dirty,
@@ -74,49 +76,70 @@ def external_closeout_commits(
     if contract.memory_worktree is None:
         raise RuntimeError("external-memory leaf closeout requires a memory worktree")
     recovered = args.recovery_commits
-    if recovered is not None and recovered.memoryContentCommit:
-        require_gated_recovery(contract, change.commit, recovered.memoryContentCommit)
-        return resume_external_commits(
+    try:
+        if recovered is not None and recovered.memoryContentCommit:
+            require_gated_recovery(contract, change.commit, recovered.memoryContentCommit)
+            return resume_external_commits(
+                contract,
+                args,
+                code_commit=change.commit,
+                memory_commit=recovered.memoryContentCommit,
+            )
+        converted = leaf_memory_converted(contract)
+        if not converted:
+            # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is never
+            # stamped or committed; it crosses through the crossing sync first.
+            locked = leaf_cutover_refusal(contract, "the closeout")
+            if locked is not None:
+                raise RuntimeError(locked)
+        refresh = _refresh_external_memory(contract, args, change)
+        closing = None
+        if converted:
+            # MIK-R07 rule 7 / MIK-R09 rule 3: the memory commit that publishes the leaf closes its
+            # history file, creating it with no rows when the leaf wrote none.
+            closing = close_owner_history(contract.memory_worktree, _owner(contract))
+        memory_commit, created = _commit_memory_content(
             contract,
             args,
+            effective_input,
             code_commit=change.commit,
-            memory_commit=recovered.memoryContentCommit,
+            closing=closing,
         )
-    converted = leaf_memory_converted(contract)
-    if not converted:
-        # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is never
-        # stamped or committed; it crosses through the crossing sync first.
-        locked = leaf_cutover_refusal(contract, "the closeout")
-        if locked is not None:
-            raise RuntimeError(locked)
-    refresh = _refresh_external_memory(contract, args, change)
-    closing = None
-    if converted:
-        # MIK-R07 rule 7 / MIK-R09 rule 3: the memory commit that publishes the leaf closes its
-        # history file, creating it with no rows when the leaf wrote none.
-        closing = close_owner_history(contract.memory_worktree, _owner(contract))
-    memory_commit, created = _commit_memory_content(
-        contract,
-        args,
-        effective_input,
-        code_commit=change.commit,
-        closing=closing,
-    )
-    if not created:
-        _report_memory_commit(args, change.commit, memory_commit)
-    cache = refresh_memory_cache(
-        contract.memory_worktree,
-        memory_commit,
-        path=contract.ledger_path,
-        repo_name=contract.repo_name,
-    )
-    return MemoryCloseoutOutcome(
-        memory_commit=memory_commit,
-        refreshed_onboarding=refresh.onboarding,
-        refreshed_entities=refresh.entities,
-        refreshed_route_overviews=refresh.route_overviews,
-        route_index_refresh=refresh.route_index,
-        ledger_repair=cache,
+        if not created:
+            _report_memory_commit(args, change.commit, memory_commit)
+        cache = refresh_memory_cache(
+            contract.memory_worktree,
+            memory_commit,
+            path=contract.ledger_path,
+            repo_name=contract.repo_name,
+        )
+        return MemoryCloseoutOutcome(
+            memory_commit=memory_commit,
+            refreshed_onboarding=refresh.onboarding,
+            refreshed_entities=refresh.entities,
+            refreshed_route_overviews=refresh.route_overviews,
+            route_index_refresh=refresh.route_index,
+            ledger_repair=cache,
+        )
+    except RuntimeError as error:
+        # MIK-R52 rule 9: the code commit is already published when the memory phase runs, so
+        # every refusal from it says what is true.
+        raise RuntimeError(_published_code_commit_detail(change.commit, str(error))) from error
+
+
+def _published_code_commit_detail(code_commit: str, detail: str) -> str:
+    """Say what is true in a closeout refusal raised after the code commit (MIK-R52 rule 9).
+
+    The code commit is published and nothing is integrated; rerunning the closeout completes the
+    pair. A detail that already says so is left alone.
+    """
+
+    marker = "rerunning the closeout completes the pair"
+    if marker in detail:
+        return detail
+    return (
+        f"{detail}; code commit {code_commit} is published and nothing is integrated: "
+        f"rerunning the closeout completes the pair"
     )
 
 
@@ -227,29 +250,132 @@ def refuse_ungated_candidate(contract, code_tree: str) -> None:
         raise RuntimeError(refusal)
 
 
+def _frozen_recorded_closeout(
+    contract, repository: Path, memory_commit: str
+) -> tuple[str, ...]:
+    """Commits whose closed history files stay frozen for one judged leaf pair (MIK-R52 rule 1).
+
+    Only the contract's recorded closeout freezes anything: when the judged memory commit is
+    that commit or descends from it, the files closed in its parents stay frozen and everything
+    the judged commit adds is checked. Any other judged commit -- a hand-made commit elsewhere,
+    a commit outside the leaf -- freezes nothing. A recorded commit Git cannot read refuses the
+    judgment as an unreadable input.
+    """
+
+    recorded = closed_out_memory(contract)
+    if not recorded:
+        return ()
+    try:
+        require_git(repository, ["rev-parse", "--verify", recorded[0]])
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the mandatory invariant gate (MIK-R52 rule 1) cannot read the leaf's recorded "
+            f"closeout memory commit {recorded[0]} ({type(error).__name__}: {error}); "
+            "the pair is not judged"
+        ) from error
+    try:
+        require_readable_commit(
+            repository, memory_commit, what="the judged memory commit"
+        )
+        descends = memory_commit == recorded[0] or require_ancestor(
+            repository,
+            recorded[0],
+            memory_commit,
+            what=(
+                "the ancestry of the leaf's recorded closeout memory commit "
+                f"{recorded[0]} to the judged memory commit {memory_commit}"
+            ),
+        )
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the mandatory invariant gate (MIK-R52 rule 1) cannot read the judged pair's "
+            f"ancestry ({type(error).__name__}: {error}); the pair is not judged"
+        ) from error
+    if not descends:
+        return ()
+    try:
+        parents = require_git(repository, ["rev-list", "--parents", "-n", "1", recorded[0]])
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the mandatory invariant gate (MIK-R52 rule 1) cannot read the parents of the "
+            f"leaf's recorded closeout memory commit {recorded[0]} "
+            f"({type(error).__name__}: {error}); the pair is not judged"
+        ) from error
+    _, *made_on = parents.split()
+    return tuple(made_on)
+
+
+def leaf_pair_refusal(
+    contract, *, code_commit: str, memory_commit: str, bases: Sequence[str], persist_worklist: bool = True
+) -> str | None:
+    """Judge a leaf's code and memory commits exactly as the closeout judges its candidate.
+
+    MIK-R52 rule 1: the knowledge validator as a leaf publication over the two commits with the
+    caller's ``bases``, then the mandatory gate with the worklist recomputed over the two
+ commits' trees and the contract's base pair. ``None`` when the pair passes; the refusal
+ naming every finding when it does not. A side Git cannot read refuses the judgment as an
+ unreadable input, and nothing is landed or recorded. Only the contract's recorded closeout
+ freezes history files (:func:`_frozen_recorded_closeout`).
+
+ The repositories are resolved as the landing routes resolve them: the memory and code repo
+ paths when set, else the route's live worktrees.
+ """
+
+    repository = contract.memory_repo_path or contract.memory_worktree
+    code_repository = contract.code_repo_path or contract.code_worktree
+    try:
+        code_tree = require_git(
+            code_repository, ["rev-parse", "--verify", f"{code_commit}^{{tree}}"]
+        )
+        memory_tree = require_git(
+            repository, ["rev-parse", "--verify", f"{memory_commit}^{{tree}}"]
+        )
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the mandatory invariant gate (MIK-R52 rule 1) cannot read the judged pair "
+            f"({type(error).__name__}: {error}); nothing is landed or recorded"
+        ) from error
+    frozen = _frozen_recorded_closeout(contract, repository, memory_commit)
+    return memory_commit_refusal(
+        memory_repository=repository,
+        candidate_tree=memory_commit,
+        bases=tuple(bases),
+        paired_code=PairedCode(repository=code_repository, commit=code_commit),
+        leaf_publication=LeafPublication(memory_commit, tuple(bases), frozen=frozen),
+    ) or leaf_gate_refusal(
+        contract, code_tree=code_tree, memory_tree=memory_tree, persist_worklist=persist_worklist
+    )
+
+
 def require_gated_recovery(contract, code_commit: str, memory_commit: str) -> None:
     """A recovered closeout is no way around the gate (MIK-R09 rule 5).
 
     A closeout that resumes with a memory commit already made records that commit as the leaf's
-    memory output. On converted memory the commit's own tree is judged first, exactly as the tree
-    of a fresh closeout is: the verdict is a function of the two trees, the contract and the parent
-    line's tip, so a commit the gate passed when it was made passes again, and one that was made
-    without the gate is refused by name here.
+    memory output. On converted memory the recovered pair is judged by MIK-R52 rule 1
+    (:func:`leaf_pair_refusal`) with the parent line's memory tip as the validator's base, exactly
+    as the tree of a fresh closeout is judged: the verdict is a function of the two commits, the
+    contract and the parent line's tip, so a pair the gate passed when it was made passes again,
+    and one that was made without the gate is refused by name here.
     """
 
     repository = contract.memory_worktree
     if contract.kind != "leaf" or repository is None or not leaf_memory_converted(contract):
         return
     try:
-        memory_tree = require_git(
-            repository, ["rev-parse", "--verify", f"{memory_commit}^{{tree}}"]
-        )
+        tip = parent_memory_tip(contract)
     except (RuntimeError, subprocess.SubprocessError) as error:
         raise RuntimeError(
-            "the mandatory invariant gate (MIK-R09) cannot read the recovered memory commit "
-            f"{memory_commit} ({type(error).__name__}: {error}); the closeout is not finalized"
+            "the mandatory invariant gate (MIK-R09) cannot read the parent memory line "
+            f"({type(error).__name__}: {error}); the closeout is not finalized"
         ) from error
-    _refuse_ungated_memory(contract, code_commit, memory_tree)
+    refusal = leaf_pair_refusal(
+        contract,
+        code_commit=code_commit,
+        memory_commit=memory_commit,
+        bases=() if tip is None else (tip,),
+    )
+    if refusal is not None:
+        raise RuntimeError(refusal)
 
 
 def _commit_memory_content(
@@ -349,8 +475,14 @@ def _commit_memory_content(
             before=intent.before,
             hooks=PublicationHooks(stage=_worktree_stager(repository)) if judged is None else None,
         )
-    except BaseException:
-        _restore_preparations(*preparations)
+    except BaseException as error:
+        skipped = _restore_preparations(*preparations)
+        if skipped and isinstance(error, RuntimeError):
+            names = ", ".join(skipped)
+            raise RuntimeError(
+                f"{error}; the closeout left {names} as it found it: the file no longer holds "
+                "the bytes the closeout wrote, so the takeback did not touch it"
+            ) from error
         raise
     prove_git_commit(args, intent, repository=repository, commit=committed)
     return committed, True
@@ -366,10 +498,14 @@ def _worktree_stager(repository: Path) -> Callable[[], str]:
     return stage
 
 
-def _restore_preparations(*preparations: HistoryClosing | None) -> None:
+def _restore_preparations(*preparations: HistoryClosing | None) -> list[str]:
+    """Take back each preparation, naming the files an edit left in place (MIK-R52 rule 9)."""
+
+    skipped: list[str] = []
     for preparation in preparations:
-        if preparation is not None:
-            preparation.restore()
+        if preparation is not None and not preparation.restore():
+            skipped.append(preparation.path.as_posix())
+    return skipped
 
 
 def _require_judged_tree(repository: Path, judged: str) -> None:

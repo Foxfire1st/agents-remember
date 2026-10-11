@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
@@ -29,6 +30,8 @@ from agents_remember.models.lifecycles.curator_coherence import (
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
+    MAX_CURATOR_REVIEW_ASSESSMENTS,
+    MAX_CURATOR_SOURCE_CANDIDATES,
     build_evidence_dependencies,
     canonical_sha256,
     dependency,
@@ -122,6 +125,9 @@ def curator_coherence_action(
 
 
 def _status(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
+    closed_out = _closed_out_answer(contract, request)
+    if closed_out is not None:
+        return closed_out
     paths = curator_coherence_paths(contract)
     try:
         observation = observe_curator_coherence_source(contract)
@@ -293,8 +299,78 @@ def _render_candidate_set(
 
 
 def _validate(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
+    closed_out = _closed_out_answer(contract, request)
+    if closed_out is not None:
+        return closed_out
     validated = require_current_curator_coherence(contract)
     return _validated_payload(request, contract, validated, state="valid")
+
+
+def _closed_out_answer(
+    contract: WorktreeContract, request: CuratorCoherenceRequest
+) -> dict[str, object] | None:
+    """Answer a completed closeout's leaf without comparing anything with the live tree.
+
+    MIK-R52 rule 10: once the closeout completed, the closeout itself closed the history file, so
+    the live comparison would always answer ``stale``. Status and validate instead answer
+    ``closed-out`` with the closeout's two commits and the record's digest, saying that the
+    coherence record was validated before the closeout. A leaf without a record falls through to
+    the ordinary path and answers ``absent``, as today.
+    """
+
+    if contract.closeout_status != "completed":
+        return None
+    if not contract.code_commit or not contract.memory_content_commit:
+        return None
+    try:
+        validated = load_curator_coherence_authority(contract)
+    except CuratorCoherenceError:
+        return None
+    paths = curator_coherence_paths(contract)
+    return _success(
+        request,
+        contract,
+        state="closed-out",
+        summary=(
+            f"Leaf closeout completed at code commit {contract.code_commit} and memory commit "
+            f"{contract.memory_content_commit}. Coherence record {validated.record_digest} was "
+            "validated before the closeout; status and validate compare nothing with the live tree."
+        ),
+        canonicalPath=paths.canonical.as_posix(),
+        recordPath=validated.record_path.as_posix(),
+        reportPath=validated.report_path.as_posix(),
+        recordDigest=validated.record_digest,
+        codeCommit=contract.code_commit,
+        memoryContentCommit=contract.memory_content_commit,
+    )
+
+
+def _require_payload_bounds(judgments: Sequence[object], assessments: Sequence[object]) -> None:
+    """Refuse a publication beyond the coherence record's own bounds before any file is written.
+
+    MIK-R52 rule 12: the record admits at most ``MAX_CURATOR_SOURCE_CANDIDATES`` judgments and
+    ``MAX_CURATOR_REVIEW_ASSESSMENTS`` assessments. The refusal names the bound and the count, so
+    a caller repairs its payload instead of meeting a schema error after files were written.
+    """
+
+    if len(judgments) > MAX_CURATOR_SOURCE_CANDIDATES:
+        raise CuratorCoherenceError(
+            "curator-coherence-payload-bounds",
+            f"the publication holds {len(judgments)} judgments but the coherence record admits "
+            f"at most {MAX_CURATOR_SOURCE_CANDIDATES}; publish fewer judgments",
+            expected={"maxJudgments": MAX_CURATOR_SOURCE_CANDIDATES},
+            observed={"judgments": len(judgments)},
+            next_action="prepare",
+        )
+    if len(assessments) > MAX_CURATOR_REVIEW_ASSESSMENTS:
+        raise CuratorCoherenceError(
+            "curator-coherence-payload-bounds",
+            f"the publication holds {len(assessments)} assessments but the coherence record "
+            f"admits at most {MAX_CURATOR_REVIEW_ASSESSMENTS}; publish fewer assessments",
+            expected={"maxAssessments": MAX_CURATOR_REVIEW_ASSESSMENTS},
+            observed={"assessments": len(assessments)},
+            next_action="prepare",
+        )
 
 
 def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> dict[str, object]:
@@ -320,6 +396,10 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
             update={"judgments": judgments, "review_assessments": assessments}
         )
     _require_expected_observation(request, observation)
+    # MIK-R52 rule 12: the payload bound is checked on the submission before assessment evidence
+    # bytes are published or judgment evidence retained — a refusal past this point must find no
+    # new file. The bound counts are preserved one-to-one by the exact-coverage steps below.
+    _require_payload_bounds(list(request.judgments), list(request.review_assessments))
     judgments = exact_curator_judgments(contract, observation.source_candidates, request.judgments)
     caller = _authorized_publisher(contract, observation, request)
     assessments = _exact_review_assessments(contract, request, observation, caller=caller)

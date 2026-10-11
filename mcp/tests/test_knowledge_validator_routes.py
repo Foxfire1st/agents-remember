@@ -25,7 +25,7 @@ from agents_remember.memory_quality.knowledge_validator.commit_route import (
     GitKnowledgeValidation,
 )
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
-from agents_remember.worktrees.services import bind_worktree_services
+from agents_remember.worktrees.services import LeafPublication, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
 from knowledge_validator_test_support import (
     CODE_PATHS,
@@ -342,3 +342,58 @@ def test_a_resolved_memory_conflict_that_breaks_validation_is_refused_on_continu
     assert "rerun worktree_sync with resolution_action='continue'" in summary
     git(worktree, "rm", "-q", "-f", RIGHT_DUPLICATE)
     assert fixture.sync(resolution_action="continue").payload["state"] == "synced"
+
+
+def test_a_merge_moved_row_refuses_at_leaf_publication(
+    tmp_path: Path, worktree_services: None
+) -> None:
+    """MIK-R52 rule 7: the report-only merge treatment ends at a leaf publication.
+
+    The same merge the sync test above syncs (the official line moved the covered entry
+    while the leaf's own row agreed with its side) is judged here as the leaf's publication:
+    every disagreeing row refuses, whether the merge moved it or not.
+    """
+
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    files = fixture_tree_files()
+    code_tip = fixture.move_official_code()
+    convert = _commit(
+        fixture.memory_repo, files, render_memory_content_message("Convert", code_tip)
+    )
+    assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
+
+    entry = json.loads(files[INTEGRATE_SIDECAR])["realizes"][0]
+    anchor = {**entry["anchor"], "path": INTEGRATE}
+    row = {
+        "id": "ROW-000000",
+        "items": [],
+        "subject": entry["invariant"],
+        "disposition": "no_impact",
+        "reason": "The route still pairs its commits.",
+        "covers": [{"id": entry["id"], "before": anchor, "after": anchor}],
+        "revision": json.loads(files[INVARIANT])["revision"],
+    }
+    history = {"schema": "ar-history/v1", "leaf": "260928-MIK-L97", "closed": False, "rows": [row]}
+    _commit(worktree, {LEAF_HISTORY: encode(history)}, "Work: a row about the route")
+
+    later = _commit(fixture.code_repo, {"src/later.py": b"LATER = 1\n"}, "Later code")
+    moved = edit_json(files, INTEGRATE_SIDECAR, _moved)[INTEGRATE_SIDECAR]
+    message = render_memory_content_message("Re-anchor", later)
+    _commit(fixture.memory_repo, {INTEGRATE_SIDECAR: moved}, message)
+    assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
+
+    merge = git(
+        fixture.memory_repo, "rev-parse", fixture.contract.memory_work_branch
+    )
+    refusal = memory_commit_refusal(
+        memory_repository=fixture.memory_repo,
+        candidate_tree=merge,
+        bases=(convert,),
+        paired_code=PairedCode(repository=fixture.code_repo, commit=later),
+        leaf_publication=LeafPublication(merge, (convert,)),
+    )
+    assert refusal is not None
+    assert "R09-history-rows" in refusal
+    assert "R09-history-rows-merged" not in refusal

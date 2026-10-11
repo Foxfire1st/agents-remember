@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -50,6 +50,33 @@ EvidenceDependencyKind = Literal[
     "validator",
 ]
 DigestAlgorithm = Literal["git-object", "sha256"]
+
+MAX_CURATOR_SOURCE_CANDIDATES: Final = 2048
+# The assessment collection's own bound. It is deliberately far below the candidate bound: an
+# assessment is an authored act a human writes, not a machine-produced row per changed file, so a
+# thousand of them on one leaf is already a defect rather than a workload.
+MAX_CURATOR_REVIEW_ASSESSMENTS: Final = 256
+
+# MIK-R52 rule 12: the dependency capacity follows from the coherence record's own bounds, so no
+# bare number stands in the field below. The coherence record builder
+# (``worktrees/integration/closeout/curator_coherence_publication.py::_record``) declares at most:
+# its fixed dependencies (code-tree, memory-tree, semantic-topology, task-intent,
+# memory-attestation, the memory-quality-report evidence-bytes edge, and at most one
+# predecessor-record edge), one evidence-bytes edge for each of at most
+# ``MAX_CURATOR_SOURCE_CANDIDATES`` judgments, one review-record edge for each of at most
+# ``MAX_CURATOR_REVIEW_ASSESSMENTS`` assessments, and its validator edges. The bound covers every
+# record builder whose model bounds its payload, and it is coherence-derived: 7 + 2048 + 256 + 1
+# = 2312. The master-scope route review has no bound of its own: its model sets no upper bound on
+# its lists, so no cap is imposed on it here — but it is still limited by this shared constant,
+# and its refusal names the bound and the count.
+_COHERENCE_FIXED_DEPENDENCIES: Final = 7
+_COHERENCE_VALIDATOR_DEPENDENCIES: Final = 1
+MAX_EVIDENCE_DEPENDENCIES: Final = (
+    _COHERENCE_FIXED_DEPENDENCIES
+    + MAX_CURATOR_SOURCE_CANDIDATES
+    + MAX_CURATOR_REVIEW_ASSESSMENTS
+    + _COHERENCE_VALIDATOR_DEPENDENCIES
+)
 
 
 class EvidenceDependencyError(ValueError):
@@ -102,7 +129,7 @@ class EvidenceDependencies(_StrictModel):
     schemaVersion: Literal["ar-evidence-dependencies/v1"] = EVIDENCE_DEPENDENCY_SCHEMA
     recordType: EvidenceRecordType
     validatorVersion: Literal["evidence-dependency-validator/v1"] = EVIDENCE_DEPENDENCY_VALIDATOR
-    edges: tuple[EvidenceDependency, ...] = Field(min_length=1, max_length=256)
+    edges: tuple[EvidenceDependency, ...] = Field(min_length=1, max_length=MAX_EVIDENCE_DEPENDENCIES)
 
     @model_validator(mode="after")
     def _edges_are_unique_and_canonical(self) -> Self:
@@ -362,6 +389,9 @@ __all__ = [
     "EVIDENCE_DEPENDENCY_POLICIES",
     "EVIDENCE_DEPENDENCY_SCHEMA",
     "EVIDENCE_DEPENDENCY_VALIDATOR",
+    "MAX_CURATOR_REVIEW_ASSESSMENTS",
+    "MAX_CURATOR_SOURCE_CANDIDATES",
+    "MAX_EVIDENCE_DEPENDENCIES",
     "EvidenceDependencies",
     "EvidenceDependency",
     "EvidenceDependencyError",

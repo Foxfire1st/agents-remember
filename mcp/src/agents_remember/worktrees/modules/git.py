@@ -283,6 +283,42 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
 
 
+def require_readable_commit(repo: Path, commit: str, *, what: str) -> None:
+    """Refuse when Git cannot read ``commit``; the caller names it through ``what``.
+
+    A landing never judges a commit it cannot read: an unreadable input refuses by name
+    instead of passing as absent or non-member (MIK-R52 F01).
+    """
+
+    result = run_git(repo, ["rev-parse", "--verify", "--quiet", commit])
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        raise RuntimeError(
+            f"{what} ({commit}) cannot be read"
+            + (f" (git rev-parse: {detail})" if detail else "")
+            + "; the landing is not judged"
+        )
+
+
+def require_ancestor(repo: Path, ancestor: str, descendant: str, *, what: str) -> bool:
+    """Like :func:`is_ancestor`, but only a plain non-ancestry answers ``False``.
+
+    rc 0 answers True and rc 1 answers False (a legitimate non-ancestor keeps its policy).
+    Any other Git failure -- an unreadable object, a failed read -- raises naming ``what``,
+    so a failed read never passes as ordinary non-membership (MIK-R52 F01).
+    """
+
+    result = run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
+    if result.returncode in (0, 1):
+        return result.returncode == 0
+    detail = (result.stderr or "").strip()
+    raise RuntimeError(
+        f"{what} cannot be read (git merge-base rc {result.returncode}"
+        + (f": {detail}" if detail else "")
+        + "); the landing is not judged"
+    )
+
+
 def ensure_git_identity(repo: Path) -> None:
     if not run_git(repo, ["config", "--get", "user.email"]).stdout.strip():
         require_git(repo, ["config", "user.email", "agents-remember@example.invalid"])

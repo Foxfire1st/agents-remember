@@ -22,6 +22,8 @@ from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
+    MAX_CURATOR_REVIEW_ASSESSMENTS,
+    MAX_CURATOR_SOURCE_CANDIDATES,
     EvidenceDependencies,
     EvidenceDependencyError,
     build_evidence_dependencies,
@@ -50,11 +52,6 @@ CuratorDisposition = Literal[
     "no-route-impact",
     "capture-candidate",
 ]
-MAX_CURATOR_SOURCE_CANDIDATES = 2048
-# The assessment collection's own bound. It is deliberately far below the candidate bound: an
-# assessment is an authored act a human writes, not a machine-produced row per changed file, so a
-# thousand of them on one leaf is already a defect rather than a workload.
-MAX_CURATOR_REVIEW_ASSESSMENTS = 256
 MEMORY_QUALITY_ATTESTATION_VALIDATOR = "curator-memory-quality-attestation/v1"
 
 

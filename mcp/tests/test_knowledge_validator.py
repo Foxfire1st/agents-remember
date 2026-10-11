@@ -600,6 +600,7 @@ def test_an_invalid_marker_number_names_how_to_write_it_as_text() -> None:
 
 NEW = "R27.2-new-record"
 EXISTING = "R27.2-existing-record"
+KEPT = "R27.4-record-kept"
 DECISION = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
 PROOF_SIDECAR = "onboarding/mcp/tests/test_direct_landing.py.json"
 
@@ -839,6 +840,7 @@ def test_the_rules_are_registered_refusing_new_and_reporting_the_rest() -> None:
         NEW: (False, False),
         EXISTING: (True, False),
         LEGACY_COUNT: (True, False),
+        KEPT: (False, False),
     }
     assert all(
         registered[rule_id] is rule for rule_id, rule in ((r.id, r) for r in ADMISSION_RULES)

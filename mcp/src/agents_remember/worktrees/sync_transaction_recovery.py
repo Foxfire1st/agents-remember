@@ -78,6 +78,11 @@ def finalize_sync(
             "memoryBaseTo": memory_to,
             "code": record.code.plan,
             "memory": record.memory.plan if record.memory is not None else "no-external-memory",
+            # MIK-R52 rule 4: the heads this sync produced, so the landing chain proof admits
+            # exactly the merges the sync made. An entry written before this leaf has no head
+            # keys and admits its merge as the proof did before.
+            "codeHeadTo": record.code.resultHead,
+            "memoryHeadTo": record.memory.resultHead if record.memory is not None else "",
         }
         current = replace(
             current,
