@@ -331,9 +331,10 @@ The capsule operation and skill catalog left the surface with the skills surface
 (MIK-R112): `role_capsule_compile`, `skill_catalog_list`, `skill_catalog_read`. Skills are
 read through the `skill://` resources and the `skills/list` extension instead.
 
-`role_message` refusals name one reason: `recipient-busy` (mid-turn handoff failed, or the
-recipient waits for a permission decision — a message would deny it — or its start has not
-finished), `recipient-not-found`, `recipient-archived`, `recipient-ambiguous`,
+`role_message` answers `held`, not refused, when the recipient waits for a permission
+decision, its start has not finished, or it is in a turn the host cannot write into; only
+a full hold store (twenty waiting messages) is refused as `recipient-busy`. Other refusals
+name one reason: `recipient-not-found`, `recipient-archived`, `recipient-ambiguous`,
 `recipient-cannot-be-resumed`, `scope-check-failed`, `caller-has-no-binding`,
 `no-paseo-runtime-configured`, `host-unreachable`. A finished turn is a fact about the
 recipient's turn, never AR acceptance of a requirement. `role_start` calls run one at a time
