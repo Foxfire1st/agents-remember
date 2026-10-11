@@ -1,129 +1,60 @@
 import { useEffect } from "react";
-import { css, cva } from "../../../styled-system/css";
+import { css } from "../../../styled-system/css";
+import { launcherButton, launcherChip, launcherSelect } from "../../grammar/viewTabLook";
 import type { SeriesNode, TaskDocNode } from "../../types/projection";
 import { sameTaskDocumentRef } from "../../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "../RoleExecutionStatus";
 import { RoleLaunchDefaults, RoleLaunchFeatures } from "../RoleLaunchFeatures";
 
 
-import { EMPTY_ROLE_EFFORTS, EMPTY_ROLE_MODELS, LAUNCHER_ROLES, isTasklessRole, usesRequestReceipts, launchChoiceProblem, launchSelectionComplete, masterOptionsForSprint, optionIndex, roleAgentOverrideFor, roleDocumentScope, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sameRoleDocumentScope, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleScopedExecution } from "../roleLaunchModel";
+import { EMPTY_ROLE_EFFORTS, EMPTY_ROLE_MODELS, LAUNCHER_ROLES, isTasklessRole, usesRequestReceipts, launchChoiceProblem, launchSelectionComplete, masterOptionsForSprint, optionIndex, roleAgentOverrideFor, roleDocumentScope, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sameRoleDocumentScope, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleScopedExecution, type RoleTaskOption } from "../roleLaunchModel";
+import type { TaskDocumentRef } from "../../types/terminalCatalog";
 
 
 
 const roleLauncherGrid = css({
   display: "flex",
   flexWrap: "wrap",
-  alignItems: "flex-end",
+  alignItems: "center",
   width: "100%",
   minWidth: "0",
-  columnGap: "0.55rem",
+  columnGap: "0.15rem",
   rowGap: "0.5rem",
-  padding: "0.65rem 0.75rem",
+  padding: "0.65rem 0.5rem",
   borderBottom: "1px solid var(--grid)",
   background: "var(--bg-panel)",
+  // Rule 8 and the overfull-feature recovery: the row wraps by whole controls
+  // at any width whenever its controls cannot fit; it never clips or hides
+  // them and offers no overflow menu.
 });
+// A selector's wrapper: no visible title (each selector keeps its accessible
+// name and carries a hover text that says what it selects). It sizes to its
+// value up to its cap and yields below it, so the full row still lands on one
+// line; only a longer value ends in an ellipsis, whole in the hover text.
 const roleLauncherField = css({
   display: "grid",
-  flex: "0 0 auto",
-  gap: "0.22rem",
-  minWidth: "0",
-  color: "muted",
-  fontSize: "0.75rem",
-  letterSpacing: "0.035em",
-  textTransform: "uppercase",
+  flexGrow: "0",
+  flexBasis: "auto",
+  minWidth: "6rem",
 });
-const roleLauncherRoleField = css({ width: "8rem" });
-const roleLauncherSprintField = css({ width: "8rem" });
-const roleLauncherMasterField = css({ width: "8.75rem" });
-const roleLauncherTaskField = css({ width: "9.5rem" });
-const roleLauncherAgentField = css({ width: "9.5rem" });
-const roleLauncherModelField = css({ width: "10rem" });
-const roleLauncherEffortField = css({ width: "8rem" });
-const roleLauncherSelect = css({
-  appearance: "none",
-  width: "100%",
-  minWidth: "0",
-  maxWidth: "100%",
-  height: "2.55rem",
-  minHeight: "2.55rem",
-  paddingInline: "0.58rem",
-  paddingRight: "2rem",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "3px",
-  backgroundColor: "bg",
-  backgroundImage: "linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%)",
-  backgroundPosition: "calc(100% - 14px) 50%, calc(100% - 9px) 50%",
-  backgroundSize: "5px 5px, 5px 5px",
-  backgroundRepeat: "no-repeat",
-  color: "ink",
-  font: "inherit",
-  fontSize: "0.86rem",
-  letterSpacing: "0",
-  textTransform: "none",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  transition: "border-color 120ms ease, box-shadow 120ms ease",
-  _hover: { borderColor: "cyan" },
-  _focusVisible: {
-    outlineWidth: "2px",
-    outlineStyle: "solid",
-    outlineColor: "amber",
-    outlineOffset: "1px",
-    borderColor: "amber",
-  },
-  _disabled: { opacity: "0.58", cursor: "not-allowed" },
-});
-const roleLauncherButton = cva({
-  base: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: "0",
-    height: "2.55rem",
-    minHeight: "2.55rem",
-    flexShrink: "0",
-    paddingInline: "0.62rem",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderRadius: "3px",
-    font: "inherit",
-    fontSize: "0.77rem",
-    fontWeight: "600",
-    lineHeight: "1.2",
-    whiteSpace: "nowrap",
-    cursor: "pointer",
-    transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
-    _focusVisible: { outlineWidth: "2px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "2px" },
-    _disabled: { opacity: "0.5", cursor: "not-allowed" },
-  },
-  variants: {
-    tone: {
-      primary: {
-        background: "amber",
-        color: "bg",
-        borderColor: "amber",
-        _hover: { background: "gold", borderColor: "gold" },
-      },
-      secondary: {
-        background: "transparent",
-        color: "cyan",
-        borderColor: "cyan",
-        _hover: { background: "oklch(0.85 0.13 200 / 0.08)", color: "ink" },
-      },
-      quiet: {
-        background: "transparent",
-        color: "muted",
-        borderColor: "grid",
-        _hover: { color: "ink", borderColor: "amber", background: "oklch(0.82 0.16 75 / 0.06)" },
-      },
-    },
-  },
-});
+// Selectors give way first: short-valued wrappers yield little, the
+// default-valued wrappers most, each down to its floor; a chip or button never
+// yields. The document caps keep the ordinary eleven-control row on one line
+// at 1440 px; whatever still does not fit wraps by whole controls.
+const roleLauncherRoleField = css({ maxWidth: "9rem", flexShrink: 0.5, "@media (min-width: 90rem)": { minWidth: "5.5rem" } });
+const roleLauncherSprintField = css({ maxWidth: "6rem", flexShrink: 0.5, "@media (min-width: 90rem)": { minWidth: "5rem" } });
+const roleLauncherMasterField = css({ maxWidth: "6rem", flexShrink: 0.5, "@media (min-width: 90rem)": { minWidth: "5rem" } });
+const roleLauncherTaskField = css({ maxWidth: "6rem", flexShrink: 0.5, "@media (min-width: 90rem)": { minWidth: "5rem" } });
+const roleLauncherAgentField = css({ maxWidth: "10rem", flexShrink: 1.25, "@media (min-width: 90rem)": { minWidth: "4.5rem" } });
+const roleLauncherModelField = css({ maxWidth: "10rem", flexShrink: 1.25, "@media (min-width: 90rem)": { minWidth: "4.5rem" } });
+const roleLauncherEffortField = css({ maxWidth: "10rem", flexShrink: 1.25, "@media (min-width: 90rem)": { minWidth: "4.5rem" } });
+// Every selector of the row is the one shared selector in
+// ../../grammar/viewTabLook (imported as `launcherSelect` above): the row
+// holds no copy of the tabs' look. Buttons likewise use the shared
+// `launcherButton` (Start the selected-tab look, the rest the unselected one).
 const roleLauncherActions = css({
   display: "flex",
+  flex: "0 0 auto",
   alignItems: "center",
   flexWrap: "wrap",
   gap: "0.35rem",
@@ -145,6 +76,25 @@ function boundCanStart(canStart: boolean, bound: boolean, liveOccupant: boolean)
   return canStart && !(bound && liveOccupant);
 }
 
+// Where a default comes from lives in the hover text of its control, in the
+// form "<key>: <value> · <source>".
+function defaultSourceTitle(key: string, choices: RoleDefaults["choices"], fallbackValue: string): string {
+  const choice = choices?.[key];
+  const value = choice?.value === undefined || choice?.value === null ? fallbackValue : String(choice.value);
+  return `${key}: ${value} · ${choice?.source ?? "host default"}`;
+}
+
+// The hover text of a document selector: the complete rendered label it
+// currently shows, what it selects, and the document identity behind it.
+function docSelectTitle(options: RoleTaskOption[], ref: TaskDocumentRef | undefined, what: string, emptyText: string): string {
+  const value = optionIndex(options, ref);
+  if (value === "") return what;
+  const selected = options[Number(value)];
+  const label = selected ? selected.doc.title || selected.doc.id : emptyText;
+  const identity = (selected && selected.ref ? `${selected.ref.repository}/${selected.ref.path}` : undefined) ?? taskRefIdentity(ref);
+  return identity ? `${label} — ${what}: ${identity}` : `${label} — ${what}`;
+}
+
 function referenceFields(bound: boolean, selection: RoleLaunchSelection) {
   return {
     sprint: !bound && roleNeedsSprint(selection.role),
@@ -153,8 +103,8 @@ function referenceFields(bound: boolean, selection: RoleLaunchSelection) {
   };
 }
 
-function launcherRow(bound: boolean, progress?: string) {
-  return { style: bound ? { flexWrap: "nowrap" as const, overflowX: "auto" as const } : undefined, startLabel: progress ?? "Start" };
+function launcherRow(progress?: string) {
+  return { startLabel: progress ?? "Start" };
 }
 
 export function RoleLauncher({
@@ -206,7 +156,7 @@ export function RoleLauncher({
 }) {
   const { role, sprintDocumentRef, masterDocumentRef, taskDocumentRef } = selection;
   const fields = referenceFields(Boolean(boundRoles), selection);
-  const row = launcherRow(Boolean(boundRoles), progress);
+  const row = launcherRow(progress);
   const sprintOptions = sprintOptionsForDocs(taskDocuments);
   const selectedSprint = sprintOptions.find((option) => sameTaskDocumentRef(option.ref, sprintDocumentRef))?.doc;
   const masterOptions = masterOptionsForSprint(taskDocuments, selectedSprint);
@@ -245,6 +195,24 @@ export function RoleLauncher({
   const efforts = selectedModel?.efforts ?? EMPTY_ROLE_EFFORTS;
   const defaultEffort = efforts.find((effort) => effort.id === (roleDefaults.effort ?? selectedModel?.defaultEffort));
   const selectedAgentLabel = agents.find((agent) => agent.id === roleDefaults.agent)?.label ?? roleDefaults.agent;
+  // The complete labels the override selectors currently show: the chosen
+  // option when an override is set, else the default first option. Each mirrors
+  // its default-option JSX below.
+  const agentDisplayed = selection.agentOverride?.agentId
+    ? agents.find((agent) => agent.id === selection.agentOverride?.agentId)?.label ?? selection.agentOverride.agentId
+    : selectedAgentLabel ? selectedAgentLabel + " · default" : "Role default";
+  const modelDisplayed = selection.agentOverride?.modelId
+    ? models.find((model) => model.id === selection.agentOverride?.modelId)?.label ?? selection.agentOverride.modelId
+    : !selectedAgentId
+      ? "Load agent default"
+      : !selectedAgent
+        ? "Agent capabilities loading"
+        : models.length
+          ? defaultModel ? defaultModel.label + " · default" : selection.agentOverride ? "Agent default" : "Role default"
+          : "No model choices";
+  const effortDisplayed = selection.agentOverride?.effortId
+    ? efforts.find((effort) => effort.id === selection.agentOverride?.effortId)?.label ?? selection.agentOverride.effortId
+    : defaultEffort ? defaultEffort.label + " · default" : selection.agentOverride ? "Model default" : "Role default";
   const launchSelection: RoleLaunchSelection = {
     ...roleDocumentScope(selection),
     ...(selection.agentOverride ? { agentOverride: selection.agentOverride } : {}),
@@ -288,13 +256,13 @@ export function RoleLauncher({
   }, [optionsReady, agents, models, efforts, selection, onSelectionChange]);
 
   return (
-    <div className={roleLauncherGrid} style={row.style} data-testid="role-launcher">
+    <div className={roleLauncherGrid} data-testid="role-launcher">
       <label className={`${roleLauncherField} ${roleLauncherRoleField}`}>
-        Role
         <select
-          className={roleLauncherSelect}
+          className={launcherSelect}
           id="launcher-role"
-          title={LAUNCHER_ROLES.find((option) => option.id === role)?.label ?? role}
+          aria-label="Role"
+          title={`${boundRoleLabel(LAUNCHER_ROLES.find((option) => option.id === role)?.label ?? role, true, Boolean(boundRoles), status)} — Role`}
           value={role}
           disabled={busy || optionsLoading || (!usesRequestReceipts(selection) && currentScopedExecution?.canRetry === true)}
           onChange={(event) => onSelectionChange(boundRoles ? { ...roleDocumentScope(selection), role: event.target.value as LauncherRole } : { role: event.target.value as LauncherRole })}
@@ -304,12 +272,11 @@ export function RoleLauncher({
       </label>
       {fields.sprint ? (
         <label className={`${roleLauncherField} ${roleLauncherSprintField}`}>
-          Sprint
           <select
-            className={roleLauncherSelect}
+            className={launcherSelect}
             aria-label="AR sprint"
             value={optionIndex(sprintOptions, sprintDocumentRef)}
-            title={taskRefIdentity(sprintDocumentRef)}
+            title={docSelectTitle(sprintOptions, sprintDocumentRef, "Sprint", sprintOptions.length ? "Select sprint…" : "No sprint documents")}
             disabled={busy || optionsLoading || currentScopedExecution?.canRetry === true}
             onChange={(event) => {
               const selected = refAtOptionIndex(sprintOptions, event.target.value);
@@ -327,12 +294,11 @@ export function RoleLauncher({
       ) : null}
       {fields.master ? (
         <label className={`${roleLauncherField} ${roleLauncherMasterField}`}>
-          Master
           <select
-            className={roleLauncherSelect}
+            className={launcherSelect}
             aria-label="AR master"
             value={optionIndex(masterOptions, masterDocumentRef)}
-            title={taskRefIdentity(masterDocumentRef)}
+            title={docSelectTitle(masterOptions, masterDocumentRef, "Master", masterOptions.length ? "Select master…" : "No linked masters")}
             disabled={busy || optionsLoading || currentScopedExecution?.canRetry === true}
             onChange={(event) => {
               const selected = refAtOptionIndex(masterOptions, event.target.value);
@@ -354,12 +320,11 @@ export function RoleLauncher({
       ) : null}
       {fields.task ? (
         <label className={`${roleLauncherField} ${roleLauncherTaskField}`}>
-          Task
           <select
-            className={roleLauncherSelect}
+            className={launcherSelect}
             aria-label="AR task"
             value={optionIndex(taskOptions, taskDocumentRef)}
-            title={taskRefIdentity(taskDocumentRef)}
+            title={docSelectTitle(taskOptions, taskDocumentRef, "Task", taskOptions.length ? "Select task…" : "No leaf tasks")}
             disabled={busy || optionsLoading || currentScopedExecution?.canRetry === true}
             onChange={(event) => {
               const selected = refAtOptionIndex(taskOptions, event.target.value);
@@ -381,10 +346,10 @@ export function RoleLauncher({
         </label>
       ) : null}
       <label className={`${roleLauncherField} ${roleLauncherAgentField}`}>
-        Agent override
         <select
-          className={roleLauncherSelect}
+          className={launcherSelect}
           aria-label="Role agent override"
+          title={`${agentDisplayed} — ${defaultSourceTitle("agent", roleDefaults.choices, selectedAgentLabel ?? roleDefaults.agent ?? "unset")}`}
           value={selection.agentOverride?.agentId ?? ""}
           disabled={!optionsReady || !agents.length || optionsLoading || busy || currentScopedExecution?.canRetry === true}
           onChange={(event) => {
@@ -402,11 +367,10 @@ export function RoleLauncher({
         </select>
       </label>
       <label className={`${roleLauncherField} ${roleLauncherModelField}`}>
-        Model override
         <select
-          className={roleLauncherSelect}
+          className={launcherSelect}
           aria-label="Role model override"
-          title={selection.agentOverride ? "Use the selected agent's default model" : "Use the model configured for this AR role"}
+          title={`${modelDisplayed} — ${defaultSourceTitle("model", roleDefaults.choices, defaultModel?.label ?? roleDefaults.model ?? "unset")}`}
           value={selection.agentOverride?.modelId ?? ""}
           disabled={!optionsReady || !selectedAgent || !models.length || optionsLoading || busy || currentScopedExecution?.canRetry === true}
           onChange={(event) => {
@@ -432,11 +396,10 @@ export function RoleLauncher({
       </label>
       {selectedModel && efforts.length ? (
         <label className={`${roleLauncherField} ${roleLauncherEffortField}`}>
-          Effort override
           <select
-            className={roleLauncherSelect}
+            className={launcherSelect}
             aria-label="Role effort override"
-            title={selection.agentOverride ? "Use the selected model's default effort" : "Use the effort configured for this AR role or model"}
+            title={`${effortDisplayed} — ${defaultSourceTitle("effort", roleDefaults.choices, defaultEffort?.label ?? roleDefaults.effort ?? "unset")}`}
             value={selection.agentOverride?.effortId ?? ""}
             disabled={busy || currentScopedExecution?.canRetry === true}
             onChange={(event) => {
@@ -461,6 +424,7 @@ export function RoleLauncher({
         </label>
       ) : null}
       <RoleLaunchDefaults ready={optionsReady} defaults={roleDefaults} selectedAgentId={selectedAgentId}
+        modeLabel={selectedAgent?.modes?.find((mode) => mode.id === roleDefaults.mode)?.label}
         modeDescription={selectedAgent?.modes?.find((mode) => mode.id === roleDefaults.mode)?.description} />
       <RoleLaunchFeatures features={(selectedModel ?? models.find((model) => model.isDefault))?.features ?? []}
         defaults={selectedAgentId === roleDefaults.agent ? roleDefaults : {}}
@@ -468,18 +432,18 @@ export function RoleLauncher({
         onChange={(agentOverride) => onSelectionChange({ ...roleDocumentScope(selection), agentOverride })} />
       <div className={roleLauncherActions}>
         {roleDefaults.serviceTier ? (
-          <span data-testid="role-service-tier" title="The role service tier applies on its default agent, including model overrides; a different agent uses its native default.">
+          <span data-testid="role-service-tier" className={launcherChip} title="The role service tier applies on its default agent, including model overrides; a different agent uses its native default.">
             {"Speed: " + (selectedAgentId === roleDefaults.agent ? (roleDefaults.serviceTier === "fast" ? "Fast" : roleDefaults.serviceTier) : "provider default")}
           </span>
         ) : null}
-        <button className={roleLauncherButton({ tone: "primary" })} type="button" aria-label="Start role" title="Start role" disabled={!boundCanStart(canStart, Boolean(boundRoles) && (!usesRequestReceipts(selection) || isTasklessRole(selection)), liveOccupant)} onClick={() => void onLaunch(launchSelection)}>{row.startLabel}</button>
+        <button className={launcherButton({ selected: true })} type="button" aria-label="Start role" title="Start role" disabled={!boundCanStart(canStart, Boolean(boundRoles) && (!usesRequestReceipts(selection) || isTasklessRole(selection)), liveOccupant)} onClick={() => void onLaunch(launchSelection)}>{row.startLabel}</button>
         {canRetry && canRetrySelection && retryRequestId ? (
-          <button className={roleLauncherButton({ tone: "secondary" })} type="button" aria-label="Retry role launch" title="Retry the same saved launch request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
+          <button className={launcherButton({ selected: false })} type="button" aria-label="Retry role launch" title="Retry the same saved launch request" disabled={busy} onClick={() => void onRetry(retrySelection, retryRequestId)}>Retry</button>
         ) : null}
-        <RoleReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={roleLauncherButton({ tone: "secondary" })} onRevive={() => void onRevive(launchSelection)} />
-        {canRefreshResult ? <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role result" title="Refresh role result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
-        {optionsError ? <button className={roleLauncherButton({ tone: "quiet" })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button> : null}
-        <button className={roleLauncherButton({ tone: "quiet" })} type="button" aria-label="Refresh role agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
+        <RoleReviveControl execution={currentScopedExecution} enabled={optionsReady && complete && !busy} className={launcherButton({ selected: false })} onRevive={() => void onRevive(launchSelection)} />
+        {canRefreshResult ? <button className={launcherButton({ selected: false })} type="button" aria-label="Refresh role result" title="Refresh role result" disabled={busy || optionsLoading} onClick={onRefreshResult}>Result</button> : null}
+        {optionsError ? <button className={launcherButton({ selected: false })} type="button" disabled={optionsLoading} onClick={onRefreshOptions}>Retry launch options</button> : null}
+        <button className={launcherButton({ selected: false })} type="button" aria-label="Refresh role agents" title="Refresh agent catalog" disabled={(!optionsReady && !optionsError) || optionsLoading || busy} onClick={onRefreshCatalog}>Refresh</button>
       </div>
       <RoleExecutionStatus
         execution={failureExecution}

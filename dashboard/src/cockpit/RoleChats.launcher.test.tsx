@@ -223,9 +223,15 @@ describe("R71 speed feature choices", () => {
       return optionsFetch(url, init);
     }));
     const view = renderLauncher();
-    await waitFor(() => expect(view.getByText("Mode: auto · least permissive mode")).toBeTruthy());
-    expect(view.getByText(/Features:/).textContent).toContain("service_tier: default (host role)");
-    expect(view.getByText(/User instructions/).textContent).toContain("baseline replaced");
+    await waitFor(() => expect(view.getByText("Default Permissions")).toBeTruthy());
+    const modeChip = view.getByText("Default Permissions");
+    expect(modeChip.getAttribute("title")).toContain("least permissive mode");
+    expect(view.queryByTestId("role-default-sources")).toBeNull();
+    expect(view.queryByText(/Features:/)).toBeNull();
+    expect(view.queryByText(/Role defaults:/)).toBeNull();
+    const instructions = view.getByText("Instructions");
+    expect(instructions.getAttribute("title")).toContain("host role");
+    expect(instructions.getAttribute("title")).toContain("baseline replaced");
     expect(view.queryByLabelText("Plan mode override")).toBeNull();
     expect(view.queryByLabelText("Mode override")).toBeNull();
     fireEvent.change(view.getByLabelText("Speed feature override"), { target: { value: "priority" } });
