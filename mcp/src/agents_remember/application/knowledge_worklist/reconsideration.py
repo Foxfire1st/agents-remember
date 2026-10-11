@@ -29,7 +29,10 @@ whose routes differ between K_B and K_C, because a family's one governing row is
 the leaf changes its guarantee together with its routes (erratum to rule 1). No directory-absence
 trigger exists.
 A decision that is superseded (derived, MIK-R13 rule 2) raises nothing: its links are listed in the
-summary as ``skipped: superseded`` (ruling Q5). Nothing reads ``reconsider_when``: the prose is never
+summary as ``skipped: superseded`` (ruling Q5), naming the successor decisions. Succession is
+derived from the decisions of K_B **and** K_C (architect ruling a3d79e94): a base decision that
+a decision of this leaf supersedes raises no item even though the successor lives only in the
+candidate. Nothing reads ``reconsider_when``: the prose is never
 evaluated (Exclusions).
 
 **Items (rules 3 and 5).** One item per decision alternative, subject
@@ -153,12 +156,13 @@ def _target_key(target: Any) -> str:
     return link_target_key(target if isinstance(target, str) else target.to_document())
 
 
-def _skipped(link: ReconsiderLink) -> dict[str, Any]:
+def _skipped(link: ReconsiderLink, successors: tuple[str, ...]) -> dict[str, Any]:
     return {
         "subject": link.subject,
         "link": link.link_index,
         "target": _target_key(link.link.target),
         "skipped": SUPERSEDED,
+        "successors": list(successors),
         "trigger": None,
     }
 
@@ -173,7 +177,17 @@ class _Evaluation:
             for _id, indexed in sorted(self.inputs.base.parsed.records.items())
             if isinstance(indexed.record, DecisionRecord)
         ]
-        superseding = superseded_by(decisions)
+        # Architect ruling a3d79e94: succession is derived from the decisions of
+        # the base AND of the candidate, so a successor authored in this leaf
+        # silences its base decision. Link evaluation still ranges over the
+        # base decisions only: a decision absent from the base raises nothing
+        # by itself.
+        candidate_decisions = [
+            indexed.record
+            for _id, indexed in sorted(self.inputs.candidate.parsed.records.items())
+            if isinstance(indexed.record, DecisionRecord)
+        ]
+        superseding = superseded_by([*decisions, *candidate_decisions])
         history = self._history()
         rows = {} if history is None else {row.subject: row.id for row in history.rows}
         evaluated: list[dict[str, Any]] = []
@@ -181,7 +195,7 @@ class _Evaluation:
         for decision in decisions:
             skipped = derived_status(decision, superseding) == SUPERSEDED
             for link in reconsider_links(decision):
-                fired = self._summarize(link, skipped, evaluated)
+                fired = self._summarize(link, skipped, superseding, evaluated)
                 if fired is not None:
                     changed.setdefault(link.subject, []).append((link, fired))
         records = {one.id: one for one in decisions}
@@ -196,12 +210,16 @@ class _Evaluation:
         return None if owner is None else self.inputs.candidate.history(owner)
 
     def _summarize(
-        self, link: ReconsiderLink, skipped: bool, evaluated: list[dict[str, Any]]
+        self,
+        link: ReconsiderLink,
+        skipped: bool,
+        superseding: Mapping[str, tuple[str, ...]],
+        evaluated: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         """Evaluate one link into the summary; its fired facts, or ``None``."""
 
         if skipped:  # ruling Q5: the successor carries its own links
-            evaluated.append(_skipped(link))
+            evaluated.append(_skipped(link, superseding.get(link.decision, ())))
             return None
         outcome = self._evaluate(link)
         evaluated.append(outcome["summary"])
@@ -375,7 +393,7 @@ class _Evaluation:
             "subject": subject,
             "facts": facts,
         }
-        open_ = reconsideration_item_open(document, rows)
+        open_ = reconsideration_item_open(document, rows, set(superseding))
         return {**document, "satisfiedBy": None if open_ else rows[subject]}
 
 

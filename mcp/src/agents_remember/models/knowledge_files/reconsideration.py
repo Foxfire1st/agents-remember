@@ -26,7 +26,7 @@ reverses a decision.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Set
 from typing import Any, Final
 
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, id_pattern
@@ -109,13 +109,26 @@ def link_target_key(target: Any) -> str:
     return f"{task.get('repository')}/{task.get('path')}#{target.get('id')}@{target.get('version')}"
 
 
-def reconsideration_item_open(item: Mapping[str, Any], rows_by_subject: Mapping[str, str]) -> bool:
+def reconsideration_item_open(
+    item: Mapping[str, Any],
+    rows_by_subject: Mapping[str, str],
+    superseded: Set[str] = frozenset(),
+) -> bool:
     """The ``reconsideration_candidate`` satisfying rule over a stored item, for the gate (MIK-R09).
 
     Only the leaf's row with the item's subject answers it; the row kind admits only
     ``still_rejected`` and ``raise``, so any such row is a satisfying one (rule 5).
     ``rows_by_subject`` maps each history-row subject of the leaf to its row ID.
+    A stored item whose decision a decision of this leaf supersedes reads closed
+    without a row, exactly as the run raises no item for it (architect ruling
+    a3d79e94): ``superseded`` names those superseded decision IDs.
     """
 
     subject = item.get("subject")
-    return not isinstance(subject, str) or subject not in rows_by_subject
+    if isinstance(subject, str) and subject in rows_by_subject:
+        return False
+    if isinstance(subject, str):
+        parsed = parse_reconsider_subject(subject)
+        if parsed is not None and parsed[0] in superseded:
+            return False
+    return True
