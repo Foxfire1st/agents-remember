@@ -93,6 +93,11 @@ then runs the locked dependency compatibility check. It never replaces the
 system Python and installs the interpreter outside the Git repository under the
 Agents Remember data root.
 
+It builds with the `uv` on the `PATH` when it is the contract's version
+(`AR_UV_VERSION` in `scripts/python-runtime-contract.env`) or newer, and
+installs none itself: an older `uv`, or none, is refused before anything is
+moved or created. A `uv` that updates by itself therefore works.
+
 ## Install And Run
 
 Build a wheel from the current checkout, then run that artifact on Python 3.14:
