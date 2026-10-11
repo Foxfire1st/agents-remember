@@ -65,7 +65,7 @@ def observe_scope_candidate(
             requested_repo_id=contract.repo_name,
         )
         code_candidate = capture_future_code_candidate(contract).codeCandidateTree
-        memory_candidate = _candidate_tree(contract.memory_worktree, contract.worktree_group)
+        memory_candidate = _candidate_tree(contract.memory_worktree)
         task_pair = observe_contract_task_pair(contract)
     except ScopeUnprovenError:
         raise
@@ -269,10 +269,11 @@ def _blob(repository: Path, tree: str, path: str) -> str:
     return require_git(repository, ["rev-parse", f"{tree}:{path}"])
 
 
-def _candidate_tree(repository: Path, worktree_group: Path) -> str:
-    reports = worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".scope-candidate-", dir=reports) as temporary:
+def _candidate_tree(repository: Path) -> str:
+    # Rule 6 (MIK-R74): this capture is unrecorded scratch, so it must not create the
+    # enclosure's reports/ directory -- an empty reports/ left behind by a read is a
+    # boundary violation. The system temp directory holds the throwaway index instead.
+    with TemporaryDirectory(prefix=".scope-candidate-") as temporary:
         return worktree_candidate_tree(repository, Path(temporary) / "index")
 
 

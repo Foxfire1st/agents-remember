@@ -56,7 +56,7 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
 
 def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """The one read operation, over the five named views."""
+    """The one read operation, over the three named views."""
 
     @server.tool()
     def knowledge_read(
@@ -76,8 +76,8 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         using explicit filters and a snapshot-bound continuation. `memoryRoot` is the root
         directory of a converted memory tree (one that holds knowledge/layout.json): a leaf's
         memory worktree, or `memoryTree.memoryRoot` of a read_ar_files published-intent block. An
-        unconverted tree or a database file is refused as `legacy-format`. The five views are
-        source_context, invariant, family, review_matrix and curation_queue. Returns recorded
+        unconverted tree or a database file is refused as `legacy-format`. The three views are
+        source_context, invariant and family. Returns recorded
         claims and assessments as attributed records: every ordered position and every
         no-consequence statement carries an `authored` or `mechanical` provenance class, and a
         value that cannot be classified is reported as an unresolved limitation rather than

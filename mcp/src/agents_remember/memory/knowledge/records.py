@@ -134,10 +134,6 @@ def decode_revision_row(
     return StoredInvariantRevision(revision=revision)
 
 
-def decode_predecessor_rows(rows: Sequence[Sequence[Any]]) -> tuple[str, ...]:
-    return tuple(sorted(str(row[0]) for row in rows))
-
-
 def family_row_digest(
     repository_id: str, family_id: str, display_label: str, provenance: Authorship
 ) -> str:

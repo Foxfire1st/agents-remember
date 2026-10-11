@@ -184,7 +184,10 @@ def link_document(index: KnowledgeIndex, link: Link) -> dict[str, Any]:
     }
     if link.source_kind == "history_row":
         # A row has no page of its own: the reader names, and navigates to, the record it is about.
-        row = index.history_row(link.source).value
+        # The lookup may return one row per file that holds the ID; the link's own origin path
+        # picks the one this relationship was filed with, never the first of several.
+        rows = index.history_row(link.source).value
+        row = next((one for one in rows if one.path == link.origin_path), None)
         if row is not None:
             document["sourceSubject"] = record_summary(index, row.subject)
     elif link.source_kind not in ("file", "route"):

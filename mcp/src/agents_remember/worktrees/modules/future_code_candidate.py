@@ -69,9 +69,10 @@ def require_current_future_code_candidate(
 
 
 def _candidate_tree(contract: WorktreeContract) -> str:
-    reports = contract.worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".future-code-candidate-", dir=reports) as temporary_directory:
+    # The scratch index lives in the system temporary directory, never in the worktree group:
+    # a read creates no directory except to hold a file of MIK-R74 rule 6 (a) to (c), and this
+    # capture is none of those until a comparison records it.
+    with TemporaryDirectory(prefix=".future-code-candidate-") as temporary_directory:
         return worktree_candidate_tree(
             contract.code_worktree,
             Path(temporary_directory) / "index",

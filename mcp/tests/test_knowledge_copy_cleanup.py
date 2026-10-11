@@ -23,8 +23,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -91,19 +93,57 @@ DELETED = {
 
 
 def _dataset(path: Path) -> Path:
-    """One SQLite file holding the knowledge schema, whatever it is called."""
+    """One SQLite file holding the knowledge schema, whatever it is called.
 
-    open_knowledge_store(path, "11111111-1111-4111-8111-111111111111").close()
+    The file is built under a working name and copied into place: the derived index never
+    opens or writes a retired dataset name, so a retired-named copy cannot be authored through
+    the store -- it arrives as a file, which is exactly what the cleanup sweeps. The copy keeps
+    only the eight logical tables: a file carrying the index's own ``ix_*`` tables reads as a
+    derived index, not as a leftover copy.
+    """
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ar-cleanup-template-") as temporary:
+        template = Path(temporary) / "template.sqlite"
+        open_knowledge_store(template, "11111111-1111-4111-8111-111111111111").close()
+        shutil.copy(template, path)
+    _drop_index_tables(path)
     return path
 
 
-def _index(path: Path) -> Path:
-    """A knowledge dataset that also holds an ``ix_*`` table: a derived index."""
-
-    _dataset(path)
+def _drop_index_tables(path: Path) -> None:
     connection = apsw.Connection(str(path))
-    connection.execute("CREATE TABLE ix_uuid (uuid TEXT PRIMARY KEY, id TEXT, role TEXT)")
-    connection.close()
+    try:
+        for table in (
+            "ix_meta",
+            "ix_problem",
+            "ix_record",
+            "ix_entry",
+            "ix_member",
+            "ix_route",
+            "ix_link",
+            "ix_history_row",
+            "ix_uuid",
+        ):
+            connection.execute(f"DROP TABLE {table}")
+    finally:
+        connection.close()
+
+
+def _index(path: Path) -> Path:
+    """A knowledge dataset that also holds an ``ix_*`` table: a derived index.
+
+    Every built dataset already carries the ``ix_*`` tables, so the copy is an index as it
+    stands; no table is added and none is dropped.
+    """
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ar-cleanup-template-") as temporary:
+        template = Path(temporary) / "template.sqlite"
+        open_knowledge_store(template, "11111111-1111-4111-8111-111111111111").close()
+        shutil.copy(template, path)
     return path
 
 

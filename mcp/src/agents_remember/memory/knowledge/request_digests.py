@@ -16,7 +16,7 @@ from threading import get_ident
 
 import apsw
 
-from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
+from agents_remember.memory.knowledge.schema import SchemaGeneration
 
 
 @dataclass

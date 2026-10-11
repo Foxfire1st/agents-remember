@@ -10,7 +10,7 @@ from the application layer instead.
 """
 
 from agents_remember.memory.knowledge.connection import BUSY_TIMEOUT_MILLISECONDS
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.schema import (
     CURRENT_GENERATION,
     SchemaGeneration,
     generation_of_database,

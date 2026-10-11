@@ -101,7 +101,9 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
 
         The preview reports the admitted candidate, source refs, external-memory refreshes,
         and exact code, memory, and ledger writes. Every enabled commit leg requires its
-        explicit, nonblank message; typed not-applicable legs may be omitted.
+        explicit, nonblank message; typed not-applicable legs may be omitted. A preview is a
+        read: it writes only the leaf's worklist, its quality reports and the judged tree's
+        objects, and never falls back to writing anywhere else.
         """
         return worktree_closeout_preview_payload(
             config,
@@ -133,7 +135,14 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         Every contract-enabled commit leg requires its explicit, nonblank message; typed
         not-applicable legs may be omitted.
         Repeat the same task input to observe/recover it; conflicting input refuses. Queue
-        invalidation or absence does not affect the accepted journal generation."""
+ invalidation or absence does not affect the accepted journal generation.
+
+ Delivered against reviewed: after the closeout has committed, the result says whether
+ the code and the memory that were delivered are exactly what the leaf's latest recorded
+ review showed: the same, different (and on which side), or no review was recorded. It
+ never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
+ that ends in the same tree reads as the same. How a branch got there is not measured.
+ """
         return worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -161,7 +170,14 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         recording the resulting pair. MUTATING: moves branch refs; preview with dry_run=true.
         Repeat the same task input to
         observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
-        the addressed landing and never blocks task-document authoring."""
+        the addressed landing and never blocks task-document authoring.
+
+        Delivered against reviewed: after the integration has committed, the result says whether
+        the code and the memory that were delivered are exactly what the leaf's latest recorded
+        review showed: the same, different (and on which side), or no review was recorded. It
+        never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
+        that ends in the same tree reads as the same. How a branch got there is not measured.
+        """
         return worktree_integrate_payload(
             config,
             contract_path,

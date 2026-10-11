@@ -38,7 +38,7 @@ resolved trees in the same request: the entry asks for it exactly when it asks f
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,7 +61,6 @@ from agents_remember.memory.knowledge.read_queries import (
     fetch_identity_rows,
     fetch_invariant_revisions,
     fetch_memberships_of_families_full,
-    fetch_predecessor_edges,
     fetch_realizations_for_invariants,
     fetch_revision_ids,
 )
@@ -211,7 +210,6 @@ def _read_side(database: Path, namespace: str) -> _SideIntent:
 
     connection = open_read_only_database(database)
     try:
-        edges = fetch_predecessor_edges(connection, namespace)
         invariant_populations = _populations(
             connection, namespace, ("invariant", "invariant_revision", "invariant_id")
         )
@@ -224,8 +222,8 @@ def _read_side(database: Path, namespace: str) -> _SideIntent:
             for revision in population
         }
         return _SideIntent(
-            invariants=_invariant_side(connection, namespace, invariant_populations, edges),
-            families=_family_side(connection, namespace, (family_populations, edges), invariant_of),
+            invariants=_invariant_side(connection, namespace, invariant_populations),
+            families=_family_side(connection, namespace, family_populations, invariant_of),
         )
     finally:
         connection.close()
@@ -249,10 +247,10 @@ def _populations(
 
 
 def _heads(
-    populations: Mapping[str, tuple[str, ...]], edges: Sequence[tuple[str, str]]
+    populations: Mapping[str, tuple[str, ...]],
 ) -> dict[str, tuple[str, ...]]:
     return {
-        identity: revision_heads(population, edges) for identity, population in populations.items()
+        identity: revision_heads(population) for identity, population in populations.items()
     }
 
 
@@ -260,9 +258,8 @@ def _invariant_side(
     connection: apsw.Connection,
     namespace: str,
     populations: Mapping[str, tuple[str, ...]],
-    edges: Sequence[tuple[str, str]],
 ) -> _KindSide:
-    heads = _heads(populations, edges)
+    heads = _heads(populations)
     head_ids = _all_heads(heads)
     content = {
         str(row["revision_id"]): tuple(_canonical(row[name]) for name in _STATEMENT_FIELDS)
@@ -282,11 +279,10 @@ def _invariant_side(
 def _family_side(
     connection: apsw.Connection,
     namespace: str,
-    lineage: tuple[Mapping[str, tuple[str, ...]], Sequence[tuple[str, str]]],
+    populations: Mapping[str, tuple[str, ...]],
     invariant_of: Mapping[str, str],
 ) -> _KindSide:
-    populations, edges = lineage
-    heads = _heads(populations, edges)
+    heads = _heads(populations)
     head_ids = _all_heads(heads)
     content = {
         str(row["revision_id"]): tuple(_canonical(row[name]) for name in _GUARANTEE_FIELDS)

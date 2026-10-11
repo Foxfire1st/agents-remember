@@ -11,7 +11,6 @@
 import type {
   ReviewApplicabilitySummary,
   ReviewAssessmentDisplay,
-  ReviewAuthoredEffect,
   ReviewContextRecord,
   ReviewDisplayedApplicability,
   ReviewKnowledgePane,
@@ -135,21 +134,6 @@ function assessmentBlock(entry: ReviewAssessmentDisplay) {
   );
 }
 
-function authoredEffect(effect: ReviewAuthoredEffect) {
-  return (
-    <li key={`${effect.record_kind}:${effect.record_id}`} data-testid="review-authored-effect">
-      <strong>{effect.record_kind}</strong>
-      {effect.label ? ` · ${effect.label}` : ''} · {effect.record_id}
-      {effect.rationale ? <div>{effect.rationale}</div> : null}
-      <div style={{ color: 'var(--muted)' }}>
-        {attribution(effect.author_ref, effect.examined_inputs)}
-      </div>
-      {applicabilityNote(effect)}
-      {unresolvedList(effect.unresolved)}
-    </li>
-  );
-}
-
 function signalBlock(signal: ReviewSignal) {
   return (
     <li key={signal.signal_id} data-testid="review-signal">
@@ -197,17 +181,11 @@ function KnowledgeFacts({ knowledge }: { knowledge: ReviewKnowledgePane }) {
   );
 }
 
-function AuthoredRecords({ knowledge }: { knowledge: ReviewKnowledgePane }) {
+function DetectionSignals({ knowledge }: { knowledge: ReviewKnowledgePane }) {
+  // The review matrix left with the retired envelope tables (MIK-R74 rule 1): the pane carries
+  // no authored-effects collection, so only the detection signals render here.
   return (
     <>
-      <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Authored effects and preservation claims</h4>
-      {knowledge.authored_effects.length ? (
-        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
-          {knowledge.authored_effects.map(authoredEffect)}
-        </ul>
-      ) : (
-        muted('No authored effect, preservation claim or unresolved question is recorded here.')
-      )}
       <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Detection signals (facts, not findings)</h4>
       {knowledge.signals.length ? (
         <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
@@ -232,7 +210,7 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
       </div>
       <KnowledgeStatements before={knowledge.before_statement} after={knowledge.after_statement} />
       <KnowledgeFacts knowledge={knowledge} />
-      <AuthoredRecords knowledge={knowledge} />
+      <DetectionSignals knowledge={knowledge} />
       {knowledge.assessments.length ? (
         <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
           {knowledge.assessments.map(assessmentBlock)}

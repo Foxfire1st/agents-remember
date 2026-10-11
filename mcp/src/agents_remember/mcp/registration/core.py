@@ -174,6 +174,7 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         each call and provisions the build-pinned host/plugin on checked product Node. It never
         writes shared settings or stops a running host; needed transitions return restartRequired.
         A preview downloads/writes/starts nothing; absent block reports no host configured.
+        A dry run files no report either.
 
         With install_provider_deps=true (default) it also builds provider images, but SKIPS any
         image whose tag already exists, then starts/rechecks watchers without rebuilding indexes.

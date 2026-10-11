@@ -323,7 +323,7 @@ def _record_union_item(population: _Population, item: KnowledgeDiffItem) -> None
 
 
 def _record_movement(population: _Population, movement: ReviewRelationshipMovement) -> None:
-    """Record one movement's identities, revisions and authored lineage as facts of this selection."""
+    """Record one movement's identities and revisions as facts of this selection."""
 
     population.reach(_movement_identity(movement) or _NO_IDENTITY, _movement_path(movement))
     for side in (*movement.before, movement.after):
@@ -331,7 +331,7 @@ def _record_movement(population: _Population, movement: ReviewRelationshipMoveme
 
 
 def _record_side(population: _Population, side, movement: ReviewRelationshipMovement) -> None:
-    """Record one recorded side's address, revisions and lineage, when it names an identity."""
+    """Record one recorded side's address and revisions, when it names an identity."""
 
     if side is None:
         return
@@ -349,10 +349,6 @@ def _record_side(population: _Population, side, movement: ReviewRelationshipMove
     # attributing it here would report a member invariant's revision under the family it sits in.
     if side.revision_id is not None:
         _reach_revision(population, identity, str(side.revision_id), path)
-    for lineage in movement.lineage:
-        population.revision_identity.setdefault(str(lineage.revision_id), identity)
-        for related_revision in lineage.related_revision_ids:
-            population.revision_identity.setdefault(str(related_revision), identity)
 
 
 def _reach_revision(

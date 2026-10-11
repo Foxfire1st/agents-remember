@@ -28,11 +28,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from agents_remember.application import knowledge_diff, knowledge_review
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
+from agents_remember.application.knowledge_paging import view_pages
 from agents_remember.application.knowledge_review import (
     compose_review,
 )
@@ -67,17 +68,20 @@ from agents_remember.serving.review import (
     register_review_routes,
     review_request_from_query,
 )
-from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
-from diff_scope_test_support import DiffFixture, build_diff_fixture
+from diff_scope_test_support import (
+    SUCCESSOR_PATH,
+    SYNCHRONIZATION_PATH,
+    DiffFixture,
+    build_diff_fixture,
+    rebuild_after_tree,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from knowledge_rows_test_support import (
-    NewAnchor,
-    RealizationClaimRequest,
-    open_knowledge_store,
-    realizations,
+from read_scope_test_support import (
+    SUBJECT_REVISION,
+    ReadFixtureRealization,
+    RealizationSeed,
 )
-from read_scope_test_support import make_read_authorship
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -155,47 +159,68 @@ def review_config() -> McpRuntimeConfig:
     )
 
 
+def _page_seed(path: str, blob: str, rationale: str) -> RealizationSeed:
+    """One candidate-only realization at its own path, citing the tree's revised revision."""
+
+    return RealizationSeed(
+        realization=ReadFixtureRealization(
+            anchor_id=str(uuid4()), claim_id=str(uuid4()), path=path
+        ),
+        revision_id=SUBJECT_REVISION,
+        role="enforcement",
+        locator=FileLocator(),
+        recorded_blob=blob,
+        rationale=rationale,
+    )
+
+
+def _paginated_after(directory: Path, diff: DiffFixture, paths: tuple[str, ...]):
+    """Rebuild the candidate with the successor claim and one claim per extra path.
+
+    The successor entry is re-recorded with the candidate tree's own bytes, so the rebuilt
+    population is the fixture's population plus exactly the extra paths.
+    """
+
+    known_blob = next(iter(diff.after.git_blobs.values()))
+    return rebuild_after_tree(
+        directory,
+        omit_claim_paths=(SYNCHRONIZATION_PATH,),
+        extra_claims=(
+            _page_seed(
+                SUCCESSOR_PATH,
+                diff.after.git_blobs[SUCCESSOR_PATH],
+                "The candidate records the revised obligation at its path.",
+            ),
+            *(
+                _page_seed(
+                    path,
+                    known_blob,
+                    f"The candidate records the obligation at {path}.",
+                )
+                for path in paths
+            ),
+        ),
+    )
+
+
 def build_pagination_fixture(directory: Path, *, extra_claims: int) -> PaginationFixture:
     """Build the shared two-snapshot fixture and add ``extra_claims`` realizations to its candidate.
 
-    The added claims are authored through the **public store operation** on the candidate dataset,
-    each at its own reported path with the exact blob identity the fixture's own code tree holds. The
-    recorded subject is the candidate's existing revised revision, so the claims extend one recorded
-    subject's realization population and the knowledge topology does not change under the comparison.
-    The code tree is not touched, so the comparison's binding on the source half stays the fixture's.
+    The added claims are built into the candidate tree as extra realizations, each at its own
+    reported path with a blob identity the fixture's own code tree holds. The recorded subject
+    is the candidate's existing revised revision, so the claims extend one recorded subject's
+    realization population and the knowledge topology does not change under the comparison.
+    The code tree is not touched, so the comparison's binding on the source half stays the
+    fixture's.
     """
 
     diff = build_diff_fixture(directory)
-    authorship = make_read_authorship(seed="agent:pagination-fixture")
     paths = tuple(f"src/pagination/realization_{index:03d}.py" for index in range(extra_claims))
-    known_blob = next(iter(diff.after.git_blobs.values()))
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        for path in paths:
-            created = realizations.create_realization_claim(
-                store,
-                RealizationClaimRequest(
-                    repository_id=diff.repository_id,
-                    claim=RealizationClaimDraft(
-                        claim_id=str(uuid4()),
-                        invariant_revision_id=diff.revised_revision_id,
-                        role="enforcement",
-                        rationale=f"The candidate records the obligation at {path}.",
-                    ),
-                    anchor=NewAnchor(
-                        anchor=SourceAnchorDraft(
-                            anchor_id=UUID(str(uuid4())),
-                            path=path,
-                            source_identity=GitBlobIdentity(object_id=known_blob),
-                            locator=FileLocator(),
-                        )
-                    ),
-                    provenance=authorship,
-                ),
-            )
-            assert created.state == "created", created.refusal
-    finally:
-        store.close()
+    after = _paginated_after(directory / "paginated-after", diff, paths)
+    diff = replace(
+        diff,
+        after=replace(diff.after, fixture=after, database_path=after.database_path),
+    )
     return PaginationFixture(
         diff=diff,
         recorded_subject=diff.revised_revision_id,
@@ -512,49 +537,59 @@ def _matrix_cursor(fixture: PaginationFixture, position: int) -> str:
     ).token
 
 
-def test_the_records_collection_states_the_matrix_walk_and_the_bound_it_applied(
+def test_the_removed_records_collection_is_a_named_refusal_on_every_request(
     tmp_path: Path,
 ) -> None:
-    """A records request publishes the matrix view's own window, under the size the caller named."""
+    """A records request is refused by name: the collection left with the review matrix.
+
+    First page, unsized, continued and crossed-cursor requests all earn the same refusal --
+    no records page is composed and no records cursor is admitted. The refusal names the
+    knowledge and family collections that remain, and no evidence channel is published for
+    the removed collection rather than a measured zero.
+    """
 
     fixture = build_pagination_fixture(tmp_path / "records", extra_claims=SMALL_EXTRA_CLAIMS)
-    page = paged_payload(compose_page(fixture, page_of="records", page_size=RECORDS_PAGE))
-    assert (page.collection, page.state, page.total_basis) == ("records", "first_page", "walk")
-    assert page.returned <= RECORDS_PAGE
-    assert page.returned + page.remaining == page.total
-    assert (page.remaining > 0) == (page.continuation is not None)
-    assert page.continued_from is None and page.reset is None
-    # The scope is the selection the counts describe: the kinds asked for and the bound applied.
-    assert page.scope == (
-        f"record_kinds={','.join(knowledge_review.REVIEW_MATRIX_KINDS)}",
-        "ordering_input=stable_ordering",
-        f"page_size={RECORDS_PAGE}",
+    for label, payload in (
+        ("first page", compose_page(fixture, page_of="records", page_size=RECORDS_PAGE)),
+        ("unsized", compose_page(fixture, page_of="records")),
+        (
+            "continued",
+            compose_page(
+                fixture,
+                page_of="records",
+                continuation=_matrix_cursor(fixture, RECORDS_PAGE),
+                page_size=RECORDS_PAGE,
+            ),
+        ),
+    ):
+        assert payload.page is None, label
+        refusal = payload.page_refusal
+        assert refusal is not None, label
+        assert refusal.code == "comparison_page_unreadable", label
+        assert "left with the review matrix" in refusal.detail, label
+        assert "no records cursor is admitted" in refusal.detail, label
+        assert "knowledge comparison" in refusal.next_action, label
+    crossed = _refused_records_page(
+        fixture, paged_payload(compose_page(fixture, page_of="knowledge", page_size=5)).continuation
+        or "",
     )
-    # A request that names no size is bounded by the view's own maximum, and says so.
-    unsized = paged_payload(compose_page(fixture, page_of="records"))
-    assert f"page_size={MAXIMUM_REVIEW_PAGE_SIZE}" in unsized.scope
-    # A cursor of this walk, minted at this candidate's snapshot, continues it and is named on the
-    # page it produced.
-    cursor = _matrix_cursor(fixture, RECORDS_PAGE)
-    continued = paged_payload(
-        compose_page(fixture, page_of="records", continuation=cursor, page_size=RECORDS_PAGE)
+    assert crossed.page is None and crossed.page_refusal is not None
+    assert crossed.page_refusal.code == "comparison_page_unreadable"
+    assert crossed.evidence.channels == (), (
+        "the removed collection publishes no channel rows rather than a measured zero"
     )
-    assert (continued.collection, continued.state) == ("records", "continued")
-    assert continued.continued_from == cursor
-    assert continued.returned + continued.remaining == continued.total
 
 
-def test_a_records_cursor_of_another_walk_or_another_snapshot_is_refused_by_name(
-    tmp_path: Path,
-) -> None:
-    """A records page the owner cannot serve is a named refusal on the wire, never a silent absence.
+def test_a_records_cursor_is_never_admitted_at_any_snapshot(tmp_path: Path) -> None:
+    """No cursor is admitted for the removed collection: moved or not, the answer is the refusal.
 
-    Two different mistakes, kept apart. The comparison's cursor is not a matrix cursor at all: nothing
-    moved, so the refusal says the token is unreadable here and keeps the owner's own next action. A
-    matrix cursor minted at the snapshot the candidate held before it advanced is the moved case, and
-    it takes the new-generation action and names both snapshots. Either way no page is published,
-    because a page needs the owner's own counts, and the matrix channel reports the read as
-    unavailable rather than as a measured zero.
+    The comparison's cursor is not a records cursor and a matrix cursor minted at an older
+    snapshot is not one either -- naming the collection addresses no walk, so both earn the
+    same named refusal rather than a cursor generation error. Either way no page is published,
+    and no evidence channel is published for the removed collection rather than a measured
+    zero.
+    The way forward the refusal names is a knowledge or family page, which this response
+    publishes beside it.
     """
 
     fixture = build_pagination_fixture(tmp_path / "refused", extra_claims=SMALL_EXTRA_CLAIMS)
@@ -563,25 +598,15 @@ def test_a_records_cursor_of_another_walk_or_another_snapshot_is_refused_by_name
     crossed = _refused_records_page(fixture, knowledge.continuation)
     assert crossed.page is None and crossed.page_refusal is not None
     assert crossed.page_refusal.code == "comparison_page_unreadable"
-    assert crossed.page_refusal.offending_input == knowledge.continuation
-    assert crossed.page_refusal.next_action != REVIEW_PAGE_RESET_NEXT_ACTION
-    channel = next(
-        entry for entry in crossed.evidence.channels if entry.records == "authored_effects"
-    )
-    assert channel.state == "unavailable"
+    assert "no records cursor is admitted" in crossed.page_refusal.detail
+    assert crossed.evidence.channels == ()
 
     stale = _matrix_cursor(fixture, RECORDS_PAGE)
     moved = _advanced_candidate(tmp_path / "refused-advanced", fixture)
     refused = _refused_records_page(moved, stale)
     assert refused.page is None and refused.page_refusal is not None
-    assert refused.page_refusal.code == "comparison_page_reset"
-    assert refused.page_refusal.offending_input == stale
-    assert refused.page_refusal.next_action == REVIEW_PAGE_RESET_NEXT_ACTION
-    assert refused.page_refusal.expected is not None and refused.page_refusal.expected in stale
-    assert refused.page_refusal.observed not in (None, refused.page_refusal.expected)
-    # The refusal is not a dead end: the same request with no cursor serves the first page.
-    first = paged_payload(compose_page(moved, page_of="records", page_size=RECORDS_PAGE))
-    assert first.state == "first_page" and first.reset is None
+    assert refused.page_refusal.code == "comparison_page_unreadable"
+    assert "no records cursor is admitted" in refused.page_refusal.detail
 
 
 def _rendered_claim_ids(payload: KnowledgeReviewPayload) -> set[str]:
@@ -749,7 +774,8 @@ def test_the_entry_read_populates_the_button_without_fetching_record_pages(
 
     monkeypatch.setattr(knowledge_diff, "diff_knowledge_scope", forbidden_comparison)
     monkeypatch.setattr(knowledge_review, "diff_knowledge_scope", forbidden_comparison)
-    monkeypatch.setattr(knowledge_review, "read_knowledge_view", forbidden_view)
+    monkeypatch.setattr(view_pages, "read_knowledge_view", forbidden_view)
+    monkeypatch.setattr(view_pages, "read_whole_view", forbidden_view)
     catalogue = _entry_for(large)
     assert calls == []
     assert catalogue.state == "entries"
@@ -782,40 +808,14 @@ def _advanced_candidate(directory: Path, fixture: PaginationFixture) -> Paginati
     """
 
     directory.mkdir(parents=True, exist_ok=True)
-    advanced_database = directory / fixture.diff.after.database_path.name
-    advanced_database.write_bytes(fixture.diff.after.database_path.read_bytes())
-    store = open_knowledge_store(advanced_database, fixture.diff.repository_id)
-    try:
-        authorship = make_read_authorship(seed="agent:pagination-advanced")
-        created = realizations.create_realization_claim(
-            store,
-            RealizationClaimRequest(
-                repository_id=fixture.diff.repository_id,
-                claim=RealizationClaimDraft(
-                    claim_id=str(uuid4()),
-                    invariant_revision_id=fixture.recorded_subject,
-                    role="support",
-                    rationale="The advanced candidate records one further realization.",
-                ),
-                anchor=NewAnchor(
-                    anchor=SourceAnchorDraft(
-                        anchor_id=UUID(str(uuid4())),
-                        path="src/pagination/advanced.py",
-                        source_identity=GitBlobIdentity(
-                            object_id=next(iter(fixture.diff.after.git_blobs.values()))
-                        ),
-                        locator=FileLocator(),
-                    )
-                ),
-                provenance=authorship,
-            ),
-        )
-        assert created.state == "created", created.refusal
-    finally:
-        store.close()
+    after = _paginated_after(
+        directory / "advanced-after",
+        fixture.diff,
+        (*fixture.extra_paths, "src/pagination/advanced.py"),
+    )
     return replace(
         fixture,
         diff=replace(
-            fixture.diff, after=replace(fixture.diff.after, database_path=advanced_database)
+            fixture.diff, after=replace(fixture.diff.after, fixture=after, database_path=after.database_path)
         ),
     )

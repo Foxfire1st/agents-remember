@@ -42,22 +42,25 @@ def provider_diagnostics_payload(
     *,
     detail_limit: int = 20,
 ) -> dict[str, Any]:
+    # A diagnostic read files no per-call report (rule 6: reads write nothing the user sees
+    # outside (a)/(b)/(c)); the answer is the compact diagnosis with no ``reportPath`` key.
     full = provider_diagnostics_tool(config, detail_limit=detail_limit)
-    report_path = write_tool_report(
-        config.coordination_root, "provider_diagnostics", full, label="diagnostics"
-    )
     return _tool_payload(
         "provider_diagnostics",
-        compact_diagnostics_payload(full, report_path.as_posix()),
+        compact_diagnostics_payload(full, None),
     )
 
 
-def compact_diagnostics_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+def compact_diagnostics_payload(
+    full: dict[str, Any], report_path: str | None
+) -> dict[str, Any]:
     """Keep the diagnosis, file the evidence.
 
     ``rawStatus`` trees and the ``currentState`` body (a verbatim copy of the
-    already-on-disk current.json) were thousands of tokens per call; the report
-    carries them, the response carries the path."""
+    already-on-disk current.json) were thousands of tokens per call; when a report is
+    filed the report carries them and the response carries the path, otherwise the
+    response carries the compact answer with no ``reportPath`` key.
+    """
     compact = {
         key: value for key, value in full.items() if key not in {"rawStatus", "currentState"}
     }
@@ -66,7 +69,8 @@ def compact_diagnostics_payload(full: dict[str, Any], report_path: str) -> dict[
         for item in full.get("items", [])
         if isinstance(item, dict)
     ]
-    compact["reportPath"] = report_path
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
 
 
@@ -77,17 +81,24 @@ def provider_watchers_payload(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     full = provider_watchers_tool(config, action=action, dry_run=dry_run)
+    summarized = summarize_provider_watchers_result(full)
+    # Reads and previews file nothing (rule 6): status never mutates and a dry run is a
+    # preview. Only an executed mutating action files its report; its answer keeps the path.
+    if dry_run or action == "status":
+        return _tool_payload(
+            "provider_watchers",
+            compact_watchers_payload(summarized, None),
+        )
     report_path = write_tool_report(
         config.coordination_root, "provider_watchers", full, label=action
     )
-    summarized = summarize_provider_watchers_result(full)
     return _tool_payload(
         "provider_watchers",
         compact_watchers_payload(summarized, report_path.as_posix()),
     )
 
 
-def compact_watchers_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+def compact_watchers_payload(full: dict[str, Any], report_path: str | None) -> dict[str, Any]:
     """Per-provider outcomes inline; raw provider payloads in the report."""
     compact = {
         key: value for key, value in full.items() if key not in {"steps", "results", "currentState"}
@@ -96,7 +107,8 @@ def compact_watchers_payload(full: dict[str, Any], report_path: str) -> dict[str
         compact["steps"] = [_compact_watcher_step(step) for step in full["steps"]]
     elif "results" in full:
         compact["results"] = _compact_watcher_results(full.get("results"))
-    compact["reportPath"] = report_path
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
 
 

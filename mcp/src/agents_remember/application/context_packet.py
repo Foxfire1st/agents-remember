@@ -27,6 +27,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
     DriftSummaryPacket,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    DriftSummaryOutput,
     not_checked,
     run_drift_summary,
 )
@@ -197,9 +198,11 @@ def _drift_packet(
 ) -> DriftSummaryPacket:
     if not request.include_drift:
         return not_checked()
+    # The packet's drift section is read-only content: no temp report is filed (rule 6).
     return run_drift_summary(
         code_repository_root=repo_scope.path,
         context=context,
         detail_limit=request.drift_detail_limit,
         base=_leaf_drift_base(repo_scope, context),
+        output=DriftSummaryOutput(write_report=False),
     )

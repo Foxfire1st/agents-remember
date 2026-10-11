@@ -223,17 +223,25 @@ def test_a_task_context_review_reports_the_matrix_collection_as_not_selected(
     """A review that read no matrix says so, instead of reporting an absence it never asked about."""
 
     payload = recorded.payload()
-    # A subject review asked the matrix, and the matrix holds nothing: a measured absence.
-    assert _channels(payload)["authored_effects"].state == "none_recorded"
+    # The matrix left with the retired envelope tables (MIK-R74 rule 1): no review reads it now,
+    # so the collection is unavailable with the removal as its reason rather than a measured
+    # absence.
+    removed = _channels(payload)["authored_effects"]
+    assert removed.state == "unavailable"
+    assert removed.record_count is None
+    assert "MIK-R74 rule 1" in removed.detail
+    assert removed.next_action
 
     result = review_through_port(recorded.endpoint, recorded.endpoint.review())
     assert result.payload is not None
     channels = _channels(result.payload)
     authored = channels["authored_effects"]
-    assert authored.state == "not_selected"
+    assert authored.state == "unavailable"
     assert authored.record_count is None
     assert authored.next_action
-    assert result.payload.knowledge.authored_effects == ()
+    # The knowledge pane carries no matrix collection at all: the channel above is the whole
+    # statement about authored effects.
+    assert not hasattr(result.payload.knowledge, "authored_effects")
     assert result.payload.evidence.evidence_links == ()
     assert channels["assessments"].state == "recorded"
 

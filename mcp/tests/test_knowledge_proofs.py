@@ -276,9 +276,18 @@ def test_the_invariant_and_family_views_carry_their_proofs(tmp_path: Path) -> No
 
 def test_the_other_views_carry_no_proofs(tmp_path: Path) -> None:
     root = _review_tree(tmp_path)
+    leaf = _read(
+        root,
+        tmp_path / "coordination",
+        view="source_context",
+        source_path="mcp/tests/test_review_family_context.py",
+    )
+    assert leaf["state"] in {"view", "page"}, leaf
+    assert "proofs" not in leaf
+    # The removed matrix view answers the unknown-view refusal instead of a proof-less view.
     queue = _read(root, tmp_path / "coordination", view="curation_queue")
-    assert queue["state"] == "view", queue
-    assert "proofs" not in queue
+    assert queue["state"] == "refused", queue
+    assert queue["refusalCode"] == "unknown_view", queue
 
 
 def test_a_family_whose_members_have_no_proof_shows_an_empty_list(tmp_path: Path) -> None:

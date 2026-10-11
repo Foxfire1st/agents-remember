@@ -12,9 +12,11 @@ A memory tree reaches the index in one of two forms, and both end as the same va
   honours ``.gitignore`` exactly as a commit would, so identical content gets an identical key
   and ignored caches (``overview.index.json``) never reach it.
 
-The file bytes of a directory are read from disk and then checked against the blob ids the captured
-tree records for the same paths; a file that changed between the two reads fails that check and the
-capture is taken again. The snapshot's bytes are therefore always the bytes its key names.
+The file bytes of a directory are read from disk -- except a path that sparse checkout leaves
+out, whose bytes are the committed blob's read through objects (MIK-R74 rule 5) -- and then
+checked against the blob ids the captured tree records for the same paths; a file that changed
+between the two reads fails that check and the capture is taken again. The snapshot's bytes are
+therefore always the bytes its key names.
 
 Only the files the index reads are carried: JSON documents under ``knowledge/`` (census files
 excepted, MIK-R20 owns them) and under ``onboarding/``, with the validator's exclusions: generated
@@ -102,12 +104,25 @@ def directory_snapshot(directory: Path) -> MemoryTreeSnapshot:
         raise MemoryTreeError(f"{root} is not inside a Git working tree")
     for _ in range(_CAPTURE_ATTEMPTS):
         key, entries = _capture(root)
-        files = {path: (root / path).read_bytes() for path in entries}
+        files = {path: _captured_bytes(root, path, blob) for path, blob in entries.items()}
         if all(_blob_id(data, key) == entries[path] for path, data in files.items()):
             return MemoryTreeSnapshot(key=key, source="directory", location=str(root), files=files)
     raise MemoryTreeError(
         f"the files under {root} kept changing while their state was captured; no key was taken"
     )
+
+
+def _captured_bytes(root: Path, path: str, blob: str) -> bytes:
+    """The bytes the captured tree records at ``path``: the worktree's, or the committed blob's.
+
+    A path that sparse checkout leaves out is absent from the worktree but present in the
+    captured tree (MIK-R74 rule 5): its bytes are the committed blob's, read through objects.
+    """
+
+    target = root / path
+    if target.is_file():
+        return target.read_bytes()
+    return read_git_blobs_bytes(root, (blob,))[blob]
 
 
 def directory_key(directory: Path) -> str:
@@ -147,29 +162,38 @@ def _capture(root: Path) -> tuple[str, dict[str, str]]:
 
 
 def _clear_index_flags(root: Path, state: IsolatedGitState) -> None:
-    """Clear ``assume-unchanged`` and ``skip-worktree`` in the scratch index copy.
+    """Clear ``assume-unchanged`` and ``skip-worktree`` in the scratch index copy, selectively.
 
     Both flags tell ``git add`` to trust the index over the file, so a copied flag would let an
     edited file keep its old blob and the key -- and every answer cached for it -- stay the previous
-    content's (rule 5). The capture is of the directory's state, so no entry is trusted: the flags
+    content's. The capture is of the directory's state, so no present entry is trusted: the flags
     are cleared on the copy, and the repository's own index keeps them.
+
+    The one exception is a ``skip-worktree`` path absent from the worktree (MIK-R74 rule 5): sparse
+    checkout leaves it out by design, and clearing its flag would stage a deletion for a file the
+    commit still holds. Its flag is kept, so ``git add`` trusts the copied index and the captured
+    tree keeps the committed blob; a file absent without that flag is still captured as deleted.
+    ``ls-files -v`` spells a skip-worktree entry that also carries ``assume-unchanged`` with a
+    lower-case ``s``, so both spellings keep the blob.
     """
 
     listing = _isolated(root, ["ls-files", "-v", "-z"], state)
-    flagged = [
-        row[2:]
+    tagged = [
+        (row[0], row[2:])
         for row in listing.split("\0")
         if len(row) > 2 and (row[0].islower() or row[0] == "S")
     ]
+    kept = {path for tag, path in tagged if tag in ("S", "s") and not (root / path).exists()}
+    clear = [path for _tag, path in tagged if path not in kept]
     # One flag per command: ``update-index`` applies only the last of several such options.
     for option in ("--no-assume-unchanged", "--no-skip-worktree"):
-        if not flagged:
+        if not clear:
             return
         result = run_git_with_isolated_index_and_objects(
             root,
             ["update-index", "-z", option, "--stdin"],
             state=state,
-            input_text="".join(f"{path}\0" for path in flagged),
+            input_text="".join(f"{path}\0" for path in clear),
         )
         if result.returncode != 0:
             raise MemoryTreeError(

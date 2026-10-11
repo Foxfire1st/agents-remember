@@ -70,7 +70,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
-from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     candidate_ref,
@@ -90,11 +89,8 @@ from agents_remember.application.review_comparison_staleness import (
     review_staleness,
 )
 from agents_remember.application.review_evidence_records import (
-    AUTHORED_EFFECT_KINDS,
-    MatrixSelection,
     review_records_for,
     review_records_of,
-    with_selection_channels,
 )
 from agents_remember.application.review_external_git_movement import external_git_movement
 from agents_remember.application.review_family_context import (
@@ -105,11 +101,8 @@ from agents_remember.application.review_family_context import (
 from agents_remember.application.review_family_rosters import family_collection_refusal
 from agents_remember.application.review_legacy_comparison import knowledge_unavailable_limitations
 from agents_remember.application.review_pagination import (
-    RecordsPagePosition,
     comparison_page,
     comparison_reset,
-    records_page,
-    records_page_refusal,
     reset_comparison_page,
 )
 from agents_remember.application.review_pair_preflight import pair_preflight_refusal
@@ -122,13 +115,11 @@ from agents_remember.application.review_record_rendering import (
     KNOWLEDGE_APPLICABILITY_CLASSES,
     ReviewRecordInputs,
     assessment_displays,
-    authored_effects,
     evidence_pane,
     refused,
     signal,
     subject_states,
     submission,
-    unresolved_authors,
 )
 from agents_remember.application.review_recorded_selection import ComparisonFacts
 from agents_remember.application.review_relationship_movement import (
@@ -189,18 +180,11 @@ from agents_remember.models.knowledge.review import (
 )
 from agents_remember.models.knowledge.view import (
     MAX_VIEW_ROWS,
-    ReviewMatrixRow,
-    ViewContinuation,
-    ViewRefusal,
-    ViewRequest,
-    ViewResult,
-    rebuild_continuation,
 )
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
-    "REVIEW_MATRIX_KINDS",
     "ReviewCandidateResolution",
     "ReviewRecordInputs",
     "ReviewSurfaceRequest",
@@ -211,17 +195,6 @@ __all__ = [
     "resolve_review_candidate",
     "review_records_for",
 ]
-
-# The record kinds the review matrix is asked for. They are an input to L20's view rather than a
-# selection policy of this leaf's: the view applies its own registered traversal over them.
-REVIEW_MATRIX_KINDS: tuple[str, ...] = (
-    "requirement_revision",
-    "invariant_effect_claim",
-    "preservation_claim",
-    "unresolved_question",
-    "evidence_claim",
-)
-
 
 def read_knowledge_review(
     config: McpRuntimeConfig,
@@ -421,41 +394,10 @@ def compose_review(
             _comparison_refusal(comparison, request),
         )
 
-    matrix = _review_matrix(resolved, opened, request)
-    matrix_refusal = _records_refusal(
-        matrix, request.continuation if request.page_of == "records" else None
-    )
-    page_refusal = (
-        matrix_refusal if request.page_of == "records" and matrix_refusal is not None else None
-    )
-    if isinstance(matrix, ViewRefusal):
-        rows: tuple[ReviewMatrixRow, ...] = ()
-    else:
-        rows = tuple(getattr(matrix[0].payload, "rows", ()))
-
-    # The two collections that live in the review matrix are added here, where the view's own answer
-    # is: a review that read the matrix reports what it returned, and a review that read none says so
-    # rather than reporting an absence it never asked about (ICR-R14).
-    #
-    # The page handed to the channels is the one the *payload* publishes, not the raw matrix window:
-    # a review that named no collection publishes no page and therefore no cursor, so a channel that
-    # reported a remainder beside an unpublished cursor would be claiming a reachable action that is
-    # not on the wire. The channel note and the payload therefore read the same value.
-    published_page = _collection_page(request, page, comparison, matrix, reset)
-    records = with_selection_channels(
-        records,
-        rows,
-        MatrixSelection(
-            # The page is handed over only when it is **this collection's** page: a request that paged
-            # the knowledge comparison publishes a comparison page whose cursor continues the
-            # comparison and reaches no records row, so the note beside the records remainder must not
-            # claim it. In that state the note names the request that does reach them
-            # (``pageOf=records``) instead.
-            page=published_page if request.page_of == "records" else None,
-            remaining=_matrix_rows_remaining(matrix),
-            unreadable=matrix_refusal,
-        ),
-    )
+    # The review matrix is gone with the envelope tables it read (MIK-R74 rule 1): no matrix
+    # is read and no records page is stated. The collections below are the owners' own; a review
+    # that read no matrix says nothing about one rather than reporting an absence it never asked
+    # about (ICR-R14).
 
     # The endpoints are re-derived here, after every read and immediately before the payload is
     # built: a capture input that moved while the comparison ran would otherwise be published as the
@@ -490,17 +432,14 @@ def compose_review(
     )
     stale = staleness.state == "stale"
     # The reviewed identity's explicit revision selection is made here, from the comparison's
-    # own union items and the two snapshots' own authored edges, and the pane renders it: the
-    # adapter resolves, calls and assembles, and the head rule lives in its own module.
+    # own union items, and the pane renders it: the adapter resolves, calls and assembles, and
+    # the head rule lives in its own module.
     selected = select_subject_revisions(
         page.items,
         request.selector,
-        repository_id=comparison.repository_id,
-        before_database=resolved.baseline_database,
-        after_database=resolved.candidate_database,
     )
     # The recorded before/after relationship union is traversed here, from the comparison's own
-    # union items and the two snapshots' own authored edges, and the source pane renders both of its
+    # union items, and the source pane renders both of its
     # views: the addresses one location per selected claim, and the two-sided movement each location
     # belongs to (ICR-R08@v1). The traversal is its own module, called and not re-implemented.
     relationships = relationship_movements(
@@ -544,13 +483,21 @@ def compose_review(
         page_refusal = family.refusal or (
             None if family.page is not None else family_collection_refusal()
         )
+    elif request.page_of == "records":
+        # The records collection left with the review matrix that read the retired envelope
+        # tables (MIK-R74 rule 1): no page is published for it, and the request earns the
+        # collection's own refusal instead of a window over a read that never happened.
+        published_page = None
+        page_refusal = records_collection_refusal()
+    else:
+        published_page = _collection_page(request, page, comparison, reset)
+        page_refusal = None
     # Which supplied record may be displayed beside *this* subject, and why, is decided once, here,
     # before either pane renders anything (ICR-R26@v1); the panes receive what it kept.
     applicability = review_applicability(
         resolved,
         request,
         records,
-        rows,
         ComparisonFacts(
             items=page.items,
             selected=selected,
@@ -558,7 +505,6 @@ def compose_review(
             relationships=relationships,
         ),
     )
-    displayed_rows = applicability.displayed_rows(rows)
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -569,11 +515,11 @@ def compose_review(
                 master=request.master,
             ),
             comparison=identity,
-            knowledge=_knowledge_pane(comparison, displayed_rows, records, subjects, applicability),
+            knowledge=_knowledge_pane(comparison, records, subjects, applicability),
             source=source_pane(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
-            evidence=evidence_pane(displayed_rows, records, subjects, applicability),
+            evidence=evidence_pane(records, subjects, applicability),
             # A tree comparison's families carry the change facts of the members this page
             # returned (MIK-R33); without a tree comparison the context is published as composed.
             family_context=with_change_kinds(family.context, resolved.trees),
@@ -637,16 +583,16 @@ def _collection_page(
     request: ReviewSurfaceRequest,
     page: KnowledgeDiffPage,
     comparison: KnowledgeDiffResult,
-    matrix: tuple[ViewResult, str] | ViewRefusal,
     reset: ReviewRefusal | None,
 ) -> ReviewCollectionPage | None:
     """The one bounded collection this request named, stated as its own page, or nothing.
 
     A request that named no collection pages nothing and this returns ``None``: that is a different
     fact from a page with no rows left in it, and the payload keeps them apart. The knowledge page is
-    the comparison's own window; the records page is the matrix's own. A reset -- a cursor whose
-    comparison moved -- is stated on the page it belongs to, beside the *first* page of the
-    comparison that is there now.
+    the comparison's own window. The records collection left with the review matrix that read the
+    retired envelope tables (MIK-R74 rule 1): a request that still names it earns the collection's
+    own refusal instead of a page. A reset -- a cursor whose comparison moved -- is stated on the
+    page it belongs to, beside the *first* page of the comparison that is there now.
     """
 
     collection = request.page_of
@@ -661,68 +607,30 @@ def _collection_page(
         return comparison_page(
             page, collection=collection, scope=scope, continued_from=request.continuation
         )
-    if isinstance(matrix, ViewRefusal):
-        # The matrix view refused the page this request named, so there is no window to state and no
-        # cursor to publish: a page whose counts nothing measured would print a remainder over a read
-        # that never happened. The refusal travels twice, deliberately -- once on the matrix channels
-        # (so an unreadable matrix is ``unavailable`` rather than a measured zero) and once as
-        # ``page_refusal`` on the payload (so the reader is told which cursor failed and what reaches
-        # the collection instead of being shown a control that claims nothing remains).
-        return None
-    return _records_page(matrix, request)
+    # Any other named collection has no page here: the family roster collection is the
+    # projection's own page (handled by the caller), and the records collection left with
+    # the review matrix (the caller states its refusal instead).
+    return None
 
 
-def _matrix_rows_remaining(matrix: tuple[ViewResult, str] | ViewRefusal) -> int:
-    """How many matrix rows the view declared beyond the window it returned, or none.
+def records_collection_refusal() -> ReviewRefusal:
+    """The refusal a request that still names the removed records collection earns.
 
-    It is the owner's own count, read here for the channels rather than derived from a published
-    page, because a review that named no collection still read a bounded selection: the count is
-    measured either way, and only the *cursor* depends on the page being published.
+    The records page with its rows, continuation and last page left with the review matrix
+    that read the retired envelope tables (MIK-R74 rule 1). Naming the collection addresses
+    no walk, so no cursor is admitted for it either: the response carries the knowledge and
+    family collections that remain, and this refusal names what reaches them instead.
     """
 
-    if isinstance(matrix, ViewRefusal):
-        return 0
-    payload = matrix[0].payload
-    if payload is None:  # pragma: no cover - a served view always carries its payload
-        return 0
-    return int(payload.counts.rows_remaining.value or 0)
-
-
-def _records_page(
-    matrix: tuple[ViewResult, str], request: ReviewSurfaceRequest
-) -> ReviewCollectionPage | None:
-    """The matrix view's own counts as the records collection's page."""
-
-    payload = matrix[0].payload
-    if payload is None:  # pragma: no cover - a served view always carries its payload
-        return None
-    return records_page(
-        payload.counts,
-        collection="records",
-        position=RecordsPagePosition(
-            scope=_records_scope(request),
-            continuation=None if payload.continuation is None else payload.continuation.token,
-            continued_from=request.continuation if request.page_of == "records" else None,
-            page_size=_review_page_size(request),
+    return refusal(
+        "comparison_page_unreadable",
+        "the records collection left with the review matrix, so no records page was composed "
+        "and no records cursor is admitted",
+        next_action=(
+            "read the knowledge comparison or a family roster page this response publishes, "
+            "which name the exact snapshot and walk they continue"
         ),
     )
-
-
-def _records_refusal(
-    matrix: tuple[ViewResult, str] | ViewRefusal, cursor: str | None
-) -> ReviewRefusal | None:
-    """The refusal a records request earned, in the surface's own vocabulary, or ``None``.
-
-    A matrix the composition asked for and could not read is a state, not an absence: the two
-    matrix-sourced collections are reported ``unavailable`` with this refusal's reason and next action
-    rather than counted as a measured zero, which is the collapse ``ICR-R14@v1`` keeps apart. When the
-    refused thing was a *cursor* whose snapshot pair moved, the refusal carries the new-generation
-    action ICR-R10 requires -- the token is not re-resolved against the generation that is there now.
-    """
-
-    if not isinstance(matrix, ViewRefusal):
-        return None
-    return records_page_refusal(matrix, cursor=cursor)
 
 
 def _knowledge_scope(
@@ -743,21 +651,6 @@ def _knowledge_scope(
         f"selector_kind={'none' if selector is None else selector.kind}",
         f"display_filter={comparison.policy or 'none'}",
         f"page_size={_knowledge_page_size(request)}",
-    )
-
-
-def _records_scope(request: ReviewSurfaceRequest) -> tuple[str, ...]:
-    """The filters that were **active** for one records page, in the owner's own vocabulary.
-
-    The record kinds are the ones this composition asked the view for, which is the selection the
-    counts describe; the size is the bound the view applied. Both travel with the page, so a
-    ``remaining`` count is never read apart from the selection it is a remainder of.
-    """
-
-    return (
-        f"record_kinds={','.join(REVIEW_MATRIX_KINDS)}",
-        "ordering_input=stable_ordering",
-        f"page_size={_review_page_size(request)}",
     )
 
 
@@ -785,58 +678,6 @@ def _open_dataset_pair(
         return review_namespace(resolved.repository_id, resolved.candidate_database)
     except KnowledgeStorageError as error:
         return refused(request.repository_id, unreadable_candidate_refusal(resolved, str(error)))
-
-
-def _review_matrix(
-    resolved: ReviewCandidateResolution, namespace: str, request: ReviewSurfaceRequest
-) -> tuple[ViewResult, str] | ViewRefusal:
-    """Read L20's review matrix for the candidate, or hand back the view's own refusal.
-
-    The refusal is returned **unmapped** on purpose: the composition is the layer that knows whether a
-    refused read is a page cursor whose comparison moved -- a state the surface states with a new
-    generation action (ICR-R10) -- or a matrix that genuinely could not be read, and it is the only
-    layer that still holds the cursor the refusal is about.
-    """
-
-    cursor = _records_cursor(request)
-    if isinstance(cursor, ViewRefusal):
-        return cursor
-    matrix = read_knowledge_view(
-        resolved.candidate_database,
-        open_diff_side(
-            resolved.candidate_database,
-            namespace,
-            repository_root=resolved.candidate_code_root,
-            code_tree_id=resolved.candidate_code_tree_id,
-        ),
-        ViewRequest(
-            view="review_matrix",
-            repository_id=namespace,
-            record_kinds=REVIEW_MATRIX_KINDS,
-            limit=_review_page_size(request),
-            continuation=cursor,
-        ),
-    )
-    # A view result carries exactly one outcome: its refusal, with the owner's own next action, or
-    # its payload.
-    if matrix.refusal is not None:
-        return matrix.refusal
-    return matrix, namespace
-
-
-def _records_cursor(request: ReviewSurfaceRequest) -> ViewContinuation | ViewRefusal | None:
-    """The view continuation one request presents for the records collection, or the refusal it earns.
-
-    The token is rebuilt through the shipped codec rather than parsed here: a token this substrate did
-    not mint, or one minted for another view's walk, rebuilds nothing and the codec's own refusal is
-    what the caller receives. The rebuilt continuation then travels as the *binding* the view checks
-    the snapshot against, so a cursor issued for one candidate and presented against another is
-    refused by the owner rather than re-resolved here.
-    """
-
-    if request.page_of != "records" or request.continuation is None:
-        return None
-    return rebuild_continuation(request.continuation, view="review_matrix")
 
 
 def _review_page_size(request: ReviewSurfaceRequest) -> int:
@@ -962,7 +803,6 @@ def _limitations(
 
 def _knowledge_pane(
     comparison: KnowledgeDiffResult,
-    rows: Sequence[ReviewMatrixRow],
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
     applicability: AppliedRecords,
@@ -997,10 +837,6 @@ def _knowledge_pane(
         revision_groups=_revision_groups(comparison),
         revision_selection=selected.selection,
         field_changes=field_changes(items),
-        authored_effects=authored_effects(
-            tuple(row for row in rows if row.subject.record_kind in AUTHORED_EFFECT_KINDS),
-            applicability,
-        ),
         signals=tuple(
             signal(entry, applicability.label_of(entry.signal_id))
             for entry in records.signals
@@ -1009,9 +845,6 @@ def _knowledge_pane(
         assessments=assessment_displays(records, subjects, applicability),
         context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
         applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
-        unresolved=unresolved_authors(
-            tuple(row for row in rows if row.subject.record_kind in AUTHORED_EFFECT_KINDS)
-        ),
     )
 
 

@@ -37,7 +37,6 @@ import apsw
 from agents_remember.memory.knowledge.read import SelectedScope
 from agents_remember.memory.knowledge.read_queries import (
     family_revision_is_recorded,
-    fetch_predecessor_edges,
     invariant_revision_is_recorded,
     membership_is_recorded,
     realization_claim_is_recorded,
@@ -133,20 +132,11 @@ class SideView:
 
 
 @dataclass(frozen=True)
-class SideLineage:
-    """One snapshot's authored old/new revision edges, as ``(successor, predecessor)`` pairs."""
-
-    edges: frozenset[tuple[str, str]]
-
-
-@dataclass(frozen=True)
 class ComparisonView:
-    """Everything one union comparison reads: the two sides and each snapshot's own lineage."""
+    """Everything one union comparison reads: the two sides."""
 
     before: SideView
     after: SideView
-    before_lineage: SideLineage
-    after_lineage: SideLineage
 
 
 @dataclass(frozen=True)
@@ -227,12 +217,6 @@ def compare_selected_scopes(
     view = ComparisonView(
         before=before,
         after=after,
-        before_lineage=SideLineage(
-            frozenset(fetch_predecessor_edges(before_connection, repository_id))
-        ),
-        after_lineage=SideLineage(
-            frozenset(fetch_predecessor_edges(after_connection, repository_id))
-        ),
     )
     comparisons = [
         _compare_one(key, payloads, view, repository_id)
@@ -328,7 +312,7 @@ def _compare_one(
             present_on_both_sides=before_item is not None and after_item is not None,
         )
     )
-    record_transition = _record_transition(key, payloads, changed, view)
+    record_transition = _record_transition(payloads, changed)
     return DiffItemComparison(
         item_id=item_id,
         kind=kind,
@@ -358,44 +342,27 @@ def _compare_one(
 
 
 def _record_transition(
-    key: tuple[DiffItemKind, str],
     payloads: tuple[ReadItem | None, ReadItem | None],
     changed: tuple[str, ...],
-    view: ComparisonView,
 ) -> DiffRecordTransition:
     """Return how one union item's record moved between the two snapshots.
 
-    Six states, and the two that matter most are ``superseding``/``superseded``. A schema whose
-    revisions are immutable (measured: a second revision with the same identity and another sealed
-    payload is refused ``duplicate_identity``) makes "the statement changed" a *pair* of records --
-    the author's successor and the exact revision it names as its predecessor. A comparison that knew
-    only added and removed would render every revised statement as a deletion plus an unrelated
-    addition, so the pair is recognised from the **authored predecessor edge** and from nothing else:
-    no display version, no label, and no insertion order participates, because none of them is a
-    statement the author made about which revision replaced which.
+    Four states. A revised statement is a *pair* of records -- the old revision only the baseline
+    holds and the new revision only the candidate holds -- and text records hold no predecessor
+    edge naming one as the other's replacement (MIK-R74 rule 1), so the pair is reported as it
+    reads: a removal beside an unrelated addition, never a succession the author did not record.
     """
 
-    kind, _item_id = key
     before_item, after_item = payloads
     if before_item is not None and after_item is not None:
         return "changed" if changed else "unchanged"
-    if kind not in _SUPERSEDABLE_KINDS:
-        return "removed" if before_item is not None else "added"
-    if before_item is None:
-        # The candidate's own edges name the exact revision it replaced, and whether the *baseline*
-        # selected that revision is what decides between a replacement and an addition.
-        replaced = _replaced_revision(view.after_lineage, after_item)
-        if replaced is not None and _selected(view.before.scope, replaced):
-            return "superseding"
-        return "added"
-    if _supersedes(view.after_lineage, before_item):
-        return "superseded"
-    return "removed"
+    return "removed" if before_item is not None else "added"
 
 
-# The kinds whose revisions record an authored old/new edge. A claim and a frontier link have no such
-# relation -- a claim's identity is the claim -- so they are never reported as supersessions.
-_SUPERSEDABLE_KINDS: frozenset[DiffItemKind] = frozenset({"invariant", "family"})
+# The kinds whose records can hold another selected revision of the same identity: a claim and
+# a frontier link have no such relation -- a claim's identity is the claim -- so they are never
+# reported as present-but-unselected on that ground.
+_REVISABLE_KINDS: frozenset[DiffItemKind] = frozenset({"invariant", "family"})
 
 
 def _selected_another_revision_of(side: SideView, present: ReadItem | None) -> bool:
@@ -418,45 +385,6 @@ def _selected_another_revision_of(side: SideView, present: ReadItem | None) -> b
     )
 
 
-def _replaced_revision(lineage: SideLineage, present: ReadItem | None) -> str | None:
-    """Return the revision one successor names as its predecessor, or ``None``.
-
-    The successor's own authored edge is the only thing consulted. A revision may be named by several
-    successors and a successor may name several predecessors, so this returns the first *sorted*
-    match, which is the same choice on every run and depends on no insertion order.
-    """
-
-    if present is None or present.revision_id is None:
-        return None
-    named = sorted(
-        predecessor for successor, predecessor in lineage.edges if successor == present.revision_id
-    )
-    return named[0] if named else None
-
-
-def _selected(scope: SelectedScope, revision_id: str | None) -> bool:
-    """Return whether one side's selected set holds one exact revision."""
-
-    return revision_id is not None and revision_id in scope.selected_invariant_revision_ids
-
-
-def _supersedes(other_side: SideLineage, present: ReadItem | None) -> bool:
-    """Return whether one revision is an author's replacement of a revision the other snapshot holds.
-
-    ``other_side`` is the *other* snapshot's own authored old/new relation. A revision is a
-    replacement when that snapshot recorded an edge from it or an edge to it: a successor declares
-    its predecessor, the predecessor's own successors are the same relation read from its end, and a
-    snapshot that holds only one of the two records still states the pair.
-    """
-
-    if present is None or present.revision_id is None:
-        return False
-    revision_id = present.revision_id
-    return any(
-        revision_id in (successor, predecessor) for successor, predecessor in other_side.edges
-    )
-
-
 def _coverage(
     key: tuple[DiffItemKind, str],
     payloads: tuple[ReadItem | None, ReadItem | None],
@@ -476,9 +404,8 @@ def _coverage(
     if before_item is not None and after_item is not None:
         return "selected_both"
     other = view.after if before_item is not None else view.before
-    other_lineage = view.after_lineage if before_item is not None else view.before_lineage
     present = before_item if before_item is not None else after_item
-    # Three ways to establish that the other snapshot holds the record. **They are not three
+    # Two ways to establish that the other snapshot holds the record. **They are not two
     # independent deciders, and the difference was measured rather than argued** (fix round 1's F2,
     # re-measured in fix round 2 after the rule-3 ablation it cited for the wrong variant):
     #
@@ -486,17 +413,6 @@ def _coverage(
     #   load-bearing on its own: removing it alone turns a missing selection into a real absence on
     #   the fixture's `unselected_revision_id` (`absent_from_snapshot` where
     #   `present_outside_selection` is owed -- variant A of the fix round 2 ablation, measured);
-    # * the other side *declares* this exact revision as a replacement of one it holds, which its own
-    #   authored edges state. This one **cannot decide a state its two neighbours do not**: whenever
-    #   it fires, the third rule fires as well, because an authored edge is a foreign key into that
-    #   snapshot's own revision table (both predecessor tables are `DEFERRABLE INITIALLY DEFERRED`
-    #   into their own revision table and are refused at COMMIT with `ConstraintError`, measured), so
-    #   a snapshot that declares an edge naming this revision necessarily holds it. It is kept as a
-    #   cheap short-circuit that reads the already-loaded lineage instead of asking the other file.
-    #   The invariant half of that subsumption is asserted by
-    #   `test_a_record_the_other_snapshot_holds_but_the_selection_missed_is_not_an_absence`; that
-    #   fixture authors no `family_predecessor` row (measured 2 invariant / 0 family before and
-    #   4 / 0 after), so the family half rests on the same schema constraint and not on that case;
     # * the other side's tables hold the record, asked by this item's own key. This is the rule that
     #   reports a real absence *and* the one that keeps a record the other snapshot holds but did not
     #   select out of that absence. It is load-bearing in the direction that matters: forcing its
@@ -508,12 +424,10 @@ def _coverage(
     #   absent -- so the direction is measured, not assumed. A candidate whose copy of a revision was
     #   removed answers no under all three.
     #
-    # A snapshot and a selection are different objects, which is why the third rule cannot be
-    # replaced by the other two: the probe asks the snapshot, and the first two read what the other
+    # A snapshot and a selection are different objects, which is why the second rule cannot be
+    # replaced by the first: the probe asks the snapshot, and the first reads what the other
     # side's *selection* already established.
-    if kind in _SUPERSEDABLE_KINDS and (
-        _selected_another_revision_of(other, present) or _supersedes(other_lineage, present)
-    ):
+    if kind in _REVISABLE_KINDS and _selected_another_revision_of(other, present):
         return "present_outside_selection"
     return (
         "present_outside_selection"

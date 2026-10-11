@@ -31,7 +31,6 @@ from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.knowledge.read import KnowledgeReadContext
 from agents_remember.models.knowledge.view import (
     CountQuantity,
-    CurationQueueRow,
     ViewContinuation,
     ViewPayload,
     ViewRefusal,
@@ -176,9 +175,6 @@ def view_page_payload(
 def _row_identity(row: Any) -> dict[str, Any]:
     """What one row is about, independent of how its facts were resolved on this read."""
 
-    if isinstance(row, CurationQueueRow):
-        disposition = None if row.disposition is None else row.disposition.disposition_id
-        return {"item": row.item.work_item_id, "disposition": disposition}
     return {
         "subject": row.subject.model_dump(mode="json"),
         "fact": getattr(row, "fact_kind", None),

@@ -2,8 +2,9 @@
 
 A family is a stable subject whose revision carries an authored joint guarantee about a set of
 invariant revisions. A family revision is one sealed aggregate -- the guarantee, the origin state,
-the acceptance reference, the provenance and the sorted predecessor set -- and every read
-re-derives the stored revision's payload seal on the way out.
+the acceptance reference and the provenance -- and every read re-derives the stored revision's
+payload seal on the way out. Text records hold no predecessor edge, so a decoded revision carries
+none.
 
 These functions only read. The rows come from the derived index of a memory tree
 (:mod:`agents_remember.memory.knowledge_index.projection`); the database write path was retired
@@ -57,9 +58,7 @@ def get_family_revision(
     )
     if row is None:
         return None
-    return records.decode_family_revision_row(
-        row, _family_predecessors(store, str(row[1]), revision_id)
-    )
+    return records.decode_family_revision_row(row, ())
 
 
 def list_family_revision_ids(store: OpenedKnowledgeStore, family_id: str) -> tuple[str, ...]:
@@ -71,20 +70,6 @@ def list_family_revision_ids(store: OpenedKnowledgeStore, family_id: str) -> tup
             "SELECT revision_id FROM family_revision "
             "WHERE repository_id = ? AND family_id = ? ORDER BY revision_id",
             (store.repository_id, family_id),
-        )
-    )
-
-
-def _family_predecessors(
-    store: OpenedKnowledgeStore, family_id: str, revision_id: str
-) -> tuple[str, ...]:
-    return records.decode_predecessor_rows(
-        list(
-            store.connection.execute(
-                "SELECT parent_revision_id FROM family_predecessor "
-                "WHERE repository_id = ? AND family_id = ? AND child_revision_id = ?",
-                (store.repository_id, family_id, revision_id),
-            )
         )
     )
 

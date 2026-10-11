@@ -586,8 +586,8 @@ def _entry(
     revisions = _FamilyRevisions(
         before=applicable["before"].population(family_id),
         after=applicable["after"].population(family_id),
-        before_heads=_heads(applicable["before"].population(family_id), before),
-        after_heads=_heads(applicable["after"].population(family_id), after),
+        before_heads=_heads(applicable["before"].population(family_id)),
+        after_heads=_heads(applicable["after"].population(family_id)),
         before_recorded=applicable["before"].revisions(family_id),
         after_recorded=applicable["after"].revisions(family_id),
         axis=_axis(sources),
@@ -651,27 +651,12 @@ def _bound_page(read: FamilyRosterRead) -> ReviewFamilyRosterPage | None:
     return read.page
 
 
-def _heads(revisions: Sequence[str], side: FamilyRosterSide) -> tuple[str, ...]:
+def _heads(revisions: Sequence[str]) -> tuple[str, ...]:
     """The heads of one side's selected family revisions, through ``ICR-R07@v1``'s own rule."""
 
     if not revisions:
         return ()
-    return revision_heads(revisions, _touching(side.edges, revisions))
-
-
-def _touching(
-    edges: frozenset[tuple[str, str]], population: Sequence[str]
-) -> tuple[tuple[str, str], ...]:
-    """The authored edges whose two endpoints are both in one selected population."""
-
-    members = set(population)
-    return tuple(
-        sorted(
-            (successor, predecessor)
-            for successor, predecessor in edges
-            if successor in members and predecessor in members
-        )
-    )
+    return revision_heads(revisions)
 
 
 def _selection(family_id: str, revisions: _FamilyRevisions) -> ReviewRevisionSelection:

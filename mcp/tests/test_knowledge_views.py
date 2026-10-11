@@ -41,8 +41,6 @@ from agents_remember.models.knowledge.view import (
     VIEW_NAMES,
     VIEW_PAYLOADS,
     VIEW_PURPOSES,
-    CurationQueueRow,
-    MachineWorkItem,
     NoConsequenceStatement,
     OrderedPosition,
     SourceContextView,
@@ -244,7 +242,7 @@ def test_a_continuation_presented_against_another_snapshot_is_refused_with_both_
     """Failure state: the view does not silently re-resolve and the caller receives no page."""
 
     other = SNAPSHOT.model_copy(update={"logical_digest": "c" * 64})
-    continuation = continuation_for(view="review_matrix", snapshot=SNAPSHOT, position=4)
+    continuation = continuation_for(view="invariant", snapshot=SNAPSHOT, position=4)
     assert require_continuation_snapshot(continuation, SNAPSHOT) is None
     refusal = require_continuation_snapshot(continuation, other)
     assert refusal is not None
@@ -270,28 +268,6 @@ def test_a_quantity_with_no_meaning_for_a_view_says_so_instead_of_reporting_zero
                 "facets_omitted": {"state": "not_applicable"},
             }
         )
-
-
-def test_the_curation_queue_keeps_a_work_item_free_of_any_curator_judgement() -> None:
-    """Requirement 1.6 is a shape obligation: the two attributions live in two records."""
-
-    item = MachineWorkItem(
-        work_item_id="w-1",
-        condition_code="member_source_diverged",
-        condition_vocabulary_version="detection-condition/v1",
-        matched_facts=("claim-4",),
-    )
-    body = item.model_dump()
-    assert "disposition" not in body
-    assert "rationale" not in body
-    assert "author_ref" not in body
-    row = CurationQueueRow(
-        item=item,
-        order=ordering_position(
-            1, "explicit_trigger_rule", mechanical_provenance("ordering.trigger-rule", 1)
-        ),
-    )
-    assert row.disposition is None
 
 
 def test_a_no_consequence_statement_is_refused_without_the_class_that_produced_it() -> None:
@@ -331,15 +307,15 @@ def test_an_authored_no_consequence_statement_names_the_stored_claim_it_is() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_the_five_view_names_are_the_closed_ordered_set() -> None:
-    """Requirement 1.1: the five names, spelled the same and in the same order.
+def test_the_three_view_names_are_the_closed_ordered_set() -> None:
+    """Requirement 1.1: the three names, spelled the same and in the same order.
 
     Both view-looping cases in this module -- and the differential beside them -- iterate
     ``VIEW_NAMES``, so every one of them stays green under a rename, an insertion, a reorder or a
-    sixth member: they check that each view *behaves*, never that the set is the one the packet
+    fourth member: they check that each view *behaves*, never that the set is the one the packet
     enumerated. This case is the one assertion that cannot be satisfied by iterating the constant it
     is checking, because the expected tuple is written out here rather than derived. It goes red on
-    a sixth view, on a rename, on a reorder, and on a name that is admitted by the ``ViewName``
+    a fourth view, on a rename, on a reorder, and on a name that is admitted by the ``ViewName``
     literal union but missing from the published ``VIEW_PURPOSES`` map -- and the last of those is
     the one a reader of ``VIEW_NAMES`` alone cannot see.
     """
@@ -348,8 +324,6 @@ def test_the_five_view_names_are_the_closed_ordered_set() -> None:
         "source_context",
         "invariant",
         "family",
-        "review_matrix",
-        "curation_queue",
     )
     assert tuple(VIEW_PURPOSES) == VIEW_NAMES
     # Each payload class declares the view it is a payload *of*, in this order, so a swapped pair of
@@ -438,13 +412,13 @@ async def test_the_read_family_refuses_an_ordering_input_it_does_not_admit(
 
 
 @pytest.mark.anyio
-async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_tree(
+async def test_the_read_family_refuses_a_fourth_view_before_it_touches_a_tree(
     tmp_path: Path,
 ) -> None:
-    """§1.1 and §6.1: the closed set of five, and a memory root that cannot be read at all.
+    """§1.1 and §6.1: the closed set of three, and a memory root that cannot be read at all.
 
     The memory root in the first call does not exist, which is the second half of the assertion: a
-    sixth view is refused from the name alone, so a caller cannot reach a tree -- or a filesystem
+    fourth view is refused from the name alone, so a caller cannot reach a tree -- or a filesystem
     error -- through a view this surface does not admit. A reader that opened first and checked the
     name later would refuse the missing root instead, which is the mutation the first call catches.
     The second call names an admitted view and the same absent root: it is answered as an absent
@@ -456,7 +430,7 @@ async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_tree(
 
     sixth = await _call(server, "knowledge_read", {"memoryRoot": absent, "view": "timeline"})
     assert (sixth["state"], sixth["refusalCode"]) == ("refused", "unknown_view"), sixth
-    assert "five named query views" in sixth["refusalDetail"], sixth
+    assert "three named query views" in sixth["refusalDetail"], sixth
 
     missing = await _call(server, "knowledge_read", {"memoryRoot": absent, "view": "family"})
     assert (missing["state"], missing["refusalCode"]) == (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -272,9 +273,13 @@ def code_candidate_tree(contract: WorktreeContract) -> str:
             contract.code_repo_path,
             ["rev-parse", f"refs/heads/{contract.code_work_branch}^{{tree}}"],
         )
+    # Rule 6 (MIK-R74): the index path is only a scratch namespace -- worktree_candidate_tree
+    # owns and removes its physical index inside it -- so it must not name the enclosure's
+    # reports/ directory, which a read would otherwise create and leave behind empty. The
+    # write paths that publish attestation/reports mkdir their own parents.
     return worktree_candidate_tree(
         contract.code_worktree,
-        contract.worktree_group / "reports" / ".route-review-candidate.index",
+        Path(tempfile.gettempdir()) / ".route-review-candidate.index",
     )
 
 

@@ -176,6 +176,13 @@ def record_final_output_receipt(
         if memory_content_commit and contract.memory_repo_path is not None
         else None
     )
+    if memory_tree is None:
+        # Ruling 814778 point 3: a delivery without a memory commit on a leaf that holds
+        # a comparison writes no receipt. The caller answers not-recorded with this reason.
+        raise ValueError(
+            "no delivered memory tree for a leaf that holds a comparison: "
+            "a delivery without a memory commit writes no receipt"
+        )
     code_match = tree_match_state(comparison.code_candidate.tree, code_tree)
     memory_match = tree_match_state(comparison.memory_candidate.tree, memory_tree)
     receipt = FinalOutputReceipt(
@@ -190,7 +197,7 @@ def record_final_output_receipt(
         comparison_digest=tree_comparison_digest(comparison),
         delivered_code_commit=code_commit,
         delivered_code_tree_id=code_tree,
-        delivered_memory_content_commit=memory_content_commit if memory_tree else None,
+        delivered_memory_content_commit=memory_content_commit,
         delivered_memory_tree_id=memory_tree,
         code_match=code_match,
         memory_match=memory_match,

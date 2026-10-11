@@ -191,3 +191,17 @@ Implementation approval is not commit approval. Preview the applicable worktree 
 Subordinate edges may proceed under recorded accepted-series authority; standalone/final work and
 human-pinned gates require the developer's explicit decision. No approval mechanism becomes a task
 freeze or operation-recovery fallback.
+
+## What the Result Blocks Say
+
+Delivered against reviewed: after a closeout or an integration has committed, the result says
+whether the code and the memory that were delivered are exactly what the leaf's latest recorded
+review showed: the same, different (and on which side), or no review was recorded. It never
+blocks.
+
+Sync movement: after a sync has changed a leaf's code or memory, the review and the sync result
+say that the latest recorded review was made before the sync, and offer to record a new one. It
+never blocks.
+
+What they do not say: both compare trees, not branch history. A rebase, cherry-pick or revert
+that ends in the same tree reads as the same. How a branch got there is not measured.

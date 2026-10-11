@@ -17,6 +17,7 @@ and an unavailable or partial partition never states a total it did not measure.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,15 +36,22 @@ from agents_remember.memory.knowledge.read_queries import fetch_realizations_at_
 from agents_remember.models.knowledge.diff import SourceAttribution
 from agents_remember.models.knowledge.read import FamilyIdentitySeed
 from agents_remember.models.knowledge.source import FileLocator, SymbolLocator
-from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
-from diff_scope_test_support import DiffFixture, build_diff_fixture
+from diff_scope_test_support import (
+    SUCCESSOR_PATH,
+    SYNCHRONIZATION_PATH,
+    DiffFixture,
+    build_diff_fixture,
+    rebuild_after_tree,
+)
 from knowledge_rows_test_support import (
-    NewAnchor,
-    RealizationClaimRequest,
     open_knowledge_store,
-    realizations,
 )
 from pydantic import ValidationError
+from read_scope_test_support import (
+    SUBJECT_REVISION,
+    ReadFixtureRealization,
+    RealizationSeed,
+)
 from test_knowledge_diff_scope import diff_seed, run_diff
 
 pytestmark = pytest.mark.evidence_unit
@@ -188,11 +196,11 @@ def test_a_family_subject_counts_its_members_own_links_as_selected_attribution(
 
     The subject here is the family that directly contains both the retry obligation and its sibling,
     so the rewritten ``src/batch.py`` -- which is realized by the sibling -- is a link to the
-    *selected* subject and not an outside one. The candidate's newly authored realization is a
-    different fact and is reported as the record states it: its owning revision is the successor the
-    candidate authored, which the family's recorded membership does not name, so that path is
-    attributed and established as exclusively outside the selected subject's own scope. Nothing here
-    infers membership from a successor relationship or a label; the family's rows answer it.
+    *selected* subject and not an outside one. The candidate's added claim cites the revised
+    revision the family's recorded membership names, so that path is attributed as a link to the
+    selected subject too: one text record holds one revision, so no authored successor stands
+    outside the family's rows. Nothing here infers membership from a label; the family's rows
+    answer it.
     """
 
     family_id = fixture.before.fixture.family.family_id
@@ -208,11 +216,11 @@ def test_a_family_subject_counts_its_members_own_links_as_selected_attribution(
     assert partition.subject_scope_complete is True
     assert by_path[fixture.changed_source_path].link == "selected_subject"
     assert by_path[fixture.baseline_only_path].link == "selected_subject"
-    assert by_path[fixture.candidate_only_path].link == "outside_selection_complete"
+    assert by_path[fixture.candidate_only_path].link == "selected_subject"
     assert set(partition.selected_subject_paths) == {
         fixture.changed_source_path,
         fixture.baseline_only_path,
-        fixture.before.fixture.integration.path,
+        fixture.candidate_only_path,
     }
 
 
@@ -298,11 +306,11 @@ def test_a_registered_mapping_that_did_not_resolve_does_not_establish_attributio
 
 
 def test_a_stale_or_unresolvable_mapping_does_not_establish_attribution(
-    fixture: DiffFixture,
+    fixture: DiffFixture, tmp_path: Path
 ) -> None:
     """A registered mapping whose evidence is stale is carried unresolved, and attributes nothing.
 
-    Two claims are authored on the candidate snapshot at the added path the fixture leaves unmapped,
+    Two claims are built on the candidate snapshot at the added path the fixture leaves unmapped,
     and each is a producer of the shipped *stale* resolution rather than of a missing path:
 
     * one records a blob identity **no compared tree holds**, so the bytes at the recorded path are not
@@ -311,29 +319,59 @@ def test_a_stale_or_unresolvable_mapping_does_not_establish_attribution(
       those bytes do not define -- the case that falsifies "a mismatch is only ever a content fact",
       because there the content matches exactly and only the locator failed to resolve.
 
-    Both are measured through the shipped anchor reader before the partition is read, so the case says
-    which resolution it is testing rather than assuming one. The partition must then report the path as
-    *confirmed unregistered* -- not attributed, and not carrying a selected-subject link -- with both
-    purported mappings counted as unresolved, while the fixture's own conforming mapping (the
-    baseline's exact `src/batch.py` claim) keeps its attribution and its stale candidate-side twins are
-    counted beside it rather than promoting it.
+    One text tree holds one entry per path and role, so the two mappings use two roles; the count
+    the partition reports is per path either way. Both are measured through the shipped anchor
+    reader before the partition is read, so the case says which resolution it is testing rather
+    than assuming one: the shipped reader reports both as the stale ``recorded_blob_mismatch``
+    code, and the symbol case is told apart by its detail -- the tree holds the exact recorded
+    blob and those bytes do not define the named symbol. The partition must then report the path as *confirmed unregistered* -- not
+    attributed, and not carrying a selected-subject link -- with both purported mappings counted
+    as unresolved, while the fixture's own conforming mapping (the baseline's exact `src/batch.py`
+    claim) keeps its attribution and its stale candidate-side twins are counted beside it rather
+    than promoting it.
     """
 
     real_blob = fixture.after.git_blobs[fixture.unattributed_path]
-    _author_candidate_claim(
-        fixture,
-        path=fixture.unattributed_path,
-        recorded_blob="0" * 40,
-        locator=FileLocator(),
+    stale_path = fixture.unattributed_path
+
+    def _stale(role: str, blob: str, locator) -> RealizationSeed:
+        return RealizationSeed(
+            realization=ReadFixtureRealization(
+                anchor_id=str(uuid4()), claim_id=str(uuid4()), path=stale_path
+            ),
+            revision_id=SUBJECT_REVISION,
+            role=role,  # type: ignore[arg-type]
+            locator=locator,
+            recorded_blob=blob,
+            rationale="ICR-R04: a mapping whose recorded evidence is stale",
+        )
+
+    after = rebuild_after_tree(
+        tmp_path / "stale-after",
+        omit_claim_paths=(SYNCHRONIZATION_PATH,),
+        extra_claims=(
+            RealizationSeed(
+                realization=ReadFixtureRealization(
+                    anchor_id=str(uuid4()), claim_id=str(uuid4()), path=SUCCESSOR_PATH
+                ),
+                revision_id=SUBJECT_REVISION,
+                role="enforcement",
+                locator=FileLocator(),
+                recorded_blob=fixture.after.git_blobs[SUCCESSOR_PATH],
+            ),
+            _stale("enforcement", "0" * 40, FileLocator()),
+            _stale(
+                "support",
+                real_blob,
+                SymbolLocator(language="python", qualified_name="icr_r04_symbol_never_defined"),
+            ),
+        ),
     )
-    _author_candidate_claim(
-        fixture,
-        path=fixture.unattributed_path,
-        recorded_blob=real_blob,
-        locator=SymbolLocator(language="python", qualified_name="icr_r04_symbol_never_defined"),
+    fixture = replace(
+        fixture, after=replace(fixture.after, fixture=after, database_path=after.database_path)
     )
     resolutions = _candidate_claim_resolutions(fixture, fixture.unattributed_path)
-    assert resolutions == ["recorded_blob_mismatch", "recorded_blob_mismatch"], (
+    assert sorted(resolutions) == ["recorded_blob_mismatch", "recorded_blob_mismatch"], (
         f"the case must exercise the stale resolution, not a missing path; measured {resolutions}"
     )
 
@@ -359,46 +397,7 @@ def test_a_stale_or_unresolvable_mapping_does_not_establish_attribution(
     assert rewritten.bucket == "attributed"
     assert rewritten.mapped_sides == ("before",)
     assert rewritten.unresolved_mapping_count == 2
-    assert (partition.attributed_total, partition.confirmed_unregistered_total) == (4, 1)
-
-
-def _author_candidate_claim(
-    fixture: DiffFixture,
-    *,
-    path: str,
-    recorded_blob: str,
-    locator: FileLocator | SymbolLocator,
-) -> str:
-    """Author one realization claim on the candidate snapshot, exactly as the write plane does."""
-
-    claim_id = str(uuid4())
-    store = open_knowledge_store(fixture.after.database_path, fixture.repository_id)
-    try:
-        created = realizations.create_realization_claim(
-            store,
-            RealizationClaimRequest(
-                repository_id=fixture.repository_id,
-                claim=RealizationClaimDraft(
-                    claim_id=claim_id,
-                    invariant_revision_id=fixture.revised_revision_id,
-                    role="enforcement",
-                    rationale="ICR-R04: a mapping whose recorded evidence is stale",
-                ),
-                anchor=NewAnchor(
-                    anchor=SourceAnchorDraft(
-                        anchor_id=uuid4(),
-                        path=path,
-                        source_identity=GitBlobIdentity(object_id=recorded_blob),
-                        locator=locator,
-                    )
-                ),
-                provenance=fixture.after.fixture.authorship,
-            ),
-        )
-        assert created.state == "created", created.refusal
-    finally:
-        store.close()
-    return claim_id
+    assert (partition.attributed_total, partition.confirmed_unregistered_total) == (3, 1)
 
 
 def _candidate_claim_resolutions(fixture: DiffFixture, path: str) -> list[str]:

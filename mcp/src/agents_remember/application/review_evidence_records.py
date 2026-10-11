@@ -9,14 +9,15 @@ store. Converted memory trees have no format or writer for those record classes,
 remain visible as unavailable with no measured count. Proof entries and worklist history keep their
 own text-store answers; neither is relabelled as a canonical supporting record.
 
-The review matrix supplies authored effects only when a subject is selected. Its availability and
-paging statement are taken from that read, and a task-context review reports it not selected.
+The authored-effects collection was the review matrix's own selection over the retired
+envelope tables. The matrix left with those tables (MIK-R74 rule 1), so its channel stays
+visible as unavailable with no measured count rather than vanishing or reading as zero.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from agents_remember.application.review_assessment_currentness import (
     CURRENTNESS_OWNER,
@@ -36,40 +37,27 @@ from agents_remember.application.review_record_rendering import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import (
-    ReviewCollectionPage,
     ReviewRecordChannel,
     ReviewRecordChannelState,
     ReviewRecordClassName,
     ReviewRefusal,
     ReviewSurfaceRequest,
 )
-from agents_remember.models.knowledge.view import ReviewMatrixRow
 
 __all__ = [
-    "AUTHORED_EFFECT_KINDS",
     "EVIDENCE_CLAIM_KINDS",
-    "MatrixSelection",
     "review_records_for",
     "review_records_for_resolution",
     "review_records_of",
-    "with_selection_channels",
-    "without_selected_matrix",
 ]
 
-# The record kinds the knowledge pane renders as mechanically-sourced *authored* records. Declared
-# here, beside the channel that reports their availability, and imported by the review adapter --
-# one declaration, so the collection a channel counts and the collection a pane renders cannot come
-# to disagree about which kinds they are.
-AUTHORED_EFFECT_KINDS: frozenset[str] = frozenset(
-    {"invariant_effect_claim", "preservation_claim", "unresolved_question"}
-)
 EVIDENCE_CLAIM_KINDS: frozenset[str] = frozenset({"evidence_claim"})
 
 _COLLECTION_OWNERS: Mapping[ReviewRecordClassName, str] = {
     "assessments": "curator_coherence.load_curator_coherence_generation",
     "detection_signals": "MIK-R26:retired-canonical-detection-records",
     "verification_observations": "MIK-R26:retired-canonical-verification-records",
-    "authored_effects": "knowledge_views.read_knowledge_view:review_matrix",
+    "authored_effects": "MIK-R74:removed-review-matrix",
     "evidence_claims": "MIK-R26:retired-canonical-evidence-records",
     "assessment_currentness": CURRENTNESS_OWNER,
 }
@@ -83,12 +71,6 @@ _COLLECTION_NAMES: tuple[ReviewRecordClassName, ...] = (
     "authored_effects",
     "evidence_claims",
 )
-
-# The collection the composition adds after reading the matrix, with the kinds it selects.
-_SELECTION_KINDS: tuple[tuple[ReviewRecordClassName, frozenset[str]], ...] = (
-    ("authored_effects", AUTHORED_EFFECT_KINDS),
-)
-
 
 def review_records_for(
     config: McpRuntimeConfig, request: ReviewSurfaceRequest
@@ -160,98 +142,31 @@ def review_records_for_resolution(
             assessment_channel,
             _retired_channel("detection_signals"),
             _retired_channel("verification_observations"),
+            _removed_matrix_channel(),
             _retired_channel("evidence_claims"),
             currentness_channel(assessment_channel, measurement, assessments),
         ),
     )
 
 
-def without_selected_matrix(records: ReviewRecordInputs) -> ReviewRecordInputs:
-    """State the matrix-sourced collection for a review that read no matrix at all.
+def _removed_matrix_channel() -> ReviewRecordChannel:
+    """Keep the matrix-sourced collection visible without claiming an owner measured zero.
 
-    A task-context review compares no subject, so it never asks the view for a row: this collection
-    is ``not_selected`` rather than absent, because "this review did not ask" is a different fact
-    from an owner answering that it holds none (``ICR-R14@v1``).
+    Authored effects were the review matrix's own selection over the retired envelope tables.
+    The matrix left with those tables (MIK-R74 rule 1): no review reads it now, so the collection
+    is unavailable with the removal as its reason rather than absent, unselected or zero.
     """
 
-    channels = tuple(
-        _not_selected(
-            name,
-            "this review selected no knowledge subject, so no review-matrix row was read and this "
-            "collection was neither supplied nor ruled out",
-        )
-        for name, _kinds in _SELECTION_KINDS
+    return _unavailable(
+        "authored_effects",
+        "authored effects were the review matrix's own selection over the retired envelope "
+        "tables, and the matrix left with those tables under MIK-R74 rule 1; no review reads "
+        "this collection now, so it is neither supplied nor a measured zero",
+        next_action=(
+            "read the knowledge comparison, a family roster, or the recorded evidence panes this "
+            "review publishes; none of them selects matrix rows"
+        ),
     )
-    return replace(records, channels=(*records.channels, *channels))
-
-
-@dataclass(frozen=True)
-class MatrixSelection:
-    """What the composition learned about the matrix selection it read.
-
-    ``page`` is the page the payload publishes for it, or ``None`` when the request named no
-    collection (or the owner refused to serve one); ``remaining`` is the owner's own extraction for
-    the selection, measured whether or not a page was published; ``unreadable`` is the refusal that
-    stopped a requested page, or ``None``. The three travel as one value because they describe one
-    read, and a caller that could pass two of them could state a bound beside a cursor that does not
-    belong to it.
-    """
-
-    page: ReviewCollectionPage | None = None
-    remaining: int = 0
-    unreadable: ReviewRefusal | None = None
-
-
-def with_selection_channels(
-    records: ReviewRecordInputs,
-    rows: Sequence[ReviewMatrixRow],
-    selection: MatrixSelection,
-) -> ReviewRecordInputs:
-    """Add the matrix-sourced collection's availability from the matrix's own rows.
-
-    A review that selected a subject reports what the view returned, and the bound it reported travels
-    with it: when the view rendered only a page of its selection, the count here is the page the
-    review actually read and ``page`` names how much of the selection lies beyond it (ICR-R14), so an
-    entry button's own record count is never read as the whole selection.
-
-    ``unreadable`` is the third state and it is not an absence: a matrix read the composition *asked
-    for* and could not be served -- a page cursor the view refused because its snapshot moved, a
-    damaged index -- leaves the collection ``unavailable`` with that refusal as the reason and its
-    next action. Reporting a measured zero there would be the collapse of "an owner holds none" and
-    "this composition could not read it" that ``ICR-R14@v1`` exists to keep apart.
-
-    ``selection`` is that read's own answer -- its page, its count and any refusal -- as one value;
-    see :class:`MatrixSelection` for why the three travel together.
-    """
-
-    channels = tuple(
-        _selection_channel(name, kinds, rows, selection) for name, kinds in _SELECTION_KINDS
-    )
-    return replace(records, channels=(*records.channels, *channels))
-
-
-def _selection_channel(
-    records: ReviewRecordClassName,
-    kinds: frozenset[str],
-    rows: Sequence[ReviewMatrixRow],
-    selection: MatrixSelection,
-) -> ReviewRecordChannel:
-    """One matrix-sourced collection's availability, from the rows the view returned.
-
-    The number this channel reports is the part of the matrix **this collection** selected -- the
-    authored effects the page carried -- while the bound beside it is the whole selection's own, which
-    is what makes the two readable together: a collection of this page and a walk of that selection.
-    """
-
-    if selection.unreadable is not None:
-        return _unavailable(
-            records,
-            "the review matrix this collection comes from could not be read: "
-            f"{selection.unreadable.detail}",
-            next_action=selection.unreadable.next_action,
-        )
-    supplied = tuple(row for row in rows if row.subject.record_kind in kinds)
-    return _answered(records, len(supplied), selection=selection)
 
 
 def _retired_channel(records: ReviewRecordClassName) -> ReviewRecordChannel:
@@ -299,31 +214,19 @@ def _unresolved_channels(refusal_value: ReviewRefusal | None) -> tuple[ReviewRec
     return (*channels, currentness)
 
 
-def _answered(
-    records: ReviewRecordClassName, count: int, *, selection: MatrixSelection | None = None
-) -> ReviewRecordChannel:
-    """One collection's owner answered: this many records were supplied, or a measured zero.
-
-    ``bounded_by`` is the page the composition published for this collection, or ``None`` when it
-    published none. It decides *which* honest sentence the bound earns: a published page carries the
-    cursor that reaches the remainder, and a review that named no collection published no cursor, so
-    it names the request that does reach it instead. A remainder is never stated without one of the
-    two, which is the shape this packet exists to remove.
-    """
+def _answered(records: ReviewRecordClassName, count: int) -> ReviewRecordChannel:
+    """One collection's owner answered: this many records were supplied, or a measured zero."""
 
     if count:
         return _recorded(
             records,
             count,
-            detail=(
-                f"{count} {records} record(s) supplied by their owner{_remaining_note(selection)}"
-            ),
+            detail=(f"{count} {records} record(s) supplied by their owner"),
         )
     return _absent(
         records,
         f"the owner of {records} answered for this candidate and holds none of this class; this is a "
-        f"measured absence, not an authority this composition failed to read"
-        f"{_remaining_note(selection)}",
+        "measured absence, not an authority this composition failed to read",
     )
 
 
@@ -383,22 +286,6 @@ def _unavailable(
     )
 
 
-def _not_selected(records: ReviewRecordClassName, detail: str) -> ReviewRecordChannel:
-    """One collection this composition did not read because the review selected no operand."""
-
-    return _channel(
-        records,
-        _Answer(
-            state="not_selected",
-            detail=detail,
-            next_action=(
-                "open the review on a recorded subject: the review matrix selects its rows for a "
-                "selected subject and never for the task alone"
-            ),
-        ),
-    )
-
-
 def _channel(records: ReviewRecordClassName, answer: _Answer) -> ReviewRecordChannel:
     """One channel value, with the owner of its collection taken from the one declaration above."""
 
@@ -410,36 +297,4 @@ def _channel(records: ReviewRecordClassName, answer: _Answer) -> ReviewRecordCha
         detail=answer.detail,
         unreadable=tuple(answer.unreadable),
         next_action=answer.next_action,
-    )
-
-
-def _remaining_note(selection: MatrixSelection | None) -> str:
-    """The declared bound of one selection, always with the action that reaches the rest of it.
-
-    Three states, one obligation. A published page whose owner issued a cursor names the cursor; a
-    review that read a bounded selection without publishing a page -- the reader named no collection
-    -- names the request that does publish one; and a review that asked for a page and was refused
-    states neither, because the refusal is on the wire and there is no window to describe. No state
-    states a remainder on its own, because a count with no reachable action is the non-conformance
-    ``ICR-R10@v1`` names.
-    """
-
-    if selection is None or not selection.remaining:
-        return ""
-    page = selection.page
-    if page is not None and page.continuation is not None:
-        return (
-            f"; the selection was bounded and {selection.remaining} further row(s) of it lie beyond "
-            "the page this review rendered, which carries the cursor that reaches them"
-        )
-    if page is None:
-        return (
-            f"; this review read records at its declared bound and {selection.remaining} further "
-            "row(s) of the selection lie beyond that page; request records as a page "
-            "(pageOf=records) to reach them"
-        )
-    return (
-        f"; the selection was bounded and {selection.remaining} further row(s) of it lie beyond the "
-        "page this review rendered, and that page published no cursor, so the remainder is stated "
-        "without a continuation rather than claimed to be reachable"
     )

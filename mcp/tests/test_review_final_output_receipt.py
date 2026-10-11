@@ -192,7 +192,10 @@ def test_memory_movement_and_absent_memory_never_claim_delivered_coverage(tree_f
     missing = attach_closeout_receipt({"ok": True, "code_commit": code}, contract)[
         "final_output_receipt"
     ]
-    assert missing["receipt_state"] == "unmeasured"
+    # Ruling 814778 point 3: a delivery without a memory commit on a leaf that holds a
+    # comparison writes no receipt; the block answers not-recorded with the reason.
+    assert missing["state"] == "not-recorded"
+    assert "no delivered memory tree" in missing["detail"]
     assert select_review_comparison(contract.task_root, contract.leaf_id).comparison == reviewed
     assert memory != moved
     changed_code = commit_file(contract.code_worktree, "reviewed.py", "VALUE = 9\n")

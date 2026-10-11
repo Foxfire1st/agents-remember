@@ -564,9 +564,11 @@ def _task_context(contract: WorktreeContract):
 
 def _memory_candidate_tree(contract: WorktreeContract) -> str:
     assert contract.memory_worktree is not None
-    reports = contract.worktree_group / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=".curator-coherence-memory-", dir=reports) as temporary:
+    # Rule 6 (MIK-R74): this capture is unrecorded scratch, so it must not create the
+    # enclosure's reports/ directory -- an empty reports/ left behind by a read is a
+    # boundary violation. The system temp directory holds the throwaway index instead,
+    # and the publication path that writes attestation/reports mkdirs its own parents.
+    with TemporaryDirectory(prefix=".curator-coherence-memory-") as temporary:
         return worktree_candidate_tree(contract.memory_worktree, Path(temporary) / "index")
 
 

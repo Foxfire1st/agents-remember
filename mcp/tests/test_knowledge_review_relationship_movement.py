@@ -8,54 +8,46 @@ fixture and verifies the family route sets remain available through their existi
 
 from __future__ import annotations
 
+import itertools
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import apsw
 import pytest
 from agents_remember.application.knowledge_review import read_complete_knowledge_review
 from agents_remember.application.review_governing_route import governing_route_movements
 from agents_remember.application.review_recorded_relationships import RecordedSnapshot
-from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
-from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.graph import FamilyMemberDraft
+from agents_remember.kernel.canonical_json import canonical_json_bytes
+from agents_remember.memory.knowledge_index import KnowledgeIndex
+from agents_remember.memory.knowledge_index.build import build_index
+from agents_remember.memory.knowledge_index.projection import (
+    INDEX_REPOSITORY_ID,
+    text_uuid,
+)
+from agents_remember.memory.knowledge_index.tree import MemoryTreeSnapshot
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.source import FileLocator
 from agents_remember.models.knowledge_files import canonical_text
-from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
+from agents_remember.models.knowledge_files.documents import record_path
 from diff_scope_test_support import (
     SUCCESSOR_PATH,
-    _claim_row_digest,
+    _claim_id_for_path,
     _git,
-)
-from knowledge_rows_test_support import (
-    FamilyMemberRequest,
-    FamilyRevisionRequest,
-    NewAnchor,
-    RealizationClaimRequest,
-    RemoveFamilyMemberRequest,
-    RemoveRealizationClaimRequest,
-    RevisionDraft,
-    RevisionRequest,
-    RowStore,
-    families,
-    memberships,
-    open_knowledge_store,
-    realizations,
+    rebuild_after_tree,
+    replace_after_tree,
 )
 from read_scope_test_support import (
     ABSENT_PATH,
     AUXILIARY_PATH,
-    BASE_LABEL,
-    DIRECT_FAMILY_GUARANTEE,
-    INTEGRATION_PATH,
+    SUBJECT_REVISION,
     SYNCHRONIZATION_PATH,
+    ReadFixtureRealization,
+    RealizationSeed,
 )
 from test_knowledge_review_source_endpoints import (
     EndpointFixture,
-    _place_datasets,
     build_endpoint_fixture,
     compose_endpoint_review,
 )
@@ -73,32 +65,20 @@ RENAMED_PATH_TEXT = "# synchronization\nshared retry budget\npropagated\nmoved b
 MERGE_PATH = "src/retry_merge.py"
 MERGE_PATH_TEXT = "# retry merge\nrecords both predecessors' budget\n"
 
-# The identities of the governing-route read's own in-memory snapshots.
-ROUTE_REPOSITORY = "repository"
+# The identities of the governing-route read's text-built snapshots. The family and
+# invariant records carry the text IDs below, so the projection derives exactly
+# these lookup identities; the read runs under the index's own namespace because
+# a text-built index is keyed by its tree alone.
 ROUTE_FAMILY = text_uuid("identity", FAMILY)
 ROUTE_INVARIANT = text_uuid("identity", "INV-R00001")
 
 
 @dataclass(frozen=True)
-class ClaimDraft:
-    """One realization to author: its claim, the revision it cites, its path and its recorded blob."""
-
-    claim_id: str
-    revision_id: str
-    path: str
-    blob: str
-
-
-@dataclass(frozen=True)
 class MovementFixture:
-    """One live enclosure whose two datasets record every movement these cases read back."""
+    """One live enclosure whose two trees record every movement these cases read back."""
 
     endpoints: EndpointFixture
-    merge_revision_id: str
     merge_claim_id: str
-    new_family_revision_id: str
-    removed_member_id: str
-    added_member_id: str
 
     @property
     def diff(self):
@@ -107,20 +87,20 @@ class MovementFixture:
 
 @pytest.fixture(scope="module")
 def movement_fixture(tmp_path_factory: pytest.TempPathFactory) -> MovementFixture:
-    """Build the enclosure and record every movement through the store's own operations."""
+    """Build the enclosure and record every movement through the text-backed builder."""
 
     return build_movement_fixture(tmp_path_factory.mktemp("movement"))
 
 
 def build_movement_fixture(directory: Path) -> MovementFixture:
-    """Populate synthetic index-shaped rows and the real source trees their anchors name.
+    """Populate two text trees and the real source trees their anchors name.
 
-    The row fixture keeps lineage and movement reader cases the text format cannot author. It is
+    The candidate tree is the endpoint's candidate topology with the withdrawn auxiliary claim
+    left out and the merge and successor claims added, both citing the revised revision. It is
     test-only input to the actual composition, and exercises no retired production writer.
     """
 
     endpoints = build_endpoint_fixture(directory / "endpoints")
-    diff = endpoints.diff
     worktree = endpoints.worktree
     # The source rename: the path the withdrawn claim recorded is gone and the path the candidate's
     # claim records holds a near-copy of it, so Git's own similarity detection has a rename to report.
@@ -132,189 +112,41 @@ def build_movement_fixture(directory: Path) -> MovementFixture:
     (worktree / AUXILIARY_PATH).unlink()
     successor_blob = _git(worktree, ["hash-object", SUCCESSOR_PATH])
     merge_blob = _git(worktree, ["hash-object", MERGE_PATH])
-    merge_revision_id = str(uuid4())
-    merge_claim_id = str(uuid4())
-
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        remove_claim(store, diff.added_claim_id)
-        remove_claim(store, diff.before.fixture.auxiliary.claim_id)
-        # The merge revision is authored before the claim that cites it: a relation names an exact
-        # revision in this namespace, so the store refuses the claim otherwise -- which is the write
-        # path's own ordering rule rather than a fixture detail.
-        author_revision(store, diff, merge_revision_id, predecessors=_merge_predecessors(diff))
-        author_claim(
-            store,
-            diff,
-            ClaimDraft(
-                claim_id=merge_claim_id,
-                revision_id=merge_revision_id,
-                path=MERGE_PATH,
-                blob=merge_blob,
-            ),
-        )
-        author_claim(
-            store,
-            diff,
-            ClaimDraft(
+    after = rebuild_after_tree(
+        directory / "movement-after",
+        omit_claim_paths=(SYNCHRONIZATION_PATH, AUXILIARY_PATH),
+        extra_claims=(
+            _extra_claim(
                 claim_id=str(uuid4()),
-                revision_id=diff.revised_revision_id,
+                anchor_id=str(uuid4()),
                 path=SUCCESSOR_PATH,
                 blob=successor_blob,
             ),
-        )
-        family_revision_id, removed_member_id, added_member_id = _reassign_family(store, diff)
-    finally:
-        store.close()
-
-    _place_datasets(diff, endpoints.contract)
+            _extra_claim(
+                claim_id=str(uuid4()),
+                anchor_id=str(uuid4()),
+                path=MERGE_PATH,
+                blob=merge_blob,
+            ),
+        ),
+    )
+    endpoints = replace_after_tree(endpoints, after)
     return MovementFixture(
         endpoints=endpoints,
-        merge_revision_id=merge_revision_id,
-        merge_claim_id=merge_claim_id,
-        new_family_revision_id=family_revision_id,
-        removed_member_id=removed_member_id,
-        added_member_id=added_member_id,
+        merge_claim_id=_claim_id_for_path(after.database_path, MERGE_PATH),
     )
 
 
-def _merge_predecessors(diff) -> tuple[str, ...]:
-    """The retry identity's two revisions the authored merge names together.
+def _extra_claim(*, claim_id: str, anchor_id: str, path: str, blob: str) -> RealizationSeed:
+    """One candidate-only realization citing the tree's own revised revision, at a real blob."""
 
-    Both must be revisions *of the reviewed invariant*: the write path refuses a predecessor from
-    another identity ("predecessors must stay within one invariant"), which is why this names the
-    retry identity's own base and subject revisions rather than any two revisions of the fixture.
-    """
-
-    return (diff.subject_revision_id, diff.before.fixture.base_revision_id)
-
-
-def author_claim(
-    store: RowStore,
-    diff,
-    draft: ClaimDraft,
-) -> None:
-    """Author one realization claim at one path, recording the blob the candidate tree really holds."""
-
-    created = realizations.create_realization_claim(
-        store,
-        RealizationClaimRequest(
-            repository_id=store.repository_id,
-            claim=RealizationClaimDraft(
-                claim_id=draft.claim_id,
-                invariant_revision_id=draft.revision_id,
-                role="enforcement",
-                rationale="The candidate records where the moved obligation is realized.",
-            ),
-            anchor=NewAnchor(
-                anchor=SourceAnchorDraft(
-                    anchor_id=UUID(str(uuid4())),
-                    path=draft.path,
-                    source_identity=GitBlobIdentity(object_id=draft.blob),
-                    locator=FileLocator(),
-                )
-            ),
-            provenance=diff.before.fixture.authorship,
-        ),
+    return RealizationSeed(
+        realization=ReadFixtureRealization(anchor_id=anchor_id, claim_id=claim_id, path=path),
+        revision_id=SUBJECT_REVISION,
+        role="enforcement",
+        locator=FileLocator(),
+        recorded_blob=blob,
     )
-    assert created.state == "created", created.refusal
-
-
-def remove_claim(store: RowStore, claim_id: str) -> None:
-    """Withdraw one realization through the shipped removal operation."""
-
-    removed = realizations.remove_realization_claim(
-        store,
-        RemoveRealizationClaimRequest(
-            repository_id=store.repository_id,
-            claim_id=claim_id,
-            expected_row_digest=_claim_row_digest(store, claim_id),
-        ),
-    )
-    assert removed.state == "removed", removed.refusal
-
-
-def author_revision(
-    store: RowStore,
-    diff,
-    revision_id: str,
-    *,
-    predecessors: tuple[str, ...],
-    invariant_id: str | None = None,
-) -> None:
-    """Author one successor revision of an identity, naming its exact predecessors."""
-
-    created = store.create_revision(
-        RevisionRequest(
-            repository_id=store.repository_id,
-            revision=RevisionDraft(
-                revision_id=revision_id,
-                invariant_id=invariant_id or diff.retry_invariant_id,
-                display_version=BASE_LABEL,
-                statement="Retries record both predecessors' budgets before the first refusal.",
-                applicability="Every retry the shared budget admits in this repository namespace.",
-                conditions=("The first refusal is recorded before the budget is re-armed.",),
-                exclusions=(),
-                predecessors=predecessors,
-                provenance=diff.before.fixture.authorship,
-            ),
-        )
-    )
-    assert created.state == "created", created.refusal
-
-
-def _reassign_family(store: RowStore, diff) -> tuple[str, str, str]:
-    """Move one member from the baseline's family revision to an authored successor revision.
-
-    Two store operations and nothing else: the baseline membership is withdrawn by identity and row
-    digest, a new family revision is authored naming the baseline's as its predecessor, and the moved
-    member revision is authored as a member of it.
-    """
-
-    baseline_member = memberships.find_membership_by_pair(
-        store, diff.before.fixture.direct_family.revision_id, diff.subject_revision_id
-    )
-    assert baseline_member is not None
-    removed = memberships.remove_family_member(
-        store,
-        RemoveFamilyMemberRequest(
-            repository_id=store.repository_id,
-            member_id=baseline_member.member_id,
-            expected_row_digest=baseline_member.row_digest,
-        ),
-    )
-    assert removed.state == "removed", removed.refusal
-    new_revision_id = str(uuid4())
-    authored = families.create_family_revision(
-        store,
-        FamilyRevisionRequest(
-            repository_id=store.repository_id,
-            revision=FamilyRevisionDraft(
-                family_id=diff.before.fixture.direct_family.family_id,
-                revision_id=new_revision_id,
-                display_version=BASE_LABEL,
-                joint_guarantee=DIRECT_FAMILY_GUARANTEE,
-                predecessors=(diff.before.fixture.direct_family.revision_id,),
-                provenance=diff.before.fixture.authorship,
-            ),
-        ),
-    )
-    assert authored.state == "created", authored.refusal
-    added_member_id = str(uuid4())
-    member = memberships.create_family_member(
-        store,
-        FamilyMemberRequest(
-            repository_id=store.repository_id,
-            member=FamilyMemberDraft(
-                member_id=added_member_id,
-                family_revision_id=new_revision_id,
-                invariant_revision_id=diff.revised_revision_id,
-                provenance=diff.before.fixture.authorship,
-            ),
-        ),
-    )
-    assert member.state == "created", member.refusal
-    return new_revision_id, baseline_member.member_id, added_member_id
 
 
 # The fix-round paths: a *member* identity's moved realization, the same-citation row, and the family
@@ -351,52 +183,59 @@ def realization_movements(payload):
     )
 
 
-def movement_between(payload, before_path: str, after_path: str):
-    """The one movement whose recorded sides name these two addresses."""
-
-    found = [
-        movement
-        for movement in realization_movements(payload)
-        if movement.after is not None
-        and movement.after.path == after_path
-        and any(side.path == before_path for side in movement.before)
-    ]
-    assert len(found) == 1, [
-        (m.transition, [s.path for s in m.before], m.after and m.after.path)
-        for m in realization_movements(payload)
-    ]
-    return found[0]
+# -- a removed claim and a new claim are a retraction and an addition --------------------------
 
 
-# -- a realization that moved shows both paths under one identity --------------------------------
-
-
-def test_a_moved_realization_displays_both_recorded_paths_under_one_invariant_identity(
+def test_a_removed_claim_and_a_new_claim_display_as_a_retraction_and_an_addition(
     movement_fixture: MovementFixture,
 ) -> None:
-    """Realization A to B is one relationship: both addresses, one preserved invariant identity.
+    """A move is a removed claim and a new claim: two movements, one preserved invariant identity.
 
-    This is the packet's conforming example as a measurement over the production composition: the
-    baseline claim at ``src/synchronization.py`` and the candidate's claim at ``src/retry_interval.py``
-    are the two sides of one movement, the identity both sit under is the reviewed invariant, and each
-    of the two locations the pane lists for them carries the same identity and names the other
-    address.
+    The store refuses to re-anchor a claim in place, so what an author's "the realization moved
+    from A to B" *is* is a removed claim at ``src/synchronization.py`` and a new claim at
+    ``src/retry_interval.py`` under the same reviewed invariant. Text records hold no predecessor
+    edge (MIK-R74 rule 1), so nothing pairs the two rows: the baseline side displays as a
+    retraction that names the candidate rows citing the same revision, and the candidate side
+    displays as an addition with no baseline side substituted. No movement carries both
+    addresses, and the pane lists each address once under the same identity.
     """
 
     fixture = movement_fixture
     payload = review(fixture)
-    movement = movement_between(payload, SYNCHRONIZATION_PATH, SUCCESSOR_PATH)
+    added = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.after is not None and movement.after.path == SUCCESSOR_PATH
+    ]
+    assert len(added) == 1
+    movement = added[0]
 
-    assert movement.transition == "moved"
+    assert movement.transition == "added"
     assert movement.record_kind == "invariant"
     assert movement.record_id == fixture.diff.retry_invariant_id
-    # Two baseline relationships the candidate withdrew are continued by the one candidate
-    # relationship: the movement displays all of them rather than choosing one to be "the" old side.
-    assert {side.path for side in movement.before} == {SYNCHRONIZATION_PATH, INTEGRATION_PATH}
+    assert movement.before == ()
+    assert movement.pairing_basis is None
     assert movement.after is not None
     assert movement.after.path == SUCCESSOR_PATH
-    assert {side.resolution for side in movement.before} == {"exact_recorded_blob"}
     assert movement.after.resolution == "exact_recorded_blob"
+    assert "no baseline side is substituted" in movement.statement
+
+    retracted = [
+        move
+        for move in realization_movements(payload)
+        if move.transition == "retracted"
+        and any(side.path == SYNCHRONIZATION_PATH for side in move.before)
+    ]
+    assert len(retracted) == 1
+    assert retracted[0].after is None
+    assert retracted[0].record_id == fixture.diff.retry_invariant_id
+    assert "withdrawn association rather than a movement" in retracted[0].statement
+    assert not any(
+        move.after is not None
+        and move.after.path == SUCCESSOR_PATH
+        and any(side.path == SYNCHRONIZATION_PATH for side in move.before)
+        for move in realization_movements(payload)
+    ), "a removed claim and a new claim are two movements, never one movement"
 
     located = {
         location.path: location
@@ -408,16 +247,15 @@ def test_a_moved_realization_displays_both_recorded_paths_under_one_invariant_id
         fixture.diff.retry_invariant_id
     }
     assert located[SYNCHRONIZATION_PATH].recorded_side == "before"
-    assert located[SYNCHRONIZATION_PATH].counterpart_path == SUCCESSOR_PATH
     assert located[SUCCESSOR_PATH].recorded_side == "after"
-    # Two recorded baseline addresses, so no single one is chosen to stand for the other: the
-    # movement lists both and the location names none.
+    # No movement pairs the two addresses, so neither location names the other as its
+    # counterpart: each address stands on its own recorded side.
+    assert located[SYNCHRONIZATION_PATH].counterpart_path is None
     assert located[SUCCESSOR_PATH].counterpart_path is None
     assert located[SYNCHRONIZATION_PATH].before_only is True
-    assert located[SYNCHRONIZATION_PATH].transition == "moved"
-    assert located[SUCCESSOR_PATH].movement == movement
-    # One row per recorded side, not one per movement that displays it: the pane's address view is a
-    # list of addresses, and a baseline address two movements continue is still one address.
+    assert located[SYNCHRONIZATION_PATH].transition == "retracted"
+    assert located[SUCCESSOR_PATH].transition == "added"
+    # One row per recorded side: the pane's address view is a list of addresses.
     assert [location.path for location in payload.source.locations].count(SYNCHRONIZATION_PATH) == 1
 
 
@@ -427,9 +265,10 @@ def test_only_the_after_graph_is_read_so_the_old_association_vanishes(
     """The packet's non-conforming reading, measured: the after side cannot produce the old address.
 
     The population the after side alone names is a real set -- every candidate-side claim address --
-    and the baseline address the relationship moved away from is not in it. The union traversal the
-    payload is built from does hold it, with the invariant identity and the authored edge beside it,
-    so the two readings are distinguished by what they can display rather than by a claim about them.
+    and the baseline address the author moved away from is not in it. The union traversal the
+    payload is built from does hold it, as a retraction under the invariant identity that names
+    the candidate rows citing the same revision, so the two readings are distinguished by what
+    they can display rather than by a claim about them.
     """
 
     fixture = movement_fixture
@@ -444,15 +283,16 @@ def test_only_the_after_graph_is_read_so_the_old_association_vanishes(
     )
     assert SUCCESSOR_PATH in after_only_paths
 
-    union = movement_between(payload, SYNCHRONIZATION_PATH, SUCCESSOR_PATH)
-    assert {side.path for side in union.before} == {SYNCHRONIZATION_PATH, INTEGRATION_PATH}
-    lineage = {entry.kind for entry in union.lineage}
-    assert "succession" in lineage, [entry.statement for entry in union.lineage]
-    assert fixture.diff.subject_revision_id in {
-        revision
-        for entry in union.lineage
-        for revision in (entry.revision_id, *entry.related_revision_ids)
-    }
+    union = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.transition == "retracted"
+        and any(side.path == SYNCHRONIZATION_PATH for side in movement.before)
+    ]
+    assert len(union) == 1
+    assert union[0].record_id == fixture.diff.retry_invariant_id
+    assert "withdrawn association rather than a movement" in union[0].statement
+    assert "no relationship citing" in union[0].statement
 
 
 def test_a_withdrawn_realization_stays_visible_with_its_deleted_file_and_its_identity(
@@ -484,7 +324,8 @@ def test_a_withdrawn_realization_stays_visible_with_its_deleted_file_and_its_ide
     assert movement.record_id == fixture.diff.before.fixture.auxiliary_invariant_id
     assert movement.before[0].path == AUXILIARY_PATH
     assert "withdrawn" in movement.statement
-    assert "no authored successor" in movement.statement
+    assert "no relationship citing" in movement.statement
+    assert "withdrawn association rather than a movement" in movement.statement
     location = next(
         location for location in payload.source.locations if location.path == AUXILIARY_PATH
     )
@@ -497,106 +338,84 @@ def test_a_withdrawn_realization_stays_visible_with_its_deleted_file_and_its_ide
     assert deleted[AUXILIARY_PATH].status == "deleted"
 
 
-def test_a_record_the_other_selection_did_not_reach_is_not_displayed_as_a_deletion(
-    movement_fixture: MovementFixture,
-) -> None:
-    """Present-but-outside-the-selection has its own transition and its own sentence.
-
-    Reassigning the family moved the candidate's selection away from one membership the candidate's
-    snapshot still holds. That relationship is displayed -- with its side, its family revision and its
-    member -- under ``outside_selection``, and its sentence says the snapshot holds the record and the
-    declared selection did not reach it rather than calling it a withdrawal.
-    """
-
-    fixture = movement_fixture
-    payload = review(fixture)
-    outside = [
-        movement
-        for movement in payload.source.relationships
-        if movement.transition == "outside_selection"
-    ]
-    assert outside, [
-        (movement.relationship_kind, movement.transition)
-        for movement in payload.source.relationships
-    ]
-    movement = outside[0]
-    assert movement.after is None
-    assert movement.before[0].item_coverage == "present_outside_selection"
-    assert movement.before[0].record_id is not None
-    assert "did not reach this relationship" in movement.statement
-    assert "never a deletion" in movement.statement
-    assert movement.record_id == movement.before[0].record_id
+# Dead: no text-tree comparison leaves a recorded row of the reviewed invariant outside the
+# declared selection, so no payload carries an ``outside_selection`` movement. The transition
+# stays in the production vocabulary for selections the text format cannot express; the case
+# below names its removal rather than asserting it.
+_REMOVED_OUTSIDE_SELECTION_CASE = (
+    "test_a_record_the_other_selection_did_not_reach_is_not_displayed_as_a_deletion"
+)
 
 
 # -- the source rename is a labelled inference, and it proves nothing -----------------------------
 
 
-def test_a_source_rename_is_displayed_as_a_labelled_git_inference(
+def test_a_source_rename_is_never_a_recorded_movement_and_carries_no_inference(
     movement_fixture: MovementFixture,
 ) -> None:
-    """A rename is displayed with Git named as the inference's basis and never as proof of movement.
+    """A rename is never a recorded movement: no movement names two addresses, so none earns one.
 
-    The two bound trees hold a deleted path and a near-copy of it at the candidate's path, so Git's
-    own similarity detection pairs them. The value says so, names the command that produced it, and
-    says in its own sentence that it is a similarity inference about the source -- while the movement
-    beside it is the two *recorded* anchors and the author's own successor edge.
+    The two bound trees hold a deleted path and a near-copy of it at the candidate's path, so
+    Git's own similarity detection *would* pair them -- but the inference attaches only to a
+    movement whose recorded sides name two different addresses, and no movement here does: the
+    baseline side displays as a retraction, the candidate side as an addition, and every
+    movement's inference is absent. The recorded sides are still both displayed with the
+    identity the snapshots record; nothing in either movement is derived from a similarity
+    the display never asked for.
     """
 
     fixture = movement_fixture
     payload = review(fixture)
-    movement = movement_between(payload, SYNCHRONIZATION_PATH, SUCCESSOR_PATH)
-    inference = movement.rename_inference
+    assert all(
+        movement.rename_inference is None for movement in realization_movements(payload)
+    ), "no movement names two recorded addresses, so Git's inference has nothing to attach to"
 
-    assert inference is not None
-    assert inference.state == "inferred", inference.statement
-    assert inference.basis == "git_rename_detection"
-    assert (inference.before_path, inference.after_path) == (SYNCHRONIZATION_PATH, SUCCESSOR_PATH)
-    assert inference.similarity
-    assert "find-renames" in inference.command
-    assert "Git's own rename detection" in inference.statement
-    assert "not proof that the invariant moved" in inference.statement
-    # The movement's own sides are the recorded anchors -- both of them -- and the identity and edge
-    # the snapshots record. Nothing in the movement is derived from the inference: the inference
-    # names which recorded address Git's similarity detection matched, and that is all it does.
-    assert SYNCHRONIZATION_PATH in {side.path for side in movement.before}
-    assert INTEGRATION_PATH in {side.path for side in movement.before}
-    assert movement.after is not None and movement.after.path == SUCCESSOR_PATH
-    assert {entry.kind for entry in movement.lineage} >= {"succession"}
+    added = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.after is not None and movement.after.path == SUCCESSOR_PATH
+    ]
+    assert len(added) == 1
+    assert added[0].transition == "added"
+    assert added[0].before == ()
+    retracted = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.transition == "retracted"
+        and any(side.path == SYNCHRONIZATION_PATH for side in movement.before)
+    ]
+    assert len(retracted) == 1
+    assert retracted[0].after is None
+    assert retracted[0].record_id == fixture.diff.retry_invariant_id
 
 
 def build_no_authored_edge_fixture(directory: Path) -> EndpointFixture:
-    """The same source rename as the conforming case, recorded with no authored edge at all.
+    """The same source rename as the conforming case, with the successor claim re-recorded.
 
-    The withdrawn baseline claim is not replaced: the candidate's claim cites a revision that records
-    *no* predecessor, while the two code trees still show the deleted path and its near-copy at the
-    candidate's path. Nothing in the store connects the two recorded associations, so nothing may
-    display them as one movement -- whatever Git's own similarity detection says about the files.
+    The candidate's claim at the successor path cites the revised revision -- a row nothing pairs
+    with the withdrawn baseline claim, because pairing needs the same recorded row. The two code
+    trees still show the deleted path and its near-copy at the candidate's path, so nothing may
+    display the two recorded associations as one movement -- whatever Git's own similarity
+    detection says about the files.
     """
 
     endpoints = build_endpoint_fixture(directory / "no-edge")
-    diff = endpoints.diff
     worktree = endpoints.worktree
     (worktree / SUCCESSOR_PATH).write_text(RENAMED_PATH_TEXT, encoding="utf-8")
     blob = _git(worktree, ["hash-object", SUCCESSOR_PATH])
-    independent_revision_id = str(uuid4())
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        remove_claim(store, diff.added_claim_id)
-        author_revision(store, diff, independent_revision_id, predecessors=())
-        author_claim(
-            store,
-            diff,
-            ClaimDraft(
+    after = rebuild_after_tree(
+        directory / "no-edge-after",
+        omit_claim_paths=(SYNCHRONIZATION_PATH, SUCCESSOR_PATH),
+        extra_claims=(
+            _extra_claim(
                 claim_id=str(uuid4()),
-                revision_id=independent_revision_id,
+                anchor_id=str(uuid4()),
                 path=SUCCESSOR_PATH,
                 blob=blob,
             ),
-        )
-    finally:
-        store.close()
-    _place_datasets(diff, endpoints.contract)
-    return endpoints
+        ),
+    )
+    return replace_after_tree(endpoints, after)
 
 
 def test_the_same_rename_with_no_authored_edge_is_a_retraction_and_an_addition(
@@ -644,37 +463,43 @@ def test_the_same_rename_with_no_authored_edge_is_a_retraction_and_an_addition(
 # -- the authored split and merge ----------------------------------------------------------------
 
 
-def test_the_authored_split_and_merge_are_displayed_from_the_candidates_own_edges(
+def test_an_authored_merge_revision_displays_as_an_addition_citing_its_own_revision(
     movement_fixture: MovementFixture,
 ) -> None:
-    """Split and merge are read from the authored predecessor rows and name every related revision.
+    """The merge claim's realization displays as an addition under its own identity.
 
-    The candidate's snapshot records two successors of the baseline's subject revision -- the revised
-    revision and the unselected fourth one -- and the case then authors a merge revision naming two
-    exact predecessors and a realization on it. Both movements display the authored relation, and the
-    split names *all* the successors rather than the one a pairing happened to follow.
+    The case records a second candidate-only realization at its own path, citing the revised
+    revision. Text records hold no predecessor edge (MIK-R74 rule 1), so the display states no
+    succession, split or merge: the merge path's realization is the candidate's added side citing
+    the revised revision, and the revised statement's realization is a second addition citing the
+    same revision. Both sit under the reviewed invariant; neither is paired with the retracted
+    baseline side.
     """
 
     fixture = movement_fixture
     payload = review(fixture)
-    revised = movement_between(payload, SYNCHRONIZATION_PATH, SUCCESSOR_PATH)
-    splits = [entry for entry in revised.lineage if entry.kind == "split"]
-    assert len(splits) == 1, [entry.statement for entry in revised.lineage]
-    assert splits[0].revision_id == fixture.diff.subject_revision_id
-    assert set(splits[0].related_revision_ids) == {
-        fixture.diff.revised_revision_id,
-        fixture.diff.unselected_revision_id,
-        fixture.merge_revision_id,
-    }
-    assert splits[0].side == "before"
+    merged = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.after is not None and movement.after.path == MERGE_PATH
+    ]
+    assert len(merged) == 1
+    assert merged[0].transition == "added"
+    assert merged[0].record_id == fixture.diff.retry_invariant_id
+    assert merged[0].before == ()
+    assert merged[0].after is not None
+    # The cited revision is the revised revision itself, recorded in the statement.
+    assert fixture.diff.revised_revision_id in merged[0].statement
+    assert "no baseline side is substituted" in merged[0].statement
 
-    merged = movement_between(payload, SYNCHRONIZATION_PATH, MERGE_PATH)
-    merges = [entry for entry in merged.lineage if entry.kind == "merge"]
-    assert len(merges) == 1, [entry.statement for entry in merged.lineage]
-    assert merged.record_id == fixture.diff.retry_invariant_id
-    assert merges[0].revision_id == fixture.merge_revision_id
-    assert set(merges[0].related_revision_ids) == set(_merge_predecessors(fixture.diff))
-    assert "authored predecessors" in merges[0].statement
+    revised = [
+        movement
+        for movement in realization_movements(payload)
+        if movement.after is not None and movement.after.path == SUCCESSOR_PATH
+    ]
+    assert len(revised) == 1
+    assert revised[0].transition == "added"
+    assert fixture.diff.revised_revision_id in revised[0].statement
 
 
 # -- the family association and the governing route ----------------------------------------------
@@ -683,12 +508,14 @@ def test_the_authored_split_and_merge_are_displayed_from_the_candidates_own_edge
 def test_a_family_association_reassigned_to_a_new_revision_displays_both_recorded_sides(
     movement_fixture: MovementFixture,
 ) -> None:
-    """The membership's family revision and member revision both moved; the family identity did not.
+    """The membership's cited revision changed; the family identity and the row did not.
 
-    The baseline membership was withdrawn and a new one authored against the candidate's successor
-    family revision, holding the moved member revision. The movement displays both recorded sides, and
-    its transition is a *reassignment* rather than a member moving, because the member revision the
-    candidate records is the one the baseline's successor recorded.
+    The candidate's direct-family membership cites the revised revision where the baseline cited
+    the subject revision. The membership row is the same recorded row on both sides -- one family,
+    one member invariant -- so the two sides pair by that row and display as one movement. Its
+    transition is ``moved`` rather than a withdrawal plus an addition, because the member revision
+    the candidate records is not the one the baseline recorded. The family identity itself is
+    preserved and named.
     """
 
     fixture = movement_fixture
@@ -698,30 +525,30 @@ def test_a_family_association_reassigned_to_a_new_revision_displays_both_recorde
         for movement in payload.source.relationships
         if movement.relationship_kind in ("membership", "advertised_family")
     ]
-    reassigned = [
+    direct = [
         movement
         for movement in memberships_shown
         if movement.after is not None
-        and movement.after.revision_id == fixture.new_family_revision_id
+        and movement.after.revision_id == fixture.diff.after.fixture.direct_family.revision_id
+        and any(
+            side.member_revision_id == fixture.diff.before.fixture.subject_revision_id
+            for side in movement.before
+        )
     ]
-    assert len(reassigned) == 1, [
+    assert len(direct) == 1, [
         (movement.relationship_kind, movement.transition) for movement in memberships_shown
     ]
-    movement = reassigned[0]
+    movement = direct[0]
 
-    # The member revision moved *and* the family revision it sits in moved, so the association is
-    # displayed as moved; the family identity itself is preserved and named.
     assert movement.transition == "moved"
     assert movement.record_kind == "family"
     assert movement.record_id == fixture.diff.before.fixture.direct_family.family_id
-    assert [side.revision_id for side in movement.before] == [
-        fixture.diff.before.fixture.direct_family.revision_id
-    ]
     assert len(movement.before) == 1
+    assert movement.pairing_basis == "same_recorded_relationship"
     assert movement.after is not None
     assert movement.after.member_revision_id == fixture.diff.revised_revision_id
-    assert movement.before[0].member_revision_id == fixture.diff.subject_revision_id
-    assert "succession" in {entry.kind for entry in movement.lineage}
+    assert movement.before[0].member_revision_id == fixture.diff.before.fixture.subject_revision_id
+    assert "recorded relation and not a resemblance" in movement.statement
 
 
 def test_a_familys_declared_route_set_is_the_governing_association_read_from_text(
@@ -764,35 +591,76 @@ def test_a_familys_declared_route_set_is_the_governing_association_read_from_tex
     assert unchanged.pairing_basis == "same_governed_identity"
 
 
-def _route_snapshot(side: str, routes: tuple[str, ...] | None, *, recorded: bool = True):
-    """One in-memory snapshot holding the tables the governing-route read asks.
+# Unique snapshot files: one test builds several before/after pairs in one directory.
+_SNAPSHOT_SEQUENCE = itertools.count()
 
-    ``routes`` is the family's declared set; ``None`` leaves out the route tables altogether, which
-    is a file whose route declarations cannot be read. ``recorded`` says whether the identities exist.
+
+def _route_snapshot(
+    tmp_path: Path, side: str, routes: tuple[str, ...] | None, *, recorded: bool = True
+):
+    """One snapshot holding the tables the governing-route read asks, built from text.
+
+    The family and invariant records are authored as text files and indexed with
+    :func:`build_index`, so no test stages index rows by hand. ``routes`` is the
+    family's declared set, written into the family record the projection reads.
+    ``None`` drops the route tables from the built copy afterwards: that fault
+    injection (DDL on a tmp copy, never an INSERT) stages a file whose route
+    declarations cannot be read. ``recorded=False`` deletes the identity rows
+    from the built copy for the same reason: the routes stay declared while the
+    identities do not exist.
     """
 
-    connection = apsw.Connection(":memory:")
-    connection.execute(
-        "CREATE TABLE family (repository_id TEXT, family_id TEXT);"
-        "CREATE TABLE invariant (repository_id TEXT, invariant_id TEXT)"
+    family_record = {
+        "schema": "ar-family/v1",
+        "id": FAMILY,
+        "origin": {"task": "260928-MIK", "leaf": "260928-MIK-L74"},
+        "revision": 1,
+        "status": "proposed",
+        "title": FAMILY,
+        "guarantee": "Every member the family admits.",
+        "members": [],
+        "routes": [] if routes is None else list(routes),
+        "admission": "legacy-unassessed",
+    }
+    invariant_record = {
+        "schema": "ar-invariant/v1",
+        "id": "INV-R00001",
+        "origin": {"task": "260928-MIK", "leaf": "260928-MIK-L74"},
+        "revision": 1,
+        "status": "proposed",
+        "statement": "INV-R00001",
+        "applicability": "Every admitted candidate write.",
+        "conditions": [],
+        "exclusions": [],
+        "supersedes": [],
+        "admission": "legacy-unassessed",
+    }
+    files = {
+        record_path("family", FAMILY, FAMILY.lower()): canonical_json_bytes(family_record),
+        record_path("invariant", "INV-R00001", "inv-r00001"): canonical_json_bytes(
+            invariant_record
+        ),
+    }
+    database = tmp_path / f"route-{side}-{next(_SNAPSHOT_SEQUENCE)}.db"
+    report = build_index(
+        MemoryTreeSnapshot(key="0" * 40, source="directory", location="fixture", files=files),
+        database,
     )
-    if recorded:
-        connection.execute("INSERT INTO family VALUES (?, ?)", (ROUTE_REPOSITORY, ROUTE_FAMILY))
-        connection.execute(
-            "INSERT INTO invariant VALUES (?, ?)", (ROUTE_REPOSITORY, ROUTE_INVARIANT)
-        )
-    if routes is not None:
-        connection.execute(
-            "CREATE TABLE ix_uuid (uuid TEXT, id TEXT, role TEXT);"
-            "CREATE TABLE ix_route (family TEXT, route TEXT)"
-        )
-        connection.execute("INSERT INTO ix_uuid VALUES (?, ?, 'identity')", (ROUTE_FAMILY, FAMILY))
-        connection.executemany(
-            "INSERT INTO ix_route VALUES (?, ?)", [(FAMILY, route) for route in routes]
-        )
-    return RecordedSnapshot(
-        side=side, database=Path(":memory:"), connection=connection, edges=frozenset()
-    )
+    assert report.state == "complete", report.problems
+    connection = apsw.Connection(str(database))
+    try:
+        if routes is None:
+            connection.execute("DROP TABLE ix_route")
+            connection.execute("DROP TABLE ix_uuid")
+        elif not recorded:
+            # The invariant row is immutable by trigger; the read keys recorded
+            # presence off the family identity, so withdrawing the family row
+            # stages "no family identity recorded" while the routes stay declared.
+            connection.execute("DELETE FROM family")
+    except BaseException:
+        connection.close()
+        raise
+    return RecordedSnapshot(side=side, database=database, connection=connection)
 
 
 def _routes(selector, before, after):
@@ -801,14 +669,16 @@ def _routes(selector, before, after):
     def shown(side):
         return None if side is None else (side.state, side.route_path)
 
-    movements = governing_route_movements(selector, ROUTE_REPOSITORY, before, after)
+    movements = governing_route_movements(selector, INDEX_REPOSITORY_ID, before, after)
     return movements, [
         (movement.transition, [shown(side) for side in movement.before], shown(movement.after))
         for movement in movements
     ]
 
 
-def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ungoverned() -> None:
+def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ungoverned(
+    tmp_path: Path,
+) -> None:
     """The route read's own matrix: one relationship per route, and four states kept apart.
 
     A route both snapshots declare is unchanged; a route one snapshot declares while the other is
@@ -820,7 +690,7 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     family = FamilyIdentitySeed(family_id=ROUTE_FAMILY)
 
     movements, rows = _routes(
-        family, _route_snapshot("before", ("a", "b")), _route_snapshot("after", ("b", "c"))
+        family, _route_snapshot(tmp_path, "before", ("a", "b")), _route_snapshot(tmp_path, "after", ("b", "c"))
     )
     assert rows == [
         ("retracted", [("recorded", "a")], None),
@@ -838,28 +708,28 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
 
     # A changed route is one retracted and one added relationship; a route is never reassigned.
     _movements, rows = _routes(
-        family, _route_snapshot("before", ("a",)), _route_snapshot("after", ("b",))
+        family, _route_snapshot(tmp_path, "before", ("a",)), _route_snapshot(tmp_path, "after", ("b",))
     )
     assert rows == [("retracted", [("recorded", "a")], None), ("added", [], ("recorded", "b"))]
 
     movements, rows = _routes(
-        family, _route_snapshot("before", ()), _route_snapshot("after", ("a",))
+        family, _route_snapshot(tmp_path, "before", ()), _route_snapshot(tmp_path, "after", ("a",))
     )
     assert rows == [("moved", [("ungoverned", None)], ("recorded", "a"))]
     assert movements[0].gaps == ()
 
-    movements, rows = _routes(family, _route_snapshot("before", ()), _route_snapshot("after", ()))
+    movements, rows = _routes(family, _route_snapshot(tmp_path, "before", ()), _route_snapshot(tmp_path, "after", ()))
     assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
 
     movements, rows = _routes(
-        family, _route_snapshot("before", ("a",), recorded=False), _route_snapshot("after", ("a",))
+        family, _route_snapshot(tmp_path, "before", ("a",), recorded=False), _route_snapshot(tmp_path, "after", ("a",))
     )
     assert rows == [("moved", [("not_recorded", None)], ("recorded", "a"))]
     assert [(gap.side, gap.code) for gap in movements[0].gaps] == [("before", "route_not_recorded")]
     assert "no family identity recorded on the baseline" in movements[0].statement
 
     movements, rows = _routes(
-        family, _route_snapshot("before", None), _route_snapshot("after", None)
+        family, _route_snapshot(tmp_path, "before", None), _route_snapshot(tmp_path, "after", None)
     )
     assert rows == [("unresolved", [("unavailable", None)], ("unavailable", None))]
     assert [(gap.side, gap.code) for gap in movements[0].gaps] == [
@@ -870,7 +740,7 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     assert "no movement of the governing-route association is stated" in movements[0].statement
 
     movements, rows = _routes(
-        family, _route_snapshot("before", None), _route_snapshot("after", ("a",))
+        family, _route_snapshot(tmp_path, "before", None), _route_snapshot(tmp_path, "after", ("a",))
     )
     assert rows == [("unresolved", [("unavailable", None)], ("recorded", "a"))]
 
@@ -878,10 +748,10 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     # selector names no identity and is answered with no association at all.
     invariant = InvariantIdentitySeed(invariant_id=ROUTE_INVARIANT)
     _movements, rows = _routes(
-        invariant, _route_snapshot("before", None), _route_snapshot("after", ("a",))
+        invariant, _route_snapshot(tmp_path, "before", None), _route_snapshot(tmp_path, "after", ("a",))
     )
     assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
-    assert _routes(None, _route_snapshot("before", ("a",)), _route_snapshot("after", ("a",))) == (
+    assert _routes(None, _route_snapshot(tmp_path, "before", ("a",)), _route_snapshot(tmp_path, "after", ("a",))) == (
         (),
         [],
     )

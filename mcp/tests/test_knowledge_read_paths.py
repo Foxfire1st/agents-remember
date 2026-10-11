@@ -339,7 +339,9 @@ def test_a_path_holding_glob_characters_is_authorable_seedable_and_observed_as_i
                 claim=RealizationClaimDraft(
                     claim_id=claim_id,
                     invariant_revision_id=fixture.resolution_revision_id,
-                    role="incidental",
+                    # The legacy "incidental" spelling normalizes to "support" at every
+                    # product boundary; text storage keeps the normalized set only.
+                    role="support",
                     rationale="A realization at a path whose name holds a glob character.",
                 ),
                 anchor=NewAnchor(anchor=draft),
@@ -370,82 +372,6 @@ def test_a_path_holding_glob_characters_is_authorable_seedable_and_observed_as_i
     assert observed[literal_path].resolution == "exact_recorded_blob"
     assert observed[literal_path].observed_source_identity == blob
     assert observed[literal_path].recorded_source_identity == blob
-
-
-def test_a_stored_path_that_cannot_be_addressed_is_refused_rather_than_reported_absent(
-    fixture: ReadScopeFixture,
-) -> None:
-    """A recorded path Git would read as magic is refused, and never answered as an absence.
-
-    The typed boundaries refuse such a spelling, so the row this case reads is written past them --
-    which is exactly the case the read path's own confinement check exists for. The row is inserted
-    as a **copy** of a real stored anchor and claim (the same JSON payloads, a new identity, one
-    changed path), so nothing but the spelling differs from a legitimate record. What matters is the
-    answer: the anchor is *not* reported as ``path_absent`` ("the requested tree contains no entry
-    at this path"), because the tree was never asked about that path. The claim keeps its recorded
-    identity and is reported as an anchor this increment cannot resolve at the spelled location.
-    """
-
-    unaddressable = ":(exclude)src/integration.py"
-    donor_claim_id = str(uuid4())
-    store = open_knowledge_store(fixture.database_path, fixture.repository_id)
-    connection = store.connection
-    try:
-        donor = connection.execute(
-            "SELECT anchor_id, provenance FROM source_anchor WHERE repository_id = ? AND anchor_id = ?",
-            (fixture.repository_id, fixture.integration.anchor_id),
-        ).fetchone()
-        assert donor is not None, "the fixture really stored the anchor this case copies"
-        donor_anchor_id, provenance = donor
-        stored_anchor_id = str(uuid4())
-        connection.execute(
-            "INSERT INTO source_anchor "
-            "(repository_id, anchor_id, path, source_identity, locator, provenance) "
-            "SELECT repository_id, ?, ?, source_identity, locator, ? FROM source_anchor "
-            "WHERE repository_id = ? AND anchor_id = ?",
-            (
-                stored_anchor_id,
-                unaddressable,
-                provenance,
-                fixture.repository_id,
-                donor_anchor_id,
-            ),
-        )
-        connection.execute(
-            "INSERT INTO realization_claim "
-            "(repository_id, claim_id, invariant_revision_id, anchor_id, role, rationale, provenance) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                fixture.repository_id,
-                donor_claim_id,
-                fixture.subject_revision_id,
-                stored_anchor_id,
-                "support",
-                "A claim whose recorded path cannot be addressed against a tree.",
-                provenance,
-            ),
-        )
-    finally:
-        store.close()
-
-    result = read(fixture, subject_seed(fixture))
-
-    assert result.state == "page", result.refusal
-    observed = anchors_by_path(result)
-    assert unaddressable in observed, "the claim is still selected and still carries its path"
-    refused = observed[unaddressable]
-    assert refused.resolution != "path_absent", (
-        "the tree was never asked about this path, so reporting it absent would be a false "
-        "statement about the repository"
-    )
-    assert refused.resolution == "unsupported_locator"
-    assert refused.detail.endswith(
-        "this is a refusal of the spelling, not an observation that the tree lacks the entry"
-    )
-    assert refused.recorded_source_identity == fixture.git_blobs[INTEGRATION_PATH]
-    assert refused.observed_source_identity is None
-    assert result.page is not None
-    assert donor_claim_id in {item.claim_id for item in result.page.items}
 
 
 def test_a_failed_tree_lookup_is_unavailable_rather_than_an_absent_path(

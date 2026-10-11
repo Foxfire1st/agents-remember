@@ -31,8 +31,6 @@ from agents_remember.application.knowledge_read import open_read_context, read_k
 from agents_remember.application.review_candidate_resolution import refusal
 from agents_remember.application.review_family_sources import member_source
 from agents_remember.memory.knowledge import families, memberships
-from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.read_queries import fetch_predecessor_edges
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.store import (
     OpenedKnowledgeStore,
@@ -130,9 +128,9 @@ class RosterContext:
 
 @dataclass
 class FamilyRosterSide:
-    """One bound snapshot as this composition reads it: its store, context and authored edges.
+    """One bound snapshot as this composition reads it: its store and context.
 
-    ``unreadable`` is the reason this side could not be opened at all, and the other three fields are
+    ``unreadable`` is the reason this side could not be opened at all, and the other fields are
     then empty and every family context on this side states that reason rather than an absence.
     """
 
@@ -141,7 +139,6 @@ class FamilyRosterSide:
     namespace: str
     store: OpenedKnowledgeStore | None = None
     read_context: KnowledgeReadContext | None = None
-    edges: frozenset[tuple[str, str]] = frozenset()
     unreadable: str | None = None
 
     def close(self) -> None:
@@ -173,7 +170,7 @@ def open_family_side(
     code_root: Path | None,
     code_tree_id: str | None,
 ) -> FamilyRosterSide:
-    """Open one snapshot's store, read context and authored edges, or state why it could not be."""
+    """Open one snapshot's store and read context, or state why it could not be."""
 
     side = FamilyRosterSide(name=name, database=database, namespace=namespace)
     try:
@@ -181,27 +178,11 @@ def open_family_side(
             database, namespace, repository_root=code_root, code_tree_id=code_tree_id
         )
         side.store = open_existing_knowledge_store(database, namespace)
-        side.edges = _authored_edges(database, namespace)
     except (KnowledgeStorageError, OSError, ValueError) as error:
         side.store = None
         side.read_context = None
         side.unreadable = f"{type(error).__name__}: {error}"
     return side
-
-
-def _authored_edges(database: Path, namespace: str) -> frozenset[tuple[str, str]]:
-    """Every authored ``(successor, predecessor)`` edge one snapshot records.
-
-    The edges are the selection policy's own read over a read-only connection -- the same values
-    ``ICR-R07@v1``'s selection reads -- so a head rule applied to them is applied to the snapshot's
-    own authored lineage and to nothing a caller derived.
-    """
-
-    connection = open_read_only_database(Path(database))
-    try:
-        return frozenset(fetch_predecessor_edges(connection, namespace))
-    finally:
-        connection.close()
 
 
 # --- the roster read ---

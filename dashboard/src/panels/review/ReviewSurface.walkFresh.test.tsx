@@ -481,11 +481,13 @@ it('forgets the scroll a refresh asked for when its read fails, so a later page 
     expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID);
     world.answer = previous;
     // A page of the subject on screen is then read: an answer that is no selection and no refresh.
+    // The scroll mechanics are collection-agnostic, so the surviving knowledge walk stands in
+    // for the retired records walk here.
     const reads = reviewCount();
-    fireEvent.change(view.getByTestId('review-page-collection'), { target: { value: 'records' } });
+    fireEvent.change(view.getByTestId('review-page-collection'), { target: { value: 'knowledge' } });
     await waitFor(() => {
       expect(reviewCount()).toBe(reads + 1);
-      expect(view.getByTestId('review-page-controls').dataset.pageRequested).toBe('records');
+      expect(view.getByTestId('review-page-controls').dataset.pageRequested).toBe('knowledge');
     });
     // Every effect of that answer has run: nothing was brought into view.
     await act(async () => {});

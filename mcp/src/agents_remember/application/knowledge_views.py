@@ -1,4 +1,4 @@
-"""The application seam for the five query views (``KS-R20@v1`` §1, §3).
+"""The application seam for the three query views (``KS-R20@v1`` §1, §3).
 
 This seam reads the derived index beside :mod:`knowledge_read`. It decides no authority and
 holds no durable state: it resolves the index snapshot, admits the request, builds the reader port,
@@ -29,10 +29,8 @@ from typing import Any
 
 from agents_remember.application.knowledge_view_render import UnadmittedOrderingInput
 from agents_remember.application.knowledge_view_rows import (
-    render_curation_queue,
     render_family,
     render_invariant,
-    render_review_matrix,
     render_source_context,
 )
 from agents_remember.memory.knowledge.connection import (
@@ -47,10 +45,8 @@ from agents_remember.models.knowledge.read import (
     snapshot_of_context,
 )
 from agents_remember.models.knowledge.view import (
-    CurationQueueView,
     FamilyView,
     InvariantView,
-    ReviewMatrixView,
     SourceContextView,
     ViewCompleteness,
     ViewCounts,
@@ -243,36 +239,17 @@ def _counts(
         rows_returned=returned,
         rows_remaining=max(total - next_position, 0),
         facets_omitted=None if request.view in ("invariant", "source_context") else 0,
-        dependency_content_identity_mismatches=(
-            _dependency_mismatches(reader) if request.view == "review_matrix" else None
-        ),
     )
-
-
-def _dependency_mismatches(reader: Any) -> int:
-    """How many recorded dependencies resolve to different bytes than they record."""
-
-    mismatched = 0
-    for row in reader.rows("verification_observation"):
-        payload = row.payload
-        artifact = payload.get("result_artifact")
-        if isinstance(artifact, dict) and artifact.get("digest_checked_against_bytes") is False:
-            mismatched += 1
-    return mismatched
 
 
 _RENDERERS: dict[str, Any] = {
     "source_context": render_source_context,
     "invariant": render_invariant,
     "family": render_family,
-    "review_matrix": render_review_matrix,
-    "curation_queue": render_curation_queue,
 }
 
 _PAYLOADS: dict[str, Any] = {
     "source_context": SourceContextView,
     "invariant": InvariantView,
     "family": FamilyView,
-    "review_matrix": ReviewMatrixView,
-    "curation_queue": CurationQueueView,
 }

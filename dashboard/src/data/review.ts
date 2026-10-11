@@ -16,9 +16,9 @@
 // view import one public entry): the body is read whatever the status and a body carrying this
 // route's `state` is the answer, refusal included.
 
-import { getReviewJson } from "./reviewTransport";
-import { qs } from "./files";
-import type { ReviewFamilyContext, ReviewRevisionSelection } from "./reviewFamily";
+import { getReviewJson } from './reviewTransport';
+import { qs } from './files';
+import type { ReviewFamilyContext, ReviewRevisionSelection } from './reviewFamily';
 
 export {
   ReviewTransportError,
@@ -28,8 +28,8 @@ export {
   reviewProblemFromCause,
   reviewProblemFromRefusal,
   unreadableAnswer,
-} from "./reviewTransport";
-export type { ReviewFailure, ReviewFailureToken, ReviewRefusalFacts } from "./reviewTransport";
+} from './reviewTransport';
+export type { ReviewFailure, ReviewFailureToken, ReviewRefusalFacts } from './reviewTransport';
 // The family half of this contract lives in its own mirror module (ICR-R31@v1) and is re-exported
 // here, so every consumer of the review payload imports one public entry.
 export {
@@ -38,7 +38,7 @@ export {
   UNRESOLVED_SELECTION_STATES,
   guaranteeComparison,
   memberComparison,
-} from "./reviewFamily";
+} from './reviewFamily';
 export type {
   FamilyMemberRow,
   GuaranteeComparison,
@@ -61,14 +61,18 @@ export type {
   ReviewSourceLineRange,
   ReviewSourceLocator,
   ReviewSourceLocatorState,
-} from "./reviewFamily";
+} from './reviewFamily';
 
-export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";
-export type ReviewSelectorKind = "invariant" | "family";
+export type ReviewSideState = 'present' | 'absent' | 'binary' | 'unresolved';
+export type ReviewSelectorKind = 'invariant' | 'family';
 // The bounded collections a review can be paged over (ICR-R10, extended by ICR-R31@v1): the
-// knowledge comparison's own window, the review-matrix records' window, and the family rosters'
-// window. They are named rather than inferred because their cursors are different documents, and a
-// cursor is only ever presented with the collection its owner minted it for.
+// knowledge comparison's own window and the family rosters' window. They are named rather
+// than inferred because their cursors are different documents, and a cursor is only ever
+// presented with the collection its owner minted it for. The review-matrix records' window
+// left with the matrix that read the retired envelope tables (MIK-R74 rule 1): no records
+// page exists, so `records` is neither in this union nor offered anywhere. A refusal that
+// names the retired collection still decodes -- its code and detail are strings, not this
+// union -- because stale links and old bodies can still arrive.
 //
 // `family_members` is a member of this union because the SERVER accepts it -- narrowing the union
 // would misdescribe the wire. It is deliberately NOT one of `REVIEW_WALKABLE_COLLECTIONS`: that
@@ -78,17 +82,19 @@ export type ReviewSelectorKind = "invariant" | "family";
 // offered "first page of family_members" would therefore be a control that fetches a refusal, and
 // the family walk is instead reached from each family's own roster page -- see
 // `REVIEW_WALKABLE_COLLECTIONS`.
-export type ReviewPagedCollection = "knowledge" | "records" | "family_members";
+export type ReviewPagedCollection = 'knowledge' | 'family_members';
 export const REVIEW_PAGED_COLLECTIONS: ReviewPagedCollection[] = [
-  "knowledge",
-  "records",
-  "family_members",
+  'knowledge',
+  'family_members',
 ];
 // The collections a request may name with NO cursor, i.e. the ones whose first page exists. This is
 // the set the collection picker offers. `family_members` is excluded on the server's own terms (see
 // above) and its walk is continued from `ReviewFamilyRosterPage.continuation` on the family that
-// published it.
-export const REVIEW_WALKABLE_COLLECTIONS: ReviewPagedCollection[] = ["knowledge", "records"];
+// published it. `records` is excluded because the collection left with the review matrix that read
+// the retired envelope tables (MIK-R74 rule 1): no records page exists, and naming it earns the
+// collection's own refusal (`comparison_page_unreadable`) instead of a walk. Offering it would be a
+// control that fetches a refusal, so the picker does not offer it.
+export const REVIEW_WALKABLE_COLLECTIONS: ReviewPagedCollection[] = ['knowledge'];
 
 export interface ReviewSideContent {
   state: ReviewSideState;
@@ -126,7 +132,7 @@ export interface ComparisonIdentity {
 }
 
 export interface ReviewRevisionGroup {
-  side: "before" | "after";
+  side: 'before' | 'after';
   record_id: string;
   selected_revision_count: number;
 }
@@ -139,18 +145,6 @@ export interface ReviewFieldChange {
   after_value?: string;
 }
 
-export interface ReviewAuthoredEffect {
-  applicability?: ReviewDisplayedApplicability;
-  record_kind: string;
-  record_id: string;
-  revision_id?: string;
-  label?: string;
-  rationale?: string;
-  author_ref?: string;
-  examined_inputs: string[];
-  unresolved: ReviewUnresolvedReference[];
-}
-
 // Why one displayed record may appear beside the selected subject (ICR-R26): the treatment its own
 // recorded binding earned, with the true subject that binding names and the exact references the
 // treatment was decided from. A record of another subject is never in the assessments below; it is
@@ -158,7 +152,7 @@ export interface ReviewAuthoredEffect {
 export interface ReviewDisplayedApplicability {
   records: string;
   record_id: string;
-  state: "direct" | "historical" | "candidate" | "unresolved";
+  state: 'direct' | 'historical' | 'candidate' | 'unresolved';
   subject_kind?: string;
   subject_id?: string;
   subject_revision_ids: string[];
@@ -227,7 +221,6 @@ export interface ReviewKnowledgePane {
   revision_groups: ReviewRevisionGroup[];
   revision_selection?: ReviewRevisionSelection | null;
   field_changes: ReviewFieldChange[];
-  authored_effects: ReviewAuthoredEffect[];
   signals: ReviewSignal[];
   assessments: ReviewAssessmentDisplay[];
   // Records of *other* subjects this selection reaches through a recorded relationship, and the
@@ -237,7 +230,7 @@ export interface ReviewKnowledgePane {
   applicability?: ReviewApplicabilitySummary[];
   unresolved: ReviewUnresolvedReference[];
   // Which question this pane answered: a compared subject, or the task context with no operand.
-  selection_state: "subject_selected" | "task_context";
+  selection_state: 'subject_selected' | 'task_context';
   selection_detail?: string;
 }
 
@@ -250,7 +243,7 @@ export interface ReviewSourceLocation {
   recorded_source_identity: string;
   observed_source_identity?: string;
   resolution: string;
-  change_state: "changed" | "unchanged" | "not_selected";
+  change_state: 'changed' | 'unchanged' | 'not_selected';
   before_only: boolean;
   reached_via: string[];
 }
@@ -261,8 +254,8 @@ export interface ReviewRemainingCount {
   reason?: string;
 }
 
-export type ReviewFileStatus = "added" | "deleted" | "modified" | "type_changed" | "unknown";
-export type ReviewFileContent = "text" | "binary" | "symlink" | "submodule" | "unknown";
+export type ReviewFileStatus = 'added' | 'deleted' | 'modified' | 'type_changed' | 'unknown';
+export type ReviewFileContent = 'text' | 'binary' | 'symlink' | 'submodule' | 'unknown';
 
 // One changed path of the bound source pair. `path` is the raw filename exactly as Git recorded it
 // -- a tab or a newline inside it is part of the address and not a separator -- so this string is
@@ -294,7 +287,7 @@ export interface ReviewUnrepresentablePath {
 // one field of some entries could not be classified, or some paths are in
 // `unrepresentable_paths`. A missing or unavailable inventory is never rendered as "no changes".
 export interface ReviewSourceInventory {
-  state: "measured" | "unavailable";
+  state: 'measured' | 'unavailable';
   entries: ReviewChangedFile[];
   listed_total: number;
   detail: string;
@@ -322,12 +315,7 @@ export interface ReviewSourcePane {
 // with no file bytes) and `unavailable` (the entry could not be read). `text` is present only for
 // the two textual states, so a missing or unrenderable side can never arrive as an empty document.
 export type ReviewSourceSideState =
-  | "present"
-  | "absent"
-  | "binary"
-  | "symlink"
-  | "submodule"
-  | "unavailable";
+  'present' | 'absent' | 'binary' | 'symlink' | 'submodule' | 'unavailable';
 
 export interface ReviewSourceSide {
   state: ReviewSourceSideState;
@@ -355,20 +343,20 @@ export interface ReviewSourceSide {
 // the same comparison's knowledge is anchored at. The second always has status `unchanged`, is never
 // an inventory entry and never counts as a changed file; a renderer reads this field rather than
 // inferring it from the inventory.
-export type ReviewSourceAdmission = "changed" | "attributed_unchanged";
+export type ReviewSourceAdmission = 'changed' | 'attributed_unchanged';
 
 export interface ReviewSourceExpansion {
   path: string;
-  status: ReviewFileStatus | "unchanged";
+  status: ReviewFileStatus | 'unchanged';
   mode_change: boolean;
   language: string;
   before: ReviewSourceSide;
   after: ReviewSourceSide;
   before_code_tree_id: string;
   after_code_tree_id: string;
-  currentness: "current" | "superseded" | "unmeasured";
+  currentness: 'current' | 'superseded' | 'unmeasured';
   currentness_detail: string;
-  path_bound: "requested_generation" | "leaf_change_set";
+  path_bound: 'requested_generation' | 'leaf_change_set';
   path_bound_detail: string;
   admission: ReviewSourceAdmission;
   admission_detail: string;
@@ -377,7 +365,7 @@ export interface ReviewSourceExpansion {
 }
 
 export interface ReviewSourceContentResult {
-  state: "content" | "refused";
+  state: 'content' | 'refused';
   operation: string;
   repository_id: string;
   expansion?: ReviewSourceExpansion;
@@ -407,15 +395,15 @@ export interface ReviewObservation {
 
 export interface ReviewRecordChannel {
   records: string;
-  state: "recorded" | "none_recorded" | "unavailable" | "not_measured" | "not_selected";
+  state: 'recorded' | 'none_recorded' | 'unavailable' | 'not_measured' | 'not_selected';
   detail: string;
   unreadable: string[];
   next_action?: string | null;
 }
 
 export interface ReviewEvidencePane {
-  evidence_state: "recorded" | "none_recorded" | "unavailable";
-  assessment_state: "assessed" | "unassessed";
+  evidence_state: 'recorded' | 'none_recorded' | 'unavailable';
+  assessment_state: 'assessed' | 'unassessed';
   evidence_links: ReviewEvidenceLink[];
   observations: ReviewObservation[];
   assessments: ReviewAssessmentDisplay[];
@@ -433,14 +421,14 @@ export interface ReviewStaleness {
   // not be read), so this surface may not claim the displayed comparison is the candidate's current
   // one. It is not `stale`, which would assert a movement nobody observed and which additionally
   // disables submission.
-  state: "current" | "stale" | "not_compared" | "not-measured";
+  state: 'current' | 'stale' | 'not_compared' | 'not-measured';
   statement: string;
   previous_comparison_ref?: string;
   moved: string[];
 }
 
 export interface ReviewSubmission {
-  state: "unavailable" | "disabled_stale";
+  state: 'unavailable' | 'disabled_stale';
   reason: string;
   next_action: string;
   proposed_dispositions: string[];
@@ -493,13 +481,13 @@ export interface ReviewPayload {
 // vocabulary, so a number is never shown apart from what it counted.
 export interface ReviewCollectionPage {
   collection: ReviewPagedCollection;
-  state: "first_page" | "continued" | "reset";
+  state: 'first_page' | 'continued' | 'reset';
   // What `total` counts. The two owners measure it differently and one rendered sentence must not
   // carry two meanings: `selection` is the size of the whole selection the walk is a page of (the
   // comparison's own constant total, with `returned` cumulative over the walk), and `walk` is the
   // size of the selection this walk still covers (the view measures its remainder from where the
   // walk stands, so its total shrinks as the walk advances). `pageBounds` words each one separately.
-  total_basis?: "selection" | "walk";
+  total_basis?: 'selection' | 'walk';
   total: number;
   returned: number;
   remaining: number;
@@ -522,7 +510,7 @@ export interface ReviewRefusal {
 }
 
 export interface ReviewResult {
-  state: "review" | "refused";
+  state: 'review' | 'refused';
   operation: string;
   repository_id: string;
   payload?: ReviewPayload;
@@ -561,14 +549,23 @@ export const intentReview = (
   leaf: string,
   selectorKind?: ReviewSelectorKind,
   selectorId?: string,
-  base = "",
+  base = '',
   page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number },
   history?: ReviewHistory,
   previousBindingDigest?: string,
 ): Promise<ReviewResult> => {
   return getReviewJson<ReviewResult>(
     `${base}/api/review/intent?${qs(
-      reviewQuery({ repo, master, leaf, selectorKind, selectorId, page, history, previousBindingDigest }),
+      reviewQuery({
+        repo,
+        master,
+        leaf,
+        selectorKind,
+        selectorId,
+        page,
+        history,
+        previousBindingDigest,
+      }),
     )}`,
   );
 };
@@ -587,7 +584,11 @@ function reviewQuery(parts: {
   history?: ReviewHistory;
   previousBindingDigest?: string;
 }): Record<string, string> {
-  const params: Record<string, string> = { repo: parts.repo, master: parts.master, leaf: parts.leaf };
+  const params: Record<string, string> = {
+    repo: parts.repo,
+    master: parts.master,
+    leaf: parts.leaf,
+  };
   if (parts.selectorKind !== undefined && parts.selectorId !== undefined) {
     params.selectorKind = parts.selectorKind;
     params.selectorId = parts.selectorId;
@@ -604,7 +605,7 @@ function reviewQuery(parts: {
   if (parts.history !== undefined) {
     params.history = parts.history;
   }
-  if (parts.previousBindingDigest !== undefined && parts.previousBindingDigest !== "") {
+  if (parts.previousBindingDigest !== undefined && parts.previousBindingDigest !== '') {
     params[PREVIOUS_BINDING_QUERY] = parts.previousBindingDigest;
   }
   return params;
@@ -613,7 +614,7 @@ function reviewQuery(parts: {
 // Which record a review read is addressed to: the live candidate, or the leaf's recorded comparison.
 // One value on purpose -- the surface addresses exactly one historical record, the leaf's own
 // published generation -- so a caller cannot ask for a comparison the leaf does not hold.
-export type ReviewHistory = "recorded";
+export type ReviewHistory = 'recorded';
 
 // The one continuation a page makes reachable, or `null` when this response has none to offer.
 //
@@ -623,7 +624,7 @@ export type ReviewHistory = "recorded";
 // it already has. The body's own `remaining` and `continuation` decide it here, so a renderer cannot
 // grow a "next" control that fetches nothing or one that cycles on one page.
 export const continuationOf = (
-  payload: Pick<ReviewPayload, "page"> | undefined,
+  payload: Pick<ReviewPayload, 'page'> | undefined,
 ): { of: ReviewPagedCollection; continuation: string } | null => {
   const page = payload?.page;
   if (!page || !page.continuation || page.remaining <= 0) return null;
@@ -633,24 +634,25 @@ export const continuationOf = (
 // One page's own statement about itself, for the control beside it: what was returned out of what,
 // what is left, and the filters the counts were taken over. `null` when this response is not a page
 // of any collection -- the whole review, which has no remainder to state.
-export const pageBounds = (
-  payload: Pick<ReviewPayload, "page"> | undefined,
-): string | null => {
+export const pageBounds = (payload: Pick<ReviewPayload, 'page'> | undefined): string | null => {
   const page = carriedPage(payload);
   if (!page) return null;
-  const filters = page.scope.length ? ` · ${page.scope.join(" · ")}` : "";
+  const filters = page.scope.length ? ` · ${page.scope.join(' · ')}` : '';
   // The gloss is worded from the refusal's own CODE, not from the state alone: a reset page can mean
   // two different things and only one of them is a moved comparison. A page whose cursor was for
   // another collection is also a `reset` -- nothing moved, the caller used the other walk's token --
   // and calling that "this comparison moved" would assert a generation change that did not happen.
-  const state = page.state !== "reset" ? page.state : RESET_GLOSS[page.reset?.code ?? ""] ?? RESET_GLOSS.default;
+  const state =
+    page.state !== 'reset'
+      ? page.state
+      : (RESET_GLOSS[page.reset?.code ?? ''] ?? RESET_GLOSS.default);
   // The two bases are worded apart on purpose. The comparison's total is the selection's size and its
   // returned count is cumulative, so it reads "returned 16 of 112"; the view measures its remainder
   // from where the walk stands, so its total is what this walk still covers and the same sentence
   // would have claimed the collection was shrinking. An older body that carries no basis is worded as
   // the selection, which is what that sentence always meant.
   const counts =
-    page.total_basis === "walk"
+    page.total_basis === 'walk'
       ? `returned ${page.returned}, ${page.remaining} remaining of the ${page.total} rows this walk still covers`
       : `returned ${page.returned} of ${page.total} in the selection · ${page.remaining} remaining`;
   return `${page.collection}: ${counts} (${state})${filters}`;
@@ -664,20 +666,20 @@ export const pageBounds = (
 // refusal branch compared against `null` alone, so a real refused page skipped it and the reader got
 // the sentence the branch existed to remove. Every consumer reads the page through here.
 export const carriedPage = (
-  payload: Pick<ReviewPayload, "page"> | undefined,
+  payload: Pick<ReviewPayload, 'page'> | undefined,
 ): ReviewCollectionPage | null => payload?.page ?? null;
 
 // The one query parameter that names the comparison a refresh is replacing. It is spelled once here
 // because the server's admission reads it by this exact name (`serving/review.py`, alias
 // `previousBindingDigest`) and a second spelling at a call site is how a refresh silently stops
 // carrying the identity it is measured against.
-export const PREVIOUS_BINDING_QUERY = "previousBindingDigest";
+export const PREVIOUS_BINDING_QUERY = 'previousBindingDigest';
 
 // What a `reset` page's state gloss says, chosen by the refusal's code because the state alone cannot
 // tell "the comparison moved" from "that cursor is not this collection's". An unrecognised or absent
 // code is glossed as the restart it is rather than as a move nothing established.
 export const RESET_GLOSS: Record<string, string> = {
-  comparison_page_reset: "reset — this comparison moved",
+  comparison_page_reset: 'reset — this comparison moved',
   comparison_page_unreadable: "reset — that cursor is not this collection's",
   default: "reset — this page restarted from the collection's first page",
 };
@@ -690,7 +692,7 @@ export const RESET_GLOSS: Record<string, string> = {
 // `presence` is the catalogue's selection state: which of the comparison's two snapshots record
 // the identity. A retired (before-only) subject and a newly added (after-only) one travel in the
 // same list as the subjects both snapshots hold, so the entry can offer every one of them.
-export type ReviewSubjectPresence = "before_only" | "after_only" | "both";
+export type ReviewSubjectPresence = 'before_only' | 'after_only' | 'both';
 
 export interface ReviewEntry {
   selector_kind: ReviewSelectorKind;
@@ -700,7 +702,7 @@ export interface ReviewEntry {
 }
 
 export interface ReviewEntryListResult {
-  state: "entries" | "refused";
+  state: 'entries' | 'refused';
   operation: string;
   repository_id: string;
   master: string;
@@ -725,9 +727,11 @@ export const intentReviewEntries = (
   repo: string,
   master: string,
   leaf: string,
-  base = "",
+  base = '',
 ): Promise<ReviewEntryListResult> =>
-  getReviewJson<ReviewEntryListResult>(`${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`);
+  getReviewJson<ReviewEntryListResult>(
+    `${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`,
+  );
 
 // One listed entry's actual content at the two bound code trees (ICR-R03). The generation is an
 // *input*: `before`/`after` are the ids the inventory published to this client, echoed back, so the
@@ -746,7 +750,7 @@ export const reviewSourceContent = (
   path: string,
   beforeCodeTreeId: string,
   afterCodeTreeId: string,
-  base = "",
+  base = '',
 ): Promise<ReviewSourceContentResult> =>
   getReviewJson<ReviewSourceContentResult>(
     `${base}/api/review/intent/source-content?${qs({

@@ -15,9 +15,10 @@ from uuid import uuid4
 
 import apsw
 import pytest
-from agents_remember.memory.knowledge import schema_generations
+from agents_remember.memory.knowledge import schema
+from agents_remember.memory.knowledge.records import decode_revision_row
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.schema import (
     CURRENT_GENERATION,
     SCHEMA_FINGERPRINT,
     KnowledgeSchemaPinError,
@@ -30,9 +31,8 @@ from agents_remember.memory.knowledge.store import (
 from knowledge_fixture_test_support import (
     BASE_DISPLAY_VERSION,
     BASE_STATEMENT,
-    BRANCH_A_STATEMENT,
-    BRANCH_B_STATEMENT,
-    SHARED_SUCCESSOR_DISPLAY_VERSION,
+    SECOND_INVARIANT_STATEMENT,
+    THIRD_INVARIANT_STATEMENT,
     BranchingKnowledgeFixture,
     build_branching_knowledge_fixture,
     make_authorship,
@@ -45,31 +45,35 @@ def fixture(tmp_path: Path) -> BranchingKnowledgeFixture:
     return build_branching_knowledge_fixture(tmp_path / "candidate")
 
 
-def test_two_same_label_successors_reopen_as_separate_revisions(
+def test_three_separately_recorded_revisions_stay_independently_addressable(
     fixture: BranchingKnowledgeFixture,
 ) -> None:
-    """Both v2 successors stay independently addressable with their exact statements.
+    """Three single-revision records stay independently addressable with their exact statements.
 
     The failure this catches is the one the requirement exists for: a store that treats a
-    display version as identity, or that keeps only the newest revision, would answer both
-    identities with one statement.
+    display version as identity, or that keeps only the newest revision, would answer several
+    identities with one statement. A text record holds exactly one revision (MIK-R74 rule 3),
+    so the three revisions are three records that share nothing but their derived display.
     """
 
     with fixture.reopen() as store:
         base = store.get_revision(fixture.base_revision_id)
-        left = store.get_revision(fixture.left_revision_id)
-        right = store.get_revision(fixture.right_revision_id)
-    assert base is not None and left is not None and right is not None
-    assert left.revision.display_version == SHARED_SUCCESSOR_DISPLAY_VERSION
-    assert right.revision.display_version == SHARED_SUCCESSOR_DISPLAY_VERSION
-    assert left.revision.statement == BRANCH_A_STATEMENT
-    assert right.revision.statement == BRANCH_B_STATEMENT
-    assert left.revision.revision_id != right.revision.revision_id
-    assert left.revision.predecessors == right.revision.predecessors == (fixture.base_revision_id,)
-    assert base.revision.display_version == BASE_DISPLAY_VERSION
+        second = store.get_revision(fixture.second_revision_id)
+        third = store.get_revision(fixture.third_revision_id)
+    assert base is not None and second is not None and third is not None
+    # Display versions are derived from the text revision number (``rN``), never authored.
+    assert base.revision.display_version == "r1"
+    assert second.revision.display_version == "r1"
+    assert third.revision.display_version == "r1"
     assert base.revision.statement == BASE_STATEMENT
-    assert base.revision.provenance == fixture.authorship
-    assert left.revision.provenance == fixture.authorship
+    assert second.revision.statement == SECOND_INVARIANT_STATEMENT
+    assert third.revision.statement == THIRD_INVARIANT_STATEMENT
+    assert len({base.revision.revision_id, second.revision.revision_id, third.revision.revision_id}) == 3
+    # The index holds no predecessor edge (MIK-R74 rule 1): every revision decodes with no
+    # predecessors.
+    assert base.revision.predecessors == second.revision.predecessors == () == third.revision.predecessors
+    assert base.revision.provenance.actor_ref == "260928-MIK/260928-MIK-L74"
+    assert second.revision.provenance.actor_ref == "260928-MIK/260928-MIK-L74"
 
 
 def test_reopening_the_same_path_keeps_identity_and_schema(
@@ -82,8 +86,8 @@ def test_reopening_the_same_path_keeps_identity_and_schema(
             revision_id: first.get_revision(revision_id).revision.payload_digest  # type: ignore[union-attr]
             for revision_id in (
                 fixture.base_revision_id,
-                fixture.left_revision_id,
-                fixture.right_revision_id,
+                fixture.second_revision_id,
+                fixture.third_revision_id,
             )
         }
         fingerprint = first.schema.fingerprint
@@ -112,8 +116,8 @@ def test_a_reader_opens_a_dataset_through_a_connection_that_cannot_write(
             assert store.get_revision(fixture.base_revision_id) is not None
             with pytest.raises(apsw.ReadOnlyError):
                 store.connection.execute(
-                    "INSERT INTO repository (repository_id, authority_home) VALUES (?, ?)",
-                    (str(uuid4()), "written-through-a-reader"),
+                    "UPDATE invariant_revision SET statement = ? WHERE revision_id = ?",
+                    ("written-through-a-reader", fixture.base_revision_id),
                 )
     with pytest.raises(KnowledgeStorageError, match="does not exist"):
         open_existing_knowledge_store(fixture.database_path.with_name("absent.db"), "x")
@@ -123,30 +127,33 @@ def test_a_reader_opens_a_dataset_through_a_connection_that_cannot_write(
 def test_stored_revision_rows_refuse_update_and_delete(
     fixture: BranchingKnowledgeFixture,
 ) -> None:
-    """The database itself refuses an in-place rewrite from any code path."""
+    """The database itself refuses an in-place rewrite from any code path.
 
-    with fixture.reopen() as store:
-        before = store.get_revision(fixture.left_revision_id)
+    The corruption is written through a writable handle -- the read handles below cannot write
+    by construction -- and the file's own triggers refuse it there.
+    """
+
+    tamperer = apsw.Connection(str(fixture.database_path))
+    try:
         with pytest.raises(apsw.ConstraintError, match="immutable_revision"):
-            store.connection.execute(
+            tamperer.execute(
                 "UPDATE invariant_revision SET statement = ? WHERE revision_id = ?",
-                ("A rewrite attempted behind the identity.", fixture.left_revision_id),
+                ("A rewrite attempted behind the identity.", fixture.second_revision_id),
             )
         with pytest.raises(apsw.ConstraintError, match="immutable_revision"):
-            store.connection.execute(
+            tamperer.execute(
                 "DELETE FROM invariant_revision WHERE revision_id = ?",
-                (fixture.left_revision_id,),
+                (fixture.second_revision_id,),
             )
-        with pytest.raises(apsw.ConstraintError, match="immutable_revision"):
-            store.connection.execute(
-                "UPDATE invariant_predecessor SET parent_revision_id = ? "
-                "WHERE child_revision_id = ?",
-                (fixture.right_revision_id, fixture.left_revision_id),
-            )
-        after = store.get_revision(fixture.left_revision_id)
-    assert before is not None and after is not None
-    assert after == before
-    assert after.revision.statement == BRANCH_A_STATEMENT
+    finally:
+        tamperer.close()
+    with fixture.reopen() as store:
+        # The predecessor tables are gone with the schema (MIK-R74 rule 1): there is no
+        # predecessor row left to refuse a rewrite of. The revision-row refusals above are the
+        # whole immutability surface now.
+        after = store.get_revision(fixture.second_revision_id)
+    assert after is not None
+    assert after.revision.statement == SECOND_INVARIANT_STATEMENT
 
 
 def test_payload_digest_seals_more_than_the_statement(
@@ -160,18 +167,36 @@ def test_payload_digest_seals_more_than_the_statement(
     """
 
     substitute = make_authorship(actor_ref="agent:substituted").model_dump_json()
-    with fixture.reopen() as store:
-        store.connection.execute("DROP TRIGGER invariant_revision_no_update")
-        store.connection.execute(
+    tamperer = apsw.Connection(str(fixture.database_path))
+    try:
+        tamperer.execute("DROP TRIGGER invariant_revision_no_update")
+        tamperer.execute(
             "UPDATE invariant_revision SET provenance = ? WHERE revision_id = ?",
-            (substitute, fixture.left_revision_id),
+            (substitute, fixture.second_revision_id),
         )
-        with pytest.raises(KnowledgeStorageError, match="payload digest"):
-            store.get_revision(fixture.left_revision_id)
+        row = list(
+            next(
+                tamperer.execute(
+                    "SELECT repository_id, invariant_id, revision_id, display_version, statement, "
+                    "applicability, conditions, exclusions, state_at_origin, acceptance_ref, "
+                    "provenance, payload_digest FROM invariant_revision WHERE revision_id = ?",
+                    (fixture.second_revision_id,),
+                )
+            )
+        )
+    finally:
+        tamperer.close()
+    with pytest.raises(KnowledgeStorageError, match="payload digest"):
+        decode_revision_row(row, ())
 
 
 def test_the_created_file_carries_the_one_declared_schema(tmp_path: Path) -> None:
-    """The created database carries the declared schema's own manifest and column order."""
+    """The created database carries the declared schema's own manifest and column order.
+
+    The file is a real derived index: the eight logical tables the projection fills beside the
+    ``ix_*`` tables the index builder owns (MIK-R74 rule 1's conforming example -- a newly built
+    index file lists the eight logical tables and the ``ix_*`` tables in ``sqlite_schema``).
+    """
 
     declared = CURRENT_GENERATION
     path = tmp_path / "manifest.db"
@@ -189,7 +214,17 @@ def test_the_created_file_carries_the_one_declared_schema(tmp_path: Path) -> Non
             )
             for table in declared.tables
         }
-    assert set(declared.tables) == tables
+    assert set(declared.tables) | {
+        "ix_meta",
+        "ix_problem",
+        "ix_record",
+        "ix_entry",
+        "ix_member",
+        "ix_route",
+        "ix_link",
+        "ix_history_row",
+        "ix_uuid",
+    } == tables
     assert user_version == declared.user_version
     assert columns == {table: tuple(declared.columns[table]) for table in declared.tables}
 
@@ -211,15 +246,15 @@ def test_the_declared_schema_is_pinned_and_a_changed_table_definition_fails_the_
         "ar-knowledge-sqlite/v9",
         9,
     )
-    assert len(CURRENT_GENERATION.tables) == 40
-    assert schema_generations.generation_for_name("ar-knowledge-sqlite/v8") is None
-    assert not hasattr(schema_generations, "GENERATIONS")  # no registry of openable generations
+    assert len(CURRENT_GENERATION.tables) == 8
+    assert schema.generation_for_name("ar-knowledge-sqlite/v8") is None
+    assert not hasattr(schema, "GENERATIONS")  # no registry of openable generations
 
     edited = dict(CURRENT_GENERATION.columns)
     edited["invariant"] = (*edited["invariant"], "a_new_column")
     changed = replace(CURRENT_GENERATION, columns=edited, fingerprint="")
-    changed = replace(changed, fingerprint=schema_generations.structure_fingerprint(changed))
-    monkeypatch.setattr(schema_generations, "CURRENT_GENERATION", changed)
+    changed = replace(changed, fingerprint=schema.structure_fingerprint(changed))
+    monkeypatch.setattr(schema, "CURRENT_GENERATION", changed)
     with pytest.raises(KnowledgeSchemaPinError, match="no longer fingerprints as pinned"):
         require_pinned_schema_unchanged()
 

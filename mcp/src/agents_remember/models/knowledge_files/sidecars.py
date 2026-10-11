@@ -55,6 +55,13 @@ RealizationRole = Literal[
     "presentation",
     "unclassified",
 ]
+"""Roles a sidecar entry may carry: the storable spelling set.
+
+``models.knowledge.graph.RealizationRole`` admits the legacy ``incidental`` spelling
+too, but every product boundary normalizes it to ``support`` (the writer handoff and
+the legacy conversion both spell it that way), so text storage keeps the normalized
+set only. A claim staged with the legacy spelling must use ``support``.
+"""
 
 
 class _Entry(FileModel):

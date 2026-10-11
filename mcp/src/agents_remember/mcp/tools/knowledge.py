@@ -70,7 +70,7 @@ from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     select_knowledge_dataset,
 )
-from agents_remember.kernel.git_command import GitRunnerOptions, run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, git_environment, run_git
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
@@ -300,6 +300,7 @@ def _current_code_tree(repository_root: str) -> str | None:
             text=True,
             check=False,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=git_environment(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -337,14 +338,12 @@ def _read_result(
         "source_context",
         "invariant",
         "family",
-        "review_matrix",
-        "curation_queue",
     ):
         return _refused_read(
             view,
             repository_id,
             "unknown_view",
-            f"{view!r} is not one of the five named query views",
+            f"{view!r} is not one of the three named query views",
         )
     # The admitted-ordering closure is checked **before** the tree is opened, because the view
     # layer's own refusal is the answer the caller needs and the request model cannot carry the

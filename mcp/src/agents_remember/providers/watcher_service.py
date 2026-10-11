@@ -8,7 +8,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     McpRuntimeConfig,
 )
-from agents_remember.providers.current_state import write_current_provider_state
+from agents_remember.providers.current_state import build_current_provider_state
 from agents_remember.providers.lifecycle_service import (
     ProviderLifecycleServiceConfig,
     run_watchers_lifecycle,
@@ -37,10 +37,13 @@ def run_configured_watchers(
         )
         payload = {**data, "operation": "provider_watchers", "ok": bool(data.get("ok"))}
         if action == "status" and payload.get("provider") == "watchers":
-            current_state = write_current_provider_state(config, payload)
-            payload["currentStateFile"] = current_state["path"]
-            payload["currentState"] = current_state["state"]
-            payload["state"] = current_state["state"]["state"]
+            # Status files none (rule 6, and the tool's own description): the answer
+            # carries the aggregated state with no snapshot file behind it. Lifecycle
+            # actions and the serving projection's explicit refresh still persist.
+            aggregated = build_current_provider_state(config, payload)
+            payload["currentStateFile"] = None
+            payload["currentState"] = aggregated
+            payload["state"] = aggregated["state"]
         return payload
     finally:
         settings_path.unlink(missing_ok=True)

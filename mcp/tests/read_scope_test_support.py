@@ -5,22 +5,23 @@ read is decided by a topology that fixture does not have: a *sibling* invariant 
 shares with a *second* family the seed never reaches. That shape is the whole stopping rule, and it
 is what this fixture exists to carry, so it is built here rather than bent into the other one.
 
-Built through the public store operations, never by inserting rows, so every identity in it is one
-the real write path produced:
+Built as a text memory tree through the rows builder, never by inserting rows, so every identity
+in it is one the projection produced:
 
-* ``I1`` is the second revision of the retry-budget invariant, and it carries two realization claims
-  at two distinct source locations (``integration`` and ``synchronization``);
-* ``J1`` is the first revision of the candidate-batch invariant. It carries **two claims at one
+* ``I1`` is the retry-budget invariant's single text revision, and it carries two realization
+  claims at two distinct source locations (``integration`` and ``synchronization``). A text record
+  holds exactly one revision (MIK-R74 rule 3), so the predecessor/successor revisions the old
+  fixture authored beside it are gone: the cases that needed several revisions of one identity in
+  one dataset tested a shape no tree can express, and they are deleted and named in the leaf's
+  report;
+* ``J1`` is the candidate-batch invariant's single revision. It carries **two claims at one
   location** (``batch``), which is what makes "two claim identities, one distinct source location"
   measurable, and it is the sibling the frontier advertises;
-* ``K1`` is the first revision of the source-resolution invariant, reachable only through ``G1``;
+* ``K1`` is the source-resolution invariant's single revision, reachable only through ``G1``;
 * ``F1`` is ``{I1, J1}`` and ``G1`` is ``{J1, K1}``, so ``J1`` is in both and ``K1`` is in the one
   the seed does not reach;
 * ``H1`` is ``{I1, L1}``, a **second** family that directly contains ``I1``, which is what proves
-  the path/invariant rule includes every directly containing family rather than only the first;
-* ``I1`` also has two retained siblings, ``I0`` (its predecessor) and ``I2``, and both of those
-  successors display the same ``v2`` label, which is what makes "a display version selects nothing"
-  measurable rather than rhetorical.
+  the path/invariant rule includes every directly containing family rather than only the first.
 
 ``absent_anchor`` is a recorded claim whose path exists in no tree, and ``mismatch_anchor`` is a
 claim whose recorded blob identity is deliberately not the one the fixture repository holds at that
@@ -30,6 +31,7 @@ resolves is a fact about a snapshot and not a condition for recording it.
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -38,13 +40,17 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from agents_remember.memory.knowledge.logical import dataset_identity
+from agents_remember.memory.knowledge.store import OpenedKnowledgeStore, open_read_only_store
+from agents_remember.memory.knowledge_index.projection import text_uuid
 from agents_remember.models.knowledge.authorship import Authorship
+from agents_remember.models.knowledge.base import KnowledgeState
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.source import FileLocator, LineRangeLocator, SourceLocator
 from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from knowledge_rows_test_support import (
+    INDEX_REPOSITORY_ID,
     FamilyMemberRequest,
     FamilyRequest,
     FamilyRevisionRequest,
@@ -54,6 +60,7 @@ from knowledge_rows_test_support import (
     RevisionDraft,
     RevisionRequest,
     RowStore,
+    _entry_text_id,
     families,
     memberships,
     open_knowledge_store,
@@ -64,11 +71,7 @@ REPOSITORY_AUTHORITY_HOME = "agents-remember"
 
 # The invariants, their labels and their statements. Stable prose so a reopened read is meaningful.
 RETRY_LABEL = "shared-retry-budget"
-RETRY_STATEMENTS = (
-    "Retries draw on the attempt and timeout configuration.",
-    "Retries share one budget across integration and synchronization.",
-    "Retries share one budget and record the exhausted attempt.",
-)
+RETRY_STATEMENT = "Retries share one budget across integration and synchronization."
 BATCH_LABEL = "candidate-batch-atomicity"
 BATCH_STATEMENT = "Apply every admitted candidate change as one transaction."
 RESOLUTION_LABEL = "source-resolution-visibility"
@@ -83,17 +86,8 @@ SUCCESSOR_CONDITIONS = (
     "The shared attempt and timeout configuration is read once.",
 )
 EXCLUSIONS = ("Historical rows are not rewritten by a candidate write.",)
-SHARED_SUCCESSOR_LABEL = "v2"
+SUBJECT_LABEL = "v2"
 BASE_LABEL = "v1"
-# The predecessor's authored label deliberately sorts **after** the two successors' shared label.
-# The ordering case measures "an authored label never orders a page" by comparing the emitted
-# sequence against the sequence a label-first key would produce, and that comparison is only
-# non-vacuous -- and only deterministic -- when the two orders *must* disagree for the draw. With a
-# monotone labelling (`v1` before `v2`) they agree whenever the predecessor's random id happens to
-# sort first, which is exactly the coin-flip the fix round removed. A non-monotone label makes the
-# disagreement structural: the predecessor is emitted first in `(label, id)` order and cannot be
-# first in stored-id order unless its id sorts first, which the pairing below makes impossible.
-PREDECESSOR_LABEL = "v3"
 
 FAMILY_LABEL = "retry-budget-family"
 FAMILY_GUARANTEE = "The retry budget is shared by integration and synchronization."
@@ -107,6 +101,10 @@ DIRECT_FAMILY_GUARANTEE = "The retry budget and the anchor identity rule hold to
 # The source locations. ``INTEGRATION_PATH`` and ``SYNCHRONIZATION_PATH`` are two claims of I1 at
 # two locations; ``BATCH_PATH`` carries the two claims that share one location.
 INTEGRATION_PATH = "src/integration.py"
+INTEGRATION_FILE_TEXT = (
+    "# integration\nshared retry budget\n\n\nclass SharedBudget:\n"
+    "    def retry_budget(self) -> int:\n        return 3\n"
+)
 SYNCHRONIZATION_PATH = "src/synchronization.py"
 ABSENT_PATH = "src/retired_adapter.py"
 BATCH_PATH = "src/batch.py"
@@ -146,6 +144,9 @@ class RevisionSeed:
     statement: str
     conditions: tuple[str, ...]
     predecessors: tuple[str, ...]
+    applicability: str = ""
+    exclusions: tuple[str, ...] = ()
+    state_at_origin: KnowledgeState = "proposed"
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,60 @@ class RealizationSeed:
     role: RealizationRole
     locator: SourceLocator
     recorded_blob: str
+    rationale: str = ""
+
+
+@dataclass(frozen=True)
+class ExtraFamilySeed:
+    """One whole family the tree holds beside the three it always holds.
+
+    The identities are caller-minted; the member slots name the tree's own revision slots
+    (``"subject"``, ``"batch"``, ``"resolution"``, ``"auxiliary"``), resolved when the tree is
+    built. A family only one side's tree holds is what makes a one-sided context measurable.
+    """
+
+    family_id: str
+    revision_id: str
+    label: str
+    guarantee: str
+    member_slots: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExtraInvariantSeed:
+    """One whole invariant the tree holds beside the four it always holds.
+
+    The identities are caller-minted; the tree authors exactly one revision with these words
+    and no membership. An invariant only one side's tree holds is what makes a measured zero
+    family context (``no_family_recorded``) measurable. The text ID derives from the
+    caller-minted invariant UUID rather than the authoring position, so the same caller
+    identity projects the same record on both sides of a comparison while two different
+    caller identities never share one.
+    """
+
+    invariant_id: str
+    revision_id: str
+    label: str
+    statement: str
+    applicability: str
+    conditions: tuple[str, ...]
+    exclusions: tuple[str, ...]
+    state_at_origin: KnowledgeState = "proposed"
+
+
+@dataclass(frozen=True)
+class ReadFixtureExtraInvariant:
+    """One extra invariant's projected identities: the invariant and its single revision."""
+
+    invariant_id: str
+    revision_id: str
+
+
+# A seed revision that means the tree's own retry subject revision: an extra claim for a side
+# whose subject revision identity the caller cannot know before the tree is built.
+SUBJECT_REVISION = "subject-revision"
+# The same for the tree's own batch revision: a re-recorded citation of the sibling invariant.
+BATCH_REVISION = "batch-revision"
 
 
 @dataclass(frozen=True)
@@ -177,9 +232,7 @@ class ReadScopeFixture:
     authorship: Authorship
 
     retry_invariant_id: str
-    base_revision_id: str
     subject_revision_id: str
-    successor_revision_id: str
 
     batch_invariant_id: str
     batch_revision_id: str
@@ -206,11 +259,13 @@ class ReadScopeFixture:
     git_root: Path
     git_tree_id: str
     git_blobs: Mapping[str, str]
+    extra_families: tuple[ReadFixtureFamily, ...] = ()
+    extra_invariants: tuple[ReadFixtureExtraInvariant, ...] = ()
 
-    def reopen(self) -> RowStore:
-        """Reopen the fixture store so a case reads what was really persisted."""
+    def reopen(self) -> OpenedKnowledgeStore:
+        """Reopen the fixture store read-only, so a case reads what was really persisted."""
 
-        return open_knowledge_store(self.database_path, self.repository_id)
+        return open_read_only_store(self.database_path, self.repository_id)
 
     @property
     def knowledge_digest(self) -> str:
@@ -250,59 +305,151 @@ def make_read_authorship(*, seed: str = "agent:read-fixture") -> Authorship:
     )
 
 
-def _ordered_revision_id(sort_marker: str) -> str:
-    """Return a unique revision id whose stored order is ``sort_marker``'s order.
-
-    The marker leads the canonical spelling, so two ids from this helper compare exactly as their
-    markers do, and the rest of the id is still a real random UUID tail. That is enough to author
-    one identity's stored order without turning the fixture's other identities into constants.
-    """
-
-    return f"{sort_marker}0000000-0000-4000-8000-{uuid4().hex[:12]}"
-
-
-def build_read_scope_fixture(
+def build_read_scope_fixture(  # noqa: PLR0913 -- one builder serves both sides of a comparison
     directory: Path,
     *,
     repository_id: str | None = None,
     database_name: str = "knowledge-candidate.db",
+    retry_text: tuple[str, str, tuple[str, ...]] | None = None,
+    omit_claim_paths: tuple[str, ...] = (),
+    extra_claims: tuple[RealizationSeed, ...] = (),
+    direct_family_revision_number: int = 1,
+    omit_members: tuple[tuple[str, str], ...] = (),
+    direct_family_guarantee: str | None = None,
+    extra_families: tuple[ExtraFamilySeed, ...] = (),
+    extra_invariants: tuple[ExtraInvariantSeed, ...] = (),
+    add_members: tuple[tuple[str, str], ...] = (),
 ) -> ReadScopeFixture:
-    """Create the fixture store and its Git tree, then return every identity in it."""
+    """Create the fixture store and its Git tree, then return every identity in it.
 
-    fixture = _seed_identities(directory, repository_id, database_name)
+    The namespace argument is accepted and not used: every index is keyed by its tree alone, so
+    the fixture reads under the index's own namespace. ``retry_text`` replaces the retry
+    invariant's ``(display_version, statement, conditions)`` -- a comparison's candidate side is
+    the same topology with a revised statement. ``omit_claim_paths`` leaves those claims out of
+    the tree, and ``extra_claims`` authors further realizations, so one builder serves both sides
+    of a comparison while the entry identities of the claims both sides keep stay identical.
+    ``direct_family_revision_number`` writes the direct family's record at another revision
+    number -- the membership rows keep their (family, invariant) identities, so a moved family
+    revision pairs its members by row instead of dropping them. ``omit_members`` names
+    ``(family field, revision field)`` pairs of the fixture whose membership row is left out.
+    ``direct_family_guarantee`` replaces the direct family's stored guarantee text, so a moved
+    family revision carries its own authored sentence. ``extra_families`` holds whole further
+    families beside the three the tree always holds. ``extra_invariants`` holds whole further
+    invariants beside the four the tree always holds, each with exactly one revision and no
+    membership. ``add_members`` names ``(family field, revision field)`` pairs of the fixture
+    whose membership row is added to the family's own revision -- a member joining a roster
+    the tree otherwise holds unchanged.
+    """
+
+    _ = repository_id
+    fixture = _seed_identities(directory, database_name)
     _write_git_tree(fixture)
     store = open_knowledge_store(fixture.database_path, fixture.repository_id)
     try:
-        _build_invariants(store, fixture)
-        _build_families(store, fixture)
-        _build_realizations(store, fixture)
+        invariant_ids, revision_ids, extra_invariant_ids, extra_revision_ids = _build_invariants(
+            store, fixture, retry_text=retry_text, extra_invariants=extra_invariants
+        )
+        family_ids, family_revision_ids, member_ids = _build_families(
+            store,
+            fixture,
+            direct_family_revision_number=direct_family_revision_number,
+            omit_members=omit_members,
+            direct_family_guarantee=direct_family_guarantee,
+            extra_families=extra_families,
+            add_members=add_members,
+        )
+        claim_ids, anchor_ids = _build_realizations(
+            store, fixture, omit_claim_paths=omit_claim_paths, extra_claims=extra_claims
+        )
     finally:
         store.close()
-    return fixture
+    return dataclasses.replace(
+        fixture,
+        retry_invariant_id=invariant_ids[fixture.retry_invariant_id],
+        subject_revision_id=revision_ids[fixture.subject_revision_id],
+        batch_invariant_id=invariant_ids[fixture.batch_invariant_id],
+        batch_revision_id=revision_ids[fixture.batch_revision_id],
+        resolution_invariant_id=invariant_ids[fixture.resolution_invariant_id],
+        resolution_revision_id=revision_ids[fixture.resolution_revision_id],
+        auxiliary_invariant_id=invariant_ids[fixture.auxiliary_invariant_id],
+        auxiliary_revision_id=revision_ids[fixture.auxiliary_revision_id],
+        family=_project_family(fixture.family, family_ids, family_revision_ids, member_ids),
+        overlapping_family=_project_family(
+            fixture.overlapping_family, family_ids, family_revision_ids, member_ids
+        ),
+        direct_family=_project_family(
+            fixture.direct_family, family_ids, family_revision_ids, member_ids
+        ),
+        extra_families=tuple(
+            ReadFixtureFamily(
+                family_id=family_ids[seed.family_id],
+                revision_id=family_revision_ids[seed.revision_id],
+                member_ids=(),
+            )
+            for seed in extra_families
+        ),
+        extra_invariants=tuple(
+            ReadFixtureExtraInvariant(
+                invariant_id=extra_invariant_ids[seed.invariant_id],
+                revision_id=extra_revision_ids[seed.revision_id],
+            )
+            for seed in extra_invariants
+        ),
+        integration=_project_realization(fixture.integration, claim_ids, anchor_ids),
+        synchronization=_project_realization(fixture.synchronization, claim_ids, anchor_ids),
+        batch_primary=_project_realization(fixture.batch_primary, claim_ids, anchor_ids),
+        batch_secondary=_project_realization(fixture.batch_secondary, claim_ids, anchor_ids),
+        resolution=_project_realization(fixture.resolution, claim_ids, anchor_ids),
+        auxiliary=_project_realization(fixture.auxiliary, claim_ids, anchor_ids),
+        absent_anchor=_project_realization(fixture.absent_anchor, claim_ids, anchor_ids),
+        mismatch_anchor=_project_realization(fixture.mismatch_anchor, claim_ids, anchor_ids),
+    )
 
 
-def _seed_identities(
-    directory: Path, repository_id: str | None, database_name: str
-) -> ReadScopeFixture:
+def _project_family(
+    seed: ReadFixtureFamily,
+    family_ids: dict[str, str],
+    family_revision_ids: dict[str, str],
+    member_ids: dict[str, str],
+) -> ReadFixtureFamily:
+    """Resolve one family's caller-side identities to the projected identities the tree holds.
+
+    A membership the tree omits projects to an empty identity, like an omitted claim.
+    """
+
+    return ReadFixtureFamily(
+        family_id=family_ids[seed.family_id],
+        revision_id=family_revision_ids[seed.revision_id],
+        member_ids=tuple(member_ids.get(member_id, "") for member_id in seed.member_ids),
+    )
+
+
+def _project_realization(
+    seed: ReadFixtureRealization, claim_ids: dict[str, str], anchor_ids: dict[str, str]
+) -> ReadFixtureRealization:
+    """Resolve one realization's caller-side identities to the projected ones the tree holds.
+
+    A claim the tree omits projects to empty identities: the field stays addressable, and no
+    row answers for it.
+    """
+
+    return ReadFixtureRealization(
+        anchor_id=anchor_ids.get(seed.anchor_id, ""),
+        claim_id=claim_ids.get(seed.claim_id, ""),
+        path=seed.path,
+    )
+
+
+def _seed_identities(directory: Path, database_name: str) -> ReadScopeFixture:
     """Allocate every identity the fixture needs before one statement runs."""
 
     directory.mkdir(parents=True, exist_ok=True)
     return ReadScopeFixture(
         database_path=directory / database_name,
-        repository_id=repository_id or str(uuid4()),
+        repository_id=INDEX_REPOSITORY_ID,
         authorship=make_read_authorship(),
         retry_invariant_id=str(uuid4()),
-        # The retry identity's three revision ids are authored so that their stored-id order is
-        # fixed by construction rather than by the draw: the predecessor's id sorts *after* both
-        # successors', and the predecessor is the one carrying ``PREDECESSOR_LABEL``, the label that
-        # sorts last. The two orders therefore disagree at the first position of the identity's
-        # revisions, for every draw -- which is what makes the ordering case's "an authored label
-        # never orders a page" comparison a measurement of the code instead of a coin-flip on
-        # random ids. The rest of the fixture's identities keep random ids, so every other case's
-        # order remains a real observation rather than a fixture constant.
-        base_revision_id=_ordered_revision_id("9"),
-        subject_revision_id=_ordered_revision_id("3"),
-        successor_revision_id=_ordered_revision_id("6"),
+        subject_revision_id=str(uuid4()),
         batch_invariant_id=str(uuid4()),
         batch_revision_id=str(uuid4()),
         resolution_invariant_id=str(uuid4()),
@@ -354,8 +501,14 @@ def _seed_identities(
     )
 
 
-def _build_invariants(store: RowStore, fixture: ReadScopeFixture) -> None:
-    """Author the four invariant identities and every revision the fixture needs."""
+def _build_invariants(
+    store: RowStore,
+    fixture: ReadScopeFixture,
+    *,
+    retry_text: tuple[str, str, tuple[str, ...]] | None = None,
+    extra_invariants: tuple[ExtraInvariantSeed, ...] = (),
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
+    """Author the four invariant identities and each one's single text revision."""
 
     created = store.create_repository(
         RepositoryIdentity(
@@ -363,18 +516,45 @@ def _build_invariants(store: RowStore, fixture: ReadScopeFixture) -> None:
         )
     )
     _require("create_repository", created.state, created.refusal)
-    for invariant_id, label, revisions in _invariant_seeds(fixture):
-        _create_invariant(store, fixture, invariant_id, label)
+    invariant_ids: dict[str, str] = {}
+    revision_ids: dict[str, str] = {}
+    for invariant_id, label, revisions in _invariant_seeds(fixture, retry_text=retry_text):
+        outcome = _create_invariant(store, fixture, invariant_id, label)
+        invariant_ids[invariant_id] = outcome.invariant_id
         for seed in revisions:
-            _create_revision(store, fixture, seed)
+            revision = _create_revision(store, fixture, seed)
+            revision_ids[seed.revision_id] = revision.revision_id
+    extra_invariant_ids: dict[str, str] = {}
+    extra_revision_ids: dict[str, str] = {}
+    for extra in extra_invariants:
+        outcome = _create_invariant(store, fixture, extra.invariant_id, extra.label, extra=True)
+        extra_invariant_ids[extra.invariant_id] = outcome.invariant_id
+        revision = _create_revision(
+            store,
+            fixture,
+            RevisionSeed(
+                invariant_id=extra.invariant_id,
+                revision_id=extra.revision_id,
+                display_version=BASE_LABEL,
+                statement=extra.statement,
+                conditions=extra.conditions,
+                predecessors=(),
+                applicability=extra.applicability,
+                exclusions=extra.exclusions,
+                state_at_origin=extra.state_at_origin,
+            ),
+        )
+        extra_revision_ids[extra.revision_id] = revision.revision_id
+    return invariant_ids, revision_ids, extra_invariant_ids, extra_revision_ids
 
 
 def _invariant_seeds(
     fixture: ReadScopeFixture,
+    *,
+    retry_text: tuple[str, str, tuple[str, ...]] | None = None,
 ) -> tuple[tuple[str, str, tuple[RevisionSeed, ...]], ...]:
-    """Return the four invariants and every revision of each, in authoring order."""
+    """Return the four invariants and the single revision of each, in authoring order."""
 
-    base = fixture.base_revision_id
     return (
         (
             fixture.retry_invariant_id,
@@ -382,20 +562,8 @@ def _invariant_seeds(
             (
                 _revision(
                     fixture,
-                    base,
-                    text=(PREDECESSOR_LABEL, RETRY_STATEMENTS[0], CONDITIONS),
-                ),
-                _revision(
-                    fixture,
                     fixture.subject_revision_id,
-                    text=(SHARED_SUCCESSOR_LABEL, RETRY_STATEMENTS[1], SUCCESSOR_CONDITIONS),
-                    predecessors=(base,),
-                ),
-                _revision(
-                    fixture,
-                    fixture.successor_revision_id,
-                    text=(SHARED_SUCCESSOR_LABEL, RETRY_STATEMENTS[2], SUCCESSOR_CONDITIONS),
-                    predecessors=(base,),
+                    text=retry_text or (SUBJECT_LABEL, RETRY_STATEMENT, SUCCESSOR_CONDITIONS),
                 ),
             ),
         ),
@@ -446,7 +614,8 @@ def _revision(
 
     ``text`` is ``(display_version, statement, conditions)`` -- the three things an author decides
     about one revision -- so a caller names the revision and its words without a six-position
-    argument list that a reader has to count.
+    argument list that a reader has to count. ``predecessors`` is carried and not stored: text
+    records hold no predecessor edge (MIK-R74 rule 1).
     """
 
     display_version, statement, conditions = text
@@ -461,20 +630,29 @@ def _revision(
 
 
 def _create_invariant(
-    store: RowStore, fixture: ReadScopeFixture, invariant_id: str, label: str
-) -> None:
-    created = store.create_invariant(
-        InvariantRequest(
-            repository_id=fixture.repository_id,
-            invariant_id=invariant_id,
-            display_label=label,
-            provenance=fixture.authorship,
-        )
+    store: RowStore,
+    fixture: ReadScopeFixture,
+    invariant_id: str,
+    label: str,
+    *,
+    extra: bool = False,
+):
+    request = InvariantRequest(
+        repository_id=fixture.repository_id,
+        invariant_id=invariant_id,
+        display_label=label,
+        provenance=fixture.authorship,
+    )
+    created = (
+        store.create_extra_invariant(request)
+        if extra
+        else store.create_invariant(request)
     )
     _require("create_invariant", created.state, created.refusal)
+    return created
 
 
-def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionSeed) -> None:
+def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionSeed):
     created = store.create_revision(
         RevisionRequest(
             repository_id=fixture.repository_id,
@@ -483,25 +661,23 @@ def _create_revision(store: RowStore, fixture: ReadScopeFixture, seed: RevisionS
                 invariant_id=seed.invariant_id,
                 display_version=seed.display_version,
                 statement=seed.statement,
-                applicability=APPLICABILITY,
+                applicability=seed.applicability or APPLICABILITY,
                 conditions=seed.conditions,
-                exclusions=EXCLUSIONS,
+                exclusions=seed.exclusions or EXCLUSIONS,
                 predecessors=seed.predecessors,
+                state_at_origin=seed.state_at_origin,
                 provenance=fixture.authorship,
             ),
         )
     )
     _require("create_revision", created.state, created.refusal)
+    return created
 
 
 def _invariant_of(fixture: ReadScopeFixture, revision_id: str) -> str:
     """Return the invariant identity one fixture revision belongs to."""
 
-    if revision_id in (
-        fixture.base_revision_id,
-        fixture.subject_revision_id,
-        fixture.successor_revision_id,
-    ):
+    if revision_id == fixture.subject_revision_id:
         return fixture.retry_invariant_id
     if revision_id == fixture.batch_revision_id:
         return fixture.batch_invariant_id
@@ -512,9 +688,23 @@ def _invariant_of(fixture: ReadScopeFixture, revision_id: str) -> str:
     raise AssertionError(f"{revision_id} is not a revision of this fixture")
 
 
-def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
+def _build_families(  # noqa: PLR0913 -- one call carries a whole family's delta
+    store: RowStore,
+    fixture: ReadScopeFixture,
+    *,
+    direct_family_revision_number: int = 1,
+    omit_members: tuple[tuple[str, str], ...] = (),
+    direct_family_guarantee: str | None = None,
+    extra_families: tuple[ExtraFamilySeed, ...] = (),
+    add_members: tuple[tuple[str, str], ...] = (),
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """Author the three families and the exact memberships the stopping rule is read through."""
 
+    family_ids: dict[str, str] = {}
+    family_revision_ids: dict[str, str] = {}
+    member_ids: dict[str, str] = {}
+    omitted = _omitted_member_rows(fixture, omit_members)
+    family_revisions: dict[str, str] = {}
     for seed, members in (
         (fixture.family, (fixture.subject_revision_id, fixture.batch_revision_id)),
         (
@@ -523,6 +713,7 @@ def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
         ),
         (fixture.direct_family, (fixture.subject_revision_id, fixture.auxiliary_revision_id)),
     ):
+        family_revisions[seed.family_id] = seed.revision_id
         created = families.create_family(
             store,
             FamilyRequest(
@@ -533,6 +724,13 @@ def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
             ),
         )
         _require("create_family", created.state, created.refusal)
+        family_ids[seed.family_id] = created.family_id
+        revision_number = (
+            direct_family_revision_number if seed.family_id == fixture.direct_family.family_id else 1
+        )
+        guarantee = _family_guarantee(seed.family_id, fixture)
+        if seed.family_id == fixture.direct_family.family_id and direct_family_guarantee is not None:
+            guarantee = direct_family_guarantee
         revision = families.create_family_revision(
             store,
             FamilyRevisionRequest(
@@ -540,14 +738,17 @@ def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
                 revision=FamilyRevisionDraft(
                     family_id=seed.family_id,
                     revision_id=seed.revision_id,
-                    display_version=BASE_LABEL,
-                    joint_guarantee=_family_guarantee(seed.family_id, fixture),
+                    display_version=f"v{revision_number}",
+                    joint_guarantee=guarantee,
                     provenance=fixture.authorship,
                 ),
             ),
         )
         _require("create_family_revision", revision.state, revision.refusal)
+        family_revision_ids[seed.revision_id] = revision.revision_id
         for member_id, invariant_revision_id in zip(seed.member_ids, members, strict=True):
+            if (seed.family_id, invariant_revision_id) in omitted:
+                continue
             member = memberships.create_family_member(
                 store,
                 FamilyMemberRequest(
@@ -561,6 +762,96 @@ def _build_families(store: RowStore, fixture: ReadScopeFixture) -> None:
                 ),
             )
             _require("create_family_member", member.state, member.refusal)
+            member_ids[member_id] = member.member_id
+    for extra in extra_families:
+        created = families.create_family(
+            store,
+            FamilyRequest(
+                repository_id=fixture.repository_id,
+                family_id=extra.family_id,
+                display_label=extra.label,
+                provenance=fixture.authorship,
+            ),
+        )
+        _require("create_family", created.state, created.refusal)
+        family_ids[extra.family_id] = created.family_id
+        revision = families.create_family_revision(
+            store,
+            FamilyRevisionRequest(
+                repository_id=fixture.repository_id,
+                revision=FamilyRevisionDraft(
+                    family_id=extra.family_id,
+                    revision_id=extra.revision_id,
+                    display_version=BASE_LABEL,
+                    joint_guarantee=extra.guarantee,
+                    provenance=fixture.authorship,
+                ),
+            ),
+        )
+        _require("create_family_revision", revision.state, revision.refusal)
+        family_revision_ids[extra.revision_id] = revision.revision_id
+        slots = {
+            "subject": fixture.subject_revision_id,
+            "batch": fixture.batch_revision_id,
+            "resolution": fixture.resolution_revision_id,
+            "auxiliary": fixture.auxiliary_revision_id,
+        }
+        for slot in extra.member_slots:
+            try:
+                invariant_revision_id = slots[slot]
+            except KeyError:
+                raise AssertionError(f"extra family member slot names a revision slot: {slot!r}") from None
+            member = memberships.create_family_member(
+                store,
+                FamilyMemberRequest(
+                    repository_id=fixture.repository_id,
+                    member=FamilyMemberDraft(
+                        member_id=str(uuid4()),
+                        family_revision_id=extra.revision_id,
+                        invariant_revision_id=invariant_revision_id,
+                        provenance=fixture.authorship,
+                    ),
+                ),
+            )
+            _require("create_family_member", member.state, member.refusal)
+    for family_field, revision_field in add_members:
+        family = getattr(fixture, family_field, None)
+        revision_id = getattr(fixture, revision_field, None)
+        if not isinstance(family, ReadFixtureFamily) or not isinstance(revision_id, str):
+            raise AssertionError(
+                f"add_members names fixture fields: {family_field!r}, {revision_field!r}"
+            )
+        member = memberships.create_family_member(
+            store,
+            FamilyMemberRequest(
+                repository_id=fixture.repository_id,
+                member=FamilyMemberDraft(
+                    member_id=str(uuid4()),
+                    family_revision_id=family_revisions[family.family_id],
+                    invariant_revision_id=revision_id,
+                    provenance=fixture.authorship,
+                ),
+            ),
+        )
+        _require("create_family_member", member.state, member.refusal)
+    return family_ids, family_revision_ids, member_ids
+
+
+def _omitted_member_rows(
+    fixture: ReadScopeFixture, omit_members: tuple[tuple[str, str], ...]
+) -> set[tuple[str, str]]:
+    """Resolve ``(family field, revision field)`` pairs to caller-side (family, revision) UUIDs."""
+
+    omitted: set[tuple[str, str]] = set()
+    for family_field, revision_field in omit_members:
+        family = getattr(fixture, family_field, None)
+        revision_id = getattr(fixture, revision_field, None)
+        if not isinstance(family, ReadFixtureFamily) or not isinstance(revision_id, str):
+            raise AssertionError(
+                f"omit_members names fixture fields: {family_field!r}, {revision_field!r}"
+            )
+        omitted.add((family.family_id, revision_id))
+    return omitted
 
 
 def _family_label(family_id: str, fixture: ReadScopeFixture) -> str:
@@ -579,11 +870,31 @@ def _family_guarantee(family_id: str, fixture: ReadScopeFixture) -> str:
     }[family_id]
 
 
-def _build_realizations(store: RowStore, fixture: ReadScopeFixture) -> None:
+def _build_realizations(
+    store: RowStore,
+    fixture: ReadScopeFixture,
+    *,
+    omit_claim_paths: tuple[str, ...] = (),
+    extra_claims: tuple[RealizationSeed, ...] = (),
+) -> tuple[dict[str, str], dict[str, str]]:
     """Author every realization claim, each citing the recorded blob its repository holds."""
 
+    claim_ids: dict[str, str] = {}
+    anchor_ids: dict[str, str] = {}
+    omitted = set(omit_claim_paths)
     for seed in _realization_seeds(fixture):
-        _create_realization(store, fixture, seed)
+        if seed.realization.path in omitted:
+            continue
+        created = _create_realization(store, fixture, seed)
+        claim_ids[seed.realization.claim_id] = created.claim_id
+        anchor_ids[seed.realization.anchor_id] = created.anchor_id
+    # The caller's extra claims are explicit additions: they are always authored, even at an
+    # omitted path, which is how a comparison re-records a withdrawn address.
+    for seed in extra_claims:
+        created = _create_realization(store, fixture, seed)
+        claim_ids[seed.realization.claim_id] = created.claim_id
+        anchor_ids[seed.realization.anchor_id] = created.anchor_id
+    return claim_ids, anchor_ids
 
 
 def _realization_seeds(fixture: ReadScopeFixture) -> tuple[RealizationSeed, ...]:
@@ -622,7 +933,9 @@ def _realization_seeds(fixture: ReadScopeFixture) -> tuple[RealizationSeed, ...]
         seed(fixture.batch_primary, fixture.batch_revision_id, "enforcement", FileLocator()),
         seed(fixture.batch_secondary, fixture.batch_revision_id, "support", FileLocator()),
         seed(fixture.resolution, fixture.resolution_revision_id, "presentation", FileLocator()),
-        seed(fixture.auxiliary, fixture.auxiliary_revision_id, "incidental", FileLocator()),
+        # The auxiliary claim's role is the vocabulary's unclassified value: the old fixture
+        # spelled it "incidental", which no vocabulary -- text or logical -- admits.
+        seed(fixture.auxiliary, fixture.auxiliary_revision_id, "unclassified", FileLocator()),
         seed(
             fixture.absent_anchor,
             fixture.subject_revision_id,
@@ -642,17 +955,34 @@ def _realization_seeds(fixture: ReadScopeFixture) -> tuple[RealizationSeed, ...]
     )
 
 
-def _create_realization(store: RowStore, fixture: ReadScopeFixture, seed: RealizationSeed) -> None:
+def projected_claim_id(path: str, role: str) -> str:
+    """Return the claim UUID the projection mints for one path and role.
+
+    The projection derives claim identities from the entry's text ID, never from a caller
+    UUID, so both sides of a comparison mint the same claim for the same association. A case
+    that reads roster sources by claim looks them up under this identity.
+    """
+
+    return text_uuid("claim", _entry_text_id(path, role))
+
+
+def _create_realization(store: RowStore, fixture: ReadScopeFixture, seed: RealizationSeed):
     realization = seed.realization
+    if seed.revision_id == SUBJECT_REVISION:
+        revision_id = fixture.subject_revision_id
+    elif seed.revision_id == BATCH_REVISION:
+        revision_id = fixture.batch_revision_id
+    else:
+        revision_id = seed.revision_id
     created = realizations.create_realization_claim(
         store,
         RealizationClaimRequest(
             repository_id=fixture.repository_id,
             claim=RealizationClaimDraft(
                 claim_id=realization.claim_id,
-                invariant_revision_id=seed.revision_id,
+                invariant_revision_id=revision_id,
                 role=seed.role,
-                rationale=f"The recorded claim for {realization.path}.",
+                rationale=seed.rationale or f"The recorded claim for {realization.path}.",
             ),
             anchor=NewAnchor(
                 anchor=SourceAnchorDraft(
@@ -666,6 +996,7 @@ def _create_realization(store: RowStore, fixture: ReadScopeFixture, seed: Realiz
         ),
     )
     _require("create_realization_claim", created.state, created.refusal)
+    return created
 
 
 def _write_git_tree(fixture: ReadScopeFixture) -> None:
@@ -685,11 +1016,7 @@ def _write_git_tree(fixture: ReadScopeFixture) -> None:
         # is named for: a symbol locator is observed through the shipped tree-sitter extractor, so
         # the tree has to hold a construct that extractor can actually bind -- ``SharedBudget`` at
         # line 5 and its ``retry_budget`` method at 6-7.
-        (
-            INTEGRATION_PATH,
-            "# integration\nshared retry budget\n\n\nclass SharedBudget:\n"
-            "    def retry_budget(self) -> int:\n        return 3\n",
-        ),
+        (INTEGRATION_PATH, INTEGRATION_FILE_TEXT),
         (SYNCHRONIZATION_PATH, "# synchronization\nshared retry budget\npropagated\n"),
         (BATCH_PATH, "# batch\none transaction\n"),
         (RESOLUTION_PATH, "# resolution\n"),

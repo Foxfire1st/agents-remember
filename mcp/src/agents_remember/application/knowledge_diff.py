@@ -82,7 +82,7 @@ from agents_remember.memory.knowledge.refusals import (
     KnowledgeStorageError,
     selected_input_unavailable_refusal,
 )
-from agents_remember.memory.knowledge.schema_generations import generation_of_database
+from agents_remember.memory.knowledge.schema import generation_of_database
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 from agents_remember.models.knowledge.diff import (
     DIFF_POLICY_VERSION,

@@ -46,7 +46,6 @@ import {
   REVIEW_WALKABLE_COLLECTIONS,
   type ReviewResult,
 } from "../../data/review";
-import { RECORDS_PAGE_REFUSAL_RESPONSE } from "./recordsPageRefusal.captured";
 import { ReviewSurface } from "./ReviewSurface";
 
 // Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
@@ -130,6 +129,16 @@ interface Serving {
 // One `fetch` for the whole surface, routed the way the browser routes: the review reads answer with
 // the queue of real bodies in order, and the source-content read answers with the typed refusal above.
 let initialFamily: string | undefined;
+// A decoder input with no family field, derived from a current surviving capture by
+// removing exactly that field. It is not a response: no route serves a familyless body.
+function withoutFamilyContext(body: unknown): unknown {
+  const clone = JSON.parse(JSON.stringify(body)) as { payload?: Record<string, unknown> };
+  if (clone && typeof clone === 'object' && clone.payload && typeof clone.payload === 'object') {
+    delete clone.payload['family_context'];
+  }
+  return clone;
+}
+
 function serving(queue: unknown[]): Serving {
   try { initialFamily = firstFamilyId(queue[0]); } catch { initialFamily = undefined; }
   const urls: string[] = [];
@@ -341,11 +350,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(view.queryByTestId("review-roster-walk")).toBeNull();
   });
 
-  it("renders a body that carries no family context as that fact, never as a measured zero", async () => {
-    // `recordsPageRefusal.captured.ts` is a real route body recorded before the family field existed.
-    // A decoder has to say what such a body is; what it must never do is render the absent field as
-    // "the recorded scope was read and holds no family", which is what `no_family_recorded` asserts.
-    serving([RECORDS_PAGE_REFUSAL_RESPONSE]);
+  it('renders a body that carries no family context as that fact, never as a measured zero', async () => {
+    // The decoder input below is a current surviving capture with exactly the family field
+    // removed. It is not a response -- no route serves it -- so the retired records-page
+    // fixture is no longer mounted anywhere. A decoder has to say what such a body is; what
+    // it must never do is render the absent field as "the recorded scope was read and holds
+    // no family", which is what `no_family_recorded` asserts.
+    serving([withoutFamilyContext(COMPLETE)]);
     const view = mount();
 
     const tree = await view.findByTestId("review-family-tree");

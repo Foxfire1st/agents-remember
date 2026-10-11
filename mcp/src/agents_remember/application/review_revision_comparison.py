@@ -1,25 +1,23 @@
 """The explicit revision comparison's selection policy (ICR-R07@v1).
 
 This module owns the one rule the packet's Required Behavior states: **a revision head is a
-retained revision with no recorded successor for that identity in the selected snapshot revision
-population**, where "recorded successor" means an authored predecessor edge -- the successor's own
-declaration of which revision it replaced -- and nothing else. No collection order, no presence on
-both sides, no timestamp and no text similarity participates, because none of them is a statement
+retained revision of that identity in the selected snapshot revision population**. Text records
+hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation narrows the
+population: a side with exactly one retained revision establishes one head, and a side with
+several establishes several. No collection order, no presence on both sides, no timestamp and no
+text similarity participates, because none of them is a statement
 an author made about which revision replaced which.
 
 **What it reads.** The selected populations come from the shipped comparison's own union items
-(one item per retained revision, each carrying the side payloads that selected it), and the
-authored edges come from the two snapshots' own predecessor tables, read through read-only
-connections. Both inputs are recorded facts; this module invents neither.
+(one item per retained revision, each carrying the side payloads that selected it). This module
+invents nothing.
 
 **What it returns.** One :class:`~agents_remember.models.knowledge.revision_selection.ReviewRevisionSelection`
-per reviewed identity: the unique-head pair when each nonempty side establishes exactly one head
-(before ``r1`` and after ``r1 -> r2 -> r3`` therefore defaults to ``r1`` versus ``r3``), the
-one-sided head under ICR-R06@v1 when a side is known-empty, and an explicit ambiguous or
+per reviewed identity: the unique-head pair when each nonempty side retains exactly one revision,
+the one-sided head under ICR-R06@v1 when a side is known-empty, and an explicit ambiguous or
 unresolved selection -- with every head and every retained revision still listed -- when multiple
-heads, a successor cycle, or an authored edge the snapshot does not retain prevents a unique
-head. Intermediate revisions stay in the union and stay addressable through the comparison's own
-per-side explicit revision selector; this module removes none of them.
+heads prevent a unique head. Intermediate revisions stay in the union and stay addressable through
+the comparison's own per-side explicit revision selector; this module removes none of them.
 
 **Why this is its own module.** The review adapter is over the repository's soft file-size rail,
 and the packet's Scope asks a leaf that touches a responsibility inside it to move that
@@ -34,29 +32,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
-import apsw
-
-from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.read_queries import (
-    family_revision_is_recorded,
-    fetch_predecessor_edges,
-    invariant_revision_is_recorded,
-)
 from agents_remember.models.knowledge.diff import KnowledgeDiffItem
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
 __all__ = [
     "SubjectRevisionSelection",
-    "read_snapshot_edges",
     "revision_heads",
     "select_subject_revisions",
 ]
 
-# The union item kinds this policy reads populations from. A claim and a frontier link record no
-# authored old/new edge -- a claim's identity is the claim -- so they are never revision heads.
+# The union item kinds this policy reads populations from. A claim and a frontier link hold no
+# selectable revisions -- a claim's identity is the claim -- so they never establish heads.
 _SELECTABLE_KINDS = ("invariant", "family")
 
 
@@ -78,36 +66,16 @@ class SubjectRevisionSelection:
     after_item: KnowledgeDiffItem | None
 
 
-def revision_heads(population: Sequence[str], edges: Sequence[tuple[str, str]]) -> tuple[str, ...]:
+def revision_heads(population: Sequence[str]) -> tuple[str, ...]:
     """Return the heads of one selected revision population, in sorted order.
 
-    A head is a retained revision no other revision of the population names as its predecessor.
-    ``edges`` are ``(successor, predecessor)`` pairs; only pairs with both endpoints in the
-    population establish a successor relation, because an edge to a revision outside the
-    population is not a successor *in the selected population* the packet scopes the rule to.
-    The sorted order is a rendering determinism -- the same snapshots always list the same heads
-    -- and never a semantic revision rule: no caller may read the first head as the selected one.
+    Text records hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation
+    narrows the population: every retained revision is a head. The sorted order is a rendering
+    determinism -- the same snapshots always list the same heads -- and never a semantic revision
+    rule: no caller may read the first head as the selected one.
     """
 
-    members = set(population)
-    succeeded = {predecessor for successor, predecessor in edges if successor in members}
-    return tuple(sorted(revision for revision in members if revision not in succeeded))
-
-
-def read_snapshot_edges(database_path: Path, repository_id: str) -> frozenset[tuple[str, str]]:
-    """Return every authored ``(successor, predecessor)`` edge one snapshot records.
-
-    The snapshot is opened read-only and closed before returning, so the read cannot change the
-    bytes the selection is made from. Both predecessor tables are read because the policy asks
-    the same question of either revision kind, and the caller filters the union to the identity
-    it reviews -- an edge is a fact about the snapshot, not about the subject.
-    """
-
-    connection = open_read_only_database(Path(database_path))
-    try:
-        return frozenset(fetch_predecessor_edges(connection, repository_id))
-    finally:
-        connection.close()
+    return tuple(sorted(population))
 
 
 @dataclass(frozen=True)
@@ -127,36 +95,18 @@ class _ReviewedPopulations:
     after_heads: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class _EdgeSources:
-    """The two snapshot files one selection reads authored edges from, and their namespace.
-
-    The three travel together because an edge read is meaningless without the namespace that
-    scopes it, and a helper handed them separately could read one snapshot under the other's
-    namespace.
-    """
-
-    repository_id: str
-    before_database: Path
-    after_database: Path
-
-
 def select_subject_revisions(
     items: Sequence[KnowledgeDiffItem],
     selector: KnowledgeReadSeed | None,
-    *,
-    repository_id: str,
-    before_database: Path,
-    after_database: Path,
 ) -> SubjectRevisionSelection:
-    """Select the reviewed identity's before/after revision pair from authored heads.
+    """Select the reviewed identity's before/after revision pair from retained heads.
 
     The populations are the shipped comparison's own union items for the selector's identity --
     the before payloads' revisions on the before side and the after payloads' on the after side --
-    and the edges are each snapshot's own authored predecessor relations. The combination is the
-    packet's Required Behavior: unique heads compare head to head, a known-empty side stays an
-    ICR-R06@v1 addition or removal, and anything that prevents a unique head is an explicit
-    ambiguous or unresolved selection that still lists every head and every retained revision.
+    and every retained revision is a head (MIK-R74 rule 1: text records hold no predecessor edge).
+    The combination is the packet's Required Behavior: unique heads compare head to head, a
+    known-empty side stays an ICR-R06@v1 addition or removal, and multiple heads are an explicit
+    ambiguous selection that still lists every head and every retained revision.
     A selector that names no identity addresses no identity item, exactly as the adapter's rule
     it replaces did.
     """
@@ -165,12 +115,7 @@ def select_subject_revisions(
     if identity is None:
         return SubjectRevisionSelection(selection=None, before_item=None, after_item=None)
     kind, record_id = identity
-    sources = _EdgeSources(
-        repository_id=repository_id,
-        before_database=before_database,
-        after_database=after_database,
-    )
-    populations = _populations(items, kind, record_id, sources)
+    populations = _populations(items, kind, record_id)
     if populations is None:
         return _unresolved(
             _ReviewedPopulations(
@@ -184,11 +129,11 @@ def select_subject_revisions(
             f"no revision of the {kind} {record_id} was selected on either side, so no "
             "pair was established and no statements render as operands",
         )
-    return _decide(items, populations, sources)
+    return _decide(items, populations)
 
 
 def _populations(
-    items: Sequence[KnowledgeDiffItem], kind: str, record_id: str, sources: _EdgeSources
+    items: Sequence[KnowledgeDiffItem], kind: str, record_id: str
 ) -> _ReviewedPopulations | None:
     """Return one identity's two selected populations with their heads, or ``None`` when empty.
 
@@ -201,34 +146,22 @@ def _populations(
     after_population = _side_population(items, kind, record_id, "after")
     if not before_population and not after_population:
         return None
-    before_edges = read_snapshot_edges(sources.before_database, sources.repository_id)
-    after_edges = read_snapshot_edges(sources.after_database, sources.repository_id)
     return _ReviewedPopulations(
         kind=kind,
         record_id=record_id,
         before=before_population,
         after=after_population,
-        before_heads=revision_heads(before_population, _touching(before_edges, before_population)),
-        after_heads=revision_heads(after_population, _touching(after_edges, after_population)),
+        before_heads=revision_heads(before_population),
+        after_heads=revision_heads(after_population),
     )
 
 
 def _decide(
     items: Sequence[KnowledgeDiffItem],
     populations: _ReviewedPopulations,
-    sources: _EdgeSources,
 ) -> SubjectRevisionSelection:
     """Route one identity's established populations to their recorded selection."""
 
-    invalid = _invalid_graph_detail(
-        populations.kind,
-        sources,
-        ("before", populations.before),
-        ("after", populations.after),
-    )
-    if invalid is not None:
-        side, reason = invalid
-        return _unresolved(populations, f"the {side} snapshot's {reason}")
     if not populations.before or not populations.after:
         return _one_sided(items, populations, added=not populations.before)
     return _combine(items, populations)
@@ -237,17 +170,8 @@ def _decide(
 def _combine(
     items: Sequence[KnowledgeDiffItem], populations: _ReviewedPopulations
 ) -> SubjectRevisionSelection:
-    """Record the selection for two nonempty populations: compared, ambiguous or unresolved."""
+    """Record the selection for two nonempty populations: compared or ambiguous."""
 
-    if not populations.before_heads or not populations.after_heads:
-        empty_side = "before" if not populations.before_heads else "after"
-        count = len(populations.before) if not populations.before_heads else len(populations.after)
-        return _unresolved(
-            populations,
-            f"the {empty_side} snapshot retains {count} revision(s) but establishes no head -- "
-            "every retained revision names a successor, so the authored lineage is cyclic and "
-            "no newest version is fabricated",
-        )
     if len(populations.before_heads) != 1 or len(populations.after_heads) != 1:
         return _ambiguous(populations)
     return _compared(items, populations)
@@ -286,93 +210,6 @@ def _side_population(
         if payload is not None and payload.revision_id is not None
     }
     return tuple(sorted(revisions))
-
-
-def _touching(
-    edges: frozenset[tuple[str, str]], population: tuple[str, ...]
-) -> tuple[tuple[str, str], ...]:
-    """Return the authored edges with both endpoints in one selected population."""
-
-    members = set(population)
-    return tuple(
-        sorted(
-            (successor, predecessor)
-            for successor, predecessor in edges
-            if successor in members and predecessor in members
-        )
-    )
-
-
-def _invalid_graph_detail(
-    kind: str,
-    sources: _EdgeSources,
-    before: tuple[str, tuple[str, ...]],
-    after: tuple[str, tuple[str, ...]],
-) -> tuple[str, str] | None:
-    """Return ``(side, reason)`` when an authored edge names a revision no snapshot retains.
-
-    An authored predecessor edge is a foreign key into the snapshot that declares it: a snapshot
-    that declares an edge naming a revision necessarily holds it. An edge touching the reviewed
-    population whose other endpoint is recorded nowhere in that snapshot is therefore an invalid
-    graph, and the reason names the missing revision rather than repairing it. Recorded-but-
-    unselected endpoints are ignored -- the packet scopes heads to the selected population, so a
-    successor relation outside it neither establishes nor breaks one.
-    """
-
-    for side, population in (before, after):
-        database = sources.before_database if side == "before" else sources.after_database
-        missing = _unretained_endpoint(kind, sources.repository_id, database, population)
-        if missing is not None:
-            return (
-                side,
-                f"authored lineage names revision {missing} that the snapshot does not "
-                "retain, so no head can be established from it",
-            )
-    return None
-
-
-def _unretained_endpoint(
-    kind: str,
-    repository_id: str,
-    database_path: Path,
-    population: tuple[str, ...],
-) -> str | None:
-    """Return the first sorted edge endpoint the snapshot does not retain, or ``None``.
-
-    Only edges touching the reviewed population are examined: an edge between two revisions the
-    comparison never selected cannot move this subject's heads. The recorded check is one
-    existence question per touched endpoint, asked of the snapshot file itself through a
-    read-only connection.
-    """
-
-    members = set(population)
-    edges = read_snapshot_edges(database_path, repository_id)
-    candidates = sorted(
-        {
-            endpoint
-            for successor, predecessor in edges
-            for endpoint in (successor, predecessor)
-            if (successor in members or predecessor in members) and endpoint not in members
-        }
-    )
-    connection = open_read_only_database(Path(database_path))
-    try:
-        for endpoint in candidates:
-            if not _revision_is_recorded(connection, kind, repository_id, endpoint):
-                return endpoint
-        return None
-    finally:
-        connection.close()
-
-
-def _revision_is_recorded(
-    connection: apsw.Connection, kind: str, repository_id: str, revision_id: str
-) -> bool:
-    """Return whether one snapshot retains one revision of the reviewed kind."""
-
-    if kind == "family":
-        return family_revision_is_recorded(connection, repository_id, revision_id)
-    return invariant_revision_is_recorded(connection, repository_id, revision_id)
 
 
 def _compared(
@@ -415,7 +252,7 @@ def _one_sided(
     A known-empty side is a side whose selected population holds no revision of the reviewed
     identity: the nonempty side's unique head is shown and the empty side renders as absent,
     exactly as the one-sided contract already does. A nonempty side with anything but one head
-    is not a one-sided side with a head to show -- it is an ambiguity or a lineage failure, and
+    is not a one-sided side with a head to show -- it is an ambiguity, and
     it is reported as one rather than as an addition or removal wearing a chosen revision.
     """
 
@@ -423,20 +260,6 @@ def _one_sided(
     shown = "after" if added else "before"
     heads = populations.after_heads if added else populations.before_heads
     if len(heads) != 1:
-        if not heads:
-            return _unresolved(
-                _ReviewedPopulations(
-                    kind=kind,
-                    record_id=record_id,
-                    before=populations.before,
-                    after=populations.after,
-                    before_heads=(),
-                    after_heads=(),
-                ),
-                f"the {shown} snapshot retains revisions but establishes no head -- every "
-                "retained revision names a successor, so the authored lineage is cyclic and "
-                "no newest version is fabricated",
-            )
         return _ambiguous(
             populations,
             crowded_side=shown,

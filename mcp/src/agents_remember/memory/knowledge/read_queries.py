@@ -24,17 +24,8 @@ from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 # column list. Ordering a read by a stored key rather than by insertion order is what makes two
 # datasets holding the same records page identically.
 #
-# The composition generation's six tables are declared here for exactly that reason. A composition
-# read ordered by insertion is a defect rather than a presentation choice: two datasets holding the
-# same edges must report the same links in the same order, and a revision's links must not move when
-# an unrelated row is written. Each entry is the primary key's distinguishing column, so the order is
-# the row's own identity rather than the order a write happened to produce.
-#
-# The supporting-record generation's five tables are declared here for the same reason, and the
-# identity column named for them is the *second* column of every key below, because the first is the
-# namespace: a table keyed ``(repository_id, identity)`` is ordered by its identity. The coverage
-# table's key is the pair of endpoint columns, so it is declared in the order the DDL names them --
-# which is also why the read orders a relation's rows by the pair rather than by either half.
+# Each entry is the primary key's distinguishing column, so the order is the row's own identity
+# rather than the order a write happened to produce.
 _ORDER_COLUMNS: Mapping[str, str] = {
     "invariant": "invariant_id",
     "invariant_revision": "revision_id",
@@ -43,12 +34,6 @@ _ORDER_COLUMNS: Mapping[str, str] = {
     "family_member": "member_id",
     "realization_claim": "claim_id",
     "source_anchor": "anchor_id",
-    "family_revision_context_revision": "revision_id",
-    "evidence_claim": "claim_id",
-    "evidence_claim_invariant_subject": "claim_id",
-    "evidence_claim_facet_subject": "claim_id",
-    "evidence_claim_coverage": "claim_id_endpoint",
-    "verification_observation": "observation_id",
 }
 
 
@@ -346,29 +331,6 @@ def membership_is_recorded(connection: apsw.Connection, repository_id: str, memb
         "SELECT 1 FROM family_member WHERE repository_id = ? AND member_id = ?",
         (repository_id, member_id),
     )
-
-
-def fetch_predecessor_edges(
-    connection: apsw.Connection, repository_id: str
-) -> tuple[tuple[str, str], ...]:
-    """Return every ``(successor_revision_id, predecessor_revision_id)`` edge one snapshot records.
-
-    Each revision kind records its own authored old/new relation in its own table, and both are read
-    here because a comparison asks the same question of either. The edges are *authored*: they are
-    what an author declared when they wrote the successor, so a comparison can pair two revisions
-    without comparing labels, versions or insertion order -- none of which an author guarantees.
-    """
-
-    rows = connection.execute(
-        "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor "
-        "WHERE repository_id = ? "
-        "UNION ALL "
-        "SELECT child_revision_id, parent_revision_id FROM family_predecessor "
-        "WHERE repository_id = ? "
-        "ORDER BY 1, 2",
-        (repository_id, repository_id),
-    )
-    return tuple((str(row[0]), str(row[1])) for row in rows)
 
 
 def realization_claim_is_recorded(

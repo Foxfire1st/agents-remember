@@ -1,26 +1,24 @@
-"""The explicit revision comparison: heads from authored successors, never from order or presence.
+"""The explicit revision comparison: heads from retained revisions, never from order or presence.
 
 These cases drive the **real** two-snapshot comparison over **real** snapshot pairs built through
-the public store operations, then run the exact head-selection function the review adapter calls.
+the text-backed builder, then run the exact head-selection function the review adapter calls.
 Nothing here re-implements a read, a comparison or a predecessor lookup, fakes a snapshot, or
-asserts a rendering it did not read back -- except the two fault-injection cases, which say so in
-their own docstrings: a corrupt snapshot cannot be authored through the validating write path, so
-the corruption is inserted as SQL into a scratch copy and the case asserts the read path refuses
-to select from it.
+asserts a rendering it did not read back -- except the fault-injection shape the void case
+names: an empty side cannot be authored as a text revision, so it is an empty built file.
+
+A text record holds exactly one revision (MIK-R74 rule 3), so one side retaining several
+revisions is not a shape a text tree can express: the multi-revision cases below name their
+removal rather than asserting it. What the selection still answers -- the single retained
+revision per side, the one-sided removal with its recorded head, and the retained population
+in sorted order -- is pinned here.
 
 The load-bearing properties, one case each:
 
-* a unique multi-step chain defaults to the first before head versus the last after head
-  (before ``r1`` and after ``r1 -> r2 -> r3`` is ``r1`` versus ``r3``; an advanced before head
-  ``r2`` moves the default to ``r2`` versus ``r3``), with the exact selected revision ids
-  recorded;
-* an intermediate revision stays selectable history through the comparison's own per-side
-  explicit revision selector;
-* a fork on either side is an explicit ambiguity naming every head -- never an arbitrary winner;
+* a unique single retained revision per side compares head to head, with the exact selected
+  revision ids recorded;
 * a known-empty side stays a one-sided addition or removal with the nonempty side's head
   recorded, which is ICR-R06@v1's contract reused rather than restated;
-* a successor cycle and a dangling authored edge are unresolved selections with no pair
-  recorded -- no timestamp, no similarity and no collection order fabricates a newest version;
+* heads are the retained population in sorted order: collection order selects nothing;
 * the review pane renders the selected head pair's own recorded statements.
 """
 
@@ -32,7 +30,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-import apsw
 import pytest
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.knowledge_review import (
@@ -51,12 +48,12 @@ from agents_remember.models.knowledge.diff import (
 )
 from agents_remember.models.knowledge.read import (
     InvariantIdentitySeed,
-    InvariantRevisionSeed,
 )
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 from knowledge_rows_test_support import (
+    INDEX_REPOSITORY_ID,
     InvariantRequest,
     RevisionDraft,
     RevisionRequest,
@@ -99,11 +96,10 @@ class ChainPair:
 
 @dataclass(frozen=True)
 class SnapshotSpec:
-    """The revisions one snapshot file holds: their ids, texts and predecessor links."""
+    """The revisions one snapshot file holds: their ids and texts."""
 
     revision_ids: tuple[str, ...]
     statements: tuple[str, ...]
-    predecessors: dict[str, tuple[str, ...]]
 
 
 def _build_snapshot(
@@ -112,9 +108,15 @@ def _build_snapshot(
     invariant_id: str,
     spec: SnapshotSpec,
     authorship: Authorship,
-) -> None:
-    """Author one snapshot's revisions through the public store operations, in chain order."""
+) -> tuple[str, tuple[str, ...]]:
+    """Author one snapshot's revision through the text-backed builder, and return its projection.
 
+    The returned identities are the projection's own UUIDs for the text it wrote, because the
+    selection names stored revision identities -- the caller-side UUIDs name nothing in a tree.
+    """
+
+    projected_revisions: list[str] = []
+    projected_invariant = invariant_id
     store = open_knowledge_store(database_path, repository_id)
     try:
         created = store.create_repository(
@@ -133,6 +135,7 @@ def _build_snapshot(
             )
         )
         assert invariant.state == "created", invariant.refusal
+        projected_invariant = invariant.invariant_id
         for revision_id, statement in zip(spec.revision_ids, spec.statements, strict=True):
             revision = store.create_revision(
                 RevisionRequest(
@@ -145,14 +148,15 @@ def _build_snapshot(
                         applicability="Every admitted candidate write.",
                         conditions=("The candidate write is admitted.",),
                         exclusions=("Historical rows are not rewritten.",),
-                        predecessors=spec.predecessors.get(revision_id, ()),
                         provenance=authorship,
                     ),
                 )
             )
             assert revision.state == "created", revision.refusal
+            projected_revisions.append(revision.revision_id)
     finally:
         store.close()
+    return projected_invariant, tuple(projected_revisions)
 
 
 def _build_pair(
@@ -160,58 +164,56 @@ def _build_pair(
     *,
     before_count: int,
     after_count: int,
-    fork: bool = False,
 ) -> ChainPair:
-    """Build a before/after snapshot pair sharing the first ``before_count`` chain revisions.
+    """Build a before/after snapshot pair sharing the first ``before_count`` revisions.
 
-    The after snapshot holds the full chain (or the fork when ``fork`` is set); the before
-    snapshot holds its prefix. Every shared revision carries the same id and the same sealed
-    fields in both files, authored under one provenance envelope.
+    Both counts are one: a text record holds exactly one revision (MIK-R74 rule 3), so the
+    pair shares its single retained revision. Every shared revision carries the same id and
+    the same sealed fields in both files, authored under one provenance envelope.
     """
 
-    repository_id = str(uuid4())
+    assert before_count == 1 and after_count == 1, (
+        "a text pair retains exactly one revision per side; "
+        "the multi-revision cases name their removal below"
+    )
+    repository_id = INDEX_REPOSITORY_ID
     invariant_id = str(uuid4())
-    total = max(before_count, after_count)
-    revision_ids = tuple(str(uuid4()) for _ in range(total))
-    statements = STATEMENTS[:total]
+    revision_ids = (str(uuid4()),)
+    statements = STATEMENTS[:1]
     authorship = _authorship()
-    if fork:
-        predecessors = {revision_id: (revision_ids[0],) for revision_id in revision_ids[1:]}
-    else:
-        predecessors = {
-            revision_ids[index]: (revision_ids[index - 1],) for index in range(1, total)
-        }
     directory.mkdir(parents=True, exist_ok=True)
     before_database = directory / "before.db"
     after_database = directory / "after.db"
-    _build_snapshot(
+    projected_invariant, before_revisions = _build_snapshot(
         before_database,
         repository_id,
         invariant_id,
         SnapshotSpec(
             revision_ids=revision_ids[:before_count],
             statements=statements[:before_count],
-            predecessors=predecessors,
         ),
         authorship,
     )
-    _build_snapshot(
+    _, after_revisions = _build_snapshot(
         after_database,
         repository_id,
         invariant_id,
         SnapshotSpec(
             revision_ids=revision_ids[:after_count],
             statements=statements[:after_count],
-            predecessors=predecessors,
         ),
         authorship,
     )
+    assert before_revisions == after_revisions, (
+        "the same text projects the same identities in both files, "
+        "which is what makes the shared revision shared"
+    )
     return ChainPair(
         repository_id=repository_id,
-        invariant_id=invariant_id,
+        invariant_id=projected_invariant,
         before_database=before_database,
         after_database=after_database,
-        revision_ids=revision_ids,
+        revision_ids=before_revisions,
         statements=statements,
     )
 
@@ -248,114 +250,42 @@ def _select(pair: ChainPair, result: KnowledgeDiffResult) -> ReviewRevisionSelec
     selected = select_subject_revisions(
         result.page.items,
         _identity_seed(pair),
-        repository_id=pair.repository_id,
-        before_database=pair.before_database,
-        after_database=pair.after_database,
     )
     assert selected.selection is not None
     return selected.selection
 
 
-def test_a_unique_chain_defaults_to_the_first_before_head_versus_the_last_after_head(
+def test_a_single_retained_revision_pair_compares_head_to_head(
     tmp_path: Path,
 ) -> None:
-    """Before ``r1`` and after ``r1 -> r2 -> r3`` defaults to ``r1`` versus ``r3``.
+    """One retained revision per side compares head to head.
 
-    The pair comes from the authored successor edges alone: ``r1`` is present on both sides
-    yet is not chosen for the after side, and the stream position of ``r3`` participates
-    nowhere -- the selection names stored revision identities, not first or last items.
+    Every retained revision is a head (MIK-R74 rule 1: text records hold no predecessor edge),
+    so a side retaining exactly one revision establishes exactly one head, and the pair
+    compares. The selection names stored revision identities, not first or last items.
     """
 
-    pair = _build_pair(tmp_path / "chain", before_count=1, after_count=3)
+    pair = _build_pair(tmp_path / "chain", before_count=1, after_count=1)
     selection = _select(pair, _compare(pair))
 
     assert selection.state == "compared"
     assert selection.before_revision_id == pair.revision_ids[0]
-    assert selection.after_revision_id == pair.revision_ids[2]
+    assert selection.after_revision_id == pair.revision_ids[0]
     assert selection.before_heads == (pair.revision_ids[0],)
-    assert selection.after_heads == (pair.revision_ids[2],)
-    assert sorted(selection.after_retained) == sorted(pair.revision_ids)
-    assert pair.revision_ids[0] in selection.statement
-    assert pair.revision_ids[2] in selection.statement
-
-
-def test_an_advanced_before_head_moves_the_default_pair(tmp_path: Path) -> None:
-    """Before ``r1 -> r2`` and after ``r1 -> r2 -> r3`` defaults to ``r2`` versus ``r3``."""
-
-    pair = _build_pair(tmp_path / "advanced", before_count=2, after_count=3)
-    selection = _select(pair, _compare(pair))
-
-    assert selection.state == "compared"
-    assert selection.before_revision_id == pair.revision_ids[1]
-    assert selection.after_revision_id == pair.revision_ids[2]
-
-
-def test_an_intermediate_revision_stays_selectable_history(tmp_path: Path) -> None:
-    """The middle revision of a chain is addressable through the per-side explicit selector.
-
-    The default still compares the heads, and the intermediate revision is compared on demand:
-    addressing ``r2`` on the after side selects exactly ``r1`` versus ``r2`` with ``r2``'s own
-    recorded text -- history that can be opened, not a count that can only be read.
-    """
-
-    pair = _build_pair(tmp_path / "history", before_count=1, after_count=3)
-    result = diff_knowledge_scope(
-        KnowledgeDiffRequest(
-            selector=_identity_seed(pair),
-            before=KnowledgeDiffSide(
-                context=open_diff_side(pair.before_database, pair.repository_id)
-            ),
-            after=KnowledgeDiffSide(
-                context=open_diff_side(pair.after_database, pair.repository_id),
-                selector=InvariantRevisionSeed(
-                    invariant_id=pair.invariant_id, revision_id=pair.revision_ids[1]
-                ),
-            ),
-        ),
-        before_path=pair.before_database,
-        after_path=pair.after_database,
-    )
-    assert result.state == "page", result.refusal
-    assert result.page is not None
-    selection = select_subject_revisions(
-        result.page.items,
-        _identity_seed(pair),
-        repository_id=pair.repository_id,
-        before_database=pair.before_database,
-        after_database=pair.after_database,
-    ).selection
-    assert selection is not None
-    assert selection.state == "compared"
-    assert selection.before_revision_id == pair.revision_ids[0]
-    assert selection.after_revision_id == pair.revision_ids[1]
-
-
-def test_a_fork_on_the_after_side_is_an_explicit_ambiguity(tmp_path: Path) -> None:
-    """Two retained successors name no winner: the selection lists both heads and no pair."""
-
-    pair = _build_pair(tmp_path / "fork", before_count=1, after_count=3, fork=True)
-    selection = _select(pair, _compare(pair))
-
-    assert selection.state == "ambiguous"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert selection.before_heads == (pair.revision_ids[0],)
-    assert sorted(selection.after_heads) == sorted(pair.revision_ids[1:])
-    assert pair.revision_ids[1] in selection.statement
-    assert pair.revision_ids[2] in selection.statement
-
-
-def test_a_fork_on_the_before_side_is_an_explicit_ambiguity(tmp_path: Path) -> None:
-    """Ambiguity is per side: a branched before snapshot is ambiguous against a linear after."""
-
-    pair = _build_pair(tmp_path / "before-fork", before_count=3, after_count=1, fork=True)
-    selection = _select(pair, _compare(pair))
-
-    assert selection.state == "ambiguous"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert sorted(selection.before_heads) == sorted(pair.revision_ids[1:])
     assert selection.after_heads == (pair.revision_ids[0],)
+    assert pair.revision_ids[0] in selection.statement
+
+
+# Dead: a text record holds exactly one revision (MIK-R74 rule 3), so one side retaining
+# several revisions is not a shape a text tree can express. The multi-revision cases below
+# name their removal rather than asserting it; the single retained revision per side above,
+# the one-sided removal, the sorted heads and the pane statements still pin the selection.
+_REMOVED_MULTI_REVISION_CASES = (
+    "test_a_second_retained_revision_is_ambiguity_not_a_default",
+    "test_an_intermediate_revision_stays_selectable_history",
+    "test_a_fork_on_the_after_side_is_an_explicit_ambiguity",
+    "test_a_fork_on_the_before_side_is_an_explicit_ambiguity",
+)
 
 
 def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
@@ -401,9 +331,6 @@ def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
     selection = select_subject_revisions(
         result.page.items,
         _identity_seed(pair),
-        repository_id=pair.repository_id,
-        before_database=pair.before_database,
-        after_database=void_database,
     ).selection
     assert selection is not None
     assert selection.state == "removed"
@@ -413,126 +340,16 @@ def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
     assert "removal" in selection.statement
 
 
-def test_a_successor_cycle_is_unresolved_and_names_no_pair(tmp_path: Path) -> None:
-    """A cycle leaves no head; the selection is unresolved rather than a newest version.
+def test_heads_are_the_retained_population_in_sorted_order() -> None:
+    """Heads are every retained revision, in sorted order: collection order selects nothing.
 
-    The cycle cannot be authored through the validating write path -- the second edge closes a
-    loop no authoring order reaches -- so it is inserted as SQL into a scratch copy, and the
-    case first proves the surgery landed. What is asserted is the read path: two recorded
-    revisions, every one naming a successor, zero heads, no pair, no timestamp, no similarity.
+    Text records hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation
+    narrows the population. A rule that picked the first stored id would answer ``m`` here;
+    the head rule answers both, sorted.
     """
 
-    pair = _build_pair(tmp_path / "cycle", before_count=1, after_count=2)
-    first, second = pair.revision_ids[0], pair.revision_ids[1]
-    cyclic = tmp_path / "cyclic.db"
-    cyclic.write_bytes(pair.after_database.read_bytes())
-    connection = apsw.Connection(str(cyclic))
-    with connection:
-        connection.execute(
-            "INSERT INTO invariant_predecessor "
-            "(repository_id, invariant_id, child_revision_id, parent_revision_id) "
-            "VALUES (?, ?, ?, ?)",
-            (pair.repository_id, pair.invariant_id, first, second),
-        )
-    connection.close()
-    check = apsw.Connection(str(cyclic))
-    try:
-        edges = {
-            (str(row[0]), str(row[1]))
-            for row in check.execute(
-                "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor "
-                "WHERE repository_id = ?",
-                (pair.repository_id,),
-            )
-        }
-    finally:
-        check.close()
-    assert (first, second) in edges and (second, first) in edges, "the cycle surgery landed"
-    assert revision_heads((first, second), tuple(sorted(edges))) == ()
-
-    cyclic_pair = ChainPair(
-        repository_id=pair.repository_id,
-        invariant_id=pair.invariant_id,
-        before_database=pair.before_database,
-        after_database=cyclic,
-        revision_ids=pair.revision_ids,
-        statements=pair.statements,
-    )
-    selection = _select(cyclic_pair, _compare(cyclic_pair))
-
-    assert selection.state == "unresolved"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert "cyclic" in selection.statement
-
-
-def test_a_dangling_authored_edge_is_unresolved_and_names_the_missing_revision(
-    tmp_path: Path,
-) -> None:
-    """An edge to a revision the snapshot does not retain is an invalid graph, not a head.
-
-    The dangling edge cannot be committed through the validating write path -- its foreign key
-    would fail -- so it is inserted with key enforcement off in a scratch copy, and the case
-    first proves the surgery landed. The read path then refuses to establish a head from it.
-    """
-
-    pair = _build_pair(tmp_path / "dangling", before_count=1, after_count=2)
-    missing = str(uuid4())
-    second = pair.revision_ids[1]
-    corrupt = tmp_path / "corrupt.db"
-    corrupt.write_bytes(pair.after_database.read_bytes())
-    connection = apsw.Connection(str(corrupt))
-    with connection:
-        connection.execute("PRAGMA foreign_keys=OFF")
-        connection.execute(
-            "INSERT INTO invariant_predecessor "
-            "(repository_id, invariant_id, child_revision_id, parent_revision_id) "
-            "VALUES (?, ?, ?, ?)",
-            (pair.repository_id, pair.invariant_id, second, missing),
-        )
-    connection.close()
-    check = apsw.Connection(str(corrupt))
-    try:
-        edges = {
-            (str(row[0]), str(row[1]))
-            for row in check.execute(
-                "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor "
-                "WHERE repository_id = ?",
-                (pair.repository_id,),
-            )
-        }
-    finally:
-        check.close()
-    assert (second, missing) in edges, "the dangling-edge surgery landed"
-
-    corrupt_pair = ChainPair(
-        repository_id=pair.repository_id,
-        invariant_id=pair.invariant_id,
-        before_database=pair.before_database,
-        after_database=corrupt,
-        revision_ids=pair.revision_ids,
-        statements=pair.statements,
-    )
-    selection = _select(corrupt_pair, _compare(corrupt_pair))
-
-    assert selection.state == "unresolved"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert missing in selection.statement
-
-
-def test_heads_come_from_successors_not_from_sorted_order() -> None:
-    """A head that sorts last is still the head: collection order selects nothing.
-
-    The successor ``z`` names ``m`` as its predecessor, so ``m`` has a recorded successor and
-    ``z`` -- which sorts after it -- is the only head. A rule that picked the first stored id
-    would answer ``m``; the authored edge answers ``z``.
-    """
-
-    assert revision_heads(("m-revision", "z-revision"), (("z-revision", "m-revision"),)) == (
-        "z-revision",
-    )
-    assert revision_heads(("m-revision", "z-revision"), ()) == ("m-revision", "z-revision")
+    assert revision_heads(("m-revision", "z-revision")) == ("m-revision", "z-revision")
+    assert revision_heads(("z-revision", "m-revision")) == ("m-revision", "z-revision")
 
 
 def _git_tree(root: Path, files: dict[str, str]) -> str:
@@ -571,13 +388,12 @@ def _git(root: Path, args: list[str]) -> str:
 def test_the_review_pane_renders_the_selected_head_pairs_own_statements(tmp_path: Path) -> None:
     """The pane's operands are the selected heads' recorded statements, through the adapter.
 
-    A three-step chain with two real trees goes through the production composition: the before
+    A pair with one retained revision per side goes through the production composition: the before
     operand is the before head's text, the after operand the after head's, and the recorded
-    selection beside them names the exact pair -- so the old rule's identical-statements
-    rendering would fail this case and the head rule passes it.
+    selection beside them names the exact pair.
     """
 
-    pair = _build_pair(tmp_path / "pane", before_count=1, after_count=3)
+    pair = _build_pair(tmp_path / "pane", before_count=1, after_count=1)
     before_root = tmp_path / "before-code"
     after_root = tmp_path / "after-code"
     before_tree = _git_tree(before_root, {"src/a.py": "# before\n"})
@@ -608,8 +424,8 @@ def test_the_review_pane_renders_the_selected_head_pairs_own_statements(tmp_path
     assert selection is not None
     assert selection.state == "compared"
     assert selection.before_revision_id == pair.revision_ids[0]
-    assert selection.after_revision_id == pair.revision_ids[2]
+    assert selection.after_revision_id == pair.revision_ids[0]
     assert knowledge.before_statement.state == "present"
     assert knowledge.after_statement.state == "present"
     assert knowledge.before_statement.text == pair.statements[0]
-    assert knowledge.after_statement.text == pair.statements[2]
+    assert knowledge.after_statement.text == pair.statements[0]

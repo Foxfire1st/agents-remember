@@ -1,18 +1,18 @@
-"""The sealed revision payloads, on both lineage graphs and through the read path.
+"""The sealed revision payloads, at the model and through the read path.
 
-The predecessor set is inside every revision digest, which is what binds a stored revision identity
-to the exact edge set it was authored with. This module owns the executable evidence for that field
-on **both** payloads, because neither single-graph module owns the shared mechanism:
+A revision's ``payload_digest`` seals its stored row: a row whose text was rewritten behind its
+identity is refused on decode rather than served as the revision that identity names. This module
+owns the executable evidence for that seal on **both** revision payloads:
 
-* the invariant payload (L1) is exercised for its aggregate round-trip but never for the field
-  alone, so a payload that dropped the predecessor set would keep every L1 node green;
-* the family payload has the same shape and is sealed by the same mechanism.
+* the digest covers the stored cells (the seal unit test pins one field's contribution);
+* the aggregates refuse self-contradictory construction (a predecessor named twice, a revision as
+  its own predecessor, acceptance mismatches);
+* each read node rewrites one stored cell behind a sealed row -- the only way to change sealed
+  content without rewriting the row through the writer, which recomputes the seal -- then asserts
+  that decoding the row refuses rather than serving content its identity no longer describes.
 
-Each digest node holds *every other field equal*, and each read node edits the edge **table**
-behind a stored row -- the only way to change a sealed predecessor set without rewriting the row
-itself -- then asserts that reading the revision back refuses rather than serving a revision whose
-identity no longer describes it. One construction node holds what neither aggregate may be built
-with at all, because the reader seals whatever value it constructed from the stored row.
+The predecessor edge tables are gone with the schema (MIK-R74 rule 1): there is no edge table
+left to tamper with, and decoded predecessors are always ().
 """
 
 from __future__ import annotations
@@ -21,7 +21,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import apsw
 import pytest
+from agents_remember.memory.knowledge.records import (
+    decode_family_revision_row,
+    decode_revision_row,
+)
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.digest import revision_payload_digest
 from agents_remember.models.knowledge.family import FamilyRevision
@@ -40,26 +45,6 @@ from knowledge_fixture_test_support import (
 )
 from knowledge_rows_test_support import families
 from pydantic import ValidationError
-
-_FAMILY_EDGE_INSERT = (
-    "INSERT INTO family_predecessor "
-    "(repository_id, family_id, child_revision_id, parent_revision_id) VALUES (?, ?, ?, ?)"
-)
-
-_FAMILY_EDGE_DELETE = (
-    "DELETE FROM family_predecessor WHERE repository_id = ? AND family_id = ? "
-    "AND child_revision_id = ? AND parent_revision_id = ?"
-)
-
-_INVARIANT_EDGE_INSERT = (
-    "INSERT INTO invariant_predecessor "
-    "(repository_id, invariant_id, child_revision_id, parent_revision_id) VALUES (?, ?, ?, ?)"
-)
-
-_INVARIANT_EDGE_DELETE = (
-    "DELETE FROM invariant_predecessor WHERE repository_id = ? AND invariant_id = ? "
-    "AND child_revision_id = ? AND parent_revision_id = ?"
-)
 
 
 @pytest.fixture
@@ -162,96 +147,63 @@ def test_neither_revision_aggregate_is_built_from_a_value_that_contradicts_itsel
                 pytest.fail(f"{aggregate.__name__} was built from {why}")
 
 
-def test_a_family_revision_read_refuses_after_a_predecessor_edge_is_added(
+def test_an_invariant_revision_read_refuses_a_cell_rewritten_behind_its_seal(
     fixture: BranchingKnowledgeFixture,
 ) -> None:
-    """An edge added behind a sealed family revision is detected when the revision is read back.
+    """The invariant read path detects a stored cell rewritten behind a sealed revision.
 
-    The seal covers the edge set, so an edge can only be added without changing the stored row by
-    writing the edge table directly -- what a changeset, a repair script or a future operation that
-    forgot to re-seal would do. The read must refuse instead of serving the revision as if its
-    identity still described it.
+    The seal covers the row's cells, so content can only change without changing the stored
+    row by rewriting the cell directly -- what a repair script or a future operation that
+    forgot to re-seal would do. The decode must refuse instead of serving the revision as if
+    its identity still described it.
     """
 
     with fixture.reopen() as store:
-        before = families.get_family_revision(store, fixture.family_sibling_revision_id)
+        before = store.get_revision(fixture.third_revision_id)
         assert before is not None
-        assert before.revision.predecessors == (fixture.family.revision_id,)
-        store.connection.execute(
-            _FAMILY_EDGE_INSERT,
-            (
-                fixture.repository_id,
-                fixture.family.family_id,
-                fixture.family_sibling_revision_id,
-                fixture.family_successor_revision_id,
-            ),
+        assert before.revision.predecessors == ()
+    tamperer = apsw.Connection(str(fixture.database_path))
+    try:
+        row = list(
+            next(
+                tamperer.execute(
+                    "SELECT repository_id, invariant_id, revision_id, display_version, statement, "
+                    "applicability, conditions, exclusions, state_at_origin, acceptance_ref, "
+                    "provenance, payload_digest FROM invariant_revision WHERE revision_id = ?",
+                    (fixture.third_revision_id,),
+                )
+            )
         )
-        with pytest.raises(KnowledgeStorageError, match="payload digest"):
-            families.get_family_revision(store, fixture.family_sibling_revision_id)
+    finally:
+        tamperer.close()
+    row[4] = "A statement rewritten behind the identity."
+    with pytest.raises(KnowledgeStorageError, match="payload digest"):
+        decode_revision_row(row, ())
 
 
-def test_a_family_revision_read_refuses_after_a_predecessor_edge_is_deleted(
+def test_a_family_revision_read_refuses_a_cell_rewritten_behind_its_seal(
     fixture: BranchingKnowledgeFixture,
 ) -> None:
-    """An edge deleted behind a sealed family revision is detected when the revision is read back.
-
-    The delete trigger is dropped first because the point of the case is the *second* defence: even
-    a database edited by something that bypassed the operation must not be served as the revision
-    the identity names.
-    """
+    """The family read path detects a stored cell rewritten behind a sealed revision."""
 
     with fixture.reopen() as store:
-        store.connection.execute("DROP TRIGGER family_predecessor_no_delete")
-        store.connection.execute(
-            _FAMILY_EDGE_DELETE,
-            (
-                fixture.repository_id,
-                fixture.family.family_id,
-                fixture.family_successor_revision_id,
-                fixture.family.revision_id,
-            ),
-        )
-        with pytest.raises(KnowledgeStorageError, match="payload digest"):
-            families.get_family_revision(store, fixture.family_successor_revision_id)
-
-
-def test_an_invariant_revision_read_refuses_after_a_predecessor_edge_is_added(
-    fixture: BranchingKnowledgeFixture,
-) -> None:
-    """The invariant read path detects an edge added behind a sealed revision."""
-
-    with fixture.reopen() as store:
-        before = store.get_revision(fixture.right_revision_id)
+        before = families.get_family_revision(store, fixture.overlapping_family.revision_id)
         assert before is not None
-        assert before.revision.predecessors == (fixture.base_revision_id,)
-        store.connection.execute(
-            _INVARIANT_EDGE_INSERT,
-            (
-                fixture.repository_id,
-                fixture.invariant_id,
-                fixture.right_revision_id,
-                fixture.left_revision_id,
-            ),
+        assert before.revision.predecessors == ()
+    tamperer = apsw.Connection(str(fixture.database_path))
+    try:
+        row = list(
+            next(
+                tamperer.execute(
+                    "SELECT repository_id, family_id, revision_id, display_version, joint_guarantee, "
+                    "state_at_origin, acceptance_ref, provenance, payload_digest FROM family_revision "
+                    "WHERE revision_id = ?",
+                    (fixture.overlapping_family.revision_id,),
+                )
+            )
         )
-        with pytest.raises(KnowledgeStorageError, match="payload digest"):
-            store.get_revision(fixture.right_revision_id)
-
-
-def test_an_invariant_revision_read_refuses_after_a_predecessor_edge_is_deleted(
-    fixture: BranchingKnowledgeFixture,
-) -> None:
-    """The invariant read path detects an edge removed behind a sealed revision."""
-
-    with fixture.reopen() as store:
-        store.connection.execute("DROP TRIGGER invariant_predecessor_no_delete")
-        store.connection.execute(
-            _INVARIANT_EDGE_DELETE,
-            (
-                fixture.repository_id,
-                fixture.invariant_id,
-                fixture.left_revision_id,
-                fixture.base_revision_id,
-            ),
-        )
-        with pytest.raises(KnowledgeStorageError, match="payload digest"):
-            store.get_revision(fixture.left_revision_id)
+    finally:
+        tamperer.close()
+    row[4] = "A guarantee rewritten behind the identity."
+    with pytest.raises(KnowledgeStorageError, match="payload digest"):
+        decode_family_revision_row(row, ())

@@ -29,7 +29,7 @@ from agents_remember.memory.knowledge.connection import (
 from agents_remember.memory.knowledge.refusals import (
     KnowledgeStorageError,
 )
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.schema import (
     SchemaGeneration,
     generation_for_name,
 )
@@ -156,7 +156,11 @@ class OpenedKnowledgeStore:
         )
 
     def get_revision(self, revision_id: str) -> StoredInvariantRevision | None:
-        """Return one revision aggregate with its decoded predecessor set, or ``None``."""
+        """Return one revision aggregate, or ``None``.
+
+        Text records are numbered revisions of one file and hold no predecessor edge, so a
+        decoded revision carries no predecessors; the stored seal is verified as recorded.
+        """
 
         row = next(
             iter(
@@ -170,7 +174,7 @@ class OpenedKnowledgeStore:
         )
         if row is None:
             return None
-        return records.decode_revision_row(row, self._predecessors_of(str(row[1]), revision_id))
+        return records.decode_revision_row(row, ())
 
     # -- index identity -------------------------------------------------------------
 
@@ -190,17 +194,6 @@ class OpenedKnowledgeStore:
         return logical.snapshot_identity(self.connection, repository, self.generation)
 
     # -- internals ------------------------------------------------------------------
-
-    def _predecessors_of(self, invariant_id: str, revision_id: str) -> tuple[str, ...]:
-        return records.decode_predecessor_rows(
-            list(
-                self.connection.execute(
-                    "SELECT parent_revision_id FROM invariant_predecessor "
-                    "WHERE repository_id = ? AND invariant_id = ? AND child_revision_id = ?",
-                    (self.repository_id, invariant_id, revision_id),
-                )
-            )
-        )
 
 
 def open_existing_knowledge_store(database_path: Path, repository_id: str) -> OpenedKnowledgeStore:

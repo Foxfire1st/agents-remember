@@ -58,7 +58,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     ) -> dict[str, Any]:
         """Measure the reference anchors of onboarding cards and the validity of the tree.
 
-        Read-only (writes only a temp drift report). On converted memory the result names
+        Read-only (files no temp drift report). On converted memory the result names
         how many anchors are current and how many are stale against the code, plus the
         knowledge validator's refusing findings. Whether an invariant is still current is
         answered by `knowledge_read` and `knowledge_integrity_check`, not here. A stale
@@ -257,7 +257,8 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         replace_existing: bool = False,
     ) -> dict[str, Any]:
         """Plan (non-mutating) carrying richer onboarding from a source branch into the exact open
-        external-memory leaf. Review it, then apply before normal leaf closeout/integration."""
+        external-memory leaf. Review it, then apply before normal leaf closeout/integration.
+        Files no report."""
         return memory_carryover_plan_payload(
             config,
             CarryoverSelection(

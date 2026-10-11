@@ -149,11 +149,18 @@ class IsolatedGitState:
 
 
 def git_environment() -> dict[str, str]:
-    """Return the ambient environment without Git repository selectors."""
+    """Return the ambient environment without Git repository selectors.
+
+    Every command through this kernel additionally runs with ``GIT_OPTIONAL_LOCKS=0`` (MIK-R74
+    rule 6): a read must never take a lock the repository did not ask for, and no command here
+    needs an optional one -- writers keep the locks their operation requires, which are never
+    optional.
+    """
 
     environment = os.environ.copy()
     for name in GIT_REPOSITORY_SELECTOR_ENV:
         environment.pop(name, None)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
     return environment
 
 

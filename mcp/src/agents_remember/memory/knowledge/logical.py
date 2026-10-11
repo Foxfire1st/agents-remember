@@ -29,7 +29,7 @@ from agents_remember.memory.knowledge.connection import (
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.request_digests import digest_in_request
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.schema import (
     SchemaGeneration,
     generation_for_name,
     generation_of_database,
@@ -54,7 +54,7 @@ def resolve_generation(generation: SchemaGeneration | str) -> SchemaGeneration:
     """Return the generation record an encoder caller selected, however it spelled it.
 
     Dispatch -- deciding *which* generation a dataset is -- happens in
-    :mod:`…schema_generations` and reads the dataset. This function does not decide anything: it
+    :mod:`…schema` and reads the dataset. This function does not decide anything: it
     resolves a caller's already-selected generation to the record the encoder needs. A name that
     no registered generation declares is refused rather than approximated, so a caller cannot
     obtain a digest under a generation the registry does not contain.

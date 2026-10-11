@@ -266,14 +266,18 @@ def memory_baseline_adopt_payload(
 MAX_INLINE_CARRYOVER_PATHS = 25
 
 
-def _capped_paths(paths: list[str]) -> list[str]:
+def _capped_paths(paths: list[str], *, report_filed: bool = True) -> list[str]:
     if len(paths) <= MAX_INLINE_CARRYOVER_PATHS:
         return paths
     overflow = len(paths) - MAX_INLINE_CARRYOVER_PATHS
-    return [*paths[:MAX_INLINE_CARRYOVER_PATHS], f"... (+{overflow} more in report)"]
+    if report_filed:
+        return [*paths[:MAX_INLINE_CARRYOVER_PATHS], f"... (+{overflow} more in report)"]
+    return [*paths[:MAX_INLINE_CARRYOVER_PATHS], f"... (+{overflow} more, no report filed)"]
 
 
-def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+def compact_carryover_payload(
+    full: dict[str, Any], report_path: str | None
+) -> dict[str, Any]:
     """Keep the decisions, file the evidence.
 
     Every candidate record repeats two onboarding paths derivable from
@@ -288,12 +292,17 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[st
         decisions.setdefault(str(candidate.get("decision")), []).append(
             str(candidate.get("source_path"))
         )
-    compact["decisions"] = {decision: _capped_paths(paths) for decision, paths in decisions.items()}
+    compact["decisions"] = {
+        decision: _capped_paths(paths, report_filed=report_path is not None)
+        for decision, paths in decisions.items()
+    }
     if "carried" in full:
         compact["carriedPaths"] = _capped_paths(
-            [str(candidate.get("source_path")) for candidate in full["carried"]]
+            [str(candidate.get("source_path")) for candidate in full["carried"]],
+            report_filed=report_path is not None,
         )
-    compact["reportPath"] = report_path
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
 
 
@@ -301,13 +310,12 @@ def memory_carryover_plan_payload(
     config: McpRuntimeConfig,
     selection: CarryoverSelection,
 ) -> dict[str, Any]:
+    # A plan is a read and files no per-call report (rule 6); the answer is the plan with
+    # no ``reportPath`` key. Only the mutating apply files its report (not adjudicated here).
     full = memory_carryover_plan_tool(config, selection)
-    report_path = write_tool_report(
-        config.coordination_root, "memory_carryover_plan", full, label="plan"
-    )
     return _tool_payload(
         "memory_carryover_plan",
-        compact_carryover_payload(full, report_path.as_posix()),
+        compact_carryover_payload(full, None),
     )
 
 

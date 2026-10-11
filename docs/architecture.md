@@ -113,3 +113,28 @@ outside staging, commits, and transaction admission or recovery. Regenerating th
 rewrite historical commits; historical attribution rewrites require explicit deployment work.
 
 Provider lifecycle — building images, watchers, and indexing — is owned by the MCP provider tools and `runtime_install`, not by the memory or workflow skills.
+
+## What a Read May Write
+
+A read is every registered tool that its description calls a read, every `GET` route of the
+dashboard, `worktree_status`, and every preview and dry run. A read changes no branch, tag or
+`HEAD`; no file of a working tree; no Git index (reads run Git with `GIT_OPTIONAL_LOCKS=0`); no
+task document and no requirement packet. A read may write only:
+
+- (a) cache files under `<coordination root>/runtime/`;
+- (b) when the reviewer records a comparison: the comparison's record in the task's reports
+  folder, the captured objects, and one pin ref under `refs/ar/review/` (the archive hook
+  removes them);
+- (c) in a preview or dry run of a closeout: the leaf's worklist in its enclosure folder, its
+  quality reports, and the objects of the tree the gate judged.
+- (d) reads: when the caller of a context read asks for freshness, the writes of one `git fetch` of the configured upstream, all inside the Git directory: the fetched objects, the remote-tracking refs and their reflogs, `FETCH_HEAD`, a tag that Git's fetch follows by its default, and Git's own housekeeping after a fetch. It changes no local branch, no HEAD, no index and no file of a working tree. Without the argument the read fetches nothing.
+
+A read creates no directory except to hold a file of (a) to (d). A capture that nothing records
+(the index's capture, a currentness read) writes its objects into a scratch object directory,
+never into the repository. A read that cannot keep this boundary (for example a cache directory
+that cannot be written) is refused by name; it never falls back to writing somewhere else.
+
+Reads, previews and dry runs file no per-call report under `temp/tool-reports`: the answer
+carries the content and omits the filing pointer when nothing is filed (the codebase's own
+drift-check idiom). Only an executed mutating action files its report; mutating apply modes
+are not adjudicated here.

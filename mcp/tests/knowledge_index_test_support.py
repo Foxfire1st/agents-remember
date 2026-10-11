@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import apsw
+from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
@@ -391,10 +392,18 @@ def _heads(
     connection: apsw.Connection, table: str, predecessor: str, identity: str
 ) -> dict[str, dict[str, Any]]:
     columns = [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
-    rows = connection.execute(
-        f"SELECT * FROM {table} r WHERE NOT EXISTS (SELECT 1 FROM {predecessor} p "
-        "WHERE p.parent_revision_id = r.revision_id)"
-    )
+    tables = {
+        row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if predecessor in tables:
+        rows = connection.execute(
+            f"SELECT * FROM {table} r WHERE NOT EXISTS (SELECT 1 FROM {predecessor} p "
+            "WHERE p.parent_revision_id = r.revision_id)"
+        )
+    else:
+        # No predecessor table (MIK-R74 rule 1): text records hold no successor relation, so
+        # every retained revision is a head.
+        rows = connection.execute(f"SELECT * FROM {table} r")
     heads: dict[str, dict[str, Any]] = {}
     for row in rows:
         value = dict(zip(columns, row, strict=True))
@@ -574,8 +583,8 @@ def build_parity_dataset(directory: Path) -> tuple[Path, str]:
         assert result.state == "created", result.refusal
 
     directory.mkdir(parents=True, exist_ok=True)
-    database = directory / "knowledge.sqlite"
-    repository_id = str(uuid4())
+    database = directory / "parity-index.sqlite"
+    repository_id = INDEX_REPOSITORY_ID
     authorship = Authorship(
         actor_ref="agent:parity-fixture",
         authorization_ref="MIK-R23 parity",

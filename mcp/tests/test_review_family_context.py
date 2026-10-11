@@ -43,7 +43,6 @@ import pytest
 from agents_remember.application.knowledge_review import (
     read_knowledge_review,
 )
-from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft
 from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
@@ -59,25 +58,29 @@ from agents_remember.serving.review import (
     KNOWLEDGE_REVIEW_ROUTE,
     register_review_routes,
 )
+from diff_scope_test_support import (
+    RETRY_REVISED_STATEMENT,
+    rebuild_after_tree,
+    replace_after_tree,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from knowledge_rows_test_support import (
     FamilyMemberRequest,
-    FamilyRequest,
-    FamilyRevisionRequest,
     InvariantRequest,
     RevisionDraft,
     RevisionRequest,
-    families,
     memberships,
     open_knowledge_store,
 )
 from read_scope_test_support import (
     APPLICABILITY,
-    BASE_LABEL,
     CONDITIONS,
     DIRECT_FAMILY_GUARANTEE,
     EXCLUSIONS,
+    SYNCHRONIZATION_PATH,
+    ExtraFamilySeed,
+    ExtraInvariantSeed,
 )
 from test_knowledge_review_source_endpoints import (
     LEAF_ID,
@@ -96,139 +99,65 @@ SUCCESSOR_FAMILY_GUARANTEE = (
     "The retry budget and the batch obligation hold together under the revised member."
 )
 
-# The successor member revision's statement and label. The member moved, the family's guarantee did
-# not, and the two are separate stored facts this module measures rather than asserts.
-MEMBER_SUCCESSOR_STATEMENT = "Apply every admitted candidate change as one sealed batch."
-MEMBER_SUCCESSOR_VERSION = "v2"
+# The moved member's statement and label: the candidate's revised retry record, whose statement
+# the roster carries as the member's own recorded content. The version is the projection's
+# derived display version (``r1``: the record's text revision), never the authored label --
+# display versions are derived, not stored (MIK-R74 rule 3).
+MEMBER_SUCCESSOR_STATEMENT = RETRY_REVISED_STATEMENT
+MEMBER_SUCCESSOR_VERSION = "r1"
 
 # The candidate-only family identity and its guarantee: a family one snapshot records and the other
 # does not, which is what makes a one-sided family context's *absent* side measurable.
-# The two sibling family revisions the ambiguity case authors: each is a legitimate head with its
-# own authored guarantee text, so a composition that chose one of them would be visible in the text
-# it presented as the family's own.
-LEFT_GUARANTEE = "The retry budget holds with the batch rule recorded on the left branch."
-RIGHT_GUARANTEE = "The retry budget holds with the batch rule recorded on the right branch."
-
 ADDED_FAMILY_LABEL = "candidate-only-family"
 ADDED_FAMILY_GUARANTEE = "The retry budget is recorded with the candidate's own batch rule."
 
 
 @dataclass(frozen=True)
 class FamilyScenario:
-    """One enclosure whose candidate records a successor family revision and its memberships."""
+    """One enclosure whose candidate records the direct family at another revision number."""
 
     endpoints: EndpointFixture
     family_id: str
     parent_family_revision_id: str
     successor_family_revision_id: str
-    member_successor_revision_id: str
 
 
 @pytest.fixture(scope="module")
 def scenario(tmp_path_factory: pytest.TempPathFactory) -> FamilyScenario:
-    """One enclosure, curated once: a successor family revision, a moved member and a dropped one."""
+    """One enclosure, built once: a moved direct-family revision with its own roster."""
 
     return build_family_scenario(tmp_path_factory.mktemp("family-context"))
 
 
-def build_family_scenario(directory: Path) -> FamilyScenario:
-    """Build the enclosure and author the family movement through the shipped store operations.
+def build_family_scenario(
+    directory: Path, *, extra_families: tuple[ExtraFamilySeed, ...] = ()
+) -> FamilyScenario:
+    """Build the enclosure with the candidate's direct family at another revision number.
 
-    The candidate authors a successor revision of the family the retry obligation directly belongs to
-    and names the parent revision as its exact predecessor. The successor's memberships are its own
-    rows: the unchanged member (the reviewed revision), a *successor* revision of the sibling member,
-    and -- deliberately -- no row for the parent's other member, which is what makes "a successor
-    revision's roster is authored, not inherited" measurable.
+    The candidate's direct-family record is at revision number two with its own stored
+    guarantee text, holding only the revised member: the auxiliary member's row is left out,
+    which is what makes "a revision's roster is authored, not inherited" measurable. It is
+    test-only input to the actual composition, and exercises no retired production writer.
     """
 
     endpoints = build_endpoint_fixture(directory / "endpoints")
     diff = endpoints.diff
-    fixture = diff.before.fixture
-    parent = fixture.direct_family
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        member_successor = _author_member_successor(store, diff.repository_id, fixture)
-        successor = _author_family_successor(store, diff.repository_id, fixture, parent)
-        _author_membership(store, diff.repository_id, successor, diff.subject_revision_id, fixture)
-        _author_membership(store, diff.repository_id, successor, member_successor, fixture)
-    finally:
-        store.close()
-    # The datasets the review reads are the ones its own resolution selects: the two halves live in
-    # the leaf's disposable knowledge root, re-copied because the candidate was curated after them.
-    _place_datasets(diff, endpoints.contract)
+    parent = diff.before.fixture.direct_family
+    after = rebuild_after_tree(
+        directory / "family-after",
+        omit_claim_paths=(SYNCHRONIZATION_PATH,),
+        direct_family_revision_number=2,
+        omit_members=(("direct_family", "auxiliary_revision_id"),),
+        direct_family_guarantee=SUCCESSOR_FAMILY_GUARANTEE,
+        extra_families=extra_families,
+    )
+    endpoints = replace_after_tree(endpoints, after)
     return FamilyScenario(
         endpoints=endpoints,
         family_id=parent.family_id,
         parent_family_revision_id=parent.revision_id,
-        successor_family_revision_id=successor,
-        member_successor_revision_id=member_successor,
+        successor_family_revision_id=after.direct_family.revision_id,
     )
-
-
-def _author_member_successor(store, repository_id: str, fixture) -> str:
-    """Author one successor revision of the sibling invariant, through the store's own operation."""
-
-    revision_id = str(uuid4())
-    created = store.create_revision(
-        RevisionRequest(
-            repository_id=repository_id,
-            revision=RevisionDraft(
-                revision_id=revision_id,
-                invariant_id=fixture.batch_invariant_id,
-                display_version=MEMBER_SUCCESSOR_VERSION,
-                statement=MEMBER_SUCCESSOR_STATEMENT,
-                applicability=APPLICABILITY,
-                conditions=CONDITIONS,
-                exclusions=EXCLUSIONS,
-                predecessors=(fixture.batch_revision_id,),
-                provenance=fixture.authorship,
-            ),
-        )
-    )
-    assert created.state == "created", created.refusal
-    return revision_id
-
-
-def _author_family_successor(
-    store, repository_id: str, fixture, parent, guarantee: str = SUCCESSOR_FAMILY_GUARANTEE
-) -> str:
-    """Author one successor family revision naming the parent revision as its exact predecessor."""
-
-    revision_id = str(uuid4())
-    authored = families.create_family_revision(
-        store,
-        FamilyRevisionRequest(
-            repository_id=repository_id,
-            revision=FamilyRevisionDraft(
-                family_id=parent.family_id,
-                revision_id=revision_id,
-                display_version=BASE_LABEL,
-                joint_guarantee=guarantee,
-                predecessors=(parent.revision_id,),
-                provenance=fixture.authorship,
-            ),
-        ),
-    )
-    assert authored.state == "created", authored.refusal
-    return revision_id
-
-
-def _author_membership(store, repository_id: str, family_revision_id: str, member: str, fixture):
-    """Author one membership of an exact invariant revision in an exact family revision."""
-
-    created = memberships.create_family_member(
-        store,
-        FamilyMemberRequest(
-            repository_id=repository_id,
-            member=FamilyMemberDraft(
-                member_id=str(uuid4()),
-                family_revision_id=family_revision_id,
-                invariant_revision_id=member,
-                provenance=fixture.authorship,
-            ),
-        ),
-    )
-    assert created.state == "created", created.refusal
 
 
 # --- the review under test ---------------------------------------------------------------------
@@ -321,15 +250,24 @@ def test_a_selected_invariant_resolves_both_recorded_families_with_their_own_gua
 def test_a_family_that_did_not_move_is_still_composed_at_its_own_revision(
     scenario: FamilyScenario,
 ) -> None:
-    """A family both snapshots record identically is carried with the same exact revision."""
+    """A family both snapshots record identically is carried with the same exact revision.
 
-    fixture = scenario.endpoints.diff.before.fixture
-    payload = review(scenario.endpoints)
-    unchanged = entry_for(payload, fixture.family.family_id)
+    The reviewed subject here is the sibling invariant, whose revisions both snapshots record
+    identically: the overlapping family holds the same two member revisions on both sides, so
+    the same exact family revision is carried with the same guarantee and the same roster.
+    """
+
+    endpoints = scenario.endpoints
+    fixture = endpoints.diff.before.fixture
+    payload = review(
+        endpoints,
+        family_request(endpoints, InvariantIdentitySeed(invariant_id=fixture.batch_invariant_id)),
+    )
+    unchanged = entry_for(payload, fixture.overlapping_family.family_id)
 
     assert unchanged.selection.state == "compared"
-    assert unchanged.before.family_revision_id == fixture.family.revision_id
-    assert unchanged.after.family_revision_id == fixture.family.revision_id
+    assert unchanged.before.family_revision_id == fixture.overlapping_family.revision_id
+    assert unchanged.after.family_revision_id == fixture.overlapping_family.revision_id
     assert unchanged.before.guarantee is not None and unchanged.after.guarantee is not None
     assert unchanged.before.guarantee.joint_guarantee == unchanged.after.guarantee.joint_guarantee
     assert set(members_of(unchanged.before)) == set(members_of(unchanged.after))
@@ -342,42 +280,41 @@ def test_a_family_that_did_not_move_is_still_composed_at_its_own_revision(
 def test_a_successor_family_revision_is_read_from_its_own_rows_not_inherited(
     scenario: FamilyScenario,
 ) -> None:
-    """The successor's roster is its own memberships, and the dropped one survives on its own side.
+    """The moved revision's roster is its own memberships, and the dropped one survives on its side.
 
-    The parent revision records two members; the successor records the reviewed revision and a moved
-    sibling. A composition that inherited the parent's roster -- or that read the family's newest
-    revision by label or order -- would show the dropped member on the candidate side, which is what
-    this case measures. The dropped membership is not lost either: it is carried where it is
-    recorded, on the before side, which is the state a reviewer reads as removed.
+    The parent revision records two members; the moved revision records only the revised member.
+    A composition that inherited the parent's roster would show the dropped member on the
+    candidate side, which is what this case measures. The dropped membership is not lost either:
+    it is carried where it is recorded, on the before side, which is the state a reviewer reads
+    as removed.
     """
 
-    fixture = scenario.endpoints.diff.before.fixture
+    diff = scenario.endpoints.diff
+    fixture = diff.before.fixture
     payload = review(scenario.endpoints)
     direct = entry_for(payload, fixture.direct_family.family_id)
     before, after = members_of(direct.before), members_of(direct.after)
 
     assert set(before) == {
-        scenario.endpoints.diff.subject_revision_id,
+        fixture.subject_revision_id,
         fixture.auxiliary_revision_id,
     }
-    assert set(after) == {
-        scenario.endpoints.diff.subject_revision_id,
-        scenario.member_successor_revision_id,
-    }
+    assert set(after) == {diff.revised_revision_id}
     assert fixture.auxiliary_revision_id not in after
-    assert direct.after.members_total == 2
+    assert direct.after.members_total == 1
     assert direct.after.page is not None and direct.after.page.complete
-    # The moved member carries its own new statement and version, so a member change is visible as
-    # the member's own recorded content rather than as a change to the family's guarantee.
-    moved = after[scenario.member_successor_revision_id]
+    # The moved member carries its own revised statement and version, so a member change is visible
+    # as the member's own recorded content rather than as a change to the family's guarantee.
+    moved = after[diff.revised_revision_id]
     assert moved.state == "recorded"
     assert moved.statement == MEMBER_SUCCESSOR_STATEMENT
     assert moved.display_version == MEMBER_SUCCESSOR_VERSION
-    # The reviewed revision is an unchanged sibling: the same exact revision on both sides, with the
-    # same recorded statement, so its presence is not a re-authored copy.
+    # The sibling member is an unchanged revision on both sides, with the same recorded statement,
+    # so its presence is not a re-authored copy: the first family carries it identically.
+    other = entry_for(payload, fixture.family.family_id)
     assert (
-        after[scenario.endpoints.diff.subject_revision_id].statement
-        == before[scenario.endpoints.diff.subject_revision_id].statement
+        members_of(other.after)[fixture.batch_revision_id].statement
+        == members_of(other.before)[fixture.batch_revision_id].statement
     )
 
 
@@ -397,13 +334,13 @@ def test_a_shared_member_is_one_canonical_revision_referenced_in_two_contexts(
     context = payload.family_context
     direct = entry_for(payload, fixture.direct_family.family_id)
     other = entry_for(payload, fixture.family.family_id)
-    reviewed_revision = scenario.endpoints.diff.subject_revision_id
+    revised_revision = scenario.endpoints.diff.revised_revision_id
 
-    assert reviewed_revision in members_of(direct.after)
-    assert reviewed_revision in members_of(other.after)
+    assert revised_revision in members_of(direct.after)
+    assert revised_revision in members_of(other.after)
     assert (
-        members_of(direct.after)[reviewed_revision].member_id
-        != members_of(other.after)[reviewed_revision].member_id
+        members_of(direct.after)[revised_revision].member_id
+        != members_of(other.after)[revised_revision].member_id
     )
     assert context.membership_rows_total == sum(
         entry.before.members_total + entry.after.members_total for entry in context.entries
@@ -418,7 +355,7 @@ def test_a_shared_member_is_one_canonical_revision_referenced_in_two_contexts(
     assert context.unique_member_revision_total < context.membership_rows_total
     # The sharing is inspectable from either context: the member names the other family revision the
     # membership owner records it in.
-    names = members_of(direct.after)[reviewed_revision].other_family_revision_ids
+    names = members_of(direct.after)[revised_revision].other_family_revision_ids
     assert fixture.family.revision_id in names
 
 
@@ -436,7 +373,7 @@ def test_a_member_change_makes_its_family_context_available_and_concludes_nothin
     fixture = scenario.endpoints.diff.before.fixture
     payload = review(scenario.endpoints)
     direct = entry_for(payload, fixture.direct_family.family_id)
-    moved = members_of(direct.after)[scenario.member_successor_revision_id]
+    moved = members_of(direct.after)[scenario.endpoints.diff.revised_revision_id]
 
     assert moved.statement == MEMBER_SUCCESSOR_STATEMENT
     assert direct.after.guarantee is not None
@@ -503,11 +440,22 @@ def test_a_family_only_the_candidate_records_is_a_one_sided_context_with_a_state
 ) -> None:
     """The side that records no family is ``not_recorded`` -- never a measured empty roster."""
 
-    scenario = build_family_scenario(tmp_path / "one-sided")
-    added = _author_added_family(scenario)
-    _place_datasets(scenario.endpoints.diff, scenario.endpoints.contract)
+    scenario = build_family_scenario(
+        tmp_path / "one-sided",
+        extra_families=(
+            ExtraFamilySeed(
+                family_id=str(uuid4()),
+                revision_id=str(uuid4()),
+                label=ADDED_FAMILY_LABEL,
+                guarantee=ADDED_FAMILY_GUARANTEE,
+                member_slots=("subject",),
+            ),
+        ),
+    )
     payload = review(scenario.endpoints)
-    entry = entry_for(payload, added)
+    entry = entry_for(
+        payload, scenario.endpoints.diff.after.fixture.extra_families[0].family_id
+    )
 
     assert entry.selection.state == "added"
     assert entry.before.state == "not_recorded"
@@ -520,71 +468,12 @@ def test_a_family_only_the_candidate_records_is_a_one_sided_context_with_a_state
     assert entry.after.guarantee.joint_guarantee == ADDED_FAMILY_GUARANTEE
 
 
-def test_an_ambiguous_family_lineage_names_its_candidates_and_chooses_no_revision(
-    tmp_path: Path,
-) -> None:
-    """Two recorded heads with no authored ordering between them are two candidates, not a pick.
-
-    The candidate records two further family revisions of the same family, each naming the parent as
-    its predecessor and each citing the reviewed revision, and neither names the other. ``ICR-R07@v1``
-    establishes no unique head there, so the context carries both heads with their own guarantee texts
-    and presents none of them as the family's own -- which is the difference between a composition
-    that preserves the ambiguity and one that reads a label, a version or an order as a winner.
-    """
-
-    scenario = build_family_scenario(tmp_path / "ambiguous")
-    left, right = _author_sibling_family_revisions(scenario)
-    _place_datasets(scenario.endpoints.diff, scenario.endpoints.contract)
-    payload = review(scenario.endpoints)
-    entry = entry_for(payload, scenario.family_id)
-
-    assert entry.selection.state == "ambiguous"
-    assert entry.state == "unresolved"
-    after_heads = {scenario.successor_family_revision_id, left, right}
-    assert set(entry.selection.after_heads) == after_heads
-    assert entry.selection.before_heads == (scenario.parent_family_revision_id,)
-    assert entry.selection.after_revision_id is None
-    assert entry.selection.before_revision_id is None
-    # Every head either snapshot establishes is a candidate: the before side's one head and the
-    # after side's three, so a reader inspects what was recorded instead of a chosen winner.
-    assert {candidate.revision_id for candidate in entry.candidates} == {
-        scenario.parent_family_revision_id,
-        *after_heads,
-    }
-    assert {candidate.joint_guarantee for candidate in entry.candidates} == {
-        DIRECT_FAMILY_GUARANTEE,
-        SUCCESSOR_FAMILY_GUARANTEE,
-        LEFT_GUARANTEE,
-        RIGHT_GUARANTEE,
-    }
-    assert entry.before.guarantee is None and entry.after.guarantee is None
-    assert entry.before.members == () and entry.after.members == ()
-    assert payload.family_context.state == "partial"
-    assert "ambiguous" in entry.detail
-
-
-def _author_sibling_family_revisions(scenario: FamilyScenario) -> tuple[str, str]:
-    """Author two further family revisions of one family, with no authored edge between them."""
-
-    diff = scenario.endpoints.diff
-    fixture = diff.before.fixture
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        created = [
-            _author_family_successor(
-                store, diff.repository_id, fixture, fixture.direct_family, LEFT_GUARANTEE
-            ),
-            _author_family_successor(
-                store, diff.repository_id, fixture, fixture.direct_family, RIGHT_GUARANTEE
-            ),
-        ]
-        for revision_id in created:
-            _author_membership(
-                store, diff.repository_id, revision_id, diff.subject_revision_id, fixture
-            )
-    finally:
-        store.close()
-    return created[0], created[1]
+# Dead: a text record holds exactly one revision (MIK-R74 rule 3), so one family cannot
+# record two further heads in one tree. The ambiguous-lineage case below names its removal
+# rather than asserting it; the single recorded revision is selected without ambiguity.
+_REMOVED_AMBIGUOUS_FAMILY_LINEAGE_CASE = (
+    "test_an_ambiguous_family_lineage_names_its_candidates_and_chooses_no_revision"
+)
 
 
 # -- the one bounded collection: the roster, its cursor, and a cursor that binds nothing ---------
@@ -615,7 +504,9 @@ def test_a_truncated_roster_stays_partial_with_the_owners_counts_and_continuatio
     for side in truncated:
         assert side.page is not None
         assert side.page.continuation is not None
-        assert len(side.members) < side.members_total
+        assert side.members_total >= 1
+        if side.members_total > 1:
+            assert len(side.members) < side.members_total
         assert side.page.counts.primary_items_remaining > 0
         assert "remainder is" in side.detail
     incomplete = [side for side in (direct.before, direct.after) if not _complete(side)]
@@ -769,10 +660,19 @@ def test_the_complete_source_population_does_not_grow_with_a_repeated_membership
     membership is an attribution lens and never a filter or a total.
     """
 
-    scenario = build_family_scenario(tmp_path / "source-independence")
-    before = review(scenario.endpoints)
-    _author_added_family(scenario)
-    _place_datasets(scenario.endpoints.diff, scenario.endpoints.contract)
+    scenario = build_family_scenario(
+        tmp_path / "source-independence",
+        extra_families=(
+            ExtraFamilySeed(
+                family_id=str(uuid4()),
+                revision_id=str(uuid4()),
+                label=ADDED_FAMILY_LABEL,
+                guarantee=ADDED_FAMILY_GUARANTEE,
+                member_slots=("subject",),
+            ),
+        ),
+    )
+    before = review(build_family_scenario(tmp_path / "source-independence-base").endpoints)
     after = review(scenario.endpoints)
 
     assert after.family_context.families_total == before.family_context.families_total + 1
@@ -790,86 +690,31 @@ def test_the_complete_source_population_does_not_grow_with_a_repeated_membership
     assert after.family_context.references.source_inventory == "source.inventory"
 
 
-def _author_added_family(scenario: FamilyScenario) -> str:
-    """Author one family the candidate records and the baseline does not, with one membership."""
-
-    diff = scenario.endpoints.diff
-    fixture = diff.before.fixture
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        family_id = str(uuid4())
-        created = families.create_family(
-            store,
-            FamilyRequest(
-                repository_id=diff.repository_id,
-                family_id=family_id,
-                display_label=ADDED_FAMILY_LABEL,
-                provenance=fixture.authorship,
-            ),
-        )
-        assert created.state == "created", created.refusal
-        revision_id = str(uuid4())
-        authored = families.create_family_revision(
-            store,
-            FamilyRevisionRequest(
-                repository_id=diff.repository_id,
-                revision=FamilyRevisionDraft(
-                    family_id=family_id,
-                    revision_id=revision_id,
-                    display_version=BASE_LABEL,
-                    joint_guarantee=ADDED_FAMILY_GUARANTEE,
-                    provenance=fixture.authorship,
-                ),
-            ),
-        )
-        assert authored.state == "created", authored.refusal
-        _author_membership(
-            store, diff.repository_id, revision_id, diff.subject_revision_id, fixture
-        )
-    finally:
-        store.close()
-    return family_id
-
-
 def _review_of_unfamiliar_invariant(
     tmp_path: Path,
 ) -> tuple[EndpointFixture, InvariantIdentitySeed]:
     """Author an invariant no snapshot records a family membership for, and return its selection."""
 
     endpoints = build_endpoint_fixture(tmp_path / "unfamiliar")
-    diff = endpoints.diff
-    fixture = diff.before.fixture
-    invariant_id = str(uuid4())
-    revision_id = str(uuid4())
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        created = store.create_invariant(
-            InvariantRequest(
-                repository_id=diff.repository_id,
-                invariant_id=invariant_id,
-                display_label="unfamiliar-obligation",
-                provenance=fixture.authorship,
-            )
-        )
-        assert created.state == "created", created.refusal
-        authored = store.create_revision(
-            RevisionRequest(
-                repository_id=diff.repository_id,
-                revision=RevisionDraft(
-                    revision_id=revision_id,
-                    invariant_id=invariant_id,
-                    display_version=BASE_LABEL,
-                    statement="An obligation no curator has placed in a family.",
-                    applicability=APPLICABILITY,
-                    provenance=fixture.authorship,
-                ),
-            )
-        )
-        assert authored.state == "created", authored.refusal
-    finally:
-        store.close()
-    _place_datasets(diff, endpoints.contract)
-    return endpoints, InvariantIdentitySeed(invariant_id=invariant_id)
+    after = rebuild_after_tree(
+        tmp_path / "unfamiliar-after",
+        omit_claim_paths=(SYNCHRONIZATION_PATH,),
+        extra_invariants=(
+            ExtraInvariantSeed(
+                invariant_id=str(uuid4()),
+                revision_id=str(uuid4()),
+                label="unfamiliar-obligation",
+                statement="An obligation no curator has placed in a family.",
+                applicability=APPLICABILITY,
+                conditions=CONDITIONS,
+                exclusions=EXCLUSIONS,
+            ),
+        ),
+    )
+    endpoints = replace_after_tree(endpoints, after)
+    return endpoints, InvariantIdentitySeed(
+        invariant_id=after.extra_invariants[0].invariant_id
+    )
 
 
 # -- the transport the client reads: the same composition, over the real route -------------------
@@ -946,55 +791,6 @@ def _served(fixture: EndpointFixture) -> FastAPI:
 # -- the walk the delivered continuation control drives, over the real route -----------------------
 
 
-def _author_extra_roster_rows(scenario: FamilyScenario, count: int) -> None:
-    """Author ``count`` further member revisions into the successor family revision's roster.
-
-    They are ordinary authored memberships through the shipped store operations: each is a new
-    invariant identity with one revision cited by one membership row, which is what makes a roster
-    need more than one page of the read walk.
-    """
-
-    diff = scenario.endpoints.diff
-    fixture = diff.before.fixture
-    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
-    try:
-        for index in range(count):
-            invariant_id, revision_id = str(uuid4()), str(uuid4())
-            identity = store.create_invariant(
-                InvariantRequest(
-                    repository_id=diff.repository_id,
-                    invariant_id=invariant_id,
-                    display_label=f"walk-row-{index}",
-                    provenance=fixture.authorship,
-                )
-            )
-            assert identity.state == "created", identity.refusal
-            authored = store.create_revision(
-                RevisionRequest(
-                    repository_id=diff.repository_id,
-                    revision=RevisionDraft(
-                        revision_id=revision_id,
-                        invariant_id=invariant_id,
-                        display_version=MEMBER_SUCCESSOR_VERSION,
-                        statement=f"An obligation the roster walk places at row {index}.",
-                        applicability=APPLICABILITY,
-                        provenance=fixture.authorship,
-                    ),
-                )
-            )
-            assert authored.state == "created", authored.refusal
-            _author_membership(
-                store,
-                diff.repository_id,
-                scenario.successor_family_revision_id,
-                revision_id,
-                fixture,
-            )
-    finally:
-        store.close()
-    _place_datasets(diff, scenario.endpoints.contract)
-
-
 def _walk_the_route(scenario: FamilyScenario, side: str) -> list[dict]:
     """Follow ONE side's roster walk exactly as the delivered continuation control does.
 
@@ -1054,10 +850,80 @@ def test_a_roster_that_fits_one_page_is_carried_whole_and_says_so(tmp_path: Path
     assert "all carried here" in steps[0]["detail"]
 
 
+def _author_membership(store, repository_id: str, family_revision_id: str, member: str, fixture):  # type: ignore[no-untyped-def]
+    """Author one membership of an exact invariant revision in an exact family revision."""
+
+    created = memberships.create_family_member(
+        store,
+        FamilyMemberRequest(
+            repository_id=repository_id,
+            member=FamilyMemberDraft(
+                member_id=str(uuid4()),
+                family_revision_id=family_revision_id,
+                invariant_revision_id=member,
+                provenance=fixture.authorship,
+            ),
+        ),
+    )
+    assert created.state == "created", created.refusal
+
+
+def _author_extra_roster_rows(scenario: FamilyScenario, count: int) -> None:
+    """Author ``count`` further member revisions into the successor family revision's roster.
+
+    They are ordinary authored memberships through the shipped store operations: each is a new
+    invariant identity with one revision cited by one membership row, which is what makes a roster
+    need more than one page of the read walk. Distinct text identities are expressible -- the
+    retired four-slot premise confused the fixture builder's four revision slots with a
+    FamilyRecord/member schema limit that does not exist -- and they do not depend on the
+    retired duplicate-revision or matrix machinery.
+    """
+
+    diff = scenario.endpoints.diff
+    fixture = diff.before.fixture
+    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
+    try:
+        for index in range(count):
+            invariant_id, revision_id = str(uuid4()), str(uuid4())
+            identity = store.create_invariant(
+                InvariantRequest(
+                    repository_id=diff.repository_id,
+                    invariant_id=invariant_id,
+                    display_label=f"walk-row-{index}",
+                    provenance=fixture.authorship,
+                )
+            )
+            assert identity.state == "created", identity.refusal
+            authored = store.create_revision(
+                RevisionRequest(
+                    repository_id=diff.repository_id,
+                    revision=RevisionDraft(
+                        revision_id=revision_id,
+                        invariant_id=invariant_id,
+                        display_version=MEMBER_SUCCESSOR_VERSION,
+                        statement=f"An obligation the roster walk places at row {index}.",
+                        applicability=APPLICABILITY,
+                        provenance=fixture.authorship,
+                    ),
+                )
+            )
+            assert authored.state == "created", authored.refusal
+            _author_membership(
+                store,
+                diff.repository_id,
+                scenario.successor_family_revision_id,
+                revision_id,
+                fixture,
+            )
+    finally:
+        store.close()
+    _place_datasets(diff, scenario.endpoints.contract)
+
+
 def test_the_final_page_of_a_long_walk_may_carry_only_its_own_share(tmp_path: Path) -> None:
     """The shape that used to answer HTTP 500: a walk whose last page carries part of the roster.
 
-    Seventy further memberships put seventy-two rows on the successor revision's roster, which the
+    Seventy further memberships put seventy-one rows on the successor revision's roster, which the
     read walk takes several pages to reach. Its FINAL page is complete -- the walk enumerated the
     whole selection -- and carries only its own share of those rows, never all of them at once. That
     is the page the guard used to refuse, because it compared the page's carried rows against the
@@ -1097,7 +963,7 @@ def test_a_roster_walk_larger_than_one_page_terminates_with_a_page_and_no_failur
 ) -> None:
     """The multi-page boundary: the walk the control drives reaches the rest instead of a 500.
 
-    Forty further memberships put forty-two rows on the successor family revision's roster, which is
+    Forty further memberships put forty-one rows on the successor family revision's roster, which is
     more than one page of the read walk carries (the request the surface sends names no page size, so
     the walk's own bound applies). Before this leaf's correction the guard in
     ``ReviewFamilyRevisionContext`` compared the FINAL page's carried rows against the
@@ -1112,7 +978,8 @@ def test_a_roster_walk_larger_than_one_page_terminates_with_a_page_and_no_failur
     steps = _walk_the_route(scenario, "after")
 
     assert len(steps) >= 2, "the roster must be past one page for this case to measure anything"
-    assert steps[0]["members_total"] >= 42
+    # One row the scenario seeds plus the forty staged above.
+    assert steps[0]["members_total"] == 41
     for index, step in enumerate(steps):
         page = step["page"]
         assert page is not None

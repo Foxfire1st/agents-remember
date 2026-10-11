@@ -55,7 +55,6 @@ from agents_remember.models.knowledge.review_records import (
 )
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal, ReviewRefusalCode
 from agents_remember.models.knowledge.review_relationships import (
-    ReviewAuthoredLineage,
     ReviewRelationshipGap,
     ReviewRelationshipMovement,
     ReviewRelationshipSide,
@@ -85,8 +84,6 @@ __all__ = [
     "ReviewApplicabilityState",
     "ReviewApplicabilitySummary",
     "ReviewAssessmentDisplay",
-    "ReviewAuthoredEffect",
-    "ReviewAuthoredLineage",
     "ReviewCandidateRef",
     "ReviewChangedFile",
     "ReviewCollectionPage",
@@ -494,31 +491,6 @@ class ReviewFieldChange(KnowledgeModel):
     after_value: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
 
-class ReviewAuthoredEffect(KnowledgeModel):
-    """One authored effect or preservation claim, displayed separately from the mechanical diff.
-
-    Its label is the author's own word from the closed vocabulary; its rationale is the author's
-    prose. The record is displayed because an identified author wrote it, and the surface adds
-    nothing to it -- there is no field here for a computed effect or a preservation the author did
-    not claim.
-
-    ``applicability`` is why this row may be displayed beside the selected subject at all
-    (``ICR-R26@v1``): the matrix row's own recorded references either resolve to the selection or
-    they do not, and a row that resolves to nothing is displayed as unresolved input with the
-    references and the reason rather than as this subject's judgment.
-    """
-
-    applicability: ReviewDisplayedApplicability | None = None
-    record_kind: Literal["invariant_effect_claim", "preservation_claim", "unresolved_question"]
-    record_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    label: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    rationale: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-    author_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    examined_inputs: tuple[str, ...] = ()
-    unresolved: tuple[ReviewUnresolvedReference, ...] = ()
-
-
 class ReviewSignal(KnowledgeModel):
     """One mechanical detection fact: the matched condition, its inputs, versions and its limits.
 
@@ -720,7 +692,6 @@ class ReviewKnowledgePane(KnowledgeModel):
     # selected no revision either.
     revision_selection: ReviewRevisionSelection | None = None
     field_changes: tuple[ReviewFieldChange, ...] = ()
-    authored_effects: tuple[ReviewAuthoredEffect, ...] = ()
     signals: tuple[ReviewSignal, ...] = ()
     assessment: ReviewAssessmentDisplay | None = None
     assessments: tuple[ReviewAssessmentDisplay, ...] = ()

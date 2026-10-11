@@ -8,8 +8,7 @@ three things that surround a movement:
   identity the snapshot records with no governing route (``ungoverned``) or an identity the snapshot
   does not record at all (``not_recorded``). The last two are different facts and neither is a missing
   route.
-* **the authored lineage and the unresolved states**, read from the snapshots' own predecessor rows and
-  from the reads the sides carry: a succession, a split, a merge, and one gap per fact this display
+* **the unresolved states**, read from the reads the sides carry: one gap per fact this display
   could not establish, each with its side, its code and the read's own reason.
 * **the pane's address view**, one location per recorded realization side, each carrying the identity
   both sides sit under and the movement it belongs to, so the row that used to show only the
@@ -24,14 +23,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 from agents_remember.application.review_recorded_relationships import (
     RecordedRelationship,
 )
 from agents_remember.models.knowledge.review import ReviewSourceLocation
 from agents_remember.models.knowledge.review_relationships import (
-    ReviewAuthoredLineage,
     ReviewPairingBasis,
     ReviewRelationshipGap,
     ReviewRelationshipMovement,
@@ -51,26 +48,15 @@ __all__ = [
 class ContinuationSearch:
     """What one baseline side's continuation search read, so its sentence can be *tested*.
 
-    A one-sided movement states why the other side is not there, and those sentences may only say what
-    was actually read. This value carries every fact a truthful sentence needs: the candidate
-    relationships this review holds (so a negative can be tested against them), the rows that cite the
-    exact same thing (so a relationship the store *does* record is named instead of denied), **every
-    revision of the citation's authored lines that was read** and the rows found on them (so a negative
-    about the line is complete, and a split's lineage sentence can name what the line holds), and the
-    line's shape -- its ends, and the unique head when there is one.
+    A one-sided movement states why the other side is not there, and those sentences may only say
+    what was actually read. This value carries every fact a truthful sentence needs: the candidate
+    relationships this review holds (so a negative can be tested against them) and the rows that
+    cite the exact same thing (so a relationship the store *does* record is named instead of
+    denied).
     """
 
     candidates: tuple[RecordedRelationship, ...] = ()
     same_citation: tuple[RecordedRelationship, ...] = ()
-    successors: tuple[str, ...] = ()
-    head_revision_id: str | None = None
-    head_detail: str = ""
-    head_state: Literal["none", "established", "unresolved"] = "none"
-    head_candidates: tuple[str, ...] = ()
-    head_read: bool = False
-    line_revisions: tuple[str, ...] = ()
-    line_rows: tuple[RecordedRelationship, ...] = ()
-    repository_id: str = ""
 
 
 def source_locations(
@@ -107,8 +93,7 @@ def source_locations(
 def paired_movement(
     candidate_side: RecordedRelationship,
     baseline_sides: tuple[RecordedRelationship, ...],
-    edges: frozenset[tuple[str, str]],
-    pairing_basis: ReviewPairingBasis,
+    pairing_basis: ReviewPairingBasis | None,
 ) -> ReviewRelationshipMovement:
     """Display one candidate-side relationship with every baseline side this review paired to it.
 
@@ -133,8 +118,7 @@ def paired_movement(
         before=before,
         after=after,
         pairing_basis=pairing_basis if baseline_sides else None,
-        lineage=_lineage(baseline_sides, candidate_side, edges),
-        gaps=_paired_gaps(before, after, candidate_side, baseline_sides, edges),
+        gaps=_paired_gaps(before, after, candidate_side),
         statement=_paired_statement(candidate_side, baseline_sides, transition, pairing_basis),
     )
 
@@ -164,8 +148,7 @@ def single_sided_movement(
         record_id=baseline_side.record_id,
         transition="outside_selection" if outside else "retracted",
         before=(_side_of(baseline_side),),
-        gaps=_single_sided_gaps(baseline_side, search),
-        lineage=_withdrawal_lineage(baseline_side, search),
+        gaps=_single_sided_gaps(baseline_side),
         statement=(
             _outside_selection_statement(baseline_side)
             if outside
@@ -210,34 +193,13 @@ def _outside_selection_statement(baseline_side: RecordedRelationship) -> str:
 
 
 def _single_sided_gaps(
-    relationship: RecordedRelationship, search: ContinuationSearch
+    relationship: RecordedRelationship,
 ) -> tuple[ReviewRelationshipGap, ...]:
-    """The gaps one one-sided association states: its own unresolved facts, and its successor line.
-
-    The line's gap exists because a head that could not be established is a fact about *this* display
-    and not about the store: the association may well be recorded at one of the line's several ends,
-    and saying "no relationship is recorded" there would be the assertion ICR-R08@v1's ruling forbids.
-    It is stated on the before side, because the movement displays no after side to attach it to.
-    """
+    """The gaps one one-sided association states: its own unresolved facts."""
 
     gaps = list(_side_gaps((_side_of(relationship),)))
     if relationship.record_id is None:
         gaps.append(_identity_unresolved_gap(relationship))
-    if search.head_state == "unresolved" and search.line_revisions:
-        gaps.append(
-            ReviewRelationshipGap(
-                side=relationship.side,  # type: ignore[arg-type]
-                field="successor_line",
-                code="successor_line_unresolved",
-                detail=(
-                    f"{search.head_detail}, so the association's continuation is not one revision; "
-                    f"this review read every revision of the line "
-                    f"({', '.join(search.line_revisions)}) and found no relationship for this "
-                    "citation there, which is what is asserted -- no negative about an unread "
-                    "revision"
-                ),
-            )
-        )
     return tuple(gaps)
 
 
@@ -287,15 +249,15 @@ def _paired_statement(
     candidate_side: RecordedRelationship,
     baseline_sides: tuple[RecordedRelationship, ...],
     transition: str,
-    pairing_basis: ReviewPairingBasis,
+    pairing_basis: ReviewPairingBasis | None,
 ) -> str:
     """State the whole movement: both recorded associations, their identity, and **why** they are one.
 
     The basis is the point of the sentence. Two recorded rows are displayed as one association because
-    of a *recorded* relation -- the row selected twice, the same member under a moved family revision,
-    or an authored old/new edge between the revisions the rows cite -- and the sentence says which,
-    because the addresses themselves prove nothing: an absence of one address and the presence of
-    another is a deletion and an addition unless an author's own record connects them.
+    of a *recorded* relation -- the row selected twice or the same member under a moved family
+    revision -- and the sentence says which, because the addresses themselves prove nothing: an
+    absence of one address and the presence of another is a deletion and an addition unless a
+    recorded row connects them.
     """
 
     after = _recorded_word(candidate_side)
@@ -303,11 +265,12 @@ def _paired_statement(
     if not baseline_sides:
         return (
             f"the candidate records {after} under {candidate_side.record_kind} {identity} and no "
-            "relationship this review read -- in the comparison's union or at the head of that "
-            "citation's authored successor line -- is connected to it, so this association is "
-            "displayed as the candidate's added side and no baseline side is substituted"
+            "relationship this review read in the comparison's union is connected to it, so this "
+            "association is displayed as the candidate's added side and no baseline side is "
+            "substituted"
         )
     before = "; ".join(_recorded_word(side) for side in baseline_sides)
+    assert pairing_basis is not None
     return (
         f"the baseline records {before} and the candidate records {after} under "
         f"{candidate_side.record_kind} {identity}; the association is displayed as {transition} "
@@ -359,31 +322,6 @@ _BASIS_SENTENCES: Mapping[ReviewPairingBasis, _BasisSentence] = {
         "the {kind} identity {identity}'s own recorded governing-route association, read on each "
         "snapshot"
     ),
-    "same_member_revision": _BasisSentence(
-        "the member revision {member}, which the baseline row also holds, under the family revision "
-        "the candidate moved to"
-    ),
-    "authored_successor_head_revision": _BasisSentence(
-        "the uniquely established head {revision} of the authored successor line of the revision the "
-        "baseline row cites ({cited}), read outside the comparison's selected page"
-    ),
-    "authored_successor_line_revision": _BasisSentence(
-        "the authored successor line of the revision the baseline row cites ({cited}), every authored "
-        "revision of which this review read outside the comparison's selected page, and this row "
-        "records revision {revision}{member_clause} rather than the line's head"
-    ),
-    "authored_successor_member_revision": _BasisSentence(
-        "the authored successor line of the member revision the baseline row holds, ending at "
-        "{member}"
-    ),
-    "recorded_family_revision": _BasisSentence(
-        "the authored successor line of the family revision the baseline row holds, ending at "
-        "{revision}"
-    ),
-    "authored_successor_revision": _BasisSentence(
-        "the authored successor line of the revision the baseline row cites ({cited}), which the "
-        "candidate's revision {revision} descends from"
-    ),
 }
 
 
@@ -398,18 +336,13 @@ def _recorded_word(relationship: RecordedRelationship) -> str:
 def _withdrawal_statement(baseline_side: RecordedRelationship, search: ContinuationSearch) -> str:
     """State that one baseline association is withdrawn, and only what the reads establish.
 
-    Four states, in the order a truthful sentence has to consider them:
+    Two states, in the order a truthful sentence has to consider them:
 
     * the candidate records a relationship for the **same citation** -- the same revision, or a
-      membership holding the same member -- under a row no authored edge connects to this one. It is
+      membership holding the same member -- under another row. It is
       *named*, because one payload may not deny a relationship another row of it displays;
-    * the citation has an authored successor line whose head is **unresolved** (a split that never
-      rejoins, or a cycle): whether a relationship is recorded there is stated as unresolved, with the
-      reason, and no negative is asserted (ICR-R08@v1's ruling);
-    * the line's head **is** established: the sentence says which head this review read and that it
-      records no relationship citing this revision;
-    * the citation records **no successor at all**: the negative is stated about the populations this
-      review actually read, and never as a claim about the snapshot's whole content.
+    * otherwise the negative is stated about the union this review actually read, and never as a
+      claim about the snapshot's whole content.
     """
 
     citation = baseline_side.revision_id or "the revision this relationship cited"
@@ -421,40 +354,12 @@ def _withdrawal_statement(baseline_side: RecordedRelationship, search: Continuat
         recorded = "; ".join(_recorded_word(other) for other in search.same_citation)
         return (
             f"{prefix}, while it does record {recorded} for the same citation ({citation}); that "
-            "relationship is displayed as its own movement rather than paired with this one, because "
-            "no authored edge connects the two rows"
-        )
-    if search.line_rows:
-        recorded = "; ".join(_recorded_word(other) for other in search.line_rows)
-        return (
-            f"{prefix}; the candidate's authored line of {citation} records {recorded}, which this "
-            "review displays as its own movement rather than pairing it with this one, because no "
-            "authored relation connects the two rows"
-        )
-    if search.head_state == "unresolved":
-        return (
-            f"{prefix}; {search.head_detail}, and this review read every revision of that line "
-            f"({', '.join(search.line_revisions)}) and found no relationship for this citation there, "
-            "so the association is displayed as withdrawn with its old address while the revision was "
-            "split"
-        )
-    if search.line_revisions:
-        unique = (
-            f", whose uniquely established head is {search.head_revision_id}"
-            if search.head_revision_id is not None
-            else ""
-        )
-        return (
-            f"{prefix}; the candidate's snapshot records {len(search.successors)} authored "
-            f"successor(s) of {citation} ({', '.join(search.successors)}){unique}, and this review read "
-            f"every revision of that line ({', '.join(search.line_revisions)}) and found no "
-            "relationship for this citation there, so nothing this review read claims the association "
-            "now and it is displayed as withdrawn with its old address"
+            "relationship is displayed as its own movement rather than paired with this one"
         )
     return (
-        f"{prefix}, and no relationship citing {citation} was read: the candidate's snapshot records "
-        "no authored successor of it and this review read the comparison's union, so this is a "
-        "withdrawn association rather than a movement, and the old address is still displayed"
+        f"{prefix}, and no relationship citing {citation} was read: "
+        "this is a withdrawn association rather than a movement, and the old address is still "
+        "displayed"
     )
 
 
@@ -492,165 +397,10 @@ def _association_facts(relationship: RecordedRelationship) -> tuple[object, ...]
     )
 
 
-def _successors(revision_id: str | None, edges: frozenset[tuple[str, str]]) -> tuple[str, ...]:
-    """Return every revision the named one is an authored predecessor of, in sorted order."""
-
-    if revision_id is None:
-        return ()
-    return tuple(sorted(child for child, parent in edges if parent == revision_id))
-
-
-def _predecessors(revision_id: str | None, edges: frozenset[tuple[str, str]]) -> tuple[str, ...]:
-    """Return every authored predecessor the named revision recorded, in sorted order."""
-
-    if revision_id is None:
-        return ()
-    return tuple(sorted(parent for child, parent in edges if child == revision_id))
-
-
-def _lineage(
-    baseline_sides: tuple[RecordedRelationship, ...],
-    candidate_side: RecordedRelationship,
-    edges: frozenset[tuple[str, str]],
-) -> tuple[ReviewAuthoredLineage, ...]:
-    """Display the author's own edges the movement's revisions take part in.
-
-    Three relations and no others: the candidate revision's declaration that a baseline revision is
-    its predecessor; a baseline revision the author recorded **several** successors of, which is the
-    split the packet names; and a candidate revision that recorded several predecessors, which is the
-    merge. Each is read from the snapshots' own predecessor rows and each names every other revision
-    of the relation, so a split is displayed with all of its successors rather than with the one this
-    pairing happened to follow.
-    """
-
-    entries: dict[tuple[str, str], ReviewAuthoredLineage] = {}
-    predecessors = _predecessors(candidate_side.revision_id, edges)
-    for baseline_side in baseline_sides:
-        _add_succession(entries, baseline_side, candidate_side, predecessors)
-        _add_split(entries, baseline_side, edges)
-    _add_merge(entries, candidate_side, predecessors)
-    return tuple(entries.values())
-
-
-def _add_succession(
-    entries: dict[tuple[str, str], ReviewAuthoredLineage],
-    baseline_side: RecordedRelationship,
-    candidate_side: RecordedRelationship,
-    predecessors: tuple[str, ...],
-) -> None:
-    """Record the authored successor edge between one baseline side and the candidate's."""
-
-    revision_id = baseline_side.revision_id
-    if revision_id is None or revision_id not in predecessors:
-        return
-    assert candidate_side.revision_id is not None
-    entries[("succession", revision_id)] = ReviewAuthoredLineage(
-        kind="succession",
-        side="after",
-        revision_id=candidate_side.revision_id,
-        related_revision_ids=(revision_id,),
-        statement=(
-            f"the candidate's revision {candidate_side.revision_id} records {revision_id} as an "
-            "authored predecessor, which is the author's own statement that it replaced it"
-        ),
-    )
-
-
-def _add_split(
-    entries: dict[tuple[str, str], ReviewAuthoredLineage],
-    baseline_side: RecordedRelationship,
-    edges: frozenset[tuple[str, str]],
-) -> None:
-    """Record one baseline revision the author recorded several successors of."""
-
-    successors = _successors(baseline_side.revision_id, edges)
-    if len(successors) < 2:
-        return
-    assert baseline_side.revision_id is not None
-    entries[("split", baseline_side.revision_id)] = ReviewAuthoredLineage(
-        kind="split",
-        side="before",
-        revision_id=baseline_side.revision_id,
-        related_revision_ids=successors,
-        statement=(
-            f"the candidate's snapshot records {len(successors)} authored successors of "
-            f"{baseline_side.revision_id} ({', '.join(successors)}), so the revision was split and "
-            "no single successor is displayed as its replacement"
-        ),
-    )
-
-
-def _add_merge(
-    entries: dict[tuple[str, str], ReviewAuthoredLineage],
-    candidate_side: RecordedRelationship,
-    predecessors: tuple[str, ...],
-) -> None:
-    """Record a candidate revision that recorded several predecessors."""
-
-    if len(predecessors) < 2 or candidate_side.revision_id is None:
-        return
-    entries[("merge", candidate_side.revision_id)] = ReviewAuthoredLineage(
-        kind="merge",
-        side="after",
-        revision_id=candidate_side.revision_id,
-        related_revision_ids=predecessors,
-        statement=(
-            f"the candidate's revision {candidate_side.revision_id} records "
-            f"{len(predecessors)} authored predecessors ({', '.join(predecessors)}), so this "
-            "association continues more than one recorded revision"
-        ),
-    )
-
-
-def _withdrawal_lineage(
-    baseline_side: RecordedRelationship, search: ContinuationSearch
-) -> tuple[ReviewAuthoredLineage, ...]:
-    """The authored split one withdrawn association sits under, stated from what was read.
-
-    The sentence is built from the same :class:`ContinuationSearch` the movement's reason is, because
-    the split branch of this sentence is where a denial used to survive the migration: saying "a
-    relationship for none of them" from the successor *edges* alone is false whenever one of those
-    successors records a relationship. Two facts are stated instead, and both are tested: how many
-    authored successors the author recorded, and what this review read on the line -- the rows it holds
-    being named as their own movements, or the complete negative that no revision of the line records
-    this citation.
-    """
-
-    successors = search.successors
-    if len(successors) < 2 or baseline_side.revision_id is None:
-        return ()
-    read = (
-        f"this review read every revision of that line ({', '.join(search.line_revisions)})"
-        if search.line_revisions
-        else "this review read the line's revisions"
-    )
-    recorded = (
-        "the relationships recorded there are displayed as their own movements rather than paired "
-        f"with this one ({', '.join(other.relationship_id for other in search.line_rows)})"
-        if search.line_rows
-        else "no revision of that line records a relationship for this citation"
-    )
-    return (
-        ReviewAuthoredLineage(
-            kind="split",
-            side="before",
-            revision_id=baseline_side.revision_id,
-            related_revision_ids=successors,
-            statement=(
-                f"the candidate's snapshot records {len(successors)} authored successors of "
-                f"{baseline_side.revision_id} ({', '.join(successors)}), so the revision was split and "
-                f"no single successor is displayed as its replacement; {read} and {recorded}"
-            ),
-        ),
-    )
-
-
 def _paired_gaps(
     before: tuple[ReviewRelationshipSide, ...],
     after: ReviewRelationshipSide,
     candidate_side: RecordedRelationship,
-    baseline_sides: tuple[RecordedRelationship, ...],
-    edges: frozenset[tuple[str, str]],
 ) -> tuple[ReviewRelationshipGap, ...]:
     """Every fact this display could not establish about the paired sides, each with its reason."""
 
@@ -658,8 +408,6 @@ def _paired_gaps(
     gaps.extend(_identity_gaps(before, after))
     if candidate_side.record_id is None:
         gaps.append(_identity_unresolved_gap(candidate_side))
-    if not baseline_sides:
-        gaps.extend(_unpaired_predecessor_gaps(candidate_side, edges))
     return tuple(gaps)
 
 
@@ -729,35 +477,6 @@ def _identity_gaps(
                 f"sits under {after.record_id or 'an identity its snapshot does not record'}; the "
                 "association is displayed under the candidate's identity with this difference "
                 "stated rather than being paired under either one silently"
-            ),
-        ),
-    )
-
-
-def _unpaired_predecessor_gaps(
-    candidate_side: RecordedRelationship, edges: frozenset[tuple[str, str]]
-) -> tuple[ReviewRelationshipGap, ...]:
-    """State the authored predecessor the union records no relationship for, when there is one.
-
-    This is the fact that separates "the candidate recorded a new association" from "the candidate
-    continued an association whose earlier side this review's union does not hold": the author's edge
-    exists and is displayed with the movement, and the earlier side is named as unrecorded rather
-    than being left for a reader to assume.
-    """
-
-    unrecorded = tuple(revision for revision in _predecessors(candidate_side.revision_id, edges))
-    if not unrecorded:
-        return ()
-    return (
-        ReviewRelationshipGap(
-            side="after",
-            field="predecessor",
-            code="predecessor_records_no_relationship",
-            detail=(
-                f"the candidate's revision {candidate_side.revision_id} records "
-                f"{', '.join(unrecorded)} as an authored predecessor, and the before union holds no "
-                "relationship for it, so this association's earlier recorded side is outside the "
-                "selected union rather than absent from the snapshot"
             ),
         ),
     )

@@ -31,15 +31,12 @@ from agents_remember.models.knowledge.review import (
     PROPOSED_ASSESSMENT_DISPOSITIONS,
     KnowledgeReviewResult,
     ReviewAssessmentDisplay,
-    ReviewAuthoredEffect,
-    ReviewEvidenceLink,
     ReviewEvidencePane,
     ReviewObservation,
     ReviewRecordChannel,
     ReviewRefusal,
     ReviewSignal,
     ReviewSubmission,
-    ReviewUnresolvedReference,
 )
 from agents_remember.models.knowledge.review_applicability import (
     ReviewApplicabilityClass,
@@ -48,7 +45,6 @@ from agents_remember.models.knowledge.review_applicability import (
     ReviewDisplayedApplicability,
 )
 from agents_remember.models.knowledge.review_records import evidence_classes_unread
-from agents_remember.models.knowledge.view import ReviewMatrixRow
 from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessment,
     SubjectAssessmentState,
@@ -66,14 +62,12 @@ __all__ = [
     "ReviewClaimRecord",
     "ReviewRecordInputs",
     "assessment_displays",
-    "authored_effects",
     "evidence_pane",
     "observation",
     "refused",
     "signal",
     "subject_states",
     "submission",
-    "unresolved_authors",
 ]
 
 
@@ -81,10 +75,7 @@ __all__ = [
 class ReviewClaimRecord:
     """One evidence claim's own recorded fields, as the evidence owner serves them.
 
-    The claim's *identity* already reaches the surface through the review matrix's row, which names
-    which claims a selection reaches. What the row deliberately does not do is restate the claim's
-    content -- the view refuses to become a second renderer of a record group it does not own -- so
-    the authored fields travel here instead, read from the claim's own owner: the author the
+    The authored fields travel here, read from the claim's own owner: the author the
     admission recorded, the lifecycle the record was written under, the limitations the author
     declared (``""`` is that declaration, verbatim, and never "unknown") and the coverage endpoints
     the author asserted.
@@ -228,28 +219,19 @@ def submission(stale: bool) -> ReviewSubmission:
 
 
 def evidence_pane(
-    rows: Sequence[ReviewMatrixRow],
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
     applicability: ReviewApplicabilityProjection,
 ) -> ReviewEvidencePane:
     """Pane 3: evidence references, execution observations and the authored assessments.
 
-    ``rows`` are only the rows the applicability projection kept for this subject, and every value
-    rendered here carries the label its own recorded binding earned (``ICR-R26@v1``): a record of
-    another subject is not in these collections at all, and the pane states the counts -- including
-    the records it does not display as this subject's judgments -- beside them.
+    Every value rendered here carries the label its own recorded binding earned
+    (``ICR-R26@v1``): a record of another subject is not in these collections at all, and the
+    pane states the counts -- including the records it does not display as this subject's
+    judgments -- beside them. The matrix-row evidence links left with the review matrix
+    (MIK-R74 rule 1): no row is read, so no link is rendered.
     """
 
-    claims = {claim.claim_id: claim for claim in records.claims}
-    links = tuple(
-        _evidence_link(
-            row, claims.get(row.subject.record_id), applicability.label_of(row.subject.record_id)
-        )
-        for row in rows
-        if row.subject.record_kind == "evidence_claim"
-        and applicability.label_of(row.subject.record_id) is not None
-    )
     observations = tuple(
         observation(entry, applicability.label_of(entry.command_name))
         for entry in records.observations
@@ -257,9 +239,9 @@ def evidence_pane(
     )
     assessments = assessment_displays(records, subjects, applicability)
     return ReviewEvidencePane(
-        evidence_state=_evidence_state(bool(links or observations), records.channels),
+        evidence_state=_evidence_state(bool(observations), records.channels),
         assessment_state="assessed" if assessments else "unassessed",
-        evidence_links=links,
+        evidence_links=(),
         observations=observations,
         assessments=assessments,
         source_inspection_available=True,
@@ -354,112 +336,6 @@ def _assessment_display(
         or (record.comparisonRef,),
         binding_state=currentness,
         evidence_refs=tuple(reference.spelling for reference in record.evidenceRefs),
-    )
-
-
-def _evidence_link(
-    row: ReviewMatrixRow,
-    claim: ReviewClaimRecord | None,
-    applicability: ReviewDisplayedApplicability | None,
-) -> ReviewEvidenceLink:
-    """One matrix row's claim, with the claim's own recorded fields where its owner supplied them.
-
-    A claim this composition supplied carries its author, lifecycle, declared limitations and asserted
-    coverage verbatim. A claim whose record could not be read keeps its identity and its assessment
-    references and names the missing half as unresolved -- with the owner that would supply it -- so
-    an unread claim is never rendered as a claim with no limitations.
-    """
-
-    if claim is not None:
-        return ReviewEvidenceLink(
-            applicability=applicability,
-            claim_id=row.subject.record_id,
-            revision_id=row.subject.revision_id,
-            claimed_coverage=claim.claimed_coverage,
-            # The authored field verbatim: an empty member is the author's own "no limitations
-            # declared", which is a recorded fact and not an unknown.
-            limitations=(claim.limitations,),
-            author_ref=claim.author_ref,
-            assessment_refs=row.assessment_ids,
-            lifecycle=claim.lifecycle,
-        )
-    return ReviewEvidenceLink(
-        applicability=applicability,
-        claim_id=row.subject.record_id,
-        revision_id=row.subject.revision_id,
-        assessment_refs=row.assessment_ids,
-        unresolved=(
-            ReviewUnresolvedReference(
-                field="claim_content",
-                recorded_reference=row.subject.record_id,
-                detail=(
-                    "the review matrix publishes this claim's identity, lifecycle and assessment "
-                    "references, and the evidence owner's own read of this claim supplied no "
-                    "content for it, so its coverage, limitations and author are displayed as "
-                    "unresolved rather than reported as absent"
-                ),
-            ),
-        ),
-    )
-
-
-def authored_effects(
-    rows: Sequence[ReviewMatrixRow],
-    applicability: ReviewApplicabilityProjection,
-) -> tuple[ReviewAuthoredEffect, ...]:
-    """The matrix's authored effects, preservation claims and open questions, as recorded.
-
-    Each carries the label its own recorded references earned: a row whose references name the
-    selected subject's revisions or relationships is the subject's own record, and a row whose
-    references name none of them is displayed with those references and the reason it could not be
-    attributed (``ICR-R26@v1``) -- never as a judgment on the selected subject.
-    """
-
-    return tuple(
-        _authored_effect(row, applicability.label_of(row.subject.record_id))
-        for row in rows
-        if applicability.label_of(row.subject.record_id) is not None
-    )
-
-
-def unresolved_authors(rows: Sequence[ReviewMatrixRow]) -> tuple[ReviewUnresolvedReference, ...]:
-    """One unresolved author per displayed row, because the matrix publishes no author for them.
-
-    The matrix view's own contract is that it publishes a record's identity and classification and
-    not its author, so the attribution is displayed as unresolved rather than rendered anonymously
-    or filled with the current actor. It is a fact about what the owner served, and it stays beside
-    the row it is about.
-    """
-
-    return tuple(_unresolved_author(row) for row in rows)
-
-
-def _authored_effect(
-    row: ReviewMatrixRow, applicability: ReviewDisplayedApplicability | None
-) -> ReviewAuthoredEffect:
-    """One authored effect, preservation claim or unresolved question, as recorded."""
-
-    return ReviewAuthoredEffect(
-        applicability=applicability,
-        record_kind=row.subject.record_kind,  # type: ignore[arg-type]
-        record_id=row.subject.record_id,
-        revision_id=row.subject.revision_id,
-        label=row.provenance.provenance_class,
-        rationale=None if row.consequence is None else row.consequence.detail,
-        author_ref=None,
-        examined_inputs=tuple(row.record_ids),
-    )
-
-
-def _unresolved_author(row: ReviewMatrixRow) -> ReviewUnresolvedReference:
-    return ReviewUnresolvedReference(
-        field="author",
-        recorded_reference=row.subject.record_id,
-        detail=(
-            "the review matrix publishes this record's identity and classification but no author "
-            "for it, so the attribution is displayed as unresolved rather than rendered "
-            "anonymously or filled with the current actor"
-        ),
     )
 
 

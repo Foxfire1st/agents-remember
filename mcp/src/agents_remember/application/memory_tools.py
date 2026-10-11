@@ -37,6 +37,7 @@ from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.memory_quality import reference_state
 from agents_remember.memory_quality.converted_cards import card_sidecar_path
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    DriftSummaryOutput,
     run_drift_summary,
 )
 from agents_remember.memory_quality.style.citations import (
@@ -117,6 +118,8 @@ def drift_check_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    # A drift read files no temp report (rule 6); the observer snapshot still applies and is
+    # a named open boundary, not part of this fix.
     packet = run_drift_summary(
         code_repository_root=scope.code_root,
         context=scope.context,
@@ -129,6 +132,7 @@ def drift_check_tool(
             if contract_path is not None
             else None
         ),
+        output=DriftSummaryOutput(write_report=False),
     )
     return {
         "ok": packet.get("status") == "checked",

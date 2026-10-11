@@ -73,19 +73,13 @@ __all__ = [
     "VIEW_PURPOSES",
     "CountQuantity",
     "CountState",
-    "CurationQueueRow",
-    "CurationQueueView",
-    "CuratorDisposition",
     "FamilyRow",
     "FamilyView",
     "InvariantRow",
     "InvariantView",
     "KnowledgeViewReader",
-    "MachineWorkItem",
     "NoConsequenceStatement",
     "OrderedPosition",
-    "ReviewMatrixRow",
-    "ReviewMatrixView",
     "SourceContextRow",
     "SourceContextView",
     "SubjectRef",
@@ -113,11 +107,11 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# The five names, in ``Doc13``'s order.
+# The three names, in ``Doc13``'s order.
 # ---------------------------------------------------------------------------
 
-ViewName = Literal["source_context", "invariant", "family", "review_matrix", "curation_queue"]
-# ``VIEW_NAMES`` is the five names themselves, not five arbitrary strings: a caller that iterates it
+ViewName = Literal["source_context", "invariant", "family"]
+# ``VIEW_NAMES`` is the three names themselves, not three arbitrary strings: a caller that iterates it
 # is iterating admitted view names, and a caller holding a plain ``str`` must still satisfy the
 # request model's own check. Declaring the element type as the literal union says that once, instead
 # of leaving every consumer to re-narrow what ``get_args`` erased.
@@ -141,16 +135,6 @@ VIEW_PURPOSES: Mapping[str, str] = {
         "changes joined to those links, member-record changes, detection signals and curator "
         "assessments -- keeping a member's record changing distinct from its attributed source "
         "changing."
-    ),
-    "review_matrix": (
-        "Requirement records, proposed invariant effects and independent assessments, "
-        "changed/unchanged source selected by registered links, authored preservation claims, "
-        "evidence observations and unresolved findings -- each ordered value carrying its "
-        "authored-or-mechanical provenance class."
-    ),
-    "curation_queue": (
-        "Machine-selected work items with their condition codes and matched facts, mapping and "
-        "scan limitations, and separately attributed curator dispositions."
     ),
 }
 
@@ -859,73 +843,6 @@ class FamilyRow(KnowledgeModel):
     provenance: Provenance
 
 
-class MachineWorkItem(KnowledgeModel):
-    """A machine-selected work item: what the detector matched, and nothing a person judged.
-
-    There is deliberately no field on this model for a disposition, a rationale or an author. The
-    packet's requirement 1.6 is a shape obligation, not a prose one: "There is no field on a work
-    item that holds a curator's judgment."
-    """
-
-    work_item_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    condition_code: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    condition_vocabulary_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    matched_facts: tuple[str, ...] = ()
-    registered_scope_status: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-
-
-class CuratorDisposition(KnowledgeModel):
-    """A curator's own authored disposition, separately attributed.
-
-    And symmetrically: there is no field here for a condition code, a matched fact or a detection
-    identity. A disposition that needed one would be the detector's row wearing a curator's name.
-    """
-
-    disposition_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    disposition: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    rationale: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    author_ref: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    state_at_origin: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    provenance: Provenance
-
-
-class CurationQueueRow(KnowledgeModel):
-    """One work item with, at most, the separately attributed disposition recorded against it."""
-
-    item: MachineWorkItem
-    disposition: CuratorDisposition | None = None
-    limitations: tuple[str, ...] = ()
-    order: OrderedPosition
-
-
-class ReviewMatrixRow(KnowledgeModel):
-    """One review-matrix row: the recorded facts requirement 1.2 names, plus the classification.
-
-    The row deliberately holds references rather than re-rendered content for the records other
-    leaves own, because a view that restated a requirement revision or an effect claim would become
-    a second renderer of it. What the row owns is the *selection*, the *order* and the
-    *classification*, and those are the three things this leaf exists to settle.
-    """
-
-    subject: SubjectRef
-    requirement_record_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    requirement_revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    proposed_effect_claim_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    preservation_claim_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    evidence_claim_ids: tuple[str, ...] = ()
-    record_ids: tuple[str, ...] = ()
-    # The assessment as recorded, with its stored status preserved -- never a status this view
-    # computed, upgraded or summarised (requirement 4.5).
-    assessment_ids: tuple[str, ...] = ()
-    assessment_status: Literal["assessed", "missing", "stale"] = "missing"
-    # Changed/unchanged source selected by the *registered links*, not by a path comparison.
-    source_change_state: Literal["changed", "unchanged", "not_selected"] = "not_selected"
-    unresolved_findings: tuple[str, ...] = ()
-    consequence: NoConsequenceStatement | None = None
-    order: OrderedPosition
-    provenance: Provenance
-
-
 # ---------------------------------------------------------------------------
 # Payloads.
 # ---------------------------------------------------------------------------
@@ -999,24 +916,10 @@ class FamilyView(ViewPayload):
     rows: tuple[FamilyRow, ...] = ()
 
 
-class ReviewMatrixView(ViewPayload):
-    """The review matrix: the surface ``KS-R22@v1``'s Intent Reviewer is specified against."""
-
-    view: Literal["review_matrix"] = "review_matrix"
-    rows: tuple[ReviewMatrixRow, ...] = ()
-
-
-class CurationQueueView(ViewPayload):
-    """The curation queue: machine work items and curator dispositions, separate in the data."""
-
-    view: Literal["curation_queue"] = "curation_queue"
-    rows: tuple[CurationQueueRow, ...] = ()
-
-
 # The discriminated union a result carries, so a payload keeps its concrete row type instead of
 # being validated down to the base class and losing the fields a consumer needs.
 ViewPayloadUnion = Annotated[
-    SourceContextView | InvariantView | FamilyView | ReviewMatrixView | CurationQueueView,
+    SourceContextView | InvariantView | FamilyView,
     Field(discriminator="view"),
 ]
 
@@ -1028,8 +931,6 @@ VIEW_PAYLOADS: tuple[type[ViewPayload], ...] = (
     SourceContextView,
     InvariantView,
     FamilyView,
-    ReviewMatrixView,
-    CurationQueueView,
 )
 
 
@@ -1080,10 +981,6 @@ class KnowledgeViewReader(Protocol):
 
     def registered_counts(self) -> ViewSourceCounts:
         """The registered realization and family totals for that snapshot."""
-        ...
-
-    def rows(self, record_kind: str) -> tuple[ViewSourceRow, ...]:
-        """Every recorded row of one registered record kind, in recorded order."""
         ...
 
     def invariant_rows(self) -> tuple[ViewSourceRow, ...]:

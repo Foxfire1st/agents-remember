@@ -14,7 +14,7 @@ from agents_remember.memory.knowledge import logical
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.request_digests import same_request_digests
-from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
+from agents_remember.memory.knowledge.schema import SchemaGeneration
 
 GENERATION = SchemaGeneration(
     schema_name="request-equality-test",

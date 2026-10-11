@@ -133,17 +133,15 @@ DiffCoverage = Literal[
 # How one union item's record moved between the two snapshots, stated as a fact about the record's
 # identity and the two selected sets. It is deliberately not a comparison of *meanings*: an item is
 # ``unchanged`` when both sides hold the same record with the same fields, ``changed`` when both
-# sides hold it and its fields differ, ``added``/``removed`` when only the candidate or only the
-# baseline holds it, and ``superseding``/``superseded`` when the one record identity has a different
-# exact revision on each side -- the state a schema with immutable revisions produces when an author
-# revises a statement, and the one shape that must not be rendered as a deletion plus an addition.
+# sides hold it and its fields differ, and ``added``/``removed`` when only the candidate or only the
+# baseline holds it. A revised statement -- a different exact revision on each side -- reads as a
+# removal beside an unrelated addition: text records hold no predecessor edge (MIK-R74 rule 1), so
+# no succession is stated.
 DiffRecordTransition = Literal[
     "unchanged",
     "changed",
     "added",
     "removed",
-    "superseding",
-    "superseded",
 ]
 
 # Every reason this response can give for omitting a change. It is *closed* on purpose: a reason

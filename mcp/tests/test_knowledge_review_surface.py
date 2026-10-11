@@ -87,8 +87,13 @@ from agents_remember.models.lifecycles.review_assessment_store import (
     AssessmentInputs,
     bind_assessment,
 )
-from diff_scope_test_support import DiffFixture, build_diff_fixture
+from diff_scope_test_support import (
+    RETRY_FIRST_REFUSAL_CONDITION,
+    DiffFixture,
+    build_diff_fixture,
+)
 from pydantic import ValidationError
+from read_scope_test_support import CONDITIONS, SUCCESSOR_CONDITIONS
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -324,12 +329,11 @@ def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparis
 ) -> None:
     """Pane 1 shows the reviewed subject's recorded selection and its own classification.
 
-    The fixture's retry identity is branchy on both snapshots -- the baseline retains two
-    successor heads of the base revision, the candidate three -- so ICR-R07@v1 reports an
-    explicit ambiguous selection rather than silently rendering the retained predecessor both
-    snapshots happen to hold. Both statements state that ambiguity, the recorded selection
-    names every head and every retained revision, and the pane's field changes are exactly the
-    comparison's own -- it adds no field transition of its own making.
+    One text record holds one revision (MIK-R74 rule 3), so the retry identity holds one head
+    per snapshot -- the baseline's subject revision and the candidate's revised one -- and
+    ICR-R07@v1 reports an explicit compared selection. Both statements render the compared
+    heads' own words, the recorded selection names the compared pair, and the pane's field
+    changes are exactly the comparison's own -- it adds no field transition of its own making.
     """
 
     shipped = diff_knowledge_scope(
@@ -365,44 +369,19 @@ def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparis
     payload = render(fixture)
     knowledge = payload.knowledge
     assert fixture.retry_invariant_id in knowledge.invariant_ids
-    base_revision = fixture.before.fixture.base_revision_id
-    successor_revision = fixture.before.fixture.successor_revision_id
     selection = knowledge.revision_selection
     assert selection is not None, "a compared subject records its revision selection"
     assert selection.record_kind == "invariant"
     assert selection.record_id == fixture.retry_invariant_id
-    # Both snapshots retain multiple legitimate heads with no authored ordering between them,
-    # so the selection is explicitly ambiguous and records no pair.
-    assert selection.state == "ambiguous"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert sorted(selection.before_heads) == sorted(
-        (fixture.subject_revision_id, successor_revision)
-    )
-    assert sorted(selection.after_heads) == sorted(
-        (successor_revision, fixture.revised_revision_id, fixture.unselected_revision_id)
-    )
-    assert sorted(selection.before_retained) == sorted(
-        (base_revision, fixture.subject_revision_id, successor_revision)
-    )
-    assert sorted(selection.after_retained) == sorted(
-        (
-            base_revision,
-            fixture.subject_revision_id,
-            successor_revision,
-            fixture.revised_revision_id,
-            fixture.unselected_revision_id,
-        )
-    )
-    assert "ambiguous revision selection" in selection.statement
-    # No head's text is rendered as the subject's operand: both sides state the ambiguity, and
-    # the retained revisions stay visible through the recorded selection above.
-    assert knowledge.before_statement.state == "unresolved"
-    assert knowledge.after_statement.state == "unresolved"
-    assert knowledge.before_statement.detail == selection.statement
-    assert knowledge.after_statement.detail == selection.statement
-    assert knowledge.before_conditions == ()
-    assert knowledge.after_conditions == ()
+    # One head per snapshot: the selection is explicitly compared and records the pair.
+    assert selection.state == "compared"
+    assert selection.before_revision_id == fixture.subject_revision_id
+    assert selection.after_revision_id == fixture.revised_revision_id
+    # Each side's statement is that side's own head's words, with that side's own conditions.
+    assert knowledge.before_statement.state == "present"
+    assert knowledge.after_statement.state == "present"
+    assert tuple(knowledge.before_conditions) == tuple(SUCCESSOR_CONDITIONS)
+    assert tuple(knowledge.after_conditions) == (*CONDITIONS, RETRY_FIRST_REFUSAL_CONDITION)
     assert {(change.item_id, change.field) for change in knowledge.field_changes} == {
         (item.item_id, name) for item in shipped.page.items for name in item.changed_fields
     }
@@ -620,7 +599,9 @@ def test_a_detection_signal_carries_its_facts_and_scope_limitations_and_no_sever
     fields = set(ReviewSignal.model_fields)
     assert fields & FORBIDDEN_FIELD_NAMES == set()
     # A signal is a different kind from an authored effect, so neither collection can absorb it.
-    assert payload.knowledge.authored_effects == ()
+    # The pane carries no matrix collection: the removed-collection channel is the whole
+    # statement about authored effects.
+    assert not hasattr(payload.knowledge, "authored_effects")
 
 
 def test_the_stale_rule_holds_in_both_directions(fixture: DiffFixture) -> None:
@@ -666,10 +647,9 @@ def test_an_item_whose_author_is_not_published_is_shown_as_an_unresolved_referen
     """An unresolved attribution is displayed as unresolved rather than rendered anonymously."""
 
     payload = render(fixture)
-    if payload.knowledge.authored_effects:
-        for effect in payload.knowledge.authored_effects:
-            assert effect.author_ref is None
-            assert any(entry.field == "author" for entry in effect.unresolved)
+    # The pane carries no matrix collection, so there are no authored effects to resolve authors
+    # for; the unresolved references below are the whole measurement.
+    assert not hasattr(payload.knowledge, "authored_effects")
     assert all(
         entry.recorded_reference
         for entry in payload.knowledge.unresolved + payload.source.unresolved
@@ -885,11 +865,13 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
         ReviewSourcePane,
         ReviewEvidencePane,
     }
-    # The knowledge pane keeps authored records and mechanical signals in separate collections of
-    # separate element types, so one cannot be rendered in the other's place by a missing branch.
+    # The knowledge pane keeps mechanical signals in their own collection of their own element
+    # type, so a signal cannot be rendered in a finding's place by a missing branch. The matrix's
+    # authored-effects collection is gone with the matrix (MIK-R74 rule 1): the pane carries no
+    # such field at all, and the removed-collection channel is the whole statement about it.
     fields = ReviewKnowledgePane.model_fields
-    assert "authored_effects" in fields and "signals" in fields
-    assert fields["authored_effects"].annotation != fields["signals"].annotation
+    assert "authored_effects" not in fields
+    assert "signals" in fields
 
     resolved = resolution_for(fixture)
     offered = read_subject_catalogue(resolved)
@@ -974,24 +956,16 @@ def test_a_knowledge_only_change_leaves_an_openable_review_with_a_measured_empty
     assert payload.comparison.before_code_tree_id == fixture.before_tree_id
     assert payload.staleness.state == "current"
     assert payload.knowledge.selection_state == "subject_selected"
-    # The knowledge half is untouched by the empty source half: the same branchy retry identity
-    # is explicitly ambiguous here too, with the same recorded heads -- only the source
+    # The knowledge half is untouched by the empty source half: the same compared retry identity
+    # selects the same pair here too, with the same compared heads -- only the source
     # measurement changed, and only the source pane answers for it.
-    successor_revision = fixture.before.fixture.successor_revision_id
     selection = payload.knowledge.revision_selection
     assert selection is not None, "a compared subject records its revision selection"
-    assert selection.state == "ambiguous"
-    assert selection.before_revision_id is None
-    assert selection.after_revision_id is None
-    assert sorted(selection.before_heads) == sorted(
-        (fixture.subject_revision_id, successor_revision)
-    )
-    assert sorted(selection.after_heads) == sorted(
-        (successor_revision, fixture.revised_revision_id, fixture.unselected_revision_id)
-    )
-    assert payload.knowledge.before_statement.state == "unresolved"
-    assert payload.knowledge.after_statement.state == "unresolved"
-    assert payload.knowledge.before_statement.detail == selection.statement
+    assert selection.state == "compared"
+    assert selection.before_revision_id == fixture.subject_revision_id
+    assert selection.after_revision_id == fixture.revised_revision_id
+    assert payload.knowledge.before_statement.state == "present"
+    assert payload.knowledge.after_statement.state == "present"
     # Attribution is the comparison's own statement about recorded claims, *intersected with the
     # measured change population* (ICR-R04). An empty source half has no changed path for a claim to
     # attribute, so the attributed list is empty -- and the partition reports that as a measurement

@@ -23,11 +23,13 @@ from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRe
 __all__ = [
     "FINAL_OUTPUT_RECEIPT_VERSION",
     "FINAL_OUTPUT_SELECTION_RULE",
+    "BoundOrMovedVerdict",
     "FinalOutputPhase",
     "FinalOutputReceipt",
     "FinalOutputVerdict",
     "LegacyFinalOutputReceipt",
     "MatchState",
+    "MeasuredMatchState",
     "PublishedKnowledgeState",
     "code_match_state",
     "final_output_verdict",
@@ -66,13 +68,16 @@ MatchState = Literal["matches-reviewed-input", "differs-from-reviewed-input", "n
 # something that is not a dataset this code can read.
 PublishedKnowledgeState = Literal["published", "not-recorded", "unusable"]
 
-# The record's one verdict, and the reason there are three rather than two. ``moved`` is a mismatch on a
-# channel that was compared. ``unmeasured`` is *not* a mismatch: the generation selected a knowledge
-# operand and no delivered dataset was ever compared against it (the declared location holds no
-# publication, or holds something this code cannot read as one), so the delivery's knowledge channel is
-# simply unknown. ``bound`` is the only value that claims coverage, and it requires a *measured* match on
-# every channel the generation actually selected -- a receipt whose knowledge channel was never compared
-# must never read as coverage, because that is the claim a consumer keys on.
+# The record's one verdict, and why only two values can stand beside a v2 receipt.
+# ``moved`` is a mismatch on a channel that was compared. ``bound`` is the only
+# value that claims coverage, and it requires a *measured* match on every channel
+# the generation actually selected. The third value of the shared vocabulary,
+# ``unmeasured``, belongs to the v1 generation record below (a selected knowledge
+# operand whose declared location held no comparable dataset); no path of the
+# product writes it into a v2 receipt (ruling 814778 point 3), so the v2 record's
+# fields name exactly the two values each can hold.
+MeasuredMatchState = Literal["matches-reviewed-input", "differs-from-reviewed-input"]
+BoundOrMovedVerdict = Literal["bound", "moved"]
 FinalOutputVerdict = Literal["bound", "unmeasured", "moved"]
 
 
@@ -281,11 +286,11 @@ class FinalOutputReceipt(KnowledgeModel):
     comparison_digest: str = Field(pattern=SHA256_PATTERN)
     delivered_code_commit: str = Field(pattern=GIT_OBJECT_PATTERN)
     delivered_code_tree_id: str = Field(pattern=GIT_OBJECT_PATTERN)
-    delivered_memory_content_commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    delivered_memory_tree_id: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
-    code_match: MatchState
-    memory_match: MatchState
-    state: FinalOutputVerdict
+    delivered_memory_content_commit: str = Field(pattern=GIT_OBJECT_PATTERN)
+    delivered_memory_tree_id: str = Field(pattern=GIT_OBJECT_PATTERN)
+    code_match: MeasuredMatchState
+    memory_match: MeasuredMatchState
+    state: BoundOrMovedVerdict
 
     @model_validator(mode="after")
     def _validate_tree_binding(self) -> FinalOutputReceipt:
@@ -293,10 +298,6 @@ class FinalOutputReceipt(KnowledgeModel):
             raise ValueError("the receipt must name the source comparison's leaf")
         if self.comparison_digest != tree_comparison_digest(self.comparison):
             raise ValueError("the comparison digest must describe the complete source record")
-        if (self.delivered_memory_content_commit is None) != (
-            self.delivered_memory_tree_id is None
-        ):
-            raise ValueError("the delivered memory commit and tree are present together")
         code = tree_match_state(self.comparison.code_candidate.tree, self.delivered_code_tree_id)
         memory = tree_match_state(
             self.comparison.memory_candidate.tree, self.delivered_memory_tree_id

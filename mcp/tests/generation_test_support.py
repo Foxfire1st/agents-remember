@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.schema_generations import CURRENT_GENERATION
+from agents_remember.memory.knowledge.schema import CURRENT_GENERATION
 
 
 def current_generation_name() -> str:

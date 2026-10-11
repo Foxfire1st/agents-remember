@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from typing import Final
 
+# v3 (MIK-R74): history rows are keyed by (path, id), so two files may hold one row ID.
 # v2 (MIK-R25): projected revision rows carry the store's own payload seal, so an index built by v1
 # (whose seals the store's revision readers refuse) is rebuilt rather than reused.
-INDEX_FORMAT: Final = "ar-knowledge-index/v2"
+INDEX_FORMAT: Final = "ar-knowledge-index/v3"
 
 INDEX_DDL: Final[tuple[str, ...]] = (
     """
@@ -82,14 +83,15 @@ CREATE TABLE ix_link (
 """,
     """
 CREATE TABLE ix_history_row (
-  id TEXT PRIMARY KEY NOT NULL,
+  id TEXT NOT NULL,
   owner TEXT NOT NULL,
   owner_kind TEXT NOT NULL,
   closed INTEGER NOT NULL,
   path TEXT NOT NULL,
   subject TEXT NOT NULL,
   disposition TEXT NOT NULL,
-  document TEXT NOT NULL
+  document TEXT NOT NULL,
+  PRIMARY KEY (path, id)
 ) STRICT
 """,
     "CREATE INDEX ix_entry_path ON ix_entry (path)",

@@ -99,24 +99,32 @@ def runtime_install_payload(
     """
 
     full = run_runtime_install(config, request)
-    report_path = write_tool_report(
-        config.coordination_root,
-        "runtime_install",
-        full,
-        label="dry-run" if request.dry_run else "install",
+    # A dry run is a preview and files nothing (rule 6); only an executed install files
+    # its report, and only then does the answer carry the path.
+    report_path = (
+        None
+        if request.dry_run
+        else write_tool_report(
+            config.coordination_root,
+            "runtime_install",
+            full,
+            label="install",
+        ).as_posix()
     )
     return _tool_payload(
         "runtime_install",
-        compact_runtime_install_payload(full, report_path.as_posix()),
+        compact_runtime_install_payload(full, report_path),
     )
 
 
-def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+def compact_runtime_install_payload(
+    full: dict[str, Any], report_path: str | None
+) -> dict[str, Any]:
     """Keep the install outcome inline; the rebind runs (compose renders, docker
     argv, container transcripts — historically >50k chars) live in the report."""
     compact = {key: value for key, value in full.items() if key != "providerWatcherRebind"}
     messages = full.get("messages")
-    if isinstance(messages, list) and len(messages) > 5:
+    if isinstance(messages, list) and len(messages) > 5 and report_path is not None:
         compact["messages"] = [*messages[:5], f"... {len(messages) - 5} more in the report"]
     rebind = full.get("providerWatcherRebind")
     if isinstance(rebind, dict):
@@ -133,7 +141,8 @@ def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> d
                 if isinstance(run, dict)
             ],
         }
-    compact["reportPath"] = report_path
+    if report_path is not None:
+        compact["reportPath"] = report_path
     return compact
 
 

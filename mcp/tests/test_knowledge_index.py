@@ -261,7 +261,124 @@ def test_history_rows_are_found_by_subject_and_by_leaf(
     assert {row.subject for row in of_other} == {REVIEW_INVARIANT, FAMILY}
 
 
+def test_two_closed_files_may_hold_one_row_id_and_a_lookup_names_both(
+    tmp_path: Path, cache: KnowledgeIndexCache
+) -> None:
+    """MIK-R74 rule 4: the key of a history row is its file and its ID together.
+
+    Two closed history files hold the row ID ``ROW-ABCDEF``. The index builds, is complete,
+    and a lookup by that ID returns both rows, each with the path of the file that holds it.
+    """
+
+    root = tmp_path / "memory"
+    init_repository(root)
+    write_review_tree(root)
+    twin = {
+        "schema": "ar-history/v1",
+        "leaf": "twin-leaf",
+        "closed": True,
+        "rows": [
+            {
+                "id": "ROW-ABCDEF",
+                "subject": REVIEW_INVARIANT,
+                "disposition": "no_impact",
+                "reason": "The twin file judges the same invariant closed.",
+                "items": [],
+                "covers": [],
+                "revision": 1,
+            }
+        ],
+    }
+    sibling = {
+        "schema": "ar-history/v1",
+        "leaf": "sibling-leaf",
+        "closed": True,
+        "rows": [
+            {
+                "id": "ROW-ABCDEF",
+                "subject": SIBLING_INVARIANT,
+                "disposition": "no_impact",
+                "reason": "The sibling file judges its own invariant closed.",
+                "items": [],
+                "covers": [],
+                "revision": 1,
+            }
+        ],
+    }
+    (root / "knowledge" / "history" / "twin-leaf.json").write_text(
+        canonical_text(twin), encoding="utf-8"
+    )
+    (root / "knowledge" / "history" / "sibling-leaf.json").write_text(
+        canonical_text(sibling), encoding="utf-8"
+    )
+    commit_all(root)
+    with cache.for_directory(root) as index:
+        assert index.state.complete, index.state.problems
+        found = index.history_row("ROW-ABCDEF").value
+    assert [(row.path, row.subject) for row in found] == [
+        ("knowledge/history/sibling-leaf.json", SIBLING_INVARIANT),
+        ("knowledge/history/twin-leaf.json", REVIEW_INVARIANT),
+    ]
+    assert {row.owner for row in found} == {"sibling-leaf", "twin-leaf"}
+    assert all(row.closed for row in found)
+
+
 # --- rule 5: freshness ------------------------------------------------------------------------
+
+
+def test_a_sparse_checkout_keeps_its_skipped_files_committed_blobs_in_the_capture(
+    tmp_path: Path,
+) -> None:
+    """MIK-R74 rule 5: a path sparse checkout leaves out is not captured as deleted.
+
+    On a real sparse checkout in a scratch repository, the skipped knowledge files are absent
+    from the worktree with ``skip-worktree`` set. The captured key is still the committed tree,
+    and the snapshot carries the skipped paths with their committed bytes. A file that is absent
+    without that flag is still captured as deleted.
+    """
+
+    root = tmp_path / "memory"
+    init_repository(root)
+    write_review_tree(root)
+    commit_all(root)
+    head_tree = git(root, "rev-parse", "HEAD^{tree}")
+    # Names, not contents: the review tree's history files.
+    history = sorted(
+        path.relative_to(root).as_posix() for path in (root / "knowledge" / "history").glob("*.json")
+    )
+    assert len(history) >= 2, history
+    skipped, present = history[0], history[1]
+    # The worktree is clean at this commit, so these bytes are the committed ones.
+    committed = {path: (root / path).read_bytes() for path in history}
+    git(root, "sparse-checkout", "init", "--no-cone")
+    git(root, "sparse-checkout", "set", "/*", f"!/{skipped}")
+    assert not (root / skipped).exists(), "the checkout did not leave the path out"
+    assert (root / present).exists(), "the checkout left out more than the history directory"
+    flags = git(root, "ls-files", "-v")
+    assert f"S {skipped}" in flags.splitlines(), flags
+
+    snapshot = directory_snapshot(root)
+    assert snapshot.key == head_tree
+    assert snapshot.files[skipped] == committed[skipped]
+    assert snapshot.files[present] == committed[present]
+
+    # The combined spelling: the same skipped path carrying assume-unchanged too. Git spells
+    # that lower-case ``s``, and the capture must still keep the committed blob.
+    git(root, "update-index", "--assume-unchanged", skipped)
+    combined = git(root, "ls-files", "-v")
+    assert f"s {skipped}" in combined.splitlines(), combined
+    combined_snapshot = directory_snapshot(root)
+    assert combined_snapshot.key == head_tree
+    assert combined_snapshot.files[skipped] == committed[skipped]
+
+    # The capture never touches the repository's own index: both flags are still set there.
+    flags_after = git(root, "ls-files", "-v")
+    assert f"s {skipped}" in flags_after.splitlines(), flags_after
+
+    # A file that is absent without that flag is still captured as deleted, as today.
+    (root / present).unlink()
+    assert directory_key(root) != head_tree
+
 
 
 def test_an_edited_working_tree_is_never_answered_from_the_previous_content(

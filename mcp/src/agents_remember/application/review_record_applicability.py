@@ -41,9 +41,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
-from agents_remember.application.review_evidence_records import AUTHORED_EFFECT_KINDS
 from agents_remember.application.review_record_rendering import (
-    ReviewClaimRecord,
     ReviewRecordInputs,
 )
 from agents_remember.application.review_recorded_selection import (
@@ -68,7 +66,6 @@ from agents_remember.models.knowledge.review_applicability import (
     ReviewContextRecord,
     ReviewDisplayedApplicability,
 )
-from agents_remember.models.knowledge.view import ReviewMatrixRow
 from agents_remember.models.lifecycles.review_assessment import ReviewAssessment
 
 __all__ = [
@@ -78,8 +75,9 @@ __all__ = [
     "task_context_applicability",
 ]
 
-# The two collections the review matrix page owns: their ``supplied`` count is the rows that page
-# returned, while the owner's complete collection count travels on ``ICR-R14@v1``'s evidence channel.
+# The two collections no review reads now that the matrix left with the retired envelope
+# tables (MIK-R74 rule 1): their ``supplied`` count is the rows no page returns -- always zero --
+# while the owner's complete collection count travels on ``ICR-R14@v1``'s evidence channel.
 _MATRIX_OWNED: tuple[ReviewApplicabilityClass, ...] = ("authored_effects", "evidence_claims")
 
 
@@ -168,23 +166,11 @@ class AppliedRecords:
 
         return tuple(self.summaries[name] for name in classes if name in self.summaries)
 
-    def displayed_rows(self, rows: Sequence[ReviewMatrixRow]) -> tuple[ReviewMatrixRow, ...]:
-        """The matrix rows this subject may be judged by, in the matrix's own order.
-
-        A row whose recorded references resolved to another subject's identity is not here, whether
-        it was displayed as context or not displayed at all; a row whose references resolved to
-        nothing is here with the ``unresolved`` label, because dropping it would report an
-        unresolvable binding as an absence of records.
-        """
-
-        return tuple(row for row in rows if row.subject.record_id in self.labels)
-
 
 def review_applicability(
     resolved: ReviewCandidateResolution,
     request: ReviewSurfaceRequest,
     records: ReviewRecordInputs,
-    rows: Sequence[ReviewMatrixRow],
     facts: ComparisonFacts,
 ) -> AppliedRecords:
     """Classify one review's supplied records against the subject its own request selected.
@@ -200,7 +186,6 @@ def review_applicability(
 
     return apply_review_applicability(
         records,
-        rows,
         ApplicabilitySources(
             comparison=facts,
             selector=request.selector,
@@ -216,16 +201,17 @@ def review_applicability(
 
 def apply_review_applicability(
     records: ReviewRecordInputs,
-    rows: Sequence[ReviewMatrixRow],
     sources: ApplicabilitySources,
 ) -> AppliedRecords:
     """Classify every supplied record against one selection, before any pane displays it.
 
     The one entry the composition calls: the selection's recorded population is read once, and the
-    four supplied collections are each classified against it. A record that may be displayed carries
+    supplied collections are each classified against it. A record that may be displayed carries
     its label in ``labels``; one displayed as another subject's context becomes a
     :class:`ReviewContextRecord`; and every collection's six-way count is recorded in ``summaries``,
-    including the records this review does not display as the selected subject's judgments.
+    including the records this review does not display as the selected subject's judgments. The two
+    matrix-owned collections are read by no review now (MIK-R74 rule 1), so their summaries stay
+    the zero counts of a selection no page returned rather than vanishing or reading as measured.
     """
 
     selection = selected_subject_population(sources)
@@ -234,7 +220,10 @@ def apply_review_applicability(
     _classify_assessments(applied, records.assessments, selection, known)
     _classify_signals(applied, records.signals, selection)
     _classify_observations(applied, records.observations)
-    _classify_rows(applied, records, rows, selection)
+    for name in _MATRIX_OWNED:
+        applied.summaries[name] = _summary(
+            name, 0, _empty_state_counts(), matrix_owned=True
+        )
     return applied
 
 
@@ -647,80 +636,6 @@ def _classify_observations(
     )
 
 
-def _classify_rows(
-    applied: AppliedRecords,
-    records: ReviewRecordInputs,
-    rows: Sequence[ReviewMatrixRow],
-    selection: RecordedSelection,
-) -> None:
-    """Project every matrix row onto the recorded references the row itself carries.
-
-    The review matrix is candidate-wide and a row's own ``subject`` is the *record* it shows rather
-    than the identity that record is about, so a row is classified by the references it records: an
-    evidence claim's own subject revision (read from the claim's owner), an effect claim's
-    realization references, a requirement revision's own revision identity. A row none of whose
-    references this selection holds is unresolved -- the composition cannot establish which subject
-    it belongs to -- and it is displayed with those references and that reason rather than as a
-    judgment on the selected subject.
-    """
-
-    counts: dict[ReviewApplicabilityClass, dict[str, int]] = {}
-    for row in rows:
-        kind = _row_class(row)
-        if kind is None:
-            continue
-        references = _row_references(row, records)
-        matched = _match_references(_row_bindings(row, records), selection)
-        counted = counts.setdefault(kind, _empty_state_counts())
-        if matched.state == "context" and matched.identity is not None:
-            applied.context.append(
-                _context_record(
-                    _Context(
-                        records=kind,
-                        record_id=row.subject.record_id,
-                        label=row.subject.record_kind,
-                        identity=matched.identity,
-                        relationship=selection.relationship_of(matched.identity)
-                        or f"recorded relationship {matched.reference}",
-                        references=references,
-                        detail=(
-                            f"this matrix row records {matched.reference}, which belongs to the "
-                            f"{matched.identity.kind} {matched.identity.record_id} the selected "
-                            "subject's recorded relationships reach; it is displayed as labelled "
-                            "context and never as a judgment on the selected subject"
-                        ),
-                    )
-                )
-            )
-            counted["context"] += 1
-            continue
-        if matched.state == "direct" and matched.identity is not None:
-            applied.labels[row.subject.record_id] = ReviewDisplayedApplicability(
-                records=kind,
-                record_id=row.subject.record_id,
-                state="direct",
-                subject_kind=matched.identity.kind,
-                subject_id=matched.identity.record_id,
-                references=references,
-                detail=(
-                    f"this matrix row records {matched.reference}, a recorded revision or "
-                    f"relationship of the selected {matched.identity.kind} "
-                    f"{matched.identity.record_id}"
-                ),
-            )
-            counted["direct"] += 1
-            continue
-        applied.labels[row.subject.record_id] = _unresolved(
-            kind, row.subject.record_id, references, _UNRESOLVED_DETAIL
-        )
-        counted["unresolved"] += 1
-    for name in _MATRIX_OWNED:
-        supplied = sum(1 for row in rows if _row_class(row) == name)
-        applied.summaries[name] = _summary(
-            name, supplied, counts.get(name, _empty_state_counts()), matrix_owned=True
-        )
-
-
 # --- the record bindings each class records ---------------------------------------------------
 
 
@@ -804,77 +719,6 @@ def _signal_references(entry: DetectionSignalPayload) -> tuple[str, ...]:
     return tuple(f"{path.path_id}:{path.reached_item_id}" for path in entry.relationship_paths) or (
         f"signal:{entry.signal_id} (no recorded relationship path)",
     )
-
-
-def _row_class(row: ReviewMatrixRow) -> ReviewApplicabilityClass | None:
-    """Which displayed collection one matrix row belongs to, or ``None`` when no pane shows it."""
-
-    if row.subject.record_kind == "evidence_claim":
-        return "evidence_claims"
-    if row.subject.record_kind in AUTHORED_EFFECT_KINDS:
-        return "authored_effects"
-    return None
-
-
-def _row_bindings(row: ReviewMatrixRow, records: ReviewRecordInputs) -> tuple[str, ...]:
-    """The raw recorded identities one matrix row's classification is decided from.
-
-    The row's own identity is deliberately absent: it is the record the row shows, not a reference
-    to anything, so matching it would make every row look resolved against itself.
-    """
-
-    claim = _claim_of(row, records)
-    return (
-        *(
-            ()
-            if claim is None or claim.subject_revision_id is None
-            else (claim.subject_revision_id,)
-        ),
-        *(() if row.requirement_revision_id is None else (row.requirement_revision_id,)),
-        *(() if row.requirement_record_id is None else (row.requirement_record_id,)),
-        *(() if row.proposed_effect_claim_id is None else (row.proposed_effect_claim_id,)),
-        *(() if row.preservation_claim_id is None else (row.preservation_claim_id,)),
-        *row.evidence_claim_ids,
-        *row.record_ids,
-    )
-
-
-def _row_references(row: ReviewMatrixRow, records: ReviewRecordInputs) -> tuple[str, ...]:
-    """The same bindings, spelled as the recorded fields a reader can go and re-read."""
-
-    claim = _claim_of(row, records)
-    references = [
-        *(
-            ()
-            if claim is None or claim.subject_revision_id is None
-            else (f"claim.subjectRevision:{claim.subject_revision_id}",)
-        ),
-        *(
-            ()
-            if row.requirement_revision_id is None
-            else (f"requirement_revision:{row.requirement_revision_id}",)
-        ),
-        *(
-            ()
-            if row.proposed_effect_claim_id is None
-            else (f"effect_claim:{row.proposed_effect_claim_id}",)
-        ),
-        *(
-            ()
-            if row.preservation_claim_id is None
-            else (f"preservation_claim:{row.preservation_claim_id}",)
-        ),
-        *(f"evidence_claim:{claim_id}" for claim_id in row.evidence_claim_ids),
-        *(f"record:{record_id}" for record_id in row.record_ids),
-    ]
-    return tuple(references) or (f"{row.subject.record_kind}:{row.subject.record_id}",)
-
-
-def _claim_of(row: ReviewMatrixRow, records: ReviewRecordInputs) -> ReviewClaimRecord | None:
-    for claim in records.claims:
-        if claim.claim_id == row.subject.record_id:
-            return claim
-    return None
 
 
 # --- the recorded match -----------------------------------------------------------------------

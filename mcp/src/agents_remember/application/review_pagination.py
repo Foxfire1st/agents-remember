@@ -8,14 +8,13 @@ is *stated* on the review surface.
 
 **It mints no cursor and re-derives no binding.** The continuation a page publishes is the owner's own
 opaque token, carried verbatim: the comparison's ``knowledge-diff-cursor/v1`` for the knowledge
-collection, the view's snapshot-bound continuation for the records collection. That is what keeps one
-pagination authority rather than two, and it is why the two collections are named rather than
-uniform -- a caller that handed one owner's cursor to the other owner would be presenting a position
-in one walk to a different walk, and both owners refuse that instead of serving a slice of it.
+collection. That is what keeps one pagination authority: a caller that handed another owner's cursor
+to the comparison would be presenting a position in one walk to a different walk, and the comparison
+refuses that instead of serving a slice of it.
 
 **The counts are the owner's own.** ``total``, ``returned`` and ``remaining`` are read off the
-comparison's ``KnowledgeDiffCounts`` and the view's ``ViewCounts`` exactly as those owners published
-them; nothing here subtracts two of them to invent the third. The arithmetic this module does perform
+comparison's ``KnowledgeDiffCounts`` exactly as that owner published them; nothing here subtracts two
+of them to invent the third. The arithmetic this module does perform
 is the check that the three agree, which :class:`ReviewCollectionPage` enforces at construction -- a
 page whose numbers do not add up cannot be built, so ``remaining=100`` can never be printed beside a
 walk that does not have a hundred rows left in it.
@@ -30,8 +29,6 @@ the refusal is the current comparison's first page rather than a page stitched f
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffPage,
     KnowledgeDiffResult,
@@ -43,49 +40,30 @@ from agents_remember.models.knowledge.review import (
     ReviewPagedCollection,
     ReviewRefusal,
 )
-from agents_remember.models.knowledge.view import ViewCounts, ViewRefusal
 
 __all__ = [
     "MOVED_SNAPSHOT_CODES",
-    "RecordsPagePosition",
     "comparison_page",
     "comparison_reset",
-    "records_page",
-    "records_page_refusal",
     "reset_comparison_page",
     "unreadable_page_refusal",
 ]
 
 # The one owner refusal code that means "this cursor bound a comparison that has moved": the
-# comparison's own binding mismatch, and the view's own snapshot mismatch, which the two owners both
-# spell this way. It alone is mapped onto the moved-snapshot action.
+# comparison's own binding mismatch. It alone is mapped onto the moved-snapshot action.
 #
 # Everything else keeps the owner's own next action and is reported as ``comparison_page_unreadable``
 # instead, because telling a reader to open a new comparison when nothing moved would be a false
 # statement about what happened. The two directions are told apart by asking the *owner's own
 # decoder* whether the token is one of its cursors at all (``continue_diff_from_cursor`` for the
-# comparison, ``rebuild_continuation`` for the view) rather than by guessing from the refusal text.
+# comparison) rather than by guessing from the refusal text.
 MOVED_SNAPSHOT_CODES: frozenset[str] = frozenset({"continuation_binding_mismatch"})
 
 # The one owner refusal code that means "this text is not a cursor of the collection you named at
-# all": the view's token codec could not read it back. It is a caller's mistake about *which walk*
-# the token belongs to, so it earns the owner's own remedy rather than the moved-snapshot action.
+# all": the comparison's token codec could not read it back. It is a caller's mistake about *which
+# walk* the token belongs to, so it earns the owner's own remedy rather than the moved-snapshot
+# action.
 _UNREADABLE_CURSOR = "continuation_unreadable"
-
-
-@dataclass(frozen=True)
-class RecordsPagePosition:
-    """Where one records page stands: its owner's cursor, its scope, and the bound it applied.
-
-    It is one value rather than four arguments because the four describe one thing -- the page's own
-    position in its walk -- and a caller that could pass three of them could state a page whose scope,
-    cursor and bound disagreed with each other.
-    """
-
-    scope: tuple[str, ...]
-    continuation: str | None
-    continued_from: str | None
-    page_size: int
 
 
 def comparison_reset(result: KnowledgeDiffResult, *, cursor: str | None) -> ReviewRefusal | None:
@@ -149,55 +127,6 @@ def unreadable_page_refusal(
     )
 
 
-def records_page_refusal(
-    refusal_value: ViewRefusal,
-    *,
-    cursor: str | None = None,
-) -> ReviewRefusal:
-    """The review surface's refusal for a matrix cursor the view could not admit.
-
-    The view's own code decides which failure this is. A binding mismatch is the moved-snapshot case
-    and takes the surface's own new-generation action; every other view refusal -- a token the shipped
-    codec could not read back, a token minted for another view's walk, an unadmitted ordering -- keeps
-    the owner's own next action, because telling a reader to open a new comparison when nothing moved
-    would be a false statement about what happened. The owner's own words are carried through either
-    way: a reader that cannot see which two identities disagreed cannot act on the refusal.
-
-    ``cursor`` is the token the caller actually presented. The view's own snapshot refusal names its
-    *view* as the offending input -- which is true of the walk and useless to the reader -- so the
-    token is named here instead: it is the value the reader sent and the value they must discard.
-    """
-
-    if refusal_value.code not in MOVED_SNAPSHOT_CODES and refusal_value.code != _UNREADABLE_CURSOR:
-        # The view refused for its own reason -- an unreadable snapshot, an ambiguous row set -- and
-        # none of those is a statement about the cursor: the refusal is the comparison's own failure
-        # and keeps the owner's words and remedy.
-        return ReviewRefusal(
-            code="comparison_refused",
-            detail=f"{refusal_value.view}: {refusal_value.detail}",
-            next_action=refusal_value.next_action,
-            offending_input=refusal_value.offending_input,
-            expected=refusal_value.expected,
-            observed=refusal_value.observed,
-        )
-    if refusal_value.code == _UNREADABLE_CURSOR:
-        return unreadable_page_refusal(
-            detail=f"{refusal_value.view}: {refusal_value.detail}",
-            next_action=refusal_value.next_action,
-            offending_input=refusal_value.offending_input or refusal_value.view,
-            expected=refusal_value.expected,
-            observed=refusal_value.observed,
-        )
-    return ReviewRefusal(
-        code="comparison_page_reset",
-        detail=f"{refusal_value.view}: {refusal_value.detail}",
-        next_action=REVIEW_PAGE_RESET_NEXT_ACTION,
-        offending_input=cursor or refusal_value.offending_input,
-        expected=refusal_value.expected,
-        observed=refusal_value.observed,
-    )
-
-
 def comparison_page(
     page: KnowledgeDiffPage,
     *,
@@ -226,45 +155,6 @@ def comparison_page(
         continuation=page.continuation,
         scope=scope,
         continued_from=continued_from,
-    )
-
-
-def records_page(
-    counts: ViewCounts,
-    *,
-    collection: ReviewPagedCollection,
-    position: RecordsPagePosition,
-) -> ReviewCollectionPage:
-    """State one view window as the review surface's own page.
-
-    ``rows_returned`` and ``rows_remaining`` are the view's own two numbers and they describe the
-    whole selection between them -- the view measures remaining from where the *walk* stands, not from
-    the start of the selection, so the sum is the selection's size on every page. ``page_size`` is the
-    limit the owner actually honoured, which is why it is checked here against the rows it returned: a
-    page that reports a bound it did not apply is how a narrow window comes to read as the whole
-    selection.
-    """
-
-    returned = _counted(counts, "rows_returned")
-    remaining = _counted(counts, "rows_remaining")
-    if returned > position.page_size:
-        raise ValueError(
-            "a page cannot have returned more rows than the size it asked its owner for; the bound "
-            "a response publishes has to be the bound the owner applied"
-        )
-    return ReviewCollectionPage(
-        collection=collection,
-        state="first_page" if position.continued_from is None else "continued",
-        # The view measures its remainder from where the *walk* stands, so the two numbers describe
-        # the selection this walk still covers; the basis says so rather than letting one rendered
-        # sentence mean the collection's size here and the walk's size there.
-        total_basis="walk",
-        total=returned + remaining,
-        returned=returned,
-        remaining=remaining,
-        continuation=position.continuation,
-        scope=position.scope,
-        continued_from=position.continued_from,
     )
 
 
@@ -302,12 +192,3 @@ def reset_comparison_page(
         # continued page uses to say where its window was taken.
         continued_from=None,
     )
-
-
-def _counted(counts: ViewCounts, name: str) -> int:
-    """One view quantity as its measured value; the view counts these two for every view."""
-
-    value = getattr(counts, name).value
-    if value is None:  # pragma: no cover - the view counts returned and remaining unconditionally
-        raise ValueError(f"the view did not measure {name}, so no page can be stated from it")
-    return int(value)

@@ -24,7 +24,7 @@ evidence_node = "mcp/tests/test_knowledge_read_boundaries.py::test_a_context_dec
 [[contract]]
 id = "knowledge-identity-branching-fixture"
 owner = "mcp/tests/knowledge_fixture_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
 
 [[contract]]
 id = "knowledge-read-scope-cases"
@@ -233,7 +233,7 @@ source_version_or_generator = "the request models of the fixture row writer, mov
 introduced_by = "260928-MIK-L26"
 lifetime = "permanent"
 permanence_rationale = "The fixture row writer of the read, comparison and review cases takes these anchor and realization drafts. No production code constructs them since the canonical writers were retired (MIK-R26), so they live with the tests that need them."
-replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
@@ -252,6 +252,8 @@ consumers = [
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_reopen.py",
@@ -272,6 +274,7 @@ consumers = [
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_family_context.py",
@@ -327,6 +330,7 @@ consumers = [
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
 ]
@@ -369,9 +373,11 @@ consumers = [
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -456,6 +462,7 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_route_chain.py",
@@ -484,6 +491,7 @@ consumers = [
   "mcp/tests/test_reader_task_context_protocol.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_role_handover_binding.py",
@@ -533,6 +541,8 @@ consumers = [
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
@@ -1189,18 +1199,23 @@ consumers = [
   "mcp/tests/test_knowledge_gate_routes.py",
   "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_inserts.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_controls.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_reader.py",
   "mcp/tests/test_knowledge_reader_tree_coverage.py",
   "mcp/tests/test_knowledge_reopen.py",
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_report_filing.py",
   "mcp/tests/test_knowledge_requirement_reference_contract.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
@@ -1338,6 +1353,7 @@ consumers = [
   "mcp/tests/test_review_assessment_history.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_assessments.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -1497,12 +1513,15 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
@@ -1534,10 +1553,12 @@ consumers = [
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -1582,7 +1603,9 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -1645,6 +1668,8 @@ consumers = [
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_crossing.py",
+  "mcp/tests/test_knowledge_index_inserts.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
@@ -1691,10 +1716,12 @@ consumers = [
   "mcp/tests/test_knowledge_leaf_read.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_reopen.py",
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_reviewer_worklist_process.py",
@@ -1716,59 +1743,29 @@ source_version_or_generator = "the row encoders of the retired canonical writers
 introduced_by = "260928-MIK-L26"
 lifetime = "permanent"
 permanence_rationale = "Production decodes index rows and never encodes one; the fixture row writer and the comparison fixtures encode typed columns, authorship and claim digests with these functions."
-replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_automatic_post_integration_cleanup.py",
-  "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
-  "mcp/tests/test_knowledge_conversion_toolchain.py",
-  "mcp/tests/test_knowledge_copies_completed_tasks.py",
-  "mcp/tests/test_knowledge_copy_cleanup.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
-  "mcp/tests/test_knowledge_index.py",
-  "mcp/tests/test_knowledge_index_reuse.py",
-  "mcp/tests/test_knowledge_index_surfaces.py",
-  "mcp/tests/test_knowledge_leaf_read.py",
-  "mcp/tests/test_knowledge_paging.py",
-  "mcp/tests/test_knowledge_proofs.py",
-  "mcp/tests/test_knowledge_read_boundaries.py",
-  "mcp/tests/test_knowledge_read_paths.py",
-  "mcp/tests/test_knowledge_read_scope.py",
-  "mcp/tests/test_knowledge_reopen.py",
-  "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
-  "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_resolution_and_route.py",
-  "mcp/tests/test_knowledge_review_revision_selection.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_surface.py",
-  "mcp/tests/test_knowledge_revision_seals.py",
-  "mcp/tests/test_knowledge_route_chain.py",
-  "mcp/tests/test_knowledge_store.py",
-  "mcp/tests/test_knowledge_views.py",
-  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_review_bounded_pagination.py",
-  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
-  "mcp/tests/test_review_family_member_sources.py",
-  "mcp/tests/test_review_intent_summary.py",
-  "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
-  "mcp/tests/test_reviewer_worklist_process.py",
-  "mcp/tests/test_reviewer_worklist_reads.py",
-  "mcp/tests/test_terminal_blocker_reasons.py",
-  "mcp/tests/test_transaction_only_worktree_delivery.py",
-  "mcp/tests/test_worktree_candidate_capture.py",
 ]
 
 [[artifact]]
@@ -1783,7 +1780,7 @@ source_version_or_generator = "raw row inserts into the schema production declar
 introduced_by = "260928-MIK-L26"
 lifetime = "permanent"
 permanence_rationale = "The canonical database's writers are retired (MIK-R26), and the read code that remains runs over index-shaped rows a text tree cannot always express (several revisions of one invariant, a membership present in one dataset and absent in the next). The fixtures of the read, comparison and review cases insert those rows through this one builder, so no production writer survives for the tests' sake and no two fixtures disagree about what a row is."
-replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+replacement_contract = "node:mcp/tests/test_knowledge_store.py::test_three_separately_recorded_revisions_stay_independently_addressable"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
@@ -1802,6 +1799,8 @@ consumers = [
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_reopen.py",
@@ -1822,6 +1821,7 @@ consumers = [
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_family_context.py",
@@ -1879,6 +1879,7 @@ consumers = [
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_database_retired.py",
   "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_writer.py",
   "mcp/tests/test_read_ar_files.py",
@@ -2089,6 +2090,26 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/read_boundary_oracle_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/read_boundary_oracle_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the rule-6 read-boundary oracle (snapshots, findings, classification), moved text-identical from mcp/tests/test_knowledge_read_boundary.py under the Owner line-bound disposition"
+introduced_by = "260928-MIK-L74"
+lifetime = "permanent"
+permanence_rationale = "The read-boundary cases and the protected-read roster share one oracle rather than copies of it."
+replacement_contract = "node:mcp/tests/test_knowledge_read_boundary_controls.py::test_an_unauthorized_object_fails_the_oracle_without_an_attributed_comparison"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_controls.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
+]
+
+[[artifact]]
 path = "mcp/tests/read_scope_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -2109,6 +2130,8 @@ consumers = [
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
@@ -2157,12 +2180,15 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
@@ -2208,8 +2234,10 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -2243,12 +2271,15 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_source_lineage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",

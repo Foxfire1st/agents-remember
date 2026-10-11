@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 import apsw
 import pytest
@@ -18,8 +19,20 @@ from agents_remember.application.review_source_realization_link import _proof_at
 from agents_remember.memory.knowledge import read as read_selection
 from agents_remember.models.knowledge.read import KnowledgeReadRequest, PathSeed
 from agents_remember.models.knowledge.review_source_content import ReviewSourceExpansion
+from agents_remember.models.knowledge.source import FileLocator
 from agents_remember.models.knowledge_files import canonical_text
+from anchor_fixture_models import GitBlobIdentity, SourceAnchorDraft
 from fastapi.testclient import TestClient
+from knowledge_rows_test_support import (
+    InvariantRequest,
+    ProofDraft,
+    ProofRequest,
+    RevisionDraft,
+    RevisionRequest,
+    open_knowledge_store,
+    proofs,
+    write_authorship,
+)
 from test_knowledge_review_source_content import _blob_text, _object_id
 from test_knowledge_review_source_endpoints import _public_resolution, _source_app, _source_params
 from test_review_git_trees import CODE_FILE, CODE_V1, INVARIANT, World, build_world, commit, git
@@ -304,14 +317,65 @@ def test_unconverted_knowledge_names_its_unavailability_without_canonical_initia
     )
 
 
-def test_a_tree_index_links_a_path_its_proof_entry_is_anchored_at() -> None:
-    index = apsw.Connection(":memory:")
-    index.execute(
-        "CREATE TABLE ix_entry (id TEXT, kind TEXT, invariant TEXT, path TEXT, sidecar TEXT, document TEXT)"
+def test_a_tree_index_links_a_path_its_proof_entry_is_anchored_at(tmp_path: Path) -> None:
+    """A proof row staged through the text builder answers the path it is anchored at.
+
+    The proof entry is authored into the source file's sidecar ``proves`` list and
+    indexed with :func:`build_index`, so no test stages ``ix_entry`` rows by hand.
+    """
+
+    invariant_id = str(uuid4())
+    revision_id = str(uuid4())
+    authorship = write_authorship(
+        actor_ref="agent:proof-fixture",
+        authorization_ref="260928-MIK-L74 repair stretch",
     )
-    index.execute(
-        "INSERT INTO ix_entry VALUES ('PRF-AAAAAA', 'proof', 'INV-AAAAAA', 'tests/t.py', 's', '{}')"
-    )
-    assert _proof_at_path(index, "tests/t.py")
-    assert not _proof_at_path(index, "tests/other.py")
+    store = open_knowledge_store(tmp_path / "proof-index.db", "repository")
+    try:
+        created = store.create_invariant(
+            InvariantRequest(
+                repository_id="repository",
+                invariant_id=invariant_id,
+                display_label="The indexed test proves its path.",
+                provenance=authorship,
+            )
+        )
+        assert created.state == "created", created.refusal
+        revised = store.create_revision(
+            RevisionRequest(
+                repository_id="repository",
+                revision=RevisionDraft(
+                    revision_id=revision_id,
+                    invariant_id=invariant_id,
+                    display_version="v1",
+                    statement="The indexed test proves its path.",
+                    applicability="Every admitted candidate write.",
+                    provenance=authorship,
+                ),
+            )
+        )
+        assert revised.state == "created", revised.refusal
+        proven = proofs.create_proof(
+            store,
+            ProofRequest(
+                repository_id="repository",
+                proof=ProofDraft(
+                    proof_id=str(uuid4()),
+                    invariant_revision_id=revision_id,
+                    facet="prints the linked path",
+                ),
+                anchor=SourceAnchorDraft(
+                    anchor_id=uuid4(),
+                    path="tests/t.py",
+                    source_identity=GitBlobIdentity(object_id="0" * 40),
+                    locator=FileLocator(),
+                ),
+            ),
+        )
+        assert proven.state == "created", proven.refusal
+        index = store.connection
+        assert _proof_at_path(index, "tests/t.py")
+        assert not _proof_at_path(index, "tests/other.py")
+    finally:
+        store.close()
     assert not _proof_at_path(apsw.Connection(":memory:"), "tests/t.py")

@@ -28,7 +28,8 @@ from agents_remember.application.knowledge_read import (
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import SelectionQuery, select_recorded_scope
-from agents_remember.memory.knowledge.schema_generations import generation_of_database
+from agents_remember.memory.knowledge.store import open_read_only_store
+from agents_remember.memory.knowledge.schema import generation_of_database
 from agents_remember.models.knowledge.read import (
     FamilyRevisionSeed,
     InvariantIdentitySeed,
@@ -392,14 +393,15 @@ def test_a_path_seed_and_the_exact_invariant_revision_seed_close_over_the_same_r
 # --- revision grouping and the absent current-revision pointer ------------------------------
 
 
-def test_an_identity_seed_returns_every_retained_revision_as_its_own_group(
+def test_an_identity_seed_returns_the_retained_revision_as_its_own_group(
     fixture: ReadScopeFixture,
 ) -> None:
-    """I1, I2 and the predecessor all come back, grouped, with no successor selected as current.
+    """The named identity's single retained revision comes back grouped, with nothing ranked.
 
-    Two of the three revisions display the same ``v2`` label on purpose. The assertions check that
-    the label is carried as authored text, that the group counts describe the whole selected
-    revision set, and that nothing in the result ranks one revision above another.
+    A text record holds exactly one revision (MIK-R74 rule 3), so the identity selects its one
+    retained revision. The assertions check that the label is carried as authored text, that the
+    group counts describe the selected revision set, and that nothing in the result ranks one
+    revision above another.
     """
 
     result = read(fixture, InvariantIdentitySeed(invariant_id=fixture.retry_invariant_id))
@@ -409,31 +411,16 @@ def test_an_identity_seed_returns_every_retained_revision_as_its_own_group(
     revision_ids = {
         item.revision_id for item in result.page.items if item.kind == "invariant_revision"
     }
-    assert {
-        fixture.base_revision_id,
+    assert revision_ids <= {
         fixture.subject_revision_id,
-        fixture.successor_revision_id,
-    } <= revision_ids, "every retained revision of the named identity is selected"
-    assert fixture.resolution_revision_id not in revision_ids, "K1 is reachable only through G1"
-    assert revision_ids == {
-        fixture.base_revision_id,
-        fixture.subject_revision_id,
-        fixture.successor_revision_id,
         fixture.batch_revision_id,
         fixture.auxiliary_revision_id,
     }
+    assert fixture.resolution_revision_id not in revision_ids, "K1 is reachable only through G1"
     group = next(
         group for group in result.revision_groups if group.record_id == fixture.retry_invariant_id
     )
-    assert group.selected_revision_count == 3
-    assert {g.selected_revision_count for g in result.revision_groups} == {1, 3}
-    labels = {
-        item.display_version
-        for item in result.page.items
-        if item.kind == "invariant_revision"
-        and item.revision_id in {fixture.subject_revision_id, fixture.successor_revision_id}
-    }
-    assert labels == {"v2"}, "both retained successors carry the same authored label"
+    assert group.selected_revision_count == 1
     dumped = result.model_dump(mode="json")
     for forbidden in ("current", "latest", "accepted_revision", "is_current", "greatest"):
         assert forbidden not in _keys(dumped), (
@@ -442,15 +429,10 @@ def test_an_identity_seed_returns_every_retained_revision_as_its_own_group(
         )
 
 
-def test_an_exact_revision_seed_does_not_select_the_identitys_other_retained_revisions(
+def test_an_exact_revision_seed_selects_only_the_named_revision(
     fixture: ReadScopeFixture,
 ) -> None:
-    """An explicit I1 seed returns I1 alone, and the successor stays unselected.
-
-    The mirror of the identity case, and the assertion that makes "a display version selects
-    nothing" checkable: the successor displays the same ``v2`` as the selected revision and is
-    still absent.
-    """
+    """An explicit I1 seed returns I1 alone: no other identity's revision is selected with it."""
 
     result = read(
         fixture,
@@ -462,8 +444,10 @@ def test_an_exact_revision_seed_does_not_select_the_identitys_other_retained_rev
     assert result.state == "page", result.refusal
     assert result.page is not None
     selected = [item.revision_id for item in result.page.items if item.kind == "invariant_revision"]
-    assert fixture.successor_revision_id not in selected
-    assert fixture.base_revision_id not in selected
+    assert fixture.subject_revision_id in selected
+    # The seed's family context comes along (F1's batch member, H1's auxiliary member), but the
+    # identity no reached family contains stays out: K1 is reachable only through G1.
+    assert fixture.resolution_revision_id not in selected
     group = next(
         group for group in result.revision_groups if group.record_id == fixture.retry_invariant_id
     )
@@ -727,13 +711,14 @@ def test_the_item_stream_is_ordered_by_stored_identity_and_never_by_an_authored_
 
     The ordering rule is part of the contract -- the same graph authored in another order must page
     identically -- and it is only checkable by comparing the emitted order against the key the policy
-    declares. Two of the fixture's revisions deliberately share one display label, so an order that
-    consulted a label or an insertion counter cannot reproduce this sequence.
+    declares. A text record holds exactly one revision (MIK-R74 rule 3), so the label-disagreement
+    half the old fixture authored -- several revisions of one identity sharing one display label --
+    is gone with the revisions: display versions are derived (``rN``), never authored, so no label
+    exists for an order to consult. What remains pins the emitted order itself.
     """
 
-    # An identity seed is the one that carries more than one revision of a single identity, which is
-    # the shape this rule needs: a page holding one revision of an identity cannot show whether an
-    # order consulted a label.
+    # An identity seed selects the identity's retained revision with its relations, which is the
+    # widest page one seed produces: every kind the order must arrange is on it.
     result = read(fixture, InvariantIdentitySeed(invariant_id=fixture.retry_invariant_id))
 
     assert result.state == "page", result.refusal
@@ -787,53 +772,6 @@ def test_the_item_stream_is_ordered_by_stored_identity_and_never_by_an_authored_
         assert revision_ids == sorted(revision_ids), (
             f"revisions of {invariant_id} are ordered by stored revision id, not by a label"
         )
-    retry_revisions = by_identity.get(fixture.retry_invariant_id, [])
-    assert retry_revisions == sorted(
-        {fixture.base_revision_id, fixture.subject_revision_id, fixture.successor_revision_id}
-    ), "every retained revision of the identity is present and in stored-id order"
-    # The page carries authored labels whose order is *not* the emitted order, and the fixture
-    # authors that disagreement so it is a property of the graph rather than of the draw: the
-    # predecessors (the predecessor revision here, and the first revisions of the other three
-    # identities) carry the label that sorts last, and the two successors share the label that sorts
-    # before it. Asserted on the stored rows through the read result, so the disagreement is
-    # measured rather than assumed.
-    labels = {
-        str(item.revision_id): str(item.display_version)
-        for item in items
-        if item.kind == "invariant_revision"
-    }
-    assert labels[fixture.subject_revision_id] == labels[fixture.successor_revision_id]
-    assert labels[fixture.base_revision_id] != labels[fixture.subject_revision_id]
-    # The disagreement between the emitted order and a label-consulting order is authored into the
-    # fixture rather than left to the draw: the predecessor revision carries the label that sorts
-    # last while its stored id sorts it last as well, and the successors share the label that sorts
-    # before it while their stored ids sort them first. Both facts are asserted from the served page,
-    # so a fixture change that made the comparison vacuous would fail here rather than pass quietly.
-    shared_successor_label = labels[fixture.subject_revision_id]
-    assert labels[fixture.base_revision_id] == max(labels.values()), (
-        "the predecessor carries the label that sorts last among the served revisions"
-    )
-    assert retry_revisions[-1] == fixture.base_revision_id, (
-        "the predecessor is emitted last among the identity's revisions"
-    )
-    assert labels[retry_revisions[0]] == shared_successor_label, (
-        "the revision the stored-id order emits first carries the successors' shared label"
-    )
-    assert max(retry_revisions, key=lambda revision_id: labels[revision_id]) == (
-        fixture.base_revision_id
-    ), (
-        "a label-first order over the identity's revisions emits the predecessor first, which is "
-        "the opposite of the stored-id order"
-    )
-    kind_of = {item.item_id: item.kind for item in items}
-    emitted_order = [item.item_id for item in items]
-    label_order = sorted(
-        emitted_order,
-        key=lambda item_id: (kind_order[kind_of[item_id]], labels.get(item_id, ""), item_id),
-    )
-    assert emitted_order != label_order, (
-        "a key that consulted the authored display label would emit a different sequence"
-    )
 
 
 def test_a_truncated_page_states_that_items_remain_rather_than_claiming_completeness(
@@ -1057,24 +995,19 @@ def test_a_refused_read_leaves_every_table_and_the_logical_digest_unchanged(
     assert after_digest == before_digest
 
 
-def test_the_selection_reads_only_the_requested_namespace(
+def test_each_dataset_file_is_selected_from_its_own_rows(
     fixture: ReadScopeFixture,
 ) -> None:
-    """A second dataset in another namespace contributes nothing to this namespace's selection.
+    """A selection reads the file it is addressed at, and nothing else.
 
-    The read is addressed at one namespace and one snapshot, so a record that exists elsewhere --
-    including one at the very same path -- is not part of this answer.
+    Every index is keyed by its tree alone, so two files built from the same topology select the
+    same shape independently, and a seed no file records selects nothing anywhere. Rows cannot
+    cross from one file to another because a read opens exactly one file per side.
     """
 
     other = build_read_scope_fixture(Path(tempfile.mkdtemp()) / "other")
-    store = open_knowledge_store(other.database_path, other.repository_id)
+    store = open_read_only_store(other.database_path, other.repository_id)
     try:
-        assert other.repository_id != fixture.repository_id
-        query = SelectionQuery(
-            repository_id=fixture.repository_id, seed=PathSeed(path=fixture.integration.path)
-        )
-        scope = select_recorded_scope(store.connection, query)
-        assert scope.items == (), "another dataset's rows cannot enter this namespace's selection"
         own = select_recorded_scope(
             store.connection,
             SelectionQuery(
@@ -1083,6 +1016,28 @@ def test_the_selection_reads_only_the_requested_namespace(
             ),
         )
         assert own.items != (), "the read does select the dataset it is addressed at"
+        mine_store = fixture.reopen()
+        try:
+            mine = select_recorded_scope(
+                mine_store.connection,
+                SelectionQuery(
+                    repository_id=fixture.repository_id,
+                    seed=PathSeed(path=fixture.integration.path),
+                ),
+            )
+        finally:
+            mine_store.close()
+        assert {item.item_id for item in mine.items} == {
+            item.item_id for item in own.items
+        }, "the same topology selects the same shape from each file"
+        nothing = select_recorded_scope(
+            store.connection,
+            SelectionQuery(
+                repository_id=other.repository_id,
+                seed=PathSeed(path="src/does-not-exist.py"),
+            ),
+        )
+        assert nothing.items == (), "a seed no file records selects nothing"
     finally:
         store.close()
 

@@ -29,7 +29,10 @@ from agents_remember.models.providers import (
     WatcherState,
 )
 from agents_remember.providers import lifecycle
-from agents_remember.providers.current_state import write_current_provider_state
+from agents_remember.providers.current_state import (
+    build_current_provider_state,
+    write_current_provider_state,
+)
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.providers.recovery import PROVIDER_WATCHER_RESTART_RECOVERY
 from agents_remember.providers.settings import write_lifecycle_settings
@@ -163,6 +166,7 @@ def refresh_current_provider_state(
         config,
         include_providers=True,
         checked_at=checked_at,
+        persist=True,
     )
     return projection.current_state
 
@@ -172,6 +176,7 @@ def _provider_status_projection(
     *,
     include_providers: bool,
     checked_at: datetime | None = None,
+    persist: bool = False,
 ) -> ProviderStatusProjection:
     configured = bool(config.providers)
     if not include_providers:
@@ -192,8 +197,16 @@ def _provider_status_projection(
         )
 
     status = _watchers_status(config)
-    current_state = write_current_provider_state(config, status, checked_at=checked_at)
-    aggregated = current_state["state"]
+    # Reads file nothing outside rule 6 (a)-(c): only an explicit refresh persists the
+    # snapshot for the serving projection. Status and diagnostics answers carry the same
+    # aggregated state with no file behind it.
+    if persist:
+        current_state = write_current_provider_state(config, status, checked_at=checked_at)
+        current_state_file: str | None = current_state["path"]
+        aggregated = current_state["state"]
+    else:
+        aggregated = build_current_provider_state(config, status, checked_at=checked_at)
+        current_state_file = None
     # The raw watchers ok only proves containers; the aggregated current-state
     # ok also reflects graph/workspace content, so both must hold for a green
     # global summary.
@@ -218,8 +231,8 @@ def _provider_status_projection(
         ok=ok,
         partial=partial,
         settings_file=status.get("settingsFile", ""),
-        current_state_file=current_state["path"],
-        current_state=current_state["state"],
+        current_state_file=current_state_file,
+        current_state=aggregated,
         process_namespace=status.get("processNamespace"),
         recovery_actions=status.get("recoveryActions", []),
         raw_status=status,

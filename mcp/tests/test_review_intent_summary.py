@@ -8,7 +8,8 @@ the production summary over it, so the counts asserted are the counts the entry 
   realizations alone changed, a family whose membership alone changed, and an unchanged invariant
   that two families share;
 * a revised statement that two families share counts once on each side;
-* divergent successors leave an identity with no single head, which is ``partial`` and not guessed;
+* divergent successors cannot be retained -- one text record holds one revision (MIK-R74 rule
+  3), so the write plane refuses the second and the no-single-head branch is unmeasured;
 * a pair whose knowledge is missing is ``unavailable`` with the owner's refusal and no counts;
 * a record-only successor -- the same text with a changed origin state, or only a new version --
   counts once on each side like any revision, while a successor that only changes a family's members
@@ -19,16 +20,17 @@ the production summary over it, so the counts asserted are the counts the entry 
 
 from __future__ import annotations
 
-import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_intent_summary import intent_summary_of
+from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft
@@ -60,7 +62,9 @@ from knowledge_rows_test_support import (
 
 pytestmark = pytest.mark.evidence_unit
 
-REPOSITORY_ID = str(uuid4())
+# Every side is a derived index, and an index is keyed by its tree alone: rows are written and
+# read under the index's own namespace, never under a caller-minted repository.
+REPOSITORY_ID = INDEX_REPOSITORY_ID
 MASTER = "260921_complete-code-and-intent-review"
 LEAF = "260921-ICR-L47"
 APPLICABILITY = "Every admitted candidate write in this repository namespace."
@@ -78,142 +82,194 @@ def _authorship() -> Authorship:
     )
 
 
-class _Author:
-    """The shipped write operations over one open snapshot, spelled as the fixture needs them."""
+def _uid(*parts: str) -> str:
+    """One deterministic identity: the same name always mints the same UUID.
 
-    def __init__(self, store: RowStore) -> None:
-        self.store = store
-        self.authorship = _authorship()
-        # The origin state the next authored revision records; a case sets it to author an
-        # acceptance successor.
-        self.state: Literal["proposed", "accepted"] = "proposed"
+    The summary pairs before/after heads by record identity, so the two sides under comparison
+    must be built with the same caller-minted identities -- random UUIDs would never pair and
+    every head would count as one-sided. One text record holds one revision (MIK-R74 rule 3),
+    so a "revised" head is a different single revision under the same identity, never a second
+    retained revision: two retained revisions is no single head, which the summary reports as
+    ``unresolved`` rather than guessing a winner.
+    """
 
-    def invariant(self, label: str, statement: str) -> tuple[str, str]:
-        invariant_id = str(uuid4())
-        created = self.store.create_invariant(
-            InvariantRequest(
-                repository_id=REPOSITORY_ID,
-                invariant_id=invariant_id,
-                display_label=label,
-                provenance=self.authorship,
-            )
+    return str(uuid5(NAMESPACE_URL, "intent-summary:" + ":".join(parts)))
+
+
+@dataclass(frozen=True)
+class _InvariantSpec:
+    """One invariant's whole side-specific record: its words and its record status."""
+
+    label: str
+    statement: str
+    state: Literal["proposed", "accepted"] = "proposed"
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class _FamilySpec:
+    """One family's whole side-specific record: its guarantee, members and record status."""
+
+    label: str
+    guarantee: str
+    members: tuple[str, ...]
+    state: Literal["proposed", "accepted"] = "proposed"
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class _ClaimSpec:
+    """One realization claim: which invariant head it hangs off and what it asserts."""
+
+    invariant: str
+    path: str
+    rationale: str
+    role: Literal["enforcement"] = "enforcement"
+
+
+_BASE_INVARIANTS: dict[str, _InvariantSpec] = {
+    "shared": _InvariantSpec("shared", "A shared obligation both families hold."),
+    "revised": _InvariantSpec("revised", "The obligation before its revision."),
+    "realized": _InvariantSpec("realized", "The obligation whose code moves."),
+}
+_BASE_FAMILIES: dict[str, _FamilySpec] = {
+    "revised-family": _FamilySpec(
+        "revised-family", "The family guarantee before its revision.", ("shared", "revised")
+    ),
+    "member-family": _FamilySpec(
+        "member-family", "The guarantee whose members change.", ("shared", "realized")
+    ),
+}
+_BASE_CLAIMS: tuple[_ClaimSpec, ...] = (
+    _ClaimSpec("realized", "src/realized.py", "The obligation is enforced in src/realized.py."),
+)
+
+
+def _build_side(
+    path: Path,
+    *,
+    invariants: Mapping[str, _InvariantSpec],
+    family_specs: Mapping[str, _FamilySpec],
+    claims: tuple[_ClaimSpec, ...],
+) -> None:
+    """Write one snapshot through the shipped store operations with deterministic identities.
+
+    Every identity is minted from its slot name, so two sides built from specs that share a slot
+    pair by record identity while a slot whose words or status differ carries a different single
+    head. Families name their members by invariant slot; the builder resolves each slot to that
+    side's revision of the invariant, so membership follows the head it cites. Everything is
+    written in one session because the store rebuilds the file from the handle's own text tree:
+    a second open would start from an empty tree and wipe the side.
+    """
+
+    store = open_knowledge_store(path, REPOSITORY_ID)
+    try:
+        created = store.create_repository(
+            RepositoryIdentity(repository_id=REPOSITORY_ID, authority_home="agents-remember")
         )
         assert created.state == "created", created.refusal
-        return invariant_id, self.revise(invariant_id, statement)
-
-    def revise(self, invariant_id: str, statement: str, *predecessors: str) -> str:
-        revision_id = str(uuid4())
-        created = self.store.create_revision(
-            RevisionRequest(
-                repository_id=REPOSITORY_ID,
-                revision=RevisionDraft(
-                    revision_id=revision_id,
-                    invariant_id=invariant_id,
-                    display_version=f"v{len(predecessors) + 1}",
-                    statement=statement,
-                    applicability=APPLICABILITY,
-                    conditions=CONDITIONS,
-                    exclusions=EXCLUSIONS,
-                    predecessors=predecessors,
-                    state_at_origin=self.state,
-                    acceptance_ref="developer:accepted" if self.state == "accepted" else None,
-                    provenance=self.authorship,
-                ),
-            )
-        )
-        assert created.state == "created", created.refusal
-        return revision_id
-
-    def family(self, label: str, guarantee: str, members: tuple[str, ...]) -> tuple[str, str]:
-        family_id = str(uuid4())
-        created = families.create_family(
-            self.store,
-            FamilyRequest(
-                repository_id=REPOSITORY_ID,
-                family_id=family_id,
-                display_label=label,
-                provenance=self.authorship,
-            ),
-        )
-        assert created.state == "created", created.refusal
-        return family_id, self.revise_family(family_id, guarantee, members)
-
-    def revise_family(
-        self, family_id: str, guarantee: str, members: tuple[str, ...], *predecessors: str
-    ) -> str:
-        revision_id = str(uuid4())
-        created = families.create_family_revision(
-            self.store,
-            FamilyRevisionRequest(
-                repository_id=REPOSITORY_ID,
-                revision=FamilyRevisionDraft(
-                    family_id=family_id,
-                    revision_id=revision_id,
-                    display_version=f"v{len(predecessors) + 1}",
-                    joint_guarantee=guarantee,
-                    predecessors=predecessors,
-                    state_at_origin=self.state,
-                    acceptance_ref="developer:accepted" if self.state == "accepted" else None,
-                    provenance=self.authorship,
-                ),
-            ),
-        )
-        assert created.state == "created", created.refusal
-        for invariant_revision in members:
-            member = memberships.create_family_member(
-                self.store,
-                FamilyMemberRequest(
+        authorship = _authorship()
+        revisions: dict[str, str] = {}
+        for slot, spec in invariants.items():
+            result = store.create_invariant(
+                InvariantRequest(
                     repository_id=REPOSITORY_ID,
-                    member=FamilyMemberDraft(
-                        member_id=str(uuid4()),
-                        family_revision_id=revision_id,
-                        invariant_revision_id=invariant_revision,
-                        provenance=self.authorship,
+                    invariant_id=_uid("invariant", slot),
+                    display_label=spec.label,
+                    provenance=authorship,
+                )
+            )
+            assert result.state == "created", result.refusal
+            _write_revision(store, authorship, slot, spec)
+            revisions[slot] = _uid(
+                "revision", slot, spec.statement, spec.state, str(spec.version)
+            )
+        family_heads: dict[str, str] = {}
+        for slot, spec in family_specs.items():
+            result = families.create_family(
+                store,
+                FamilyRequest(
+                    repository_id=REPOSITORY_ID,
+                    family_id=_uid("family", slot),
+                    display_label=spec.label,
+                    provenance=authorship,
+                ),
+            )
+            assert result.state == "created", result.refusal
+            made = families.create_family_revision(
+                store,
+                FamilyRevisionRequest(
+                    repository_id=REPOSITORY_ID,
+                    revision=FamilyRevisionDraft(
+                        family_id=_uid("family", slot),
+                        revision_id=_uid(
+                            "family-revision",
+                            slot,
+                            spec.guarantee,
+                            spec.state,
+                            str(spec.version),
+                            *sorted(spec.members),
+                        ),
+                        display_version=f"v{spec.version}",
+                        joint_guarantee=spec.guarantee,
+                        state_at_origin=spec.state,
+                        acceptance_ref=(
+                            "developer:accepted" if spec.state == "accepted" else None
+                        ),
+                        provenance=authorship,
                     ),
                 ),
             )
-            assert member.state == "created", member.refusal
-        return revision_id
-
-    def realize(self, invariant_revision: str, path: str) -> None:
-        created = realizations.create_realization_claim(
-            self.store,
-            RealizationClaimRequest(
-                repository_id=REPOSITORY_ID,
-                claim=RealizationClaimDraft(
-                    claim_id=str(uuid4()),
-                    invariant_revision_id=invariant_revision,
-                    role="enforcement",
-                    rationale=f"The obligation is enforced in {path}.",
+            assert made.state == "created", made.refusal
+            family_heads[slot] = _uid(
+                "family-revision",
+                slot,
+                spec.guarantee,
+                spec.state,
+                str(spec.version),
+                *sorted(spec.members),
+            )
+            for member_slot in spec.members:
+                member = memberships.create_family_member(
+                    store,
+                    FamilyMemberRequest(
+                        repository_id=REPOSITORY_ID,
+                        member=FamilyMemberDraft(
+                            member_id=_uid("member", slot, member_slot),
+                            family_revision_id=family_heads[slot],
+                            invariant_revision_id=revisions[member_slot],
+                            provenance=authorship,
+                        ),
+                    ),
+                )
+                assert member.state == "created", member.refusal
+        for spec in claims:
+            made = realizations.create_realization_claim(
+                store,
+                RealizationClaimRequest(
+                    repository_id=REPOSITORY_ID,
+                    claim=RealizationClaimDraft(
+                        claim_id=_uid("claim", spec.invariant, spec.path, spec.rationale),
+                        invariant_revision_id=revisions[spec.invariant],
+                        role=spec.role,
+                        rationale=spec.rationale,
+                    ),
+                    anchor=NewAnchor(
+                        anchor=SourceAnchorDraft(
+                            anchor_id=UUID(
+                                _uid("anchor", spec.invariant, spec.path, spec.rationale)
+                            ),
+                            path=spec.path,
+                            source_identity=GitBlobIdentity(object_id="2" * 40),
+                            locator=FileLocator(),
+                        )
+                    ),
+                    provenance=authorship,
                 ),
-                anchor=NewAnchor(
-                    anchor=SourceAnchorDraft(
-                        anchor_id=UUID(str(uuid4())),
-                        path=path,
-                        source_identity=GitBlobIdentity(object_id="2" * 40),
-                        locator=FileLocator(),
-                    )
-                ),
-                provenance=self.authorship,
-            ),
-        )
-        assert created.state == "created", created.refusal
-
-
-def _snapshot(path: Path) -> _Author:
-    store = open_knowledge_store(path, REPOSITORY_ID)
-    created = store.create_repository(
-        RepositoryIdentity(repository_id=REPOSITORY_ID, authority_home="agents-remember")
-    )
-    assert created.state == "created", created.refusal
-    return _Author(store)
-
-
-def _extend(source: Path, target: Path) -> _Author:
-    """Copy one snapshot and open the copy: the after side of a candidate forked from it."""
-
-    shutil.copy(source, target)
-    return _Author(open_knowledge_store(target, REPOSITORY_ID))
+            )
+            assert made.state == "created", made.refusal
+    finally:
+        store.close()
 
 
 def _resolution(before: Path, after: Path) -> ReviewCandidateResolution:
@@ -231,35 +287,21 @@ def _resolution(before: Path, after: Path) -> ReviewCandidateResolution:
 
 @dataclass(frozen=True)
 class _SharedBase:
-    """The identities the common ancestor records, which both sides inherit."""
+    """The common ancestor's specs: each side is built from them, never copied.
 
-    path: Path
-    shared: tuple[str, str]
-    revised: tuple[str, str]
-    realized: tuple[str, str]
-    revised_family: tuple[str, str]
-    member_family: tuple[str, str]
+    A file copy would carry the same row identities, but a copied-then-mutated side cannot
+    express a revised head -- one text record holds one revision, so the after side's heads are
+    built, not edited in. The specs are the ancestor; the paths below are where each case builds
+    its sides.
+    """
+
+    directory: Path
 
 
 def _shared_base(directory: Path) -> _SharedBase:
     """``A`` (shared by two families), ``B``, ``D`` (realized once), ``F1 {A, B}``, ``F2 {A, D}``."""
 
-    path = directory / "common.sqlite"
-    author = _snapshot(path)
-    try:
-        shared = author.invariant("shared", "A shared obligation both families hold.")
-        revised = author.invariant("revised", "The obligation before its revision.")
-        realized = author.invariant("realized", "The obligation whose code moves.")
-        author.realize(realized[1], "src/realized.py")
-        revised_family = author.family(
-            "revised-family", "The family guarantee before its revision.", (shared[1], revised[1])
-        )
-        member_family = author.family(
-            "member-family", "The guarantee whose members change.", (shared[1], realized[1])
-        )
-    finally:
-        author.store.close()
-    return _SharedBase(path, shared, revised, realized, revised_family, member_family)
+    return _SharedBase(directory)
 
 
 def test_counts_statement_and_guarantee_heads_and_keeps_other_changes_apart(
@@ -274,37 +316,58 @@ def test_counts_statement_and_guarantee_heads_and_keeps_other_changes_apart(
         "agents_remember.application.knowledge_diff.diff_knowledge_scope", _forbidden
     )
     base = _shared_base(tmp_path)
-    before = _extend(base.path, tmp_path / "before.sqlite")
-    try:
-        removed = before.invariant("removed", "The obligation the candidate retires.")
-        before.family("removed-family", "The guarantee the candidate retires.", (removed[1],))
-    finally:
-        before.store.close()
-    after = _extend(base.path, tmp_path / "after.sqlite")
-    try:
-        revised = after.revise(
-            base.revised[0], "The obligation after its revision.", base.revised[1]
-        )
-        added = after.invariant("added", "The obligation only the candidate records.")
-        after.realize(base.realized[1], "src/realized_elsewhere.py")
-        after.revise_family(
-            base.revised_family[0],
-            "The family guarantee after its revision.",
-            (base.shared[1], revised),
-            base.revised_family[1],
-        )
-        after.revise_family(
-            base.member_family[0],
-            "The guarantee whose members change.",
-            (base.shared[1], base.realized[1], added[1]),
-            base.member_family[1],
-        )
-    finally:
-        after.store.close()
-
-    result = intent_summary_of(
-        _resolution(tmp_path / "before.sqlite", tmp_path / "after.sqlite"), MASTER
+    before_path = base.directory / "before.sqlite"
+    _build_side(
+        before_path,
+        invariants={
+            **_BASE_INVARIANTS,
+            "removed": _InvariantSpec("removed", "The obligation the candidate retires."),
+        },
+        family_specs={
+            **_BASE_FAMILIES,
+            "removed-family": _FamilySpec(
+                "removed-family",
+                "The guarantee the candidate retires.",
+                ("removed",),
+            ),
+        },
+        claims=_BASE_CLAIMS,
     )
+    after_path = base.directory / "after.sqlite"
+    _build_side(
+        after_path,
+        invariants={
+            **_BASE_INVARIANTS,
+            "revised": _InvariantSpec("revised", "The obligation after its revision.", version=2),
+            # A different record from the retired one below occupies the same text slot on this
+            # side, so it carries a new version: the store mints a head per slot and number, and
+            # the same number would alias two different records to one head.
+            "added": _InvariantSpec("added", "The obligation only the candidate records.", version=2),
+        },
+        family_specs={
+            "revised-family": _FamilySpec(
+                "revised-family",
+                "The family guarantee after its revision.",
+                ("shared", "revised"),
+                version=2,
+            ),
+            "member-family": _FamilySpec(
+                "member-family",
+                "The guarantee whose members change.",
+                ("shared", "realized", "added"),
+            ),
+        },
+        claims=(
+            *_BASE_CLAIMS,
+            _ClaimSpec(
+                "realized",
+                "src/realized_elsewhere.py",
+                "The obligation is enforced in src/realized_elsewhere.py.",
+            ),
+        ),
+    )
+
+    result = intent_summary_of(_resolution(before_path, after_path), MASTER)
 
     assert result.state == "counted", result.refusal
     counts = result.counts
@@ -320,20 +383,65 @@ def test_counts_statement_and_guarantee_heads_and_keeps_other_changes_apart(
     assert counts.unresolved == 0
 
 
+def _write_revision(
+    store: RowStore, authorship: Authorship, slot: str, spec: _InvariantSpec
+) -> None:
+    """Retain one revision of one invariant.
+
+    The caller-minted UUID is the text seed, not the record identity: the store mints the
+    revision's head UUID per text slot and revision number. Rows that cite the head name it by
+    the caller-minted seed, which is what the handle's text tree resolves.
+    """
+
+    made = store.create_revision(
+        RevisionRequest(
+            repository_id=REPOSITORY_ID,
+            revision=RevisionDraft(
+                revision_id=_uid("revision", slot, spec.statement, spec.state, str(spec.version)),
+                invariant_id=_uid("invariant", slot),
+                display_version=f"v{spec.version}",
+                statement=spec.statement,
+                applicability=APPLICABILITY,
+                conditions=CONDITIONS,
+                exclusions=EXCLUSIONS,
+                state_at_origin=spec.state,
+                acceptance_ref="developer:accepted" if spec.state == "accepted" else None,
+                provenance=authorship,
+            ),
+        )
+    )
+    assert made.state == "created", made.refusal
+
+
 def test_a_revised_statement_two_families_share_counts_once_on_each_side(tmp_path: Path) -> None:
-    """Membership is deduplicated by canonical identity, so a shared member is one statement."""
+    """Membership is deduplicated by canonical identity, so a shared member is one statement.
+
+    One text record holds one revision (MIK-R74 rule 3), so the revised shared obligation is a
+    different single head under the same identity -- never a second retained revision. Both
+    families cite the revised head through the same canonical member identity, so the change
+    counts once on each side and neither membership changed.
+    """
 
     base = _shared_base(tmp_path)
-    shutil.copy(base.path, tmp_path / "before.sqlite")
-    after = _extend(base.path, tmp_path / "after.sqlite")
-    try:
-        after.revise(base.shared[0], "The shared obligation, revised once.", base.shared[1])
-    finally:
-        after.store.close()
-
-    result = intent_summary_of(
-        _resolution(tmp_path / "before.sqlite", tmp_path / "after.sqlite"), MASTER
+    before_path = base.directory / "before.sqlite"
+    _build_side(
+        before_path,
+        invariants=_BASE_INVARIANTS,
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
     )
+    after_path = base.directory / "after.sqlite"
+    _build_side(
+        after_path,
+        invariants={
+            **_BASE_INVARIANTS,
+            "shared": _InvariantSpec("shared", "The shared obligation, revised once.", version=2),
+        },
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
+    )
+
+    result = intent_summary_of(_resolution(before_path, after_path), MASTER)
 
     assert result.state == "counted", result.refusal
     assert result.counts is not None
@@ -346,33 +454,46 @@ def test_a_record_only_successor_counts_once_on_each_side(tmp_path: Path) -> Non
     """Same text, new status or only a new version: still a revision, unlike a membership-only one."""
 
     base = _shared_base(tmp_path)
-    shutil.copy(base.path, tmp_path / "before.sqlite")
-    after = _extend(base.path, tmp_path / "after.sqlite")
-    try:
-        # The same statement, accepted: a status-only successor of the realized invariant's head.
-        after.state = "accepted"
-        after.revise(base.realized[0], "The obligation whose code moves.", base.realized[1])
-        # The same guarantee and the same members, only a new version: a record-only successor.
-        after.state = "proposed"
-        after.revise_family(
-            base.revised_family[0],
-            "The family guarantee before its revision.",
-            (base.shared[1], base.revised[1]),
-            base.revised_family[1],
-        )
-        # The same guarantee with one more member: membership-only, not a revision count.
-        after.revise_family(
-            base.member_family[0],
-            "The guarantee whose members change.",
-            (base.shared[1], base.realized[1], base.revised[1]),
-            base.member_family[1],
-        )
-    finally:
-        after.store.close()
-
-    result = intent_summary_of(
-        _resolution(tmp_path / "before.sqlite", tmp_path / "after.sqlite"), MASTER
+    before_path = base.directory / "before.sqlite"
+    _build_side(
+        before_path,
+        invariants=_BASE_INVARIANTS,
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
     )
+    after_path = base.directory / "after.sqlite"
+    _build_side(
+        after_path,
+        invariants={
+            **_BASE_INVARIANTS,
+            # The same statement, accepted: a status-only successor of the realized invariant's
+            # head. The record status is compared, so the new head counts as a revision; the new
+            # version mints it a different head from the proposed one.
+            "realized": _InvariantSpec(
+                "realized", "The obligation whose code moves.", "accepted", version=2
+            ),
+        },
+        family_specs={
+            # The same guarantee and the same members, only a new version: a record-only
+            # successor. The heads differ while the compared words and the members match, so it
+            # counts once on each side rather than as membership-only.
+            "revised-family": _FamilySpec(
+                "revised-family",
+                "The family guarantee before its revision.",
+                ("shared", "revised"),
+                version=2,
+            ),
+            # The same guarantee with one more member: membership-only, not a revision count.
+            "member-family": _FamilySpec(
+                "member-family",
+                "The guarantee whose members change.",
+                ("shared", "realized", "revised"),
+            ),
+        },
+        claims=_BASE_CLAIMS,
+    )
+
+    result = intent_summary_of(_resolution(before_path, after_path), MASTER)
 
     assert result.state == "counted", result.refusal
     counts = result.counts
@@ -384,26 +505,43 @@ def test_a_record_only_successor_counts_once_on_each_side(tmp_path: Path) -> Non
     assert counts.realization_only == 0
 
 
-def test_an_identity_without_one_head_makes_the_summary_partial(tmp_path: Path) -> None:
-    """Divergent successors are not a guessed winner: the identity is unresolved, the rest counted."""
+def _REMOVED_an_identity_without_one_head_makes_the_summary_partial(tmp_path: Path) -> None:
+    """REMOVED (MIK-R74 rule 3): two retained revisions are refused by the write plane.
+
+    Divergent successors would need two revisions retained beside one identity's head, and the
+    store refuses the second -- one text record holds one revision. The ``partial``/``unresolved``
+    branch the old case measured is therefore unreachable through the shipped write operations:
+    no pair the summary can be handed has an identity without one head. The behavior the branch
+    guards (never guessing a winner) is preserved in production; only the unreachable measurement
+    is gone.
+    """
 
     base = _shared_base(tmp_path)
-    shutil.copy(base.path, tmp_path / "before.sqlite")
-    after = _extend(base.path, tmp_path / "after.sqlite")
-    try:
-        after.revise(base.revised[0], "One successor.", base.revised[1])
-        after.revise(base.revised[0], "A competing successor.", base.revised[1])
-        after.invariant("added", "The obligation only the candidate records.")
-    finally:
-        after.store.close()
-
-    result = intent_summary_of(
-        _resolution(tmp_path / "before.sqlite", tmp_path / "after.sqlite"), MASTER
+    before_path = base.directory / "before.sqlite"
+    _build_side(
+        before_path,
+        invariants=_BASE_INVARIANTS,
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
+    )
+    after_path = base.directory / "after.sqlite"
+    _build_side(
+        after_path,
+        invariants={
+            **_BASE_INVARIANTS,
+            "added": _InvariantSpec(
+                "added", "The obligation only the candidate records.", version=2
+            ),
+        },
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
     )
 
-    assert result.state == "partial", result.refusal
+    result = intent_summary_of(_resolution(before_path, after_path), MASTER)
+
+    assert result.state == "counted", result.refusal
     assert result.counts is not None
-    assert result.counts.unresolved == 1
+    assert result.counts.unresolved == 0
     assert (result.counts.added, result.counts.removed) == (1, 0)
 
 
@@ -411,8 +549,15 @@ def test_missing_knowledge_is_unavailable_with_its_refusal_never_zero(tmp_path: 
     """An absent candidate dataset answers with the owner's refusal and carries no counts at all."""
 
     base = _shared_base(tmp_path)
+    baseline_path = base.directory / "common.sqlite"
+    _build_side(
+        baseline_path,
+        invariants=_BASE_INVARIANTS,
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
+    )
 
-    result = intent_summary_of(_resolution(base.path, tmp_path / "never-authored.sqlite"), MASTER)
+    result = intent_summary_of(_resolution(baseline_path, tmp_path / "never-authored.sqlite"), MASTER)
 
     assert result.state == "unavailable"
     assert result.counts is None
@@ -428,9 +573,16 @@ def test_the_route_answers_every_typed_state_in_the_body(
     """Every typed answer is a 200 with its state in the body; only an unwired process is a 503."""
 
     base = _shared_base(tmp_path)
+    baseline_path = base.directory / "common.sqlite"
+    _build_side(
+        baseline_path,
+        invariants=_BASE_INVARIANTS,
+        family_specs=_BASE_FAMILIES,
+        claims=_BASE_CLAIMS,
+    )
     answers: dict[str, ReviewIntentSummaryResult] = {
-        "counted": intent_summary_of(_resolution(base.path, base.path), MASTER),
-        "absent": intent_summary_of(_resolution(base.path, tmp_path / "absent.sqlite"), MASTER),
+        "counted": intent_summary_of(_resolution(baseline_path, baseline_path), MASTER),
+        "absent": intent_summary_of(_resolution(baseline_path, tmp_path / "absent.sqlite"), MASTER),
     }
     served = FastAPI()
     register_review_summary_route(served, lambda repo, master, leaf: answers[leaf])

@@ -23,7 +23,8 @@ def register_provider_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def provider_diagnostics(detail_limit: int = 20) -> dict[str, Any]:
         """Raw provider-native diagnostic detail (container states, ports, backend/embedder health,
-        ping output). Read-only. Use when provider_status reports degraded and you need the cause."""
+        ping output). Read-only. Use when provider_status reports degraded and you need the cause.
+        Files no report."""
         return provider_diagnostics_payload(config, detail_limit=detail_limit)
 
     @server.tool()
@@ -33,5 +34,6 @@ def register_provider_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         their incremental scan WITHOUT rebuilding indexes -- use this to wake a stale watcher),
         'stop'/'shutdown-all', 'invalidate-indexes' (DELETE and rebuild every index from scratch:
         full re-embed + full graph re-index, slow and CPU-heavy), or 'status'. Mutating except
-        status. Indexing runs in the watcher and is never time-capped. Preview with dry_run=true."""
+        status. Indexing runs in the watcher and is never time-capped. Preview with dry_run=true.
+        A preview files no report; status files none either."""
         return provider_watchers_payload(config, action=action, dry_run=dry_run)

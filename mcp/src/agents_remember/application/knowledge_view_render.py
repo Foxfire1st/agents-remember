@@ -1,4 +1,4 @@
-"""The five views rendered deterministically over the reader port, with their provenance classes.
+"""The three views rendered deterministically over the reader port, with their provenance classes.
 
 This is the module the whole leaf exists for. Everything before it settles vocabulary and everything
 after it transports bytes; here a view decides what it selects, how it orders it, and -- the clause
@@ -90,7 +90,6 @@ NO_CONSEQUENCE_OUTCOME_PREFIX = "no_consequence: "
 PRIORITY_OUTCOME_PREFIX = "declared_priority: "
 
 # The rule every generated row's *content* is classified under when its own record is mechanical.
-DETECTION_RULE = ("ordering.trigger-rule", 1)
 CONSEQUENCE_RULE = ("consequence.record-payload-byte-equal", 1)
 REGISTERED_ROLE_RULE = ("ordering.registered-role", 1)
 
@@ -708,8 +707,6 @@ def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tup
         )
     members = _family_members(reader, request, candidates)
     _member_locations(reader, members, candidates)
-    for row in reader.rows("detection_signal"):
-        candidates.append(_signal_candidate(row))
     return tuple(candidates)
 
 
@@ -787,94 +784,6 @@ def _member_locations(
         )
 
 
-def _signal_candidate(row: object) -> Candidate:
-    """One recorded detection signal as a mechanically-determined family row."""
-
-    payload = row.payload  # type: ignore[attr-defined]
-    condition = _string(payload.get("condition")) or "recorded_condition"
-    return Candidate(
-        subject=SubjectRef(
-            record_kind="detection_signal",
-            record_id=str(row.record_id),  # type: ignore[attr-defined]
-            revision_id=row.revision_id,  # type: ignore[attr-defined]
-        ),
-        label=condition,
-        authored=None,
-        mechanical_rule_id=DETECTION_RULE,
-        trigger=condition,
-        fact_kind="detection_signal",
-        change_locus="attributed_source",
-        lifecycle=row.lifecycle,  # type: ignore[attr-defined]
-    )
-
-
-def _review_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tuple[Candidate, ...]:
-    """The review matrix: requirements, effects, preservation claims, evidence and findings."""
-
-    kinds = request.record_kinds or (
-        "requirement_revision",
-        "invariant_effect_claim",
-        "preservation_claim",
-        "unresolved_question",
-        "evidence_claim",
-        "verification_observation",
-    )
-    candidates: list[Candidate] = []
-    for kind in kinds:
-        for row in reader.rows(kind):
-            candidates.append(_record_candidate(row, kind))
-    return tuple(candidates)
-
-
-def _record_candidate(row: object, kind: str) -> Candidate:
-    """One envelope record as a review-matrix row, with its recorded references preserved."""
-
-    payload = row.payload  # type: ignore[attr-defined]
-    refs = _references(payload)
-    return Candidate(
-        subject=SubjectRef(
-            record_kind=kind,
-            record_id=str(row.record_id),  # type: ignore[attr-defined]
-            revision_id=row.revision_id,  # type: ignore[attr-defined]
-        ),
-        label=kind,
-        authored=None,
-        mechanical_rule_id=CONSEQUENCE_RULE,
-        fact_kind=kind,
-        statement=_string(payload.get("explanation")) or _string(payload.get("rationale")),
-        lifecycle=row.lifecycle,  # type: ignore[attr-defined]
-        assessment_status="assessed" if refs else "missing",
-        assessment_ids=refs,
-        extra=refs,
-    )
-
-
-def _curation_candidates(
-    reader: KnowledgeViewReader, request: ViewRequest
-) -> tuple[Candidate, ...]:
-    """Machine work items, and curator dispositions, kept as two separate row sets."""
-
-    candidates: list[Candidate] = []
-    for row in reader.rows("detection_signal"):
-        candidates.append(_signal_candidate(row))
-    if request.family_revision_id:
-        for decision in _decisions_for(reader, "family_revision", request.family_revision_id):
-            candidates.append(
-                Candidate(
-                    subject=SubjectRef(
-                        record_kind="curator_disposition",
-                        record_id=decision.facet_revision_id,
-                    ),
-                    label=decision.decider,
-                    authored=decision,
-                    fact_kind="curator_disposition",
-                    statement=decision.reason,
-                    trigger=decision.facet_revision_id,
-                )
-            )
-    return tuple(candidates)
-
-
 # ---------------------------------------------------------------------------
 # Per-view row assembly.
 # ---------------------------------------------------------------------------
@@ -902,20 +811,3 @@ def _conditions(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
     return () if value is None else (str(value),)
-
-
-def _references(payload: Mapping[str, object]) -> tuple[str, ...]:
-    """Every recorded assessment reference on one payload, in recorded order."""
-
-    found: list[str] = []
-    for field in (
-        "assessment_refs",
-        "requirement_revision_refs",
-        "candidate_realization_claim_ids",
-    ):
-        value = payload.get(field)
-        if isinstance(value, (list, tuple)):
-            found.extend(str(item) for item in value)
-        elif isinstance(value, str):
-            found.append(value)
-    return tuple(found)

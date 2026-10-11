@@ -7,7 +7,7 @@ from pathlib import Path
 
 import apsw
 
-from agents_remember.memory.knowledge import schema_generations
+from agents_remember.memory.knowledge import schema
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 
@@ -58,9 +58,9 @@ def create_or_validate_schema(connection: apsw.Connection) -> KnowledgeSchemaIde
 
     if next(iter(connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'")))[0]:
         return inspect_schema(connection)
-    declared = schema_generations.generation_of_new_store()
+    declared = schema.generation_of_new_store()
     with immediate_transaction(connection):
-        for statement in schema_generations.create_schema_statements(declared):
+        for statement in schema.create_schema_statements(declared):
             connection.execute(statement)
     # The version marker is written after the DDL commits. A crash between the two leaves a
     # complete but unversioned database, which the next open refuses instead of guessing -- the
@@ -79,7 +79,7 @@ def inspect_schema(connection: apsw.Connection) -> KnowledgeSchemaIdentity:
     structural checks below, not by a fallback to a different generation.
     """
 
-    declared = schema_generations.generation_of_database(connection)
+    declared = schema.generation_of_database(connection)
     _require_declared_tables(connection, declared)
     _require_declared_triggers(connection, declared)
     return KnowledgeSchemaIdentity(
@@ -116,7 +116,7 @@ class _ImmediateTransaction:
 
 
 def _require_declared_tables(
-    connection: apsw.Connection, declared: schema_generations.SchemaGeneration
+    connection: apsw.Connection, declared: schema.SchemaGeneration
 ) -> None:
     present = {
         str(row[0])
@@ -137,7 +137,7 @@ def _require_declared_tables(
 
 
 def _require_declared_triggers(
-    connection: apsw.Connection, declared: schema_generations.SchemaGeneration
+    connection: apsw.Connection, declared: schema.SchemaGeneration
 ) -> None:
     present = {
         str(row[0])

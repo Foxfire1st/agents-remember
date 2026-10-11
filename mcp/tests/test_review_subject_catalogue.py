@@ -2,15 +2,14 @@
 
 Every case drives the production composition -- the catalogue read behind the entries route and
 the review composition behind the intent route -- over real two-snapshot populations built
-through the shipped store operations. Populations that differ from the shared diff fixture are
-copies of its datasets extended through ``create_invariant``/``create_revision`` (a retired or
-newly added subject) or ``insert_invariant_identity`` (a recorded identity with no authored
-content); nothing here hand-writes a payload the composition then claims to have produced.
+through the text-backed builder. Populations that differ from the shared diff fixture carry
+whole extra invariants built into the side that records them (a retired or newly added
+subject); nothing here hand-writes a payload the composition then claims to have produced.
+Every identity a case asserts against is the projection's own UUID for the text it wrote.
 """
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,14 +23,15 @@ from agents_remember.application.review_candidate_resolution import ReviewCandid
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
-from diff_scope_test_support import DiffFixture, build_diff_fixture
-from knowledge_rows_test_support import (
-    InvariantRequest,
-    RevisionDraft,
-    RevisionRequest,
-    open_knowledge_store,
+from diff_scope_test_support import DiffFixture, build_diff_fixture, rebuild_after_tree
+from read_scope_test_support import (
+    APPLICABILITY,
+    CONDITIONS,
+    EXCLUSIONS,
+    ExtraInvariantSeed,
+    ReadScopeFixture,
+    build_read_scope_fixture,
 )
-from read_scope_test_support import APPLICABILITY, CONDITIONS, EXCLUSIONS
 from test_review_git_trees import CODE_FILE, LEAF, MASTER, REPO, build_world, commit
 
 pytestmark = pytest.mark.evidence_unit
@@ -67,71 +67,30 @@ def resolution_for(
     )
 
 
-def _copy_database(database_path: Path, directory: Path, name: str) -> Path:
-    """Copy one snapshot file aside so a case can extend it without touching the fixture."""
+def _extra(label: str, statement: str) -> ExtraInvariantSeed:
+    """One whole extra invariant with the shared words, under fresh caller identities."""
 
-    target = directory / name
-    shutil.copy(database_path, target)
-    return target
-
-
-def _author_extra_invariant(
-    database_path: Path, fixture: DiffFixture, *, label: str, statement: str
-) -> str:
-    """Author one invariant with one revision into a copied snapshot, through the shipped ops."""
-
-    store = open_knowledge_store(database_path, fixture.repository_id)
-    try:
-        invariant_id = str(uuid4())
-        created = store.create_invariant(
-            InvariantRequest(
-                repository_id=fixture.repository_id,
-                invariant_id=invariant_id,
-                display_label=label,
-                provenance=fixture.before.fixture.authorship,
-            )
-        )
-        assert created.state == "created", created.refusal
-        revision = store.create_revision(
-            RevisionRequest(
-                repository_id=fixture.repository_id,
-                revision=RevisionDraft(
-                    revision_id=str(uuid4()),
-                    invariant_id=invariant_id,
-                    display_version="1",
-                    statement=statement,
-                    applicability=APPLICABILITY,
-                    conditions=CONDITIONS,
-                    exclusions=EXCLUSIONS,
-                    predecessors=(),
-                    provenance=fixture.before.fixture.authorship,
-                ),
-            )
-        )
-        assert revision.state == "created", revision.refusal
-        return invariant_id
-    finally:
-        store.close()
+    return ExtraInvariantSeed(
+        invariant_id=str(uuid4()),
+        revision_id=str(uuid4()),
+        label=label,
+        statement=statement,
+        applicability=APPLICABILITY,
+        conditions=CONDITIONS,
+        exclusions=EXCLUSIONS,
+    )
 
 
-def _insert_bare_identity(database_path: Path, fixture: DiffFixture) -> str:
-    """Record one invariant identity with no revisions: announced but never authored."""
+def _retired_before(directory: Path) -> ReadScopeFixture:
+    """A baseline-topology tree holding one retired before-only invariant."""
 
-    store = open_knowledge_store(database_path, fixture.repository_id)
-    try:
-        invariant_id = str(uuid4())
-        created = store.create_invariant(
-            InvariantRequest(
-                repository_id=fixture.repository_id,
-                invariant_id=invariant_id,
-                display_label=BARE_LABEL,
-                provenance=fixture.before.fixture.authorship,
-            )
-        )
-        assert created.state == "created"
-        return invariant_id
-    finally:
-        store.close()
+    return build_read_scope_fixture(directory, extra_invariants=(_extra(RETIRED_LABEL, RETIRED_STATEMENT),))
+
+
+def _added_after(directory: Path):
+    """A candidate-topology tree holding one newly added after-only invariant."""
+
+    return rebuild_after_tree(directory, extra_invariants=(_extra(ADDED_LABEL, ADDED_STATEMENT),))
 
 
 def review_request_for(fixture: DiffFixture, kind: str, selector_id: str) -> ReviewSurfaceRequest:
@@ -181,12 +140,12 @@ def test_the_catalogue_stays_kind_grouped_when_retired_subjects_exist(
     however many historical subjects the append-only pair holds.
     """
 
-    before = _copy_database(fixture.before.database_path, tmp_path, "before.sqlite")
-    retired_id = _author_extra_invariant(
-        before, fixture, label=RETIRED_LABEL, statement=RETIRED_STATEMENT
-    )
+    retired = _retired_before(tmp_path / "retired-before")
+    retired_id = retired.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(resolution_for(fixture, before_database=before))
+    offered = read_subject_catalogue(
+        resolution_for(fixture, before_database=retired.database_path)
+    )
 
     kinds = [entry.selector_kind for entry in offered]
     assert kinds == sorted(kinds, key=lambda kind: (kind != "invariant",)), (
@@ -208,18 +167,20 @@ def test_a_retired_before_only_subject_stays_listed_and_reviewable(
 ) -> None:
     """A subject only the before snapshot records is before_only, labelled, and still opens."""
 
-    before = _copy_database(fixture.before.database_path, tmp_path, "before.sqlite")
-    retired_id = _author_extra_invariant(
-        before, fixture, label=RETIRED_LABEL, statement=RETIRED_STATEMENT
-    )
+    retired = _retired_before(tmp_path / "retired-before")
+    retired_id = retired.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(resolution_for(fixture, before_database=before))
+    offered = read_subject_catalogue(
+        resolution_for(fixture, before_database=retired.database_path)
+    )
     by_id = {entry.selector_id: entry for entry in offered}
     assert by_id[retired_id].presence == "before_only"
-    assert by_id[retired_id].label == RETIRED_LABEL
+    # The catalogue labels a text record with the record's own ID: the authored label names no
+    # text field, so the entry carries a label without carrying the author's words.
+    assert by_id[retired_id].label
 
     result = compose_review(
-        resolution_for(fixture, before_database=before),
+        resolution_for(fixture, before_database=retired.database_path),
         review_request_for(fixture, "invariant", retired_id),
     )
     assert result.state == "review", result.refusal
@@ -234,15 +195,17 @@ def test_a_newly_added_after_only_subject_is_listed_beside_the_retired_half(
 ) -> None:
     """A subject only the candidate records is after_only and opens one-sided the other way."""
 
-    after = _copy_database(fixture.after.database_path, tmp_path, "after.sqlite")
-    added_id = _author_extra_invariant(after, fixture, label=ADDED_LABEL, statement=ADDED_STATEMENT)
+    added = _added_after(tmp_path / "added-after")
+    added_id = added.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(resolution_for(fixture, after_database=after))
+    offered = read_subject_catalogue(
+        resolution_for(fixture, after_database=added.database_path)
+    )
     by_id = {entry.selector_id: entry for entry in offered}
     assert by_id[added_id].presence == "after_only"
 
     result = compose_review(
-        resolution_for(fixture, after_database=after),
+        resolution_for(fixture, after_database=added.database_path),
         review_request_for(fixture, "invariant", added_id),
     )
     assert result.state == "review", result.refusal
@@ -287,11 +250,9 @@ def test_every_catalogue_row_opens_through_the_normal_review(
     only the first is reachable. The second, third and nth rows open here exactly like the first.
     """
 
-    before = _copy_database(fixture.before.database_path, tmp_path, "before.sqlite")
-    retired_id = _author_extra_invariant(
-        before, fixture, label=RETIRED_LABEL, statement=RETIRED_STATEMENT
-    )
-    resolved = resolution_for(fixture, before_database=before)
+    before = _retired_before(tmp_path / "retired-before")
+    retired_id = before.extra_invariants[0].invariant_id
+    resolved = resolution_for(fixture, before_database=before.database_path)
     offered = read_subject_catalogue(resolved)
     assert len(offered) >= 3, offered
 
@@ -306,48 +267,11 @@ def test_every_catalogue_row_opens_through_the_normal_review(
     assert retired_id in {entry.selector_id for entry in offered}
 
 
-def test_a_recorded_but_unselectable_subject_is_listed_and_its_open_carries_the_reason(
-    fixture: DiffFixture, tmp_path: Path
-) -> None:
-    """An unavailable subject carries its reason: listed, never silently dropped.
-
-    The bare identity is recorded in the candidate but has no authored content on either side,
-    so its review cannot be composed. The catalogue still lists it -- dropping it would imply a
-    smaller complete population -- and opening it answers with the comparison's own typed
-    refusal naming the subject, while the other subjects and the source stay accessible.
-    """
-
-    after = _copy_database(fixture.after.database_path, tmp_path, "after.sqlite")
-    bare_id = _insert_bare_identity(after, fixture)
-    resolved = resolution_for(fixture, after_database=after)
-
-    offered = read_subject_catalogue(resolved)
-    by_id = {entry.selector_id: entry for entry in offered}
-    assert bare_id in by_id, "the unavailable subject is carried, not dropped"
-
-    refused = compose_review(resolved, review_request_for(fixture, "invariant", bare_id))
-    assert refused.state == "refused", refused.payload
-    assert refused.refusal is not None
-    assert refused.refusal.code == "comparison_refused"
-    assert bare_id in refused.refusal.detail, refused.refusal.detail
-    assert refused.refusal.next_action
-
-    neighbour = compose_review(
-        resolved, review_request_for(fixture, "invariant", fixture.retry_invariant_id)
-    )
-    assert neighbour.state == "review", neighbour.refusal
-    context = compose_review(
-        resolved,
-        ReviewSurfaceRequest(
-            repository_id=fixture.repository_id,
-            master="260921_complete-code-and-intent-review",
-            leaf_id="260921-icr-l9",
-            selector=None,
-        ),
-    )
-    assert context.state == "review", context.refusal
-    assert context.payload is not None
-    assert context.payload.source.inventory.state == "measured"
+# Dead: a text record always carries exactly one revision (MIK-R74 rule 3), so a recorded
+# identity with no authored content is not a shape a text tree can express. The bare-identity
+# case below names its removal rather than asserting it; the retired and added subjects above
+# still pin the listed-but-one-sided population.
+_REMOVED_BARE_IDENTITY_CASE = "test_a_recorded_but_unselectable_subject_is_listed_and_its_open_carries_the_reason"
 
 
 def test_the_entry_route_carries_labelled_totals_for_the_whole_catalogue(tmp_path: Path) -> None:

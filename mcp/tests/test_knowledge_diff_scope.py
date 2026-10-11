@@ -21,13 +21,6 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
-from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.read import SelectionQuery, select_recorded_scope
-from agents_remember.memory.knowledge.read_queries import (
-    family_revision_is_recorded,
-    fetch_predecessor_edges,
-    invariant_revision_is_recorded,
-)
 from agents_remember.models.knowledge.diff import (
     DiffLimitation,
     DisplayFilter,
@@ -139,15 +132,13 @@ def item_for(result: KnowledgeDiffResult, item_id: str) -> KnowledgeDiffItem:
 def test_a_revised_statement_arrives_as_a_successor_alongside_the_revision_it_replaced(
     fixture: DiffFixture,
 ) -> None:
-    """The candidate's revised statement is the pair the substrate's immutability forces it to be.
+    """The candidate's revised statement arrives beside the revision it replaced.
 
-    ``create_invariant_revision`` refuses a second revision with the same identity and another sealed
-    payload -- measured, ``duplicate_identity``, whose own next action is "author a successor with its
-    own identity and this revision as an exact predecessor" -- so an author who revises a statement
-    keeps the identity, authors a successor, and records the predecessor it replaced. The comparison
-    must therefore report the *identity*: both revisions appear, each from the snapshot that selected
-    it, the successor is recognised as a replacement of a revision the baseline selected, and the
-    baseline revision itself stays a record both snapshots hold.
+    The candidate tree carries the same retry record with a different statement at another
+    revision number. Text records are numbered revisions of one file and hold no predecessor
+    edge (MIK-R74 rule 1), so the comparison reports the *identity* as a removal beside an
+    unrelated addition -- never as a succession the author did not record -- with each side
+    present outside the other's selection.
     """
 
     result = run_diff(fixture, diff_seed(fixture))
@@ -156,16 +147,18 @@ def test_a_revised_statement_arrives_as_a_successor_alongside_the_revision_it_re
     replaced = item_for(result, fixture.subject_revision_id)
     successor = item_for(result, fixture.revised_revision_id)
 
-    # The revision that was revised is not deleted by the revision that replaced it: both snapshots
-    # hold it, so it is context with no change of its own.
-    assert replaced.before is not None and replaced.after is not None
-    assert replaced.record_transition == "unchanged"
+    # The revision that was revised is gone from the candidate snapshot: it is a removal, and it
+    # is present outside the candidate's selection rather than absent from it, because the
+    # candidate selected another exact revision of the same identity.
+    assert replaced.before is not None and replaced.after is None
+    assert replaced.record_transition == "removed"
+    assert replaced.coverage == "present_outside_selection"
     assert replaced.changed_fields == ()
-    # The successor is the candidate's own addition, and it is recognised as a replacement rather than
-    # as an unrelated new revision: its authored predecessor edge names a revision the baseline
-    # selected, and no display version, label or insertion order was consulted to decide that.
+    # The successor is the candidate's own addition, present outside the baseline's selection
+    # for the same reason: no display version, label or insertion order was consulted to decide
+    # that.
     assert successor.before is None and successor.after is not None
-    assert successor.record_transition == "superseding"
+    assert successor.record_transition == "added"
     assert successor.coverage == "present_outside_selection"
     # The pair is one record identity whose two halves are different exact revisions, and the revised
     # text travels on the successor while the text it replaced travels on the revision it named.
@@ -352,10 +345,10 @@ def test_the_identity_seed_retains_a_revision_group_for_each_side_even_where_the
 ) -> None:
     """One identity selector, two snapshots, two different retained-revision sets.
 
-    The candidate holds a revision the baseline does not, so the two sides' groups differ. The
-    comparison keeps one group per side rather than merging them into a single count, which is what
-    lets a reader see that the sides disagree about how many revisions the identity retains without
-    the response choosing one of them.
+    The candidate carries another revision number of the same text record, so the two sides'
+    groups differ by exactly that revision. The comparison keeps one group per side rather than
+    merging them into a single count, which is what lets a reader see that the sides disagree
+    about which revision the identity retains without the response choosing one of them.
     """
 
     result = run_diff(fixture, diff_seed(fixture))
@@ -367,18 +360,25 @@ def test_the_identity_seed_retains_a_revision_group_for_each_side_even_where_the
     after_counts = {
         group.record_id: group.selected_revision_count for group in result.revision_groups.after
     }
-    assert before_counts[fixture.retry_invariant_id] == 3
-    assert after_counts[fixture.retry_invariant_id] == 5
+    assert before_counts[fixture.retry_invariant_id] == 1
+    assert after_counts[fixture.retry_invariant_id] == 1
     assert result.summary is not None
-    assert result.summary.before.primary_items_total != result.summary.after.primary_items_total
-    assert superseding_revisions(result, fixture) == {
-        fixture.revised_revision_id,
-        fixture.unselected_revision_id,
+    assert result.page is not None
+    outside = {
+        str(item.item_id)
+        for item in result.page.items
+        if item.kind == "invariant" and item.coverage == "present_outside_selection"
     }
+    assert {item_for(result, fixture.subject_revision_id).item_id} <= outside
+    assert {item_for(result, fixture.revised_revision_id).item_id} <= outside
 
 
 def superseding_revisions(result: KnowledgeDiffResult, fixture: DiffFixture) -> set[str]:
-    """The revisions the candidate holds that the baseline's selection does not reach."""
+    """The revisions the candidate holds that the baseline's selection does not reach.
+
+    Named for the coverage state, not for a succession: with no predecessor edge (MIK-R74 rule 1)
+    these read as additions outside the baseline's selection.
+    """
 
     del fixture
     assert result.page is not None
@@ -394,7 +394,7 @@ def test_explicit_side_selectors_address_a_different_exact_revision_on_each_side
 ) -> None:
     """An explicit selector per side is how one comparison names two different exact revisions.
 
-    The sides address the revision the candidate superseded and the revision that superseded it. Each
+    The sides address the older and the newer revision. Each
     is selected on its own side only, so the union holds the pair and each half reports the side it
     came from -- which is what makes "an explicit revision selector may address different before/after
     revision IDs" a value rather than a special case inside the selection policy.
@@ -419,117 +419,41 @@ def test_explicit_side_selectors_address_a_different_exact_revision_on_each_side
     # Neither side selected the revision the other addressed, so neither is present outside the
     # selection: each snapshot *does* hold the other revision, and the record identity proves it.
     assert before_only.record_id == after_only.record_id == fixture.retry_invariant_id
-    assert before_only.record_transition == "superseded"
-    assert after_only.record_transition == "superseding"
+    assert before_only.record_transition == "removed"
+    assert after_only.record_transition == "added"
 
 
-def test_a_record_the_other_snapshot_holds_but_the_selection_missed_is_not_an_absence(
+def test_a_revision_outside_the_selection_is_advertised_but_never_an_absence(
     fixture: DiffFixture,
 ) -> None:
     """Present-but-outside-the-selected-scope is not deletion, and the response says which it is.
 
-    The candidate snapshot holds a fourth retry revision that carries no claim and that neither
-    side's selection reaches. It is reported as present outside the selection -- with the omission
-    that advertises it -- rather than as absent from the snapshot, which is the design's own named
-    misreading. The removed claim, by contrast, really is absent from the candidate snapshot, and the
-    two states are asserted side by side so the distinction cannot collapse.
+    Each side's revision of the retry identity is present outside the other side's selection,
+    and the response advertises both with the omission that names them -- rather than as absent
+    from the snapshot, which is the design's own named misreading. The removed claim, by
+    contrast, really is absent from the candidate snapshot, and the two states are asserted side
+    by side so the distinction cannot collapse.
 
-    The second half of the case measures the coverage decision's own rule structure on those two
-    items: the rule that reads the other side's *authored predecessor edges* never decides a state
-    the probe does not, because an edge is a foreign key into the snapshot that declares it -- so a
-    snapshot that declares an edge naming this revision necessarily holds it. Each of the two
-    predecessor tables is asked with its own probe, because ``fetch_predecessor_edges`` unions them.
-    That rule is kept as a cheaper short-circuit, not as a second opinion, and this assertion is
-    what keeps the comment on ``_coverage`` honest for the invariant half this fixture authors; the
-    family half is carried by the same schema constraint and no family edge is authored here.
+    The coverage decision's two rules are both selection- and probe-based: the other side selected
+    another exact revision of the same identity, or the other side's tables hold the record. No
+    authored edge participates (MIK-R74 rule 1).
     """
 
     result = run_diff(fixture, diff_seed(fixture))
 
     assert result.state == "page", result.refusal
-    unreached = item_for(result, fixture.unselected_revision_id)
-    assert unreached.coverage == "present_outside_selection"
-    # Its transition names why it is one-sided: the baseline's selection reached other exact
-    # revisions of the same identity instead, which is a supersession and not an absence.
-    assert unreached.record_transition == "superseding"
-    assert unreached.after is not None and unreached.before is None
+    replaced = item_for(result, fixture.subject_revision_id)
+    assert replaced.coverage == "present_outside_selection"
+    # Its transition names why it is one-sided: the candidate's selection reached another exact
+    # revision of the same identity instead. With no predecessor edge it reads as a removal
+    # outside the selection, not as a succession and not as an absence.
+    assert replaced.record_transition == "removed"
+    assert replaced.after is None and replaced.before is not None
     removed = item_for(result, fixture.removed_claim_id)
     assert removed.coverage == "absent_from_snapshot"
     reasons = {omission.reason for omission in result.omissions}
     assert "present_outside_the_declared_selection" in reasons
     assert "records_present_outside_the_selection" in result.limitations
-
-    # The rule-2-is-subsumed-by-rule-3 measurement, on the same two items and through the published
-    # read surface rather than through the comparison's private helpers: for every authored edge each
-    # side declares, that side's own tables hold *both* revisions it names, which is why reading the
-    # edge can never answer a question the probe answers differently.
-    #
-    # Each predecessor table is asked with its own probe (fix round 2). `fetch_predecessor_edges`
-    # unions the invariant and the family edge table, so asking the invariant probe about a family
-    # endpoint is a false alarm on a legal snapshot -- one authored family edge, valid under the
-    # schema, made this assertion fail before the split. This fixture authors 2 invariant and 0
-    # family edges before, and 4 and 0 after, so the invariant half below is exercised here and the
-    # family half rests on the same `DEFERRABLE INITIALLY DEFERRED` foreign keys into
-    # `family_revision` rather than on this case; the split is what keeps a family edge from being
-    # read as a broken invariant one.
-    seed = diff_seed(fixture)
-    invariant_edge_query = (
-        "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor "
-        "WHERE repository_id = ? ORDER BY 1, 2"
-    )
-    family_edge_query = (
-        "SELECT child_revision_id, parent_revision_id FROM family_predecessor "
-        "WHERE repository_id = ? ORDER BY 1, 2"
-    )
-    before_connection = open_read_only_database(fixture.before.database_path)
-    try:
-        after_connection = open_read_only_database(fixture.after.database_path)
-        try:
-            for connection in (before_connection, after_connection):
-                invariant_edges = tuple(
-                    (str(row[0]), str(row[1]))
-                    for row in connection.execute(invariant_edge_query, (fixture.repository_id,))
-                )
-                family_edges = tuple(
-                    (str(row[0]), str(row[1]))
-                    for row in connection.execute(family_edge_query, (fixture.repository_id,))
-                )
-                assert invariant_edges or family_edges, (
-                    "each fixture snapshot declares at least one authored edge"
-                )
-                for successor, predecessor in invariant_edges:
-                    for revision_id in (successor, predecessor):
-                        assert invariant_revision_is_recorded(
-                            connection, fixture.repository_id, revision_id
-                        ), (
-                            "an authored edge names a revision its own snapshot must hold; if this "
-                            "ever fails, rule 2 of the coverage decision can decide a state rule 3 "
-                            "cannot and the subsumption comment on _coverage is wrong"
-                        )
-                for successor, predecessor in family_edges:
-                    for revision_id in (successor, predecessor):
-                        assert family_revision_is_recorded(
-                            connection, fixture.repository_id, revision_id
-                        ), (
-                            "an authored family edge names a family revision its own snapshot must "
-                            "hold; if this ever fails, rule 2 of the coverage decision can decide a "
-                            "state rule 3 cannot and the subsumption comment on _coverage is wrong"
-                        )
-                assert fetch_predecessor_edges(connection, fixture.repository_id) == tuple(
-                    sorted((*invariant_edges, *family_edges))
-                ), "fetch_predecessor_edges is the union of the two per-table edge sets"
-            before_scope = select_recorded_scope(
-                before_connection, SelectionQuery(repository_id=fixture.repository_id, seed=seed)
-            )
-            after_scope = select_recorded_scope(
-                after_connection, SelectionQuery(repository_id=fixture.repository_id, seed=seed)
-            )
-        finally:
-            after_connection.close()
-    finally:
-        before_connection.close()
-    assert before_scope.selected_invariant_revision_ids
-    assert after_scope.selected_invariant_revision_ids
 
 
 # --- the display filter is a display decision --------------------------------------------------

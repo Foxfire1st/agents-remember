@@ -123,8 +123,14 @@ def resolve_baseline_context(args: argparse.Namespace):
     return resolve_request_context(request_from_args(args))
 
 
-def run_drift(context, report_path: Path | None) -> tuple[DriftSummaryPacket, Path]:
+def run_drift(
+    context, report_path: Path | None, *, write_report: bool = True
+) -> tuple[DriftSummaryPacket, Path | None]:
     """Measure drift with the one shared summary (MIK-R44 rule 1).
+
+    With ``write_report=False`` the call is a read: nothing is filed and no
+    report path is returned (rule 6). Callers that really ask for a report
+    pass an explicit path (or leave the default) and keep full behavior.
 
     The legacy classification is not run here for any tree: `run_drift_summary`
     measures a converted tree from `converted_knowledge_check` and keeps today's
@@ -136,13 +142,17 @@ def run_drift(context, report_path: Path | None) -> tuple[DriftSummaryPacket, Pa
     summary = run_drift_summary(
         code_repository_root=context.code_repository_root,
         context=context,
-        output=DriftSummaryOutput(report_path=report_path, include_rows=True),
+        output=DriftSummaryOutput(
+            report_path=report_path, include_rows=True, write_report=write_report
+        ),
     )
     if summary.get("status") != "checked":
         raise RuntimeError(str(summary.get("error") or "drift measurement failed"))
     report = summary.get("reportPath")
     if not report:
-        raise RuntimeError("drift measurement produced no report")
+        if write_report:
+            raise RuntimeError("drift measurement produced no report")
+        return summary, None
     return summary, Path(report)
 
 
@@ -580,11 +590,13 @@ def _legacy_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in rows if str(row.get("classification", "")) in ACTIONABLE_CLASSIFICATIONS]
 
 
-def base_payload(context, summary: DriftSummaryPacket, report: Path) -> dict[str, object]:
+def base_payload(
+    context, summary: DriftSummaryPacket | list, report: Path | None
+) -> dict[str, object]:
     ledger = ledger_status(context.memory_root)
-    if summary.get("basis") == CONVERTED_BASIS:
+    if isinstance(summary, dict) and summary.get("basis") == CONVERTED_BASIS:
         return _converted_base_payload(context, summary, report, ledger)
-    rows = [row for row in summary.get("rows", [])]
+    rows = [row for row in summary.get("rows", [])] if isinstance(summary, dict) else list(summary)
     actionable = _legacy_actionable(rows)
     state = "ready"
     if ledger.get("state") == "derived" and ledger.get("lastMemoryContentCommit"):
@@ -604,7 +616,7 @@ def base_payload(context, summary: DriftSummaryPacket, report: Path) -> dict[str
         "memory_root": context.memory_root.as_posix(),
         "onboarding_root": context.onboarding_root.as_posix(),
         "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
-        "drift_report": report.as_posix(),
+        **({"drift_report": report.as_posix()} if report is not None else {}),
         "drift": {
             "counts": _legacy_counts(rows),
             "actionable": len(actionable),
@@ -614,7 +626,7 @@ def base_payload(context, summary: DriftSummaryPacket, report: Path) -> dict[str
 
 
 def _converted_base_payload(
-    context, summary: DriftSummaryPacket, report: Path, ledger: dict[str, object]
+    context, summary: DriftSummaryPacket, report: Path | None, ledger: dict[str, object]
 ) -> dict[str, object]:
     """The baseline payload for a converted tree (MIK-R44 rule 7).
 
@@ -647,7 +659,7 @@ def _converted_base_payload(
         "memory_root": context.memory_root.as_posix(),
         "onboarding_root": context.onboarding_root.as_posix(),
         "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
-        "drift_report": report.as_posix(),
+        **({"drift_report": report.as_posix()} if report is not None else {}),
         "drift": {
             "status": "checked",
             "basis": CONVERTED_BASIS,
@@ -671,7 +683,11 @@ def _converted_base_payload(
 
 def baseline_status(request: BaselineRequest) -> dict[str, object]:
     context = resolve_request_context(request)
-    summary, report = run_drift(context, request.report)
+    # A status read files nothing (rule 6): only an explicit report path is a
+    # report producer.
+    summary, report = run_drift(
+        context, request.report, write_report=request.report is not None
+    )
     return base_payload(context, summary, report)
 
 
@@ -714,7 +730,11 @@ def baseline_adopt(
     context = resolve_request_context(request)
     if context.topology != "external":
         raise RuntimeError("adoption requires external topology")
-    summary, report = run_drift(context, request.report)
+    # A dry-run preview files nothing (rule 6); the mutating adoption keeps
+    # full report behavior.
+    summary, report = run_drift(
+        context, request.report, write_report=not dry_run
+    )
     payload = base_payload(context, summary, report)
     if payload["state"] == "already-adopted":
         return 0, payload

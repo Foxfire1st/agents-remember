@@ -106,7 +106,11 @@ def run_drift_summary(
             code_repository_root,
             context.onboarding_root,
         )
-    _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
+        _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
+    # Without an explicit report-producing caller, a read files nothing at all (rule 6):
+    # no temp markdown report and no observer snapshot. Readers of the snapshot directory
+    # tolerate its absence (prune/surface/watch all skip a missing dir), so no consumer
+    # contract requires reads to produce it.
     serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
     packet = summarize_rows(
         serialized_rows,
@@ -115,6 +119,8 @@ def run_drift_summary(
     )
     if output.include_rows:
         packet["rows"] = serialized_rows
+    if not output.write_report:
+        packet.pop("reportPath", None)
     return packet
 
 
@@ -185,8 +191,8 @@ def _run_converted_summary(
     )
     if output.write_report:
         _write_converted_report(packet, report_path)
-    _write_converted_snapshot(code_repository_root, context, packet, report_path=report_path)
-    packet["reportPath"] = report_path.as_posix()
+        _write_converted_snapshot(code_repository_root, context, packet, report_path=report_path)
+        packet["reportPath"] = report_path.as_posix()
     if output.include_rows:
         packet["rows"] = [*stale_findings, *refusals]
     return packet

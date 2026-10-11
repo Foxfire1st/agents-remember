@@ -27,7 +27,7 @@ from agents_remember.application.knowledge_read import (
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import _manifest_digest
-from agents_remember.memory.knowledge.schema_generations import (
+from agents_remember.memory.knowledge.schema import (
     CURRENT_GENERATION,
     generation_of_database,
 )

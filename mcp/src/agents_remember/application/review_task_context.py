@@ -51,7 +51,6 @@ from agents_remember.application.review_committed_leaf import (
     closed_leaf_intent_detail,
     closed_leaf_limitations,
 )
-from agents_remember.application.review_evidence_records import without_selected_matrix
 from agents_remember.application.review_external_git_movement import external_git_movement
 from agents_remember.application.review_legacy_comparison import (
     knowledge_unavailable_detail,
@@ -122,7 +121,6 @@ def task_context_review(
     moved = require_current_candidate_identity(resolved)
     if moved is not None:
         return refused(request.repository_id, moved)
-    records = without_selected_matrix(records)
     # Three ways the knowledge half can be unusable, all three *stated* here rather than raised: a
     # dataset that is present but unreadable, a candidate receipt that exists and does not validate
     # (which leaves no namespace to open either half under), and a half that is simply absent.
@@ -154,7 +152,7 @@ def task_context_review(
             knowledge=_task_context_pane(resolved, records, subjects, applicability, unreadable),
             # No comparison travels beside the inventory: this review selected no subject.
             source=source_pane(None, inventory, attribution),
-            evidence=evidence_pane((), records, subjects, applicability),
+            evidence=evidence_pane(records, subjects, applicability),
             # A review that selected no subject composed no family context, and it says so with the
             # one state that claims nothing: the recorded families of a subject nobody named are not
             # an unread scope, an unavailable one or a measured zero (ICR-R31@v1).

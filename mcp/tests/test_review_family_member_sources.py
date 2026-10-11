@@ -6,11 +6,12 @@ one file are two regions with two explanations, not one file -- so every source 
 structured recorded locator, the line ranges the read's own anchor resolver placed it on in *this*
 side's exact recorded blob, and a state naming which of those facts the side established.
 
-Every value is produced by the production path: claims are authored through the store's own
-realization operation, the two sides are two real datasets and two real Git trees, and the roster is
+Every value is produced by the production path: the claims are built into the two text trees as
+extra realizations, the two sides are two real datasets and two real Git trees, and the roster is
 read through :func:`read_family_roster` with the anchor resolver the side's read context selects.
 Nothing here parses a ``detail`` sentence; the ranges are compared against the lines the fixture
-wrote.
+wrote. One text tree holds one entry per path and role, so the six claims at the shared path use
+six different roles; the after side's alpha claim is the same entry recording the after blob.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from agents_remember.application.review_family_rosters import (
@@ -35,14 +36,15 @@ from agents_remember.models.knowledge.source import (
     SourceLocator,
     SymbolLocator,
 )
-from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
-from knowledge_rows_test_support import (
-    NewAnchor,
-    RealizationClaimRequest,
-    open_knowledge_store,
-    realizations,
+from read_scope_test_support import (
+    BATCH_REVISION,
+    SUBJECT_REVISION,
+    ReadFixtureRealization,
+    ReadScopeFixture,
+    RealizationSeed,
+    build_read_scope_fixture,
+    projected_claim_id,
 )
-from read_scope_test_support import ReadScopeFixture, build_read_scope_fixture
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -82,7 +84,7 @@ LEGACY_FIELDS = frozenset(
 
 @dataclass(frozen=True)
 class Claim:
-    """One realization this module authors: its identity and what it records."""
+    """One realization this module builds in: its projected identity and what it records."""
 
     claim_id: str
     revision_id: str
@@ -114,47 +116,135 @@ def fixture(tmp_path_factory: pytest.TempPathFactory) -> SourcesFixture:
 
 
 def build_sources_fixture(directory: Path) -> SourcesFixture:
-    """Author the claims on the before dataset, then copy it and re-attest ``alpha`` on the after one."""
+    """Build the claims into the before tree, and the after tree with ``alpha`` re-recorded.
 
-    store = build_read_scope_fixture(directory / "store")
+    Both trees are built by the text-backed builder: the before tree records all seven claims
+    against the before blob, and the after tree records the same six stale claims plus the
+    alpha entry recording the after blob. The claim identities are the projection's own
+    UUIDs for each path and role, so both sides mint the same claim for the same association.
+    """
+
     code_root = directory / "code"
     before_tree, before_blob, double_blob = _commit_tree(code_root, BEFORE_TEXT, initial=True)
     after_tree, after_blob, _ = _commit_tree(code_root, AFTER_TEXT, initial=False)
-    subject, batch = store.subject_revision_id, store.batch_revision_id
-    before_claims = {
-        "alpha": _claim(subject, "enforcement", ALPHA_RATIONALE, _symbol("alpha"), before_blob),
-        "beta": _claim(batch, "support", BETA_RATIONALE, _symbol("beta"), before_blob),
-        "range": _claim(
-            batch, "presentation", "The recorded lines.", _lines(*BETA_LINES), before_blob
+    stale = (
+        _seed("alpha", SUBJECT_REVISION, "enforcement", ALPHA_RATIONALE, _symbol("alpha"), before_blob),
+        _seed("beta", BATCH_REVISION, "support", BETA_RATIONALE, _symbol("beta"), before_blob),
+        _seed(
+            "range",
+            BATCH_REVISION,
+            "presentation",
+            "The recorded lines.",
+            _lines(*BETA_LINES),
+            before_blob,
         ),
-        "file": _claim(subject, "incidental", "The whole file.", FileLocator(), before_blob),
-        "unbound": _claim(subject, "support", "A name.", _symbol("missing"), before_blob),
-        "past_end": _claim(batch, "support", "Lines.", _lines(*PAST_END_LINES), before_blob),
-        "double": Claim(
-            str(uuid4()),
-            subject,
+        _seed("file", SUBJECT_REVISION, "propagation-persistence", "The whole file.", FileLocator(), before_blob),
+        _seed("unbound", SUBJECT_REVISION, "unclassified", "A name.", _symbol("missing"), before_blob),
+        _seed(
+            "past_end", BATCH_REVISION, "primary-authority", "Lines.", _lines(*PAST_END_LINES), before_blob
+        ),
+        _seed(
+            "double",
+            SUBJECT_REVISION,
             "enforcement",
             "Both.",
             _symbol("alpha"),
             double_blob,
             DOUBLE_PATH,
         ),
+    )
+    before = build_read_scope_fixture(directory / "before", extra_claims=stale)
+    after = build_read_scope_fixture(
+        directory / "after",
+        extra_claims=(
+            *stale[1:],
+            _seed(
+                "alpha_after",
+                SUBJECT_REVISION,
+                "enforcement",
+                ALPHA_RATIONALE,
+                _symbol("alpha"),
+                after_blob,
+            ),
+        ),
+    )
+    claims = {
+        name: _claim_record(name, seed, before) for name, seed in _named(stale)
     }
-    _author(store, store.database_path, before_claims.values())
-    after_database = directory / "after.db"
-    after_database.write_bytes(store.database_path.read_bytes())
-    alpha_after = _claim(subject, "enforcement", ALPHA_RATIONALE, _symbol("alpha"), after_blob)
-    _author(store, after_database, (alpha_after,))
+    claims["alpha_after"] = _claim_record(
+        "alpha_after",
+        _seed(
+            "alpha_after",
+            SUBJECT_REVISION,
+            "enforcement",
+            ALPHA_RATIONALE,
+            _symbol("alpha"),
+            after_blob,
+        ),
+        after,
+    )
     return SourcesFixture(
-        store=store,
+        store=before,
         code_root=code_root,
-        before_database=store.database_path,
-        after_database=after_database,
+        before_database=before.database_path,
+        after_database=after.database_path,
         before_tree=before_tree,
         after_tree=after_tree,
         before_blob=before_blob,
         after_blob=after_blob,
-        claims={**before_claims, "alpha_after": alpha_after},
+        claims=claims,
+    )
+
+
+def _named(seeds: tuple[RealizationSeed, ...]) -> tuple[tuple[str, RealizationSeed], ...]:
+    """Name the seven stale seeds in the order the fixture builds them."""
+
+    return tuple(
+        zip(("alpha", "beta", "range", "file", "unbound", "past_end", "double"), seeds, strict=True)
+    )
+
+
+def _seed(
+    name: str,
+    revision: str,
+    role: RealizationRole,
+    rationale: str,
+    locator: SourceLocator,
+    blob: str,
+    path: str = SHARED_PATH,
+) -> RealizationSeed:
+    """One extra realization for the text-backed builder, under fresh caller identities."""
+
+    del name
+    return RealizationSeed(
+        realization=ReadFixtureRealization(
+            anchor_id=str(uuid4()), claim_id=str(uuid4()), path=path
+        ),
+        revision_id=revision,
+        role=role,
+        locator=locator,
+        recorded_blob=blob,
+        rationale=rationale,
+    )
+
+
+def _claim_record(name: str, seed: RealizationSeed, tree: ReadScopeFixture) -> Claim:
+    """The case-facing record for one seed: the projected claim identity it mints."""
+
+    del name
+    revision_id = (
+        tree.subject_revision_id
+        if seed.revision_id == SUBJECT_REVISION
+        else tree.batch_revision_id
+    )
+    return Claim(
+        claim_id=projected_claim_id(seed.realization.path, seed.role),
+        revision_id=revision_id,
+        role=seed.role,
+        rationale=seed.rationale,
+        locator=seed.locator,
+        blob=seed.recorded_blob,
+        path=seed.realization.path,
     )
 
 
@@ -164,42 +254,6 @@ def _symbol(name: str) -> SymbolLocator:
 
 def _lines(start: int, end: int) -> LineRangeLocator:
     return LineRangeLocator(start_line=start, end_line=end)
-
-
-def _claim(
-    revision_id: str, role: RealizationRole, rationale: str, locator: SourceLocator, blob: str
-) -> Claim:
-    return Claim(str(uuid4()), revision_id, role, rationale, locator, blob)
-
-
-def _author(fixture: ReadScopeFixture, database: Path, claims) -> None:
-    store = open_knowledge_store(database, fixture.repository_id)
-    try:
-        for claim in claims:
-            created = realizations.create_realization_claim(
-                store,
-                RealizationClaimRequest(
-                    repository_id=fixture.repository_id,
-                    claim=RealizationClaimDraft(
-                        claim_id=claim.claim_id,
-                        invariant_revision_id=claim.revision_id,
-                        role=claim.role,
-                        rationale=claim.rationale,
-                    ),
-                    anchor=NewAnchor(
-                        anchor=SourceAnchorDraft(
-                            anchor_id=UUID(str(uuid4())),
-                            path=claim.path,
-                            source_identity=GitBlobIdentity(object_id=claim.blob),
-                            locator=claim.locator,
-                        )
-                    ),
-                    provenance=fixture.authorship,
-                ),
-            )
-            assert created.state == "created", created.refusal
-    finally:
-        store.close()
 
 
 def _commit_tree(root: Path, text: str, *, initial: bool) -> tuple[str, str, str]:
@@ -324,9 +378,11 @@ def test_an_unresolved_locator_is_stated_with_its_recorded_locator_and_no_range(
     assert (unbound.locator, unbound.resolved_ranges) == (_symbol("missing"), ())
 
     # The after tree holds other bytes than these claims recorded: every one of them is unresolved on
-    # that side, carries its own recorded locator, and is never placed on the new bytes.
+    # that side, carries its own recorded locator, and is never placed on the new bytes. (Alpha is
+    # not among them: the after tree re-records the alpha entry against the after blob, so the one
+    # claim identity resolves there -- the changed-file case above measures exactly that.)
     after = roster_sources(fixture, "after", fixture.after_tree)
-    for name in ("alpha", "beta", "range", "file"):
+    for name in ("beta", "range", "file"):
         stale = after[fixture.claims[name].claim_id]
         assert (stale.locator_state, stale.resolution) == ("unresolved", "recorded_blob_mismatch")
         assert stale.locator == fixture.claims[name].locator

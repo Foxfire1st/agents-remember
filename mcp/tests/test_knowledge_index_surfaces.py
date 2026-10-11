@@ -171,8 +171,10 @@ def test_the_bootstrap_skill_names_only_views_that_list_an_existing_foundation(
     for view in named:
         listed = _read(root, tmp_path / "coordination", view=view)
         assert listed["state"] == "view" and listed["payload"]["rows"], view
-    # The view the earlier text named first answers no row on the same tree.
-    assert _read(root, tmp_path / "coordination", view="curation_queue")["payload"]["rows"] == []
+    # The removed matrix view answers the unknown-view refusal on the same tree, not rows.
+    removed = _read(root, tmp_path / "coordination", view="curation_queue")
+    assert removed["state"] == "refused", removed
+    assert removed["refusalCode"] == "unknown_view", removed
 
 
 def _diff(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:

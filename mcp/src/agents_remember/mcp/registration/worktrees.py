@@ -230,7 +230,14 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         Git's markers (cards), and the result names the report that lists each one. Resolve them
         in the files, stage, and call again with resolution_action='continue'; the file validator
         runs before the merge is committed. Sync early — before memories are written — for the
-        friction-free fast-forward path."""
+        friction-free fast-forward path.
+
+        Sync movement: after the sync has changed the leaf's code or memory, the review and the
+        sync result say that the latest recorded review was made before the sync, and offer to
+        record a new one. It never blocks. Both compare trees, not branch history. A rebase,
+        cherry-pick or revert that ends in the same tree reads as the same. How a branch got
+        there is not measured.
+        """
         return worktree_sync_payload(
             config,
             contract_path,
