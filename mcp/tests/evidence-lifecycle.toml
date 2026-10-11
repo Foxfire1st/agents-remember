@@ -334,6 +334,7 @@ consumers = [
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
@@ -1055,6 +1056,42 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/l43_l37_attempt-1.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_review_meaning_effects.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "rows for INV-9NCBGQSY, INV-1XKX9ERN and FAM-7B6N3Y4Q extracted from the real 260928-MIK-L37 history file at memory base ec67a42ff210cdccbc3696ee628881aa220d9476"
+introduced_by = "260928-MIK-L43"
+lifetime = "permanent"
+permanence_rationale = "The L37 real-case regression reads these rows as the packet's recorded sequences."
+replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_review_meaning_effects.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l43_l37_attempt-2.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_review_meaning_effects.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "rows for INV-9NCBGQSY, INV-1XKX9ERN and FAM-7B6N3Y4Q extracted from the real 260928-MIK-L37-attempt-2 history file at memory base ec67a42ff210cdccbc3696ee628881aa220d9476"
+introduced_by = "260928-MIK-L43"
+lifetime = "permanent"
+permanence_rationale = "The L37 real-case regression reads these rows as the packet's recorded sequences."
+replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_review_meaning_effects.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/old_coherence_record_l39.json"
 kind = "fixture"
 authority = "external-recorded"
@@ -1472,6 +1509,7 @@ consumers = [
   "mcp/tests/test_review_git_trees.py",
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_limit_wording.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_review_route_refusals.py",
@@ -1839,6 +1877,7 @@ consumers = [
   "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
@@ -1947,6 +1986,7 @@ consumers = [
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",

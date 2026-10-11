@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import apsw
 
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
+from agents_remember.application.review_meaning_effects import outline_meanings
 from agents_remember.application.review_record_changes import RecordChanges
 from agents_remember.memory.knowledge_index import (
     IndexMismatchError,
@@ -15,6 +16,7 @@ from agents_remember.memory.knowledge_index import (
     Record,
     text_uuid,
 )
+from agents_remember.models.knowledge.review_meaning_effects import MeaningRecordKind
 from agents_remember.models.knowledge.review_outline import (
     ReviewOutline,
     ReviewOutlineFamily,
@@ -41,7 +43,7 @@ def read_review_outline(resolved: ReviewCandidateResolution) -> ReviewOutline:
             KnowledgeIndex(resolved.baseline_database) as before,
             KnowledgeIndex(resolved.candidate_database) as after,
         ):
-            return _outline(before, after)
+            return _outline(before, after, resolved.leaf_id)
     except (apsw.Error, IndexMismatchError) as error:
         return _unavailable(f"The comparison's memory indexes could not be read: {error}")
 
@@ -50,7 +52,7 @@ def _unavailable(detail: str) -> ReviewOutline:
     return ReviewOutline(state="unavailable", detail=detail[:20_000])
 
 
-def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
+def _outline(before: KnowledgeIndex, after: KnowledgeIndex, owner: str) -> ReviewOutline:
     sides = (
         _Side("before", before, dict(before.state.problems)),
         _Side("after", after, dict(after.state.problems)),
@@ -58,6 +60,13 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
     changes = RecordChanges()
     families: list[ReviewOutlineFamily] = []
     invariants: list[ReviewOutlineInvariant] = []
+    # One owner-scoped history read serves every row's recorded effects (MIK-R43 rule 9):
+    # the same values the reading area's block shows, from the after tree's index.
+    # The baseline resolves the rare UUID the after map misses, exactly as the
+    # selected answer does (MIK-R43 rule 1: retired and after-absent records).
+    meanings = outline_meanings(
+        after, owner, _meaning_subjects(before, after), identity_index=before
+    )
     for kind in ("family", "invariant"):
         records = [{r.id: r for r in side.index.records_of_kind(kind).value} for side in sides]
         for side, held in zip(sides, records, strict=True):
@@ -75,6 +84,7 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
                         id=identity,
                         summary=_summary(str(record.document["statement"])),
                         change=changes.intent(sides, identity).change,
+                        meaning=meanings[identity],
                     )
                 )
                 continue
@@ -91,6 +101,7 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
                         selector_id=text_uuid("identity", member),
                         id=member,
                         membership=fact.membership,
+                        meaning=meanings[member],
                     )
                 )
             families.append(
@@ -100,6 +111,7 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
                     title=str(record.document["title"]),
                     change=change,
                     members=tuple(members),
+                    meaning=meanings[identity],
                 )
             )
     return ReviewOutline(
@@ -108,6 +120,32 @@ def _outline(before: KnowledgeIndex, after: KnowledgeIndex) -> ReviewOutline:
         families=tuple(families),
         invariants=tuple(invariants),
     )
+
+
+def _meaning_subjects(
+    before: KnowledgeIndex, after: KnowledgeIndex
+) -> list[tuple[str, MeaningRecordKind]]:
+    """Every record the outline lists, with its kind, in outline order.
+
+    Candidate order first, then identities only the baseline holds -- the same
+    population the outline below enumerates, so every row finds its meaning.
+    """
+
+    subjects: list[tuple[str, MeaningRecordKind]] = []
+    seen: set[str] = set()
+    for kind in ("family", "invariant"):
+        for index in (after, before):
+            for record in index.records_of_kind(kind).value:
+                if record.id in seen:
+                    continue
+                seen.add(record.id)
+                subjects.append((record.id, "family" if kind == "family" else "invariant"))
+                if kind == "family":
+                    for member in _members(record):
+                        if member not in seen:
+                            seen.add(member)
+                            subjects.append((member, "invariant"))
+    return subjects
 
 
 def _members(record: Record | None) -> tuple[str, ...]:

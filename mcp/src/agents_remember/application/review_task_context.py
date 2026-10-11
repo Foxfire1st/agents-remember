@@ -88,6 +88,7 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 
 __all__ = ["pair_attribution", "task_context_review"]
@@ -164,6 +165,9 @@ def task_context_review(
                     "inventory of the bound source pair independently of any family membership"
                 ),
             ),
+            # No subject was selected, so no record's steps are covered; the field is still
+            # present, because a current build's answer without it is invalid (MIK-R43 rule 9).
+            meaning_effects=ReviewMeaningEffects(records=()),
             staleness=ReviewStaleness(
                 state="not_compared",
                 statement=(

@@ -48,6 +48,7 @@ import { DiffPane } from '../changeset/DiffPane';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { ReviewExpressions } from './ReviewExpressions';
 import { KnowledgeStatements } from './KnowledgeStatements';
+import { MeaningBlock, MeaningFieldGuard } from './MeaningEffects';
 import {
   SelectedStatement,
   SubjectEvidence,
@@ -327,6 +328,7 @@ function UnselectedCenter({
       <h2 className={sectionLabel}>
         {selected ? (noFamily ? 'No recorded family' : 'Selected intent') : 'Source review'}
       </h2>
+      <MeaningFieldGuard payload={payload} />
       {selected ? (
         <KnowledgeStatements
           before={payload.knowledge.before_statement}
@@ -668,6 +670,7 @@ function FamilyCenter({
       <GuaranteeChangeBadge kinds={entry.change_kinds} />
       <FamilyBreakdown triage={familyTriage(entry)} />
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
+      <MeaningBlock payload={payload} record={entry.family_id} />
       <FamilyMemberContext
         entry={entry}
         distinct={distinct}
@@ -799,6 +802,7 @@ function MemberCenter({
           layout={layout}
           members={subjectRows(entry, subject)}
         />
+        <MeaningBlock payload={payload} record={subject.id} />
       </div>
       {expressions}
       <section data-review-content="resolution">
@@ -844,15 +848,18 @@ function UnavailableMember({
   member,
   layout,
   onRosterNext,
+  payload,
 }: {
   entry: ReviewFamilyContextEntry;
   member: ReviewFamilyMember;
   layout: DiffLayout;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
+  payload: ReviewPayload;
 }) {
   return (
     <section className={shell} data-testid="review-center-member-context">
       <h2 className={sectionLabel}>Member revision context</h2>
+      <MeaningFieldGuard payload={payload} />
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
       <p data-review-content="statement">{member.statement ?? member.detail}</p>
       <p className={muted} data-testid="review-center-evidence-unavailable">
@@ -986,6 +993,7 @@ function SelectedCenter({
             entry={entry}
             member={member}
             layout={layout}
+            payload={payload}
             onRosterNext={onRosterNext}
           />
           {expressions}

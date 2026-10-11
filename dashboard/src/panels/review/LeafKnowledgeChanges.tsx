@@ -6,6 +6,7 @@ import type {
   ReviewSideCurrentness,
   ReviewTreesRead,
   ReviewTreesResult,
+  ReviewWorklistHistoryRow,
   ReviewWorklistItem,
   ReviewWorklistView,
 } from '../../data/reviewTrees';
@@ -93,12 +94,22 @@ function itemFacts(item: ReviewWorklistItem): string {
   return (FACT_FORMATS[item.kind] ?? factText)(item.facts);
 }
 
+// The governing row prints its recorded effect after its disposition (MIK-R43): the
+// effect the leaf-wide view's row document already returns. A changed row without one
+// was written before the effect label became required.
+function rowEffect(row: ReviewWorklistHistoryRow): string {
+  const effect = (row.row as Record<string, unknown> | undefined)?.effect;
+  if (typeof effect === 'string' && effect) return ` · ${effect}`;
+  if (row.disposition === 'changed') return ' · effect not recorded';
+  return '';
+}
+
 function ItemLine({ entry, trees }: { entry: WorklistEntry; trees: ReviewTreesResult }) {
   const { item, rows } = entry;
   const state = item.satisfied_by
     ? `answered by ${factText(item.satisfied_by, true)}`
     : rows.length
-      ? rows.map((row) => `${row.owner} ${row.disposition} (${row.id})`).join(', ')
+      ? rows.map((row) => `${row.owner} ${row.disposition}${rowEffect(row)} (${row.id})`).join(', ')
       : 'no history row';
   const reasons = currentnessReasons(trees, item.subject);
   return (

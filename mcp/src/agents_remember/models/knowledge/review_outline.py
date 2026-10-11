@@ -12,6 +12,7 @@ from agents_remember.models.knowledge.base import (
     UUID_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.review_meaning_effects import ReviewOutlineMeaning
 
 OutlineChange = Literal["added", "removed", "changed", "unchanged", "unknown"]
 
@@ -20,6 +21,9 @@ class ReviewOutlineMember(KnowledgeModel):
     selector_id: str = Field(pattern=UUID_PATTERN)
     id: str
     membership: Literal["both", "joined", "left"]
+    # The member's recorded effects in attempt order with the rule-8 state (MIK-R43). The
+    # tree badge joins the labels; the state ``none`` shows no badge.
+    meaning: ReviewOutlineMeaning
 
 
 class ReviewOutlineFamily(KnowledgeModel):
@@ -28,6 +32,8 @@ class ReviewOutlineFamily(KnowledgeModel):
     title: str = Field(max_length=LABEL_MAX_LENGTH)
     change: OutlineChange
     members: tuple[ReviewOutlineMember, ...] = ()
+    # The family's recorded effects in attempt order with the rule-8 state (MIK-R43).
+    meaning: ReviewOutlineMeaning
 
 
 class ReviewOutlineInvariant(KnowledgeModel):
@@ -35,6 +41,8 @@ class ReviewOutlineInvariant(KnowledgeModel):
     id: str
     summary: str = Field(max_length=120)
     change: OutlineChange
+    # The invariant's recorded effects in attempt order with the rule-8 state (MIK-R43).
+    meaning: ReviewOutlineMeaning
 
 
 class ReviewOutline(KnowledgeModel):

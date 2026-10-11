@@ -99,7 +99,11 @@ from agents_remember.application.review_family_context import (
     review_family_context,
 )
 from agents_remember.application.review_family_rosters import family_collection_refusal
-from agents_remember.application.review_legacy_comparison import knowledge_unavailable_limitations
+from agents_remember.application.review_legacy_comparison import (
+    knowledge_unavailable_detail,
+    knowledge_unavailable_limitations,
+)
+from agents_remember.application.review_meaning_effects import review_meaning_effects
 from agents_remember.application.review_outline import read_review_outline
 from agents_remember.application.review_pagination import (
     comparison_page,
@@ -179,6 +183,8 @@ from agents_remember.models.knowledge.review import (
     ReviewSourceInventory,
     ReviewSurfaceRequest,
 )
+from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_meaning_effects import MeaningRecordKind
 from agents_remember.models.knowledge.view import (
     MAX_VIEW_ROWS,
 )
@@ -196,6 +202,7 @@ __all__ = [
     "resolve_review_candidate",
     "review_records_for",
 ]
+
 
 def read_knowledge_review(
     config: McpRuntimeConfig,
@@ -507,6 +514,23 @@ def compose_review(
             relationships=relationships,
         ),
     )
+    # The recorded effects of this leaf's meaning changes (MIK-R43): the steps of the
+    # selected record and of the families and members the family context returns, read
+    # from the after tree's index the resolution already holds. No new route, no second
+    # resolution of the candidate, no wait for the leaf-wide view or the worklist
+    # process: the field travels in this answer, and a roster continuation carries the
+    # steps of the members it returns because they are in the returned context.
+    meaning = review_meaning_effects(
+        resolved.candidate_database,
+        resolved.leaf_id,
+        _meaning_subjects(request.selector, family.context),
+        legacy_detail=(
+            None if resolved.trees is not None else knowledge_unavailable_detail(resolved)
+        ),
+        # Retired or after-absent selections resolve their UUID through the baseline
+        # map; history is still read from the after tree alone (MIK-R43 rule 1).
+        before_database=resolved.baseline_database,
+    )
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -525,6 +549,7 @@ def compose_review(
             # A tree comparison's families carry the change facts of the members this page
             # returned (MIK-R33); without a tree comparison the context is published as composed.
             family_context=with_change_kinds(family.context, resolved.trees),
+            meaning_effects=meaning,
             staleness=staleness,
             submission=submission(stale),
             sync_movement=sync_movement,
@@ -548,6 +573,44 @@ def compose_review(
             ),
         ),
     )
+
+
+def _meaning_subjects(
+    selector: KnowledgeReadSeed | None, context: ReviewFamilyContext
+) -> tuple[tuple[str, MeaningRecordKind], ...]:
+    """The records one review answers meaning effects for (MIK-R43 rule 9).
+
+    The selected record and the families and members the family context returns. A
+    member whose invariant identity is not on this page is not covered: without the
+    identity there is no record to answer about, and the roster continuation that
+    carries it carries its steps. A path selector names no knowledge record.
+    """
+
+    subjects: list[tuple[str, MeaningRecordKind]] = []
+    seen: set[tuple[str, MeaningRecordKind]] = set()
+
+    def add(record: str, kind: MeaningRecordKind) -> None:
+        if (record, kind) not in seen:
+            seen.add((record, kind))
+            subjects.append((record, kind))
+
+    if selector is not None:
+        # Identity seeds name their record; a path seed names none. Invariant seeds
+        # carry ``invariant_id``, family seeds ``family_id``; getattr keeps the union
+        # closed without listing its members here.
+        invariant_id = getattr(selector, "invariant_id", None)
+        family_id = getattr(selector, "family_id", None)
+        if isinstance(invariant_id, str):
+            add(invariant_id, "invariant")
+        elif isinstance(family_id, str):
+            add(family_id, "family")
+    for entry in context.entries:
+        add(entry.family_id, "family")
+        for side in (entry.before, entry.after):
+            for member in side.members:
+                if member.invariant_id is not None:
+                    add(member.invariant_id, "invariant")
+    return tuple(subjects)
 
 
 def _compare(

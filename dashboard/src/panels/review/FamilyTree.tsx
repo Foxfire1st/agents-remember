@@ -14,6 +14,7 @@ import type {
 import { FAMILY_SIDES } from '../../data/review';
 import type { ReviewSubject } from './ReviewNavigation';
 import { OutlineChangeBadge, TriageControls } from './ChangeBadges';
+import { MeaningBadge, meaningBadgeText } from './MeaningEffects';
 import { outlineGroups, realChange, type OutlineRow } from './changeTriage';
 import { useChangeTraversal } from './changeTraversal';
 import { rowWording, wordingComparison } from './statementWording';
@@ -200,6 +201,16 @@ function familyLabel(entry: ReviewFamilyContextEntry): string {
   return entry.display_label ?? entry.family_id;
 }
 
+// The recorded-effects badge text (MIK-R43): the step labels in attempt order on a
+// row whose change badge is added, removed or changed. The state `none` shows no
+// badge; the badge joins the row's accessible name at the call site.
+function rowMeaningBadge(row: OutlineRow): string | undefined {
+  if (row.meaning?.state !== 'steps') return undefined;
+  if (row.badge !== 'added' && row.badge !== 'removed' && row.badge !== 'changed')
+    return undefined;
+  return meaningBadgeText(row.meaning.labels);
+}
+
 function treeArrow(event: React.KeyboardEvent<HTMLButtonElement>): void {
   const delta = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
   if (delta === 0) return;
@@ -212,6 +223,16 @@ function treeArrow(event: React.KeyboardEvent<HTMLButtonElement>): void {
   if (index === -1) return;
   event.preventDefault();
   nodes[(index + delta + nodes.length) % nodes.length]?.focus();
+}
+
+// The row's badge facts for its attributes: the aggregate guard and the accessible
+// name carrying the change badge and the recorded-effects badge.
+function nodeBadges(row: OutlineRow, meaning: string | undefined) {
+  const aggregate = /^\d+ changed$/.test(row.badge ?? '');
+  return {
+    primary: aggregate ? 'unchanged' : row.badge,
+    label: [row.title, row.badge, meaning].filter(Boolean).join(' '),
+  };
 }
 
 function OutlineNode({
@@ -228,7 +249,8 @@ function OutlineNode({
   const description = useId();
   const family = row.kind === 'family';
   const familyId = family ? row.selectorId : row.familyId;
-  const aggregate = /^\d+ changed$/.test(row.badge ?? '');
+  const meaning = rowMeaningBadge(row);
+  const badges = nodeBadges(row, meaning);
   const descriptionId = keptFor ? description : undefined;
   return (
     <>
@@ -242,8 +264,9 @@ function OutlineNode({
         data-subject-kind={row.kind}
         data-subject-id={row.selectorId}
         data-occurrence={JSON.stringify([row.kind, row.familyId, row.selectorId])}
-        data-change-primary={aggregate ? 'unchanged' : row.badge}
-        aria-label={[row.title, row.badge].filter(Boolean).join(' ')}
+        data-change-primary={badges.primary}
+        data-meaning={meaning}
+        aria-label={badges.label}
         aria-current={selected || undefined}
         aria-describedby={descriptionId}
         title={row.title}
@@ -252,6 +275,7 @@ function OutlineNode({
       >
         <span className={titleStyle}>{row.title}</span>
         <OutlineChangeBadge badge={row.badge} />
+        {meaning && row.meaning ? <MeaningBadge meaning={row.meaning} /> : null}
         <KeptTag keptFor={keptFor} description={description} />
       </button>
     </>
