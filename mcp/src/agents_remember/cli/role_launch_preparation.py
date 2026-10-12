@@ -861,11 +861,7 @@ def _return_address(
     def dumped(reference: Any) -> dict[str, Any] | None:
         return reference.model_dump(mode="json") if reference is not None else None
 
-    if (
-        context.role in LEAF_ROLES
-        and context.sprint is not None
-        and context.master is not None
-    ):
+    if context.role in LEAF_ROLES and context.sprint is not None and context.master is not None:
         return {
             "role": "manager",
             "sprint_document_ref": dumped(context.sprint.ref),

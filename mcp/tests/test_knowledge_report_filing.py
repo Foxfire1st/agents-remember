@@ -48,9 +48,7 @@ def _config(root: Path) -> McpRuntimeConfig:
 def test_install_dry_run_files_nothing(tmp_path: Path) -> None:
     # Providerless seats cannot install (ok False is the honest answer); the boundary holds
     # either way: a preview files nothing.
-    payload = runtime_install_payload(
-        _config(tmp_path), RuntimeInstallRequest(dry_run=True)
-    )
+    payload = runtime_install_payload(_config(tmp_path), RuntimeInstallRequest(dry_run=True))
     assert "reportPath" not in payload
     assert not (tmp_path / "temp").exists()
 

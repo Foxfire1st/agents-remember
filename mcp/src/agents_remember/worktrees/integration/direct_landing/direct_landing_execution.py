@@ -163,9 +163,7 @@ def execute_or_require_direct_landing_recovery(
         ) from exc
 
 
-def _code_output_published(
-    contract: WorktreeContract, record: LifecycleOperationRecord
-) -> bool:
+def _code_output_published(contract: WorktreeContract, record: LifecycleOperationRecord) -> bool:
     """Whether the admitted code commit is proven on the branch (F01/F04).
 
     The admitted generation persists the code commit, candidate tree and
@@ -186,9 +184,11 @@ def _code_output_published(
         return False
     try:
         repo = contract.code_repo_path
-        if require_git(repo, ["rev-parse", f"{commit}^{{tree}}"]) != (
-            operation_input.candidateTree
-        ) or require_git(repo, ["rev-parse", f"{commit}^"]) != before.head:
+        if (
+            require_git(repo, ["rev-parse", f"{commit}^{{tree}}"])
+            != (operation_input.candidateTree)
+            or require_git(repo, ["rev-parse", f"{commit}^"]) != before.head
+        ):
             return False
         tip = branch_commit(repo, contract.code_work_branch)
         if tip != commit:

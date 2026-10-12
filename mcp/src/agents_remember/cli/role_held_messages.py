@@ -208,9 +208,7 @@ class HeldMessage:
     permission: str | None = None
 
 
-def hold_message(
-    workspace_path: str | Path, agent_id: str, message: HeldMessage
-) -> dict[str, Any]:
+def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage) -> dict[str, Any]:
     """Take one message the host cannot take now; refuse a message beyond the bound."""
 
     path = store_path_for(workspace_path, agent_id)
@@ -342,9 +340,7 @@ def record_lines(
     if not isinstance(lines, list):
         lines = []
         receipt["heldMessageLines"] = lines
-    have = {
-        line.get("messageId") for line in lines if isinstance(line, dict)
-    }
+    have = {line.get("messageId") for line in lines if isinstance(line, dict)}
     now = _now_iso()
     for row in ended:
         if not isinstance(row, dict) or row.get("id") in have:
@@ -398,9 +394,7 @@ def _stage_pending_lines(
         if not isinstance(staged, list):
             staged = []
             store["pendingLines"] = staged
-        have = {
-            entry.get("messageId") for entry in staged if isinstance(entry, dict)
-        }
+        have = {entry.get("messageId") for entry in staged if isinstance(entry, dict)}
         for row in ended:
             if not isinstance(row, dict) or row.get("id") in have:
                 continue
@@ -452,9 +446,7 @@ def _flush_pending_lines(
             store = _read_store_file(path, agent_id)
             staged_now = store.get("pendingLines")
             if isinstance(staged_now, list):
-                store["pendingLines"] = [
-                    e for e in staged_now if not isinstance(e, dict)
-                ]
+                store["pendingLines"] = [e for e in staged_now if not isinstance(e, dict)]
             _write_store_file(path, store)
     except (ValueError, OSError):
         return False
@@ -513,14 +505,10 @@ def _claim_batch(
             return None
         if isinstance(store.get("deliveryClaim"), str):
             member_ids = [
-                entry
-                for entry in store.get("deliveryClaimIds", [])
-                if isinstance(entry, str)
+                entry for entry in store.get("deliveryClaimIds", []) if isinstance(entry, str)
             ]
             if member_ids:
-                by_id = {
-                    row.get("id"): row for row in messages if isinstance(row.get("id"), str)
-                }
+                by_id = {row.get("id"): row for row in messages if isinstance(row.get("id"), str)}
                 resumed = [by_id[entry] for entry in member_ids if entry in by_id]
                 if resumed:
                     messages = resumed
@@ -551,7 +539,9 @@ def _release_claim(workspace_path: str | Path, agent_id: str, claim: str) -> Non
                 _write_store_file(path, store)
 
 
-def drain_held(config: McpRuntimeConfig, receipt_path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
+def drain_held(
+    config: McpRuntimeConfig, receipt_path: Path, receipt: dict[str, Any]
+) -> dict[str, Any]:
     """Deliver everything held for one recipient in one delivery, or say why it stays held.
 
     A held seat opens with its handover and the waiting messages in one turn (rule 4);
@@ -704,9 +694,7 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
             store = _read_store_file(path, batch.agent_id)
         except ValueError as error:
             _release_claim(batch.folder, batch.agent_id, batch.claim)
-            raise _DrainPause(
-                {"outcome": "store-unreadable", "detail": str(error)}
-            ) from error
+            raise _DrainPause({"outcome": "store-unreadable", "detail": str(error)}) from error
         if store.get("deliveryClaim") != batch.claim:
             raise _DrainPause(
                 {
@@ -714,9 +702,7 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
                     "detail": "The delivery claim moved on; the messages stay held.",
                 }
             )
-        present = {
-            row.get("id") for row in store["messages"] if isinstance(row, dict)
-        }
+        present = {row.get("id") for row in store["messages"] if isinstance(row, dict)}
     survivors = [row for row in batch.messages if row.get("id") in present]
     if not survivors:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
@@ -834,9 +820,7 @@ def _send_part(batch: _DrainBatch, part: list[dict[str, Any]]) -> dict[str, Any]
     return delivery
 
 
-def _greedy_prefix(
-    rows: list[dict[str, Any]], budget: int
-) -> list[dict[str, Any]]:
+def _greedy_prefix(rows: list[dict[str, Any]], budget: int) -> list[dict[str, Any]]:
     """The longest leading run of messages that fits the learned byte budget.
 
     At least the first message, even when it alone exceeds the budget: the
@@ -961,10 +945,7 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
         "detail": (
             "The held messages were delivered in one delivery."
             if len(deliveries) == 1
-            else (
-                f"The held messages were delivered in {len(deliveries)} "
-                "deliveries, in order."
-            )
+            else (f"The held messages were delivered in {len(deliveries)} deliveries, in order.")
         ),
         "ended": ended,
         "how": _END_DELIVERED,
@@ -979,7 +960,9 @@ def _resume_for_send(batch: _DrainBatch) -> None:
     outcome = resume_agent(batch.config, batch.agent_id)
     if not outcome.reading.reachable:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
-        raise _DrainPause({"outcome": "host-unreachable", "detail": "The resume was not confirmed."})
+        raise _DrainPause(
+            {"outcome": "host-unreachable", "detail": "The resume was not confirmed."}
+        )
     if outcome.reading.session_closed or outcome.refusal is not None:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         raise _DrainPause(
@@ -1101,7 +1084,9 @@ def _executions_roots(config: McpRuntimeConfig) -> list[Path]:
 
     roots = [config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY]
     roots.extend(
-        sorted((config.coordination_root / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}"))
+        sorted(
+            (config.coordination_root / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}")
+        )
     )
     return [root for root in roots if root.is_dir()]
 
@@ -1222,9 +1207,7 @@ def _store_endpoints(receipt: dict[str, Any]) -> tuple[str, str] | None:
     return folder, agent_id
 
 
-def _clear_pending_lines(
-    workspace_path: str | Path, agent_id: str, ids: list[str]
-) -> None:
+def _clear_pending_lines(workspace_path: str | Path, agent_id: str, ids: list[str]) -> None:
     """Forget staged ends the receipt now records; best-effort, never raises."""
 
     try:
@@ -1253,11 +1236,7 @@ def _stage_and_record_ends(
     """Stage this drain's ends for recovery, then line them; the rows and endpoints."""
 
     ended = result.get("ended")
-    rows = (
-        [row for row in ended if isinstance(row, dict)]
-        if isinstance(ended, list)
-        else []
-    )
+    rows = [row for row in ended if isinstance(row, dict)] if isinstance(ended, list) else []
     how = str(result.get("how"))
     endpoints = _store_endpoints(current)
     if rows and endpoints is not None:
@@ -1275,7 +1254,6 @@ def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
     first, so a receipt write that fails after the texts left still leaves them
     recoverable for the next flush; a successful write clears what it recorded.
     """
-
 
     try:
         current = _read_receipt(path)
@@ -1309,9 +1287,7 @@ def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
     except OSError:
         return False
     if rows and endpoints is not None:
-        _clear_pending_lines(
-            endpoints[0], endpoints[1], [str(row.get("id")) for row in rows]
-        )
+        _clear_pending_lines(endpoints[0], endpoints[1], [str(row.get("id")) for row in rows])
     return True
 
 

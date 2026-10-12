@@ -307,6 +307,12 @@ def _returned_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
     whole, missing = _read_whole_result(payload)
     if whole is None:
         return "unvalidatable", missing or "the answer names no whole-result file"
+    return _judge_delivered(tool, payload, whole)
+
+
+def _judge_delivered(tool: str, payload: dict[str, Any], whole: dict[str, Any]) -> tuple[str, str]:
+    """The arm for a call with a validated whole result: shape, envelope, keys, then ok."""
+
     try:
         TOOL_RESPONSE_MODELS[tool].model_validate(whole)
     except ValidationError as error:
@@ -328,6 +334,12 @@ def _returned_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
             f"the delivered answer holds {unknown!r}, which neither the whole result holds "
             "nor the shaping of MIK-R108 adds",
         )
+    return _refusal_arm(payload)
+
+
+def _refusal_arm(payload: dict[str, Any]) -> tuple[str, str]:
+    """The arm for a delivered answer: a refusal read from the answer, or the payload."""
+
     if payload.get("ok") is False:
         # Whether the caller can act on the refusal is read from the
         # delivered answer, never from the whole result (MIK-R130 rule 2).

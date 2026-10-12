@@ -72,9 +72,7 @@ __all__ = [
 ]
 
 
-def _resolve_grant_leaf(
-    coordination_root: Path, ref: TaskDocumentRef
-) -> tuple[Path, str]:
+def _resolve_grant_leaf(coordination_root: Path, ref: TaskDocumentRef) -> tuple[Path, str]:
     """The leaf's task root and id for a canonical leaf reference, else a refusal."""
     try:
         resolved = TaskDocumentTopology(coordination_root).resolve(ref)
@@ -96,17 +94,16 @@ def _refuse_started_leaf(config: Any, coordination_root: Path, ref: TaskDocument
     """Refuse a grant change for a started leaf, naming the evidence of the start."""
     task_root, leaf_id = _resolve_grant_leaf(coordination_root, ref)
     try:
-        binding = resolve_leaf_task_binding(
-            coordination_root, ref.repository, task_root, leaf_id
-        )
+        binding = resolve_leaf_task_binding(coordination_root, ref.repository, task_root, leaf_id)
     except TaskLeafBindingError as error:
         raise DirectGrantError(error.detail, status=error.status) from error
     evidence = prove_task_unstarted(config, binding)
     if evidence.unstarted:
         return
-    facts = "; ".join(
-        f"{fact.get('kind')}: {fact.get('state')}" for fact in evidence.facts
-    ) or "the leaf has started"
+    facts = (
+        "; ".join(f"{fact.get('kind')}: {fact.get('state')}" for fact in evidence.facts)
+        or "the leaf has started"
+    )
     raise DirectGrantError(
         f"the grant for {ref.repository}:{ref.path} is refused: the leaf has started "
         f"({facts}). Finish the leaf as it is, or abandon it and plan a new one",
@@ -159,7 +156,10 @@ def give_grant(
                 )
             _refuse_started_leaf(config, coordination_root, ref)
         grant = DirectExecutionGrant(
-            leaf=ref, granted_by=granted_by, granted_at=utc_now_iso(), granter_agent_id=granter_agent_id
+            leaf=ref,
+            granted_by=granted_by,
+            granted_at=utc_now_iso(),
+            granter_agent_id=granter_agent_id,
         )
         try:
             create_grant_file(grant_path_for(coordination_root, ref), grant)
@@ -244,6 +244,18 @@ class GrantReclaim:
     preserved: tuple[dict[str, str], ...]
 
 
+def _grant_leaf_ref(leaf: dict[str, Any]) -> TaskDocumentRef | None:
+    """The leaf reference of a decoded grant record, or None when it is not one."""
+    repository = leaf.get("repository")
+    leaf_path = leaf.get("path")
+    if not isinstance(repository, str) or not isinstance(leaf_path, str):
+        return None
+    try:
+        return TaskDocumentRef(repository=repository, path=leaf_path)
+    except Exception:
+        return None
+
+
 def reclaim_direct_execution_grants(
     config: Any, ref: TaskDocumentRef, *, dry_run: bool = False
 ) -> GrantReclaim:
@@ -287,11 +299,8 @@ def reclaim_direct_execution_grants(
             if not isinstance(leaf, dict):
                 preserved.append({"file": path.name, "reason": "not a grant record"})
                 continue
-            try:
-                leaf_ref = TaskDocumentRef(
-                    repository=leaf.get("repository"), path=leaf.get("path")
-                )
-            except Exception:
+            leaf_ref = _grant_leaf_ref(leaf)
+            if leaf_ref is None:
                 preserved.append({"file": path.name, "reason": "not a grant record"})
                 continue
             try:
@@ -317,9 +326,7 @@ def _reclaim_task_root(coordination_root: Path, grant: DirectExecutionGrant) -> 
 
     parts = Path(grant.leaf.path).parts
     master = parts[0] if parts else ""
-    return (coordination_root / "tasks" / grant.leaf.repository / master).resolve(
-        strict=False
-    )
+    return (coordination_root / "tasks" / grant.leaf.repository / master).resolve(strict=False)
 
 
 def _reclaim_leaf_worked(
@@ -527,8 +534,7 @@ def direct_execution_grant_tool(
     if caller is None:
         return _grant_refusal(
             "direct-grant-architect-only",
-            "direct_execution_grant without a role binding is refused; "
-            f"{GRANT_GIVERS}",
+            f"direct_execution_grant without a role binding is refused; {GRANT_GIVERS}",
             next_action="ask-architect",
         )
     role = getattr(caller, "role", "")
@@ -568,9 +574,7 @@ def direct_execution_grant_tool(
                 "changed": bool(reclaimed.reclaimed),
                 "grant": None,
                 "reclaimed": list(reclaimed.reclaimed),
-                "preserved": [
-                    dict(entry) for entry in reclaimed.preserved
-                ],
+                "preserved": [dict(entry) for entry in reclaimed.preserved],
             }
     except DirectGrantError as error:
         return _grant_refusal(error.status, error.detail, next_action="correct-request")
@@ -646,13 +650,9 @@ def _sibling_checkout_dirty(task_root: Path) -> bool | None:
         return False
     try:
         contract = load_contract(contract_path)
-        code = code_checkout_dirty(
-            Path(contract.code_repo_path), contract.code_work_branch
-        )
+        code = code_checkout_dirty(Path(contract.code_repo_path), contract.code_work_branch)
         memory = memory_checkout_dirty(
-            Path(contract.memory_repo_path)
-            if contract.memory_repo_path is not None
-            else None,
+            Path(contract.memory_repo_path) if contract.memory_repo_path is not None else None,
             contract.memory_work_branch,
         )
     except Exception:
@@ -673,9 +673,7 @@ def _sibling_series_contract(task_root: Path) -> Any | None:
         return None
 
 
-def open_direct_sibling(
-    config: Any, ref: TaskDocumentRef
-) -> tuple[TaskDocumentRef, str] | None:
+def open_direct_sibling(config: Any, ref: TaskDocumentRef) -> tuple[TaskDocumentRef, str] | None:
     """The first granted sibling leaf that is started and neither landed nor abandoned.
 
     ``None`` when no other direct leaf of the same master is in work. The start
@@ -739,9 +737,7 @@ def _open_sibling_candidate(
         )
     except (TaskDocumentRefError, TaskLeafBindingError):
         return None
-    if _sibling_id.document.kind != "subTask" or prove_task_unstarted(
-        config, binding
-    ).unstarted:
+    if _sibling_id.document.kind != "subTask" or prove_task_unstarted(config, binding).unstarted:
         return None
     landed = (
         direct_pair_proof(scan.series_contract, sibling)

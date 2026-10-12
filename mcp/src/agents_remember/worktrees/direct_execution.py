@@ -41,9 +41,7 @@ def _doc_in_work(
     checkout's dirt and the leaf's pair proof when determinable.
     """
 
-    return sibling_occupies_checkout(
-        document, checkout_dirty=checkout_dirty, landed=landed
-    )
+    return sibling_occupies_checkout(document, checkout_dirty=checkout_dirty, landed=landed)
 
 
 def _stored_grant_leaves(
@@ -118,9 +116,7 @@ def _open_grant_candidate(
     except ValueError:
         return None
     landed = (
-        direct_pair_proof(series_contract, sibling_ref)
-        if series_contract is not None
-        else None
+        direct_pair_proof(series_contract, sibling_ref) if series_contract is not None else None
     )
     if _doc_in_work(doc, checkout_dirty=checkout_dirty, landed=landed):
         return f"{repository}:{leaf_path}"

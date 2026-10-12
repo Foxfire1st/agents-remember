@@ -139,11 +139,7 @@ def _retire_seat(
                 "operation": "retire_child",
                 "status": "already-retired",
                 "role": seat_role,
-                **(
-                    {"taskDocumentRef": _task_ref_of(receipt)}
-                    if _task_ref_of(receipt)
-                    else {}
-                ),
+                **({"taskDocumentRef": _task_ref_of(receipt)} if _task_ref_of(receipt) else {}),
                 "detail": (
                     f"Agent {agent_id} was already retired by {retired.get('caller')} for "
                     f"{retired.get('reason')!r}; nothing changed."
@@ -227,8 +223,7 @@ def _archive_retiree(
                 _task_ref_of(seat.receipt),
                 seat.seat_role,
                 "host-unreachable",
-                f"The Paseo runtime cannot be reached: {error.code}: {error} "
-                "Nothing was archived.",
+                f"The Paseo runtime cannot be reached: {error.code}: {error} Nothing was archived.",
             )
         ) from error
     if not isinstance(reply, dict) or reply.get("archived") is not True:
@@ -272,11 +267,7 @@ def _archive_retiree(
         "operation": "retire_child",
         "status": "retired",
         "role": seat.seat_role,
-        **(
-            {"taskDocumentRef": _task_ref_of(seat.receipt)}
-            if _task_ref_of(seat.receipt)
-            else {}
-        ),
+        **({"taskDocumentRef": _task_ref_of(seat.receipt)} if _task_ref_of(seat.receipt) else {}),
         "detail": (
             f"Agent {agent_id} was archived on the host without a turn by "
             f"{seat.caller.role} agent {seat.caller.agent_id}; the launch record names "
@@ -321,7 +312,9 @@ def _scan_seat_records(
 
     roots = [config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY]
     roots.extend(
-        sorted((config.coordination_root / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}"))
+        sorted(
+            (config.coordination_root / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}")
+        )
     )
     currents: list[tuple[Path, dict[str, Any]]] = []
     histories: list[tuple[Path, dict[str, Any]]] = []

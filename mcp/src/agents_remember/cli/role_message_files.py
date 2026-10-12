@@ -123,9 +123,7 @@ def store_message_file(folder: Path, stem: str, content: str) -> Path:
     try:
         fd, staged = tempfile.mkstemp(prefix=f".{stem}.", dir=folder)
     except OSError as error:
-        raise MessageFileError(
-            f"The message file cannot be staged in {folder}: {error}"
-        ) from error
+        raise MessageFileError(f"The message file cannot be staged in {folder}: {error}") from error
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(encoded)
@@ -156,9 +154,7 @@ def store_message_file(folder: Path, stem: str, content: str) -> Path:
                 _remember_next_counter(key, counter)
             return candidate
     except OSError as error:
-        raise MessageFileError(
-            f"The message file cannot be placed in {folder}: {error}"
-        ) from error
+        raise MessageFileError(f"The message file cannot be placed in {folder}: {error}") from error
     finally:
         Path(staged).unlink(missing_ok=True)
 
@@ -214,12 +210,8 @@ def narrowed_scope(
         task_dir = Path(task_dir_of(sprint))
         folder = task_dir / "notes" / MESSAGES_DIRECTORY
         return MessageScope(folder=folder, record_root=task_dir, level="sprint")
-    base = (
-        coordination_root / "notes" / "reports" / "paseo-native-executions" / _safe(sender_role)
-    )
-    return MessageScope(
-        folder=base / MESSAGES_DIRECTORY, record_root=base, level="taskless"
-    )
+    base = coordination_root / "notes" / "reports" / "paseo-native-executions" / _safe(sender_role)
+    return MessageScope(folder=base / MESSAGES_DIRECTORY, record_root=base, level="taskless")
 
 
 def record_attachments(
@@ -298,13 +290,10 @@ def _copy_planned(
             except OSError as error:
                 target.unlink(missing_ok=True)
                 raise MessageFileError(
-                    "The attached path cannot be copied into the message folder: "
-                    f"{raw} ({error})."
+                    f"The attached path cannot be copied into the message folder: {raw} ({error})."
                 ) from error
             copied.append(target)
-            records.append(
-                MessageAttachment(source=raw, sha256=digest, copy=target.as_posix())
-            )
+            records.append(MessageAttachment(source=raw, sha256=digest, copy=target.as_posix()))
     except Exception:
         for target in copied:
             target.unlink(missing_ok=True)
@@ -359,9 +348,7 @@ def render_message_file(content: MessageContent) -> str:
         lines.append("## attachments")
         for record in content.attachments:
             if record.copy is not None:
-                lines.append(
-                    f"- {record.source} sha256:{record.sha256} (copied as {record.copy})"
-                )
+                lines.append(f"- {record.source} sha256:{record.sha256} (copied as {record.copy})")
             else:
                 lines.append(f"- {record.source} sha256:{record.sha256}")
     return "\n".join(lines) + "\n"

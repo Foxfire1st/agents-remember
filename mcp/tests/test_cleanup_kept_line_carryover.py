@@ -99,10 +99,18 @@ def test_kept_line_probe_records_both_tips_lines_and_commits(tmp_path: Path) -> 
     assert kept is not None
     assert kept["codeLine"] == SOURCE_BRANCH
     assert kept["memoryLine"] == SOURCE_BRANCH
-    assert git(code_repo, "rev-parse", kept["codeTip"])
-    assert git(memory_repo, "rev-parse", kept["memoryTip"])
-    assert git(code_repo, "rev-parse", kept["codeFoundIn"])
-    assert git(memory_repo, "rev-parse", kept["memoryFoundIn"])
+    code_tip = kept["codeTip"]
+    memory_tip = kept["memoryTip"]
+    code_found_in = kept["codeFoundIn"]
+    memory_found_in = kept["memoryFoundIn"]
+    assert isinstance(code_tip, str)
+    assert isinstance(memory_tip, str)
+    assert isinstance(code_found_in, str)
+    assert isinstance(memory_found_in, str)
+    assert git(code_repo, "rev-parse", code_tip)
+    assert git(memory_repo, "rev-parse", memory_tip)
+    assert git(code_repo, "rev-parse", code_found_in)
+    assert git(memory_repo, "rev-parse", memory_found_in)
 
 
 def test_kept_line_probe_refuses_a_tip_on_neither_line(tmp_path: Path) -> None:

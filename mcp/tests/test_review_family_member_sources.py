@@ -128,29 +128,51 @@ def build_sources_fixture(directory: Path) -> SourcesFixture:
     before_tree, before_blob, double_blob = _commit_tree(code_root, BEFORE_TEXT, initial=True)
     after_tree, after_blob, _ = _commit_tree(code_root, AFTER_TEXT, initial=False)
     stale = (
-        _seed("alpha", SUBJECT_REVISION, "enforcement", ALPHA_RATIONALE, _symbol("alpha"), before_blob),
-        _seed("beta", BATCH_REVISION, "support", BETA_RATIONALE, _symbol("beta"), before_blob),
         _seed(
-            "range",
-            BATCH_REVISION,
-            "presentation",
-            "The recorded lines.",
-            _lines(*BETA_LINES),
-            before_blob,
+            _SeedSpec(
+                SUBJECT_REVISION, "enforcement", ALPHA_RATIONALE, _symbol("alpha"), before_blob
+            )
         ),
-        _seed("file", SUBJECT_REVISION, "propagation-persistence", "The whole file.", FileLocator(), before_blob),
-        _seed("unbound", SUBJECT_REVISION, "unclassified", "A name.", _symbol("missing"), before_blob),
+        _seed(_SeedSpec(BATCH_REVISION, "support", BETA_RATIONALE, _symbol("beta"), before_blob)),
         _seed(
-            "past_end", BATCH_REVISION, "primary-authority", "Lines.", _lines(*PAST_END_LINES), before_blob
+            _SeedSpec(
+                BATCH_REVISION,
+                "presentation",
+                "The recorded lines.",
+                _lines(*BETA_LINES),
+                before_blob,
+            )
         ),
         _seed(
-            "double",
-            SUBJECT_REVISION,
-            "enforcement",
-            "Both.",
-            _symbol("alpha"),
-            double_blob,
-            DOUBLE_PATH,
+            _SeedSpec(
+                SUBJECT_REVISION,
+                "propagation-persistence",
+                "The whole file.",
+                FileLocator(),
+                before_blob,
+            )
+        ),
+        _seed(
+            _SeedSpec(SUBJECT_REVISION, "unclassified", "A name.", _symbol("missing"), before_blob)
+        ),
+        _seed(
+            _SeedSpec(
+                BATCH_REVISION,
+                "primary-authority",
+                "Lines.",
+                _lines(*PAST_END_LINES),
+                before_blob,
+            )
+        ),
+        _seed(
+            _SeedSpec(
+                SUBJECT_REVISION,
+                "enforcement",
+                "Both.",
+                _symbol("alpha"),
+                double_blob,
+                DOUBLE_PATH,
+            )
         ),
     )
     before = build_read_scope_fixture(directory / "before", extra_claims=stale)
@@ -159,27 +181,27 @@ def build_sources_fixture(directory: Path) -> SourcesFixture:
         extra_claims=(
             *stale[1:],
             _seed(
-                "alpha_after",
+                _SeedSpec(
+                    SUBJECT_REVISION,
+                    "enforcement",
+                    ALPHA_RATIONALE,
+                    _symbol("alpha"),
+                    after_blob,
+                )
+            ),
+        ),
+    )
+    claims = {name: _claim_record(name, seed, before) for name, seed in _named(stale)}
+    claims["alpha_after"] = _claim_record(
+        "alpha_after",
+        _seed(
+            _SeedSpec(
                 SUBJECT_REVISION,
                 "enforcement",
                 ALPHA_RATIONALE,
                 _symbol("alpha"),
                 after_blob,
-            ),
-        ),
-    )
-    claims = {
-        name: _claim_record(name, seed, before) for name, seed in _named(stale)
-    }
-    claims["alpha_after"] = _claim_record(
-        "alpha_after",
-        _seed(
-            "alpha_after",
-            SUBJECT_REVISION,
-            "enforcement",
-            ALPHA_RATIONALE,
-            _symbol("alpha"),
-            after_blob,
+            )
         ),
         after,
     )
@@ -204,27 +226,30 @@ def _named(seeds: tuple[RealizationSeed, ...]) -> tuple[tuple[str, RealizationSe
     )
 
 
-def _seed(
-    name: str,
-    revision: str,
-    role: RealizationRole,
-    rationale: str,
-    locator: SourceLocator,
-    blob: str,
-    path: str = SHARED_PATH,
-) -> RealizationSeed:
+@dataclass(frozen=True)
+class _SeedSpec:
+    """The content of one extra realization: everything but its fresh caller identities."""
+
+    revision: str
+    role: RealizationRole
+    rationale: str
+    locator: SourceLocator
+    blob: str
+    path: str = SHARED_PATH
+
+
+def _seed(spec: _SeedSpec) -> RealizationSeed:
     """One extra realization for the text-backed builder, under fresh caller identities."""
 
-    del name
     return RealizationSeed(
         realization=ReadFixtureRealization(
-            anchor_id=str(uuid4()), claim_id=str(uuid4()), path=path
+            anchor_id=str(uuid4()), claim_id=str(uuid4()), path=spec.path
         ),
-        revision_id=revision,
-        role=role,
-        locator=locator,
-        recorded_blob=blob,
-        rationale=rationale,
+        revision_id=spec.revision,
+        role=spec.role,
+        locator=spec.locator,
+        recorded_blob=spec.blob,
+        rationale=spec.rationale,
     )
 
 
@@ -233,9 +258,7 @@ def _claim_record(name: str, seed: RealizationSeed, tree: ReadScopeFixture) -> C
 
     del name
     revision_id = (
-        tree.subject_revision_id
-        if seed.revision_id == SUBJECT_REVISION
-        else tree.batch_revision_id
+        tree.subject_revision_id if seed.revision_id == SUBJECT_REVISION else tree.batch_revision_id
     )
     return Claim(
         claim_id=projected_claim_id(seed.realization.path, seed.role),

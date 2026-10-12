@@ -89,6 +89,7 @@ REALIZATION_CLAIMS = (
     "WHERE claim.repository_id = ? ORDER BY claim.claim_id"
 )
 
+
 def _text(value: object) -> str | None:
     """One recorded scalar as text, or ``None`` when the column is null."""
 
@@ -302,6 +303,7 @@ class StoreViewReader:
                 "locator": None if row[8] is None else decode_typed_column(str(row[8])),
             },
         )
+
 
 def open_view_reader(
     database_path: Path,

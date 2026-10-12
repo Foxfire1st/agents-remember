@@ -181,9 +181,7 @@ def _build_side(
             )
             assert result.state == "created", result.refusal
             _write_revision(store, authorship, slot, spec)
-            revisions[slot] = _uid(
-                "revision", slot, spec.statement, spec.state, str(spec.version)
-            )
+            revisions[slot] = _uid("revision", slot, spec.statement, spec.state, str(spec.version))
         family_heads: dict[str, str] = {}
         for slot, spec in family_specs.items():
             result = families.create_family(
@@ -213,9 +211,7 @@ def _build_side(
                         display_version=f"v{spec.version}",
                         joint_guarantee=spec.guarantee,
                         state_at_origin=spec.state,
-                        acceptance_ref=(
-                            "developer:accepted" if spec.state == "accepted" else None
-                        ),
+                        acceptance_ref=("developer:accepted" if spec.state == "accepted" else None),
                         provenance=authorship,
                     ),
                 ),
@@ -342,7 +338,9 @@ def test_counts_statement_and_guarantee_heads_and_keeps_other_changes_apart(
             # A different record from the retired one below occupies the same text slot on this
             # side, so it carries a new version: the store mints a head per slot and number, and
             # the same number would alias two different records to one head.
-            "added": _InvariantSpec("added", "The obligation only the candidate records.", version=2),
+            "added": _InvariantSpec(
+                "added", "The obligation only the candidate records.", version=2
+            ),
         },
         family_specs={
             "revised-family": _FamilySpec(
@@ -557,7 +555,9 @@ def test_missing_knowledge_is_unavailable_with_its_refusal_never_zero(tmp_path: 
         claims=_BASE_CLAIMS,
     )
 
-    result = intent_summary_of(_resolution(baseline_path, tmp_path / "never-authored.sqlite"), MASTER)
+    result = intent_summary_of(
+        _resolution(baseline_path, tmp_path / "never-authored.sqlite"), MASTER
+    )
 
     assert result.state == "unavailable"
     assert result.counts is None

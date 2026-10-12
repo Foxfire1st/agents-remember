@@ -43,7 +43,9 @@ LOGICAL_TABLES = frozenset(
 )
 
 _STATEMENT = re.compile(r"\b(?:insert|replace)\s+into\s+", re.IGNORECASE)
-_TABLE = re.compile(r"\b(?:insert|replace)\s+into\s+(?:main\s*\.\s*)?[\"'\[]?([A-Za-z_][\w$]*)", re.IGNORECASE)
+_TABLE = re.compile(
+    r"\b(?:insert|replace)\s+into\s+(?:main\s*\.\s*)?[\"'\[]?([A-Za-z_][\w$]*)", re.IGNORECASE
+)
 
 EXCEPTED_FILES = {
     "knowledge_conversion_test_support.py": (
@@ -192,11 +194,7 @@ def _insert_bound_names(tree: ast.AST) -> set[str]:
         else:
             bound.update(_default_tainted_params(node))
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.For)
-            and isinstance(node.iter, ast.Name)
-            and node.iter.id in bound
-        ):
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id in bound:
             bound.update(_assignment_targets(node.target))
     return bound
 
@@ -299,7 +297,9 @@ def test_retired_detector_vectors_are_inert_data_never_called() -> None:
                     )
                     tables = _index_tables(joined, dynamic=True)
                     if tables and _executed(node, parents, bound_names=bound, called_names=called):
-                        live.append(f"{name}:{node.lineno}: executable staging into {tables} (joined)")
+                        live.append(
+                            f"{name}:{node.lineno}: executable staging into {tables} (joined)"
+                        )
             assert live == [], (
                 "writer-detector vectors became executable; they must stay bare data:\n"
                 + "\n".join(live)

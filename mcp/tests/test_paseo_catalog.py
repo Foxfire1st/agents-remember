@@ -49,6 +49,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.mcp.registration.core import _register_identity_tools
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.role_launcher import (
+    LauncherRole,
     RoleAgentOverride,
     RoleLauncherOptionsRequest,
     RoleSelection,
@@ -1126,7 +1127,19 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         configured = {"mcpServers": {foreign: {"command": "never-started", "args": []}}}
         harness_config.write_text(json.dumps(configured))
         before = harness_config.read_bytes()
-        for role, references in ROLE_REFS.items():
+        # ROLE_REFS is keyed by plain str; the grant is built per LauncherRole,
+        # in the catalogue's own role order.
+        roles: tuple[LauncherRole, ...] = (
+            "architect",
+            "investigator",
+            "orchestrator",
+            "manager",
+            "worker",
+            "reviewer",
+            "curator",
+        )
+        for role in roles:
+            references = ROLE_REFS[role]
             documents = {
                 key: resolved_document(self.config, ref, key) for key, ref in references.items()
             }
@@ -1238,7 +1251,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
             assert tool.annotations is not None
             self.assertTrue(tool.annotations.readOnlyHint)
             self.assertFalse(tool.annotations.destructiveHint)
-        self.assertEqual(set(listed), {"ping", "server_info"})
+        self.assertEqual(set(listed), {"server_info"})
 
     def test_r71_layer_binding_keeps_codex_auto_from_becoming_claude_auto(self) -> None:
         user = user_agentic_settings_path()

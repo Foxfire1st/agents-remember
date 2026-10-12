@@ -646,7 +646,9 @@ class ToolEventRiverTests(unittest.TestCase):
             ),
             mock.patch.object(role_message_delivery, "_resolve_recipient", return_value=resolve)
             if not isinstance(receipt, BaseException)
-            else mock.patch.object(role_message_delivery, "_resolve_recipient", side_effect=receipt),
+            else mock.patch.object(
+                role_message_delivery, "_resolve_recipient", side_effect=receipt
+            ),
             mock.patch.object(role_message_delivery, "_deliver", return_value=payload),
         ):
             return role_agents.role_message_payload(self._role_message_config(), call)

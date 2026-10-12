@@ -880,9 +880,7 @@ def _task_doc_grant_node(
     grant = grants.get(f"{path.parent.name}/{path.name}")
     if grant is None:
         return None
-    return DirectGrantNode(
-        grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at
-    )
+    return DirectGrantNode(grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at)
 
 
 def _task_doc_body_revision(doc: TaskDocument) -> str:

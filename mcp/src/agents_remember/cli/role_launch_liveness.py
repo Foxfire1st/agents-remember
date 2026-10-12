@@ -92,7 +92,10 @@ def _reconcile_prior_execution(
         return JSONResponse(_refresh_execution(config, path, current))
     if str(current.get("role")) in LEAF_ROLES or str(request.role) in LEAF_ROLES:
         return _reconcile_leaf_occupancy(
-            config, path, current, replacement or _Replacement(),
+            config,
+            path,
+            current,
+            replacement or _Replacement(),
         )
     # The open-execution rule is applied to what the agent is doing now, not to the saved status.
     status = _refresh_execution(config, path, current)
@@ -187,7 +190,9 @@ def _reconcile_leaf_occupancy(
                     "Nothing was archived."
                 ),
             )
-        if (reading.turn_active or reading.lifecycle == "running") and not replacement.interrupt_turn:
+        if (
+            reading.turn_active or reading.lifecycle == "running"
+        ) and not replacement.interrupt_turn:
             # Rule 8, as in retirement: a holder in a turn is replaced only with
             # the word that its turn may be interrupted.
             raise HTTPException(

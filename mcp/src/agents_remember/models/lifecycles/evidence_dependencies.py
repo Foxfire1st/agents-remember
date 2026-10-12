@@ -129,7 +129,9 @@ class EvidenceDependencies(_StrictModel):
     schemaVersion: Literal["ar-evidence-dependencies/v1"] = EVIDENCE_DEPENDENCY_SCHEMA
     recordType: EvidenceRecordType
     validatorVersion: Literal["evidence-dependency-validator/v1"] = EVIDENCE_DEPENDENCY_VALIDATOR
-    edges: tuple[EvidenceDependency, ...] = Field(min_length=1, max_length=MAX_EVIDENCE_DEPENDENCIES)
+    edges: tuple[EvidenceDependency, ...] = Field(
+        min_length=1, max_length=MAX_EVIDENCE_DEPENDENCIES
+    )
 
     @model_validator(mode="after")
     def _edges_are_unique_and_canonical(self) -> Self:

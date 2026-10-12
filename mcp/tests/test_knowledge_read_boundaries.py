@@ -1048,7 +1048,7 @@ def test_the_selection_reasons_are_part_of_the_selected_sets_own_identity(
     result = read(
         fixture,
         InvariantRevisionSeed(
-            invariant_id=fixture.retry_invariant_id, revision_id=fixture.base_revision_id
+            invariant_id=fixture.retry_invariant_id, revision_id=fixture.subject_revision_id
         ),
     )
     assert result.state == "page", result.refusal

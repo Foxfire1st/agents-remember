@@ -1010,7 +1010,9 @@ class HandoverTextWordingTests(unittest.TestCase):
             f"Agent {parent.agent_id} (architect · Projects) started this role and is its parent",
             started["host"]["ownerRelation"],
         )
-        self.assertIn("addressed to the return address role architect", started["host"]["ownerRelation"])
+        self.assertIn(
+            "addressed to the return address role architect", started["host"]["ownerRelation"]
+        )
         self.assertNotIn("addressed to its agent id", started["host"]["ownerRelation"])
         self.assertTrue(
             prompt.startswith(

@@ -108,7 +108,9 @@ def _read_tool(world: writer_fixture.World, coordination: Path, **fields: Any) -
     )
 
 
-def test_every_registered_read_leaves_nothing_but_cache(tmp_path: Path, tool_world: writer_fixture.World) -> None:
+def test_every_registered_read_leaves_nothing_but_cache(
+    tmp_path: Path, tool_world: writer_fixture.World
+) -> None:
     """Rule 6 over the tool reads: knowledge read, diff, integrity and the intent block."""
 
     world = tool_world
@@ -131,7 +133,9 @@ def test_every_registered_read_leaves_nothing_but_cache(tmp_path: Path, tool_wor
         invariant_revision_id=text_uuid("revision", f"{writer_fixture.BASE_INVARIANT}@1"),
     )
     assert invariant["state"] in {"view", "page"}, invariant
-    leaf = _read_tool(world, coordination, view="source_context", source_path=writer_fixture.CODE_FILE)
+    leaf = _read_tool(
+        world, coordination, view="source_context", source_path=writer_fixture.CODE_FILE
+    )
     assert leaf["state"] == "page", leaf
     for view in ("review_matrix", "curation_queue"):
         refused = _read_tool(world, coordination, view=view)
@@ -161,7 +165,9 @@ def _context(world: writer_fixture.World, coordination: Path) -> Any:
     )
 
 
-def test_a_mutated_read_is_caught(tmp_path: Path, tool_world: writer_fixture.World, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_mutated_read_is_caught(
+    tmp_path: Path, tool_world: writer_fixture.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The harness is not vacuous: a read that creates a directory fails it."""
 
     world = tool_world
@@ -220,9 +226,7 @@ def test_enclosure_reads_record_only_comparisons_and_previews(
     compared = result.payload.comparison
     assert compared.before_code_tree_id is not None
     assert compared.after_code_tree_id is not None
-    reviewed_trees = {
-        "enclosure": (compared.before_code_tree_id, compared.after_code_tree_id)
-    }
+    reviewed_trees = {"enclosure": (compared.before_code_tree_id, compared.after_code_tree_id)}
 
     # The synthetic enclosure is not an adopted seat (no task document), so the seat-bound
     # operations answer their named refusals here rather than reading. A refusal is still a
@@ -279,10 +283,7 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
     """
 
     endpoints = build_endpoint_fixture(tmp_path / "enclosure")
-    knowledge = (
-        endpoints.contract.worktree_group
-        / "provider-runtime/dev-ar-coordination/knowledge"
-    )
+    knowledge = endpoints.contract.worktree_group / "provider-runtime/dev-ar-coordination/knowledge"
     summary_resolution = ReviewCandidateResolution(
         repository_id=endpoints.repository_id,
         leaf_id=endpoints.diff.retry_invariant_id,
@@ -323,7 +324,11 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
 
     task_context = client.get(
         "/api/review/intent",
-        params={"repo": endpoints.repository_id, "master": endpoints.master, "leaf": "260921-icr-l1"},
+        params={
+            "repo": endpoints.repository_id,
+            "master": endpoints.master,
+            "leaf": "260921-icr-l1",
+        },
     )
     assert task_context.status_code == 200, task_context.text[:400]
     subject = client.get(
@@ -339,7 +344,11 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
     assert subject.status_code == 200, subject.text[:400]
     summary = client.get(
         KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
-        params={"repo": endpoints.repository_id, "master": endpoints.master, "leaf": "260921-icr-l1"},
+        params={
+            "repo": endpoints.repository_id,
+            "master": endpoints.master,
+            "leaf": "260921-icr-l1",
+        },
     )
     assert summary.status_code == 200, summary.text[:400]
 
@@ -403,9 +412,7 @@ def test_miscellaneous_description_called_reads_write_nothing(
     gates = gate_list_payload(config, lifecycle_id=None)
     assert isinstance(gates, dict), gates
     code_files = sorted(
-        p
-        for p in endpoints.contract.code_repo_path.rglob("*.py")
-        if ".git" not in p.parts
+        p for p in endpoints.contract.code_repo_path.rglob("*.py") if ".git" not in p.parts
     )
     assert code_files, "the endpoint fixture holds no code file to read"
     first = code_files[0].relative_to(endpoints.contract.code_repo_path).as_posix()
@@ -465,16 +472,15 @@ def test_memory_backed_reads_write_nothing(tmp_path: Path, worktree_services: An
 
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("enclosure/ar-coordination",),
         reviewed_prefixes=("enclosure/diff",),
     )
     assert findings == [], findings
 
 
-def test_converted_drift_check_read_writes_nothing(
-    tmp_path: Path, worktree_services: Any
-) -> None:
+def test_converted_drift_check_read_writes_nothing(tmp_path: Path, worktree_services: Any) -> None:
     """Rule 6 over drift_check on converted memory: the selected format files nothing.
 
     A drift read on a converted tree measures and answers; it must leave
@@ -493,11 +499,7 @@ def test_converted_drift_check_read_writes_nothing(
     endpoints = build_endpoint_fixture(root / "seat", memory_mode="external")
     # Convert the enclosure's own conventional memory repo in place: converted
     # layout marker plus one current card beside the existing ledger.
-    memory = (
-        endpoints.config.coordination_root
-        / "memory-repos"
-        / f"ar-{endpoints.repository_id}"
-    )
+    memory = endpoints.config.coordination_root / "memory-repos" / f"ar-{endpoints.repository_id}"
     (memory / "knowledge").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "knowledge" / "layout.json").write_text(
@@ -505,25 +507,27 @@ def test_converted_drift_check_read_writes_nothing(
         encoding="utf-8",
     )
     data = (code / "alpha.py").read_bytes()
-    document = {
-        "path": "alpha.py",
-        "schema": "ar-onboarding-file/v1",
-        "realizes": [],
-        "references": {
-            "1": {
-                "targets": [
-                    {
-                        "kind": "code",
-                        "anchor": {
-                            "blob": git_blob_id(data),
-                            "locator": {"kind": "file"},
-                            "content": content_identity(data),
-                        },
-                    }
-                ]
-            }
+    document = (
+        {
+            "path": "alpha.py",
+            "schema": "ar-onboarding-file/v1",
+            "realizes": [],
+            "references": {
+                "1": {
+                    "targets": [
+                        {
+                            "kind": "code",
+                            "anchor": {
+                                "blob": git_blob_id(data),
+                                "locator": {"kind": "file"},
+                                "content": content_identity(data),
+                            },
+                        }
+                    ]
+                }
+            },
         },
-    },
+    )
     sidecar = memory / "onboarding" / "alpha.py.json"
     sidecar.write_text(canonical_text(document), encoding="utf-8")
     (memory / "onboarding" / "alpha.py.md").write_text("# alpha.py\n\nSee [1].\n", encoding="utf-8")
@@ -548,16 +552,15 @@ def test_converted_drift_check_read_writes_nothing(
 
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("enclosure/ar-coordination",),
         reviewed_prefixes=("enclosure/diff",),
     )
     assert findings == [], "\n".join(findings)
 
 
-def test_converted_adopt_dry_run_writes_nothing(
-    tmp_path: Path, worktree_services: Any
-) -> None:
+def test_converted_adopt_dry_run_writes_nothing(tmp_path: Path, worktree_services: Any) -> None:
     """Rule 6 over baseline adoption previews: a dry run files nothing.
 
     Adoption itself is a mutating operation, but its dry_run preview is a
@@ -574,11 +577,7 @@ def test_converted_adopt_dry_run_writes_nothing(
     git(code, "commit", "-qm", "code")
 
     endpoints = build_endpoint_fixture(root / "seat", memory_mode="external")
-    memory = (
-        endpoints.config.coordination_root
-        / "memory-repos"
-        / f"ar-{endpoints.repository_id}"
-    )
+    memory = endpoints.config.coordination_root / "memory-repos" / f"ar-{endpoints.repository_id}"
     (memory / "knowledge").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "knowledge" / "layout.json").write_text(
@@ -586,25 +585,27 @@ def test_converted_adopt_dry_run_writes_nothing(
         encoding="utf-8",
     )
     data = (code / "alpha.py").read_bytes()
-    document = {
-        "path": "alpha.py",
-        "schema": "ar-onboarding-file/v1",
-        "realizes": [],
-        "references": {
-            "1": {
-                "targets": [
-                    {
-                        "kind": "code",
-                        "anchor": {
-                            "blob": git_blob_id(data),
-                            "locator": {"kind": "file"},
-                            "content": content_identity(data),
-                        },
-                    }
-                ]
-            }
+    document = (
+        {
+            "path": "alpha.py",
+            "schema": "ar-onboarding-file/v1",
+            "realizes": [],
+            "references": {
+                "1": {
+                    "targets": [
+                        {
+                            "kind": "code",
+                            "anchor": {
+                                "blob": git_blob_id(data),
+                                "locator": {"kind": "file"},
+                                "content": content_identity(data),
+                            },
+                        }
+                    ]
+                }
+            },
         },
-    },
+    )
     sidecar = memory / "onboarding" / "alpha.py.json"
     sidecar.write_text(canonical_text(document), encoding="utf-8")
     (memory / "onboarding" / "alpha.py.md").write_text("# alpha.py\n\nSee [1].\n", encoding="utf-8")
@@ -627,7 +628,8 @@ def test_converted_adopt_dry_run_writes_nothing(
 
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("enclosure/ar-coordination",),
         reviewed_prefixes=("enclosure/diff",),
     )
@@ -687,9 +689,11 @@ def test_context_packet_freshness_fetch_is_bounded(
     )
     calls: list[str] = []
     real_fetch = freshness.fetch_remote
+
     def spy_fetch(*args: Any, **kwargs: Any) -> Any:
         calls.append("fetch")
         return real_fetch(*args, **kwargs)
+
     monkeypatch.setattr(freshness, "fetch_remote", spy_fetch)
 
     # Without the argument: nothing changes and nothing fetches.
@@ -703,7 +707,8 @@ def test_context_packet_freshness_fetch_is_bounded(
     assert calls == [], calls
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("enclosure/ar-coordination",),
         reviewed_prefixes=("enclosure/diff",),
     )
@@ -721,7 +726,8 @@ def test_context_packet_freshness_fetch_is_bounded(
     assert code_fresh.get("behind") == 1, code_fresh
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("enclosure/ar-coordination",),
         reviewed_prefixes=("enclosure/diff",),
     )
@@ -790,7 +796,8 @@ def test_adopted_seat_status_preview_and_dry_runs(tmp_path: Path, worktree_servi
 
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("adopted/coordination",),
         reviewed_prefixes=("adopted/code", "adopted/memory"),
     )
@@ -817,7 +824,8 @@ def test_adopted_seat_status_preview_and_dry_runs(tmp_path: Path, worktree_servi
 
     after = _snapshot(roots)
     findings = _classify(
-        before, after,
+        before,
+        after,
         coordination_roots=("adopted/coordination",),
         reviewed_prefixes=("adopted/code", "adopted/memory"),
     )
@@ -902,9 +910,7 @@ def test_remaining_preview_plan_and_queue_reads_write_nothing(
     # contract is not one, so even the dry run names that refusal before touching
     # anything. A raising preview is still a preview for rule 6: it must write nothing.
     with pytest.raises(RuntimeError, match="atomic series contract"):
-        worktree_checkpoint_landing_payload(
-            config, contract.contract_path.as_posix(), dry_run=True
-        )
+        worktree_checkpoint_landing_payload(config, contract.contract_path.as_posix(), dry_run=True)
     # Recording a landing the protected branch never saw refuses before touching
     # anything, dry run or not: the all-zero tip is reachable from no landing target.
     with pytest.raises(RuntimeError, match="not reachable from any landing target"):
@@ -981,9 +987,7 @@ def test_remaining_dashboard_gets_read_without_writing(
     repos = client.get("/api/files/repos")
     assert repos.status_code == 200, repos.text[:400]
     assert isinstance(repos.json().get("repos"), list), repos.text[:400]
-    listing = client.get(
-        "/api/files/list", params={"repo": "agents-remember", "path": ""}
-    )
+    listing = client.get("/api/files/list", params={"repo": "agents-remember", "path": ""})
     assert listing.status_code in (200, 400, 403, 404), listing.text[:400]
     missing_repo = client.get("/api/files/list", params={"repo": "no-such-repo"})
     assert missing_repo.status_code in (400, 403, 404), missing_repo.text[:400]
@@ -1032,5 +1036,3 @@ def test_remaining_dashboard_gets_read_without_writing(
         reviewed_prefixes=("enclosure/diff",),
     )
     assert findings == [], findings
-
-

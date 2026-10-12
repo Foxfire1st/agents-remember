@@ -785,9 +785,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     return _public_instruction_fields(public)
 
 
-def _apply_leaf_holder(
-    public: dict[str, Any], receipt: dict[str, Any], status: Any
-) -> None:
+def _apply_leaf_holder(public: dict[str, Any], receipt: dict[str, Any], status: Any) -> None:
     """Name the leaf seat's holder while it holds the seat (MIK-R100 rule 9).
 
     The launcher shows the holder and offers the replacing start.

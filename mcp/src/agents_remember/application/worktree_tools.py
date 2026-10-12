@@ -158,16 +158,16 @@ def _direct_leaf_start_refusal(
     if grant is None and not unreadable:
         return None
     if unreadable:
-        summary = (
-            f"worktree_start for {ref.repository}:{ref.path} is refused: {unreadable}"
-        )
-    else:
+        summary = f"worktree_start for {ref.repository}:{ref.path} is refused: {unreadable}"
+    elif grant is not None:
         summary = (
             f"worktree_start for {ref.repository}:{ref.path} is refused: the leaf is direct "
             f"({grant.describe()}). A direct leaf has no enclosure of its own; start its "
             "roles with role_start on the same leaf, which gives them the checkouts of "
             "the master's branch."
         )
+    else:
+        return None
     return {
         "ok": False,
         "state": "direct-leaf-no-enclosure",

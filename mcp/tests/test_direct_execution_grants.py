@@ -8,14 +8,18 @@ read at the moment of a call, and changes only through give/revoke.
 from __future__ import annotations
 
 import json
+import multiprocessing
 import tempfile
+import threading
 import unittest
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application import agent_binding as binding_module
+from agents_remember.application import direct_execution_grants as architect_module
+from agents_remember.application import direct_execution_grants as mutation_module
 from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.direct_execution_grants import (
     ARCHITECT_GRANTER,
@@ -36,6 +40,7 @@ from agents_remember.application.direct_execution_grants import (
     revoke_grant,
 )
 from agents_remember.application.lifecycle.direct_landing import direct_landing_tool
+from agents_remember.application.task_docs.task_doc_response import task_doc_preview
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
@@ -47,12 +52,19 @@ from agents_remember.controlplane.operator_inbox_records import OperatorInboxEnt
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.direct_execution_grants import grants_for_task, write_grant_file
 from agents_remember.kernel.primitives.observer_paths import observer_root
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.models.task_document import DocStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving import direct_execution_grants as developer_module
+from agents_remember.serving.direct_execution_grants import (
+    DeveloperGrantChange,
+    give_grant_developer,
+    revoke_grant_developer,
+)
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
     read_series_documents,
     read_task_documents,
@@ -68,6 +80,8 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.tasks.route_review import RouteReviewRecord
+from agents_remember.tasks.store import markdown_path_for
+from agents_remember.worktrees.direct_landing import DirectLandingRequest
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     operation_key,
 )
@@ -148,9 +162,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.fixture, self.leaf_ref, self.master_ref = _fixture_lineage(
-            Path(self._tmp.name)
-        )
+        self.fixture, self.leaf_ref, self.master_ref = _fixture_lineage(Path(self._tmp.name))
         self.config = self.fixture.config
         self.coord = self.fixture.coord
 
@@ -474,7 +486,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
 
     def test_landing_for_second_leaf_names_completed_dirty_first(self) -> None:
         # F05 through the landing consumer: the tool refuses before admission.
-        from agents_remember.worktrees.direct_landing import DirectLandingRequest
 
         give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
         second = self._second_leaf()
@@ -498,7 +509,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         )
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["status"], "direct-landing-sibling-open")
-        self.assertIn(self.leaf_ref.path, refused["detail"])
+        detail = refused["detail"]
+        assert isinstance(detail, str)
+        self.assertIn(self.leaf_ref.path, detail)
 
     def test_completed_leaf_with_uncommitted_work_holds_without_registrations(self) -> None:
         give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
@@ -521,11 +534,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         )
 
     def test_concurrent_givers_produce_one_changed_grant(self) -> None:
-        import threading
-
-        from agents_remember.application import (
-            direct_execution_grants as mutation_module,
-        )
 
         barrier = threading.Barrier(2)
         outcomes: dict[str, GrantChange] = {}
@@ -563,11 +571,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(outcomes[unchanged[0]].grant, stored)
 
     def test_concurrent_give_and_revoke_stay_deterministic(self) -> None:
-        import threading
-
-        from agents_remember.application import (
-            direct_execution_grants as mutation_module,
-        )
 
         barrier = threading.Barrier(2)
         outcomes: dict[str, GrantChange] = {}
@@ -610,14 +613,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         # Sealed F08 across the two authorized writers: both calls prove
         # absence together at the publication barrier, yet exactly one create
         # wins and the loser reports the stored grant unchanged.
-        import threading
-
-        from agents_remember.application import (
-            direct_execution_grants as architect_module,
-        )
-        from agents_remember.serving import (
-            direct_execution_grants as developer_module,
-        )
 
         barrier = threading.Barrier(2)
         actual = architect_module.create_grant_file
@@ -653,39 +648,27 @@ class DirectExecutionGrantTest(unittest.TestCase):
             threading.Thread(target=give_developer),
         ]
         with (
-            mock.patch.object(
-                architect_module, "create_grant_file", side_effect=at_publication
-            ),
-            mock.patch.object(
-                developer_module, "create_grant_file", side_effect=at_publication
-            ),
+            mock.patch.object(architect_module, "create_grant_file", side_effect=at_publication),
+            mock.patch.object(developer_module, "create_grant_file", side_effect=at_publication),
         ):
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join(timeout=120)
         self.assertEqual(failures, {})
-        changed = [
-            name
-            for name, outcome in outcomes.items()
-            if getattr(outcome, "changed", False)
-        ]
+        changed = [name for name, outcome in outcomes.items() if getattr(outcome, "changed", False)]
         unchanged = [
-            name
-            for name, outcome in outcomes.items()
-            if not getattr(outcome, "changed", True)
+            name for name, outcome in outcomes.items() if not getattr(outcome, "changed", True)
         ]
         self.assertEqual(len(changed), 1)
         self.assertEqual(len(unchanged), 1)
         stored = read_grant(self.coord, self.leaf_ref)
         assert stored is not None
         loser = outcomes[unchanged[0]]
-        assert hasattr(loser, "grant")
+        assert isinstance(loser, (GrantChange, DeveloperGrantChange))
         self.assertEqual(loser.grant, stored)
 
     def test_concurrent_givers_across_processes_produce_one_changed_grant(self) -> None:
-        import multiprocessing
-
         outcome_path = Path(self._tmp.name) / "proc-outcomes.json"
 
         def grant_json(grant) -> dict | None:
@@ -699,12 +682,12 @@ class DirectExecutionGrantTest(unittest.TestCase):
             }
 
         def give_in_process(role: str) -> None:
-            import json
+            import json  # noqa: PLC0415  # the forked child imports its own modules
 
-            from agents_remember.kernel.primitives.runtime_config import (
+            from agents_remember.kernel.primitives.runtime_config import (  # noqa: PLC0415  # the forked child imports its own modules
                 McpRuntimeConfig as ChildConfig,
             )
-            from agents_remember.models.task_document_ref import (
+            from agents_remember.models.task_document_ref import (  # noqa: PLC0415  # the forked child imports its own modules
                 TaskDocumentRef as ChildRef,
             )
 
@@ -716,7 +699,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
             )
             child_ref = ChildRef(repository="repo-a", path=f"{MASTER_NAME}/{LEAF_SLUG}.json")
             if role == "architect":
-                from agents_remember.application.direct_execution_grants import (
+                from agents_remember.application.direct_execution_grants import (  # noqa: PLC0415  # the forked child imports its own modules
                     give_grant as child_give,
                 )
 
@@ -724,14 +707,16 @@ class DirectExecutionGrantTest(unittest.TestCase):
                     child_config, child_ref, granted_by="architect", granter_agent_id=role
                 )
             else:
-                from agents_remember.serving.direct_execution_grants import (
-                    give_grant_developer as child_give,
+                from agents_remember.serving.direct_execution_grants import (  # noqa: PLC0415  # the forked child imports its own modules
+                    give_grant_developer as child_give_developer,
                 )
 
-                change = child_give(child_config, child_ref)
+                change = child_give_developer(child_config, child_ref)
             with open(outcome_path, "a", encoding="utf-8") as handle:
                 handle.write(
-                    json.dumps({"role": role, "changed": change.changed, "grant": grant_json(change.grant)})
+                    json.dumps(
+                        {"role": role, "changed": change.changed, "grant": grant_json(change.grant)}
+                    )
                     + "\n"
                 )
 
@@ -745,11 +730,8 @@ class DirectExecutionGrantTest(unittest.TestCase):
         for process in processes:
             process.join(timeout=120)
         self.assertEqual([process.exitcode for process in processes], [0, 0])
-        import json as _json
-
         outcomes = [
-            _json.loads(line)
-            for line in outcome_path.read_text(encoding="utf-8").splitlines()
+            json.loads(line) for line in outcome_path.read_text(encoding="utf-8").splitlines()
         ]
         self.assertEqual(len(outcomes), 2)
         changed = [row for row in outcomes if row["changed"]]
@@ -781,9 +763,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
     ) -> None:
         # A start that lands between the proof and the publication must not
         # leave a grant behind: the give remediates its own write and refuses.
-        from agents_remember.application import (
-            direct_execution_grants as mutation_module,
-        )
 
         real_create = mutation_module.create_grant_file
         started: list[bool] = []
@@ -812,14 +791,8 @@ class DirectExecutionGrantTest(unittest.TestCase):
         # Sealed F08 revoke/start boundary, both owners: a real started
         # registration scheduled at the removal boundary refuses the revoke
         # and keeps the exact grant record.
-        from agents_remember.application import (
-            direct_execution_grants as architect_module,
-        )
-        from agents_remember.serving import (
-            direct_execution_grants as developer_module,
-        )
 
-        for module, give, revoke, fresh_leaf in (
+        for module, _give, revoke, fresh_leaf in (
             (architect_module, architect_module.give_grant, architect_module.revoke_grant, False),
             (
                 developer_module,
@@ -831,14 +804,14 @@ class DirectExecutionGrantTest(unittest.TestCase):
             with self.subTest(owner=module.__name__.rsplit(".", 1)[-1]):
                 leaf_ref = self._second_leaf() if fresh_leaf else self.leaf_ref
                 if module is architect_module:
-                    gave = give(
+                    gave = architect_module.give_grant(
                         self.config,
                         leaf_ref,
                         granted_by=ARCHITECT_GRANTER,
                         granter_agent_id="revoke-start",
                     )
                 else:
-                    gave = give(self.config, leaf_ref)
+                    gave = developer_module.give_grant_developer(self.config, leaf_ref)
                 self.assertTrue(gave.changed)
                 before = read_grant(self.coord, leaf_ref)
                 assert before is not None
@@ -849,9 +822,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
                     return _paths(*args, **kwargs)
 
                 with (
-                    mock.patch.object(
-                        module, "grant_removal_paths", side_effect=start_after_proof
-                    ),
+                    mock.patch.object(module, "grant_removal_paths", side_effect=start_after_proof),
                     self.assertRaises(DirectGrantError) as refused,
                 ):
                     revoke(self.config, leaf_ref)
@@ -859,14 +830,10 @@ class DirectExecutionGrantTest(unittest.TestCase):
                 self.assertEqual(read_grant(self.coord, leaf_ref), before)
 
     def test_task_census_reads_only_its_task_files_at_two_sizes(self) -> None:
-        from agents_remember.kernel.direct_execution_grants import grants_for_task
-
         for size in (100, 200):
             coord = Path(self._tmp.name) / f"census-{size}"
             for index in range(size):
-                ref = TaskDocumentRef(
-                    repository="repo-a", path=f"task-{index:03d}/leaf.json"
-                )
+                ref = TaskDocumentRef(repository="repo-a", path=f"task-{index:03d}/leaf.json")
                 write_grant_file(
                     grant_path_for(coord, ref),
                     DirectExecutionGrant(
@@ -879,10 +846,10 @@ class DirectExecutionGrantTest(unittest.TestCase):
             reads = 0
             real_read_bytes = Path.read_bytes
 
-            def counting_read_bytes(path_self):
+            def counting_read_bytes(path_self, _real_read_bytes=real_read_bytes):
                 nonlocal reads
                 reads += 1
-                return real_read_bytes(path_self)
+                return _real_read_bytes(path_self)
 
             with mock.patch.object(Path, "read_bytes", counting_read_bytes):
                 found = grants_for_task(coord, "repo-a", "task-042")
@@ -891,7 +858,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
             # share the store.
             self.assertEqual(reads, 1)
 
-    def _reclaim_fixture(self) -> tuple[TaskDocumentRef, TaskDocumentRef, Path]:
+    def _reclaim_fixture(self) -> tuple[TaskDocumentRef, Path, Path]:
         """Two granted leaves plus a series checkout, for reclamation."""
         give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
         second = self._second_leaf()
@@ -918,7 +885,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         # The started Completed leaf keeps its grant: completion is not
         # landing proof and no packet amendment authorizes taking it (rule 5).
         self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+        reasons = {
+            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+        }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
         self.assertTrue(broken.is_file())
         # The tool action reports the same outcome for the architect.
@@ -943,7 +912,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
         self.assertEqual(result.reclaimed, ())
         self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+        reasons = {
+            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+        }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
 
     def test_reclaim_preserves_abandoned_leaf_with_seat_evidence(self) -> None:
@@ -974,7 +945,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
         self.assertEqual(result.reclaimed, ())
         self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+        reasons = {
+            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+        }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
 
     def test_reclaim_preserves_abandoned_leaf_with_turn_report(self) -> None:
@@ -1001,7 +974,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
         self.assertEqual(result.reclaimed, ())
         self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+        reasons = {
+            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+        }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
 
     def test_reclaim_preserves_abandoned_leaf_with_unreadable_locator(self) -> None:
@@ -1019,7 +994,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
             result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
             self.assertEqual(result.reclaimed, ())
             self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-            reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+            reasons = {
+                entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+            }
             self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
         finally:
             locator_path.unlink(missing_ok=True)
@@ -1032,7 +1009,9 @@ class DirectExecutionGrantTest(unittest.TestCase):
         (code / "uncommitted.py").write_text("print(1)\n", encoding="utf-8")
         result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
         self.assertEqual(result.reclaimed, ())
-        reasons = {entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved}
+        reasons = {
+            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
+        }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
         self.assertIn("still guards", reasons[f"repo-a:{second.path}"])
         self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
@@ -1122,8 +1101,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
                     self.assertIsNotNone(read_grant(coord, leaf_ref))
 
     def test_retired_key_notices_once_per_load_under_default_policy(self) -> None:
-        from agents_remember.kernel.primitives.runtime_config import load_config
-
         settings = Path(self._tmp.name) / "retired-settings.json"
         workspace = Path(self._tmp.name) / "retired-workspace"
         workspace.mkdir(exist_ok=True)
@@ -1167,9 +1144,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(given["state"], "granted")
         self.assertTrue(given["changed"])
         self.assertEqual(given["grant"]["grantedBy"], "architect")
-        self.assertEqual(
-            given["grant"]["granterAgentId"], "11111111-1111-4111-8111-111111111111"
-        )
+        self.assertEqual(given["grant"]["granterAgentId"], "11111111-1111-4111-8111-111111111111")
         revoked = direct_execution_grant_tool(
             self.config, self.leaf_ref, "revoke", binding=self._binding("architect")
         )
@@ -1287,9 +1262,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertNotIn("directGrant", master)
         # Taking the grant back removes it from the next answer: nothing is stored twice.
         revoke_grant(self.config, self.leaf_ref)
-        self.assertNotIn(
-            "directGrant", task_doc_tool(self.config, target, operation="get")
-        )
+        self.assertNotIn("directGrant", task_doc_tool(self.config, target, operation="get"))
 
     def test_task_document_model_carries_no_grant_field(self) -> None:
         # Rule 1: no task_doc write can make a leaf direct; the model is unchanged.
@@ -1334,7 +1307,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
             "requirements": ["The fixture leaf takes a grant."],
         }
 
-        def rewrite(row_status="planning", **leaf_updates):
+        def rewrite(row_status: DocStatus = "planning", **leaf_updates):
             master = base_master.model_copy(
                 update={
                     "subTasks": [
@@ -1368,16 +1341,12 @@ class DirectExecutionGrantTest(unittest.TestCase):
                         "verdict": "pass",
                         "verdictRef": "review",
                         "reviewedAt": "2026-10-06T00:00:00+00:00",
-                        "routes": [
-                            {"route": "code", "verdict": "pass", "evidenceRef": "evidence"}
-                        ],
+                        "routes": [{"route": "code", "verdict": "pass", "evidenceRef": "evidence"}],
                         "taskIntent": {"schema": "task-intent/v1", "digest": "0" * 64},
                     }
                 )
             ),
-            "step": lambda: rewrite(
-                steps=[{"id": "s1", "title": "One", "status": "inProgress"}]
-            ),
+            "step": lambda: rewrite(steps=[{"id": "s1", "title": "One", "status": "inProgress"}]),
         }
         for name, setup in cases.items():
             with self.subTest(evidence_class=name):
@@ -1510,9 +1479,7 @@ class DirectExecutionGrantTest(unittest.TestCase):
                 "candidateState": "a" * 64,
                 "candidateTree": "c" * 40,
                 "fingerprint": "b" * 64,
-                "operationKey": operation_key(
-                    enclosure_path, "direct-landing", "b" * 64
-                ),
+                "operationKey": operation_key(enclosure_path, "direct-landing", "b" * 64),
                 "input": DirectLandingOperationInput.model_validate(
                     {
                         "configPath": str(Path(self._tmp.name) / "settings.json"),
@@ -1707,7 +1674,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(require_grant(other.coordination_root, self.leaf_ref), change.grant)
 
     def test_series_projection_shows_grant_and_giver_per_leaf(self) -> None:
-        from datetime import datetime
 
         now = datetime(2026, 10, 6, tzinfo=UTC)
         nodes = read_series_documents(self.coord, now=now)
@@ -1728,11 +1694,14 @@ class DirectExecutionGrantTest(unittest.TestCase):
         give_grant(self.config, second, granted_by=DEVELOPER_GRANTER)
         nodes = read_series_documents(self.coord, now=now)
         by_number = {sub.number: sub for sub in nodes[0].subTasks}
-        self.assertEqual(by_number[LEAF_ID].directGrant.grantedBy, "architect a1")
-        self.assertEqual(by_number["TEST-DIRECT-LEAF-2"].directGrant.grantedBy, "developer")
+        first_grant = by_number[LEAF_ID].directGrant
+        assert first_grant is not None
+        self.assertEqual(first_grant.grantedBy, "architect a1")
+        second_grant = by_number["TEST-DIRECT-LEAF-2"].directGrant
+        assert second_grant is not None
+        self.assertEqual(second_grant.grantedBy, "developer")
 
     def test_malformed_grant_records_skip_projection_but_gate_refuses(self) -> None:
-        from datetime import datetime
 
         give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
         store = grant_store_dir(self.coord)
@@ -1778,7 +1747,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(raised.exception.status, "direct-grant-unreadable")
 
     def test_task_document_projection_carries_leaf_grant(self) -> None:
-        from datetime import datetime
 
         now = datetime(2026, 10, 6, tzinfo=UTC)
         nodes = read_task_documents(self.coord, enclosures=[], now=now)
@@ -1788,12 +1756,12 @@ class DirectExecutionGrantTest(unittest.TestCase):
         nodes = read_task_documents(self.coord, enclosures=[], now=now)
         by_id = {node.id: node for node in nodes}
         self.assertIsNotNone(by_id[LEAF_ID].directGrant)
-        assert by_id[LEAF_ID].directGrant is not None
-        self.assertEqual(by_id[LEAF_ID].directGrant.grantedBy, "developer")
+        grant = by_id[LEAF_ID].directGrant
+        assert grant is not None
+        self.assertEqual(grant.grantedBy, "developer")
         self.assertIsNone(by_id["TEST-DIRECT-MASTER"].directGrant)
 
     def test_stored_markdown_shows_grant_line_only_when_granted(self) -> None:
-        from agents_remember.tasks.store import markdown_path_for
 
         task_root = self.coord / "tasks" / "repo-a" / MASTER_NAME
         leaf = read_task_doc(task_root / f"{LEAF_SLUG}.json")
@@ -1818,12 +1786,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(markdown_path.read_text(encoding="utf-8"), plain)
 
     def test_developer_give_and_revoke_rewrite_stored_markdown(self) -> None:
-        from agents_remember.serving.direct_execution_grants import (
-            give_grant_developer,
-            revoke_grant_developer,
-        )
-        from agents_remember.tasks.store import markdown_path_for
-
         task_root = self.coord / "tasks" / "repo-a" / MASTER_NAME
         leaf = read_task_doc(task_root / f"{LEAF_SLUG}.json")
         markdown_path = markdown_path_for(task_root, leaf)
@@ -1843,13 +1805,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(markdown_path.read_text(encoding="utf-8"), plain)
 
     def test_ordinary_mutation_keeps_exactly_one_grant_header(self) -> None:
-        from agents_remember.application.task_docs.task_doc_tools import (
-            TaskDocCall,
-            TaskDocEdit,
-            TaskDocTarget,
-            task_doc_tool,
-        )
-
         task_root = self.coord / "tasks" / "repo-a" / MASTER_NAME
         give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
         task_doc_tool(
@@ -1867,13 +1822,12 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
     def test_dry_run_preview_agrees_with_stored_markdown(self) -> None:
-        from agents_remember.application.task_docs.task_doc_response import task_doc_preview
-        from agents_remember.tasks.store import markdown_path_for
-
         task_root = self.coord / "tasks" / "repo-a" / MASTER_NAME
         leaf = read_task_doc(task_root / f"{LEAF_SLUG}.json")
         give_grant(
-            self.config, self.leaf_ref, granted_by=DEVELOPER_GRANTER,
+            self.config,
+            self.leaf_ref,
+            granted_by=DEVELOPER_GRANTER,
         )
         preview = task_doc_preview("get", leaf, task_root)
         write_task_doc(task_root, leaf)

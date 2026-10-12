@@ -83,10 +83,7 @@ class NativeRetireTests(RoleToolsTestCase):
         record = receipt_of(self)
         self.assertEqual(record["status"], "stopped")
         self.assertEqual(
-            {
-                key: record["retiredBy"][key]
-                for key in ("caller", "callerAgentId", "reason")
-            },
+            {key: record["retiredBy"][key] for key in ("caller", "callerAgentId", "reason")},
             {
                 "caller": f"manager agent {manager.agent_id}",
                 "callerAgentId": manager.agent_id,
@@ -96,9 +93,7 @@ class NativeRetireTests(RoleToolsTestCase):
         self.assertTrue(record["retiredBy"]["at"])
         # A repeat changes nothing and says so.
         again = retire(self, manager, worker)
-        self.assertEqual(
-            (again["ok"], again["status"]), (True, "already-retired")
-        )
+        self.assertEqual((again["ok"], again["status"]), (True, "already-retired"))
         self.assertIn("nothing changed", again["detail"])
 
     def test_another_role_agent_is_refused_naming_the_starter(self) -> None:
@@ -139,9 +134,7 @@ class NativeRetireTests(RoleToolsTestCase):
         manager = binding("manager")
         worker = self.start(manager, "worker")["agentId"]
         self.runtime.agents[worker].update(status="idle")
-        self.assertEqual(
-            retire(self, manager, worker)["status"], "retired"
-        )
+        self.assertEqual(retire(self, manager, worker)["status"], "retired")
 
         by_id = self.message(manager, agent_id=worker)
         self.assertEqual(
@@ -217,23 +210,17 @@ class NativeRetireTests(RoleToolsTestCase):
         request = RetireChildRequest(
             task_document_ref=LEAF_REF, role="worker", reason=REASON, agent_id=worker
         )
-        duplicate = retire_child_payload(
-            self.config, request, environ=manager.environment()
-        )
+        duplicate = retire_child_payload(self.config, request, environ=manager.environment())
         self.assertEqual(duplicate["status"], "ambiguous-agent")
         self.assertIn(worker, duplicate["detail"])
 
         (path.parent / "duplicate.json").unlink()
         self.assertEqual(
-            retire_child_payload(self.config, request, environ=manager.environment())[
-                "status"
-            ],
+            retire_child_payload(self.config, request, environ=manager.environment())["status"],
             "retired",
         )
         other = binding("manager")
-        repeat = retire_child_payload(
-            self.config, request, environ=other.environment()
-        )
+        repeat = retire_child_payload(self.config, request, environ=other.environment())
         self.assertEqual(repeat["status"], "not-starter")
         self.assertIn(manager.agent_id, repeat["detail"])
 
@@ -241,9 +228,7 @@ class NativeRetireTests(RoleToolsTestCase):
         manager = binding("manager")
         worker = self.start(manager, "worker")["agentId"]
         self.runtime.agents[worker].update(status="idle")
-        with patch.object(
-            receipts, "_write_receipt", side_effect=OSError("probe disk full")
-        ):
+        with patch.object(receipts, "_write_receipt", side_effect=OSError("probe disk full")):
             result = retire(self, manager, worker)
 
         self.assertEqual((result["ok"], result["status"]), (False, "retire-record-failed"))
@@ -263,10 +248,7 @@ class NativeRetireTests(RoleToolsTestCase):
         self.assertEqual((again["ok"], again["status"]), (True, "already-retired"))
         record = receipt_of(self)
         self.assertEqual(
-            {
-                key: record["retiredBy"][key]
-                for key in ("caller", "callerAgentId", "reason")
-            },
+            {key: record["retiredBy"][key] for key in ("caller", "callerAgentId", "reason")},
             {
                 "caller": f"manager agent {manager.agent_id}",
                 "callerAgentId": manager.agent_id,

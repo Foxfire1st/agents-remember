@@ -443,12 +443,8 @@ class RoleMessageLimitSettingsTests(unittest.TestCase):
         self.assertEqual(settings.role_message_limit, 1000)
 
     def test_a_positive_whole_number_is_taken_and_the_local_layer_wins(self) -> None:
-        write_settings(
-            self.coordination_root, {"orchestration": {"roleMessageLimit": 600}}
-        )
-        write_settings(
-            self.repo_root, {"orchestration": {"roleMessageLimit": 700}}, user=False
-        )
+        write_settings(self.coordination_root, {"orchestration": {"roleMessageLimit": 600}})
+        write_settings(self.repo_root, {"orchestration": {"roleMessageLimit": 700}}, user=False)
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertEqual(settings.role_message_limit, 700)
 
@@ -459,9 +455,7 @@ class RoleMessageLimitSettingsTests(unittest.TestCase):
                     self.coordination_root,
                     {"orchestration": {"roleMessageLimit": bad}},
                 )
-                with self.assertRaisesRegex(
-                    AgenticSettingsError, "orchestration.roleMessageLimit"
-                ):
+                with self.assertRaisesRegex(AgenticSettingsError, "orchestration.roleMessageLimit"):
                     load_agentic_settings(self.coordination_root, self.repo_root)
 
 

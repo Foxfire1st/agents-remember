@@ -387,7 +387,9 @@ class DirectLeafRoleStartTests(unittest.TestCase):
         self.assertIn("no enclosure of its own", result["summary"])
 
     def test_direct_start_refusal_helper_passes_other_starts(self) -> None:
-        self.assertIsNone(_direct_leaf_start_refusal(self.fixture.config, _identity(self.fixture, None)))
+        self.assertIsNone(
+            _direct_leaf_start_refusal(self.fixture.config, _identity(self.fixture, None))
+        )
         self.assertIsNone(
             _direct_leaf_start_refusal(self.fixture.config, _identity(self.fixture, "NOPE"))
         )
@@ -400,9 +402,7 @@ class DirectLeafRoleStartTests(unittest.TestCase):
                 self.fixture.leaf_ref,
                 self.fixture.series.contract_path,
             )
-        self.assertEqual(
-            scoped.repositories[REPO].path, self.fixture.code.resolve(strict=False)
-        )
+        self.assertEqual(scoped.repositories[REPO].path, self.fixture.code.resolve(strict=False))
         self.assertEqual(
             scoped.repositories[REPO].memory_root, self.fixture.memory.resolve(strict=False)
         )

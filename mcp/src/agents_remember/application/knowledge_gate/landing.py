@@ -280,9 +280,7 @@ def _unreadable(name: str, detail: str) -> GateFinding:
     return GateFinding(RUN_INCOMPLETE, name, f"{detail}; an unreadable tree blocks the landing")
 
 
-def _commit_blob_ids(
-    repository: Path, commit: str, directory: str
-) -> dict[str, str] | None:
+def _commit_blob_ids(repository: Path, commit: str, directory: str) -> dict[str, str] | None:
     """Map every blob path under ``directory`` at ``commit`` to its blob id; ``None`` if unreadable."""
 
     listed = _git(repository, "ls-tree", "-r", commit, "--", directory)
@@ -397,9 +395,7 @@ def _claim_history_paths(
         candidates = owners.setdefault(path, [])
         owner_id = _history_owner_id(path)
         if owner_id is not None and owner_id in leaf_commits:
-            candidates.append(
-                _HistoryOwner("leaf", f"leaf {owner_id!r}", leaf_commits[owner_id])
-            )
+            candidates.append(_HistoryOwner("leaf", f"leaf {owner_id!r}", leaf_commits[owner_id]))
         for commit in direct:
             if _commit_holds_path(request, commit, path):
                 candidates.append(
@@ -641,9 +637,7 @@ def _master_history_ownership(request: LandingGateRequest) -> list[GateFinding]:
         path
         for path in sorted(landed_ids)
         if path.endswith(".json")
-        and not any(
-            path in base and is_closed_history(blobs.get(base[path])) for base in bases
-        )
+        and not any(path in base and is_closed_history(blobs.get(base[path])) for base in bases)
     ]
     if not newly_closed:
         return []

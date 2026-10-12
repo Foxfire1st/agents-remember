@@ -149,8 +149,7 @@ def _canonical_leaf_contract(
         grant = read_grant(config.coordination_root, task_document_ref)
     except DirectGrantError as error:
         raise ValueError(
-            "The direct-execution grant for the selected leaf cannot be read: "
-            f"{error.detail}"
+            f"The direct-execution grant for the selected leaf cannot be read: {error.detail}"
         ) from error
     if grant is None:
         raise ValueError("The task context contract is not the canonical enclosure for this leaf.")

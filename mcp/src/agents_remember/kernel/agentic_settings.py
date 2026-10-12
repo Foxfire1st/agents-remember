@@ -515,9 +515,7 @@ def _parse_orchestration(
     role_message_limit = (
         DEFAULT_ROLE_MESSAGE_LIMIT
         if limit_raw is None
-        else _require_positive_int(
-            limit_raw, "orchestration.roleMessageLimit", source
-        )
+        else _require_positive_int(limit_raw, "orchestration.roleMessageLimit", source)
     )
     return AgenticSettings(
         gate_policy=gate_policy,

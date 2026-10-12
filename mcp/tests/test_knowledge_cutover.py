@@ -380,7 +380,10 @@ def test_the_converting_candidate_is_gated_never_locked(tmp_path: Path, ports: N
     repository_level = SimpleNamespace(contract=None, onboarding_root=world.memory / "onboarding")
     assert controller._unconverted_refusal(repository_level) is None
     unconverted_landing = IntegratedCommits(code=landed.code, memory_content=main)
-    assert integration_gate._leaf_landing_lock(world.contract, unconverted_landing, sources) is not None
+    assert (
+        integration_gate._leaf_landing_lock(world.contract, unconverted_landing, sources)
+        is not None
+    )
 
 
 def test_no_read_selects_the_database_of_a_converted_tree(tmp_path: Path) -> None:

@@ -233,9 +233,11 @@ def direct_pair_proof(contract: WorktreeContract, leaf_ref: Any) -> bool | None:
         record = direct_landing_store(contract).read()
     except Exception:
         return None
-    if record is None or not isinstance(
-        record.input, DirectLandingOperationInput
-    ) or _leaf_mismatch(record.input, leaf_ref):
+    if (
+        record is None
+        or not isinstance(record.input, DirectLandingOperationInput)
+        or _leaf_mismatch(record.input, leaf_ref)
+    ):
         return None
     if record.status != "completed":
         return False

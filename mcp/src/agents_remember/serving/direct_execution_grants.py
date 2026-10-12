@@ -77,9 +77,7 @@ class DeveloperGrantChange:
     detail: str
 
 
-def _resolve_leaf(
-    coordination_root: Path, ref: TaskDocumentRef
-) -> tuple[Path, str, TaskDocument]:
+def _resolve_leaf(coordination_root: Path, ref: TaskDocumentRef) -> tuple[Path, str, TaskDocument]:
     """The leaf's task root, id, and document for a canonical leaf reference."""
     try:
         resolved = TaskDocumentTopology(coordination_root).resolve(ref)
@@ -168,9 +166,7 @@ def _master_row_labels(task_root: Path, leaf_id: str) -> list[str]:
     return []
 
 
-def _enclosure_labels(
-    task_root: Path, leaf_id: str
-) -> tuple[list[str], Any | None]:
+def _enclosure_labels(task_root: Path, leaf_id: str) -> tuple[list[str], Any | None]:
     """Start evidence from the leaf enclosure contract; the contract when readable."""
     path = leaf_enclosure_path(task_root, leaf_id)
     try:
@@ -271,11 +267,7 @@ def refuse_started_leaf(
     enclosure_labels, contract = _enclosure_labels(task_root, leaf_id)
     labels += enclosure_labels
     contract_failure = next(
-        (
-            label
-            for label in enclosure_labels
-            if label.startswith("leaf enclosure unreadable")
-        ),
+        (label for label in enclosure_labels if label.startswith("leaf enclosure unreadable")),
         None,
     )
     labels += _operation_labels(
@@ -296,9 +288,7 @@ def refuse_started_leaf(
     )
 
 
-def give_grant_developer(
-    config: McpRuntimeConfig, ref: TaskDocumentRef
-) -> DeveloperGrantChange:
+def give_grant_developer(config: McpRuntimeConfig, ref: TaskDocumentRef) -> DeveloperGrantChange:
     """Give a leaf its grant from the dashboard control before work starts.
 
     The same lock-then-exclusive-create discipline as the architect writer:
@@ -361,9 +351,7 @@ def give_grant_developer(
     )
 
 
-def revoke_grant_developer(
-    config: McpRuntimeConfig, ref: TaskDocumentRef
-) -> DeveloperGrantChange:
+def revoke_grant_developer(config: McpRuntimeConfig, ref: TaskDocumentRef) -> DeveloperGrantChange:
     """Take back a leaf's grant from the dashboard control before the start.
 
     The read and proof hold the store lock and the removal is one atomic

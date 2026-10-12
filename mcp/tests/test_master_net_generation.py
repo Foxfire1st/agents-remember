@@ -448,7 +448,10 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
         memory_work_branch="ar/fixture-live",
         memory_base_commit=master_fixture.base_memory,
         memory_worktree=master_fixture.config.workspace_root / "worktrees" / "memory-wt-live",
-        ledger_path=master_fixture.config.workspace_root / "worktrees" / "memory-wt-live" / MEMORY_PATH,
+        ledger_path=master_fixture.config.workspace_root
+        / "worktrees"
+        / "memory-wt-live"
+        / MEMORY_PATH,
         kind="leaf",
         leaf_id="fixture-live",
         parent_task_name=MASTER,
@@ -702,7 +705,10 @@ def test_the_change_set_route_serves_a_quoted_name_as_an_address(tmp_path: Path)
             memory_work_branch="ar/fixture-quoted",
             memory_base_commit="",
             memory_worktree=fixture.config.workspace_root / "worktrees" / "memory-wt-quoted",
-            ledger_path=fixture.config.workspace_root / "worktrees" / "memory-wt-quoted" / MEMORY_PATH,
+            ledger_path=fixture.config.workspace_root
+            / "worktrees"
+            / "memory-wt-quoted"
+            / MEMORY_PATH,
             kind="leaf",
             leaf_id="fixture-quoted",
             parent_task_name=MASTER,

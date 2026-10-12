@@ -82,9 +82,7 @@ def _fixture(root: Path) -> SimpleNamespace:
         config=config,
         coord=coord,
         task_root=task_root,
-        leaf_ref=TaskDocumentRef(
-            repository="repo-a", path=f"{MASTER_NAME}/{LEAF_SLUG}.json"
-        ),
+        leaf_ref=TaskDocumentRef(repository="repo-a", path=f"{MASTER_NAME}/{LEAF_SLUG}.json"),
         master_ref=TaskDocumentRef(repository="repo-a", path=f"{MASTER_NAME}/task.json"),
     )
 
@@ -105,16 +103,20 @@ class DeveloperGrantControlTests(unittest.TestCase):
         self.fixture = _fixture(Path(self._tmp.name))
 
     def _give(self, ref: TaskDocumentRef | None = None) -> dict:
-        ref = ref or self.fixture.leaf_ref
+        if ref is None:
+            ref = self.fixture.leaf_ref
+        assert isinstance(ref, TaskDocumentRef)
         return developer_grant_tool(self.fixture.config, ref.repository, ref.path, "give")
 
     def test_request_model_rejects_extra_fields(self) -> None:
         with self.assertRaises(ValueError):
             DeveloperGrantRequest(
-                repository="repo-a",
-                path=f"{MASTER_NAME}/{LEAF_SLUG}.json",
-                action="give",
-                extra="nope",
+                **{
+                    "repository": "repo-a",
+                    "path": f"{MASTER_NAME}/{LEAF_SLUG}.json",
+                    "action": "give",
+                    "extra": "nope",
+                }
             )
 
     def test_give_records_developer_grant_and_second_give_is_unchanged(self) -> None:
@@ -177,9 +179,7 @@ class DeveloperGrantControlTests(unittest.TestCase):
 
     def _mark_started(self) -> None:
         leaf = read_task_doc(self.fixture.task_root / f"{LEAF_SLUG}.json")
-        write_task_doc(
-            self.fixture.task_root, leaf.model_copy(update={"status": "inProgress"})
-        )
+        write_task_doc(self.fixture.task_root, leaf.model_copy(update={"status": "inProgress"}))
 
     def test_started_leaf_refuses_give_and_names_evidence(self) -> None:
         self._mark_started()

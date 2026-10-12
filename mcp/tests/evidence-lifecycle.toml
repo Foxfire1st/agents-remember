@@ -2120,6 +2120,7 @@ consumers = [
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
   "mcp/tests/test_enclosure_without_remains.py",
+  "mcp/tests/test_master_retirement_readiness.py",
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",

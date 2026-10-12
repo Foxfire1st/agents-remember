@@ -246,9 +246,7 @@ def _branch_addressed_leaf(target: TaskDocTarget) -> TaskDocumentRef | None:
     """
     if target.task_name is None or target.slug is None:
         return None
-    return TaskDocumentRef(
-        repository=target.repo_id, path=f"{target.task_name}/{target.slug}.json"
-    )
+    return TaskDocumentRef(repository=target.repo_id, path=f"{target.task_name}/{target.slug}.json")
 
 
 def _refuse_open_direct_sibling_for_task_doc(

@@ -261,13 +261,7 @@ def checkout_holding_branch(repo_path: Path, branch: str) -> Path | None:
 
     def flush() -> None:
         nonlocal found, path, current, detached, bare
-        if (
-            found is None
-            and path is not None
-            and current == wanted
-            and not detached
-            and not bare
-        ):
+        if found is None and path is not None and current == wanted and not detached and not bare:
             found = Path(path)
         path, current = None, None
         detached, bare = False, False

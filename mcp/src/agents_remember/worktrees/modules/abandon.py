@@ -38,6 +38,7 @@ from agents_remember.worktrees.integration.terminal_enclosure_archive import (
 from agents_remember.worktrees.modules import terminal_abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
+    ENCLOSURE_LOGS_DIRECTORY,
     ENCLOSURE_REPORTS_DIRECTORY,
     _terminal_mutation_authority,
     _with_terminal_archive,
@@ -727,6 +728,13 @@ def _abandon_directories(
     lifecycle = group / ".lifecycle"
     if contract.kind == "series":
         reports = group / ENCLOSURE_REPORTS_DIRECTORY
+        # Parity with cleanup and the leaf path (MIK-R108 rule 3): the series
+        # branch removes <group>/logs/ before it returns; the answer keeps
+        # its two keys.
+        worktree_services().provider_lifecycle.remove_tree(
+            group / ENCLOSURE_LOGS_DIRECTORY,
+            dry_run=dry_run,
+        )
         return {
             "reports": (
                 {
@@ -760,6 +768,13 @@ def _abandon_directories(
             lifecycle,
             dry_run=dry_run,
         )
+        # Abandon removes <enclosure>/logs/ with the enclosure, as cleanup does
+        # (MIK-R108 rule 3): the tool-call log is the product's own trace.
+        logs_path = group / ENCLOSURE_LOGS_DIRECTORY
+        logs = worktree_services().provider_lifecycle.remove_tree(
+            logs_path,
+            dry_run=dry_run,
+        )
         planned: set[Path] = {
             Path(str(row["path"]))
             for row in role_folders.values()
@@ -769,10 +784,13 @@ def _abandon_directories(
             planned.add(reports_path.resolve())
         if lifecycle_result.get("removed") or lifecycle_result.get("would_remove"):
             planned.add(lifecycle.resolve())
+        if logs.get("removed") or logs.get("would_remove"):
+            planned.add(logs_path.resolve())
         directories = {
             **role_folders,
             "reports": reports,
             "lifecycle": lifecycle_result,
+            "logs": logs,
             "worktree_group": remove_empty_dir(group, dry_run, planned),
         }
     if group.parent.exists():

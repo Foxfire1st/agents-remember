@@ -326,9 +326,7 @@ def test_sync_records_unmeasured_when_the_memory_capture_faults(
     def _faulted_capture(*args: Any, **kwargs: Any) -> str:
         raise OSError("staged capture fault: memory candidate unreadable")
 
-    with mock.patch.object(
-        rebinding_module, "worktree_candidate_tree", _faulted_capture
-    ):
+    with mock.patch.object(rebinding_module, "worktree_candidate_tree", _faulted_capture):
         result = worktree_tools.worktree_sync_tool(
             config,
             contract_path=contract.contract_path.as_posix(),
@@ -353,7 +351,9 @@ def test_sync_records_unmeasured_when_the_memory_capture_faults(
     assert read.rebinding.memory_detail == block["memory_detail"], read.rebinding
 
 
-def test_a_memory_disabled_leaf_records_no_comparison(tmp_path: Path, worktree_services: Any) -> None:
+def test_a_memory_disabled_leaf_records_no_comparison(
+    tmp_path: Path, worktree_services: Any
+) -> None:
     """A leaf without memory holds no tree comparison, so closeout, integrate and sync
     have nothing to measure on it."""
 

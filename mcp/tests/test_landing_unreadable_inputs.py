@@ -154,9 +154,7 @@ def test_record_landing_with_unreadable_recorded_code_refuses_without_writing(
     assert _git(world.memory, "rev-parse", "leaf") == memory_before
 
 
-def test_frozen_closeout_with_unreadable_judged_commit_refuses(
-    world: Gated, ports: None
-) -> None:
+def test_frozen_closeout_with_unreadable_judged_commit_refuses(world: Gated, ports: None) -> None:
     """Rule 1 freezing: an unreadable judged memory commit refuses instead of answering
     an empty frozen tuple."""
 
@@ -211,9 +209,7 @@ def test_gate_finding_reports_an_unreadable_history_ownership_check(
     assert "probe-commit" in refusal
 
 
-def test_chain_ancestry_refuses_an_unreadable_step_by_name(
-    small_repo: Path, ports: None
-) -> None:
+def test_chain_ancestry_refuses_an_unreadable_step_by_name(small_repo: Path, ports: None) -> None:
     """Rule 4 admission: a failed ancestry read inside the chain proof refuses, naming the
     step instead of mislabeling the commit foreign or admitted."""
 

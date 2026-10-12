@@ -221,9 +221,7 @@ def apply_review_applicability(
     _classify_signals(applied, records.signals, selection)
     _classify_observations(applied, records.observations)
     for name in _MATRIX_OWNED:
-        applied.summaries[name] = _summary(
-            name, 0, _empty_state_counts(), matrix_owned=True
-        )
+        applied.summaries[name] = _summary(name, 0, _empty_state_counts(), matrix_owned=True)
     return applied
 
 

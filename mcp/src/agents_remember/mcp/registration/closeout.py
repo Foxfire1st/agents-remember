@@ -167,24 +167,24 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
         """Start or observe an approved task-bound worktree closeout. A mutating call
-        returns promptly with queued/running/current-phase state; the plane-owned worker
-        survives this MCP request and server process, and worktree_status observes it by
-        task context without a job id. The worker validates the admitted candidate and
-        source refs, commits code, refreshes and commits external memory, prepends the
-        exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
-        journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
-        preview and approval precede apply. Requires intent_note.
-        Every contract-enabled commit leg requires its explicit, nonblank message; typed
-        not-applicable legs may be omitted.
-        Repeat the same task input to observe/recover it; conflicting input refuses. Queue
- invalidation or absence does not affect the accepted journal generation.
+               returns promptly with queued/running/current-phase state; the plane-owned worker
+               survives this MCP request and server process, and worktree_status observes it by
+               task context without a job id. The worker validates the admitted candidate and
+               source refs, commits code, refreshes and commits external memory, prepends the
+               exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
+               journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
+               preview and approval precede apply. Requires intent_note.
+               Every contract-enabled commit leg requires its explicit, nonblank message; typed
+               not-applicable legs may be omitted.
+               Repeat the same task input to observe/recover it; conflicting input refuses. Queue
+        invalidation or absence does not affect the accepted journal generation.
 
- Delivered against reviewed: after the closeout has committed, the result says whether
- the code and the memory that were delivered are exactly what the leaf's latest recorded
- review showed: the same, different (and on which side), or no review was recorded. It
- never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
- that ends in the same tree reads as the same. How a branch got there is not measured.
- """
+        Delivered against reviewed: after the closeout has committed, the result says whether
+        the code and the memory that were delivered are exactly what the leaf's latest recorded
+        review showed: the same, different (and on which side), or no review was recorded. It
+        never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
+        that ends in the same tree reads as the same. How a branch got there is not measured.
+        """
         return worktree_closeout_apply_payload(
             config,
             contract_path,

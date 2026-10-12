@@ -29,7 +29,6 @@ from agents_remember.memory.knowledge.store import (
     open_read_only_store,
 )
 from knowledge_fixture_test_support import (
-    BASE_DISPLAY_VERSION,
     BASE_STATEMENT,
     SECOND_INVARIANT_STATEMENT,
     THIRD_INVARIANT_STATEMENT,
@@ -68,10 +67,18 @@ def test_three_separately_recorded_revisions_stay_independently_addressable(
     assert base.revision.statement == BASE_STATEMENT
     assert second.revision.statement == SECOND_INVARIANT_STATEMENT
     assert third.revision.statement == THIRD_INVARIANT_STATEMENT
-    assert len({base.revision.revision_id, second.revision.revision_id, third.revision.revision_id}) == 3
+    assert (
+        len({base.revision.revision_id, second.revision.revision_id, third.revision.revision_id})
+        == 3
+    )
     # The index holds no predecessor edge (MIK-R74 rule 1): every revision decodes with no
     # predecessors.
-    assert base.revision.predecessors == second.revision.predecessors == () == third.revision.predecessors
+    assert (
+        base.revision.predecessors
+        == second.revision.predecessors
+        == ()
+        == third.revision.predecessors
+    )
     assert base.revision.provenance.actor_ref == "260928-MIK/260928-MIK-L74"
     assert second.revision.provenance.actor_ref == "260928-MIK/260928-MIK-L74"
 
@@ -214,17 +221,21 @@ def test_the_created_file_carries_the_one_declared_schema(tmp_path: Path) -> Non
             )
             for table in declared.tables
         }
-    assert set(declared.tables) | {
-        "ix_meta",
-        "ix_problem",
-        "ix_record",
-        "ix_entry",
-        "ix_member",
-        "ix_route",
-        "ix_link",
-        "ix_history_row",
-        "ix_uuid",
-    } == tables
+    assert (
+        set(declared.tables)
+        | {
+            "ix_meta",
+            "ix_problem",
+            "ix_record",
+            "ix_entry",
+            "ix_member",
+            "ix_route",
+            "ix_link",
+            "ix_history_row",
+            "ix_uuid",
+        }
+        == tables
+    )
     assert user_version == declared.user_version
     assert columns == {table: tuple(declared.columns[table]) for table in declared.tables}
 

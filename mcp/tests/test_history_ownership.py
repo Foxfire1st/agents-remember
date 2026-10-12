@@ -166,7 +166,9 @@ class OwnershipMaster:
             parent_contract_path=self.task_root / "series-contract.md",
         )
         write_contract(enclosure, leaf)
-        (coord / "worktrees" / "agents-remember" / "master-ar" / ".lifecycle").mkdir(parents=True, exist_ok=True)
+        (coord / "worktrees" / "agents-remember" / "master-ar" / ".lifecycle").mkdir(
+            parents=True, exist_ok=True
+        )
         self.series = WorktreeContract(
             task_id="OWNERSHIP_MASTER",
             task_name="master",
@@ -193,7 +195,9 @@ class OwnershipMaster:
         )
         write_contract(self.series.contract_path, self.series)
         text = self.series.contract_path.read_text(encoding="utf-8")
-        publish_new_lifecycle_operation_location(load_contract(self.series.contract_path), contract_text=text)
+        publish_new_lifecycle_operation_location(
+            load_contract(self.series.contract_path), contract_text=text
+        )
 
     def request(self) -> LandingGateRequest:
         return LandingGateRequest(
@@ -222,7 +226,9 @@ def test_newly_closed_file_with_its_leaf_owner_passes(master: OwnershipMaster, p
 def test_edited_closed_file_refuses_naming_it(master: OwnershipMaster, ports: None) -> None:
     """Rule 5 fabricated: a byte-different closed file is owned by no publication."""
 
-    (master.memory / HISTORY).write_text(_history_file("L1", True, extra="edited"), encoding="utf-8")
+    (master.memory / HISTORY).write_text(
+        _history_file("L1", True, extra="edited"), encoding="utf-8"
+    )
     _git(master.memory, "add", "-A")
     _git(master.memory, "commit", "-q", "-m", "edit the closed file")
     edited = _git(master.memory, "rev-parse", "HEAD")

@@ -67,14 +67,16 @@ class SetStartTests(RoleToolsTestCase):
             self.config, set_call(uuid.uuid4()), environment=manager.environment()
         )
         request_id = uuid.UUID(first["requestId"])
-        before = {role: first["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")}
+        before = {
+            role: first["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")
+        }
 
-        again = start_leaf_set(
-            self.config, set_call(request_id), environment=manager.environment()
-        )
+        again = start_leaf_set(self.config, set_call(request_id), environment=manager.environment())
 
         self.assertEqual((again["ok"], again["status"]), (True, "completed"))
-        after = {role: again["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")}
+        after = {
+            role: again["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")
+        }
         self.assertEqual(after, before)
         self.assertEqual(len(self.runtime.agents), 3)
         self.assertEqual(
@@ -106,16 +108,16 @@ class SetStartTests(RoleToolsTestCase):
         )
 
         self.assertEqual((completed["ok"], completed["status"]), (True, "completed"))
-        agent_ids = {completed["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")}
+        agent_ids = {
+            completed["seats"][role]["agentId"] for role in ("worker", "reviewer", "curator")
+        }
         self.assertEqual(len(agent_ids), 3)
         # No fourth agent: the repeat completed the failed seat, and the held
         # seats never opened in between.
         self.assertEqual(len(self.runtime.agents), 3)
         self.assertTrue(completed["seats"]["reviewer"]["held"])
         self.assertTrue(completed["seats"]["curator"]["held"])
-        self.assertEqual(
-            self.received(completed["seats"]["reviewer"]["agentId"]), []
-        )
+        self.assertEqual(self.received(completed["seats"]["reviewer"]["agentId"]), [])
         self.assertEqual(self.received(completed["seats"]["curator"]["agentId"]), [])
 
     def test_a_reviewer_message_opens_the_reviewer_at_once(self) -> None:

@@ -92,9 +92,7 @@ def test_the_protected_read_roster_names_every_route_with_its_outcome(
     requirements = client.get("/api/requirements/list", params=context)
     assert requirements.status_code == 400, requirements.text[:400]
     assert requirements.json()["status"] == "bad-context", requirements.text[:400]
-    requirement = client.get(
-        "/api/requirements/read", params={**context, "path": "no/such.md"}
-    )
+    requirement = client.get("/api/requirements/read", params={**context, "path": "no/such.md"})
     assert requirement.status_code == 400, requirement.text[:400]
 
     forward = client.get("/api/files/onboarding", params={"repo": "fixture-code", "path": ""})

@@ -366,7 +366,10 @@ def _reserve_message_binding_projection(
     else:
         replaces_agent_id = None
     prior = _reconcile_prior_execution(
-        config, path, request, request_digest,
+        config,
+        path,
+        request,
+        request_digest,
         _Replacement(
             reservation.started_by,
             request.replaces_agent_id,
@@ -458,7 +461,10 @@ def _start_execution(
     if _receipt_carries_request(path, request):
         _refuse_another_starter(path, request, started_by)
         prior = _reconcile_prior_execution(
-            config, path, request, request_digest,
+            config,
+            path,
+            request,
+            request_digest,
             _Replacement(
                 started_by,
                 request.replaces_agent_id,
@@ -626,7 +632,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         try:
             _refuse_another_starter(start.receipt_path, request, start.started_by)
             prior = _reconcile_prior_execution(
-                start.config, start.receipt_path, request, start.request_digest,
+                start.config,
+                start.receipt_path,
+                request,
+                start.request_digest,
                 _Replacement(
                     start.started_by,
                     request.replaces_agent_id,

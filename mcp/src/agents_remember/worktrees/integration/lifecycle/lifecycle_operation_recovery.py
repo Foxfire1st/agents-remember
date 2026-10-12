@@ -80,9 +80,7 @@ def recover_direct_landing_under_authority(
     return settled
 
 
-def _settle_recovered_closing(
-    contract: WorktreeContract, record: LifecycleOperationRecord
-) -> None:
+def _settle_recovered_closing(contract: WorktreeContract, record: LifecycleOperationRecord) -> None:
     """Decide the kept closings against the recovered generation (MIK-R52 rule 8).
 
     Mirrors the apply path's settle: a receipt that cannot be read refuses the recovery by name.

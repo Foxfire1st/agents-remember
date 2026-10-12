@@ -245,7 +245,10 @@ def _leaf_pair_recorded_refusal(
     try:
         code = _judged_recorded_code(contract, code_commit)
         refusal = leaf_pair_refusal(
-            contract, code_commit=code, memory_commit=memory_commit, bases=(base,),
+            contract,
+            code_commit=code,
+            memory_commit=memory_commit,
+            bases=(base,),
             persist_worklist=False,
         )
     except (RuntimeError, subprocess.SubprocessError) as error:

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import patch
 
-from agents_remember.cli import paseo_role_tools, role_launch_receipts, role_message_delivery
+from agents_remember.cli import paseo_role_tools, role_launch_receipts
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
 from agents_remember.models.role_agents import (
     RoleMessageCall,
@@ -132,7 +132,9 @@ class RoleMessageTests(RoleToolsTestCase):
                 content = Path(path).read_text()
                 self.assertIn("report your plan", content)
                 self.assertIn("messageId:", content)
-            self.assertEqual({path: Path(path).read_bytes() for path in after if path in saved}, saved)
+            self.assertEqual(
+                {path: Path(path).read_bytes() for path in after if path in saved}, saved
+            )
         with self.subTest("a task document that is gone still names the work by its reference"):
             caller = binding("orchestrator", sprint_ref=OTHER_SPRINT)
             self.assertEqual(
@@ -400,9 +402,7 @@ class RoleMessageTests(RoleToolsTestCase):
             (_first_request, first), (_second_request, second) = launched
             self.runtime.agents[first].update(status="idle", archivedAt=None, received=[])
             self.runtime.calls.clear()
-            result = self.message(
-                self.architect, role="manager", **selection_of("manager")
-            )
+            result = self.message(self.architect, role="manager", **selection_of("manager"))
             self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", second))
 
     def test_only_an_agent_id_of_this_lines_receipts_is_a_recipient(self) -> None:

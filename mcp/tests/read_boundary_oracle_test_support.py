@@ -221,7 +221,10 @@ def _snapshot_external_admin(name: str, root: Path, checkout: Path, acc: _SnapAc
         _snapshot_alternates(name, root, admin, acc)
         if admin == checkout / ".git":
             continue
-        if any(str(admin) == str(other) or str(admin).startswith(str(other) + "/") for other in [root, *known]):
+        if any(
+            str(admin) == str(other) or str(admin).startswith(str(other) + "/")
+            for other in [root, *known]
+        ):
             continue
         acc.external += 1
         _walk_files(admin, f"{name}@gitdir{acc.external}", acc.files, acc.dirs)
@@ -243,7 +246,9 @@ def _snapshot(roots: dict[str, Path]) -> _WorldState:
     frozen_paths = {
         name: tuple(path.as_posix() for path in paths) for name, paths in acc.repo_paths.items()
     }
-    return _WorldState(git=acc.git, files=acc.files, dirs=acc.dirs, roots=root_paths, repo_paths=frozen_paths)
+    return _WorldState(
+        git=acc.git, files=acc.files, dirs=acc.dirs, roots=root_paths, repo_paths=frozen_paths
+    )
 
 
 def _parse_refs(raw: str) -> dict[str, str]:
@@ -616,9 +621,7 @@ def _classify(
     for trees in declared.values():
         attributed_trees.update(trees)
     return [
-        *_git_findings(
-            before, after, record_refs=record_refs, attributed_trees=attributed_trees
-        ),
+        *_git_findings(before, after, record_refs=record_refs, attributed_trees=attributed_trees),
         *_file_findings(
             before,
             after,

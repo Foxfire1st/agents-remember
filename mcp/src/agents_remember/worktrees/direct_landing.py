@@ -177,20 +177,20 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract, load_c
 class DirectLandingRequest:
     """One branch-addressed direct landing of an exact series code commit.
 
-    ``leaf_task_document_ref`` names the leaf this landing lands: only a leaf
-    with a direct-execution grant lands directly. ``code_commit`` is the exact
-    series code commit to verify; ``None`` takes the uncommitted changes in the
-    checkout holding the master's branch and creates the code commit on that
-    branch. ``code_commit_message`` is the message of a created code commit; a
-    call that verifies an existing commit gives none. ``candidate_tree`` is the
- staged candidate tree the owner gated pre-commit through the Dagger
- ``--source``/``--repository-bundle`` contract; when given, the landing
- verifies the branch HEAD tree equals it before committing.
-    ``leaf_id`` names the leaf whose history file this landing judges and closes
-    (MIK-R52 rule 8); without it the owner is inferred from the one open history
-    file, as before.
- ``bound_leaf_id`` is set by the landing itself after it proves the named
- leaf belongs to the admitted series contract; callers leave it empty.
+       ``leaf_task_document_ref`` names the leaf this landing lands: only a leaf
+       with a direct-execution grant lands directly. ``code_commit`` is the exact
+       series code commit to verify; ``None`` takes the uncommitted changes in the
+       checkout holding the master's branch and creates the code commit on that
+       branch. ``code_commit_message`` is the message of a created code commit; a
+       call that verifies an existing commit gives none. ``candidate_tree`` is the
+    staged candidate tree the owner gated pre-commit through the Dagger
+    ``--source``/``--repository-bundle`` contract; when given, the landing
+    verifies the branch HEAD tree equals it before committing.
+       ``leaf_id`` names the leaf whose history file this landing judges and closes
+       (MIK-R52 rule 8); without it the owner is inferred from the one open history
+       file, as before.
+    ``bound_leaf_id`` is set by the landing itself after it proves the named
+    leaf belongs to the admitted series contract; callers leave it empty.
     """
 
     contract_path: str
@@ -456,9 +456,7 @@ _UNFINISHED_CHECKOUT_MARKERS = (
 )
 
 
-def _validated_source_contract(
-    contract: WorktreeContract, *, dry_run: bool
-) -> WorktreeContract:
+def _validated_source_contract(contract: WorktreeContract, *, dry_run: bool) -> WorktreeContract:
     """Run the ordinary closeout source-lineage check on the direct route (F01).
 
     The direct route judges the same super -> master -> leaf chain the
@@ -759,8 +757,7 @@ def _publish_provisional_code_commit(
     if require_git(checkout, ["rev-parse", f"{provisional}^{{tree}}"]) != tree:
         raise DirectLandingError(
             "direct-landing-code-tree-mismatch",
-            "the judged commit does not hold the judged candidate tree; "
-            "nothing else was committed",
+            "the judged commit does not hold the judged candidate tree; nothing else was committed",
         )
     stage_tree(checkout, tree)
 
@@ -814,9 +811,13 @@ def _retry_create_landing(  # noqa: PLR0913, PLR0917 -- the retry compares the w
     Anything else falls through to a fresh create, which refuses on a
     conflicting in-flight generation.
     """
-    retry_identity = _DirectRequestIdentity(
-        config, contract, request, effective_input, current.input.codeCommit, tree
-    ) if isinstance(current.input, DirectLandingOperationInput) else None
+    retry_identity = (
+        _DirectRequestIdentity(
+            config, contract, request, effective_input, current.input.codeCommit, tree
+        )
+        if isinstance(current.input, DirectLandingOperationInput)
+        else None
+    )
     if retry_identity is None or not _in_flight_retry(current, retry_identity):
         return None
     resumed = _resume_retry_if_needed(contract, store, current)
@@ -902,7 +903,9 @@ def _apply_create_landing(
     provisional = _provisional_code_commit(checkout, tree, head, message)
     identity = _DirectRequestIdentity(config, contract, request, effective_input, provisional, tree)
     closing = _close_gated_leaf(
-        contract, provisional, request.bound_leaf_id,
+        contract,
+        provisional,
+        request.bound_leaf_id,
         enforce_owner=not _in_flight_conflict_pending(current),
     )
     operation_input, candidate = _operation_candidate(
@@ -1610,7 +1613,9 @@ def _close_gated_leaf(
     ignore_before = HistoryClosing(ignore, ignore_previous, ignore_previous)
     closing = None
     try:
-        selected = _select_gated_history(contract, code_commit, leaf_id, enforce_owner=enforce_owner)
+        selected = _select_gated_history(
+            contract, code_commit, leaf_id, enforce_owner=enforce_owner
+        )
         if not selected.applies:
             return None
         assert selected.source is not None and selected.owner is not None

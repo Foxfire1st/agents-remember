@@ -570,8 +570,8 @@ def test_the_removed_records_collection_is_a_named_refusal_on_every_request(
         assert "no records cursor is admitted" in refusal.detail, label
         assert "knowledge comparison" in refusal.next_action, label
     crossed = _refused_records_page(
-        fixture, paged_payload(compose_page(fixture, page_of="knowledge", page_size=5)).continuation
-        or "",
+        fixture,
+        paged_payload(compose_page(fixture, page_of="knowledge", page_size=5)).continuation or "",
     )
     assert crossed.page is None and crossed.page_refusal is not None
     assert crossed.page_refusal.code == "comparison_page_unreadable"
@@ -816,6 +816,7 @@ def _advanced_candidate(directory: Path, fixture: PaginationFixture) -> Paginati
     return replace(
         fixture,
         diff=replace(
-            fixture.diff, after=replace(fixture.diff.after, fixture=after, database_path=after.database_path)
+            fixture.diff,
+            after=replace(fixture.diff.after, fixture=after, database_path=after.database_path),
         ),
     )

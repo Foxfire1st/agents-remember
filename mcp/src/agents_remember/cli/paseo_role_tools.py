@@ -353,12 +353,13 @@ def start_leaf_set(
                 )
         sender = starting_agent(config, binding)
         reviewer_opening = (
-            f"{sender_line(sender)}\n{call.reviewer_message}"
-            if call.reviewer_message
-            else None
+            f"{sender_line(sender)}\n{call.reviewer_message}" if call.reviewer_message else None
         )
         return dispatch_leaf_set(
-            config, call, sender, reviewer_opening=reviewer_opening,
+            config,
+            call,
+            sender,
+            reviewer_opening=reviewer_opening,
             lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
     except _Refused as refused:
@@ -680,7 +681,9 @@ def _publish_role_agent_for_plugin(
         return False
     if runtime is None:
         return False
-    reference = request.task_document_ref or request.master_document_ref or request.sprint_document_ref
+    reference = (
+        request.task_document_ref or request.master_document_ref or request.sprint_document_ref
+    )
     try:
         return publish_role_agent(
             runtime.home,
@@ -752,9 +755,7 @@ def _file_message(
     link_warning = recipient_warning
     if sender_warning:
         link_warning = (
-            f"{sender_warning} {recipient_warning}".strip()
-            if recipient_warning
-            else sender_warning
+            f"{sender_warning} {recipient_warning}".strip() if recipient_warning else sender_warning
         )
     path, digest, _payload = _store_message(
         call,
@@ -835,7 +836,7 @@ def send_role_message(
             result["detail"] = f"{result['detail']} {withdrawal_note}"
         result.update(_held_readback(located[0] if located else None, sender.agent_id))
     except _Refused as refused:
-        if refused.refusal == "recipient-archived" and recipient is not None:
+        if refused.refusal == "recipient-archived" and recipient is not None and sender is not None:
             parties = _MessageParties(binding, sender, recipient, own_receipt)
             refused = _archived_with_successor(config, parties)
         if filed is not None:
@@ -985,9 +986,7 @@ def _withdraw_requested(
     return message_id, None
 
 
-def _record_held_lines(
-    path: Path, ended: list[dict[str, Any]], how: str
-) -> None:
+def _record_held_lines(path: Path, ended: list[dict[str, Any]], how: str) -> None:
     """Write terminal lines for messages ended outside a drain (withdrawal)."""
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
@@ -1111,7 +1110,9 @@ def _hold_for_seat(
         return _held_wait_permission(send, drain)
     apply_drain_to_receipt(path, drain)
     drain_permission = drain.get("permission")
-    final_reason = reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
+    final_reason = (
+        reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
+    )
     if final_reason == "permission-pending" and reason == "permission-pending":
         # Rule 4a names the permission as the refused send named it: the send met the
         # prompt first, so its naming (or "not supplied") stands over the drain's.
@@ -1127,9 +1128,7 @@ def _hold_for_seat(
     )
 
 
-def _trigger_delivery(
-    drain: dict[str, Any], taken: dict[str, Any]
-) -> dict[str, Any]:
+def _trigger_delivery(drain: dict[str, Any], taken: dict[str, Any]) -> dict[str, Any]:
     """The split part carrying the triggering message; the last part as fallback."""
 
     deliveries = [
@@ -1206,11 +1205,7 @@ def _held_then_delivered(
         result["reportCollection"] = send.collection
     if send.withdrawn is not None:
         result["withdrawnHeldMessageId"] = send.withdrawn
-    if (
-        send.call.wait
-        and drain.get("outcome") == "delivered"
-        and isinstance(message_id, str)
-    ):
+    if send.call.wait and drain.get("outcome") == "delivered" and isinstance(message_id, str):
         result.update(
             wait_for_turn(
                 send.config,
@@ -1284,8 +1279,7 @@ def _held_answer(
         "detail": (
             f"The message is held for agent {send.recipient.agent_id}: {why}. It is delivered "
             "when the recipient can be written to, in the order it was taken; nothing has "
-            "to be sent again."
-            + (f" The last delivery attempt said: {detail}" if detail else "")
+            "to be sent again." + (f" The last delivery attempt said: {detail}" if detail else "")
         ),
         "recipientAgentId": send.recipient.agent_id,
         "senderLine": sender_line(send.sender),
@@ -1323,13 +1317,8 @@ def _refusal_answer(
     """The refusal answer, with the sender's terminal lines when its recipient is gone."""
 
     result = refused.payload()
-    if (
-        sender is not None
-        and refused.refusal in {"recipient-archived", "recipient-not-found"}
-    ):
-        result.update(
-            _held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id)
-        )
+    if sender is not None and refused.refusal in {"recipient-archived", "recipient-not-found"}:
+        result.update(_held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id))
     return result
 
 

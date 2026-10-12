@@ -16,7 +16,6 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application import worktree_tools
@@ -27,6 +26,7 @@ from agents_remember.application.direct_execution_grants import (
 )
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.lifecycle.direct_landing import direct_landing_tool
+from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.role_launch_workspace import _resolve_workspace
 from agents_remember.errors import RolePreparationError
@@ -43,6 +43,7 @@ from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_intent import MissingTaskIntent
 from agents_remember.tasks import (
     SubTaskRef,
     TaskDocument,
@@ -471,18 +472,20 @@ class DirectLandingTests(unittest.TestCase):
         refused = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["status"], "direct-landing-leaf-without-grant")
-        self.assertIn(fixture["leaf_ref"].path, refused["detail"])
-        self.assertIn("dashboard", refused["detail"])
-        self.assertIn("direct_execution_grant", refused["detail"])
-        self.assertNotIn("directExecutionEnabled", refused["detail"])
+        detail = refused["detail"]
+        assert isinstance(detail, str)
+        self.assertIn(fixture["leaf_ref"].path, detail)
+        self.assertIn("dashboard", detail)
+        self.assertIn("direct_execution_grant", detail)
+        self.assertNotIn("directExecutionEnabled", detail)
 
     def test_direct_landing_with_unreadable_grant_refuses(self) -> None:
         fixture = _converted_series_fixture(Path(self.temp.name) / "badgrant")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        grant_path_for(
-            fixture["config"].coordination_root, fixture["leaf_ref"]
-        ).write_text("{not json", encoding="utf-8")
+        grant_path_for(fixture["config"].coordination_root, fixture["leaf_ref"]).write_text(
+            "{not json", encoding="utf-8"
+        )
         refused = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["status"], "direct-landing-grant-unreadable")
@@ -535,7 +538,9 @@ class DirectLandingTests(unittest.TestCase):
         fixture = self._create_fixture(root / "create-preview")
         code = fixture["code"]
         head_before = git(code, "rev-parse", "HEAD")
-        preview = direct_landing_tool(fixture["config"], self._create_request(fixture, dry_run=True))
+        preview = direct_landing_tool(
+            fixture["config"], self._create_request(fixture, dry_run=True)
+        )
         self.assertTrue(preview["ok"])
         self.assertEqual(preview["state"], "would-land")
         self.assertEqual(preview["codeCommit"], "")
@@ -562,6 +567,7 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(DirectLandingResponse.model_validate(landed).state, "landed")
         self.assertEqual(landed["candidateTree"], preview["candidateTree"])
         created = landed["codeCommit"]
+        assert isinstance(created, str)
         self.assertTrue(created)
         self.assertNotEqual(created, code_base)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
@@ -647,6 +653,7 @@ class DirectLandingTests(unittest.TestCase):
         landed = direct_landing_tool(config, request)
         self.assertEqual(landed["state"], "landed")
         created = landed["codeCommit"]
+        assert isinstance(created, str)
         self.assertTrue(created)
         self.assertNotEqual(created, code_base)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
@@ -669,9 +676,7 @@ class DirectLandingTests(unittest.TestCase):
         assert accepted.codeBefore is not None
         self.assertEqual(accepted.codeBefore.head, code_base)
 
-    def _cut_create_before_memory(
-        self, fixture: dict
-    ) -> tuple[DirectLandingRequest, str]:
+    def _cut_create_before_memory(self, fixture: dict) -> tuple[DirectLandingRequest, str]:
         """Preview, then cut the apply before any memory commit is published."""
 
         config = fixture["config"]
@@ -737,9 +742,7 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(again["state"], "landed")
         self.assertEqual(again["codeCommit"], created)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
-        self.assertEqual(
-            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
-        )
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
         self.assertTrue(again["memoryContentCommit"])
         self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
         self.assertEqual(again["memoryContentCommit"], cut_memory)
@@ -776,9 +779,7 @@ class DirectLandingTests(unittest.TestCase):
         assert isinstance(completed.result, dict)
         self.assertEqual(completed.result["codeCommit"], created)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
-        self.assertEqual(
-            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
-        )
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
         self.assertTrue(completed.result["memoryContentCommit"])
         self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
 
@@ -812,9 +813,7 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(successor.generation, cut_generation)
         self.assertEqual(successor.status, "completed")
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
-        self.assertEqual(
-            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
-        )
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
         self.assertTrue(again["memoryContentCommit"])
         self.assertNotEqual(git(memory, "rev-parse", "HEAD"), memory_before)
 
@@ -860,10 +859,10 @@ class DirectLandingTests(unittest.TestCase):
         _request, created = self._cut_create_before_memory(fixture)
         record = direct_landing_store(contract).read()
         assert record is not None
-        self.assertEqual(record.input.effectiveInput.code.state, "enabled")
-        self.assertEqual(
-            set(record.mutationEvidence), {"code", "memory"}
-        )
+        op_input = record.input
+        assert op_input.kind == "direct-landing"
+        self.assertEqual(op_input.effectiveInput.code.state, "enabled")
+        self.assertEqual(set(record.mutationEvidence), {"code", "memory"})
         code_evidence = record.mutationEvidence["code"]
         self.assertEqual(code_evidence.state, "commit-proven")
         self.assertEqual(code_evidence.commit, created)
@@ -908,9 +907,7 @@ class DirectLandingTests(unittest.TestCase):
         record = store.read()
         assert record is not None
         self.assertNotEqual(record.status, "cancelled")
-        self.assertEqual(
-            git(code, "merge-base", "--is-ancestor", published["code"], "HEAD"), ""
-        )
+        self.assertEqual(git(code, "merge-base", "--is-ancestor", published["code"], "HEAD"), "")
         classification = classify_direct_landing_recovery(contract, record)
         self.assertEqual(classification.state, "developer-decision")
         again = direct_landing_tool(config, request)
@@ -1013,20 +1010,14 @@ class DirectLandingTests(unittest.TestCase):
         ungranted = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
         self.assertFalse(ungranted["ok"])
         self.assertEqual(ungranted["status"], "direct-landing-leaf-without-grant")
-        give_grant(
-            config, fixture["leaf_ref"], granted_by="architect", granter_agent_id="census"
-        )
+        give_grant(config, fixture["leaf_ref"], granted_by="architect", granter_agent_id="census")
         # Message row: without the create message the apply refuses up front.
-        no_message = replace(
-            self._create_request(fixture, dry_run=False), code_commit_message=" "
-        )
+        no_message = replace(self._create_request(fixture, dry_run=False), code_commit_message=" ")
         refused = direct_landing_tool(config, no_message)
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["status"], "direct-landing-code-message-required")
         # Tree row: a stale previewed tree refuses with nothing committed.
-        stale = replace(
-            self._create_request(fixture, dry_run=True), candidate_tree="0" * 40
-        )
+        stale = replace(self._create_request(fixture, dry_run=True), candidate_tree="0" * 40)
         moved = direct_landing_tool(config, stale)
         self.assertFalse(moved["ok"])
         self.assertEqual(moved["status"], "direct-landing-candidate-tree-moved")
@@ -1040,9 +1031,12 @@ class DirectLandingTests(unittest.TestCase):
         record = direct_landing_store(contract).read()
         assert record is not None
         self.assertIsNone(record.doorPublication)
-        self.assertEqual(record.input.leafTaskDocumentRef, fixture["leaf_ref"])
+        op_input = record.input
+        assert op_input.kind == "direct-landing"
+        self.assertEqual(op_input.leafTaskDocumentRef, fixture["leaf_ref"])
+        assert isinstance(record.taskIntent, MissingTaskIntent)
         self.assertEqual(record.taskIntent.state, "missing-intent")
-        self.assertEqual(record.input.effectiveInput.code.state, "enabled")
+        self.assertEqual(op_input.effectiveInput.code.state, "enabled")
         self.assertEqual(record.mutationEvidence["code"].state, "commit-proven")
         self.assertTrue(record.irreversibleBoundaryEntered)
 
@@ -1124,9 +1118,7 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(again["codeCommit"], created)
         self.assertEqual(again["memoryContentCommit"], cut_memory)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
-        self.assertEqual(
-            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
-        )
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
         self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
         ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
         self.assertIn(created, ledger_text)
@@ -1163,9 +1155,7 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(completed.result["memoryContentCommit"], cut_memory)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
         self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
-        self.assertEqual(
-            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
-        )
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
 
     def _second_granted_leaf(self, fixture: dict) -> TaskDocumentRef:
         """A second planning leaf of the same master with its own grant."""
@@ -1227,17 +1217,18 @@ class DirectLandingTests(unittest.TestCase):
             ),
         )
 
-    def _second_workspace_context(self, fixture: dict, second_ref: TaskDocumentRef):
+    def _second_workspace_context(
+        self, fixture: dict, second_ref: TaskDocumentRef
+    ) -> RoleLaunchContext:
         config = fixture["config"]
-        tasks = fixture["tasks"]
         topology = TaskDocumentTopology(config.coordination_root)
-        return SimpleNamespace(
+        master_ref = TaskDocumentRef(repository="repo-a", path="direct-task/task.json")
+        return RoleLaunchContext(
             role="worker",
+            sprint=topology.resolve(master_ref),
+            master=topology.resolve(master_ref),
             task=topology.resolve(second_ref),
-            master=topology.resolve(
-                TaskDocumentRef(repository="repo-a", path="direct-task/task.json")
-            ),
-            sprint=SimpleNamespace(path=tasks / "task.json"),
+            effective_task=None,
         )
 
     def test_completed_leaf_with_dirty_memory_guards_sibling(self) -> None:
@@ -1267,7 +1258,9 @@ class DirectLandingTests(unittest.TestCase):
         )
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["status"], "direct-landing-sibling-open")
-        self.assertIn(fixture["leaf_ref"].path, refused["detail"])
+        detail = refused["detail"]
+        assert isinstance(detail, str)
+        self.assertIn(fixture["leaf_ref"].path, detail)
         with self.assertRaises(RolePreparationError) as raised:
             _resolve_workspace(config, self._second_workspace_context(fixture, second_ref))
         self.assertIn("direct-grant-sibling-open", str(raised.exception))
@@ -1339,8 +1332,10 @@ class DirectLandingTests(unittest.TestCase):
             direct_landing_owner.direct_landing(config, other, contract)
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
         self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
-        self.assertEqual(store.read().fingerprint, first.fingerprint)
-        self.assertEqual(store.read().status, first.status)
+        after = store.read()
+        assert after is not None
+        self.assertEqual(after.fingerprint, first.fingerprint)
+        self.assertEqual(after.status, first.status)
 
     def test_direct_create_apply_refuses_a_moved_checkout(self) -> None:
         root = Path(self.temp.name)
@@ -1371,16 +1366,16 @@ class DirectLandingTests(unittest.TestCase):
         preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
         self.assertTrue(preview["candidateTree"])
         with self.assertRaisesRegex(DirectLandingError, "candidate-tree-required"):
-            direct_landing(config, self._create_request(fixture, dry_run=False), fixture["contract"])
+            direct_landing(
+                config, self._create_request(fixture, dry_run=False), fixture["contract"]
+            )
         # Nothing was committed on either side and the files are as previewed.
         self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
         self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
         self.assertTrue((code / "extra.py").is_file())
         # F02: malformed and stale assertions refuse the same way, unchanged.
         for bad_tree in ("not-a-tree", "0" * 40):
-            bad = replace(
-                self._create_request(fixture, dry_run=False), candidate_tree=bad_tree
-            )
+            bad = replace(self._create_request(fixture, dry_run=False), candidate_tree=bad_tree)
             with self.assertRaisesRegex(DirectLandingError, "candidate-tree-moved"):
                 direct_landing(config, bad, fixture["contract"])
         self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)

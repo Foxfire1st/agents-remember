@@ -192,9 +192,7 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         """The full leaf-then-series closeout/integrate chain; exact responses."""
 
         result: dict[str, Any] = {}
-        result["leaf_preview"] = worktree_closeout_preview_payload(
-            config, leaf_path, MESSAGES
-        )
+        result["leaf_preview"] = worktree_closeout_preview_payload(config, leaf_path, MESSAGES)
         self.assertTrue(result["leaf_preview"].get("ok"), result["leaf_preview"])
         result["leaf_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, leaf_path, MESSAGES, APPROVAL
@@ -208,17 +206,13 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         self.assertEqual(
             result["leaf_integrated"].get("state"), "integrated", result["leaf_integrated"]
         )
-        result["series_preview"] = worktree_closeout_preview_payload(
-            config, series_path, MESSAGES
-        )
+        result["series_preview"] = worktree_closeout_preview_payload(config, series_path, MESSAGES)
         self.assertTrue(result["series_preview"].get("ok"), result["series_preview"])
         result["series_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, series_path, MESSAGES, APPROVAL
         )
         self.assertTrue(result["series_apply"].get("ok"), result["series_apply"])
-        self.assertEqual(
-            result["series_apply"].get("state"), "closed", result["series_apply"]
-        )
+        self.assertEqual(result["series_apply"].get("state"), "closed", result["series_apply"])
         result["series_integrated"] = worktree_tools.worktree_integrate_tool(
             config, contract_path=series_path
         )
@@ -271,7 +265,9 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         # Guard: the extracted tree must predate the grant machinery, or this
         # would compare the implementation against itself.
         self.assertFalse(
-            (tree / "mcp" / "src" / "agents_remember" / "kernel" / "direct_execution_grants.py").exists()
+            (
+                tree / "mcp" / "src" / "agents_remember" / "kernel" / "direct_execution_grants.py"
+            ).exists()
         )
         driver_path = self.tmp_path / "e11_driver.py"
         driver_path.write_text(_BASELINE_DRIVER, encoding="utf-8")
@@ -287,7 +283,12 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
             ),
         )
         subprocess.run(
-            [sys.executable, str(driver_path), str(self.tmp_path / "baseline-world"), str(out_path)],
+            [
+                sys.executable,
+                str(driver_path),
+                str(self.tmp_path / "baseline-world"),
+                str(out_path),
+            ],
             env=env,
             cwd=ROOT,
             check=True,

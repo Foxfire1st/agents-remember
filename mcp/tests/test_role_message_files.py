@@ -396,9 +396,7 @@ class SuccessorAndReturnTests(RoleToolsTestCase):
     def test_a_message_to_an_archived_agent_names_its_live_successor(self) -> None:
         # The first execution is archived from its start, so the seat is free for
         # the successor (MIK-R100 rule 9: a completed holder would still hold it).
-        _first_request, first = self.started(
-            "worker", status="closed", archivedAt=ARCHIVED_AT
-        )
+        _first_request, first = self.started("worker", status="closed", archivedAt=ARCHIVED_AT)
         _second_request, second = self.started("worker", status="idle")
         result = self.refusal(
             self.message(binding("manager"), agent_id=first), "recipient-archived"
@@ -652,9 +650,7 @@ class RegisteredRefusalTests(RoleToolsTestCase):
     ) -> None:
         # The first execution is archived from its start, so the seat is free for
         # the successor (MIK-R100 rule 9: a completed holder would still hold it).
-        _first_request, first = self.started(
-            "worker", status="closed", archivedAt=ARCHIVED_AT
-        )
+        _first_request, first = self.started("worker", status="closed", archivedAt=ARCHIVED_AT)
         _second_request, second = self.started("worker", status="idle")
         refused = self.registered(binding("manager"), {"text": "again", "agent_id": first})
         self.assertEqual(

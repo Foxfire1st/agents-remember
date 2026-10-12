@@ -362,7 +362,9 @@ def _require_clean_branch_checkout(
 ) -> None:
     for checkout in branch_worktree_owners(repo, branch):
         try:
-            require_clean(checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths)
+            require_clean(
+                checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths
+            )
         except RuntimeError as error:
             leaf = open_direct_leaf_name(contract) if contract is not None else None
             if leaf is None:

@@ -153,6 +153,7 @@ def replace_after_tree(endpoints: Any, after: ReadScopeFixture) -> Any:
     _place_datasets(new_diff, endpoints.contract)
     return placed
 
+
 # The candidate-only realization's authored words, so the added relationship is distinguishable from
 # the removed one rather than a copy of it.
 SUCCESSOR_RATIONALE = "The candidate records where the revised obligation is realized."

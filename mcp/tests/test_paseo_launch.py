@@ -1137,14 +1137,10 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
                 # refusal offers the replacing start on this line.
                 self.assertIn("replacesAgentId naming it", str(error.detail))
                 # Nothing was archived or created: one read of the holder, receipt kept.
-                self.assertEqual(
-                    [call[0] for call in self.runtime.calls], ["agent-state"]
-                )
+                self.assertEqual([call[0] for call in self.runtime.calls], ["agent-state"])
                 self.assertEqual(self.runtime.calls[0][1], {"agentId": old_agent})
                 self.assertIsNone(self.runtime.agents[old_agent]["archivedAt"])
-                self.assertEqual(
-                    self.receipt(successor)["requestId"], str(previous.request_id)
-                )
+                self.assertEqual(self.receipt(successor)["requestId"], str(previous.request_id))
                 self.assertEqual(self.receipt(successor)["status"], status)
                 # The holder's own request id still reconciles it.
                 self.assertEqual(self.dispatch(previous)[1]["status"], status)
@@ -1176,12 +1172,8 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         self.dispatch(previous)
         old_agent = self.receipt(previous)["agentId"]
         self.agent_of(previous).update(status="idle")
-        payload = self.request("worker").model_dump(
-            mode="json", by_alias=True, exclude_none=True
-        )
-        replacing = RoleDispatchRequest.model_validate(
-            {**payload, "replacesAgentId": old_agent}
-        )
+        payload = self.request("worker").model_dump(mode="json", by_alias=True, exclude_none=True)
+        replacing = RoleDispatchRequest.model_validate({**payload, "replacesAgentId": old_agent})
         self.runtime.calls.clear()
 
         status_code, public = self.dispatch(replacing)
@@ -1198,21 +1190,15 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         )
         self.assertEqual(self.runtime.calls[1][1], {"agentId": old_agent})
         receipt = self.receipt(replacing)
-        self.assertEqual(
-            receipt["predecessorReports"]["requestId"], str(previous.request_id)
-        )
+        self.assertEqual(receipt["predecessorReports"]["requestId"], str(previous.request_id))
         artifact = receipt["handoverArtifact"]
-        text = Path(
-            artifact.get("canonicalPath") or artifact["path"]
-        ).read_text(encoding="utf-8")
+        text = Path(artifact.get("canonicalPath") or artifact["path"]).read_text(encoding="utf-8")
         self.assertIn(f"Successor start: this seat replaces agent {old_agent}", text)
         self.assertIn("its earlier report paths are", text)
         self.assertIn("Take over from what is written there.", text)
         # The archived predecessor receipt carries the replacement record (rule 8).
         history = self.receipt_path(previous).parent / "history"
-        archived = json.loads(
-            (history / f"{previous.request_id}.json").read_text(encoding="utf-8")
-        )
+        archived = json.loads((history / f"{previous.request_id}.json").read_text(encoding="utf-8"))
         self.assertIn("replaced by a new start", archived["retiredBy"]["reason"])
         self.assertEqual(archived["replaceAuthorizedBy"], "the launcher")
 
@@ -1223,12 +1209,8 @@ class RepeatAndConflictTests(PaseoLaunchTestCase):
         self.dispatch(previous)
         old_agent = self.receipt(previous)["agentId"]
         self.runtime.agents[old_agent].update(status="running")
-        payload = self.request("worker").model_dump(
-            mode="json", by_alias=True, exclude_none=True
-        )
-        replacing = RoleDispatchRequest.model_validate(
-            {**payload, "replacesAgentId": old_agent}
-        )
+        payload = self.request("worker").model_dump(mode="json", by_alias=True, exclude_none=True)
+        replacing = RoleDispatchRequest.model_validate({**payload, "replacesAgentId": old_agent})
         self.runtime.calls.clear()
 
         error = self.refused(replacing)

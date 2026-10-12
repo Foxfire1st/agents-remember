@@ -76,11 +76,7 @@ def _snapshot(world: Gated, contract: Any) -> tuple[bytes | None, bytes | None, 
     contract_bytes = path.read_bytes() if path.is_file() else None
     list_path = worklist_path(contract)
     list_bytes = list_path.read_bytes() if list_path is not None and list_path.is_file() else None
-    refs = (
-        _git(world.code, "for-each-ref")
-        + "\n"
-        + _git(world.memory, "for-each-ref")
-    )
+    refs = _git(world.code, "for-each-ref") + "\n" + _git(world.memory, "for-each-ref")
     return contract_bytes, list_bytes, refs
 
 
@@ -97,9 +93,9 @@ def _assert_untouched(
         assert list_path is None or not list_path.is_file()
     else:
         assert list_path is not None and list_path.read_bytes() == before[1]
-    assert (
-        _git(world.code, "for-each-ref") + "\n" + _git(world.memory, "for-each-ref")
-    ) == before[2]
+    assert (_git(world.code, "for-each-ref") + "\n" + _git(world.memory, "for-each-ref")) == before[
+        2
+    ]
 
 
 def _refusing_leaf(world: Gated) -> tuple[Any, IntegratedCommits, IntegrationSources]:

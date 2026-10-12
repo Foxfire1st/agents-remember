@@ -514,6 +514,7 @@ def test_a_managed_sync_merge_passes_through_the_public_final_route(
     assert contract.code_repo_path is not None and contract.memory_repo_path is not None
     contract = _finished(contract)
     code, memory = contract.code_repo_path, contract.memory_repo_path
+    assert memory is not None
     _git(code, "checkout", "-q", "super")
     (code / "official.txt").write_text("official line\n", encoding="utf-8")
     _git(code, "add", "official.txt")

@@ -32,6 +32,8 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location_errors import (
     LifecycleOperationLocationError,
 )
+from agents_remember.worktrees.modules import abandon as abandon_module
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.terminal_validation import require_series_children_retired
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -39,6 +41,7 @@ from agents_remember.worktrees.sync_transaction_state import (
     sync_operation_path,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from lifecycle_enclosure_test_support import byte_tree
 from test_master_retirement import World, _historical_operation
 from test_task_execution_topology import REPOSITORY
 from test_worktree_start_preview import LEAF, MASTER, REPO, PreviewFixture
@@ -357,7 +360,7 @@ def test_an_enclosure_with_a_live_operation_locator_is_open_work_and_names_the_t
 @pytest.fixture
 def paired_world(tmp_path):
     """A commanded organizational master, so the leaf is its only live enclosure."""
-    world = PreviewFixture(tmp_path / "world", external=True, commanded=True)
+    world = PreviewFixture(tmp_path / "world", commanded=True)
     master = read_task_doc(world.task_root / "task.json")
     write_task_doc(world.task_root, master.model_copy(update={"executionNature": "organizational"}))
     world._document(
@@ -414,7 +417,37 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     text = " ".join(getattr(content, "text", "") for content in refused.content)
     assert f"worktree_abandon (contract_path={path})" in text, text
     assert str(child.code_worktree) in text and str(child.memory_worktree) in text
-    assert world.snapshot() == before
+    after = world.snapshot()
+    after_paths = after["paths"]
+    before_paths = before["paths"]
+    assert isinstance(after_paths, dict) and isinstance(before_paths, dict)
+    # A refused dry run logs on purpose (D124): the tool-call log is the one
+    # deliberate trace, so it is set aside and counted, never compared away.
+    added = sorted(set(after_paths) - set(before_paths))
+    assert len(added) == 1, added
+
+    def _is_new_log_file(entry: object, name: object) -> bool:
+        return (
+            isinstance(entry, list)
+            and len(entry) == 4
+            and entry[0] == "file"
+            and isinstance(name, str)
+            and "/logs/ar-tools-" in name
+        )
+
+    assert _is_new_log_file(after_paths[added[0]], added[0]), after_paths[added[0]]
+    # The discriminator rejects kind substitutions on the same name.
+    assert not _is_new_log_file(["directory", 0, 0], added[0])
+    assert not _is_new_log_file(["symlink", "nowhere"], added[0])
+    assert {
+        **after,
+        "paths": {key: value for key, value in after_paths.items() if "/logs/ar-tools-" not in key},
+    } == {
+        **before,
+        "paths": {
+            key: value for key, value in before_paths.items() if "/logs/ar-tools-" not in key
+        },
+    }
     abandon_arguments: dict[str, object] = {"contract_path": str(path)}
     abandoned = anyio.run(world._call, "worktree_abandon", abandon_arguments)
     world.record("named-tool-carried-out", abandoned.model_dump(mode="json"))
@@ -432,6 +465,45 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     assert git(world.code, "branch", "--list", child.code_work_branch) == ""
     assert git(world.memory, "branch", "--list", child.memory_work_branch) == ""
     assert child.leaf_id == LEAF
+
+
+def test_abandon_dry_run_names_populated_logs_and_changes_nothing(
+    paired_world,
+) -> None:
+    """A leaf enclosure with populated logs previews their removal without touching disk."""
+
+    world = paired_world
+    started = world.start(dry_run=False)
+    assert started.structuredContent is not None and started.structuredContent["ok"], started
+    path = Path(started.structuredContent["enclosure_path"])
+    child = readiness.load_contract(path)
+    group = child.worktree_group
+    assert isinstance(group, Path)
+    assert isinstance(child.code_worktree, Path) and isinstance(child.memory_worktree, Path)
+    populated = [
+        entry
+        for entry in group.rglob("*")
+        if entry.is_file() and "/logs/ar-tools-" in entry.as_posix()
+    ]
+    assert populated, "the start call populates the enclosure logs"
+    # Arrange the mid-flight state the real abandon passes through: worktrees
+    # gone, logs remaining. The preview must plan the full removal from here.
+    git(world.code, "worktree", "remove", "--force", str(child.code_worktree))
+    git(world.memory, "worktree", "remove", "--force", str(child.memory_worktree))
+    # The preview acquires the citation-cache guard lease outside the
+    # enclosure, so no-mutation is measured on the enclosure itself.
+    before = byte_tree(group)
+    preview = abandon_module.abandon_result(WorktreeArgs(contract_path=path, dry_run=True))
+    assert preview.returncode == 0, preview.payload
+    directories = preview.payload["directories"]
+    assert isinstance(directories, dict)
+    log_row = directories.get("logs")
+    assert isinstance(log_row, dict)
+    assert log_row.get("would_remove") is True, log_row
+    group_row = directories.get("worktree_group")
+    assert isinstance(group_row, dict)
+    assert group_row.get("would_remove") is True, group_row
+    assert byte_tree(group) == before
 
 
 def _broken(name: str):

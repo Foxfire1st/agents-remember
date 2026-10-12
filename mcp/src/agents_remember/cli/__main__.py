@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     dash = sub.add_parser("dashboard", help="Run the local mission-control dashboard.")
     dashboard.add_arguments(dash)
     dash.set_defaults(func=dashboard.run)
+    _register_memory_commands(sub)
+    _register_knowledge_commands(sub)
+    _register_runtime_commands(sub)
+    return parser
+
+
+def _register_memory_commands(sub: argparse._SubParsersAction) -> None:
+    """The memory maintenance commands."""
     citations = sub.add_parser(
         "memory-citations",
         help="Check a leaf's memory citations; --fix regenerates their ranges from the anchors.",
@@ -57,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_backfill.add_arguments(backfill)
     backfill.set_defaults(func=memory_backfill.run)
+
+
+def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
+    """The knowledge maintenance commands."""
     ingest = sub.add_parser(
         "knowledge-ingest",
         help=(
@@ -126,6 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_copies.add_arguments(copies)
     copies.set_defaults(func=knowledge_copies.run)
+
+
+def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
+    """The runtime and settings maintenance commands."""
     paseo = sub.add_parser(
         "paseo",
         help="Provision, inspect or stop the pinned Paseo runtime the settings describe.",
@@ -150,7 +166,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     providers_remove.add_arguments(removal)
     removal.set_defaults(func=providers_remove.run)
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:

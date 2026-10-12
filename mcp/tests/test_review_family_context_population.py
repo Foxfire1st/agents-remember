@@ -60,9 +60,7 @@ EMPTY_FAMILY_GUARANTEE = "A guarantee recorded for a family with no members."
 # a memberless successor beside its membered revision -- two heads -- is not a shape a text
 # tree can express. The canonical-ambiguity case below names its removal rather than
 # asserting it.
-_REMOVED_CANONICAL_AMBIGUITY_CASE = (
-    "test_the_canonical_memberless_successor_shape_is_an_ambiguity"
-)
+_REMOVED_CANONICAL_AMBIGUITY_CASE = "test_the_canonical_memberless_successor_shape_is_an_ambiguity"
 
 
 def test_a_recorded_family_with_no_members_is_recorded_not_absent(tmp_path: Path) -> None:
@@ -82,12 +80,8 @@ def test_a_recorded_family_with_no_members_is_recorded_not_absent(tmp_path: Path
         guarantee=EMPTY_FAMILY_GUARANTEE,
         member_slots=(),
     )
-    before = build_read_scope_fixture(
-        tmp_path / "recorded-empty-before", extra_families=(seed,)
-    )
-    after = build_read_scope_fixture(
-        tmp_path / "recorded-empty-after", extra_families=(seed,)
-    )
+    before = build_read_scope_fixture(tmp_path / "recorded-empty-before", extra_families=(seed,))
+    after = build_read_scope_fixture(tmp_path / "recorded-empty-after", extra_families=(seed,))
     family_id = after.extra_families[0].family_id
     revision_id = after.extra_families[0].revision_id
     assert before.extra_families[0].family_id == family_id

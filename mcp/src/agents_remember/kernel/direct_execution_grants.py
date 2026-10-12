@@ -113,7 +113,9 @@ def grant_path_for(coordination_root: Path, ref: TaskDocumentRef) -> Path:
     the digest keeps the exact leaf address. Files written before addressing
     keep the bare digest name and are still read and migrated on write.
     """
-    prefix = f"{_safe_filename_segment(ref.repository)}--{_safe_filename_segment(_grant_master(ref))}"
+    prefix = (
+        f"{_safe_filename_segment(ref.repository)}--{_safe_filename_segment(_grant_master(ref))}"
+    )
     return grant_store_dir(coordination_root) / f"{prefix}--{_grant_digest(ref)}.json"
 
 
@@ -153,9 +155,7 @@ def grant_store_locked(coordination_root: Path) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _grant_candidate_paths(
-    coordination_root: Path, ref: TaskDocumentRef
-) -> Iterator[Path]:
+def _grant_candidate_paths(coordination_root: Path, ref: TaskDocumentRef) -> Iterator[Path]:
     """The addressed file first, then the pre-addressing name for migration reads."""
     path = grant_path_for(coordination_root, ref)
     yield path

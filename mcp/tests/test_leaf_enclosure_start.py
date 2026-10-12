@@ -28,6 +28,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 IDENTITY = TaskIdentity(
@@ -145,12 +146,31 @@ class LeafEnclosureStartCommandTests(unittest.TestCase):
                 self.assertEqual((status, json.loads(output)), (1, {"ok": False, "error": error}))
 
     def test_native_stale_recovery_survives_the_child_and_both_entry_points(self) -> None:
+        # The canned findings never consult the contract; it is scaffolding the
+        # signature requires, like the SimpleNamespace context beside it.
+        unused_contract = WorktreeContract(
+            task_id="sbx-text-helpers",
+            task_name="sbx-text-helpers",
+            repo_name="sandbox-app",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=Path("/nonexistent"),
+            task_root=Path("/nonexistent"),
+            contract_path=Path("/nonexistent"),
+            task_artifact=Path("/nonexistent"),
+            worktree_group=Path("/nonexistent"),
+            code_repo_path=Path("/nonexistent"),
+            code_source_branch="main",
+            code_work_branch="leaf",
+            code_base_commit="0" * 40,
+            code_worktree=Path("/nonexistent"),
+        )
         with patch.object(
             worktree_start, "_branch_freshness_findings", return_value=[{"state": "behind"}]
         ):
             native = worktree_start._stale_base_preflight(
                 SimpleNamespace(code_repository_name="sandbox-app"),
-                None,
+                unused_contract,
                 WorktreeArgs(task_name="sbx-text-helpers", worktree_name="leaf"),
             )
         assert native is not None

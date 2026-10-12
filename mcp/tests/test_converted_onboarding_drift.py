@@ -379,7 +379,7 @@ def test_three_consumers_return_one_answer(tmp_path: Path) -> None:
 
     packet = build_context_packet(
         config,
-        ContextPacketRequest(repo_id=REPO_ID, include_providers=False, include_drift=True),
+        ContextPacketRequest(repo_id=REPO_ID, include_drift=True),
     )
     assert packet["drift"]["count"] == checked["count"], packet["drift"]
     assert packet["drift"]["actionableCount"] == checked["actionableCount"], packet["drift"]
@@ -392,7 +392,7 @@ def test_three_consumers_return_one_answer(tmp_path: Path) -> None:
 
     quiet = build_context_packet(
         config,
-        ContextPacketRequest(repo_id=REPO_ID, include_providers=False, include_drift=False),
+        ContextPacketRequest(repo_id=REPO_ID, include_drift=False),
     )
     assert quiet["drift"] == {"status": "notChecked"}, quiet
 
@@ -789,7 +789,7 @@ def test_context_packet_leaf_route_binds_the_leaf_base(tmp_path: Path) -> None:
     fold = cast(
         "dict[str, Any]",
         _drift_packet(
-            ContextPacketRequest(repo_id=REPO_ID, include_providers=False, include_drift=True),
+            ContextPacketRequest(repo_id=REPO_ID, include_drift=True),
             scope.context,
             cast(Any, SimpleNamespace(path=scope.code_root)),
         ),
@@ -835,7 +835,7 @@ def test_context_packet_agrees_with_the_summary_on_carried_anchors(tmp_path: Pat
     fold = cast(
         "dict[str, Any]",
         _drift_packet(
-            ContextPacketRequest(repo_id=REPO_ID, include_providers=False, include_drift=True),
+            ContextPacketRequest(repo_id=REPO_ID, include_drift=True),
             scope.context,
             cast(Any, SimpleNamespace(path=scope.code_root)),
         ),

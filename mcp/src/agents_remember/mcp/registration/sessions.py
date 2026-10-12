@@ -50,6 +50,7 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
                 label=label,
             ),
         )
+
     @server.tool()
     def retire_child(
         task_document_ref: TaskDocumentRef,
