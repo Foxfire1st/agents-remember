@@ -152,6 +152,9 @@ CITATION_FIX_PRODUCTION_PATHS = ("converted", "unconverted")
 # census, the samples and the catalogue stay in the files the run wrote. A
 # refusal keeps its reason as a code with the next action; a taken-over
 # coherence refusal keeps that check's code and next action.
+# MIK-R120 rule 3 adds the two landing counts with the first rows: a converted
+# run answers how many cards it cut and how many files it added beside the
+# knowledge; the full lists stay in the whole result the log records.
 QUALITY_ROW_FIELDS = frozenset(
     {
         "status",
@@ -179,6 +182,10 @@ QUALITY_ROW_FIELDS = frozenset(
         "blocking",
         "censusPath",
         "runId",
+        "cutCardCount",
+        "addedFileCount",
+        "cutCards",
+        "addedFiles",
     }
 )
 QUALITY_ROW_USES = {
@@ -207,6 +214,10 @@ QUALITY_ROW_USES = {
     "blocking": "work the blocking findings in repair order, first entries first",
     "censusPath": "open the structural census holding the sample and catalogue",
     "runId": "poll the started run that this answer names",
+    "cutCardCount": "read how many cards the landing cut without opening the list",
+    "addedFileCount": "read how many files the landing added beside the knowledge",
+    "cutCards": "name the cut behind each shortened card, first rows first",
+    "addedFiles": "place each added file in the task's requirement, first rows first",
 }
 QUALITY_ROW_BOUND = 1500
 QUALITY_PRODUCTION_PATHS = ("sync", "start", "poll")

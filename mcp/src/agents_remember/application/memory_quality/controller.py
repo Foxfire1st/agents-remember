@@ -26,7 +26,11 @@ from agents_remember.application.memory_quality.census import (
     prepare_memory_census,
     publish_memory_census,
 )
-from agents_remember.application.memory_quality.converted_base import converted_check_base
+from agents_remember.application.memory_quality.converted_base import (
+    converted_check_base,
+    leaf_base_port,
+    leaf_base_request,
+)
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
     QualityRunSnapshot,
@@ -472,6 +476,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
     )
     census = prepare_memory_census(scope)
     gate, worklist = _knowledge_gate_and_worklist(scope, candidate_inputs)
+    leaf_request = leaf_base_request(scope.contract, execution.config.coordination_root)
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -487,6 +492,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             include_rows=execution.publish_curator_report,
             write_report=not execution.publish_curator_report,
             knowledge_base=converted_check_base(scope, execution.config.coordination_root),
+            landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
         ),
         include_report_only_findings=execution.publish_curator_report,
     )

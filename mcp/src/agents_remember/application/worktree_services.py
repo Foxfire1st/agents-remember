@@ -9,7 +9,11 @@ from typing import Any
 from agents_remember.application import provider_runtime as provider_runtime_api
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
-from agents_remember.application.memory_quality.converted_base import context_check_base
+from agents_remember.application.memory_quality.converted_base import (
+    context_check_base,
+    leaf_base_port,
+    leaf_base_request_for_context,
+)
 from agents_remember.application.prepared_certification import (
     PreparedMemoryCertificationAdapter,
 )
@@ -174,12 +178,14 @@ class MemoryQualityAdapter:
         *,
         unstamped_code_commit: str | None = None,
     ) -> Any:
+        leaf_request = leaf_base_request_for_context(context)
         return memory_quality_check_api.DriftCheckContext(
             code_repository_root=code_repository_root,
             context=context,
             detail_limit=detail_limit,
             unstamped_code_commit=unstamped_code_commit,
             knowledge_base=context_check_base(code_repository_root, context),
+            landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
         )
 
     def run_check(

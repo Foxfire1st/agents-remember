@@ -106,6 +106,7 @@ response — it must be this leaf's memory worktree — and preview any write wi
    made after its commit can never match the tree the authority attests.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
+   Evidence and working files go to the task record or the scratch root, never into the memory worktree.
 The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
@@ -143,6 +144,8 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   entries it wrote with their IDs and paths, the history rows, and every refusal with its own reason. It carries
   the **family coverage** the same way — the families authored or updated with their members and routes, and the
   families you examined and left unchanged with the reason. What you did not examine is reported as not examined.
+- **For every card the quality check reports as cut, the handover names the change of this task that made the
+  removed text untrue.** Text is never removed to clear a finding of the quality check.
 - **On the repository-foundation entry**, the same report carries the foundation's own facts instead of a leaf's:
   the state that was read before authoring, the source areas examined and not examined, each record's outcome, the
   files the wave wrote (or the state that says nothing was written), and the remaining and carried work — with the

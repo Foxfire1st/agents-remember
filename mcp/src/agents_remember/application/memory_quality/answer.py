@@ -184,14 +184,71 @@ def quality_blocking(whole: Mapping[str, Any]) -> tuple[int, list[dict[str, str]
     return total, entries
 
 
+_QUALITY_LANDING_CUT_KEYS = ("path", "linesRemoved", "linesAdded")
+_QUALITY_LANDING_ADDED_KEYS = ("path", "sizeBytes")
+
+
+def _landing_rows(rows: Any, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """The first landing rows as the caller reads them: what and how much."""
+
+    slimmed: list[dict[str, Any]] = []
+    if isinstance(rows, list):
+        for row in rows[:TOOL_ANSWER_STATUS_ENTRY_MAX]:
+            if isinstance(row, dict):
+                slimmed.append({key: row.get(key) for key in keys})
+    return slimmed
+
+
+def carry_landing_answer(whole: Mapping[str, Any], answer: dict[str, Any]) -> None:
+    """MIK-R120 rule 3: a converted run answers its two landing counts.
+
+    The counts ride every converted answer, including a clean leaf (a zero
+    cut is still the answer to "what did this landing cut"). The first rows
+    ride only when there is something to show; the full lists stay in the
+    whole result the log records, which the answer's ``log`` names.
+    """
+
+    checks = whole.get("checks")
+    if not isinstance(checks, dict):
+        return
+    landed = False
+    cut_count = 0
+    added_count = 0
+    cut_rows: list[dict[str, Any]] = []
+    added_rows: list[dict[str, Any]] = []
+    for result in checks.values():
+        if not isinstance(result, dict):
+            continue
+        cut = result.get("cutCardCount")
+        if isinstance(cut, int) and not isinstance(cut, bool):
+            landed = True
+            cut_count += cut
+            cut_rows.extend(_landing_rows(result.get("cutCards"), _QUALITY_LANDING_CUT_KEYS))
+        added = result.get("addedFileCount")
+        if isinstance(added, int) and not isinstance(added, bool):
+            landed = True
+            added_count += added
+            added_rows.extend(_landing_rows(result.get("addedFiles"), _QUALITY_LANDING_ADDED_KEYS))
+    if not landed:
+        return
+    answer["cutCardCount"] = cut_count
+    answer["addedFileCount"] = added_count
+    if cut_rows:
+        answer["cutCards"] = cut_rows[:TOOL_ANSWER_STATUS_ENTRY_MAX]
+    if added_rows:
+        answer["addedFiles"] = added_rows[:TOOL_ANSWER_STATUS_ENTRY_MAX]
+
+
 def quality_result_answer(whole: dict[str, Any]) -> dict[str, Any]:
     """MIK-R110 rule 4: a sync (or completed poll) whole result answered as a status.
 
     The outcome, the count of findings by kind, the blocking findings up to the list
     bound, and the locations of the checklist, census and coherence record. The census,
-    the samples and the catalogue stay in the files the run wrote. A refusal keeps its
-    reason as a code with the next action; a taken-over coherence refusal keeps that
-    check's code and next action.
+    the samples and the catalogue stay in the files the run wrote. A converted run
+    additionally answers its two landing counts (MIK-R120): cut cards and added files,
+    with the first rows; the full lists stay in the whole result the log records.
+    A refusal keeps its reason as a code with the next action; a taken-over coherence
+    refusal keeps that check's code and next action.
     """
 
     ok = bool(whole.get("ok", False))
@@ -209,6 +266,7 @@ def quality_result_answer(whole: dict[str, Any]) -> dict[str, Any]:
     kinds = quality_finding_counts(whole)
     if kinds:
         answer["findingCountsByKind"] = kinds
+    carry_landing_answer(whole, answer)
     total, entries = quality_blocking(whole)
     answer["blockingCount"] = total
     if entries:

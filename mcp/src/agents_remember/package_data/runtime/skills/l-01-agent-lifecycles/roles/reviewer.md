@@ -106,6 +106,9 @@ The Manager starts the Curator when the first freeze exists; you do not start it
    with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
    with your hand-off list for that freeze. Review the Curator's memory change in its separate sealed lane
    and send its findings or PASS directly to the Curator. Non-leaf verdicts keep the seam recipient above.
+   That memory review reads the landing cut-card and added-file reports in the quality result: text removed
+   without a named change is a finding, and an added file outside the knowledge without a place in the task's
+   requirement is a finding.
 
 Classify every rejection as exactly one of `implementation defect`, `evidence gap`,
 `requirement contradiction/overconstraint`, `test/tool defect`, `external blocker`.
