@@ -1,15 +1,26 @@
 import {
   agentProblemText,
+  agentSilentText,
   agentTimeoutText,
+  DASHBOARD_ABILITIES,
   parentProblemText,
   parsePluginMessage,
   paseoFrameUrl,
+  pluginNoticeText,
+  pluginOpensAgents,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
+  type PaseoFrameShowing,
+  type PaseoOpenRequest,
   type PaseoPluginMessage,
+  type PluginAbilities,
 } from "./paseoFrameModel";
 
-/** How long the embedded application has to report ready, or to answer a request to show an agent. */
+/**
+ * How long the embedded application has to report ready after a load, how long a request to
+ * show an agent may stay unanswered before the application is asked whether it is there, and
+ * how long that ping may stay unanswered.
+ */
 export const PASEO_CONTROL_TIMEOUT_MS = 10_000;
 
 /**
@@ -34,6 +45,10 @@ export interface PaseoFramePane {
   setControl(state: PaseoControlState): void;
   setFrame(update: (current: PaseoFrameView | null) => PaseoFrameView | null): void;
   setAgentProblem(text: string | null): void;
+  /** What the frame shows and which request it has not answered yet. */
+  setShowing(showing: PaseoFrameShowing): void;
+  /** What to say about a plug-in that lacks something this dashboard uses; `null` for none. */
+  setPluginNotice(text: string | null): void;
   page?: "chats" | "document";
 }
 
@@ -42,9 +57,18 @@ export interface PaseoFramePane {
  *
  * While the AR plugin's control channel is ready the agent is shown by one message and the frame
  * is never reloaded. Messages are accepted only from the frame's own window and configured
- * origin, and posted only to that origin. When the application does not report ready, or does
- * not answer a request, within the deadline the channel counts as unavailable: the frame stays
- * and an execution is then shown by loading its agent's URL.
+ * origin, and posted only to that origin.
+ *
+ * The frame's document loads again in these cases only. The application answers nothing at
+ * all: its ready report after a load, or its answer to a request, is missing for the deadline,
+ * and the ping sent then stays unanswered for another deadline. That silence allows one load,
+ * of the wanted agent's URL. Retry, and a host that was gone and is back, start the frame anew.
+ * And a plug-in that says it cannot show an agent on request has every agent loaded by its URL.
+ *
+ * After every load the application's ready report is awaited in the same way, and a pong counts
+ * as that report. A selection made meanwhile is held and goes out by message at the report; it
+ * loads only when the ping after that load stays unanswered too. An answer that is only late is
+ * waited for: the channel stays ready, and the next selection is a message.
  */
 export class PaseoFrameControl {
   private available: AvailablePaseoFrame | null = null;
@@ -56,6 +80,18 @@ export class PaseoFrameControl {
   private settled: string | null = null;
   private pending: string | null = null;
   private loaded: string | null = null;
+  // Of the answers: the agent confirmed as shown, and the agent the frame refused.
+  private shown: string | null = null;
+  private refused: string | null = null;
+  // Of the open request: past its deadline; the plug-in said the application was asked to
+  // navigate; and a ping is out that the application has not answered.
+  private late = false;
+  private navigated = false;
+  private onChat = false;
+  private probing = false;
+  // A load whose ready report is still awaited: no other load starts before that wait ends.
+  private loading = false;
+  private abilities: PluginAbilities = null;
   private deadline: number | null = null;
   private scope: string | null = null;
   private seenAgent: string | null = null;
@@ -78,13 +114,14 @@ export class PaseoFrameControl {
    */
   start(available: AvailablePaseoFrame, afterRetry: boolean): void {
     this.available = available;
-    this.pending = null;
     this.settled = null;
+    this.shown = null;
+    this.refused = null;
+    this.closeRequest();
     this.clearSettle();
     this.selectedAgentIds.clear();
     this.setControl("waiting");
     this.load(afterRetry || this.pane.page === "document" ? this.wanted : null);
-    this.arm();
   }
 
   /** No frame (any more): nothing is steered and no deadline runs. */
@@ -93,6 +130,7 @@ export class PaseoFrameControl {
     this.clearSettle();
     this.available = null;
     this.pending = null;
+    this.loading = false;
     this.selectedAgentIds.clear();
   }
 
@@ -101,8 +139,9 @@ export class PaseoFrameControl {
    * agent is a new request: the execution is briefly absent while launch options reload, and
    * that must not navigate the frame again.
    *
-   * While the control channel is ready the switch goes out at once by message. While it is
-   * not ready the switch re-arms the trailing settle window: only its expiry brings the
+   * While the control channel is ready the switch goes out at once by message. While a load's
+   * ready report is awaited the switch is held for that report. While the channel is
+   * unavailable the switch re-arms the trailing settle window: only its expiry brings the
    * latest selection forward, so a burst of any turn pattern loads exactly its latest and
    * never an intermediate. The ready report, Retry, host return, or a new deadline preempts
    * the window.
@@ -118,9 +157,12 @@ export class PaseoFrameControl {
     this.seenAgent = target.agentId;
     this.wanted = target;
     this.settled = null;
+    this.shown = null;
+    this.refused = null;
     this.loaded = null;
     this.pane.setAgentProblem(null);
-    if (this.control !== "unavailable") {
+    this.publish();
+    if (this.control !== "unavailable" || this.loading) {
       this.sync();
       return;
     }
@@ -159,11 +201,27 @@ export class PaseoFrameControl {
         if (this.selectedAgentIds.has(message.sourceAgentId))
           this.pane.setAgentProblem(parentProblemText(message.code, message.message));
         break;
+      default:
+        this.onAnswer(message);
+    }
+  }
+
+  private onAnswer(message: PaseoPluginMessage): void {
+    switch (message.type) {
       case "ready":
+        this.onReady(message.capabilities);
+        break;
       case "pong":
-        this.onReady();
+        this.onPong(message.capabilities);
+        break;
+      case "navigated":
+        this.onNavigated(message.agentId);
+        break;
+      case "on-chat":
+        this.onOnChat(message.agentId);
         break;
       case "shown":
+      case "load-failed":
         this.onShown(message.agentId);
         break;
       case "error":
@@ -171,21 +229,69 @@ export class PaseoFrameControl {
     }
   }
 
-  /** Also after the plugin restarted inside the page: an unanswered request is sent again. */
-  private onReady(): void {
+  /**
+   * Also after the plugin restarted inside the page: an unanswered request is sent again. A
+   * plug-in that says what it can do is told what this dashboard can do; one that says it
+   * cannot show an agent on request leaves the channel unavailable, and agents load by URL.
+   */
+  private onReady(capabilities: PluginAbilities): void {
+    this.loading = false;
     this.clearDeadline();
     this.clearSettle();
-    this.pending = null;
+    this.closeRequest();
+    this.abilities = capabilities;
+    this.pane.setPluginNotice(pluginNoticeText(capabilities, this.available!.provisionCommand));
+    if (!pluginOpensAgents(capabilities)) {
+      this.setControl("unavailable");
+      this.sync();
+      return;
+    }
     this.setControl("ready");
-    if (this.pane.page === "document") this.pane.frameWindow()?.postMessage({ type: "ar.page", page: "document" }, this.available!.frameOrigin);
+    if (capabilities) this.post({ type: "ar.hello", capabilities: DASHBOARD_ABILITIES });
+    if (this.pane.page === "document") this.post({ type: "ar.page", page: "document" });
     this.sync();
   }
 
+  /**
+   * The answer to a ping: the application is there, so a late answer is waited for and asked
+   * after again one deadline later. It never sends the open request a second time. From an
+   * application that was not counted as ready, a pong is its ready report.
+   */
+  private onPong(capabilities: PluginAbilities): void {
+    if (this.control !== "ready") {
+      this.onReady(capabilities);
+      return;
+    }
+    if (!this.probing) return;
+    this.probing = false;
+    this.arm(() => this.probe());
+  }
+
+  private onNavigated(agentId: string): void {
+    if (agentId !== this.pending) return;
+    this.navigated = true;
+    this.publish();
+  }
+
+  /** The application is on the asked chat: its header and its input are that agent's. */
+  private onOnChat(agentId: string): void {
+    if (agentId !== this.pending) return;
+    this.onChat = true;
+    this.publish();
+  }
+
+  /**
+   * The answer that ends a request: the agent's chat is drawn, or the application shows on the
+   * agent's screen its own pane for a host that could not load it. Either way the application
+   * is on the agent, nothing more is waited for, and the frame is in reach; a failure is the
+   * application's to say and to retry, the dashboard names none of its own.
+   */
   private onShown(agentId: string | undefined): void {
     if (!agentId || agentId !== this.pending) return;
     this.clearDeadline();
-    this.pending = null;
     this.settled = agentId;
+    this.shown = agentId;
+    this.closeRequest();
     this.pane.setAgentProblem(null);
   }
 
@@ -193,7 +299,8 @@ export class PaseoFrameControl {
     if (!this.pending || (message.agentId && message.agentId !== this.pending)) return;
     this.clearDeadline();
     this.settled = this.pending;
-    this.pending = null;
+    this.refused = this.pending;
+    this.closeRequest();
     this.pane.setAgentProblem(agentProblemText(message.code, message.message));
   }
 
@@ -201,21 +308,34 @@ export class PaseoFrameControl {
    * Bring the frame to the wanted agent: by message while the control channel is ready, by
    * loading the agent's URL when it is unavailable (once: a frame whose URL already names the
    * agent is left alone; bursts coalesce through the settle window before this runs). While
-   * the application is still expected to report ready nothing happens; the report, or its
-   * deadline, calls this again.
+   * the application is still expected to report ready after a load nothing happens; the
+   * report, or the silence after its ping, calls this again.
    */
   private sync(): void {
     const { available, wanted } = this;
     if (!available || !wanted || this.settled === wanted.agentId) return;
     if (this.control === "ready") {
-      const frameWindow = this.pane.frameWindow();
-      if (!frameWindow) return;
-      this.pending = wanted.agentId;
-      this.arm();
-      frameWindow.postMessage({ type: "ar.open", agentId: wanted.agentId, ...(this.pane.page === "document" && wanted.workspaceId ? { workspaceId: wanted.workspaceId } : {}) }, available.frameOrigin);
-    } else if (this.control === "unavailable" && this.loaded !== wanted.agentId) {
+      this.ask(wanted);
+    } else if (this.control === "unavailable" && !this.loading && this.loaded !== wanted.agentId) {
       this.load(wanted);
     }
+  }
+
+  /** Ask the application by message for the wanted agent; its answer has the deadline. */
+  private ask(wanted: PaseoAgentTarget): void {
+    if (!this.pane.frameWindow()) return;
+    this.pending = wanted.agentId;
+    this.late = false;
+    this.navigated = false;
+    this.onChat = false;
+    this.probing = false;
+    this.arm(() => this.probe());
+    this.post({ type: "ar.open", agentId: wanted.agentId, ...(this.pane.page === "document" && wanted.workspaceId ? { workspaceId: wanted.workspaceId } : {}) });
+    this.publish();
+  }
+
+  private post(message: Record<string, unknown>): void {
+    if (this.available) this.pane.frameWindow()?.postMessage(message, this.available.frameOrigin);
   }
 
   private load(wanted: PaseoAgentTarget | null): void {
@@ -226,32 +346,97 @@ export class PaseoFrameControl {
       src: paseoFrameUrl(available, wanted) + (this.pane.page === "document" ? (paseoFrameUrl(available, wanted).includes("?") ? "&" : "?") + "arPage=document" : ""),
       generation: (current?.generation ?? 0) + 1,
     }));
+    this.publish();
+    this.awaitReady();
   }
 
   /**
    * The selected target when the frame never became ready: wanted but never settled. Null
-   * when nothing is selected or the selection already settled — then the deadline names nothing.
+   * when nothing is selected or the selection already settled — then the silence names nothing.
    */
   private unansweredTarget(): PaseoAgentTarget | null {
     return this.wanted && this.settled !== this.wanted.agentId ? this.wanted : null;
   }
 
-  /** Without a ready report, or an answer to a request, in time the control channel is unavailable. */
-  private arm(): void {
+  /**
+   * After a load the application has the deadline to report ready. Then it is asked by a ping
+   * whether it is there, and its pong is taken as the ready report. Only when that ping stays
+   * unanswered for another deadline is the control channel unavailable.
+   */
+  private awaitReady(): void {
+    this.loading = true;
+    this.arm(() => {
+      this.post({ type: "ar.ping" });
+      this.arm(() => {
+        this.loading = false;
+        // The silence names the selected target truthfully, saying whether the fallback below
+        // loads its page or the frame already names it. It wins over any coalescing burst: it
+        // clears it first, so the one fallback stays bounded.
+        const target = this.unansweredTarget();
+        if (target) this.pane.setAgentProblem(agentTimeoutText(target.agentId, this.loaded !== target.agentId));
+        this.fallBack();
+      });
+    });
+  }
+
+  /**
+   * A request is unanswered for the deadline: the answer is late. Whether the application is
+   * there at all is asked by a ping with the same deadline; only its silence loads the frame.
+   */
+  private probe(): void {
+    if (!this.pending || !this.pane.frameWindow()) return;
+    this.late = true;
+    this.probing = true;
+    this.publish();
+    this.post({ type: "ar.ping" });
+    this.arm(() => {
+      const agentId = this.pending;
+      if (agentId) this.pane.setAgentProblem(agentSilentText(agentId, this.loaded !== agentId));
+      this.fallBack();
+    });
+  }
+
+  private fallBack(): void {
+    this.clearSettle();
+    this.closeRequest();
+    this.setControl("unavailable");
+    this.sync();
+  }
+
+  private closeRequest(): void {
+    this.pending = null;
+    this.late = false;
+    this.navigated = false;
+    this.onChat = false;
+    this.probing = false;
+    this.publish();
+  }
+
+  private openRequest(): PaseoOpenRequest | null {
+    if (!this.pending) return null;
+    const told = this.abilities?.includes("navigated") === true;
+    return {
+      agentId: this.pending,
+      late: this.late,
+      waitsFor: !told ? "chat" : this.navigated || this.onChat ? "application" : "host",
+      onChat: this.onChat,
+    };
+  }
+
+  private publish(): void {
+    this.pane.setShowing({
+      shown: this.shown,
+      refused: this.refused,
+      landed: this.loaded,
+      request: this.openRequest(),
+    });
+  }
+
+  private arm(onDeadline: () => void): void {
     this.clearDeadline();
     this.deadline = window.setTimeout(() => {
       this.deadline = null;
-      // The unanswered selection: the pending request, or the selected target when readiness
-      // itself never arrived. Either way the deadline names it truthfully, saying whether the
-      // fallback below loads its page or the frame already names it. The deadline wins over
-      // any coalescing burst: it clears it first, so the one fallback stays bounded.
-      this.clearSettle();
-      const pending = this.pending;
-      this.pending = null;
-      const target = pending ? { agentId: pending } : this.unansweredTarget();
-      if (target) this.pane.setAgentProblem(agentTimeoutText(target.agentId, this.loaded !== target.agentId));
-      this.setControl("unavailable");
-      this.sync();
+      onDeadline();
     }, PASEO_CONTROL_TIMEOUT_MS);
   }
 

@@ -7,14 +7,20 @@ import os
 import shutil
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from agents_remember.application.role_launch_context import selection_binding
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.cli.role_document_chat_tree import document_chat_tree
+from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA, _receipt_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_launcher import RoleSelection
 from paseo_runtime_test_support import write_shared_runtime
 
 SERVER_ID = "srv_configured"
@@ -38,6 +44,23 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return scenario.lost ? { status: 'disconnected' } : this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId } }
+  // One page of the runtime's agent listing, as the host pages it: at most 200 a page. A
+  // `cursorless` listing announces its further agents and names no page to read them from.
+  async fetchAgents(options) {
+    record({ via: 'fetchAgents', page: options.page })
+    const { count, archivedEvery, cursorless } = scenario.listing
+    if (options.page.limit > 200) throw new Error('Too big: expected number to be <=200')
+    const start = Number(options.page.cursor ?? 0)
+    const end = Math.min(count, start + options.page.limit)
+    const entries = []
+    for (let index = start; index < end; index += 1) {
+      const archivedAt = index % archivedEvery === 0 ? 'then' : null
+      entries.push({ agent: { id: 'agent-' + index, archivedAt }, project: null })
+    }
+    const more = end < count
+    const nextCursor = more && !cursorless ? String(end) : null
+    return { entries, pageInfo: { nextCursor, hasMore: more } }
+  }
 }
 """
 # Every call on an agent is recorded. A timeline read does what the runtime does: it loads the
@@ -179,22 +202,26 @@ class AgentStateScriptTests(unittest.TestCase):
         (package / "dist" / "daemon-client.js").write_text(FAKE_DAEMON_CLIENT, encoding="utf-8")
         (package / "dist" / "index.js").write_text(FAKE_CLIENT_ROOT, encoding="utf-8")
 
-    def call(self, command: str, **scenario: Any) -> dict[str, Any]:
-        """Run one command for AGENT_ID against a runtime that holds the scenario's agent."""
+    @contextmanager
+    def runtime(self, **scenario: Any) -> Iterator[None]:
+        """While the block runs, the real script reaches a runtime that is as the scenario says."""
 
-        held = scenario.pop("holds", None)
-        payload = scenario.pop("payload", {"agentId": AGENT_ID})
         scenario_path = self.root / "scenario.json"
-        agents = {AGENT_ID: held} if held else {}
-        scenario_path.write_text(
-            json.dumps({"serverId": SERVER_ID, "agents": agents, **scenario}), encoding="utf-8"
-        )
+        scenario_path.write_text(json.dumps({"serverId": SERVER_ID, **scenario}), encoding="utf-8")
         (self.root / "record.jsonl").write_text("", encoding="utf-8")
         environment = {
             "FAKE_PASEO_SCENARIO": scenario_path.as_posix(),
             "FAKE_PASEO_RECORD": (self.root / "record.jsonl").as_posix(),
         }
         with patch.dict(os.environ, environment):
+            yield
+
+    def call(self, command: str, **scenario: Any) -> dict[str, Any]:
+        """Run one command for AGENT_ID against a runtime that holds the scenario's agent."""
+
+        held = scenario.pop("holds", None)
+        payload = scenario.pop("payload", {"agentId": AGENT_ID})
+        with self.runtime(agents={AGENT_ID: held} if held else {}, **scenario):
             return bridge_call(self.config, command, payload)
 
     def recorded(self) -> list[dict[str, Any]]:
@@ -301,6 +328,68 @@ class AgentStateScriptTests(unittest.TestCase):
                 )
         self.assertEqual(len(long_reply[:3000]), 3000)
         self.assertGreater(len(long_reply[:3000].encode("utf-16-le")) // 2, 3000)
+
+    def test_agents_live_lists_in_pages_and_says_when_the_listing_did_not_end(self) -> None:
+        answer = self.call("agents-live", payload={}, listing={"count": 450, "archivedEvery": 9})
+        live = [f"agent-{index}" for index in range(450) if index % 9]
+        self.assertEqual(answer, {"serverId": SERVER_ID, "agentIds": live, "complete": True})
+        self.assertEqual(
+            [call["page"] for call in self.recorded()],
+            [{"limit": 200}, {"limit": 200, "cursor": "200"}, {"limit": 200, "cursor": "400"}],
+        )
+        # A runtime with more agents than the read's bound: the answer says it did not end.
+        answer = self.call(
+            "agents-live", payload={}, listing={"count": 2100, "archivedEvery": 2100}
+        )
+        self.assertFalse(answer["complete"])
+        self.assertEqual(len(self.recorded()), 10)
+        self.assertEqual(len(answer["agentIds"]), 1999)
+        # A page that announces more agents and names no next page: the listing did not end.
+        answer = self.call(
+            "agents-live",
+            payload={},
+            listing={"count": 450, "archivedEvery": 9, "cursorless": True},
+        )
+        first_page = [f"agent-{index}" for index in range(200) if index % 9]
+        self.assertEqual(answer, {"serverId": SERVER_ID, "agentIds": first_page, "complete": False})
+        self.assertEqual([call["page"] for call in self.recorded()], [{"limit": 200}])
+
+    def test_a_recorded_agent_a_listing_did_not_reach_is_unknown_to_the_tree_and_not_gone(
+        self,
+    ) -> None:
+        sprint = {"repository": "agents-remember", "path": "sprint/task.json"}
+        master = {"repository": "agents-remember", "path": "master/task.json"}
+        # The Manager's agent is on the listing's second page; the Orchestrator's is archived.
+        recorded = {
+            "agent-250": {
+                "role": "manager",
+                "sprintDocumentRef": sprint,
+                "masterDocumentRef": master,
+            },
+            "agent-9": {"role": "orchestrator", "sprintDocumentRef": sprint},
+        }
+        selections = [RoleSelection.model_validate(row) for row in recorded.values()]
+        for agent_id, selection in zip(recorded, selections, strict=True):
+            path = _receipt_path(self.config, selection)
+            path.parent.mkdir(parents=True)
+            record = {
+                "schema": RECEIPT_SCHEMA,
+                "role": selection.role,
+                "selection": selection_binding(selection),
+                "execution": {"kind": "paseo-agent", "workspaceId": "wks_1", "agentId": agent_id},
+            }
+            path.write_text(json.dumps(record), encoding="utf-8")
+        listing = {"count": 450, "archivedEvery": 9}
+        # The real script's answer for a listing that did not end leaves both agents unknown.
+        with self.runtime(listing={**listing, "cursorless": True}):
+            cut = document_chat_tree(self.config, selections)
+        self.assertEqual(cut, {"chats": [{"agents": None}, {"agents": None}]})
+        self.assertEqual([call["page"] for call in self.recorded()], [{"limit": 200}])
+        # A listing the host ended says which agent it holds and which it no longer does.
+        with self.runtime(listing=listing):
+            ended = document_chat_tree(self.config, selections)
+        self.assertEqual([row["agentId"] for row in ended["chats"][0]["agents"]], ["agent-250"])
+        self.assertEqual(ended["chats"][1], {"agents": []})
 
     def test_agent_resume_opens_a_closed_session_and_leaves_every_other_agent_alone(self) -> None:
         resume_read = {

@@ -76,27 +76,35 @@ test("selecting a task shows its agent's chat in the sidebar", async ({ page }) 
   await page.screenshot({ path: test.info().outputPath("task-chat-shown.png") });
 });
 
-test("a chat the message cannot bring ends in a named problem and loads its page once", async ({ page }) => {
+test("a chat the message cannot bring is waited for, and Retry loads its page", async ({ page }) => {
   test.setTimeout(180_000);
   let stall = true;
   await routeFrameHost(page, (): Record<string, string> => (stall ? { stall: "1" } : {}));
   await page.goto("/dev/document-chat-host?effects=off");
   await expect(page.frameLocator("iframe[title='Role chats']").getByTestId("fake-paseo-host")).toBeVisible({ timeout: 30_000 });
 
-  // Nothing the message asks for can appear: after the deadline the pane names the worker and
-  // loads its page exactly once.
+  // Nothing the message asks for can appear, while the application itself still answers: the
+  // answer is late, not lost. The pane says that it still waits, keeps
+  // the frame it has, and loads nothing on its own.
   await page.getByTestId("harness-doc-leaf").click();
+  const waiting = page.getByTestId("paseo-frame-waiting");
+  // The task's request is a new one: first it waits, and only after its deadline it is late.
+  await expect(waiting).not.toContainText("Still waiting");
+  await expect(waiting, `no waiting line; ${await describeFrame(page)}`).toContainText("Still waiting", { timeout: 30_000 });
   const problem = page.getByTestId("paseo-frame-agent-problem");
-  await expect(problem, `no named problem state; ${await describeFrame(page)}`).toContainText("agent-worker", { timeout: 30_000 });
-  const src = await page.locator("iframe[title='Role chats']").getAttribute("src");
-  expect(src, "fallback load names the worker's page").toContain("workspace/wks_leaf?open=agent:agent-worker");
+  await expect(problem).toHaveCount(0);
+  await expect(page.getByTestId("paseo-frame-control-banner")).toHaveCount(0);
+  const kept = await page.locator("iframe[title='Role chats']").getAttribute("src");
+  expect(kept, "a late answer loaded the frame again").not.toContain("open=agent:agent-worker");
 
   // The host recovers: Retry loads the page without the stall and the worker's chat appears.
   stall = false;
-  await page.getByRole("button", { name: "Retry" }).first().click();
+  await waiting.getByRole("button", { name: "Retry" }).click();
   await expect
     .poll(() => shownAgent(page), { timeout: 30_000 })
     .toBe("agent-worker");
+  const src = await page.locator("iframe[title='Role chats']").getAttribute("src");
+  expect(src, "Retry loads the worker's page").toContain("workspace/wks_leaf?open=agent:agent-worker");
   await expect(problem).toHaveCount(0);
 });
 

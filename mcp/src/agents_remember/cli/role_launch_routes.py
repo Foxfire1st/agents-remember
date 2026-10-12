@@ -47,6 +47,7 @@ from agents_remember.cli.paseo_launch import (
 )
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_answers import alias_response
+from agents_remember.cli.role_document_chat_tree import register_document_chat_tree_route
 from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.cli.role_instructions import launch_choice_metadata
@@ -140,6 +141,7 @@ def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         "/api/role-launch/progress/{request_id}", role_launch_progress.read, methods=["GET"]
     )
     register_document_chat_route(app, config)
+    register_document_chat_tree_route(app, config)
     register_role_report_route(app, config)
 
 

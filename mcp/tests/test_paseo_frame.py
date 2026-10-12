@@ -134,6 +134,9 @@ class PaseoFrameTests(unittest.TestCase):
                 "serverId": SERVER_ID,
                 "projectsWorkspaceId": "wks_projects",
                 "projectsWorkspaceDetail": None,
+                # What the frame's notice names for a plug-in older than the dashboard.
+                "provisionCommand": "agents-remember paseo provision --config "
+                + (self.root / "settings" / "ar.json").as_posix(),
             },
         )
         self.assertEqual(remote["frameBaseUrl"], "https://box.tailnet.ts.net:8443")
@@ -300,6 +303,7 @@ class WiredHostFactsTests(unittest.TestCase):
                 "serverId": SERVER_ID,
                 "projectsWorkspaceId": "wks_real",
                 "projectsWorkspaceDetail": None,
+                "provisionCommand": answer["provisionCommand"],
             },
         )
         # The identity first, then the launch's reuse-or-create call for the Projects folder,

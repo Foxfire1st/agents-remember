@@ -842,7 +842,9 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
         )
     try:
         receipt = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, RecursionError) as error:
+        # Bytes that are not UTF-8 or not JSON, a number too long to convert (all ValueError),
+        # and a nesting beyond the parser's depth are one answer: the record cannot be read.
         raise HTTPException(
             status_code=409,
             detail="The role execution receipt is unreadable; reconcile it before launching.",

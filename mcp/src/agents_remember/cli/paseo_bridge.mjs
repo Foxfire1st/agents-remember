@@ -101,6 +101,15 @@
 //            with an open session: reading the timeline of a closed session makes the runtime
 //            resume it.
 //
+//   agents-live  {}
+//            -> {serverId, agentIds: string[], complete: boolean}
+//            The ids of the agents the runtime holds that are not archived, from one listing read
+//            in pages (at most LIVE_PAGES pages of LIVE_PAGE_LIMIT). `complete` is true only when
+//            the runtime said that the listing ended. It is false when the listing did not end
+//            within those pages, and when a page announced further agents without naming the page
+//            that holds them: an id that is absent then says nothing about its agent. A read with
+//            no effect on any agent.
+//
 //   agent-resume  {agentId: string}
 //            -> {serverId, agent: STATE | null, resume: {attempted: boolean, resumed: boolean,
 //                error?: string}}
@@ -215,6 +224,7 @@ const COMMANDS = {
   'agent-get': getAgent,
   'agent-archive': archiveAgent,
   'agent-state': readAgentState,
+  'agents-live': listLiveAgents,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
   'agent-wait': waitForAgent
@@ -229,6 +239,11 @@ const CLOSE_TIMEOUT_MS = 1000
 const LISTING_RESERVE_MS = 10000
 const REPLY_RESERVE_MS = 2000
 const MESSAGE_LIMIT = 800
+// agents-live: the runtime refuses a page above 200 entries; ten pages bound the read at 2,000
+// agents. Only the runtime's own word that no agents follow ends a listing: a read that stops
+// at the bound, or at a page that names no next page, answers that the listing did not end.
+const LIVE_PAGE_LIMIT = 200
+const LIVE_PAGES = 10
 // agent-state and agent-resume: the runtime's word for an agent without a running harness
 // process, the timeline entries that mark the end of a turn, how many entries are read from the
 // end, and the length of the reply text that is returned.
@@ -713,6 +728,27 @@ async function readAgentState({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const agent = await findAgent(api, daemon, agentId)
   return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
+}
+
+async function listLiveAgents({ daemon }) {
+  const agentIds = []
+  let cursor = null
+  let complete = false
+  for (let page = 0; page < LIVE_PAGES; page += 1) {
+    const listed = await daemon.fetchAgents({
+      page: { limit: LIVE_PAGE_LIMIT, ...(cursor ? { cursor } : {}) }
+    })
+    for (const entry of listed.entries ?? []) {
+      const agent = entry?.agent
+      if (nonEmpty(agent?.id) && !nonEmpty(agent.archivedAt)) agentIds.push(agent.id)
+    }
+    // The listing has ended when the runtime says that no agents follow, and only then. A page
+    // without a next page ends the read, not the listing.
+    complete = listed.pageInfo?.hasMore === false
+    cursor = nonEmpty(listed.pageInfo?.nextCursor) ? listed.pageInfo.nextCursor : null
+    if (complete || cursor === null) break
+  }
+  return { serverId: serverIdOf(daemon), agentIds, complete }
 }
 
 async function resumeAgent({ api, daemon }, input) {

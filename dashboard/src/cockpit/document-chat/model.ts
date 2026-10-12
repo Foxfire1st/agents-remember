@@ -1,10 +1,8 @@
 import type { SeriesNode, TaskDocNode } from "../../types/projection";
 import type { TaskDocumentRef } from "../../types/terminalCatalog";
-import { sameTaskDocumentRef, taskDocumentRefForDoc } from "../../data/taskIdentity";
-import {
-  masterOptionsForSprint, sprintOptionsForDocs, taskOptionsForMaster,
-  type LauncherRole, type RoleLaunchSelection,
-} from "../roleLaunchModel";
+import { isOrchestrationDoc, masterCommandNames, orchestratorParentKey, taskDocParentKey } from "../../data/taskHierarchy";
+import { sameTaskDocumentRef, taskDocSelectionKey } from "../../data/taskIdentity";
+import { taskOptionsForDocs, type LauncherRole, type RoleLaunchSelection, type RoleTaskOption } from "../roleLaunchModel";
 
 export interface DocumentChatBinding {
   selection: RoleLaunchSelection;
@@ -20,28 +18,83 @@ export interface DocumentAgent {
   labels: Record<string, string>;
 }
 
+/** A document of the tree a role chat can belong to, with the selection that names it. */
+export interface DocumentBinding {
+  ref: TaskDocumentRef;
+  binding: DocumentChatBinding;
+}
+
+function grouped<Row>(groups: Map<string, Row[]>, key: string | undefined, row: Row): void {
+  if (key === undefined) return;
+  const rows = groups.get(key);
+  if (rows) rows.push(row);
+  else groups.set(key, [row]);
+}
+
+/** The key a master is grouped under: its repository and the sprint that commands it there. */
+function commandedBy(repository: string, sprintKey: string | undefined): string | undefined {
+  return sprintKey === undefined ? undefined : repository + "\n" + sprintKey;
+}
+
+/** Each document's parent, worked out once: masters by their commanding sprint, tasks by their master. */
+function treeGroups(docs: TaskDocNode[], series: SeriesNode[], options: RoleTaskOption[]) {
+  const commanders = new Map<string, TaskDocNode[]>();
+  for (const doc of docs) if (isOrchestrationDoc(doc)) grouped(commanders, doc.repository, doc);
+  const masterDocPaths = new Set(docs.filter((doc) => doc.kind === "master").map((doc) => doc.docPath));
+  const masters = new Map<string, RoleTaskOption[]>();
+  const leaves = new Map<string, RoleTaskOption[]>();
+  for (const option of options) {
+    const { doc } = option;
+    if (doc.kind !== "master") grouped(leaves, taskDocParentKey(doc, series, masterDocPaths), option);
+    else if (!isOrchestrationDoc(doc)) {
+      const sprint = orchestratorParentKey(masterCommandNames(doc), commanders.get(doc.repository) ?? [], doc.docPath);
+      grouped(masters, commandedBy(doc.repository, sprint), option);
+    }
+  }
+  return { masters, leaves };
+}
+
+/** A master's own row and the rows of its tasks. */
+function masterRows(sprint: TaskDocumentRef, master: RoleTaskOption, leaves: RoleTaskOption[]): DocumentBinding[] {
+  const scope = { sprintDocumentRef: sprint, masterDocumentRef: master.ref };
+  return [
+    { ref: master.ref, binding: { selection: { role: "manager", ...scope }, roles: ["manager"] } },
+    ...leaves.map((leaf): DocumentBinding => ({ ref: leaf.ref, binding: {
+      selection: { role: "worker", ...scope, taskDocumentRef: leaf.ref }, roles: ["worker", "reviewer", "curator"],
+    } })),
+  ];
+}
+
+/**
+ * Every sprint, each master a sprint of its repository commands, and each master's tasks, in
+ * the tree's order. Each document's parent is worked out once and the tree is read off the
+ * groups, so the cost grows with the documents and not with documents times masters.
+ */
+export function documentBindings(docs: TaskDocNode[], series: SeriesNode[]): DocumentBinding[] {
+  const options = taskOptionsForDocs(docs);
+  const { masters, leaves } = treeGroups(docs, series, options);
+  const tree: DocumentBinding[] = [];
+  for (const sprint of options.filter((option) => isOrchestrationDoc(option.doc))) {
+    tree.push({ ref: sprint.ref, binding: { selection: { role: "orchestrator", sprintDocumentRef: sprint.ref }, roles: ["orchestrator"] } });
+    const commanded = commandedBy(sprint.doc.repository, taskDocSelectionKey(sprint.doc.docPath))!;
+    for (const master of masters.get(commanded) ?? []) {
+      tree.push(...masterRows(sprint.ref, master, leaves.get(taskDocSelectionKey(master.doc.docPath)) ?? []));
+    }
+  }
+  return tree;
+}
+
+/** The binding of one document of the tree; no document is the Projects chat. */
+export function bindingInTree(ref: TaskDocumentRef | undefined, tree: DocumentBinding[]): DocumentChatBinding {
+  if (!ref) return { selection: { role: "architect" }, roles: ["architect", "investigator"] };
+  return tree.find((row) => sameTaskDocumentRef(row.ref, ref))?.binding ?? { selection: { role: "worker" }, roles: [],
+    problem: "No role can start here: a leaf needs a master commanded by a sprint, and a master needs its commanding sprint document." };
+}
+
 export function documentChatBinding(
   ref: TaskDocumentRef | undefined, docs: TaskDocNode[], series: SeriesNode[],
 ): DocumentChatBinding {
-  if (!ref) return { selection: { role: "architect" }, roles: ["architect", "investigator"] };
-  const matches = (doc: TaskDocNode) => sameTaskDocumentRef(taskDocumentRefForDoc(doc), ref);
-  for (const sprint of sprintOptionsForDocs(docs)) {
-    if (matches(sprint.doc)) return {
-      selection: { role: "orchestrator", sprintDocumentRef: sprint.ref }, roles: ["orchestrator"],
-    };
-    for (const master of masterOptionsForSprint(docs, sprint.doc)) {
-      const scope = { sprintDocumentRef: sprint.ref, masterDocumentRef: master.ref };
-      if (matches(master.doc)) return { selection: { role: "manager", ...scope }, roles: ["manager"] };
-      for (const leaf of taskOptionsForMaster(docs, series, master.doc)) {
-        if (matches(leaf.doc)) return {
-          selection: { role: "worker", ...scope, taskDocumentRef: leaf.ref },
-          roles: ["worker", "reviewer", "curator"],
-        };
-      }
-    }
-  }
-  return { selection: { role: "worker" }, roles: [],
-    problem: "No role can start here: a leaf needs a master commanded by a sprint, and a master needs its commanding sprint document." };
+  return bindingInTree(ref, ref ? documentBindings(docs, series) : []);
 }
 
 export function documentChatAgent(ref: TaskDocumentRef | undefined, agents: DocumentAgent[]): DocumentAgent | null {
