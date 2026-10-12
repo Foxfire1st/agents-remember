@@ -250,6 +250,7 @@ consumers = [
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -261,6 +262,7 @@ consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_structural_dispatch_recovery.py",
   "mcp/tests/test_tool_answer_log.py",
@@ -1442,6 +1444,7 @@ consumers = [
   "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_no_harness_name.py",
   "mcp/tests/test_paseo_node.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -1530,6 +1533,8 @@ consumers = [
   "mcp/tests/test_role_instruction_corpus.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
+  "mcp/tests/test_role_message_wording.py",
   "mcp/tests/test_role_report.py",
   "mcp/tests/test_role_single_server.py",
   "mcp/tests/test_role_start_set.py",
@@ -2172,6 +2177,7 @@ consumers = [
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
 ]
 
@@ -2204,6 +2210,7 @@ consumers = [
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -2214,6 +2221,7 @@ consumers = [
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
 ]
 
