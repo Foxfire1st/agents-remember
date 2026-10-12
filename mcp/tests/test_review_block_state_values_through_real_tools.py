@@ -186,7 +186,9 @@ def test_sync_records_not_measured_when_the_carry_fails(
     (code_worktree / "same.py").write_text("SAME = 1\n", encoding="utf-8")
     contract, _reviewed = _record_review(lines)
     config = _sync_config(lines)
-    commit_file(lines.fixture.code_repo, "same.py", "SAME = 1\n")
+    # The landed line holds different bytes than the parked file: applying the
+    # parked candidate would lose the parked byte, so the git proof still refuses.
+    commit_file(lines.fixture.code_repo, "same.py", "SAME = 2\n")
     result = worktree_tools.worktree_sync_tool(
         config,
         contract_path=contract.contract_path.as_posix(),

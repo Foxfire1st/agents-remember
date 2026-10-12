@@ -71,6 +71,13 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
+    # The operation-created tree and index at a retained stop: path fingerprints captured
+    # when a merge or parked-candidate reapply is retained (or a staged memory merge is
+    # refused), so a cancel can tell owned output from later bytes. Each value is
+    # "<worktree-sha256>:<index-sha256>" ("absent"/"unreadable" where no bytes exist);
+    # the index half hashes `git ls-files -s` output, stages included. Never rewritten
+    # after capture: an agent edit must read as later work, never as a new reference.
+    retainedTreeDigests: dict[str, str] = {}
     # A crossing sync's durable report (MIK-R24 rule 8): the item-level conflicts, with each side's
     # value, and the cards taken from each side. The resolution payload names it and summarises it.
     crossingReport: str = Field(default="", max_length=4096)

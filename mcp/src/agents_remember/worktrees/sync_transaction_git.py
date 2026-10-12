@@ -6,12 +6,18 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import os
+import shutil
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import read_git_blob_bytes, run_git
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
@@ -32,6 +38,50 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.services import CrossingPlanView
 from agents_remember.worktrees.sync_transaction_state import SyncSideRecord
+
+logger = logging.getLogger(__name__)
+
+#: How many paths a refusal names inline; the full set always reaches the log.
+MAX_NAMED_SYNC_PATHS = 10
+
+
+@dataclass(frozen=True)
+class ExpectedReappliedContent:
+    """What the reapply of one parked path onto the carried head gives.
+
+    ``kind`` is ``"bytes"`` (the worktree must hold ``content``), ``"absent"``
+    (the path must be gone), ``"uncomputable"`` (no construction proves it: the
+    proof fails the path and the cancel leads back), or ``"unreadable"`` (the
+    live worktree entry, never an expectation: a directory or device where a
+    file belongs, which matches nothing).
+    """
+
+    kind: str
+    content: bytes = b""
+
+
+@dataclass(frozen=True)
+class CancelTreeAssessment:
+    """Whether a cancel may discard one side's tree before rolling its head back.
+
+    ``later_work`` names dirty paths no stash and no commit holds: the cancel is
+    refused while it is non-empty. ``unproven_paths`` names dirty paths no
+    reference shows to be the transaction's own after an interrupted step: the
+    cancel is refused while it is non-empty, and the refusal says so instead of
+    claiming later work. ``owned_untracked`` names untracked paths the
+    recorded stash holds, removed explicitly because ``reset --hard`` keeps them.
+    ``needs_discard`` says owned dirt is present at all.
+    """
+
+    later_work: tuple[str, ...] = ()
+    owned_untracked: tuple[str, ...] = ()
+    unproven_paths: tuple[str, ...] = ()
+    needs_discard: bool = False
+
+
+#: Blob modes ``merge-file`` can reapply; a symlink or submodule change the proof
+#: cannot compute fails its path instead of passing it.
+_REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 
 
 class SyncGitProofError(RuntimeError):
@@ -147,15 +197,17 @@ def git_status(side: SyncSideRecord) -> str:
     return result.stdout.strip()
 
 
-def worktree_dirty_paths(side: SyncSideRecord) -> tuple[str, ...]:
-    """Every dirty path the worktree holds, untracked included.
+def _content_spec_paths(side_name: str) -> tuple[str, ...]:
+    if side_name == "memory":
+        return (".", ":!memory.md")
+    return (".",)
 
-    NUL separation is the only porcelain form that never quotes a path, so the reported
-    paths are exactly the paths git reported.
-    """
+
+def _dirty_names(worktree: Path, side_name: str) -> tuple[str, ...]:
+    """Every dirty path one worktree holds, untracked included, NUL-parsed."""
 
     result = run_git(
-        Path(side.worktree), ["status", "--porcelain", "-z", "-uall", *_content_pathspec(side)]
+        worktree, ["status", "--porcelain", "-z", "-uall", *_content_spec_paths(side_name)]
     )
     if result.returncode != 0:
         raise SyncGitProofError(result.stderr.strip() or "could not read sync worktree status")
@@ -172,6 +224,55 @@ def worktree_dirty_paths(side: SyncSideRecord) -> tuple[str, ...]:
         if "R" in status or "C" in status:
             index += 1
     return tuple(paths)
+
+
+def _untracked_names(worktree: Path, side_name: str) -> frozenset[str]:
+    """Every untracked path one worktree holds, minus the derived memory cache."""
+
+    result = run_git(worktree, ["status", "--porcelain", "-z", "-uall"])
+    if result.returncode != 0:
+        raise SyncGitProofError(result.stderr.strip() or "could not read sync worktree status")
+    entries = result.stdout.split("\0")
+    names: set[str] = set()
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if not entry:
+            continue
+        status = entry[:2]
+        path = entry[3:]
+        if "R" in status or "C" in status:
+            index += 1
+            continue
+        if status == "??" and not (side_name == "memory" and path == "memory.md"):
+            names.add(path)
+    return frozenset(names)
+
+
+def _fingerprint_at(worktree: Path, path: str) -> str:
+    """One path's state at one worktree: worktree bytes plus full index entries."""
+
+    actual = _entry_content_at(worktree, path)
+    if actual.kind == "bytes":
+        worktree_part = f"bytes:{hashlib.sha256(actual.content).hexdigest()}"
+    else:
+        worktree_part = actual.kind
+    listed = run_git(worktree, ["ls-files", "-s", "-z", "--", path])
+    if listed.returncode != 0:
+        raise SyncGitProofError(f"could not read the index state of {path}")
+    index_part = hashlib.sha256(listed.stdout.encode("utf-8", "surrogateescape")).hexdigest()
+    return f"{worktree_part}:{index_part}"
+
+
+def worktree_dirty_paths(side: SyncSideRecord) -> tuple[str, ...]:
+    """Every dirty path the worktree holds, untracked included.
+
+    NUL separation is the only porcelain form that never quotes a path, so the reported
+    paths are exactly the paths git reported.
+    """
+
+    return _dirty_names(Path(side.worktree), side.side)
 
 
 def park_worktree_wip(side: SyncSideRecord, *, message: str) -> str:
@@ -231,36 +332,644 @@ def apply_parked_wip(side: SyncSideRecord) -> tuple[str, tuple[str, ...]]:
 def prove_parked_wip_restored(side: SyncSideRecord, carried_head: str) -> bool:
     """Prove the parked candidate is back in the worktree, not silently lost.
 
-    A parked path is restored when the worktree reports it dirty again, or when the
-    carried result already holds exactly the parked content (a clean reapply that the
-    moved source made identical). Anything else fails the proof.
+    For each parked path the proof establishes that the worktree holds what the
+    reapply of the parked change onto the carried head gives. An edit the
+    carried line already holds is restored; a parked path whose content is in
+    neither the worktree nor the carried line fails it.
+    """
+
+    return not parked_wip_failures(side, carried_head)
+
+
+def parked_wip_failures(side: SyncSideRecord, carried_head: str) -> tuple[str, ...]:
+    """The parked paths whose bytes the worktree does not hold.
+
+    A path fails when the worktree differs from the reapplied content, and when
+    no construction computes that content (a file type git cannot merge, a path
+    removed on one side): both fail the proof and the cancel leads back. Every
+    path the stash holds is proved, including entries beyond the journal sample.
+    An unreadable stash inventory raises instead of passing on the sample: the
+    sample names failures, it never passes a proof.
+    """
+
+    failures: list[str] = []
+    for path in stashed_parked_paths(side):
+        expected = expected_reapplied_content(side, path, carried_head)
+        if expected.kind == "uncomputable":
+            failures.append(path)
+            continue
+        actual = worktree_entry_content(side, path)
+        if (actual.kind, actual.content) != (expected.kind, expected.content):
+            failures.append(path)
+    return tuple(failures)
+
+
+def expected_reapplied_content(
+    side: SyncSideRecord, path: str, carried_head: str
+) -> ExpectedReappliedContent:
+    """What the reapply of one parked path onto the carried head gives."""
+
+    repository = Path(side.repository)
+    parked_rev, parked = _parked_path_content(side, path)
+    base = _spec_content(repository, (f"{side.preSyncHead}:{path}",))
+    carried = _spec_content(repository, (f"{carried_head}:{path}",))
+    holders: list[tuple[str, bool]] = [
+        (side.preSyncHead, base is not None),
+        (carried_head, carried is not None),
+    ]
+    if parked_rev is not None:
+        holders.append((parked_rev, parked is not None))
+    if not _regular_modes(repository, path, holders):
+        return ExpectedReappliedContent("uncomputable")
+    if base is None:
+        return _expected_added_path(parked, carried)
+    if parked is None:
+        return _expected_deleted_path(base, carried)
+    if carried is None:
+        return ExpectedReappliedContent("uncomputable")
+    return _expected_changed_path(repository, parked, base, carried)
+
+
+def _expected_deleted_path(base: bytes, carried: bytes | None) -> ExpectedReappliedContent:
+    """What the reapply of a parked deletion gives."""
+
+    if carried is None or carried == base:
+        return ExpectedReappliedContent("absent")
+    return ExpectedReappliedContent("uncomputable")
+
+
+def _expected_changed_path(
+    repository: Path, parked: bytes, base: bytes, carried: bytes
+) -> ExpectedReappliedContent:
+    """What the reapply of a parked change to a carried-changed file gives."""
+
+    if parked == base:
+        return ExpectedReappliedContent("bytes", carried)
+    if carried == base:
+        return ExpectedReappliedContent("bytes", parked)
+    return _merged_path_content(repository, parked, base, carried)
+
+
+def parked_path_content(side: SyncSideRecord, path: str) -> ExpectedReappliedContent:
+    """The parked candidate's own content for one path: bytes, absent, or uncomputable."""
+
+    repository = Path(side.repository)
+    parked_rev, parked = _parked_path_content(side, path)
+    if parked is None:
+        base = _spec_content(repository, (f"{side.preSyncHead}:{path}",))
+        if base is None:
+            return ExpectedReappliedContent("uncomputable")
+        return ExpectedReappliedContent("absent")
+    if parked_rev is None or _rev_mode(repository, parked_rev, path) not in _REGULAR_BLOB_MODES:
+        return ExpectedReappliedContent("uncomputable")
+    return ExpectedReappliedContent("bytes", parked)
+
+
+def _entry_content_at(worktree: Path, path: str) -> ExpectedReappliedContent:
+    target = worktree / path
+    if target.is_symlink():
+        return ExpectedReappliedContent("bytes", os.fsencode(os.readlink(target)))
+    if target.is_file():
+        return ExpectedReappliedContent("bytes", target.read_bytes())
+    if not os.path.lexists(target):
+        return ExpectedReappliedContent("absent")
+    return ExpectedReappliedContent("unreadable")
+
+
+def worktree_entry_content(side: SyncSideRecord, path: str) -> ExpectedReappliedContent:
+    """The live worktree's exact bytes for one path, without following checkouts."""
+
+    return _entry_content_at(Path(side.worktree), path)
+
+
+def stashed_parked_paths(side: SyncSideRecord) -> tuple[str, ...]:
+    """Every path the recorded stash holds: tracked changes plus untracked files."""
+
+    if not side.wipStash:
+        return ()
+    repository = Path(side.repository)
+    tracked = run_git(
+        repository, ["diff", "--name-only", "-z", f"{side.wipStash}^1", side.wipStash]
+    )
+    if tracked.returncode != 0:
+        raise SyncGitProofError("could not read the parked worktree WIP paths")
+    paths = [entry for entry in tracked.stdout.split("\0") if entry]
+    third = run_git(repository, ["rev-parse", "--verify", "--quiet", f"{side.wipStash}^3"])
+    if third.returncode == 0:
+        listed = run_git(repository, ["ls-tree", "-r", "--name-only", "-z", f"{side.wipStash}^3"])
+        if listed.returncode != 0:
+            raise SyncGitProofError("could not read the parked worktree untracked paths")
+        paths.extend(entry for entry in listed.stdout.split("\0") if entry)
+    ordered: list[str] = []
+    for path in paths:
+        if path not in ordered:
+            ordered.append(path)
+    return tuple(ordered)
+
+
+def stash_entry_live(side: SyncSideRecord) -> bool:
+    """Whether the recorded stash entry is still on the live stash stack.
+
+    Assessment trusts only a live entry: a dropped stash can leave readable ghost
+    objects behind, and retiring authority on those would discard the tree's only copy.
+    """
+
+    if not side.wipStash:
+        return False
+    listed = run_git(Path(side.repository), ["stash", "list", "--format=%H"])
+    return listed.returncode == 0 and side.wipStash in listed.stdout.split()
+
+
+def sample_paths(side: SyncSideRecord) -> tuple[str, ...]:
+    """The journaled path sample, minus the derived memory cache.
+
+    It names failure paths only when the full stash inventory is unreadable; it
+    never passes a proof.
+    """
+
+    return tuple(
+        path for path in side.wipPaths if not (side.side == "memory" and path == "memory.md")
+    )
+
+
+def _scratch_tree_matches(side: SyncSideRecord, scratch: Path) -> bool:
+    """Whether a scratch reproduction holds exactly the live side's state."""
+
+    worktree = Path(side.worktree)
+    if _untracked_names(worktree, side.side) != _untracked_names(scratch, side.side):
+        return False
+    live_dirty = _dirty_names(worktree, side.side)
+    if live_dirty != _dirty_names(scratch, side.side):
+        return False
+    return all(
+        _fingerprint_at(worktree, path) == _fingerprint_at(scratch, path) for path in live_dirty
+    )
+
+
+def _reproduce_in_scratch(side: SyncSideRecord, base: str, setup: Callable[[Path], None]) -> bool:
+    """Whether a scratch worktree running the same setup holds the live state.
+
+    A crash window may hold owner bytes the live tree cannot distinguish from
+    operation output; only an exact reproduction earns trust. Any scratch that
+    cannot be built or compared fails safe to False.
+    """
+
+    repository = Path(side.repository)
+    parent = Path(tempfile.mkdtemp(prefix="ar-sync-verify-"))
+    scratch = parent / "worktree"
+    try:
+        added = run_git(repository, ["worktree", "add", "--detach", str(scratch), base])
+        if added.returncode != 0:
+            return False
+        try:
+            setup(scratch)
+        except (OSError, SyncGitProofError, CrossingSyncError):
+            return False
+        return _scratch_tree_matches(side, scratch)
+    except OSError:
+        return False
+    finally:
+        run_git(repository, ["worktree", "remove", "--force", str(scratch)])
+        shutil.rmtree(parent, ignore_errors=True)
+
+
+def _git_setup(command: list[str]) -> Callable[[Path], None]:
+    """A scratch setup running one git command; the comparison decides the rest."""
+
+    def run(scratch: Path) -> None:
+        run_git(scratch, command)
+
+    return run
+
+
+def verify_crashed_reapply(side: SyncSideRecord) -> bool:
+    """Whether the live unmerged state is exactly a fresh reapply of the stash.
+
+    A crash between a reapply and its retain journal leaves unmerged output with
+    no reference; owner bytes added in the window must never be blessed. Only an
+    exact scratch reproduction earns a fingerprint capture.
+    """
+
+    if not side.wipStash or not stash_entry_live(side):
+        return False
+    return _reproduce_in_scratch(
+        side,
+        head_commit(Path(side.worktree)),
+        _git_setup(["stash", "apply", "--quiet", side.wipStash]),
+    )
+
+
+def _merge_base_and_structure(side: SyncSideRecord) -> tuple[str, str] | None:
+    """The admitted merge's base and structure, or None where unreadable."""
+
+    try:
+        repository = Path(side.repository)
+        base = merge_base(repository, side.preSyncHead, side.sourceCommit)
+        structure = merge_structure(Path(side.worktree), base, side.preSyncHead, side.sourceCommit)
+        return base, structure
+    except (SyncGitProofError, CrossingSyncError):
+        return None
+
+
+def _crossing_setup(
+    side: SyncSideRecord,
+    base: str,
+    paired_code: PairedCode | None,
+    owner: tuple[Literal["leaf", "master"], str],
+) -> Callable[[Path], None]:
+    """A scratch setup repeating the admitted merge plus its structural crossing."""
+
+    def run(scratch: Path) -> None:
+        merged = run_git(scratch, ["merge", "--no-commit", "--no-edit", side.sourceCommit])
+        if merged.returncode not in {0, 1} or merge_head(scratch) != side.sourceCommit:
+            raise SyncGitProofError("scratch crossing merge failed")
+        plan = crossing_plan(
+            scratch,
+            (base, side.preSyncHead, side.sourceCommit),
+            paired_code=paired_code,
+            owner=owner,
+        )
+        apply_crossing(scratch, plan)
+
+    return run
+
+
+def recapture_resumed_merge(
+    side: SyncSideRecord,
+    *,
+    paired_code: PairedCode | None,
+    owner: tuple[Literal["leaf", "master"], str],
+) -> dict[str, str]:
+    """Fingerprint a resumed merge only where its output is exactly reproducible.
+
+    A merge that was already active when this call started crossed a crash
+    window; capturing its tree blindly would bless owner edits. Code and plain
+    memory merges reproduce as pure git; a converted-memory merge reproduces the
+    admitted merge plus its structural crossing, recomputed from the same
+    commits with the same paired code and owner. Anything else stays empty and
+    its cancel refuses safely while continue still settles it.
+    """
+
+    git_merge = _git_setup(["merge", "--no-commit", "--no-edit", side.sourceCommit])
+    if side.side != "memory":
+        if not _reproduce_in_scratch(side, side.preSyncHead, git_merge):
+            return {}
+        return {path: path_fingerprint(side, path) for path in worktree_dirty_paths(side)}
+    founded = _merge_base_and_structure(side)
+    if founded is None:
+        return {}
+    base, structure = founded
+    setup = git_merge if structure == "plain" else _crossing_setup(side, base, paired_code, owner)
+    if not _reproduce_in_scratch(side, side.preSyncHead, setup):
+        return {}
+    return {path: path_fingerprint(side, path) for path in worktree_dirty_paths(side)}
+
+
+def path_fingerprint(side: SyncSideRecord, path: str) -> str:
+    """One path's operation-created state: worktree bytes plus full index entries."""
+
+    try:
+        return _fingerprint_at(Path(side.worktree), path)
+    except SyncGitProofError as error:
+        raise SyncGitProofError(f"could not read the {side.side} index state of {path}") from error
+
+
+def capture_retained_digests(side: SyncSideRecord, *, include_untracked: bool) -> dict[str, str]:
+    """Fingerprint every dirty path of an operation-created retained state.
+
+    Untracked entries are captured only for a same-call reapply: after any crash
+    window an untracked file may be its owner's, and blessing it would discard it.
+    """
+
+    digests: dict[str, str] = {}
+    for path in worktree_dirty_paths(side):
+        if not include_untracked and _is_untracked(side, path):
+            continue
+        digests[path] = path_fingerprint(side, path)
+    return digests
+
+
+def assess_stash_tree(side: SyncSideRecord, carried_head: str | None) -> CancelTreeAssessment:
+    """Decide whether a cancel may discard one side's tree before rolling back.
+
+    ``carried_head`` is the head the reapply ran onto, or ``None`` where the head
+    never moved and the reference is the parked content itself. Dirty paths the
+    live recorded stash does not hold, parked paths whose worktree bytes differ
+    from the reference, parked paths whose index bytes differ from the head (or
+    from identical parked bytes), and uncomputable paths whose bytes differ from
+    the parked content are later work: the cancel is refused while any remains.
+    """
+
+    if side.wipStash and not stash_entry_live(side):
+        raise SyncGitProofError(
+            f"{side.side} recorded stash {side.wipStash} is missing; "
+            "cancel cannot prove tree ownership"
+        )
+    dirty = set(worktree_dirty_paths(side))
+    parked = set(stashed_parked_paths(side)) if side.wipStash else set()
+    later: list[str] = []
+    owned_untracked: list[str] = []
+    for path in sorted(dirty):
+        if path not in parked:
+            later.append(path)
+            continue
+        if _path_owned_by_stash(side, path, carried_head):
+            actual = worktree_entry_content(side, path)
+            if actual.kind == "bytes" and _is_untracked(side, path):
+                owned_untracked.append(path)
+        else:
+            later.append(path)
+    for path in _index_later_paths(side, carried_head, parked):
+        if path not in later:
+            later.append(path)
+    later_sorted = sorted(later)
+    return CancelTreeAssessment(
+        later_work=tuple(later_sorted),
+        owned_untracked=tuple(owned_untracked),
+        needs_discard=bool(dirty - set(later_sorted)),
+    )
+
+
+def _assess_unretained(
+    side: SyncSideRecord, carried_head: str | None, dirty: set[str]
+) -> CancelTreeAssessment:
+    """Assess a retained state whose crash window left no reference map.
+
+    With no active merge and a live stash the stash proof decides: a tree that
+    holds exactly the parked bytes is the transaction's own and cancels, anything
+    else is later work. Everywhere else — an active merge, a missing stash —
+    nothing shows the bytes to be the transaction's own, so every dirty path is
+    unproven, never later work.
+    """
+
+    if merge_head(Path(side.worktree)) is None and side.wipStash and stash_entry_live(side):
+        return assess_stash_tree(side, carried_head)
+    return CancelTreeAssessment(unproven_paths=tuple(sorted(dirty)))
+
+
+def assess_retained_tree(side: SyncSideRecord, carried_head: str | None) -> CancelTreeAssessment:
+    """Decide whether a cancel may discard a retained merge or reapply state.
+
+    Every dirty path must fingerprint-match the operation-created state captured
+    at retain time: merge output, conflict markers and stages included. A
+    fingerprint mismatch falls back to the stash's own ownership proof only
+    where the retained side carries no active merge: the live stash enumerates
+    the owned paths, and a mismatched path whose worktree and index bytes the
+    stash still owns is a crash-stale fingerprint, not later work. Paths no
+    Paths no reference shows to be the transaction's own — an unverified crash
+    window, or a recorded stash that is gone — are unproven, never later work:
+    discarding them could destroy the only copy. The one exception is a retained
+    reapply with no reference map, no active merge and a live stash: there the
+    stash proof itself decides, exactly as for an unretained tree. Anything else
+    is later work and refuses before journal, index, heads, stash or tree change.
     """
 
     dirty = set(worktree_dirty_paths(side))
-    for path in side.wipPaths:
+    retained = side.retainedTreeDigests
+    if not retained:
+        return _assess_unretained(side, carried_head, dirty)
+    if side.wipStash and not stash_entry_live(side):
+        return CancelTreeAssessment(unproven_paths=tuple(sorted(dirty)))
+    matched = {
+        path
+        for path in dirty
+        if retained.get(path) is not None and path_fingerprint(side, path) == retained[path]
+    }
+    mismatched = set(sorted(dirty)) - matched
+    fallback_owned: set[str] = set()
+    if mismatched and merge_head(Path(side.worktree)) is None:
+        parked = set(stashed_parked_paths(side))
+        index_later = set(_index_later_paths(side, carried_head, parked))
+        for path in sorted(mismatched):
+            if (
+                path in parked
+                and path not in index_later
+                and _path_owned_by_stash(side, path, carried_head)
+            ):
+                fallback_owned.add(path)
+    owned = matched | fallback_owned
+    owned_untracked = [
+        path
+        for path in sorted(owned)
+        if worktree_entry_content(side, path).kind == "bytes" and _is_untracked(side, path)
+    ]
+    later_sorted = sorted(dirty - owned)
+    return CancelTreeAssessment(
+        later_work=tuple(later_sorted),
+        owned_untracked=tuple(owned_untracked),
+        needs_discard=bool(owned),
+    )
+
+
+def _path_owned_by_stash(side: SyncSideRecord, path: str, carried_head: str | None) -> bool:
+    """Whether one dirty parked path's worktree bytes are exactly the reapply's."""
+
+    if carried_head is None:
+        expected = parked_path_content(side, path)
+    else:
+        expected = expected_reapplied_content(side, path, carried_head)
+    if expected.kind != "uncomputable":
+        actual = worktree_entry_content(side, path)
+        return (actual.kind, actual.content) == (expected.kind, expected.content)
+    raw = _parked_raw_content(side, path)
+    if raw is None:
+        return False
+    actual = worktree_entry_content(side, path)
+    return (actual.kind, actual.content) == ("bytes", raw)
+
+
+def _parked_raw_content(side: SyncSideRecord, path: str) -> bytes | None:
+    """The stashed bytes for one path without any type gate, if the stash holds them."""
+
+    _, content = _parked_path_content(side, path)
+    return content
+
+
+def _index_later_paths(
+    side: SyncSideRecord, carried_head: str | None, parked: set[str]
+) -> list[str]:
+    """Parked paths whose staged index bytes the operation did not create.
+
+    A clean reapply leaves the index at the head; any staged deviation — later
+    content, a staged deletion, foreign unmerged stages — is bytes no admitted
+    stash or commit holds. Staged bytes identical to the parked content are owned:
+    discarding them loses nothing the reapply does not return.
+    """
+
+    head = carried_head if carried_head is not None else side.preSyncHead
+    later: list[str] = []
+    for path in sorted(parked):
         if side.side == "memory" and path == "memory.md":
             continue
-        if path in dirty:
+        state, indexed = _index_state(side, path)
+        if state == "unmerged":
+            later.append(path)
             continue
-        parked = _revision_blob(side, (f"{side.wipStash}^3:{path}", f"{side.wipStash}:{path}"))
-        if parked is not None and parked == _revision_blob(side, (f"{carried_head}:{path}",)):
+        head_blob = _spec_content(Path(side.repository), (f"{head}:{path}",))
+        if state == "absent":
+            if head_blob is None or _parked_deleted(side, path):
+                continue
+            later.append(path)
             continue
+        if head_blob is not None and indexed == head_blob:
+            continue
+        raw = _parked_raw_content(side, path)
+        if raw is not None and indexed == raw:
+            continue
+        later.append(path)
+    return later
+
+
+def _index_state(side: SyncSideRecord, path: str) -> tuple[str, bytes]:
+    """One path's staged state: ("blob", bytes), ("absent", b"") or ("unmerged", b"")."""
+
+    worktree = Path(side.worktree)
+    listed = run_git(worktree, ["ls-files", "-s", "--", path])
+    if listed.returncode != 0:
+        raise SyncGitProofError(f"could not read the {side.side} index state of {path}")
+    if not listed.stdout.strip():
+        return ("absent", b"")
+    stages = {line.split()[2] for line in listed.stdout.splitlines()}
+    if stages != {"0"}:
+        return ("unmerged", b"")
+    shown = run_git(worktree, ["show", f":{path}"])
+    if shown.returncode != 0:
+        raise SyncGitProofError(f"could not read the {side.side} staged bytes of {path}")
+    return ("blob", shown.stdout.encode("utf-8", "surrogateescape"))
+
+
+def _parked_deleted(side: SyncSideRecord, path: str) -> bool:
+    """Whether the parked candidate deletes a path the pre-sync head holds."""
+
+    repository = Path(side.repository)
+    _, parked = _parked_path_content(side, path)
+    if parked is not None:
         return False
+    return _spec_content(repository, (f"{side.preSyncHead}:{path}",)) is not None
+
+
+def cancelled_wip_restored(side: SyncSideRecord) -> bool:
+    """Whether the tree holds the parked candidate as parked (heads already back)."""
+
+    for path in stashed_parked_paths(side):
+        if side.side == "memory" and path == "memory.md":
+            continue
+        expected = parked_path_content(side, path)
+        if expected.kind == "uncomputable":
+            return False
+        actual = worktree_entry_content(side, path)
+        if (actual.kind, actual.content) != (expected.kind, expected.content):
+            return False
     return True
 
 
-def discard_conflicted_wip_reapply(side: SyncSideRecord) -> None:
-    """Drop a conflicted parked-candidate reapply; the candidate itself stays in its stash."""
+def discard_owned_reapply(side: SyncSideRecord, owned_untracked: tuple[str, ...]) -> None:
+    """Drop the transaction-owned reapply; the candidate itself stays in its stash.
+
+    Only call after :func:`cancel_tree_assessment` found no later work: the reset
+    discards tracked owned changes, and the scoped clean removes exactly the owned
+    untracked paths ``reset --hard`` keeps.
+    """
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
-    if merge_head(worktree) is not None:
-        raise SyncGitProofError(f"{side.side} sync has an active merge outside cancel authority")
     reset = run_git(worktree, ["reset", "--hard"])
     if reset.returncode != 0:
         raise SyncGitProofError(
             reset.stderr.strip() or f"could not clear the {side.side} candidate reapply"
         )
+    if owned_untracked:
+        cleaned = run_git(worktree, ["clean", "-f", "--", *owned_untracked])
+        if cleaned.returncode != 0:
+            raise SyncGitProofError(
+                cleaned.stderr.strip() or f"could not clear the {side.side} owned untracked paths"
+            )
+
+
+def _expected_added_path(parked: bytes | None, carried: bytes | None) -> ExpectedReappliedContent:
+    """What the reapply of a path the pre-sync head lacks gives."""
+
+    if carried is None:
+        if parked is None:
+            return ExpectedReappliedContent("uncomputable")
+        return ExpectedReappliedContent("bytes", parked)
+    if parked is not None and carried == parked:
+        return ExpectedReappliedContent("bytes", carried)
+    return ExpectedReappliedContent("uncomputable")
+
+
+def _merged_path_content(
+    repository: Path, parked: bytes, base: bytes, carried: bytes
+) -> ExpectedReappliedContent:
+    """The three-way reapply of the parked change onto the carried head."""
+
+    with tempfile.TemporaryDirectory(prefix="ar-sync-proof-") as scratch:
+        scratch_dir = Path(scratch)
+        (scratch_dir / "parked").write_bytes(parked)
+        (scratch_dir / "base").write_bytes(base)
+        (scratch_dir / "carried").write_bytes(carried)
+        merged = run_git(
+            repository,
+            [
+                "merge-file",
+                (scratch_dir / "parked").as_posix(),
+                (scratch_dir / "base").as_posix(),
+                (scratch_dir / "carried").as_posix(),
+            ],
+        )
+        if merged.returncode != 0:
+            return ExpectedReappliedContent("uncomputable")
+        return ExpectedReappliedContent("bytes", (scratch_dir / "parked").read_bytes())
+
+
+def _parked_path_content(side: SyncSideRecord, path: str) -> tuple[str | None, bytes | None]:
+    """The stashed bytes for one path with the rev that held them, if any."""
+
+    repository = Path(side.repository)
+    for spec in (f"{side.wipStash}^3:{path}", f"{side.wipStash}:{path}"):
+        content = _spec_content(repository, (spec,))
+        if content is not None:
+            rev, _, _ = spec.rpartition(":")
+            return rev, content
+    return None, None
+
+
+def _spec_content(repository: Path, specs: tuple[str, ...]) -> bytes | None:
+    """The exact blob bytes of the first resolvable spec, or ``None`` when absent."""
+
+    for spec in specs:
+        resolved = run_git(repository, ["rev-parse", "--verify", "--quiet", spec])
+        if resolved.returncode == 0:
+            return read_git_blob_bytes(repository, resolved.stdout.strip())
+    return None
+
+
+def _rev_mode(repository: Path, rev: str, path: str) -> str | None:
+    """The tree mode one rev holds for a path, or ``None`` when it holds none."""
+
+    listed = run_git(repository, ["ls-tree", rev, "--", path])
+    if listed.returncode != 0:
+        return None
+    lines = listed.stdout.splitlines()
+    if not lines:
+        return None
+    return lines[0].split()[0]
+
+
+def _regular_modes(repository: Path, path: str, holders: list[tuple[str, bool]]) -> bool:
+    """Whether every present revision holds a blob ``merge-file`` can reapply."""
+
+    for rev, present in holders:
+        if present and _rev_mode(repository, rev, path) not in _REGULAR_BLOB_MODES:
+            return False
+    return True
+
+
+def _is_untracked(side: SyncSideRecord, path: str) -> bool:
+    """Whether a dirty path is untracked rather than modified."""
+
+    listed = run_git(Path(side.worktree), ["ls-files", "--", path])
+    return listed.returncode == 0 and not listed.stdout.strip()
 
 
 def drop_parked_wip(side: SyncSideRecord) -> bool:
@@ -280,15 +989,6 @@ def drop_parked_wip(side: SyncSideRecord) -> bool:
                 )
             return True
     return False
-
-
-def _revision_blob(side: SyncSideRecord, specs: tuple[str, ...]) -> str | None:
-    repository = Path(side.repository)
-    for spec in specs:
-        resolved = run_git(repository, ["rev-parse", "--verify", "--quiet", spec])
-        if resolved.returncode == 0:
-            return resolved.stdout.strip()
-    return None
 
 
 def merge_head(worktree: Path) -> str | None:
@@ -312,7 +1012,7 @@ def side_merge_completed(side: SyncSideRecord) -> bool:
 
 
 def _content_pathspec(side: SyncSideRecord) -> list[str]:
-    return ["--", ".", ":(top,exclude)memory.md"] if side.side == "memory" else []
+    return ["--", *_content_spec_paths(side.side)] if side.side == "memory" else []
 
 
 def content_conflicts(side: SyncSideRecord) -> tuple[str, ...]:

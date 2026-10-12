@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from agents_remember.models.worktree import SyncSide
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, cutover_lock_refusal
@@ -32,12 +33,14 @@ from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
     SyncKnowledgeValidationError,
     apply_parked_wip,
+    capture_retained_digests,
     content_conflicts,
     continue_side_merge,
     drop_parked_wip,
     ensure_temporary_worktree,
     merge_head,
     park_worktree_wip,
+    recapture_resumed_merge,
     require_side_checkout,
     side_branch_head,
     side_merge_completed,
@@ -575,17 +578,33 @@ def _run_side(
         )
         return _advance_after_side(store, record, side_name, completed)
     ensure_temporary_worktree(side)
-    outcome = start_side_merge(
-        side,
-        paired_code=_paired_code(record),
-        crossing_owner=("leaf" if record.contractKind == "leaf" else "master", record.taskId),
+    resumed_merge = merge_head(Path(side.worktree)) is not None
+    paired = _paired_code(record)
+    owner: tuple[Literal["leaf", "master"], str] = (
+        "leaf" if record.contractKind == "leaf" else "master",
+        record.taskId,
     )
+    try:
+        outcome = start_side_merge(
+            side,
+            paired_code=paired,
+            crossing_owner=owner,
+        )
+    except SyncKnowledgeValidationError:
+        if not resumed_merge and side_name == "memory":
+            record = _persist_fresh_validator_stop(store, record)
+        raise
     if outcome.state == "resolution-required":
+        if resumed_merge:
+            retained = recapture_resumed_merge(side, paired_code=paired, owner=owner)
+        else:
+            retained = capture_retained_digests(side, include_untracked=False)
         updated_side = side.model_copy(
             update={
                 "state": "resolution-required",
                 "conflictFiles": outcome.conflicts,
                 "crossingReport": outcome.crossing_report,
+                "retainedTreeDigests": retained,
             }
         )
         return update_record(store, record, phase=resolution_phase(side_name), side=updated_side)
@@ -600,6 +619,28 @@ def _run_side(
     if conflicted:
         return record
     return _advance_after_side(store, record, side_name, updated_side)
+
+
+def _persist_fresh_validator_stop(
+    store: SyncOperationStore, record: SyncOperationRecord
+) -> SyncOperationRecord:
+    """Journal the staged memory tree the knowledge validator refused.
+
+    Only a merge this call performed is fingerprinted: it crossed no owner
+    window, so the staged output is operation-created and a later cancel can
+    tell it from owner edits. A resumed merge or an agent-resolved tree is never
+    persisted here; their cancel refuses safely instead. A capture failure
+    journals nothing rather than masking the validator refusal.
+    """
+
+    if record.memory is None:
+        return record
+    try:
+        digests = capture_retained_digests(record.memory, include_untracked=False)
+    except SyncGitProofError:
+        return record
+    updated = record.memory.model_copy(update={"retainedTreeDigests": digests})
+    return update_record(store, record, phase=record.phase, side=updated, side_name="memory")
 
 
 def _knowledge_validation_refused(

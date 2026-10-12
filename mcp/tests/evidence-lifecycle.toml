@@ -389,6 +389,7 @@ consumers = [
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
 ]
 
@@ -573,6 +574,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_custody.py",
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
@@ -1844,6 +1846,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_inserts.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
 
