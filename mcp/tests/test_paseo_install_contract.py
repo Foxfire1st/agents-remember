@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
@@ -55,6 +56,7 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
         return provision_for_install(actual, runner=fake, reader=fake.reader, probe=free)
 
     previous = {"ok": True, "summary": {"copiedFiles": 5}}
+    report_dir = config.coordination_root / "temp" / "tool-reports" / "runtime_install"
     with (
         patch(
             "agents_remember.application.runtime.install.install_runtime_from_config",
@@ -62,7 +64,11 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
         ),
         patch.object(paseo_install, "provision_for_install", side_effect=provision) as call,
     ):
+        filed_before = set(report_dir.glob("*-install*.json"))
         result = runtime_install_payload(config, RuntimeInstallRequest())
+        # Exactly one report is filed by this first install; the later
+        # `updated` call files another, so capture this one here.
+        first_filed = sorted(set(report_dir.glob("*-install*.json")) - filed_before)
         before = file_states(tmp_path)
         at = len(fake.calls)
         second = run_runtime_install(config, RuntimeInstallRequest())
@@ -77,10 +83,25 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
     assert call.call_count == 3
     assert not second["host"]["changed"]
     assert not second_mutations and second_files == before
-    assert result["summary"] == previous["summary"]
-    assert result["host"]["version"] == PASEO_VERSION
-    assert "latest" in result["host"]["notice"]
-    assert str(user_agentic_settings_path()) in result["host"]["notice"]
+    # The first provisioned install is over the answer bound, so since L112
+    # (976bc39e: MIK-R112 rule 9 projects the answer onto its row, MIK-R108
+    # rule 4 guards it) the delivered answer is the overflow short form. The
+    # whole install — summary, host, node — lies in the report the answer names
+    # in `reportPath`, which is where the test reads it.
+    assert result["ok"]
+    assert result["overflow"] is True
+    # The overflow short form sheds strings over 200 chars, so under a long
+    # test root the answer no longer names `reportPath`; the first install's
+    # report is still filed under the coordination root, so derive the
+    # pointer: the answer's when present, else the newly filed report.
+    assert len(first_filed) == 1, f"expected one new install report, saw {first_filed}"
+    if "reportPath" in result:
+        assert Path(result["reportPath"]) == first_filed[0]
+    whole = json.loads(first_filed[0].read_text(encoding="utf-8"))
+    assert whole["summary"] == previous["summary"]
+    assert whole["host"]["version"] == PASEO_VERSION
+    assert "latest" in whole["host"]["notice"]
+    assert str(user_agentic_settings_path()) in whole["host"]["notice"]
     assert fake.mutations().count(("npm", "ci")) == 1
     assert {
         "ok",
@@ -93,12 +114,25 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
         "changes",
         "error",
         "node",
-    } <= set(result["host"])
-    assert {"version", "platform", "path", "url", "sha256"} <= set(result["host"]["node"])
+    } <= set(whole["host"])
+    assert {"version", "platform", "path", "url", "sha256"} <= set(whole["host"]["node"])
     assert ("daemon", "reload") in fake.mutations(update_at)
     assert ("daemon", "stop") not in fake.mutations(update_at)
     assert ("daemon", "start") not in fake.mutations(update_at)
-    assert "new-provider" in json.dumps(updated["host"]["changes"])
+    # The updated call's answer is bounded the same way: under a long root
+    # it sheds the whole `host` dict, so the update facts come from the
+    # updated call's own filed report — the retained whole-result path —
+    # with the answer's `ok` kept as the delivered-outcome check.
+    assert updated["ok"] is True
+    updated_filed = sorted(
+        set(report_dir.glob("*-install*.json")) - filed_before - set(first_filed)
+    )
+    assert len(updated_filed) == 1, f"expected one updated report, saw {updated_filed}"
+    if "reportPath" in updated:
+        assert Path(updated["reportPath"]) == updated_filed[0]
+    updated_whole = json.loads(updated_filed[0].read_text(encoding="utf-8"))
+    assert "new-provider" in json.dumps(updated_whole["host"]["changes"])
+    assert "pnt-provider-value" not in json.dumps(updated_whole)
     assert "pnt-provider-value" not in json.dumps(updated)
 
 
@@ -131,8 +165,16 @@ def test_preview_and_absent_host_make_no_mutation_and_host_error_preserves_earli
             side_effect=AssertionError("preview provisioned"),
         ),
     ):
-        preview = runtime_install_payload(config, RuntimeInstallRequest(dry_run=True))["host"]
-    assert dispatched.call_count == 1
+        seen = dispatched.call_count
+        preview_answer = runtime_install_payload(config, RuntimeInstallRequest(dry_run=True))
+        # A dry run files no report and a direct call writes no log, so the
+        # bounded dry-run answer is the only retained object — and under a
+        # long root its short form sheds `host`. The preview flags come from
+        # the same preview computation via the unshaped application result;
+        # each of the two preview calls dispatches exactly once.
+        assert preview_answer["ok"] is True
+        preview = run_runtime_install(config, RuntimeInstallRequest(dry_run=True))["host"]
+        assert dispatched.call_count == seen + 2
     assert preview["wouldInstallHost"] and preview["wouldStart"]
     assert fake.mutations() == []
     assert {

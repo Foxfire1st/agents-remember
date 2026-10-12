@@ -316,9 +316,12 @@ def world_fixture() -> Iterator[tuple[Path, McpRuntimeConfig, _FakeHost, Path]]:
     Short on purpose: the opener mints a Unix-domain control socket under the coordination root and
     the 103-byte path limit is a real production constraint, so a deep pytest temporary directory
     would fail the launch for a reason that has nothing to do with this leaf.
+    The approved short root keeps the suite green for any TMPDIR.
     """
 
-    root = Path(tempfile.mkdtemp(prefix="l15-"))
+    short_root = Path("/tmp/mik-run3/l157/t")
+    short_root.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="l15-", dir=short_root))
     try:
         yield (root, *_scratch_world(root))
     finally:

@@ -155,13 +155,23 @@ def write_current_task_lineage(
     master_name: str,
     leaf_id: str,
 ) -> Path:
-    """Create a current organizational sprint-super -> leaf lineage."""
+    """Create a current organizational sprint-super -> leaf lineage.
+
+    Since L50 (00d6b4d4, MIK-R50) the fixture contract runs external memory, so
+    the memory edge is part of the lineage: the memory repository is created
+    here with the same source and work branches, or the lineage cannot prove
+    and task-bound seats fail closed.
+    """
     repo = coordination_root / "fixture-repositories" / repo_name
     base = init_repo(repo, "main")
     super_branch = "super"
     leaf_branch = f"ar/{leaf_id}"
     git(repo, "branch", super_branch, "main")
     git(repo, "branch", leaf_branch, super_branch)
+    memory_repo = coordination_root / "memory-repos" / repo_name
+    memory_base = init_repo(memory_repo, "main")
+    git(memory_repo, "branch", super_branch, "main")
+    git(memory_repo, "branch", leaf_branch, super_branch)
     task_root = coordination_root / "tasks" / repo_name
     master_path = task_root / master_name / "task.json"
     master = read_task_doc(master_path)
@@ -214,10 +224,10 @@ def write_current_task_lineage(
             base_commit=base,
         ),
         memory=RepoBranchPlan(
-            repo_path=coordination_root / "memory-repos" / repo_name,
+            repo_path=memory_repo,
             source_branch=super_branch,
             work_branch=leaf_branch,
-            base_commit=base,
+            base_commit=memory_base,
         ),
     )
     write_contract(leaf.contract_path, leaf)

@@ -89,18 +89,26 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
     def _assert_bounded_parser_refusal(self, result, contract, malformed_bytes) -> None:
+        # Since L108 (663f51ae, MIK-R108 rules 3-4) the oversized parser refusal
+        # is over the answer bound: the delivered answer is the overflow short
+        # form, and the whole refusal — the bounded detail and the admission —
+        # lies in the file the answer names in `log`.
         self.assertFalse(result.isError)
         assert result.structuredContent is not None
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
+        self.assertTrue(payload["overflow"])
         self.assertEqual(payload["state"], "atomic-series-contract-unreadable")
         self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
-        self.assertEqual(payload["contract_path"], contract.contract_path.as_posix())
-        self.assertIn("invalid contract kind:", payload["detail"])
-        self.assertLessEqual(len(payload["detail"]), 8192)
-        self.assertTrue(payload["detail"].endswith("\u2026 [detail truncated]"))
+        # `contract_path` is a long path: the short form sheds it under a
+        # long test root, so read it from the whole refusal in `log`.
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole["contract_path"], contract.contract_path.as_posix())
+        self.assertIn("invalid contract kind:", whole["detail"])
+        self.assertLessEqual(len(whole["detail"]), 8192)
+        self.assertTrue(whole["detail"].endswith("\u2026 [detail truncated]"))
 
-        admission = payload["admission"]
+        admission = whole["admission"]
         self.assertNotIn("classification", admission)
         self.assertNotIn("blocking", admission)
         self.assertEqual(admission["status"], "atomic-series-contract-unreadable")
@@ -124,9 +132,9 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertIn("before retrying", payload["retryPrecondition"])
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
-        self.assertIn("invalid contract kind:", self._text(result))
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertIn("invalid contract kind:", json.dumps(whole))
         self.assertIn("worktree_status", self._text(result))
         self.assertEqual(contract.contract_path.read_bytes(), malformed_bytes)
 
@@ -310,13 +318,16 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         assert sync.structuredContent is not None
         sync_payload = sync.structuredContent
         self.assertFalse(sync_payload["ok"])
-        admission = sync_payload["admission"]
+        # The oversized sync refusal is over the answer bound like the parser
+        # refusal above: short form on the wire, whole admission in `log`.
+        self.assertTrue(sync_payload["overflow"])
+        self.assertEqual(sync_payload["nextTool"], "worktree_sync")
+        admission = json.loads(Path(sync_payload["log"]).read_text(encoding="utf-8"))["admission"]
         self.assertEqual(admission["activation"]["observedState"], "unreadable")
         self.assertEqual(admission["activation"]["errorType"], "ValidationError")
         self.assertLessEqual(len(admission["activation"]["detail"]), 8192)
         self.assertTrue(admission["activation"]["detail"].endswith("\u2026 [detail truncated]"))
         self.assertEqual(admission["statusAction"]["tool"], "worktree_status")
-        self.assertIn("ValidationError", self._text(sync))
         self.assertIn("worktree_status", self._text(sync))
         self.assertEqual(path.read_bytes(), before)
 
@@ -478,8 +489,14 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         malformed_bytes = contract.contract_path.read_bytes()
         with self.assertRaises(ContractError) as parser_error:
             load_contract(contract.contract_path)
-        self.assertEqual(len(str(parser_error.exception)), 9099)
-        self.assertTrue(str(parser_error.exception).startswith("invalid contract kind:"))
+        message = str(parser_error.exception)
+        self.assertTrue(message.startswith("invalid contract kind:"))
+        # The parser message embeds the contract path, so its exact length
+        # depends on the test root: derive it instead of hardcoding it.
+        self.assertEqual(
+            len(message),
+            len("invalid contract kind: ") + 9000 + len(f" (in {contract.contract_path})"),
+        )
 
         oversized = anyio.run(
             self._call,
