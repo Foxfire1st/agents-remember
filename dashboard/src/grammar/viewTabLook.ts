@@ -1,9 +1,11 @@
 import { css, cva } from "../../styled-system/css";
 
 // The one shared definition of the view tabs' look (MIK-R133 rule 7). The view
-// tabs (ModeBar) and the role launcher's selectors, chips, Start and Refresh
-// all take their height, border, corner radius, font size, letter spacing and
-// letter case from here; neither the tabs nor the launcher holds a copy.
+// tabs (ModeBar), the role launcher's selectors, chips, Start and Refresh, and
+// the tabs in the head of the tasks column all take their border, corner
+// radius, letter spacing and letter case from here; none of them holds a copy.
+// The view tabs and the launcher take their height and font size from here too;
+// the tasks column has a size of its own, defined below.
 //
 // The tabs' height is implicit: it falls out of the shared padding and font
 // size, so the launcher's controls use height auto with the same padding and
@@ -43,6 +45,32 @@ export const viewTabButton = css({
   cursor: "pointer",
   _selected: viewTabSelectedLook,
   _focusVisible: viewTabFocusLook,
+});
+
+// The same tab at the size of the tasks column (MIK-R144 rule 3b): the grouping
+// switch, the bell of the attention queue and "Clear all". The pages of the
+// column's approved look are drawn on a base of 14 px, so their tab is the
+// metrics above times 0.875, with less room left and right. At the tab's own
+// size the switch and the bell do not fit the head of the column beside its
+// title. Colours, border, corners, the selected and the focus look are the
+// ones above; the focus line lies inside the tab, because the column cuts what
+// leaves it.
+export const columnTabButton = css({
+  font: "inherit",
+  ...viewTabMetrics,
+  fontSize: "0.63rem",
+  lineHeight: "1.4",
+  paddingInline: "0.525rem",
+  paddingBlock: "0.2625rem",
+  whiteSpace: "nowrap",
+  background: "bg",
+  color: "muted",
+  borderStyle: "solid",
+  borderColor: "grid",
+  cursor: "pointer",
+  _selected: viewTabSelectedLook,
+  _focusVisible: { ...viewTabFocusLook, outlineOffset: "-1px" },
+  _disabled: { opacity: "0.5", cursor: "default" },
 });
 
 // Start has the look of the selected tab, Refresh (and the other row buttons)

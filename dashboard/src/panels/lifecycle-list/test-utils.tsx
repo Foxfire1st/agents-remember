@@ -1,5 +1,5 @@
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
 import { sessionStore } from '../../data/sessions';
@@ -114,6 +114,25 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, 'seriesI
     docPath: '/tasks/260610_browser-dashboard/task.json',
     ...over,
   } satisfies SeriesNode;
+}
+
+// The hover text of a row. The line that fills the list item carries it.
+export function rowHover(row: Element | null | undefined): string {
+  return row?.firstElementChild?.getAttribute('title') ?? '';
+}
+
+// The row a title stands on.
+export function rowOf(title: HTMLElement): HTMLElement {
+  const row = title.closest<HTMLElement>("[role='option']");
+  if (!row) throw new Error(`no row around '${title.textContent}'`);
+  return row;
+}
+
+// jsdom has no CSS.escape, which React Aria calls once a row of the list has the keyboard's
+// focus (a whole press on a row, a row brought into view). A test that gets there stands in for
+// it; `installLifecycleListCleanup` takes the stand-in away after the test.
+export function standInForCssEscape() {
+  vi.stubGlobal('CSS', { escape: (value: string) => value });
 }
 
 export function seed(projection: WorkspaceProjection) {
@@ -244,6 +263,7 @@ function collapsibleSeries(): ReturnType<typeof seriesNode>[] {
 export function installLifecycleListCleanup() {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     dashboardStore.getState().reset();
     sessionStore.getState().hydrate([]);
     window.localStorage.clear();

@@ -1,46 +1,46 @@
-import { css } from "../../styled-system/css";
+import { css, cx } from "../../styled-system/css";
+import { caretCell } from "./lifecycle-list/columnLook";
 
 const disclosure = css({
-  flex: "none",
-  display: "inline-grid",
-  placeItems: "center",
-  width: "1rem",
-  height: "1rem",
   padding: "0",
   background: "transparent",
-  color: "muted",
   borderWidth: "0",
   cursor: "pointer",
   font: "inherit",
-  fontSize: "0.68rem",
-  lineHeight: "1",
+  textAlign: "left",
   _hover: { color: "ink" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
 
+// The caret of a parent row of the tasks tree. `held` is the parent the chosen document stands
+// under: the tree is always open down to that document, so the caret says so and does not close.
 export function TaskGroupDisclosure({
   label,
   collapsed,
+  held = false,
   onToggle,
 }: {
   label: string;
   collapsed: boolean;
+  held?: boolean;
   onToggle: () => void;
 }) {
+  const action = `${collapsed ? "Expand" : "Collapse"} ${label} tasks`;
   return (
     <button
       type="button"
-      className={disclosure}
-      aria-label={`${collapsed ? "Expand" : "Collapse"} ${label} tasks`}
+      className={cx(caretCell, disclosure)}
+      aria-label={action}
       aria-expanded={!collapsed}
+      title={held ? "Stays open: the chosen document is inside" : action}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
-        onToggle();
+        if (!held) onToggle();
       }}
     >
-      {collapsed ? "▶" : "▼"}
+      {collapsed ? "▸" : "▾"}
     </button>
   );
 }

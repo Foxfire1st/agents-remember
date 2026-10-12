@@ -41,11 +41,16 @@ function contrastRatio(left: Oklch, right: Oklch): number {
 
 // Playwright runs against the gallery (`/dev/bench`), which hydrates panels from fixtures — no
 // live server/sim needed, so assertions are deterministic. `?effects=off` freezes animation.
+//
+// The attention queue is a bell in the head of the tasks column; its entries are in the layer
+// the bell opens (MIK-R144 rule 3a). The three tests that read the queue open the bell first.
+// Cockpit.test.tsx asserts the same on the same test ids against the same gallery states.
 
 test("attention queue ranks alarms first and surfaces the gate", async ({
   page,
 }) => {
   await page.goto("/dev/bench?state=alarm&effects=off");
+  await page.getByTestId("attention-bell").click();
   const queue = page.getByTestId("attention-queue");
   await expect(queue).toContainText("waiting");
   await expect(page.getByTestId("attn-item").first()).toContainText("down"); // alarm sorts first
@@ -55,6 +60,7 @@ test("blocked state keeps the projected gate ask visible in the attention queue"
   page,
 }) => {
   await page.goto("/dev/bench?state=blocked&effects=off");
+  await page.getByTestId("attention-bell").click();
   const queue = page.getByTestId("attention-queue");
   await expect(queue).toContainText("Approve the plan?");
   await expect(queue).toContainText("Gate — input needed");
@@ -71,9 +77,13 @@ test("task rail pivots between repository and phase grouping", async ({
 
 test("empty state renders without items", async ({ page }) => {
   await page.goto("/dev/bench?state=empty&effects=off");
+  await page.getByTestId("attention-bell").click();
   await expect(page.getByTestId("attention-queue")).toContainText(
-    "Queue clear",
+    "nothing waiting",
   );
+  await expect(page.getByTestId("attn-item")).toHaveCount(0);
+  // An open layer takes the rest of the page out of the accessibility tree: close it first.
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "Detail" })).toBeVisible();
   await expect(
     page.getByText("Select a task to inspect its phase, gate, and tokens."),

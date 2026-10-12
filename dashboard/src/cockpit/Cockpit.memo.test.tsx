@@ -226,11 +226,17 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     expect(counts.detailPanel).toBe(1); // no selection; stable callbacks
     expect(counts.eventRiver).toBe(1);
     expect(counts.fileViewer).toBe(3); // File Viewer is visited once
-    // The left-rail panels receive only the visibility edges: Chats hides them,
-    // then Operations shows them again. LifecycleList's rendered React Aria
-    // collection has its own memo gate, so these controller renders do not rebuild it while hidden.
-    expect(counts.attentionQueue).toBe(3);
+    // The task list receives only the visibility edges: Chats hides the left rail, then
+    // Operations shows it again. LifecycleList's rendered React Aria collection has its own memo
+    // gate, so these controller renders do not rebuild it while hidden.
     expect(counts.lifecycleList).toBe(3);
+    // The attention queue is the bell in the task list's head (MIK-R144 rule 3a), so its parent
+    // is the list's rendered collection, not the rail, and the visibility edges never reach it.
+    // It renders once, when it mounts. Hiding the rail renders the list's controller alone: the
+    // collection's gate holds everything under it still. Showing the rail renders the collection
+    // again, and the bell's own memo gate stops that render: its one prop is a callback that
+    // keeps its identity.
+    expect(counts.attentionQueue).toBe(1);
   });
 
   it("keeps the visibility/aria contract and DOM identity across switches (keep-alive intact)", () => {

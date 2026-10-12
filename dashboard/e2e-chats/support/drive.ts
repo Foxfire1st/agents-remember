@@ -128,7 +128,8 @@ export async function assertWorkingStateSeenDuringTurn(page: Page, prompt: strin
   await editor.click();
   await page.keyboard.type(prompt);
   await page.getByTestId("session-composer-send").click();
-  // A working affordance (WorkingLine or the rail chat-activity chip) must appear within the
+  // A working affordance (WorkingLine, or the word "working" on the task's row of the rail, test
+  // id chat-activity) must appear within the
   // projection's latency — never a settled-green "turn-ended" for the whole streaming turn.
   await expect(page.getByTestId("working-line").or(page.getByTestId("chat-activity"))).toBeVisible({
     timeout: 30_000,

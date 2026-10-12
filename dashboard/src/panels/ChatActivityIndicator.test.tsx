@@ -1,8 +1,7 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { OpenSession } from "../data/sessions";
-import { ChatActivityIndicator, summarizeChatActivity } from "./ChatActivityIndicator";
+import { summarizeChatActivity } from "./ChatActivityIndicator";
 
 const TASK = {
   repository: "agents-remember",
@@ -19,8 +18,6 @@ function session(over: Partial<OpenSession> & Pick<OpenSession, "id">): OpenSess
     ...over,
   };
 }
-
-afterEach(cleanup);
 
 describe("Operations chat activity", () => {
   it("maps an observed busy chat to working", () => {
@@ -87,15 +84,12 @@ describe("Operations chat activity", () => {
       ],
       { taskDocumentRef: TASK },
     );
-    const { getByRole } = render(<ChatActivityIndicator summary={summary} />);
 
+    // The busiest seat is the summary; every seat stays in the detail, which the task's row
+    // shows in its hover (lifecycle-list/rowState.test.ts).
     expect(summary?.state).toBe("working");
-    expect(getByRole("status").getAttribute("aria-label")).toBe(
-      "Chat activity: working. curator: working; worker: idle",
-    );
-    expect(getByRole("status").getAttribute("title")).toBe(
-      "Chat activity: working. curator: working; worker: idle",
-    );
+    expect(summary?.label).toBe("working");
+    expect(summary?.detail).toBe("curator: working; worker: idle");
   });
 
   it("isolates exact task-document identity before considering lifecycle", () => {

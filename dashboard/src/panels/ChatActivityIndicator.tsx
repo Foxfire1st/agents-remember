@@ -1,8 +1,10 @@
-import { css, cva } from "../../styled-system/css";
 import { sessionSeatRole, type OpenSession } from "../data/sessions";
 import { sameTaskDocumentRef } from "../data/taskIdentity";
 import type { TaskDocumentRef } from "../types/terminalCatalog";
 
+// The chat activity of a task: what the live chat seats bound to it are doing, as one summary.
+// The tasks column says it on the task's row: "needs input" and "working" as the row's word, the
+// seats one by one in the row's hover (lifecycle-list/rowState.ts).
 export type ChatActivityState = "needs-input" | "working" | "unknown" | "idle";
 
 export interface ChatActivityIdentity {
@@ -15,52 +17,6 @@ export interface ChatActivitySummary {
   label: string;
   detail: string;
 }
-
-const shell = css({
-  flex: "0 0 auto",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.22rem",
-  minWidth: "0",
-  maxWidth: "4.5rem",
-  fontSize: "0.66rem",
-  whiteSpace: "nowrap",
-});
-
-const marker = cva({
-  base: {
-    display: "inline-block",
-    width: "0.48rem",
-    height: "0.48rem",
-    flex: "0 0 auto",
-    borderRadius: "full",
-  },
-  variants: {
-    state: {
-      "needs-input": { background: "amber" },
-      working: { background: "mint" },
-      unknown: { background: "dormant" },
-      idle: { background: "cyan" },
-    },
-  },
-});
-
-const label = cva({
-  base: {
-    minWidth: "0",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  variants: {
-    state: {
-      "needs-input": { color: "amber" },
-      working: { color: "mint" },
-      unknown: { color: "muted" },
-      idle: { color: "cyan" },
-    },
-  },
-});
 
 const ACTIVITY_RANK: Record<ChatActivityState, number> = {
   "needs-input": 3,
@@ -131,22 +87,4 @@ export function summarizeChatActivity(
     label: activityLabel(state),
     detail: seats.map((seat) => `${seat.role}: ${activityLabel(seat.state)}`).join("; "),
   };
-}
-
-export function ChatActivityIndicator({ summary }: { summary: ChatActivitySummary | undefined }) {
-  if (!summary) return null;
-  const accessible = `Chat activity: ${summary.label}. ${summary.detail}`;
-  return (
-    <span
-      className={shell}
-      role="status"
-      aria-label={accessible}
-      title={accessible}
-      data-testid="chat-activity"
-      data-chat-activity={summary.state}
-    >
-      <span className={marker({ state: summary.state })} aria-hidden="true" />
-      <span className={label({ state: summary.state })}>{summary.label}</span>
-    </span>
-  );
 }

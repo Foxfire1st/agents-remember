@@ -8,6 +8,8 @@ import {
   installLifecycleListCleanup,
   lifecycle,
   projection,
+  rowHover,
+  rowOf,
   seed,
   seriesNode,
   taskDoc,
@@ -128,26 +130,27 @@ describe("LifecycleList task labels — row admission", () => {
 
     expect(getByText("Tasks · 3")).toBeTruthy();
     expect(getByText("Browser Dashboard Series")).toBeTruthy();
-    expect(getByText("15. Parallel Leaf Enclosure Workflow")).toBeTruthy();
-    expect(queryByText("16. Engine Room Stack Entry Height")).toBeNull();
+    // A leaf's row: its id, then its title.
+    expect(getByText("Parallel Leaf Enclosure Workflow").previousElementSibling?.textContent).toBe("15");
+    expect(queryByText("Engine Room Stack Entry Height")).toBeNull();
     expect(getByText("empty-state-backdrop-zoom-stability")).toBeTruthy();
     expect(queryByText("Lifecycle + Event + Gate Design")).toBeNull();
     expect(queryByText("Plan Before Worktree")).toBeNull();
     expect(queryByText("LC-ABANDONED")).toBeNull();
-    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='1']")).toBeTruthy();
-    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
+    expect(getByText("Parallel Leaf Enclosure Workflow").closest("[data-depth='1']")).toBeTruthy();
+    expect(getByText("Parallel Leaf Enclosure Workflow").closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
       "taskdoc:/tasks/260610_browser-dashboard/task.json",
     );
 
     fireEvent.click(getByText("Browser Dashboard Series"));
     expect(onSelect).toHaveBeenCalledWith("taskdoc:/tasks/260610_browser-dashboard/task.json");
-    fireEvent.click(getByText("15. Parallel Leaf Enclosure Workflow"));
+    fireEvent.click(getByText("Parallel Leaf Enclosure Workflow"));
     expect(onSelect).toHaveBeenCalledWith(
       "taskdoc:/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
     );
 
     fireEvent.click(getByText("BY PHASE"));
-    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
+    expect(getByText("Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
   });
 
   it("admits an active leaf doc whose enclosure leafId differs from the doc id only by case (L10)", () => {
@@ -237,7 +240,8 @@ describe("LifecycleList task labels — row admission", () => {
     );
 
     const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
-    const row = getByText("31. Provider State Refresh and Engine Room Honesty");
+    const row = getByText("Provider State Refresh and Engine Room Honesty");
+    expect(row.previousElementSibling?.textContent).toBe("31");
 
     expect(getByText("Tasks · 2")).toBeTruthy();
     expect(row.closest("[data-depth='1']")).toBeTruthy();
@@ -358,7 +362,8 @@ describe("LifecycleList task labels — row admission", () => {
     );
 
     const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
-    const row = getByText("29. Event-River Retention and Projection Freshness");
+    const row = getByText("Event-River Retention and Projection Freshness");
+    expect(row.previousElementSibling?.textContent).toBe("29");
     expect(getByText("Tasks · 2")).toBeTruthy();
     expect(row.closest("[data-depth='1']")).toBeTruthy();
     expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
@@ -442,16 +447,17 @@ describe("LifecycleList task labels — row admission", () => {
     expect(queryByText("12_three-party-loops")).toBeNull();
 
     // The bound lifecycle ANNOTATES the single row: state, gate, and staleness flow through it.
+    // The open gate is the row's word; the lifecycle's own state and its age are in the hover.
     const contractRow = getByText("Hangar Worktree Truth");
-    expect(contractRow.getAttribute("title")).toContain("Lifecycle: LC-CONTRACT");
-    expect(contractRow.getAttribute("title")).toContain("State: blocked");
-    expect(contractRow.getAttribute("title")).toContain("Gate: closeout-approval");
+    const contractHover = rowHover(rowOf(contractRow));
+    expect(contractHover).toContain("Lifecycle: LC-CONTRACT · blocked");
+    expect(contractHover).toContain("last event 2m ago"); // staleSeconds: 120
+    expect(contractHover).toContain("Gate: closeout-approval");
     expect(getByText("closeout-approval")).toBeTruthy();
-    expect(getByText(/2m/)).toBeTruthy(); // staleSeconds: 120 formatted into the row meta
 
     const anchorRow = getByText("Three Party Loops");
-    expect(anchorRow.getAttribute("title")).toContain("Lifecycle: LC-ANCHOR");
-    expect(anchorRow.getAttribute("title")).toContain("State: running");
+    expect(rowHover(rowOf(anchorRow))).toContain("Lifecycle: LC-ANCHOR · running");
+    expect(rowHover(rowOf(anchorRow))).toContain("State: running");
 
     // Selecting the single row selects the task document — the leaf's durable identity.
     fireEvent.click(contractRow);

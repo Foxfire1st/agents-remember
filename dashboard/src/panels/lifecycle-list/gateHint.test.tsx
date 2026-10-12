@@ -8,6 +8,8 @@ import {
   installLifecycleListCleanup,
   lifecycle,
   projection,
+  rowHover,
+  rowOf,
   seed,
   taskDoc,
 } from "./test-utils";
@@ -45,12 +47,13 @@ describe("LifecycleList gate hint (L17 — no bare-ask affordance)", () => {
       }),
     );
     const { getByText } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
-    const row = getByText("Ask Only Leaf");
+    const row = rowOf(getByText("Ask Only Leaf"));
     // The lifecycle IS bound (its state annotates the row) — so the absent gate line is the contract,
     // not a missing binding. Neither a "Gate:" line nor the ask question leaks into the row.
-    expect(row.getAttribute("title")).toContain("State: running");
-    expect(row.getAttribute("title")).not.toContain("Gate:");
-    expect(row.getAttribute("title")).not.toContain("Approve the plan?");
+    expect(rowHover(row)).toContain("State: running");
+    expect(rowHover(row)).not.toContain("Gate:");
+    expect(rowHover(row)).not.toContain("Approve the plan?");
+    expect(row.textContent).not.toContain("Approve the plan?");
   });
 });
 
