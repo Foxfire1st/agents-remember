@@ -388,6 +388,7 @@ integration = [
   "mcp/tests/test_closeout_queue_abandoned_rows.py",
   "mcp/tests/test_code_quality_check.py",
   "mcp/tests/test_cold_start.py",
+  "mcp/tests/test_completed_direct_landing_disposition.py",
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversation_control_api.py",

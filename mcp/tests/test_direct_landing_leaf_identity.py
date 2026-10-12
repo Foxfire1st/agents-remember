@@ -145,9 +145,7 @@ def test_direct_landing_with_leaf_id_refuses_another_leaf_s_open_file(
     assert LEAF in refused.value.detail and "260928-MIK-L96" in refused.value.detail
 
 
-def test_direct_landing_with_an_invalid_leaf_id_refuses_by_name(
-    world: Gated, ports: None
-) -> None:
+def test_direct_landing_with_an_invalid_leaf_id_refuses_by_name(world: Gated, ports: None) -> None:
     """Rule 8: a leaf_id that names no history file refuses, naming the leaf_id."""
 
     code_commit = commit(world.code, {})  # a changed code commit: this landing is no replay
@@ -179,10 +177,10 @@ def test_recovery_through_operation_control_settles_the_kept_closing_receipt(
     Architect ruling 0f278214 part (b): the test with the real executor that calls
     recover_direct_landing_under_authority and shows the kept closing receipt settled
     in the same call. The recovery runs unmocked: ``recover_direct_landing_under_authority`` executes the
-    route's own ``execute_or_require_direct_landing_recovery``. The outer control entry
-    (``control_operation``) cannot admit this step — probed on this exact fixture state, the
-    control plane offers only ``cancel`` for the interrupted running generation, so routing
-    through it would test a refusal, not the recovery.
+    route's own ``execute_or_require_direct_landing_recovery``. Since MIK-R143 the
+    outer control entry (``control_operation``) admits this step too — the turned
+    test (a) above proves the admission through the public tool on the same
+    fixture state, where the control once offered only ``cancel``.
     """
 
     _config, series, _open_bytes = _admitted(world)
@@ -254,15 +252,17 @@ def test_public_direct_landing_with_a_wrong_leaf_refuses_naming_the_leaf(
     assert "260928-MIK-LXX-none" in str(bogus["detail"])
 
 
-def test_control_recover_on_the_interrupted_running_generation_is_refused(
+def test_control_recover_on_the_interrupted_running_generation_is_admitted(
     tmp_path: Path, ports: None
 ) -> None:
-    """F04 receipt-control witness (architect ruling 0f278214, MIK-R143): a direct landing
-    is not recovered through the control today — through the PUBLIC
-    ``worktree_operation_control`` tool, recover of the intent-less interrupted running
-    generation is refused with ``lifecycle-control-not-legal`` and the answer lists the
-    legal actions the product reports; the refusal alters nothing. With the real-executor
-    recovery test below, this pair proves MIK-R52 rule 8 line 3 here."""
+    """MIK-R143 turns L52's test (a) (architect ruling 0f278214, F04): a direct
+    landing IS recovered through the control now — through the PUBLIC
+    ``worktree_operation_control`` tool, recover of the intent-less interrupted
+    running generation is admitted, completes the same generation, and settles
+    the kept closing receipt in the same call (rule 3b, first branch). The
+    refusal this test pinned before L143 is superseded by design; the
+    interruption vehicle (a first leg cut short of proof) is unchanged, and the
+    refusal alters nothing before the recover runs."""
 
     fixture = _public_supplied_fixture(tmp_path, "control-refused")
     store = direct_landing_store(fixture["contract"])
@@ -276,24 +276,21 @@ def test_control_recover_on_the_interrupted_running_generation_is_refused(
     assert stopped["status"] == "fixture-stop", stopped
     record = store.read()
     assert record is not None and record.status == "running"
-    refused = worktree_operation_control_tool(
+    assert _receipts(fixture["contract"])
+    bind_worktree_services(build_default_worktree_services())
+    recovered = worktree_operation_control_tool(
         fixture["config"],
         OperationControlRequest(
             contract_path=fixture["contract"].contract_path.as_posix(),
             operation_kind="direct-landing",
             action="recover",
             expected_generation=record.generation,
-            intent_note="pin today's control answer",
+            intent_note="pin the admitted recovery",
         ),
     )
-    assert refused["ok"] is False, refused
-    assert refused["status"] == "lifecycle-control-not-legal", refused
-    legal = [refused.get("expected"), refused.get("observed")]
-    assert any(
-        isinstance(mapping, dict) and mapping.get("legalActions") == ["cancel"]
-        for mapping in legal
-    )
-    assert any(
-        isinstance(mapping, dict) and mapping.get("status") == "running" for mapping in legal
-    )
-    assert store.read() == record
+    assert recovered["ok"], recovered
+    current = store.read()
+    assert current is not None
+    assert (current.status, current.generation) == ("completed", record.generation)
+    assert current.operationKey == record.operationKey
+    assert _receipts(fixture["contract"]) == []

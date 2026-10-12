@@ -14,8 +14,12 @@ from agents_remember.worktrees.integration.closeout.recovery_projection import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
+    direct_supersede_refusal,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
+    completed_direct_owner,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
@@ -29,9 +33,13 @@ def require_completed_disposition(
     action: Literal["retire", "supersede"],
 ) -> None:
     """Refuse disposition unless exact unintegrated closeout authority is idle."""
+    if action == "supersede" and record.operationKind == "direct-landing":
+        # A direct landing claims no door, so there is nothing to supersede
+        # (ruling e55c0093 point 3); retire is its owner's disposition.
+        raise direct_supersede_refusal(contract, record)
     integration = located_lifecycle_operation_store(contract, "integrate").read()
     _require_idle_integration_claim(contract, integration, action)
-    exact_owner = _completed_closeout_owner(contract, record) or _completed_direct_owner(
+    exact_owner = _completed_closeout_owner(contract, record) or completed_direct_owner(
         record,
     )
     _require_completed_owner(contract, record, exact_owner)
@@ -99,33 +107,6 @@ def _completed_closeout_owner(
         "active",
         True,
         closeout_contract_sha256(contract),
-    )
-    return observed == expected
-
-
-def _completed_direct_owner(
-    record: LifecycleOperationRecord,
-) -> bool:
-    publication = record.doorPublication
-    generation = getattr(publication, "generation", None)
-    observed = (
-        record.operationKind,
-        record.generationDisposition,
-        getattr(publication, "state", None),
-        getattr(generation, "disposition", None),
-        getattr(generation, "operationKind", None),
-        getattr(generation, "operationFingerprint", None),
-        getattr(generation, "claimedOperationKey", None),
-    )
-    expected = (
-        "direct-landing",
-        "active",
-        "proven",
-        "claimed",
-        "direct-landing",
-        record.fingerprint,
-        record.operationKey,
-        generation,
     )
     return observed == expected
 

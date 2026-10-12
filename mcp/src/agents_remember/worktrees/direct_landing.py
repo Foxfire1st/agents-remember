@@ -1679,8 +1679,12 @@ def _create_direct_landing(
         return current, False
     if current.status in {"completed", "cancelled"} and current.generationDisposition in {
         "cancelled",
+        "retired",
         "superseded",
     }:
+        # A retired direct landing is replaced, not observed: after its owner
+        # retires it for audit, the next direct_landing call starts a fresh
+        # generation instead of refusing input-conflict (ruling e55c0093).
         return store.replace_terminal(queued), True
     raise DirectLandingError(
         "direct-landing-input-conflict",
