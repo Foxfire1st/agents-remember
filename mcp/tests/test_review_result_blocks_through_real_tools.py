@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 from agents_remember.application import worktree_tools
@@ -19,10 +21,12 @@ from agents_remember.application.review_final_output_receipt import comparison_k
 from agents_remember.application.review_sync_rebinding import read_review_sync_rebinding
 from agents_remember.application.review_tree_comparison import ReviewTrees, live_review_trees
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     contract_publication_text,
     publish_new_lifecycle_operation_location,
 )
+from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.worktree_contract import load_contract
 from checkpoint_landing_test_support import close_out_leaf, commit_memory_content
@@ -59,6 +63,24 @@ def _record_review(lines: Lines):
     trees = live_review_trees(contract.coordination_root, contract, capture.codeCandidateTree)
     assert isinstance(trees, ReviewTrees), trees
     return contract, trees.record
+
+
+def _integrate_without_item_judgment(config: Any, closed: Any) -> Any:
+    """Run the real integrate tool with only the worklist-items judgment stubbed.
+
+    The integration judges the closeout pair again, including open worklist
+    items; the QueueFixture leaves staged here carry uncovered scaffold hunks,
+    which that judgment correctly refuses. These receipt cases measure the
+    receipt the tool attaches, not the verdict (the gate has its own tests), so
+    they stub exactly the items judgment — the same closeout_external seam the
+    closeout-receipt cases stub — while the validator and every receipt
+    assertion run for real through worktree_integrate_tool.
+    """
+
+    with mock.patch.object(closeout_external, "leaf_gate_refusal", return_value=None):
+        return worktree_tools.worktree_integrate_tool(
+            config, contract_path=closed.contract_path.as_posix(), strategy="ff-only"
+        )
 
 
 def test_the_real_sync_tool_attaches_the_rebinding_block_for_a_moved_pair(
@@ -100,8 +122,11 @@ def test_the_real_integrate_tool_attaches_the_delivered_receipt_for_a_reviewed_l
     # The leaf's work: one code file and a converted memory tree, uncommitted when it is reviewed.
     (leaf.code_worktree / "reviewed.py").write_text("VALUE = 2\n", encoding="utf-8")
     (leaf.memory_worktree / "knowledge").mkdir(exist_ok=True)
+    # Canonical bytes: the integration judges the pair with the validator, and
+    # the validator refuses a knowledge file that is not canonical.
     (leaf.memory_worktree / "knowledge/layout.json").write_text(
-        '{"schema":"ar-memory-layout/v2","conversion":"1"}\n', encoding="utf-8"
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+        encoding="utf-8",
     )
     capture = capture_future_code_candidate(leaf)
     trees = live_review_trees(leaf.coordination_root, leaf, capture.codeCandidateTree)
@@ -109,9 +134,7 @@ def test_the_real_integrate_tool_attaches_the_delivered_receipt_for_a_reviewed_l
     reviewed_record = trees.record
 
     closed = close_out_leaf(leaf)
-    landed = worktree_tools.worktree_integrate_tool(
-        fixture.cfg, contract_path=closed.contract_path.as_posix(), strategy="ff-only"
-    )
+    landed = _integrate_without_item_judgment(fixture.cfg, closed)
 
     assert landed["ok"] is True, landed
     receipt = landed["final_output_receipt"]

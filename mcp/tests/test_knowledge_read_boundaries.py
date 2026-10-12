@@ -89,6 +89,10 @@ def _unregistered_generation_name() -> str:
 
 
 UNSUPPORTED_SCHEMA_NAME = _unregistered_generation_name()
+# A namespace no fixture dataset is bound to. Every fixture reads under the index's own
+# namespace (an index is keyed by its tree alone), so a second fixture cannot supply a
+# foreign one; the foreign side of the namespace cases below is hand-named instead.
+FOREIGN_NAMESPACE = "33333333-3333-4333-8333-333333333333"
 EVERY_RECORDED_PATH = {
     INTEGRATION_PATH,
     SYNCHRONIZATION_PATH,
@@ -130,6 +134,23 @@ def anchored_context(fixture: ReadScopeFixture) -> KnowledgeReadContext:
         fixture.repository_id,
         repository_root=fixture.git_root,
         code_tree_id=fixture.git_tree_id,
+    )
+
+
+def foreign_context(fixture: ReadScopeFixture) -> KnowledgeReadContext:
+    """The fixture's own snapshot under a namespace no dataset holds.
+
+    The context model requires the snapshot's namespace to match the context's
+    own, so both are renamed together; the read then refuses the file against
+    the foreign namespace by name.
+    """
+
+    resolved = anchored_context(fixture)
+    return resolved.model_copy(
+        update={
+            "repository_id": FOREIGN_NAMESPACE,
+            "knowledge": resolved.knowledge.model_copy(update={"repository_id": FOREIGN_NAMESPACE}),
+        }
     )
 
 
@@ -362,7 +383,11 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
                 claim=RealizationClaimDraft(
                     claim_id=claim_id,
                     invariant_revision_id=fixture.subject_revision_id,
-                    role="incidental",
+                    # Text storage keeps the normalized role set: the legacy
+                    # "incidental" spelling is refused by the sidecar model, so a
+                    # staged claim uses "support" (the role is not this case's
+                    # subject; the anchor resolution is).
+                    role="support",
                     rationale="A recorded symbol location for the same obligation.",
                 ),
                 anchor=NewAnchor(
@@ -384,10 +409,12 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
 
     assert result.state == "page", result.refusal
     assert result.page is not None
+    # The read serves the projection's identities, not the caller UUIDs the
+    # claim was staged with: look the item up under the outcome's claim id.
     item = next(
         item
         for item in result.page.items
-        if item.kind == "realization_claim" and item.claim_id == claim_id
+        if item.kind == "realization_claim" and item.claim_id == created.claim_id
     )
     assert item.anchor is not None
     assert item.anchor.resolution == "unsupported_locator"
@@ -523,23 +550,22 @@ def test_a_baseline_read_serves_a_task_free_context_and_reaches_the_whole_select
 
 def test_a_context_naming_another_namespace_refuses_and_names_both_identities(
     fixture: ReadScopeFixture,
-    tmp_path: Path,
 ) -> None:
-    """A context resolved from another dataset is refused against this file, with both sides named.
+    """A context naming another namespace is refused against this file, with both sides named.
 
-    The context carries a namespace and a logical snapshot; this file is bound to neither. The
-    refusal says which namespace it expected and which it found, so the caller is not left guessing
-    whether the path or the selection was wrong.
+    The context carries a namespace and a logical snapshot; this file is bound to neither the
+    foreign namespace nor, under it, the snapshot. The refusal says which namespace it expected
+    and which it found, so the caller is not left guessing whether the path or the selection
+    was wrong.
     """
 
-    other = build_read_scope_fixture(tmp_path / "other")
-    foreign = open_read_context(other.database_path, other.repository_id)
+    foreign = foreign_context(fixture)
     assert foreign.repository_id != fixture.repository_id
 
     result = read_knowledge_scope(
         fixture.database_path,
         foreign,
-        KnowledgeReadRequest(seed=subject_seed(other)),
+        KnowledgeReadRequest(seed=subject_seed(fixture)),
     )
 
     assert result.state == "refused"
@@ -945,7 +971,6 @@ def test_a_continuation_against_its_own_snapshot_continues_the_same_manifest(
 
 def test_a_refused_read_of_a_real_database_leaves_the_file_byte_identical(
     fixture: ReadScopeFixture,
-    tmp_path: Path,
 ) -> None:
     """A refusal on a real file changes no row and no logical digest, measured either side.
 
@@ -957,11 +982,10 @@ def test_a_refused_read_of_a_real_database_leaves_the_file_byte_identical(
     before_counts = read_row_counts(fixture.database_path)
     before_digest = _digest(fixture)
 
-    elsewhere = build_read_scope_fixture(tmp_path / "other")
     wrong_snapshot = read_knowledge_scope(
         fixture.database_path,
-        open_read_context(elsewhere.database_path, elsewhere.repository_id),
-        KnowledgeReadRequest(seed=subject_seed(elsewhere)),
+        foreign_context(fixture),
+        KnowledgeReadRequest(seed=subject_seed(fixture)),
     )
     assert wrong_snapshot.state == "refused"
     assert wrong_snapshot.refusal is not None
