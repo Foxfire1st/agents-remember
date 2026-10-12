@@ -158,14 +158,18 @@ def test_direct_landing_with_an_invalid_leaf_id_refuses_by_name(world: Gated, po
 def test_direct_landing_without_leaf_id_names_leaf_id_in_the_open_file_refusal(
     world: Gated, ports: None
 ) -> None:
-    """Rule 8: the none-or-several refusal tells the caller about leaf_id."""
+    """Bound leaf judged (MIK-R94 rules 7 and 9): without leaf_id the route lands
+    the grant-bound leaf, so no none-or-several refusal names leaf_id; the
+    invariant gate over the exact candidate refuses instead, naming the bound
+    leaf and the finding count."""
 
     commit(world.code, {A: CODE_A.replace("return value", "return -value")})
     config, series = _configured(world)
     with pytest.raises(route.DirectLandingError) as refused:
         _land(world, config, series, dry_run=True)
-    assert "0 open leaf history file(s)" in refused.value.detail
-    assert "leaf_id" in refused.value.detail
+    assert refused.value.status == "direct-landing-knowledge-gate-refused"
+    assert LEAF in refused.value.detail
+    assert "4 finding(s)" in refused.value.detail
 
 
 def test_recovery_through_operation_control_settles_the_kept_closing_receipt(
@@ -230,7 +234,9 @@ def test_public_direct_landing_with_a_wrong_leaf_refuses_naming_the_leaf(
     tmp_path: Path, ports: None
 ) -> None:
     """F04 public direct discriminator (wrong): a supplied leaf_id that is not the landing's
-    leaf refuses through the public tool, naming the supplied leaf."""
+    leaf refuses through the public tool. Under MIK-R94 rule 7 the route lands its
+    grant-bound leaf, so the refusal names the bound leaf and the open other leaf,
+    with the leaf_id hint, instead of the supplied string."""
 
     fixture = _public_supplied_fixture(tmp_path, "wrong")
     request = _converted_request(fixture, fixture["code_commit"])
@@ -249,7 +255,8 @@ def test_public_direct_landing_with_a_wrong_leaf_refuses_naming_the_leaf(
     assert LEAF in str(refused["detail"]) and other in str(refused["detail"])
     bogus = direct_landing_tool(fixture["config"], replace(request, leaf_id="260928-MIK-LXX-none"))
     assert not bogus["ok"], bogus
-    assert "260928-MIK-LXX-none" in str(bogus["detail"])
+    assert LEAF in str(bogus["detail"]) and other in str(bogus["detail"])
+    assert "leaf_id" in str(bogus["detail"])
 
 
 def test_control_recover_on_the_interrupted_running_generation_is_admitted(
