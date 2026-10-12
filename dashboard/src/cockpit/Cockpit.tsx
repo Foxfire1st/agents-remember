@@ -902,7 +902,6 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
   return (
     <IntentEntryRevalidation shown={state.view === "operations" && !state.takeover}>
       <div className={cx(shell, "cockpit--shell")}>
-        <div className="crt-overlay" aria-hidden="true" />
         <TopBar />
         {state.changeSet ? (
           <ChangeSetTakeover

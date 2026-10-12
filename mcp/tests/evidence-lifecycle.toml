@@ -1594,6 +1594,7 @@ consumers = [
   "mcp/tests/test_task_execution_topology.py",
   "mcp/tests/test_task_execution_topology_segments.py",
   "mcp/tests/test_task_intent_identity.py",
+  "mcp/tests/test_task_page_skeleton_projection.py",
   "mcp/tests/test_task_projection.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",

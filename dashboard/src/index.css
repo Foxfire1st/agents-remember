@@ -1,6 +1,7 @@
 /* Panda entry + the global layers (layered blueprint). Declares the cascade-layer order; Panda's
    postcss plugin injects the generated `tokens` / `recipes` / `utilities` layers, while `reset` /
-   `base` / `effects` are ours. Effects stay global + isolated (note 09), never per-component.
+   `base` / `effects` are ours. `effects` is the slot for global effects (note 09), never
+   per-component; it holds no rule since the scanline layer over the cockpit was removed (D223).
    Imported first in main.tsx. Token *values* still live in styles/tokens.css `:root` during the
    migration (referenced here as var(--…)); they move into Panda tokens as panels are ported.
    `webtui` (260715-FEUI-L1 S1) hosts the scoped WebTUI skin for the sessions cockpit — slotted
@@ -54,35 +55,6 @@
   }
 }
 
-@layer effects {
-  /* CRT base overlay — global, pointer-events:none, compositor-only (note 09). */
-  .crt-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    pointer-events: none;
-    /* 260721 C1: NO mix-blend-mode. A full-page multiply blend forced a whole-screen re-raster on
-       every invalidated frame (each GSAP write / video frame / scroll). Plain alpha compositing
-       keeps the scanlines + vignette — they are translucent black over a dark theme, so the look
-       is ~unchanged — and lets the overlay sit on its own static compositor layer. */
-    background:
-      repeating-linear-gradient(0deg, oklch(0 0 0 / 0.18) 0 1px, transparent 1px 3px),
-      radial-gradient(120% 120% at 50% 50%, transparent 70%, oklch(0 0 0 / 0.22) 100%);
-    animation: flicker 4s infinite;
-  }
-}
-
-@keyframes flicker {
-  0%,
-  97%,
-  100% {
-    opacity: 1;
-  }
-  98% {
-    opacity: 0.85;
-  }
-}
-
 /* shared alarm pulse (≤3 flashes/s, under WCAG 2.3.1) — used by blocked/alarm dots, signal-lost,
    caution--alarm, and the down engine silhouette. Global keyframe; frozen by effects=off below. */
 @keyframes pulse {
@@ -105,8 +77,8 @@
    closeoutSweep, warpSurgeUp/Down, landingIn) are removed. The indexing→nominal engine "powerup" is a
    Motion opacity pulse (the charge rect's fill is owned by the engineCharge class, so the cyan→mint step
    is an instant class flip, not an animation) — there is no `powerup` CSS keyframe anymore, so the canvas
-   carries no animation carve-out. `flicker` (CRT) + `pulse` (app-wide alarm, still used by the rail /
-   cockpit / topology) stay above; the determinism freeze below still applies. */
+   carries no animation carve-out. `pulse` (app-wide alarm, still used by the rail / cockpit /
+   topology) stays above; the determinism freeze below still applies. */
 
 
 

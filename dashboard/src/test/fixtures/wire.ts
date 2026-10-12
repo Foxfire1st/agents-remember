@@ -42,7 +42,7 @@
 // `exactOptionalPropertyTypes` is off. (`wireFixtureGuard.ts` covers the residual case TypeScript
 // will not — an override that has been through a variable and so lost its literal freshness.)
 
-import { metricsFor } from "../../types/projection";
+import { metricsFor } from '../../types/projection';
 import type {
   ActionAvailability,
   AgentPickupNode,
@@ -56,11 +56,11 @@ import type {
   AgentNotifierHeartbeat,
   TaskDocNode,
   WorkspaceProjection,
-} from "../../types/projection";
-import type { ObserverEvent } from "../../types/event";
-import { asServedProjection } from "../servedProjection";
-import type { NoOverrides, Overrides } from "./overrides";
-import snapshot from "../../fixtures/snapshot.json";
+} from '../../types/projection';
+import type { ObserverEvent } from '../../types/event';
+import { asServedProjection } from '../servedProjection';
+import type { NoOverrides, Overrides } from './overrides';
+import snapshot from '../../fixtures/snapshot.json';
 
 /** The sampled payload, read as the projection the server would have sent. */
 export const SERVED: WorkspaceProjection = asServedProjection(snapshot);
@@ -75,19 +75,25 @@ function demandServed<Node>(row: Node | undefined, what: string): Node {
   return row;
 }
 
-const SERVED_LIFECYCLE = demandServed(SERVED.lifecycles[0], "lifecycles[0]");
-const SERVED_ENCLOSURE = demandServed(SERVED.enclosures[0], "enclosures[0]");
-const SERVED_PROVIDER = demandServed(SERVED.providers[0], "providers[0]");
-const SERVED_TASK_DOC = demandServed(SERVED.analytics.taskDocuments[0], "analytics.taskDocuments[0]");
+const SERVED_LIFECYCLE = demandServed(SERVED.lifecycles[0], 'lifecycles[0]');
+const SERVED_ENCLOSURE = demandServed(SERVED.enclosures[0], 'enclosures[0]');
+const SERVED_PROVIDER = demandServed(SERVED.providers[0], 'providers[0]');
+const SERVED_TASK_DOC = demandServed(
+  SERVED.analytics.taskDocuments[0],
+  'analytics.taskDocuments[0]',
+);
 const SERVED_ENGINE_PROCESS = demandServed(
   SERVED.analytics.engineProcesses[0],
-  "analytics.engineProcesses[0]",
+  'analytics.engineProcesses[0]',
 );
-const SERVED_PICKUP = demandServed(SERVED.analytics.agentPickups[0], "analytics.agentPickups[0]");
-const SERVED_ATTENTION = demandServed(SERVED.analytics.attentionQueue[0], "analytics.attentionQueue[0]");
+const SERVED_PICKUP = demandServed(SERVED.analytics.agentPickups[0], 'analytics.agentPickups[0]');
+const SERVED_ATTENTION = demandServed(
+  SERVED.analytics.attentionQueue[0],
+  'analytics.attentionQueue[0]',
+);
 const SERVED_GATE = demandServed(
   SERVED.lifecycles.find((entry) => entry.gate !== undefined)?.gate,
-  "a lifecycle carrying a gate",
+  'a lifecycle carrying a gate',
 );
 
 // ── the bases: required fields only, every value taken from the served payload ──
@@ -147,6 +153,15 @@ const BASE_TASK_DOC: TaskDocNode = {
   title: SERVED_TASK_DOC.title,
   status: SERVED_TASK_DOC.status,
   kind: SERVED_TASK_DOC.kind,
+  form:
+    SERVED_TASK_DOC.kind === 'master'
+      ? SERVED_TASK_DOC.orchestrates.length > 0
+        ? 'sprint'
+        : 'master'
+      : 'task',
+  type: '',
+  headerNotes: [],
+  statusNoteTruncated: false,
   stepsDone: SERVED_TASK_DOC.stepsDone,
   stepsTotal: SERVED_TASK_DOC.stepsTotal,
   docPath: SERVED_TASK_DOC.docPath,
@@ -307,10 +322,10 @@ export function attentionItem<O extends Partial<AttentionItem> = NoOverrides>(
   return { ...BASE_ATTENTION, ...over };
 }
 
-export function action<
-  O extends Partial<ActionAvailability> & Pick<ActionAvailability, "action">,
->(overrides: Overrides<O, ActionAvailability>): ActionAvailability {
-  const over: Partial<ActionAvailability> & Pick<ActionAvailability, "action"> = overrides;
+export function action<O extends Partial<ActionAvailability> & Pick<ActionAvailability, 'action'>>(
+  overrides: Overrides<O, ActionAvailability>,
+): ActionAvailability {
+  const over: Partial<ActionAvailability> & Pick<ActionAvailability, 'action'> = overrides;
   return { enabled: true, ...over };
 }
 
@@ -354,7 +369,7 @@ export function agentNotifierHeartbeat<O extends Partial<AgentNotifierHeartbeat>
 ): AgentNotifierHeartbeat {
   const over: Partial<AgentNotifierHeartbeat> = overrides ?? {};
   return {
-    lastTickAt: "2026-07-08T00:00:00+00:00",
+    lastTickAt: '2026-07-08T00:00:00+00:00',
     ageSeconds: 1,
     staleCutoffSeconds: 30,
     stale: false,
@@ -370,16 +385,16 @@ export function agentNotifierHeartbeat<O extends Partial<AgentNotifierHeartbeat>
  * separate contract from the projection, so the base cannot come from `snapshot.json`; it is a
  * typed literal, which the mirror still checks in both directions.
  */
-export function observerEvent<O extends Partial<ObserverEvent> & Pick<ObserverEvent, "kind">>(
+export function observerEvent<O extends Partial<ObserverEvent> & Pick<ObserverEvent, 'kind'>>(
   overrides: Overrides<O, ObserverEvent>,
 ): ObserverEvent {
-  const over: Partial<ObserverEvent> & Pick<ObserverEvent, "kind"> = overrides;
+  const over: Partial<ObserverEvent> & Pick<ObserverEvent, 'kind'> = overrides;
   return {
-    schema: "ar-observer-event/v1",
+    schema: 'ar-observer-event/v1',
     id: `evt-${over.kind}`,
     ts: SERVED.generatedAt,
-    trust: "observed",
-    actor: "system",
+    trust: 'observed',
+    actor: 'system',
     ...over,
   };
 }

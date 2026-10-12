@@ -3,17 +3,13 @@
 // provider spine, and tokens. The reader family lives in taskReader.tsx, doc selection in
 // model.ts, selection state in state.ts, and the render families in taskDocPanels.tsx and
 // lifecycleBody.tsx; this file owns the container and its dispatch.
-import { memo } from "react";
+import { memo } from 'react';
 
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
-import {
-  EmptyDetailPanel,
-  SeriesDetailPanel,
-  TaskDocumentPanel,
-} from "./taskDocPanels";
-import { LifecycleDetailBody } from "./lifecycleBody";
-import { useDetailPanelState, type ViewedTaskContext } from "./state";
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
+import { EmptyDetailPanel, SeriesDetailPanel, TaskDocumentPanel } from './taskDocPanels';
+import { LifecycleDetailBody } from './lifecycleBody';
+import { useDetailPanelState, type ViewedTaskContext } from './state';
 
 function DetailPanelImpl({
   selectedId,

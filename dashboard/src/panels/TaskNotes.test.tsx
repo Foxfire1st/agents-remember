@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FolderEntry } from "../data/notes";
@@ -184,6 +184,60 @@ describe("TaskNotes reference resolution", () => {
     await view.findByTestId("notes-root-count"); // the folder answer arrived — resolution is settled
     expect(view.queryByTestId("note-ref-1")).toBeNull();
     expect(view.getByText(/the confinement idiom to reuse/)).toBeTruthy();
+  });
+
+  it("asks for the resolution once per content of the references, not per render", async () => {
+    const reference = "notes/friction-ledger.md (F-M — the finding this leaf closes)";
+    stubNotesApi([entry("friction-ledger.md")], [[reference, "friction-ledger.md"]]);
+    // What each resolution request named, in the order the page asked.
+    const asked = (): string[][] =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).startsWith("/api/notes/resolve"))
+        .map(([, init]) => (JSON.parse(String(init?.body)) as { references: string[] }).references);
+    const page = (references: string[]) => (
+      <TaskNotes repo={REPO} master={MASTER} references={references} onOpenNotes={vi.fn()} />
+    );
+    const view = render(page([reference]));
+    await view.findByTestId("note-ref-1");
+    expect(asked()).toEqual([[reference]]);
+
+    // a new list of the same content: no new request, and the link stays
+    view.rerender(page([reference]));
+    view.rerender(page([reference]));
+    await view.findByTestId("notes-root-count");
+    expect(asked()).toEqual([[reference]]);
+    expect(view.getByTestId("note-ref-1")).toBeTruthy();
+
+    // another content: one more request, which names the new list
+    view.rerender(page([reference, "another.md"]));
+    await waitFor(() => expect(asked()).toEqual([[reference], [reference, "another.md"]]));
+
+    // an empty text is a reference of its own and no empty list
+    view.rerender(page([""]));
+    await waitFor(() => expect(asked()).toHaveLength(3));
+    expect(asked()[2]).toEqual([""]);
+  });
+
+  it("asks nothing again when an empty list becomes a list of one empty text", async () => {
+    stubNotesApi([entry("friction-ledger.md")]);
+    const asked = (): string[][] =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).startsWith("/api/notes/resolve"))
+        .map(([, init]) => (JSON.parse(String(init?.body)) as { references: string[] }).references);
+    const page = (references: string[]) => (
+      <TaskNotes repo={REPO} master={MASTER} references={references} onOpenNotes={vi.fn()} />
+    );
+    const view = render(page([]));
+    await view.findByTestId("notes-root-count");
+    expect(asked()).toEqual([[]]);
+
+    // the two lists join to the same key, as they always did: the page draws the
+    // new reference and sends no second request
+    view.rerender(page([""]));
+    await view.findByTestId("plain-ref-1");
+    expect(asked()).toEqual([[]]);
   });
 });
 

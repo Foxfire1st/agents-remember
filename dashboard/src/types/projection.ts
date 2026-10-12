@@ -664,7 +664,11 @@ export interface TaskDocNode {
   executionGraphView?: TaskExecutionGraphView;
   executionNature?: "organizational" | "atomic";
   executionWaves: TaskExecutionNode[][];
+  form: "sprint" | "master" | "task";
+  headerNotes: TaskHeaderNoteNode[];
+  headerNotesTotal?: number;
   id: string;
+  integrationBranch?: string;
   kind: string;
   lifecycleId?: string;
   masterLifecycleId?: string;
@@ -674,14 +678,18 @@ export interface TaskDocNode {
   references: string[];
   repository: string;
   requirements: string[];
+  reviewState?: TaskReviewStateNode;
   seats: TaskSeatNode[];
   sections: TaskSectionNode[];
   status: string;
+  statusNote?: string;
+  statusNoteTruncated: boolean;
   steps: TaskStepNode[];
   stepsDone: number;
   stepsTotal: number;
   subTasks: TaskSubTaskRefNode[];
   title: string;
+  type: string;
 }
 
 export interface TaskDocProjectionEffect {
@@ -751,10 +759,32 @@ export interface TaskExecutionPredecessorNode {
   reason: string;
 }
 
+export interface TaskHeaderNoteNode {
+  label: string;
+  value: string;
+}
+
 export interface TaskIntentIdentity {
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   digest: string;
   schema: "task-intent/v1";
+}
+
+export interface TaskReviewFindingNode {
+  description: string;
+  descriptionTruncated: boolean;
+  findingId: string;
+  open: boolean;
+}
+
+export interface TaskReviewStateNode {
+  additionalRounds: number;
+  developerApproval?: string;
+  findings: TaskReviewFindingNode[];
+  openFindings: number;
+  pending: boolean;
+  round: number;
+  totalFindings: number;
 }
 
 export interface TaskSeatNode {
@@ -781,6 +811,10 @@ export interface TaskStepDispositionNode {
 export interface TaskStepNode {
   disposition?: TaskStepDispositionNode;
   id: string;
+  note?: string;
+  noteTruncated: boolean;
+  outcome?: string;
+  outcomeTruncated: boolean;
   status: string;
   substeps: TaskSubStepNode[];
   title: string;
@@ -789,6 +823,7 @@ export interface TaskStepNode {
 export interface TaskSubStepNode {
   disposition?: TaskStepDispositionNode;
   id: string;
+  note?: string;
   status: string;
   title: string;
 }

@@ -205,7 +205,11 @@ function ChangeSetReadState({
   }
   if (unrecorded !== null) {
     return (
-      <span className={changeSetCounts} data-testid="changeset-state" data-review-state="unrecorded">
+      <span
+        className={changeSetCounts}
+        data-testid="changeset-state"
+        data-review-state="unrecorded"
+      >
         unrecorded
       </span>
     );
@@ -252,8 +256,8 @@ function ChangeSetStateDetails({
   if (unrecorded === null) return null;
   return (
     <EntryStateDetails testId="changeset-state-details" label={label}>
-      Nothing has recorded this change-set&apos;s endpoint yet: the range is unrecorded, not measured
-      empty.{unrecorded ? ` ${unrecorded}` : ''}
+      Nothing has recorded this change-set&apos;s endpoint yet: the range is unrecorded, not
+      measured empty.{unrecorded ? ` ${unrecorded}` : ''}
     </EntryStateDetails>
   );
 }

@@ -515,6 +515,10 @@ function masterDoc(): TaskDocNode {
     title: "Agent Orchestration",
     status: "inProgress",
     kind: "master",
+    form: "master",
+    type: "",
+    headerNotes: [],
+    statusNoteTruncated: false,
     docPath: `/tasks/${REPO}/${MASTER}/task.json`,
     bodyRevision: "",
     createdAt: "2026-07-07T09:00:00+00:00",
@@ -665,12 +669,15 @@ describe("decision whole-log page", () => {
 });
 
 describe("task report target", () => {
+  // The role scope the report is recorded under: the viewer is given it and the request names it.
+  const REPORT_ROLE = "worker";
+
   it("fetches the recorded report for its role scope and renders it", async () => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       if (url === "/api/role-launch/report") {
         const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
         expect(body).toEqual({
-          role: "worker",
+          role: REPORT_ROLE,
           taskDocumentRef: { repository: REPO, path: `${MASTER}/09_x.json` },
           requestId: "req-1",
         });
@@ -688,7 +695,7 @@ describe("task report target", () => {
         kind="task-report"
         repo={REPO}
         master={MASTER}
-        role="worker"
+        role={REPORT_ROLE}
         requestId="req-1"
         taskRepository={REPO}
         taskPath={`${MASTER}/09_x.json`}

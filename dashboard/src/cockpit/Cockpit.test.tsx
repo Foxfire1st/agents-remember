@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -477,6 +480,23 @@ describe("workspace rollup — the handoff reaches the header", () => {
     // the standing rhythm is unchanged — the segment is appended, it does not displace anything
     expect(text).toContain("1 running");
     expect(text).toContain("1 blocked");
+  });
+});
+
+describe("no scanline layer over the cockpit (MIK-R127, D223)", () => {
+  // The fixed layer of dark lines over the whole application cut every letter on each third
+  // pixel row. It is removed with its rule and its animation; nothing brings it back.
+  it("draws no layer over the application and keeps no rule for one", () => {
+    seed("calm");
+    const { container } = render(<CockpitShell initialView="operations" />);
+    expect(container.querySelector(".crt-overlay")).toBeNull();
+    const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    expect(css).not.toContain(".crt-overlay");
+    expect(css).not.toMatch(/@keyframes\s+flicker/);
+    expect(css).not.toContain("repeating-linear-gradient");
+    // the alarm pulse and the calm freeze are not the layer's and stay
+    expect(css).toMatch(/@keyframes\s+pulse\b/);
+    expect(css).toContain('html[data-effects="off"]');
   });
 });
 

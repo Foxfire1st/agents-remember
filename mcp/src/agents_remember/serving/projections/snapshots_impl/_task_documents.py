@@ -14,7 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 from agents_remember.kernel.direct_execution_grants import (
     ARCHITECT_GRANTER,
@@ -38,6 +38,9 @@ from agents_remember.observer.projection import (
     TaskDocumentRef,
     TaskExecutionGraphNode,
     TaskExecutionNode,
+    TaskHeaderNoteNode,
+    TaskReviewFindingNode,
+    TaskReviewStateNode,
     TaskSeatNode,
     TaskSectionNode,
     TaskStepDispositionNode,
@@ -466,7 +469,14 @@ def _ref_lifecycle(
     return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
 
 
-def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
+def _task_step_nodes(doc: TaskDocument, *, preview: bool = False) -> list[TaskStepNode]:
+    """Project one document's steps, bounding long prose for summaries (rule 9).
+
+    The on-demand body (``preview=False``) carries whole strings with clear
+    flags; the always-on summary carries bounded previews so one task document
+    cannot grow every snapshot by its longest prose. Full details stay reachable
+    through the existing body read; nothing reachable is capped away.
+    """
     return [
         TaskStepNode(
             id=step.id,
@@ -487,12 +497,92 @@ def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
                         if sub.disposition is not None
                         else None
                     ),
+                    note=_summary_preview(sub.note) if preview else sub.note,
                 )
                 for sub in step.substeps
             ],
+            outcome=_summary_preview(step.outcome) if preview else step.outcome,
+            note=_summary_preview(step.note) if preview else step.note,
+            outcomeTruncated=preview and _is_truncated(step.outcome),
+            noteTruncated=preview and _is_truncated(step.note),
         )
         for step in doc.steps
     ]
+
+
+# Display-aligned summary boundaries (MIK-R127 rule 9): the always-on summary
+# carries what the page blocks draw — six head notes with the whole count, the
+# first review findings with whole descriptions previewed — never the complete
+# prose. Full details stay reachable through the existing on-demand body read.
+_SUMMARY_TEXT_PREVIEW_CHARS = 400
+_SUMMARY_HEADER_NOTES = 6
+_SUMMARY_REVIEW_FINDINGS = 25
+
+
+def _is_truncated(value: str | None) -> bool:
+    return value is not None and len(value) > _SUMMARY_TEXT_PREVIEW_CHARS
+
+
+@overload
+def _summary_preview(value: None) -> None: ...
+
+
+@overload
+def _summary_preview(value: str) -> str: ...
+
+
+def _summary_preview(value: str | None) -> str | None:
+    if value is None or len(value) <= _SUMMARY_TEXT_PREVIEW_CHARS:
+        return value
+    return value[:_SUMMARY_TEXT_PREVIEW_CHARS]
+
+
+def _task_doc_form(doc: TaskDocument) -> Literal["sprint", "master", "task"]:
+    """The page form of one document by the model's own rule (MIK-R127 rule 1)."""
+    if doc.is_sprint:
+        return "sprint"
+    if doc.kind == "master":
+        return "master"
+    return "task"
+
+
+def _task_review_state_node(
+    doc: TaskDocument, *, preview: bool = False
+) -> TaskReviewStateNode | None:
+    """The recorded review round, bounded as the Review block shows it (rule 9).
+
+    Summaries carry the first ``_SUMMARY_REVIEW_FINDINGS`` findings with whole
+    descriptions previewed; ``totalFindings`` always names the whole round for
+    the counted link, ``openFindings`` always counts the open findings of the
+    whole round, and the on-demand body carries every finding whole.
+    """
+    state = doc.reviewState
+    if state is None:
+        return None
+    remaining = set(state.remainingFindingIds)
+    findings = [
+        TaskReviewFindingNode(
+            findingId=item.findingId,
+            description=_summary_preview(item.description) if preview else item.description,
+            open=item.findingId in remaining,
+            descriptionTruncated=preview and _is_truncated(item.description),
+        )
+        for item in state.baselineFindings
+    ]
+    # Counted before the cut: an open finding beyond the summary's first ones
+    # is still open.
+    open_findings = sum(1 for item in findings if item.open)
+    if preview:
+        findings = findings[:_SUMMARY_REVIEW_FINDINGS]
+    return TaskReviewStateNode(
+        round=state.round,
+        pending=state.pending,
+        additionalRounds=state.additionalRounds,
+        findings=findings,
+        totalFindings=len(state.baselineFindings),
+        openFindings=open_findings,
+        developerApproval=state.developerApproval,
+    )
 
 
 def _execution_graph_view(
@@ -702,6 +792,13 @@ def _task_doc_node(
         doc, options.master_docs
     )
     direct_grant = _task_doc_grant_node(options.coordination_root, path, doc)
+    # The always-on summary carries bounded previews (rule 9); the on-demand
+    # body carries every note and whole string. Totals always name the whole
+    # collection for the page's counted links.
+    preview = not options.include_body
+    header_notes = [
+        TaskHeaderNoteNode(label=note.label, value=note.value) for note in doc.headerNotes
+    ]
     return TaskDocNode(
         id=doc.id,
         lifecycleId=lifecycle_id,
@@ -709,6 +806,14 @@ def _task_doc_node(
         title=doc.title,
         status=doc.status,
         kind=doc.kind,
+        form=_task_doc_form(doc),
+        type=doc.type,
+        integrationBranch=doc.integrationBranch,
+        statusNote=(_summary_preview(doc.statusNote) if preview else doc.statusNote),
+        statusNoteTruncated=preview and _is_truncated(doc.statusNote),
+        headerNotes=(header_notes[:_SUMMARY_HEADER_NOTES] if preview else header_notes),
+        headerNotesTotal=len(header_notes),
+        reviewState=_task_review_state_node(doc, preview=preview),
         stepsDone=step_done(doc),
         stepsTotal=step_total(doc),
         currentStep=current_step(doc),
@@ -716,7 +821,7 @@ def _task_doc_node(
         bodyRevision=body_revision,
         createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
-        steps=_task_step_nodes(doc),
+        steps=_task_step_nodes(doc, preview=preview),
         objective=reader.objective,
         requirements=reader.requirements,
         design=reader.design,
@@ -781,6 +886,9 @@ def _task_doc_grant_node(
 
 
 def _task_doc_body_revision(doc: TaskDocument) -> str:
+    # Every field an open reader displays joins the revision: a change to any
+    # of them refetches an already-open document instead of letting a cached
+    # body override the newer summary. The task model is only read, never edited.
     payload = {
         "objective": doc.objective,
         "requirements": [_task_intent_body_value(value) for value in doc.requirements],
@@ -790,6 +898,11 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         "openQuestions": [_task_intent_body_value(value) for value in doc.openQuestions],
         "references": list(doc.references),
         "sections": [section.model_dump(mode="json") for section in doc.sections],
+        "statusNote": doc.statusNote,
+        "headerNotes": [note.model_dump(mode="json") for note in doc.headerNotes],
+        "type": doc.type,
+        "steps": [step.model_dump(mode="json") for step in doc.steps],
+        "reviewState": doc.reviewState.model_dump(mode="json") if doc.reviewState else None,
         # Sprint structure (L14): the sub-task index rows (typed masterRef links included) and the
         # first-class seats ride the always-on summary, but an OPEN reader renders the fetched body
         # — so both join the revision and a linkage/seat edit refetches an already-open sprint doc.

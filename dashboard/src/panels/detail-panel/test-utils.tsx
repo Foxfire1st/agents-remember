@@ -1,35 +1,46 @@
-import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { cleanup } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
 
-import { dashboardStore } from "../../data/store";
-import { GALLERY } from "../../dev/fixtures";
-import { metricsFor } from "../../types/projection";
+import { dashboardStore } from '../../data/store';
+import { GALLERY } from '../../dev/fixtures';
+import { metricsFor } from '../../types/projection';
 import type {
   EnclosureNode,
   LifecycleProjection,
   SeriesNode,
   TaskDocNode,
   WorkspaceProjection,
-} from "../../types/projection";
+} from '../../types/projection';
 export function seed(name: string) {
   const projection = GALLERY.find((entry) => entry.name === name)?.projection;
   if (!projection) throw new Error(`fixture not found: ${name}`);
   dashboardStore.getState().applySnapshot(projection);
 }
 
-export function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPath">): TaskDocNode {
+export function taskDoc(
+  over: Partial<TaskDocNode> & Pick<TaskDocNode, 'kind' | 'docPath'>,
+): TaskDocNode {
   return {
-    id: "1",
-    lifecycleId: "LC-SER",
-    repository: "repo-a",
-    title: "doc",
-    status: "inProgress",
-    bodyRevision: "",
-    createdAt: "2026-06-20T09:00:00+00:00",
+    id: '1',
+    lifecycleId: 'LC-SER',
+    repository: 'repo-a',
+    title: 'doc',
+    status: 'inProgress',
+    bodyRevision: '',
+    createdAt: '2026-06-20T09:00:00+00:00',
+    // The projection's own word by default; an older cache leaves the page to
+    // derive it by the same rule.
+    form: over.kind === 'master' ? (over.orchestrates?.length ? 'sprint' : 'master') : 'task',
+    headerNotes: [],
+    // New projection bounds default to whole values: fixtures stand for
+    // freshly projected documents unless a test deletes the fields to model
+    // an older cache.
+    statusNoteTruncated: false,
+    type: '',
     stepsDone: 0,
     stepsTotal: 0,
     steps: [],
-    objective: "",
+    objective: '',
     requirements: [],
     codeExamples: [],
     decisions: [],
@@ -44,19 +55,19 @@ export function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | 
   };
 }
 
-export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">): SeriesNode {
+export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, 'seriesId'>): SeriesNode {
   return {
-    repository: "repo-a",
-    title: "series",
-    status: "inProgress",
-    objective: "",
+    repository: 'repo-a',
+    title: 'series',
+    status: 'inProgress',
+    objective: '',
     subTasks: [],
     discardedCount: 0,
     discardedSubTasks: [],
     doneCount: 0,
     totalCount: 0,
     abandonedCount: 0,
-    createdAt: "2026-06-20T09:00:00+00:00",
+    createdAt: '2026-06-20T09:00:00+00:00',
     sections: [],
     decisions: [],
     docPath: `/t/${over.seriesId}/task.json`,
@@ -64,19 +75,21 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
   };
 }
 
-export function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure" | "lifecycleId">) {
+export function enclosure(
+  over: Partial<EnclosureNode> & Pick<EnclosureNode, 'enclosure' | 'lifecycleId'>,
+) {
   return {
     enclosureId: over.enclosure,
     leafId: over.enclosure,
-    taskRoot: "/tasks/260610_browser-dashboard",
-    taskId: "260610_BROWSER-DASHBOARD",
-    taskName: "260610_browser-dashboard",
-    repoName: "agents-remember",
-    worktreeGroup: "/worktrees/260610-browser-dashboard-s16-ar",
-    humanReviewStatus: "pending-review",
-    closeoutStatus: "not-started",
-    integrationStatus: "not-started",
-    cleanup: "pending",
+    taskRoot: '/tasks/260610_browser-dashboard',
+    taskId: '260610_BROWSER-DASHBOARD',
+    taskName: '260610_browser-dashboard',
+    repoName: 'agents-remember',
+    worktreeGroup: '/worktrees/260610-browser-dashboard-s16-ar',
+    humanReviewStatus: 'pending-review',
+    closeoutStatus: 'not-started',
+    integrationStatus: 'not-started',
+    cleanup: 'pending',
     codeWorktreeExists: true,
     memoryWorktreeExists: true,
     actions: [],
@@ -86,47 +99,47 @@ export function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "en
 
 // A series projection: one lifecycle, a contract-paired master, and one authored slice doc.
 const SERIES_LIFECYCLE: LifecycleProjection = {
-  id: "LC-SER",
-  state: "running",
-  phase: "build",
+  id: 'LC-SER',
+  state: 'running',
+  phase: 'build',
   fleeting: false,
-  startedAt: "2026-06-20T09:00:00+00:00",
-  lastEventTs: "2026-06-20T09:00:30+00:00",
-  stateEnteredAt: "2026-06-20T09:00:00+00:00",
+  startedAt: '2026-06-20T09:00:00+00:00',
+  lastEventTs: '2026-06-20T09:00:30+00:00',
+  stateEnteredAt: '2026-06-20T09:00:00+00:00',
   inferred: false,
   actions: [],
 };
 
 const SERIES_MASTER = seriesNode({
-  seriesId: "series",
-  title: "My Series",
-  objective: "Series objective text",
-  docPath: "/tasks/repo-a/series/task.json",
+  seriesId: 'series',
+  title: 'My Series',
+  objective: 'Series objective text',
+  docPath: '/tasks/repo-a/series/task.json',
   subTasks: [
     {
-      number: "1",
-      name: "First slice",
-      file: "01_first.md",
-      status: "inProgress",
-      scope: "",
-      createdAt: "2026-06-20T09:00:00+00:00",
+      number: '1',
+      name: 'First slice',
+      file: '01_first.md',
+      status: 'inProgress',
+      scope: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
     },
     {
-      number: "2",
-      name: "Parallel series",
-      file: "../other/task.md",
-      status: "inProgress",
-      scope: "",
-      createdAt: "2026-06-21T09:00:00+00:00",
+      number: '2',
+      name: 'Parallel series',
+      file: '../other/task.md',
+      status: 'inProgress',
+      scope: '',
+      createdAt: '2026-06-21T09:00:00+00:00',
     },
   ],
   sections: [
     {
-      kind: "freeform",
-      heading: "Current State",
-      body: "Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |",
+      kind: 'freeform',
+      heading: 'Current State',
+      body: 'Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |',
     },
-    { kind: "subTasks", heading: "Sub-tasks", body: "" },
+    { kind: 'subTasks', heading: 'Sub-tasks', body: '' },
   ],
 });
 
@@ -138,30 +151,39 @@ export function seedSeries(
     sliceDoc?: Partial<TaskDocNode>;
   } = {},
 ) {
-  const lc: LifecycleProjection = { ...SERIES_LIFECYCLE, id: options.lifecycleId ?? "LC-SER" };
+  const lc: LifecycleProjection = { ...SERIES_LIFECYCLE, id: options.lifecycleId ?? 'LC-SER' };
   const master = SERIES_MASTER;
   const slice = taskDoc({
-    lifecycleId: options.lifecycleId ?? "LC-SER",
-    kind: "subTask",
-    title: "First slice",
-    objective: "Slice objective text",
-    docPath: "/tasks/repo-a/series/01_first.json",
+    lifecycleId: options.lifecycleId ?? 'LC-SER',
+    kind: 'subTask',
+    title: 'First slice',
+    objective: 'Slice objective text',
+    docPath: '/tasks/repo-a/series/01_first.json',
     stepsTotal: 1,
-    steps: [{ id: "S1", title: "do the thing", status: "pending", substeps: [] }],
+    steps: [
+      {
+        id: 'S1',
+        title: 'do the thing',
+        status: 'pending',
+        substeps: [],
+        noteTruncated: false,
+        outcomeTruncated: false,
+      },
+    ],
     ...options.sliceDoc,
   });
   const projection: WorkspaceProjection = {
     version: 2,
-    generatedAt: "2026-06-20T09:01:00+00:00",
+    generatedAt: '2026-06-20T09:01:00+00:00',
     lifecycles: [lc],
     enclosures: options.enclosureTaskId
       ? [
           enclosure({
-            enclosure: "/contracts/series",
-            lifecycleId: options.lifecycleId ?? "LC-SER",
-            leafId: options.enclosureTaskName ?? "series",
+            enclosure: '/contracts/series',
+            lifecycleId: options.lifecycleId ?? 'LC-SER',
+            leafId: options.enclosureTaskName ?? 'series',
             taskId: options.enclosureTaskId,
-            taskName: options.enclosureTaskName ?? "series",
+            taskName: options.enclosureTaskName ?? 'series',
           }),
         ]
       : [],
@@ -187,45 +209,47 @@ export function seedSeries(
   dashboardStore.getState().applySnapshot(projection);
 }
 
-export function nestedProgressSteps(): TaskDocNode["steps"] {
+export function nestedProgressSteps(): TaskDocNode['steps'] {
   return Array.from({ length: 7 }, (_, stepIndex) => ({
     id: `S${stepIndex + 1}`,
     title: `Top level step ${stepIndex + 1}`,
-    status: stepIndex < 6 ? "done" : "pending",
+    status: stepIndex < 6 ? 'done' : 'pending',
+    noteTruncated: false,
+    outcomeTruncated: false,
     substeps: Array.from({ length: 6 }, (_, substepIndex) => ({
       id: `S${stepIndex + 1}.${substepIndex + 1}`,
       title: `Nested step ${stepIndex + 1}.${substepIndex + 1}`,
-      status: stepIndex < 6 || substepIndex < 4 ? "done" : "pending",
+      status: stepIndex < 6 || substepIndex < 4 ? 'done' : 'pending',
     })),
   }));
 }
 
 export function seedSeriesOrdering() {
   const master = seriesNode({
-    seriesId: "series",
-    title: "Ordered Series",
+    seriesId: 'series',
+    title: 'Ordered Series',
     subTasks: [
       {
-        number: "99",
-        name: "Alpha later",
-        file: "alpha_later.md",
-        status: "inProgress",
-        scope: "",
-        createdAt: "2026-06-22T09:00:00+00:00",
+        number: '99',
+        name: 'Alpha later',
+        file: 'alpha_later.md',
+        status: 'inProgress',
+        scope: '',
+        createdAt: '2026-06-22T09:00:00+00:00',
       },
       {
-        number: "01",
-        name: "Zulu earlier",
-        file: "zulu_earlier.md",
-        status: "planning",
-        scope: "",
-        createdAt: "2026-06-20T09:00:00+00:00",
+        number: '01',
+        name: 'Zulu earlier',
+        file: 'zulu_earlier.md',
+        status: 'planning',
+        scope: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
       },
     ],
   });
   const projection: WorkspaceProjection = {
     version: 2,
-    generatedAt: "2026-06-20T09:01:00+00:00",
+    generatedAt: '2026-06-20T09:01:00+00:00',
     lifecycles: [],
     enclosures: [],
     providers: [],
@@ -252,7 +276,9 @@ export function seedSeriesOrdering() {
 
 export function seedTaskDocuments(
   docs: TaskDocNode[],
-  over: Partial<Pick<WorkspaceProjection, "lifecycles" | "enclosures" | "activeWorktreeGroups">> = {},
+  over: Partial<
+    Pick<WorkspaceProjection, 'lifecycles' | 'enclosures' | 'activeWorktreeGroups'>
+  > = {},
 ) {
   seedProjection({
     ...over,
@@ -278,7 +304,7 @@ export function seedProjection(over: Partial<WorkspaceProjection>) {
   const lifecycles = over.lifecycles ?? [];
   const projection: WorkspaceProjection = {
     version: 2,
-    generatedAt: "2026-06-20T09:01:00+00:00",
+    generatedAt: '2026-06-20T09:01:00+00:00',
     lifecycles,
     enclosures: [],
     providers: [],
@@ -305,66 +331,77 @@ export function seedProjection(over: Partial<WorkspaceProjection>) {
 }
 
 const PROMOTED_LIFECYCLE: LifecycleProjection = {
-  id: "01KVW2FE8MQK6QCQQP0J4SEK3C",
-  state: "paused",
-  phase: "build",
+  id: '01KVW2FE8MQK6QCQQP0J4SEK3C',
+  state: 'paused',
+  phase: 'build',
   fleeting: false,
-  enclosure: "/contracts/16",
-  repoId: "agents-remember",
-  startedAt: "2026-06-24T06:00:00+00:00",
-  lastEventTs: "2026-06-24T06:00:30+00:00",
-  stateEnteredAt: "2026-06-24T06:00:00+00:00",
+  enclosure: '/contracts/16',
+  repoId: 'agents-remember',
+  startedAt: '2026-06-24T06:00:00+00:00',
+  lastEventTs: '2026-06-24T06:00:30+00:00',
+  stateEnteredAt: '2026-06-24T06:00:00+00:00',
   inferred: false,
   actions: [],
 };
 
 const PROMOTED_DOC = taskDoc({
-  lifecycleId: "260610_BROWSER-DASHBOARD",
-  kind: "subTask",
-  title: "Lifecycle Finalize Task",
-  docPath: "/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json",
-  objective: "Close out the lifecycle finalizer.",
+  lifecycleId: '260610_BROWSER-DASHBOARD',
+  kind: 'subTask',
+  title: 'Lifecycle Finalize Task',
+  docPath: '/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json',
+  objective: 'Close out the lifecycle finalizer.',
 });
 
 const PROMOTED_MASTER = taskDoc({
-  lifecycleId: "260610_BROWSER-DASHBOARD",
-  kind: "master",
-  title: "Browser Dashboard Series",
-  docPath: "/tasks/260610_browser-dashboard/task.json",
-  objective: "Parent master content.",
+  lifecycleId: '260610_BROWSER-DASHBOARD',
+  kind: 'master',
+  title: 'Browser Dashboard Series',
+  docPath: '/tasks/260610_browser-dashboard/task.json',
+  objective: 'Parent master content.',
 });
 
 const PROMOTED_LEAF = taskDoc({
-  lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
-  kind: "subTask",
-  title: "Engine Room Stack Entry Height",
-  status: "inProgress",
-  docPath: "/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json",
-  objective: "Keep a single Engine Room enclosure entry visually bounded.",
-  requirements: ["Render the selected leaf task document, not the parent task or enclosure contract."],
+  lifecycleId: '01KVW2FE8MQK6QCQQP0J4SEK3C',
+  kind: 'subTask',
+  title: 'Engine Room Stack Entry Height',
+  status: 'inProgress',
+  docPath: '/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json',
+  objective: 'Keep a single Engine Room enclosure entry visually bounded.',
+  requirements: [
+    'Render the selected leaf task document, not the parent task or enclosure contract.',
+  ],
   stepsTotal: 1,
-  steps: [{ id: "S1", title: "Fix the stack entry height", status: "inProgress", substeps: [] }],
+  steps: [
+    {
+      id: 'S1',
+      title: 'Fix the stack entry height',
+      status: 'inProgress',
+      substeps: [],
+      noteTruncated: false,
+      outcomeTruncated: false,
+    },
+  ],
   sections: [
     {
-      kind: "freeform",
-      heading: "Notes",
-      body: "This is the authored leaf task document.",
+      kind: 'freeform',
+      heading: 'Notes',
+      body: 'This is the authored leaf task document.',
     },
   ],
 });
 
 const PROMOTED_SERIES = seriesNode({
-  seriesId: "260610_browser-dashboard",
-  title: "Browser Dashboard Series",
-  docPath: "/tasks/260610_browser-dashboard/task.json",
+  seriesId: '260610_browser-dashboard',
+  title: 'Browser Dashboard Series',
+  docPath: '/tasks/260610_browser-dashboard/task.json',
   subTasks: [
     {
-      number: "16",
-      name: "Engine Room Stack Entry Height",
-      file: "16_engine-room-stack-entry-height.md",
-      status: "inProgress",
-      scope: "",
-      createdAt: "2026-06-24T06:00:00+00:00",
+      number: '16',
+      name: 'Engine Room Stack Entry Height',
+      file: '16_engine-room-stack-entry-height.md',
+      status: 'inProgress',
+      scope: '',
+      createdAt: '2026-06-24T06:00:00+00:00',
     },
   ],
 });
@@ -376,13 +413,13 @@ export function seedPromotedLeaf() {
   const leaf = PROMOTED_LEAF;
   const projection: WorkspaceProjection = {
     version: 2,
-    generatedAt: "2026-06-24T06:01:00+00:00",
+    generatedAt: '2026-06-24T06:01:00+00:00',
     lifecycles: [lc],
     enclosures: [
       enclosure({
-        enclosure: "/contracts/16",
-        lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
-        leafId: "16_engine-room-stack-entry-height",
+        enclosure: '/contracts/16',
+        lifecycleId: '01KVW2FE8MQK6QCQQP0J4SEK3C',
+        leafId: '16_engine-room-stack-entry-height',
       }),
     ],
     providers: [],
@@ -414,6 +451,25 @@ afterEach(() => {
   dashboardStore.getState().reset();
 });
 
+// What a fetch double answers: a response the page reads as JSON.
+function answer(payload: unknown): Response {
+  return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+}
+
+function queryOf(url: string): URLSearchParams {
+  return new URLSearchParams(url.split('?', 2)[1] ?? '');
+}
+
+// The body of the task document a request names: the seeded document of that
+// path, else a bare one of the kind the path says.
+function taskDocumentBody(url: string): TaskDocNode {
+  const docPath = queryOf(url).get('path') ?? '';
+  return (
+    dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+    taskDoc({ kind: docPath.endsWith('/task.json') ? 'master' : 'subTask', docPath })
+  );
+}
+
 // ChangeSetButton fetches its counters on mount; a tiny stub keeps the doc-reader-bar tests from
 // touching a real fetch (the counts are incidental — these tests assert the buttons + click target).
 // `reviewSummary` optionally answers the changed-intent summary route the Intent review control reads:
@@ -422,136 +478,148 @@ afterEach(() => {
 // summary answer), which is what a caller that does not exercise the entry wants.
 export function stubCounters(reviewSummary?: unknown) {
   vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async (url: string) => {
-        if (url.startsWith("/api/task-document")) {
-          const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
-          const docPath = params.get("path") ?? "";
-          const doc =
-            dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
-            taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
-          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
-        }
-        if (reviewSummary !== undefined && url.startsWith("/api/review/intent/summary")) {
-          return { ok: true, status: 200, json: async () => reviewSummary } as unknown as Response;
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            counters: {
-              code: { files: 0, insertions: 0, deletions: 0 },
-              memory: { files: 0, insertions: 0, deletions: 0 },
-            },
-          }),
-        } as unknown as Response;
-      },
-    ),
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.startsWith('/api/task-document')) return answer(taskDocumentBody(url));
+      if (reviewSummary !== undefined && url.startsWith('/api/review/intent/summary')) {
+        return answer(reviewSummary);
+      }
+      if (url.startsWith('/api/role-launch/reports')) {
+        // The server contract names the report rows; the generic catch-all
+        // below is not a well-formed reports payload.
+        return answer({ reports: [], total: 0, explorer: null });
+      }
+      return answer({
+        counters: {
+          code: { files: 0, insertions: 0, deletions: 0 },
+          memory: { files: 0, insertions: 0, deletions: 0 },
+        },
+      });
+    }),
   );
 }
 
+// A note the notes double is seeded with.
+interface SeededNote {
+  name: string;
+  path: string;
+  size: number;
+  language: string;
+}
+
+// A requirement packet the notes double is seeded with.
+interface SeededRequirement {
+  name: string;
+  path: string;
+  address: string;
+  size: number;
+  sha256: string;
+}
+
+interface FetchInit {
+  body?: unknown;
+}
+
+// How many entries of a folder one answer carries.
+const NOTES_PAGE = 200;
+
+// One folder of the seeded notes: the files that lie in it, one page from the offset.
+function notesFolder(notes: SeededNote[], url: string) {
+  const params = queryOf(url);
+  const folder = params.get('path') ?? '';
+  const offset = Number(params.get('offset') ?? '0');
+  const prefix = folder ? `${folder}/` : '';
+  const entries = notes
+    .filter((note) => note.path.startsWith(prefix) && !note.path.slice(prefix.length).includes('/'))
+    .map((note) => ({
+      name: note.name,
+      path: note.path,
+      kind: 'file' as const,
+      size: note.size,
+      language: note.language,
+    }));
+  return {
+    repo: 'agents-remember',
+    master: 'm',
+    path: folder,
+    entries: entries.slice(offset, offset + NOTES_PAGE),
+    total: entries.length,
+    offset,
+    limit: NOTES_PAGE,
+    remaining: Math.max(0, entries.length - offset - NOTES_PAGE),
+    exists: true,
+    reason: null,
+  };
+}
+
+// The seeded note a reference names. The test double mirrors the server rule: a token naming a
+// seeded notes-relative path (with or without the notes/ prefix) or a root-level bare name resolves.
+function noteNamedBy(reference: string, paths: string[]): string | null {
+  for (const token of reference.match(/[\w./-]+\.[A-Za-z0-9]+/g) ?? []) {
+    const relative = token.startsWith('notes/') ? token.slice('notes/'.length) : token;
+    if (paths.includes(relative)) return relative;
+    if (!token.includes('/') && paths.includes(token)) return token;
+  }
+  return null;
+}
+
+// Which seeded note each reference of the request names.
+function noteResolutions(notes: SeededNote[], init: FetchInit | undefined) {
+  const asked = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+    references?: string[];
+  };
+  const paths = notes.map((note) => note.path);
+  const resolutions = (asked.references ?? []).map((reference: string) => ({
+    reference,
+    path: noteNamedBy(reference, paths),
+  }));
+  return { repo: 'agents-remember', master: 'm', resolutions };
+}
+
+// The reports of a task: the double seeds none.
+function noReports() {
+  return { repo: 'agents-remember', master: 'm', doc: '', reports: [], total: 0, explorer: null };
+}
+
+// A note's file: every note reads as the one seeded body.
+function noteFile(body: string) {
+  return { path: 'x', language: 'markdown', size: body.length, truncated: false, content: body };
+}
+
+// The requirement packets registered for the master.
+function requirementsList(requirements: SeededRequirement[]) {
+  return {
+    repo: 'agents-remember',
+    master: 'm',
+    document: 'm/task.json',
+    registered: requirements.length > 0,
+    requirements,
+  };
+}
+
 export function stubNotes(
-  notes: Array<{ name: string; path: string; size: number; language: string }>,
-  body = "note body",
-  requirements: Array<{
-    name: string;
-    path: string;
-    address: string;
-    size: number;
-    sha256: string;
-  }> = [],
+  notes: SeededNote[],
+  body = 'note body',
+  requirements: SeededRequirement[] = [],
 ) {
-  const fn = vi.fn(async (url: string, init?: { body?: unknown }) => {
-    if (url.startsWith("/api/task-document")) {
-      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
-      const docPath = params.get("path") ?? "";
-      const doc =
-        dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
-        taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
-      return { ok: true, status: 200, json: async () => doc } as unknown as Response;
-    }
-    if (url.startsWith("/api/notes/folder")) {
-      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
-      const folder = params.get("path") ?? "";
-      const offset = Number(params.get("offset") ?? "0");
-      const prefix = folder ? `${folder}/` : "";
-      const level = notes.filter(
-        (note) => note.path.startsWith(prefix) && !note.path.slice(prefix.length).includes("/"),
-      );
-      const entries = level.map((note) => ({
-        name: note.name,
-        path: note.path,
-        kind: "file" as const,
-        size: note.size,
-        language: note.language,
-      }));
-      const payload = {
-        repo: "agents-remember",
-        master: "m",
-        path: folder,
-        entries: entries.slice(offset, offset + 200),
-        total: entries.length,
-        offset,
-        limit: 200,
-        remaining: Math.max(0, entries.length - offset - 200),
-        exists: true,
-        reason: null,
-      };
-      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
-    }
-    if (url.startsWith("/api/notes/resolve")) {
-      // The test double mirrors the server rule: a token naming a seeded notes-relative
-      // path (with or without the notes/ prefix) or a root-level bare name resolves.
-      const body = JSON.parse((typeof init?.body === "string" ? init.body : "{}")) as { references?: string[] };
-      const paths = notes.map((note) => note.path);
-      const resolutions = (body.references ?? []).map((reference: string) => {
-        let found: string | null = null;
-        for (const token of reference.match(/[\w./-]+\.[A-Za-z0-9]+/g) ?? []) {
-          const relative = token.startsWith("notes/") ? token.slice("notes/".length) : token;
-          if (paths.includes(relative)) {
-            found = relative;
-            break;
-          }
-          if (!token.includes("/") && notes.some((note) => note.path === token)) {
-            found = token;
-            break;
-          }
-        }
-        return { reference, path: found };
-      });
-      const payload = { repo: "agents-remember", master: "m", resolutions };
-      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
-    }
-    if (url.startsWith("/api/role-launch/reports")) {
-      const payload = { repo: "agents-remember", master: "m", doc: "", reports: [], total: 0, explorer: null };
-      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
-    }
-    if (url.startsWith("/api/notes/read")) {
-      const payload = {
-        path: "x",
-        language: "markdown",
-        size: body.length,
-        truncated: false,
-        content: body,
-      };
-      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
-    }
-    if (url.startsWith("/api/requirements/list")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          repo: "agents-remember",
-          master: "m",
-          document: "m/task.json",
-          registered: requirements.length > 0,
-          requirements,
-        }),
-      } as unknown as Response;
-    }
-    return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+  // Each address the page asks and what the double answers there; the first that matches answers.
+  const routes: Array<[string, (url: string, init?: FetchInit) => unknown]> = [
+    ['/api/task-document', taskDocumentBody],
+    ['/api/notes/folder', (url) => notesFolder(notes, url)],
+    ['/api/notes/resolve', (_url, init) => noteResolutions(notes, init)],
+    ['/api/role-launch/reports', noReports],
+    ['/api/notes/read', () => noteFile(body)],
+    ['/api/requirements/list', () => requirementsList(requirements)],
+  ];
+  const fn = vi.fn(async (url: string, init?: FetchInit) => {
+    const route = routes.find(([prefix]) => url.startsWith(prefix));
+    return answer(route ? route[1](url, init) : {});
   });
-  vi.stubGlobal("fetch", fn);
+  vi.stubGlobal('fetch', fn);
   return fn;
+}
+
+// The texts of an element's direct children: the cells a row or a row link draws.
+export function cells(el: Element | null | undefined): string[] {
+  return Array.from(el?.children ?? []).map((child) => child.textContent ?? '');
 }
