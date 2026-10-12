@@ -29,6 +29,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_history as _rules_history,  # noqa: F401  # registers MIK-R09's open history row rule
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_overviews as _rules_overviews,  # noqa: F401  # registers MIK-R80's overview order rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_reconsideration as _rules_reconsideration,  # noqa: F401  # registers MIK-R14's link guard
 )
 from agents_remember.memory_quality.knowledge_validator import (

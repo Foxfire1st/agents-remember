@@ -77,6 +77,10 @@ response — it must be this leaf's memory worktree — and preview any write wi
 2. **Route every change-set and notes item to its right onboarding home** through the
    `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject it actually
    is. Never add an overview heading named for a leaf or date; update the applicable overview body.
+   An overview reads from its purpose (MIK-R80): title, the governing overview, what the area is for
+   under one of the fixed headings `## What This Repo Is`, `## What This Area Is` or `## Purpose`,
+   how it is built, its invariants and boundaries, and last all citation lines together. A change
+   goes into the section its change belongs to.
    Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
    **On converted memory** (the tree holds the knowledge layout marker), follow the c-05 skill's converted-card

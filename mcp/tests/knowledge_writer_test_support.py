@@ -167,7 +167,7 @@ def base_memory(code: Path) -> dict[str, str | bytes]:
             }
         ),
         f"onboarding/{TEST_FILE}.md": "# tests/test_landing.py\n",
-        "onboarding/overview.md": "# root\n",
+        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
     }
 
 

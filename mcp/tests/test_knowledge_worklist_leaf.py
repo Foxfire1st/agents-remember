@@ -175,7 +175,7 @@ def converted_memory(code: Path, code_commit: str) -> dict[str, str]:
             LINES_FILE,
             realization("RLZ-A00003", LINES_FILE, {"kind": "line_range", "start": 4, "end": 5}),
         ),
-        "onboarding/overview.md": "# root\n",
+        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
     }
 
 

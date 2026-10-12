@@ -20,6 +20,8 @@ committed instead of by database constraints. One module, one rule registry:
   records and their covered entries' ``after`` anchors are the tree's; and MIK-R48's rule on family
   judgments published by the route: a new or edited changed family row records its effect and own
   revision;
+* :mod:`.rules_overviews` -- MIK-R80's overview order: the purpose first under a fixed heading,
+  no section named after a leaf or a date, and every citation line together at the end;
 * :mod:`.validator` -- :func:`validate_tree`, rule 8's applicability and
   :func:`require_valid_commit`;
 * :mod:`.commit_route` -- the Git adapter a commit route calls through the worktree port.

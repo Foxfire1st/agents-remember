@@ -151,7 +151,8 @@ def other_card(commit: str) -> str:
 
 def route_card(commit: str) -> str:
     return (
-        "# src\n\n## Route Model\n\nThe source route.\n\n## Repo-Internal References\n\n"
+        "# src\n\n## What This Area Is\n\nThe source route.\n\n## Route Model\n\nThe source route.\n\n"
+        "## Repo-Internal References\n\n"
         "| Finding | Anchor | Source |\n| --- | --- | --- |\n"
         f"| The app module computes. | `beta` | {APP}:8-11 |\n"
     )
@@ -162,7 +163,7 @@ def memory_files(commit: str) -> dict[str, str]:
         APP_CARD: app_card(commit),
         OTHER_CARD: other_card(commit[:10]),  # an abbreviated anchor commit
         ROUTE_CARD: route_card(commit),
-        ROOT_CARD: "# demo\n\nThe repository root route.\n",
+        ROOT_CARD: "# demo\n\n## What This Repo Is\n\nThe repository root route.\n",
         "system/settings.md": "# settings\n",
     }
 

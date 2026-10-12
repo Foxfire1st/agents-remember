@@ -343,7 +343,7 @@ def conversion_digest(files: dict[str, bytes]) -> str:
 # byte or refuses it: if this digest changes, the change -- in cards, citations, the export, the
 # marker escaping or the shipped extractor (qualified_spans, extents.definitions, a grammar bump) --
 # must ship as a new conversion-format version, never as a new digest for "1".
-VERSION_1_FIXTURE_DIGEST = "2e3b3110179ae21e37f47fb5223f2f275f16b26b775ff45dd2219d9ecd56ad2c"
+VERSION_1_FIXTURE_DIGEST = "b86d170eb552d0852f87732bfb2bac4ef3d36081731a187667c3bd835e4be4c4"
 
 
 def test_conversion_format_version_1_reproduces_its_pinned_bytes(

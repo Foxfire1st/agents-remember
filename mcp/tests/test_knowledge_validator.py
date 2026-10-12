@@ -1,6 +1,8 @@
 """MIK-R22: the mandatory knowledge validator's rules, over converted fixture trees.
 
 The last section proves the admission rules MIK-R27 adds to the registry (MIK-R22 rule 9).
+The overview section proves MIK-R80's order rules: the purpose first, no section named
+after a leaf or a date, and every citation line together at the end.
 
 Each test names the packet rule it proves. The trees are the MIK-R21 Doc14 fixtures assembled into
 one converted memory tree (``knowledge_validator_test_support``); a test changes one thing and checks
@@ -28,6 +30,7 @@ from agents_remember.memory_quality.knowledge_validator import (
 from agents_remember.memory_quality.knowledge_validator import registry as registry_module
 from agents_remember.memory_quality.knowledge_validator.markers import find_markers
 from agents_remember.memory_quality.knowledge_validator.rules_admission import ADMISSION_RULES
+from agents_remember.memory_quality.knowledge_validator.rules_overviews import OVERVIEW_RULES
 from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.models.knowledge_files import history_path
 from agents_remember.models.knowledge_files.history import empty_history
@@ -845,3 +848,261 @@ def test_the_rules_are_registered_refusing_new_and_reporting_the_rest() -> None:
     assert all(
         registered[rule_id] is rule for rule_id, rule in ((r.id, r) for r in ADMISSION_RULES)
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# MIK-R80: an overview reads from its purpose
+# --------------------------------------------------------------------------------------------------
+
+PURPOSE_FIRST = "R80.1-purpose-first"
+NO_LEAF_SECTIONS = "R80.2-no-leaf-sections"
+CITATIONS_AT_END = "R80.7-citations-at-end"
+
+
+def _route_overview(files: dict[str, bytes], text: str) -> dict[str, bytes]:
+    edited = dict(files)
+    edited[ROUTE_CARD] = text.encode("utf-8")
+    return edited
+
+
+def test_conforming_overview_passes_the_order_rules() -> None:
+    report = _validate(fixture_tree_files(), leaf_publication=True)
+
+    assert [one.rule for one in report.violations if one.rule.startswith("R80.")] == []
+
+
+def test_buried_purpose_is_refused_and_names_the_heading() -> None:
+    """Packet rule 1: the first section after the title and the governing overview is the purpose."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## How It Is Built\n"
+        "\n"
+        "The route pairs each delivery with its memory candidate.\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    [line] = _only(_validate(files, leaf_publication=True), PURPOSE_FIRST)
+
+    assert line.startswith(f"{ROUTE_CARD}: ## How It Is Built: [{PURPOSE_FIRST}]")
+    assert "not the purpose" in line
+
+
+def test_paraphrased_purpose_heading_is_refused() -> None:
+    """Packet rule 1, worker ruling: the purpose carries a fixed heading, not a paraphrase."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## What This Directory Is For\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    [line] = _only(_validate(files, leaf_publication=True), PURPOSE_FIRST)
+
+    assert "## What This Directory Is For" in line
+
+
+def test_leaf_named_and_dated_sections_are_refused() -> None:
+    """Packet rule 2: no section is named after a leaf or a date."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "## 260928-MIK-L99 A Leaf's Agents Hand Over\n"
+        "\n"
+        "The suite gained handover tests.\n"
+        "\n"
+        "## 2026-07-24 Warm Projection Refinement\n"
+        "\n"
+        "Older notes.\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    lines = _only(_validate(files, leaf_publication=True), NO_LEAF_SECTIONS)
+
+    assert len(lines) == 2
+    assert any("named after a leaf" in line and "L99" in line for line in lines)
+    assert any("named after a date" in line and "2026-07-24" in line for line in lines)
+
+
+def test_scattered_citations_are_refused_and_name_the_line() -> None:
+    """Packet rule 7: every citation line stands together at the overview's end."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route pairs each delivery [1].\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    [line] = _only(_validate(files, leaf_publication=True), CITATIONS_AT_END)
+
+    assert line.startswith(f"{ROUTE_CARD}: line 9: [{CITATIONS_AT_END}]")
+    assert "## Evidence" in line
+
+
+def test_fenced_code_holds_no_sections() -> None:
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "```markdown\n"
+        "## 260928-MIK-L99 A Leaf's Agents Hand Over\n"
+        "```\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    report = _validate(files, leaf_publication=True)
+
+    assert [one.rule for one in report.violations if one.rule.startswith("R80.")] == []
+
+
+def test_root_overview_needs_no_governing_section() -> None:
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    report = _validate(files, leaf_publication=True)
+
+    assert [one.rule for one in report.violations if one.rule.startswith("R80.")] == []
+
+
+def test_combined_fixture_fires_all_three_rules_and_refuses_closeout() -> None:
+    """Packet Expected Evidence 4: a leaf-named section, a buried purpose and scattered
+    citations give three findings, and the closeout is refused."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## Governing Overview\n"
+        "\n"
+        "[mcp overview](../overview.md)\n"
+        "\n"
+        "## How It Is Built\n"
+        "\n"
+        "The route pairs each delivery [1].\n"
+        "\n"
+        "## What This Area Is\n"
+        "\n"
+        "The route's files pair each delivery with its memory candidate.\n"
+        "\n"
+        "## 260928-MIK-L99 A Leaf's Agents Hand Over\n"
+        "\n"
+        "The suite gained handover tests.\n"
+        "\n"
+        "## Evidence\n"
+        "\n"
+        "- The route's files are listed with their anchors [1].\n",
+    )
+
+    report = _validate(files, leaf_publication=True)
+
+    assert _rules(report) == {PURPOSE_FIRST, NO_LEAF_SECTIONS, CITATIONS_AT_END}
+    try:
+        require_valid_commit(tree(files), bases=[], code=code(), leaf_publication=True)
+    except KnowledgeValidationError as error:
+        rendered = str(error)
+    else:  # pragma: no cover - the refusal is the asserted behaviour
+        raise AssertionError(f"closeout passed: {report.render()}")
+    assert PURPOSE_FIRST in rendered
+    assert NO_LEAF_SECTIONS in rendered
+    assert CITATIONS_AT_END in rendered
+
+
+def test_a_conversion_carries_legacy_prose_without_the_order_rules() -> None:
+    """MIK-R24 carries; MIK-R80 refuses at leaf-publication routes, not at the conversion."""
+
+    files = _route_overview(
+        fixture_tree_files(),
+        "# worktrees\n"
+        "\n"
+        "## How It Is Built\n"
+        "\n"
+        "The route pairs each delivery [1].\n"
+        "\n"
+        "## 260928-MIK-L99 A Leaf's Agents Hand Over\n"
+        "\n"
+        "The suite gained handover tests.\n",
+    )
+
+    report = validate_tree(tree(files), conversion=True)
+
+    assert [one.rule for one in report.violations if one.rule.startswith("R80.")] == []
+
+
+def test_the_overview_rules_are_registered_refusing() -> None:
+    registered = {rule.id: rule for rule in registered_rules()}
+    flags = {rule.id: (rule.report_only, rule.writer_reports) for rule in OVERVIEW_RULES}
+    assert flags == {
+        PURPOSE_FIRST: (False, False),
+        NO_LEAF_SECTIONS: (False, False),
+        CITATIONS_AT_END: (False, False),
+    }
+    assert all(registered[rule_id] is rule for rule_id, rule in ((r.id, r) for r in OVERVIEW_RULES))

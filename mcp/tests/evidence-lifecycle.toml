@@ -877,6 +877,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -900,6 +901,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -923,6 +925,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -946,6 +949,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -969,6 +973,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -992,6 +997,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1015,6 +1021,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1038,6 +1045,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1061,6 +1069,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1352,6 +1361,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
@@ -2038,6 +2048,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
