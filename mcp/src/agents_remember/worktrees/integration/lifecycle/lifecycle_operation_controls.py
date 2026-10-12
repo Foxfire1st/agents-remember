@@ -352,7 +352,10 @@ def _resume(
             contract,
             record.input.configPath,
         )
-        _require_proven_closeout_door_for_launch(record)
+        # Direct-landing authority is the grant plus the admitted evidence,
+        # proven by the recovery classifier inside the recover call: the
+        # route never claims closeout doors, so no door proof is required
+        # for launch (F04).
         current = recover_direct_landing_under_authority(current_contract, store, record)
         return operation_projection(
             current,
@@ -380,7 +383,10 @@ def _resume_closeout_publications(
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
 ) -> tuple[WorktreeContract, LifecycleOperationRecord]:
-    if record.operationKind not in {"closeout", "direct-landing"}:
+    if record.operationKind != "closeout":
+        # Only the enclosure closeout claims doors. The direct landing route
+        # never does: its launch authority is the grant plus the admitted
+        # evidence, proven by the recovery classifier (F04).
         return contract, record
     if record.legacyMigration is not None and record.doorPublication is None:
         # The explicit schema-1 bridge proves a retained generation that predates

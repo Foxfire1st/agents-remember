@@ -18,6 +18,7 @@ from unittest import mock
 
 import pytest
 from agents_remember.application import review_tree_entries
+from agents_remember.application.direct_execution_grants import give_grant
 from agents_remember.application.knowledge_currentness import observe
 from agents_remember.application.knowledge_gate import (
     GateResult,
@@ -49,6 +50,8 @@ from agents_remember.memory_quality.knowledge_validator.commit_route import GitK
 from agents_remember.memory_quality.style.citations import extents
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.worktrees import direct_landing as route
 from agents_remember.worktrees import knowledge_gate, knowledge_validation
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
@@ -327,15 +330,52 @@ def _configured(world: Gated) -> tuple[McpRuntimeConfig, Any]:
                 "coordinationRoot": world.root.as_posix(),
                 "workspaceRoot": workspace.as_posix(),
                 "repositories": {"agents-remember": {}},
-                "directExecutionEnabled": True,
             }
         ),
         encoding="utf-8",
     )
     task_root = world.root / "tasks" / "agents-remember" / "gate_case"
     task_root.mkdir(parents=True)
-    for name in ("task.md", "leaf.json"):
-        (task_root / name).write_bytes((world.task_root / name).read_bytes())
+    (task_root / "task.md").write_bytes((world.task_root / "task.md").read_bytes())
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "TEST-GATE-MASTER",
+                "slug": "gate_case",
+                "title": "Gate case",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "agents-remember",
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number=LEAF,
+                        name="Gate leaf",
+                        file="leaf.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": LEAF,
+                "slug": "leaf",
+                "title": "Gate leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": "agents-remember",
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the direct landing gate.",
+                "requirements": ["The fixture leaf lands directly."],
+            }
+        ),
+    )
     series = default_series_contract(
         ContractTask(
             name="gate_case",
@@ -351,7 +391,14 @@ def _configured(world: Gated) -> tuple[McpRuntimeConfig, Any]:
     write_contract(series.contract_path, series)
     text = series.contract_path.read_text(encoding="utf-8")
     publish_new_lifecycle_operation_location(series, contract_text=text)
-    return load_config(config_path), load_contract(series.contract_path)
+    config = load_config(config_path)
+    give_grant(
+        config,
+        TaskDocumentRef(repository="agents-remember", path="gate_case/leaf.json"),
+        granted_by="architect",
+        granter_agent_id="fixture",
+    )
+    return config, load_contract(series.contract_path)
 
 
 def _land(world: Gated, config: McpRuntimeConfig, series: Any, **fields: Any) -> Any:
@@ -359,6 +406,9 @@ def _land(world: Gated, config: McpRuntimeConfig, series: Any, **fields: Any) ->
     request = route.DirectLandingRequest(
         contract_path=series.contract_path.as_posix(),
         code_commit=code_commit,
+        leaf_task_document_ref=TaskDocumentRef(
+            repository="agents-remember", path="gate_case/leaf.json"
+        ),
         candidate_tree=git(world.code, "rev-parse", "HEAD^{tree}"),
         memory_commit_message="direct memory",
         intent_note=fields.pop("intent_note", "approved"),
@@ -378,7 +428,10 @@ def test_direct_landing_preview_and_apply_refuse_through_their_route_entry(
         with pytest.raises(route.DirectLandingError) as refused:
             _land(world, config, series, dry_run=dry_run)
         assert refused.value.status == "direct-landing-knowledge-gate-refused"
-        assert "0 open leaf history file(s)" in refused.value.detail
+        # L52 leaf-aware gate: with the bound leaf named, the refusal reports
+        # that leaf's missing authored rows instead of the old 0-open-files
+        # words; the property holds: refused, nothing admitted.
+        assert "260928-MIK-L97" in refused.value.detail
     assert direct_landing_store(series).read() is None  # nothing was admitted
 
     world.rows()
@@ -386,7 +439,10 @@ def test_direct_landing_preview_and_apply_refuse_through_their_route_entry(
     write(world.memory, {"knowledge/history/260928-MIK-L96.json": canonical_text(other)})
     with pytest.raises(route.DirectLandingError) as two:
         _land(world, config, series, dry_run=True)
-    assert "2 open leaf history file(s)" in two.value.detail
+    # L52 leaf-aware gate: with two open files the refusal names the landing
+    # leaf and the other open leaf instead of the old 2-open-files words.
+    assert "260928-MIK-L97" in two.value.detail
+    assert "260928-MIK-L96" in two.value.detail
 
 
 # --------------------------------------------------------------------------------------------------

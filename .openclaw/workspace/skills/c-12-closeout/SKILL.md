@@ -37,7 +37,8 @@ worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_n
 worktree_status(repo_id="<repo-id>", contract_path="<enclosure series-contract.md>")
 worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="cancel|resume", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="inspect|migrate|archive", ...)
-direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>", leaf_id="<leaf-id>")
+direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", leaf_task_document_ref={"repository": "<repo>", "path": "<master>/<leaf>.json"}, memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>", leaf_id="<leaf-id>")
+direct_landing(contract_path="<task-root series-contract.md>", leaf_task_document_ref={"repository": "<repo>", "path": "<master>/<leaf>.json"}, code_commit_message="<new code commit message>", memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<previewed tree>", leaf_id="<leaf-id>")
 ```
 
 Worktree closeout records closeout state in the contract the
@@ -132,7 +133,7 @@ commit carries it. Resetting first recomputes what gets staged on every run unde
 in force at that moment, and `--mixed` is index-only, so no file content is touched.
 
 Two refusals guard the transaction before staging or ref movement. Closeout refuses when the code
-checkout is **not** the declared task worktree (unless the declared transaction route is a sanctioned
+checkout is **not** the declared task worktree (unless the declared transaction route is a granted
 branch-direct landing) or when code or memory content has unresolved merge conflicts. A missing
 quality profile, review record, or suite result never creates a compatibility route and never blocks
 an otherwise authorized transaction. Curation is not a third such refusal for the same reason it is
@@ -247,12 +248,22 @@ reason and the enclosure still pending cleanup. Then use `lifecycle_finalize_tas
 to prove the landed parent-child branch edge, verify cleanup, and update the current
 task plus immediate parent row.
 
-## Sanctioned Branch-Direct Landing
+## Granted Branch-Direct Landing
 
-`direct_landing` is not a direct-checkout closeout path. It is the policy-gated,
-branch-addressed counterpart for a **leaf delivered without its own worktree enclosure**, where a
-code commit already exists at the exact series branch HEAD. A series contract is necessary address
+`direct_landing` is not a direct-checkout closeout path. It is the grant-gated,
+branch-addressed counterpart for a **leaf delivered without its own worktree enclosure**, where the
+product either verifies the code commit at the exact series branch HEAD or creates it from the
+leaf's uncommitted changes in that checkout. A series contract is necessary address
 authority for this route; it is not by itself evidence that an operation is direct execution.
+The named leaf must hold a direct-execution grant, given before work starts by the developer's
+dashboard control or the architect's `direct_execution_grant` function; no harness setting
+decides this. The grant is one file per leaf outside task documents and settings, read
+at the moment of every call; the leaf's plan shows its giver, and giving an existing
+grant changes nothing. The retired `directExecutionEnabled` setting is ignored, with
+one notice per load. One direct leaf at a time works in a checkout: the start of a second direct leaf
+and every landing call for it are refused while the first is in work, and the refusal names
+the first leaf. A direct leaf has no enclosure of its own: `worktree_start` for it refuses,
+and `role_start` gives its roles the checkouts of the master's branch.
 An atomic master's closeout needs a landed enclosure for each row other than `abandoned`.
 An abandoned row is outside every walk of a master's rows. It needs no enclosure, no landing, no
 contract and no document: a row with status `abandoned` and an empty file cell blocks nothing, and
@@ -321,24 +332,54 @@ change. Every answer names the restart that a server started before this build n
 reads a sprint that holds a retired row.
 
 Ordinary master/series closeout and the later master-to-parent `worktree_integrate` edge are not
-branch-direct leaf delivery and must work while `directExecutionEnabled` is false.
+branch-direct leaf delivery. They never need a direct-execution grant, and no harness setting
+decides direct execution.
 The tool verifies that code commit and gated candidate tree, requires an explicit nonblank memory
 message when that leg is enabled, and validates the complete effective input before acquiring
 landing authority.
 
-Apply persists a task/contract-addressed `direct-landing` operation generation before memory Git
-mutation. The memory commit intent, commit proof, and terminal publication are journaled
-independently. After interruption, read the same generation
-through `worktree_status` and execute only its advertised action through
-`worktree_operation_control(operation_kind="direct-landing", ...)`. Recovery reconciles exact
-code/tree/memory evidence and reuses each already produced commit once; the queue is not an
+Apply persists a task/contract-addressed `direct-landing` operation generation before
+any branch moves. The generation carries the code input, message, tree and admitted
+ref, the pre-publication code snapshot, the code mutation intent through to commit
+proof, and the memory intent; the code commit is
+published only after the invariant and knowledge gates judge the exact trees and the
+generation is admitted. Preview and apply both prove the super -> master -> leaf
+source lineage first, exactly like the ordinary closeout: a source that moved
+after admission refuses with the lineage words, and a plain fast-forward heals
+the same way. The branch move itself is one atomic compare-and-swapped publication
+of the judged commit with the judged tree under the admitted parent; the admitted
+code commit, tree and pre-state stay on the
+generation, and a later cut re-proves that output live against the branch
+(the commit holds the tree under the pre-state tip, and the branch names the
+commit or a descendant of it).
+A create apply requires the exact previewed `candidate_tree`: an omitted,
+malformed or stale tree refuses with branch, files and index unchanged, and a valid
+preview assertion commits exactly its tree and listed paths. A create also requires
+an explicit `code_commit_message`. The memory commit intent, commit proof, and terminal
+publication are journaled independently per leg. After interruption, repeat the exact
+same call: when the admitted code output is proven on the branch with memory
+provably missing, the call resumes that same generation and completes the memory
+commit and ledger row with the same code commit -- no second code commit, no new
+generation.
+Read the same generation through `worktree_status` and execute only its advertised
+action through `worktree_operation_control(operation_kind="direct-landing", ...)` as
+the second way to complete it. Recovery reconciles exact code/tree/memory evidence
+and reuses each already produced commit once; the queue is not an
 input. A transient landing lock, synthesized subject, repeat-from-scratch, or raw Git is not
-recovery.
+recovery. A code commit proven with its memory missing completes the memory commit
+and ledger row in the admitted generation; a memory commit proven with its ledger
+row missing completes the row;
+genuinely ambiguous states (an unreadable journal, a moved or replaced branch,
+evidence outside every accepted state) keep their explicit refusal and advertised
+recover action.
 
-A generation stays in flight, with a recovery action, only when its memory commit is, or may be, on
-the branch. A landing that is refused or fails before that leaves nothing behind: the memory branch
-moved, `HEAD` was switched, a merge is unfinished, the commit object could not be written, or the
-memory checkout changed after it was judged. The generation is then cancelled in the same call, the
+A generation stays in flight, with a recovery action, only when something irreversible
+has happened or cannot be ruled out: its code commit is on the branch, or its memory
+commit is, or may be, on the branch. A landing that is refused or fails before any
+branch moves leaves nothing behind. The refusal names its cause: the branch moved
+after admission, `HEAD` was switched, a merge is unfinished, the judged commit
+could not be written to any branch,
+or the memory checkout changed after it was judged. The generation is then cancelled in the same call, the
 leaf's history file and the ignore rule are restored, and the index is given back (unless it holds
 someone else's staged edit). The refusal names `direct_landing` as the next action: repeat the same
 call once the cause is gone, any number of times; each repeat judges the memory checkout as it is
@@ -376,7 +417,7 @@ transaction records, and admission validates that authority, so a record that is
 refuses there with `publish` as its remedy while this transaction never runs the operation.
 
 The code worktree must be the contract's task worktree unless the declared
-route is the sanctioned branch-direct landing. Refuse before staging when it
+route is the granted branch-direct landing. Refuse before staging when it
 is a normal checkout or when a merge, rebase, cherry-pick, or revert has
 unmerged entries. This preserves Git's conflict state instead of allowing a
 blind stage to commit conflict markers. Existing operation journals keep

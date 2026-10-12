@@ -403,8 +403,8 @@ master). A raised durable `integration-approval` gate still awaits the developer
 
 An ordinary master/series integration has no leaf closeout door of its own: its integration journal
 records source-door authority as `not-applicable`. That is an explicit series lifecycle state, not
-the policy-gated branch-direct leaf route. It therefore does not consult or require
-`directExecutionEnabled`. If a series contract does carry a direct-landing door, integration must
+the grant-gated branch-direct leaf route. It therefore needs no direct-execution grant and no
+harness setting. If a series contract does carry a direct-landing door, integration must
 still prove that exact claimed door and its source journal; absence is never inferred by ignoring a
 present or stale door. Leaf integration continues to require its exact claimed closeout source.
 That last rule governs admission of a new leaf integration; an already-journaled no-door operation

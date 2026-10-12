@@ -783,6 +783,22 @@ class TaskDocNode(BaseModel):
     # Render-ready per-node sprint graph (L12-R4): the dashboard renders this view directly and
     # never joins raw refs to titles or re-derives waves/frontier state from the persisted graph.
     executionGraphView: TaskExecutionGraphView | None = None
+    # The leaf's direct-execution grant with who gave it (MIK-R94 rule 4); None
+    # when the leaf has no grant. Read from the one record at projection time.
+    directGrant: DirectGrantNode | None = None
+
+
+class DirectGrantNode(BaseModel):
+    """A leaf's direct-execution grant as the dashboard shows it (MIK-R94 rule 4).
+
+    Read from the one grant record at projection time, never stored twice.
+    ``None`` on the parent node distinguishes a leaf with no grant.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    grantedBy: str
+    grantedAt: str
 
 
 class SeriesSubTaskNode(BaseModel):
@@ -801,6 +817,9 @@ class SeriesSubTaskNode(BaseModel):
     status: str
     scope: str = ""
     createdAt: str | None = None
+    # The leaf's direct-execution grant with who gave it (MIK-R94 rule 4); None
+    # when the leaf has no grant. Read from the one record at projection time.
+    directGrant: DirectGrantNode | None = None
 
 
 class SeriesSectionNode(BaseModel):

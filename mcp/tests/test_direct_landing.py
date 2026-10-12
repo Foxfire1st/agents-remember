@@ -1,6 +1,6 @@
 """Wave 2 (L16-R6/R7/R8/R9): branch-addressed direct execution and error dialect.
 
-Covers the policy-gated series-contract binding for ``record_route_review``
+Covers the grant-gated series-contract binding for ``record_route_review``
 (R6), the lock-serialized ``direct_landing`` operation with its pre-commit staged-
 candidate gate (R7/R8), and the contract-bound refusal dialect (R9). Uses real
 scratch git repos and a synthetic coordination root -- never the live tree.
@@ -10,24 +10,50 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+from agents_remember.application import worktree_tools
+from agents_remember.application.direct_execution_grants import (
+    give_grant,
+    open_direct_sibling,
+    revoke_grant,
+)
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.lifecycle.direct_landing import direct_landing_tool
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.cli.role_launch_workspace import _resolve_workspace
+from agents_remember.errors import RolePreparationError
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grant_path_for,
+    write_grant_file,
+)
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import derive_memory_ledger
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.direct_landing import DirectLandingResponse
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import (
+    SubTaskRef,
+    TaskDocument,
+    TaskExecutionRegistration,
+    read_task_doc,
+    write_task_doc,
+)
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees import direct_landing as direct_landing_owner
 from agents_remember.worktrees.direct_landing import (
+    DIRECT_CREATE_PRECODE_CENSUS,
     DirectLandingError,
     DirectLandingRequest,
 )
@@ -46,6 +72,9 @@ from agents_remember.worktrees.integration.direct_landing.direct_landing_recover
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
+    legal_operation_controls,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
@@ -58,6 +87,7 @@ from agents_remember.worktrees.knowledge_gate import (
     settle_direct_closing,
 )
 from agents_remember.worktrees.modules import git as git_owner
+from agents_remember.worktrees.modules.closeout import _validate_closeout_source_state
 from agents_remember.worktrees.modules.closeout_external import require_gated_recovery
 from agents_remember.worktrees.modules.git import (
     head_commit,
@@ -79,6 +109,7 @@ from test_knowledge_closeout_gate import (
     TRACES,
     A,
     _answered,
+    _edit,
     build_gated,
     commit,
     family_row,
@@ -99,8 +130,6 @@ def _scratch_config(
     root: Path,
     code: Path,
     memory: Path | None,
-    *,
-    direct_execution_enabled: bool = True,
 ) -> McpRuntimeConfig:
     configured_code = root / "repo-a"
     if not configured_code.exists():
@@ -110,9 +139,7 @@ def _scratch_config(
         configured_memory.parent.mkdir(parents=True, exist_ok=True)
         if not configured_memory.exists():
             configured_memory.symlink_to(memory, target_is_directory=True)
-    config_path = root / (
-        "settings.json" if direct_execution_enabled else "settings-direct-disabled.json"
-    )
+    config_path = root / "settings.json"
     config_path.write_text(
         json.dumps(
             {
@@ -120,7 +147,6 @@ def _scratch_config(
                 "coordinationRoot": (root / "coord").as_posix(),
                 "workspaceRoot": root.as_posix(),
                 "repositories": {"repo-a": {}},
-                "directExecutionEnabled": direct_execution_enabled,
             }
         ),
         encoding="utf-8",
@@ -128,7 +154,55 @@ def _scratch_config(
     return load_config(config_path)
 
 
-def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> dict:
+def _grant_direct_leaf(tasks: Path, config: McpRuntimeConfig) -> TaskDocumentRef:
+    """Publish a canonical master + leaf pair and give the leaf its grant.
+
+    The fixtures land a leaf the knowledge gate infers from its history file;
+    the grant names that same leaf by its canonical task reference.
+    """
+    master = TaskDocument.model_validate(
+        {
+            "id": "TEST-DIRECT-MASTER",
+            "slug": "direct-task",
+            "title": "Direct master",
+            "kind": "master",
+            "status": "inProgress",
+            "repo": "repo-a",
+            "createdAt": "2026-10-06T00:00:00+00:00",
+            "executionNature": "atomic",
+            "subTasks": [
+                SubTaskRef(
+                    number=LEAF,
+                    name="Direct leaf",
+                    file="leaf.md",
+                    status="planning",
+                ).model_dump(mode="json"),
+            ],
+        }
+    )
+    write_task_doc(tasks, master)
+    leaf = TaskDocument.model_validate(
+        {
+            "id": LEAF,
+            "slug": "leaf",
+            "title": "Direct leaf",
+            "kind": "subTask",
+            "status": "planning",
+            "repo": "repo-a",
+            "createdAt": "2026-10-06T00:00:00+00:00",
+            "objective": "Exercise the direct landing.",
+            "requirements": ["The fixture leaf lands directly."],
+        }
+    )
+    write_task_doc(tasks, leaf)
+    ref = TaskDocumentRef(repository="repo-a", path="direct-task/leaf.json")
+    give_grant(config, ref, granted_by="architect", granter_agent_id="fixture")
+    return ref
+
+
+def _series_fixture(
+    root: Path, *, code_commit_message: str = "code commit", lifecycle_id: str = ""
+) -> dict:
     """A task-root series contract over a real code + memory repo pair."""
     coord = root / "coord"
     tasks = coord / "tasks" / "repo-a" / "direct-task"
@@ -152,7 +226,7 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
     )
     git(memory, "add", "memory.md")
     git(memory, "commit", "-m", "seed ledger")
-    memory_base = head_commit(memory)
+    memory_source = git(memory, "rev-parse", "main")
 
     task = ContractTask(
         name="direct-task",
@@ -173,22 +247,26 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
             repo_path=memory,
             source_branch="main",
             work_branch="ar/direct-task",
-            base_commit=memory_base,
+            base_commit=memory_source,
         ),
     )
+    if lifecycle_id:
+        contract = replace(contract, lifecycle_id=lifecycle_id)
     write_contract(contract.contract_path, contract)
     publish_new_lifecycle_operation_location(
         contract,
         contract_text=contract.contract_path.read_text(encoding="utf-8"),
     )
+    config = _scratch_config(root, code, memory)
     return {
-        "config": _scratch_config(root, code, memory),
+        "config": config,
         "contract": contract,
         "code": code,
         "memory": memory,
         "code_head": code_head,
         "candidate_tree": require_git(code, ["rev-parse", f"{code_head}^{{tree}}"]),
         "tasks": tasks,
+        "leaf_ref": _grant_direct_leaf(tasks, config),
     }
 
 
@@ -216,12 +294,14 @@ def _converted_series_fixture(root: Path) -> dict:
     publish_new_lifecycle_operation_location(
         contract, contract_text=contract.contract_path.read_text(encoding="utf-8")
     )
+    config = _scratch_config(root, world.code, world.memory)
     return {
         "world": world,
-        "config": _scratch_config(root, world.code, world.memory),
+        "config": config,
         "contract": contract,
         "memory": world.memory,
         "code": world.code,
+        "leaf_ref": _grant_direct_leaf(tasks, config),
     }
 
 
@@ -368,6 +448,7 @@ def _converted_request(fixture: dict, code_commit: str) -> DirectLandingRequest:
     return DirectLandingRequest(
         contract_path=fixture["contract"].contract_path.as_posix(),
         code_commit=code_commit,
+        leaf_task_document_ref=fixture["leaf_ref"],
         candidate_tree=require_git(fixture["code"], ["rev-parse", f"{code_commit}^{{tree}}"]),
         memory_commit_message="publish exact converted tree",
         intent_note="fixture approval",
@@ -381,6 +462,1117 @@ class DirectLandingTests(unittest.TestCase):
     def tearDown(self) -> None:
         reset_worktree_services()
         self.temp.cleanup()
+
+    def test_direct_landing_without_grant_names_leaf_and_givers(self) -> None:
+        fixture = _converted_series_fixture(Path(self.temp.name) / "nogrant")
+        world = fixture["world"]
+        code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+        revoke_grant(fixture["config"], fixture["leaf_ref"])
+        refused = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-leaf-without-grant")
+        self.assertIn(fixture["leaf_ref"].path, refused["detail"])
+        self.assertIn("dashboard", refused["detail"])
+        self.assertIn("direct_execution_grant", refused["detail"])
+        self.assertNotIn("directExecutionEnabled", refused["detail"])
+
+    def test_direct_landing_with_unreadable_grant_refuses(self) -> None:
+        fixture = _converted_series_fixture(Path(self.temp.name) / "badgrant")
+        world = fixture["world"]
+        code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+        grant_path_for(
+            fixture["config"].coordination_root, fixture["leaf_ref"]
+        ).write_text("{not json", encoding="utf-8")
+        refused = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-grant-unreadable")
+
+    def _create_fixture(self, root: Path) -> dict:
+        fixture = _series_fixture(root, lifecycle_id="direct-create-test")
+        code = fixture["code"]
+        git(code, "checkout", fixture["contract"].code_work_branch)
+        (code / "feature.py").write_text("def f():\n    return 2\n", encoding="utf-8")
+        (code / "extra.py").write_text("def g():\n    return 3\n", encoding="utf-8")
+        memory = fixture["memory"]
+        (memory / "onboarding").mkdir(exist_ok=True)
+        (memory / "onboarding" / "feature.py.md").write_text("# feature\n", encoding="utf-8")
+        return fixture
+
+    def _create_request(self, fixture: dict, *, dry_run: bool) -> DirectLandingRequest:
+        return DirectLandingRequest(
+            contract_path=fixture["contract"].contract_path.as_posix(),
+            code_commit=None,
+            leaf_task_document_ref=fixture["leaf_ref"],
+            code_commit_message="direct work",
+            memory_commit_message="direct memory",
+            intent_note="approve",
+            dry_run=dry_run,
+        )
+
+    def _converted_create_fixture(self, root: Path) -> dict:
+        """A converted-memory fixture with an answered, uncommitted code change to create."""
+
+        fixture = _converted_series_fixture(root)
+        world = fixture["world"]
+        _edit(world, CODE_A.replace("return value", "return -value"))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        bind_worktree_services(build_default_worktree_services())
+        return fixture
+
+    def _converted_create_request(self, fixture: dict, *, dry_run: bool) -> DirectLandingRequest:
+        return DirectLandingRequest(
+            contract_path=fixture["contract"].contract_path.as_posix(),
+            code_commit=None,
+            leaf_task_document_ref=fixture["leaf_ref"],
+            code_commit_message="direct work",
+            memory_commit_message="direct memory",
+            intent_note="approve",
+            dry_run=dry_run,
+        )
+
+    def test_direct_create_preview_lists_paths_and_names_tree(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-preview")
+        code = fixture["code"]
+        head_before = git(code, "rev-parse", "HEAD")
+        preview = direct_landing_tool(fixture["config"], self._create_request(fixture, dry_run=True))
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["state"], "would-land")
+        self.assertEqual(preview["codeCommit"], "")
+        self.assertEqual(preview["codeCommitMessage"], "direct work")
+        self.assertTrue(preview["candidateTree"])
+        self.assertEqual(preview["candidatePaths"], ["README.md", "extra.py", "feature.py"])
+        self.assertEqual(DirectLandingResponse.model_validate(preview).state, "would-land")
+        # The preview commits nothing: the branch and the files are as before.
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertTrue(git(code, "status", "--porcelain"))
+
+    def test_direct_create_apply_lands_code_memory_and_ledger(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-apply")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        code_base = fixture["code_head"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        apply_request = self._create_request(fixture, dry_run=False)
+        apply_request = replace(apply_request, candidate_tree=preview["candidateTree"])
+        landed = direct_landing_tool(config, apply_request)
+        self.assertEqual(landed["state"], "landed")
+        self.assertEqual(DirectLandingResponse.model_validate(landed).state, "landed")
+        self.assertEqual(landed["candidateTree"], preview["candidateTree"])
+        created = landed["codeCommit"]
+        self.assertTrue(created)
+        self.assertNotEqual(created, code_base)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(git(code, "rev-parse", f"{created}^{{tree}}"), preview["candidateTree"])
+        self.assertEqual(
+            git(code, "show", "-s", "--format=%s", created),
+            "direct work",
+        )
+        self.assertEqual(git(code, "status", "--porcelain"), "")
+        memory_commit = landed["memoryContentCommit"]
+        self.assertTrue(memory_commit)
+        memory_body = git(memory, "show", "-s", "--format=%B", str(memory_commit))
+        self.assertEqual(memory_body, f"direct memory\n\nCode-Commit: {created}")
+        ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
+        self.assertIn(created, ledger_text)
+        self.assertIn(str(memory_commit), ledger_text)
+        # F01: the admitted generation persists the create's code facts before
+        # publication: message, tree/ref snapshot, and the exact tree.
+        contract = fixture["contract"]
+        record = direct_landing_store(contract).read()
+        assert record is not None
+        accepted = DirectLandingOperationInput.model_validate(record.input.model_dump(mode="json"))
+        self.assertEqual(accepted.codeCommit, created)
+        self.assertEqual(accepted.codeCommitMessage, "direct work")
+        self.assertEqual(accepted.candidateTree, preview["candidateTree"])
+        assert accepted.codeBefore is not None
+        self.assertEqual(accepted.codeBefore.head, code_base)
+        self.assertEqual(accepted.codeBefore.headRef, f"refs/heads/{contract.code_work_branch}")
+
+    def test_direct_create_apply_refuses_before_code_with_state_preserved(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._converted_create_fixture(root / "create-precode-refusal")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        world = fixture["world"]
+        code = world.code
+        memory = world.memory
+        preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
+        request = self._converted_create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        head_before = git(code, "rev-parse", "HEAD")
+        porcelain_before = git(code, "status", "--porcelain")
+        cached_before = git(code, "diff", "--cached", "--name-only")
+        history = memory / f"knowledge/history/{LEAF}.json"
+        history_before = history.read_bytes()
+        memory_porcelain_before = git(memory, "status", "--porcelain")
+        memory_before = git(memory, "rev-parse", "HEAD")
+        store = direct_landing_store(contract)
+        with (
+            mock.patch.object(
+                direct_landing_owner,
+                "direct_gate_source",
+                return_value=direct_landing_owner.DirectGateVerdict(
+                    True, None, "probe refuses before any code publication"
+                ),
+            ),
+            self.assertRaisesRegex(DirectLandingError, "direct-landing-knowledge-gate-refused"),
+        ):
+            direct_landing_owner.direct_landing(config, request, contract)
+        # F01: a pre-code refusal publishes nothing and preserves everything:
+        # branch, files, index, history, and no admitted generation.
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertEqual(git(code, "status", "--porcelain"), porcelain_before)
+        self.assertEqual(git(code, "diff", "--cached", "--name-only"), cached_before)
+        self.assertTrue((code / A).is_file())
+        self.assertEqual(history.read_bytes(), history_before)
+        self.assertEqual(git(memory, "status", "--porcelain"), memory_porcelain_before)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+        self.assertIsNone(store.read())
+
+    def test_direct_create_apply_on_converted_memory_judges_before_code(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._converted_create_fixture(root / "create-converted")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        world = fixture["world"]
+        code = world.code
+        memory = world.memory
+        code_base = git(code, "rev-parse", "HEAD")
+        preview = direct_landing_tool(config, self._converted_create_request(fixture, dry_run=True))
+        request = self._converted_create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        landed = direct_landing_tool(config, request)
+        self.assertEqual(landed["state"], "landed")
+        created = landed["codeCommit"]
+        self.assertTrue(created)
+        self.assertNotEqual(created, code_base)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(git(code, "rev-parse", f"{created}^{{tree}}"), preview["candidateTree"])
+        memory_commit = landed["memoryContentCommit"]
+        self.assertTrue(memory_commit)
+        memory_body = git(memory, "show", "-s", "--format=%B", str(memory_commit))
+        self.assertIn(f"Code-Commit: {created}", memory_body)
+        # The gate closed this leaf's history file.
+        closed = json.loads((memory / f"knowledge/history/{LEAF}.json").read_text(encoding="utf-8"))
+        self.assertTrue(closed["closed"])
+        self.assertEqual(closed["leaf"], LEAF)
+        # F01: the admitted generation persists the create's code facts.
+        record = direct_landing_store(contract).read()
+        assert record is not None
+        accepted = DirectLandingOperationInput.model_validate(record.input.model_dump(mode="json"))
+        self.assertEqual(accepted.codeCommit, created)
+        self.assertEqual(accepted.codeCommitMessage, "direct work")
+        self.assertEqual(accepted.candidateTree, preview["candidateTree"])
+        assert accepted.codeBefore is not None
+        self.assertEqual(accepted.codeBefore.head, code_base)
+
+    def _cut_create_before_memory(
+        self, fixture: dict
+    ) -> tuple[DirectLandingRequest, str]:
+        """Preview, then cut the apply before any memory commit is published."""
+
+        config = fixture["config"]
+        code = fixture["code"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution._publish_judged_tree",
+                side_effect=RuntimeError("cut before memory publication"),
+            ),
+        ):
+            cut = direct_landing_tool(config, request)
+        self.assertEqual(cut["state"], "refused")
+        created = git(code, "rev-parse", "HEAD")
+        self.assertNotEqual(created, fixture["code_head"])
+        return request, created
+
+    def _cut_create_at_memory_receipt(self, fixture: dict) -> tuple[DirectLandingRequest, str, str]:
+        """Preview, then cut the apply after the memory commit but before its receipt."""
+
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        memory_before = git(memory, "rev-parse", "HEAD")
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.prove_git_commit",
+                side_effect=RuntimeError("receipt interrupted"),
+            ),
+        ):
+            try:
+                direct_landing(config, request, contract)
+            except DirectLandingError as error:
+                self.assertEqual(error.status, "direct-landing-recovery-required")
+            else:
+                self.fail("the cut call must refuse")
+        created = git(code, "rev-parse", "HEAD")
+        self.assertNotEqual(created, fixture["code_head"])
+        # The cut lands after the memory publication: the memory commit is on
+        # the branch; only its receipt and the ledger row are missing.
+        cut_memory = git(memory, "rev-parse", "HEAD")
+        self.assertNotEqual(cut_memory, memory_before)
+        return request, created, cut_memory
+
+    def test_direct_create_apply_completes_after_a_cut_memory_commit(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-resume")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        request, created, cut_memory = self._cut_create_at_memory_receipt(fixture)
+        # The same call again completes the admitted pair: no second code
+        # commit, the same memory commit, then the ledger row.
+        again = direct_landing_tool(config, request)
+        self.assertEqual(again["state"], "landed")
+        self.assertEqual(again["codeCommit"], created)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(
+            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
+        )
+        self.assertTrue(again["memoryContentCommit"])
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
+        self.assertEqual(again["memoryContentCommit"], cut_memory)
+
+    def test_recover_control_completes_a_cut_memory_commit(self) -> None:
+        # The recover control completes the same cut on a fresh pair with no
+        # second code commit.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-recover")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        store = direct_landing_store(contract)
+        memory_before = git(memory, "rev-parse", "HEAD")
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.prove_git_commit",
+                side_effect=RuntimeError("receipt interrupted"),
+            ),
+            self.assertRaises(DirectLandingError),
+        ):
+            direct_landing(config, request, contract)
+        created = git(code, "rev-parse", "HEAD")
+        cut_memory = git(memory, "rev-parse", "HEAD")
+        self.assertNotEqual(cut_memory, memory_before)
+        record = store.read()
+        assert record is not None
+        completed = recover_direct_landing_under_authority(contract, store, record)
+        assert isinstance(completed.result, dict)
+        self.assertEqual(completed.result["codeCommit"], created)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(
+            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
+        )
+        self.assertTrue(completed.result["memoryContentCommit"])
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
+
+    def test_direct_create_apply_completes_after_a_cut_before_memory(self) -> None:
+        # Sealed F01/F04: a cut after code publication but before any memory
+        # commit keeps generation1 in flight (it owns an irreversible output),
+        # and the exact same call resumes and completes that generation with
+        # the same code commit — no generation2, no second code commit.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-code-cut")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        memory_before = git(memory, "rev-parse", "HEAD")
+        request, created = self._cut_create_before_memory(fixture)
+        # No memory commit was published by the cut.
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+        store = direct_landing_store(contract)
+        record = store.read()
+        assert record is not None
+        cut_generation = record.generation
+        self.assertNotEqual(record.status, "completed")
+        # The exact same call completes the admitted generation: same code
+        # commit, one code commit total, memory and ledger follow.
+        again = direct_landing_tool(config, request)
+        self.assertEqual(again["state"], "landed")
+        self.assertEqual(again["codeCommit"], created)
+        successor = store.read()
+        assert successor is not None
+        self.assertEqual(successor.generation, cut_generation)
+        self.assertEqual(successor.status, "completed")
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(
+            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
+        )
+        self.assertTrue(again["memoryContentCommit"])
+        self.assertNotEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+
+    def _cut_create_at_ledger_write(self, fixture: dict) -> tuple[DirectLandingRequest, str, str]:
+        """Preview, then cut the apply after the memory commit but before the ledger row."""
+
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.refresh_memory_cache",
+                side_effect=RuntimeError("ledger interrupted"),
+            ),
+        ):
+            try:
+                direct_landing_owner.direct_landing(config, request, contract)
+            except DirectLandingError as error:
+                self.assertEqual(error.status, "direct-landing-recovery-required")
+            else:
+                self.fail("the cut call must refuse")
+        created = git(code, "rev-parse", "HEAD")
+        self.assertNotEqual(created, fixture["code_head"])
+        # The cut lands after the memory commit: it is on the branch, but the
+        # ledger row was never written.
+        cut_memory = git(memory, "rev-parse", "HEAD")
+        ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
+        self.assertNotIn(created, ledger_text)
+        return request, created, cut_memory
+
+    def test_cut_generation_carries_code_leg_and_boundary(self) -> None:
+        # Sealed F01: the post-code/pre-memory generation journals the
+        # per-leg code intent through to commit proof and enters the
+        # irreversible boundary: enabled code leg, proven code cell, flag set.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-code-leg")
+        contract = fixture["contract"]
+        _request, created = self._cut_create_before_memory(fixture)
+        record = direct_landing_store(contract).read()
+        assert record is not None
+        self.assertEqual(record.input.effectiveInput.code.state, "enabled")
+        self.assertEqual(
+            set(record.mutationEvidence), {"code", "memory"}
+        )
+        code_evidence = record.mutationEvidence["code"]
+        self.assertEqual(code_evidence.state, "commit-proven")
+        self.assertEqual(code_evidence.commit, created)
+        self.assertTrue(record.irreversibleBoundaryEntered)
+
+    def test_moved_code_branch_keeps_generation_ambiguous(self) -> None:
+        # Sealed F01-F04-moved-code: the branch advances past the admitted
+        # code commit (same tree) before the memory cut. The published output
+        # stays reachable, so the generation is not unpublished and is never
+        # cancelled as such: it stays in flight with an explicit
+        # developer-decision refusal, and the repeat refuses the same way.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-moved-code")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        published: dict[str, str] = {}
+
+        def cut_after_code(*args, **kwargs):
+            published["code"] = git(code, "rev-parse", "HEAD")
+            tree = git(code, "rev-parse", "HEAD^{tree}")
+            published["descendant"] = git(
+                code, "commit-tree", tree, "-p", published["code"], "-m", "advance"
+            )
+            git(code, "update-ref", "HEAD", published["descendant"], published["code"])
+            raise RuntimeError("cut before memory with advanced code branch")
+
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution._publish_judged_tree",
+                side_effect=cut_after_code,
+            ),
+        ):
+            result = direct_landing_tool(config, request)
+        self.assertEqual(result["state"], "refused")
+        self.assertNotEqual(published["code"], fixture["code_head"])
+        store = direct_landing_store(contract)
+        record = store.read()
+        assert record is not None
+        self.assertNotEqual(record.status, "cancelled")
+        self.assertEqual(
+            git(code, "merge-base", "--is-ancestor", published["code"], "HEAD"), ""
+        )
+        classification = classify_direct_landing_recovery(contract, record)
+        self.assertEqual(classification.state, "developer-decision")
+        again = direct_landing_tool(config, request)
+        self.assertEqual(again["state"], "refused")
+        successor = store.read()
+        assert successor is not None
+        self.assertEqual(successor.generation, record.generation)
+        self.assertNotEqual(successor.status, "cancelled")
+        self.assertNotEqual(successor.status, "completed")
+
+    def test_advanced_source_refuses_create(self) -> None:
+        # Sealed F01: the direct route proves the same source lineage as the
+        # enclosure closeout. A source that moved after admission refuses the
+        # preview and the apply with the lineage words.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-stale-source")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        source = git(code, "rev-parse", contract.code_source_branch)
+        tree = git(code, "rev-parse", f"{source}^{{tree}}")
+        advanced = git(code, "commit-tree", tree, "-p", source, "-m", "source advance")
+        git(code, "update-ref", f"refs/heads/{contract.code_source_branch}", advanced, source)
+        with self.assertRaises(Exception) as ordinary:
+            _validate_closeout_source_state(contract, dry_run=True)
+        self.assertIn("stale", str(ordinary.exception))
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        self.assertFalse(preview["ok"])
+        self.assertEqual(preview["status"], "direct-landing-source-lineage-refused")
+        self.assertEqual(git(code, "rev-parse", "HEAD"), fixture["code_head"])
+        apply = direct_landing_tool(config, self._create_request(fixture, dry_run=False))
+        self.assertFalse(apply["ok"])
+        self.assertEqual(apply["status"], "direct-landing-source-lineage-refused")
+
+    def test_public_recover_control_completes_cut_generation(self) -> None:
+        # Sealed F04: the public worktree_operation_control recover call
+        # executes the advertised action on a mechanically recoverable cut
+        # instead of refusing it.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-public-recover")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        _request, created = self._cut_create_before_memory(fixture)
+        store = direct_landing_store(contract)
+        record = store.read()
+        assert record is not None
+        controls = legal_operation_controls(contract, record)
+        self.assertIn("recover", [item["action"] for item in controls])
+        result = worktree_tools.worktree_operation_control_tool(
+            config,
+            worktree_tools.OperationControlRequest(
+                contract_path=str(contract.contract_path),
+                operation_kind="direct-landing",
+                action="recover",
+                expected_generation=record.generation,
+                intent_note="Recover the sealed code cut.",
+            ),
+        )
+        self.assertTrue(result.get("ok"), result)
+        successor = store.read()
+        assert successor is not None
+        self.assertEqual(successor.status, "completed")
+        self.assertEqual(successor.generation, record.generation)
+        self.assertEqual(git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1")
+        _ = created
+
+    def test_create_precode_census_pins_each_row(self) -> None:
+        # Sealed F01: the durable ordinary-closeout census. Each row's
+        # disposition is pinned behaviorally on one fixture: same-check rows
+        # refuse or judge identically, ruled-out rows hold structurally.
+        self.assertEqual(
+            [row.id for row in DIRECT_CREATE_PRECODE_CENSUS],
+            [
+                "entry-opt-out",
+                "source-lineage",
+                "plan-contract-identity",
+                "commit-messages",
+                "previewed-tree-equality",
+                "branch-checkout",
+                "review-claim",
+                "invariant-knowledge-judgment",
+                "generation-admission",
+                "code-leg-intent-proof",
+                "closeout-door",
+                "task-intent-binding",
+                "grant-and-bound-leaf",
+            ],
+        )
+        self.assertEqual(
+            [row.direct_disposition for row in DIRECT_CREATE_PRECODE_CENSUS],
+            ["same"] * 10 + ["ruled-out", "ruled-out", "direct-only"],
+        )
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-census")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        # Grant row: without the grant the create refuses at entry.
+        revoke_grant(config, fixture["leaf_ref"])
+        ungranted = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        self.assertFalse(ungranted["ok"])
+        self.assertEqual(ungranted["status"], "direct-landing-leaf-without-grant")
+        give_grant(
+            config, fixture["leaf_ref"], granted_by="architect", granter_agent_id="census"
+        )
+        # Message row: without the create message the apply refuses up front.
+        no_message = replace(
+            self._create_request(fixture, dry_run=False), code_commit_message=" "
+        )
+        refused = direct_landing_tool(config, no_message)
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-code-message-required")
+        # Tree row: a stale previewed tree refuses with nothing committed.
+        stale = replace(
+            self._create_request(fixture, dry_run=True), candidate_tree="0" * 40
+        )
+        moved = direct_landing_tool(config, stale)
+        self.assertFalse(moved["ok"])
+        self.assertEqual(moved["status"], "direct-landing-candidate-tree-moved")
+        # Door ruled out, code leg in: a real apply admits a generation with
+        # no door publication and an enabled, proven code leg.
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        landed = direct_landing_tool(config, request)
+        self.assertEqual(landed["state"], "landed")
+        record = direct_landing_store(contract).read()
+        assert record is not None
+        self.assertIsNone(record.doorPublication)
+        self.assertEqual(record.input.leafTaskDocumentRef, fixture["leaf_ref"])
+        self.assertEqual(record.taskIntent.state, "missing-intent")
+        self.assertEqual(record.input.effectiveInput.code.state, "enabled")
+        self.assertEqual(record.mutationEvidence["code"].state, "commit-proven")
+        self.assertTrue(record.irreversibleBoundaryEntered)
+
+    def test_recover_for_another_operations_record_is_refused(self) -> None:
+        # Sealed F01 (L94-THE-TWO-CHECKS ruling, door stand-in): a recovery
+        # acts only on its own operation. Asked for another operation's record
+        # (a generation that is not the admitted one), the public recover
+        # control refuses with lifecycle-generation-changed, and the admitted
+        # generation still recovers afterwards.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-foreign-recover")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        _request, _created = self._cut_create_before_memory(fixture)
+        store = direct_landing_store(contract)
+        record = store.read()
+        assert record is not None
+        foreign = worktree_tools.worktree_operation_control_tool(
+            config,
+            worktree_tools.OperationControlRequest(
+                contract_path=str(contract.contract_path),
+                operation_kind="direct-landing",
+                action="recover",
+                expected_generation=record.generation + 1,
+                intent_note="Recover another operation's record.",
+            ),
+        )
+        self.assertFalse(foreign.get("ok"))
+        self.assertEqual(foreign.get("status"), "lifecycle-generation-changed")
+        result = worktree_tools.worktree_operation_control_tool(
+            config,
+            worktree_tools.OperationControlRequest(
+                contract_path=str(contract.contract_path),
+                operation_kind="direct-landing",
+                action="recover",
+                expected_generation=record.generation,
+                intent_note="Recover the sealed code cut.",
+            ),
+        )
+        self.assertTrue(result.get("ok"), result)
+        successor = store.read()
+        assert successor is not None
+        self.assertEqual(successor.status, "completed")
+
+    def test_direct_landing_without_a_bound_leaf_is_refused(self) -> None:
+        # Sealed F01 (L94-THE-TWO-CHECKS ruling, binding stand-in): an
+        # operation belongs to exactly one leaf task. A landing that names a
+        # granted leaf bound to another master — i.e. no leaf bound to this
+        # series contract — is refused before any durable effect.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-unbound-leaf")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        head_before = git(code, "rev-parse", "HEAD")
+        memory_before = git(memory, "rev-parse", "HEAD")
+        unbound = self._foreign_leaf_ref(config)
+        request = replace(
+            self._create_request(fixture, dry_run=False),
+            leaf_task_document_ref=unbound,
+        )
+        refused = direct_landing_tool(config, request)
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-foreign-leaf")
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+
+    def test_direct_create_apply_completes_after_a_cut_ledger_write(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-ledger-cut")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        request, created, cut_memory = self._cut_create_at_ledger_write(fixture)
+        # The same call again completes the admitted pair: the same commits,
+        # then the ledger row, with one code commit total.
+        again = direct_landing_tool(config, request)
+        self.assertEqual(again["state"], "landed")
+        self.assertEqual(again["codeCommit"], created)
+        self.assertEqual(again["memoryContentCommit"], cut_memory)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(
+            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
+        )
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
+        ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
+        self.assertIn(created, ledger_text)
+        self.assertIn(cut_memory, ledger_text)
+
+    def test_recover_control_completes_a_cut_ledger_write(self) -> None:
+        # The recover control completes the same cut on a fresh pair.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-ledger-recover")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        store = direct_landing_store(contract)
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.refresh_memory_cache",
+                side_effect=RuntimeError("ledger interrupted"),
+            ),
+            self.assertRaises(DirectLandingError),
+        ):
+            direct_landing_owner.direct_landing(config, request, contract)
+        created = git(code, "rev-parse", "HEAD")
+        cut_memory = git(memory, "rev-parse", "HEAD")
+        record = store.read()
+        assert record is not None
+        completed = recover_direct_landing_under_authority(contract, store, record)
+        assert isinstance(completed.result, dict)
+        self.assertEqual(completed.result["codeCommit"], created)
+        self.assertEqual(completed.result["memoryContentCommit"], cut_memory)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
+        self.assertEqual(
+            git(code, "rev-list", "--count", f"{fixture['code_head']}..HEAD"), "1"
+        )
+
+    def _second_granted_leaf(self, fixture: dict) -> TaskDocumentRef:
+        """A second planning leaf of the same master with its own grant."""
+        config = fixture["config"]
+        tasks = fixture["tasks"]
+        sibling = TaskDocument.model_validate(
+            {
+                "id": "TEST-DIRECT-SECOND",
+                "slug": "second",
+                "title": "Second direct leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": "repo-a",
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the sibling guard.",
+                "requirements": ["The second leaf stays out until the first lands."],
+            }
+        )
+        write_task_doc(tasks, sibling)
+        master = read_task_doc(tasks / "task.json")
+        write_task_doc(
+            tasks,
+            master.model_copy(
+                update={
+                    "subTasks": [
+                        *master.subTasks,
+                        SubTaskRef(
+                            number="TEST-DIRECT-SECOND",
+                            name="Second direct leaf",
+                            file="second.md",
+                            status="planning",
+                        ),
+                    ]
+                }
+            ),
+        )
+        second_ref = TaskDocumentRef(repository="repo-a", path="direct-task/second.json")
+        give_grant(config, second_ref, granted_by="architect", granter_agent_id="fixture")
+        return second_ref
+
+    def _mark_completed_started(self, fixture: dict) -> None:
+        """Mark the first leaf Completed with a worker start registration."""
+        tasks = fixture["tasks"]
+        first = read_task_doc(tasks / "leaf.json")
+        write_task_doc(
+            tasks,
+            first.model_copy(
+                update={
+                    "status": "Completed",
+                    "executionRegistrations": [
+                        TaskExecutionRegistration(
+                            sourceKind="terminal-catalog-seat",
+                            role="worker",
+                            sourceId="first-worker",
+                            observedAt="2026-10-11T00:00:00Z",
+                        )
+                    ],
+                }
+            ),
+        )
+
+    def _second_workspace_context(self, fixture: dict, second_ref: TaskDocumentRef):
+        config = fixture["config"]
+        tasks = fixture["tasks"]
+        topology = TaskDocumentTopology(config.coordination_root)
+        return SimpleNamespace(
+            role="worker",
+            task=topology.resolve(second_ref),
+            master=topology.resolve(
+                TaskDocumentRef(repository="repo-a", path="direct-task/task.json")
+            ),
+            sprint=SimpleNamespace(path=tasks / "task.json"),
+        )
+
+    def test_completed_leaf_with_dirty_memory_guards_sibling(self) -> None:
+        # Sealed F05: the R2 counterexample. A cut publishes the first leaf's
+        # code (clean) with memory dirty and no pair result; marking it
+        # Completed does not release the guard. Both consumers refuse.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "sibling-memory-dirt")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        _request, _created = self._cut_create_before_memory(fixture)
+        self.assertEqual(git(code, "status", "--porcelain"), "")
+        self.assertTrue(git(memory, "status", "--porcelain"))
+        self._mark_completed_started(fixture)
+        second_ref = self._second_granted_leaf(fixture)
+        found = open_direct_sibling(config, second_ref)
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found[0], fixture["leaf_ref"])
+        refused = direct_landing_tool(
+            config,
+            replace(
+                self._create_request(fixture, dry_run=True),
+                leaf_task_document_ref=second_ref,
+            ),
+        )
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-sibling-open")
+        self.assertIn(fixture["leaf_ref"].path, refused["detail"])
+        with self.assertRaises(RolePreparationError) as raised:
+            _resolve_workspace(config, self._second_workspace_context(fixture, second_ref))
+        self.assertIn("direct-grant-sibling-open", str(raised.exception))
+
+    def test_completed_leaf_with_clean_pair_and_no_proof_guards_sibling(self) -> None:
+        # Sealed F05: a cut leaves code published and clean; cleaning memory
+        # too still guards, because the incomplete generation is no landing
+        # proof and completion is not landing.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "sibling-cancelled-pair")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        _request, _created = self._cut_create_before_memory(fixture)
+        shutil.rmtree(memory / "onboarding", ignore_errors=True)
+        (memory / ".gitignore").unlink(missing_ok=True)
+        self.assertEqual(git(code, "status", "--porcelain"), "")
+        self.assertEqual(git(memory, "status", "--porcelain"), "")
+        self._mark_completed_started(fixture)
+        second_ref = self._second_granted_leaf(fixture)
+        found = open_direct_sibling(config, second_ref)
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found[0], fixture["leaf_ref"])
+
+    def test_landed_leaf_with_completed_document_releases_sibling(self) -> None:
+        # Sealed F05: a completed generation with the published pair releases
+        # the guard even after the document is marked Completed.
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "sibling-landed")
+        config = fixture["config"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        landed = direct_landing_tool(config, request)
+        self.assertEqual(landed["state"], "landed")
+        self._mark_completed_started(fixture)
+        second_ref = self._second_granted_leaf(fixture)
+        self.assertIsNone(open_direct_sibling(config, second_ref))
+
+    def test_direct_create_apply_refuses_a_conflicting_generation(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-conflict")
+        config = fixture["config"]
+        contract = fixture["contract"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        store = direct_landing_store(contract)
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.prove_git_commit",
+                side_effect=RuntimeError("receipt interrupted"),
+            ),
+            self.assertRaises(DirectLandingError),
+        ):
+            direct_landing_owner.direct_landing(config, request, contract)
+        first = store.read()
+        assert first is not None
+        created = git(code, "rev-parse", "HEAD")
+        cut_memory = git(memory, "rev-parse", "HEAD")
+        # A different request while the first generation is in flight refuses
+        # as a conflict, leaving the admitted pair untouched.
+        other = replace(request, intent_note="another approval")
+        with self.assertRaisesRegex(DirectLandingError, "direct-landing-input-conflict"):
+            direct_landing_owner.direct_landing(config, other, contract)
+        self.assertEqual(git(code, "rev-parse", "HEAD"), created)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), cut_memory)
+        self.assertEqual(store.read().fingerprint, first.fingerprint)
+        self.assertEqual(store.read().status, first.status)
+
+    def test_direct_create_apply_refuses_a_moved_checkout(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-moved")
+        config = fixture["config"]
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        code = fixture["code"]
+        head_before = git(code, "rev-parse", "HEAD")
+        (code / "late.py").write_text("late\n", encoding="utf-8")
+        request = self._create_request(fixture, dry_run=False)
+        request = replace(request, candidate_tree=preview["candidateTree"])
+        with self.assertRaisesRegex(DirectLandingError, "no longer matches"):
+            direct_landing(config, request, fixture["contract"])
+        # The refusal came before the code commit: nothing is committed on either
+        # side and the checkout's files are as before.
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertTrue((code / "late.py").is_file())
+        self.assertTrue((code / "extra.py").is_file())
+
+    def test_direct_create_apply_requires_the_previewed_tree(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-no-tree")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        head_before = git(code, "rev-parse", "HEAD")
+        memory_before = git(memory, "rev-parse", "HEAD")
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        self.assertTrue(preview["candidateTree"])
+        with self.assertRaisesRegex(DirectLandingError, "candidate-tree-required"):
+            direct_landing(config, self._create_request(fixture, dry_run=False), fixture["contract"])
+        # Nothing was committed on either side and the files are as previewed.
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+        self.assertTrue((code / "extra.py").is_file())
+        # F02: malformed and stale assertions refuse the same way, unchanged.
+        for bad_tree in ("not-a-tree", "0" * 40):
+            bad = replace(
+                self._create_request(fixture, dry_run=False), candidate_tree=bad_tree
+            )
+            with self.assertRaisesRegex(DirectLandingError, "candidate-tree-moved"):
+                direct_landing(config, bad, fixture["contract"])
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+        self.assertTrue((code / "extra.py").is_file())
+
+    def _foreign_leaf_ref(self, config: McpRuntimeConfig) -> TaskDocumentRef:
+        """A granted leaf of another master, for foreign-authority refusals."""
+
+        foreign = TaskDocumentRef(repository="repo-a", path="foreign-master/leaf.json")
+        foreign_tasks = config.coordination_root / "tasks" / "repo-a" / "foreign-master"
+        foreign_tasks.mkdir(parents=True, exist_ok=True)
+        write_task_doc(
+            foreign_tasks,
+            TaskDocument.model_validate(
+                {
+                    "id": "TEST-FOREIGN-LEAF",
+                    "slug": "leaf",
+                    "title": "Foreign leaf",
+                    "kind": "subTask",
+                    "status": "planning",
+                    "repo": "repo-a",
+                    "createdAt": "2026-10-06T00:00:00+00:00",
+                    "objective": "Belongs to another master.",
+                    "requirements": ["The foreign leaf stays foreign."],
+                }
+            ),
+        )
+        write_grant_file(
+            grant_path_for(config.coordination_root, foreign),
+            DirectExecutionGrant(
+                leaf=foreign,
+                granted_by="architect",
+                granted_at="2026-10-06T00:00:00+00:00",
+                granter_agent_id="fixture",
+            ),
+        )
+        return foreign
+
+    def test_direct_landing_refuses_a_foreign_leaf_grant(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-foreign")
+        config = fixture["config"]
+        code = fixture["code"]
+        memory = fixture["memory"]
+        head_before = git(code, "rev-parse", "HEAD")
+        memory_before = git(memory, "rev-parse", "HEAD")
+        foreign = self._foreign_leaf_ref(config)
+        preview = direct_landing_tool(config, self._create_request(fixture, dry_run=True))
+        request = replace(
+            self._create_request(fixture, dry_run=False),
+            leaf_task_document_ref=foreign,
+            candidate_tree=preview["candidateTree"],
+        )
+        with self.assertRaisesRegex(DirectLandingError, "direct-landing-foreign-leaf"):
+            direct_landing(config, request, fixture["contract"])
+        refused = direct_landing_tool(config, replace(request, dry_run=True))
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["status"], "direct-landing-foreign-leaf")
+        # Nothing was committed on either side.
+        self.assertEqual(git(code, "rev-parse", "HEAD"), head_before)
+        self.assertEqual(git(memory, "rev-parse", "HEAD"), memory_before)
+
+    def test_direct_verify_refuses_a_foreign_leaf_grant(self) -> None:
+        root = Path(self.temp.name)
+        fixture = _converted_series_fixture(root / "verify-foreign")
+        world = fixture["world"]
+        config = fixture["config"]
+        code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        bind_worktree_services(build_default_worktree_services())
+        memory_before = git(world.memory, "rev-parse", "HEAD")
+        foreign = self._foreign_leaf_ref(config)
+        request = replace(_converted_request(fixture, code), leaf_task_document_ref=foreign)
+        with self.assertRaisesRegex(DirectLandingError, "direct-landing-foreign-leaf"):
+            direct_landing_owner.direct_landing(config, request, fixture["contract"])
+        # Nothing was committed on either side.
+        self.assertEqual(git(world.code, "rev-parse", "HEAD"), code)
+        self.assertEqual(git(world.memory, "rev-parse", "HEAD"), memory_before)
+
+    def test_direct_verify_refuses_a_mismatched_history_owner(self) -> None:
+        root = Path(self.temp.name)
+        fixture = _converted_series_fixture(root / "verify-owner")
+        world = fixture["world"]
+        config = fixture["config"]
+        code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        # The bound leaf's file stays open, but another leaf's open history is
+        # the one the gate selects: the landing must not close a foreign file.
+        other = {"schema": "ar-history/v1", "leaf": "260928-MIK-L96", "closed": False, "rows": []}
+        (world.memory / "knowledge/history/260928-MIK-L96.json").write_text(
+            canonical_text(other), encoding="utf-8"
+        )
+        (world.memory / f"knowledge/history/{LEAF}.json").unlink()
+        bind_worktree_services(build_default_worktree_services())
+        memory_before = git(world.memory, "rev-parse", "HEAD")
+        request = _converted_request(fixture, code)
+        # L52 now refuses first at the gate with the leaf named (land with its
+        # own leaf_id); the property holds: refused, foreign file unclosed.
+        with self.assertRaisesRegex(
+            DirectLandingError, "direct-landing-knowledge-gate-refused"
+        ) as refused:
+            direct_landing_owner.direct_landing(config, request, fixture["contract"])
+        self.assertIn("260928-MIK-L96", str(refused.exception))
+        self.assertEqual(git(world.code, "rev-parse", "HEAD"), code)
+        self.assertEqual(git(world.memory, "rev-parse", "HEAD"), memory_before)
+
+    def test_direct_verify_refuses_a_sibling_leaf_history(self) -> None:
+        root = Path(self.temp.name)
+        fixture = _converted_series_fixture(root / "verify-sibling")
+        world = fixture["world"]
+        config = fixture["config"]
+        tasks = fixture["contract"].task_root
+        sibling = TaskDocument.model_validate(
+            {
+                "id": "TEST-DIRECT-SIBLING",
+                "slug": "sibling",
+                "title": "Direct sibling",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": "repo-a",
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the sibling refusal.",
+                "requirements": ["The sibling leaf stays out of this landing."],
+            }
+        )
+        write_task_doc(tasks, sibling)
+        master = TaskDocument.model_validate(
+            {
+                "id": "TEST-DIRECT-MASTER",
+                "slug": "direct-task",
+                "title": "Direct master",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo-a",
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number=LEAF, name="Direct leaf", file="leaf.md", status="planning"
+                    ).model_dump(mode="json"),
+                    SubTaskRef(
+                        number="TEST-DIRECT-SIBLING",
+                        name="Direct sibling",
+                        file="sibling.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        )
+        write_task_doc(tasks, master)
+        sibling_ref = TaskDocumentRef(repository="repo-a", path="direct-task/sibling.json")
+        give_grant(config, sibling_ref, granted_by="architect", granter_agent_id="fixture")
+        code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        bind_worktree_services(build_default_worktree_services())
+        memory_before = git(world.memory, "rev-parse", "HEAD")
+        request = replace(_converted_request(fixture, code), leaf_task_document_ref=sibling_ref)
+        # The sibling passes the entry authority (it is a master row), but the
+        # gate's open history belongs to this series' leaf, not to the sibling.
+        # L52 now refuses first at the gate with the leaf named (land with its
+        # own leaf_id); the property holds: refused, foreign file unclosed.
+        with self.assertRaisesRegex(
+            DirectLandingError, "direct-landing-knowledge-gate-refused"
+        ) as refused:
+            direct_landing_owner.direct_landing(config, request, fixture["contract"])
+        self.assertIn("TEST-DIRECT-SIBLING", str(refused.exception))
+        self.assertEqual(git(world.code, "rev-parse", "HEAD"), code)
+        self.assertEqual(git(world.memory, "rev-parse", "HEAD"), memory_before)
+
+    def test_direct_landing_refuses_an_unknown_repository_leaf(self) -> None:
+        root = Path(self.temp.name)
+        fixture = self._create_fixture(root / "create-unknown-repo")
+        config = fixture["config"]
+        unknown = TaskDocumentRef(repository="repo-b", path="other-master/leaf.json")
+        write_grant_file(
+            grant_path_for(config.coordination_root, unknown),
+            DirectExecutionGrant(
+                leaf=unknown,
+                granted_by="architect",
+                granted_at="2026-10-06T00:00:00+00:00",
+                granter_agent_id="fixture",
+            ),
+        )
+        request = replace(
+            self._create_request(fixture, dry_run=False),
+            leaf_task_document_ref=unknown,
+            candidate_tree="0" * 40,
+        )
+        # The grant exists, but the leaf resolves to no canonical task document.
+        with self.assertRaisesRegex(DirectLandingError, "direct-landing-leaf-missing"):
+            direct_landing_owner.direct_landing(config, request, fixture["contract"])
 
     def test_converted_direct_landing_judges_closed_tree_and_refuses_late_memory_change(
         self,
@@ -1021,6 +2213,7 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit="0" * 40,
+                    leaf_task_document_ref=fixture["leaf_ref"],
                     candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     intent_note="approve",
@@ -1037,6 +2230,7 @@ class DirectLandingTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                leaf_task_document_ref=fixture["leaf_ref"],
                 candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory content",
                 intent_note="approve",
@@ -1066,6 +2260,7 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    leaf_task_document_ref=fixture["leaf_ref"],
                     candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory",
                     intent_note="approved by owner",
@@ -1155,6 +2350,7 @@ class DirectLandingTests(unittest.TestCase):
         request = DirectLandingRequest(
             contract_path=contract.contract_path.as_posix(),
             code_commit=fixture["code_head"],
+            leaf_task_document_ref=fixture["leaf_ref"],
             candidate_tree=fixture["candidate_tree"],
             memory_commit_message="reuse current memory",
             intent_note="approved by owner",

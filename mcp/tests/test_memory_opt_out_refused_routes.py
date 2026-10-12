@@ -25,6 +25,11 @@ from agents_remember.application.lifecycle.direct_landing import direct_landing_
 from agents_remember.application.task_docs.task_reopen import task_reopen_tool
 from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.application.worktree_tool_requests import CloseoutCommitMessages
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grant_path_for,
+    write_grant_file,
+)
 from agents_remember.kernel.memory_mode import (
     LEAF_WAY_OUT,
     SERIES_WAY_OUT,
@@ -34,7 +39,8 @@ from agents_remember.models.closeout.input import (
     EffectiveCloseoutInput,
     NotApplicableCloseoutLeg,
 )
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.tasks.task_paths import series_contract_path
 from agents_remember.worktrees.direct_landing import (
     DirectLandingRequest,
@@ -292,19 +298,67 @@ def test_direct_landing_tool_refuses_a_legacy_contract(tmp_path: Path) -> None:
 
     _fixture_world, path, settings = _published_disabled_leaf(tmp_path)
     config = load_config(settings)
-    settings.write_text(
-        json.dumps(
+    # The grant the leaf started with: the opt-out refusal at admission is
+    # reached only past the grant gate.
+    coord = config.coordination_root
+    task_root = coord / "tasks" / REPO / "legacy-leaf"
+    task_root.mkdir(parents=True, exist_ok=True)
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
             {
-                **json.loads(settings.read_text(encoding="utf-8")),
-                "directExecutionEnabled": True,
+                "id": "TEST-LEGACY-MASTER",
+                "slug": "legacy-leaf",
+                "title": "Legacy leaf",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": REPO,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number="L50",
+                        name="Legacy leaf",
+                        file="l50.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
             }
         ),
-        encoding="utf-8",
     )
-    config = load_config(settings)
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "L50",
+                "slug": "l50",
+                "title": "Legacy leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the opt-out refusal.",
+                "requirements": ["The fixture leaf is refused at admission."],
+            }
+        ),
+    )
+    leaf_ref = TaskDocumentRef(repository=REPO, path="legacy-leaf/l50.json")
+    write_grant_file(
+        grant_path_for(coord, leaf_ref),
+        DirectExecutionGrant(
+            leaf=leaf_ref,
+            granted_by="architect",
+            granted_at="2026-10-06T00:00:00+00:00",
+            granter_agent_id="fixture",
+        ),
+    )
     payload = direct_landing_tool(
         config,
-        DirectLandingRequest(contract_path=path.as_posix(), code_commit="a" * 40),
+        DirectLandingRequest(
+            contract_path=path.as_posix(),
+            code_commit="a" * 40,
+            leaf_task_document_ref=leaf_ref,
+        ),
     )
     assert payload["ok"] is False
     # The tool wraps the read-time opt-out refusal in its generic error
@@ -710,6 +764,62 @@ def _bare_disabled_contract(coord: Path, code: Path, *, kind: str = "leaf") -> W
     )
 
 
+def _grant_bare_leaf(coord: Path) -> TaskDocumentRef:
+    """Publish the bare contract's canonical leaf and the grant it started with."""
+    task_root = coord / "tasks" / REPO / "some-task"
+    task_root.mkdir(parents=True, exist_ok=True)
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "TEST-SOME-MASTER",
+                "slug": "some-task",
+                "title": "Some task",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": REPO,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number="L50",
+                        name="Legacy leaf",
+                        file="l50.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "L50",
+                "slug": "l50",
+                "title": "Legacy leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the opt-out refusal.",
+                "requirements": ["The fixture leaf is refused at admission."],
+            }
+        ),
+    )
+    ref = TaskDocumentRef(repository=REPO, path="some-task/l50.json")
+    write_grant_file(
+        grant_path_for(coord, ref),
+        DirectExecutionGrant(
+            leaf=ref,
+            granted_by="architect",
+            granted_at="2026-10-06T00:00:00+00:00",
+            granter_agent_id="fixture",
+        ),
+    )
+    return ref
+
+
 def _route_args(path: Path, **overrides: object) -> WorktreeArgs:
     arguments: dict[str, object] = {"contract_path": path, "dry_run": True}
     arguments.update(overrides)
@@ -869,7 +979,12 @@ def test_direct_landing_preview_equals_its_apply(tmp_path: Path, memory: str | N
 
     world = _world(tmp_path, memory=memory)
     contract = _bare_disabled_contract(world.coord, world.code)
-    request = DirectLandingRequest(contract_path="/nonexistent/contract.md", code_commit="c" * 40)
+    leaf_ref = _grant_bare_leaf(world.coord)
+    request = DirectLandingRequest(
+        contract_path="/nonexistent/contract.md",
+        code_commit="c" * 40,
+        leaf_task_document_ref=leaf_ref,
+    )
     effective_input = EffectiveCloseoutInput(
         route="direct-landing",
         contractKind="leaf",
@@ -895,7 +1010,11 @@ def direct_landing_apply(contract: WorktreeContract) -> None:
 
     direct_landing(
         _direct_config(contract),
-        DirectLandingRequest(contract_path="/nonexistent/contract.md", code_commit="c" * 40),
+        DirectLandingRequest(
+            contract_path="/nonexistent/contract.md",
+            code_commit="c" * 40,
+            leaf_task_document_ref=_grant_bare_leaf(contract.coordination_root),
+        ),
         contract,
     )
 
@@ -908,7 +1027,6 @@ def _direct_config(contract: WorktreeContract):
     return McpRuntimeConfig(
         config_path=contract.coordination_root / "settings.json",
         coordination_root=contract.coordination_root,
-        direct_execution_enabled=True,
         workspace_root=contract.coordination_root.parent,
         transcript_root=contract.coordination_root / "logs" / "mcp",
         repositories={},

@@ -52,7 +52,11 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
-from agents_remember.cli.role_launch_workspace import _leaf_contract_path, _resolve_workspace
+from agents_remember.cli.role_launch_workspace import (
+    _direct_leaf_grant,
+    _leaf_contract_path,
+    _resolve_workspace,
+)
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
@@ -67,6 +71,7 @@ from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.task_document_copies import prepare_task_document_copies
+from agents_remember.worktrees.task_resolver import series_contract_path
 
 ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
@@ -456,18 +461,21 @@ def _ar_mcp_context(
     }
 
 
-def _verify_leaf_revival_scope(context: RoleLaunchContext, receipt: dict[str, Any]) -> None:
+def _verify_leaf_revival_scope(
+    config: McpRuntimeConfig, context: RoleLaunchContext, receipt: dict[str, Any]
+) -> None:
     """Refuse the revive of a leaf-bound agent whose task scope changed since its launch.
 
     The scope is the task reference and the contract path. The one computed now comes from the
-    leaf document alone, so the comparison creates and starts nothing.
+    leaf document alone, so the comparison creates and starts nothing. A direct leaf is
+    bound through its grant to its master's series contract, never to a leaf enclosure.
     """
 
     if context.task is None:
         raise ValueError("A leaf role requires its canonical task document for a revive.")
     current = TaskScopedReaderContext(
         task_document_ref=context.task.ref,
-        contract_path=_leaf_contract_path(context.task).as_posix(),
+        contract_path=_revival_contract_path(config, context.task).as_posix(),
     ).model_dump(mode="json")
     recorded = _recorded_leaf_scope(receipt)
     if recorded != current:
@@ -477,6 +485,19 @@ def _verify_leaf_revival_scope(context: RoleLaunchContext, receipt: dict[str, An
             f"{json.dumps(recorded, sort_keys=True)}. Computed now: "
             f"{json.dumps(current, sort_keys=True)}. Start a new execution for the current scope."
         )
+
+
+def _revival_contract_path(config: McpRuntimeConfig, leaf: ResolvedTaskDocument) -> Path:
+    """The contract binding a leaf's revival: the series contract through its grant.
+
+    A direct leaf never owns a leaf enclosure, so its binding is the canonical
+    leaf document with its master's series contract. Any other leaf keeps the
+    enclosure binding. The grant is read, never inferred: an unreadable grant
+    refuses the revive rather than falling back to an enclosure.
+    """
+    if _direct_leaf_grant(config, leaf):
+        return series_contract_path(leaf.path.parent)
+    return _leaf_contract_path(leaf)
 
 
 def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:

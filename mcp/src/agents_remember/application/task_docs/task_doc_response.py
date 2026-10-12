@@ -6,6 +6,10 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grants_for_task,
+)
 from agents_remember.tasks import (
     SprintGraphTitles,
     TaskDocument,
@@ -104,8 +108,30 @@ def graph_titles_for(task_root: Path, doc: TaskDocument) -> SprintGraphTitles | 
     return read_graph_titles(task_root.parents[1], doc.executionGraph)
 
 
+def _preview_grant(task_root: Path, doc: TaskDocument) -> DirectExecutionGrant | None:
+    """The leaf's live grant for its rendered preview, read from the one record.
+
+    ``None`` for non-leaves and when no readable grant exists: display never
+    breaks on a missing or broken grant file (gates still refuse it).
+    """
+    if doc.kind != "subTask":
+        return None
+    parents = task_root.parents
+    if len(parents) < 3:
+        return None
+    try:
+        grants = grants_for_task(parents[2], doc.repo, task_root.name)
+    except (OSError, ValueError):
+        return None
+    return grants.get(f"{task_root.name}/{doc.slug}.json")
+
+
 def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:
-    rendered = render_markdown(doc, graph_titles=graph_titles_for(task_root, doc))
+    rendered = render_markdown(
+        doc,
+        graph_titles=graph_titles_for(task_root, doc),
+        direct_grant=_preview_grant(task_root, doc),
+    )
     markdown_path = markdown_path_for(task_root, doc)
     existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
     diff = "".join(

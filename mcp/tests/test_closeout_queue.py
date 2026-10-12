@@ -8,6 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grant_path_for,
+    write_grant_file,
+)
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     write_ledger,
@@ -216,7 +221,6 @@ class QueueFixture:
                     "version": 1,
                     "coordinationRoot": self.coord.as_posix(),
                     "workspaceRoot": root.as_posix(),
-                    "directExecutionEnabled": False,
                     "repositories": {
                         REPO: {
                             "certificationProfile": TEST_CERTIFICATION_PROFILE_REFERENCE.as_posix()
@@ -440,13 +444,22 @@ class QueueFixture:
             write_curator_evidence(contract, caller_ref=SPRINT)
         return contract
 
-    def enable_direct_execution(self) -> None:
-        """Opt this fixture into the explicit direct-series policy boundary."""
+    def grant_direct_execution(self, candidate: TaskDocumentRef) -> None:
+        """Give a fixture leaf the direct-execution grant it started with.
 
-        settings = json.loads(self.config_path.read_text(encoding="utf-8"))
-        settings["directExecutionEnabled"] = True
-        self.config_path.write_text(json.dumps(settings), encoding="utf-8")
-        self.cfg = load_config(self.config_path)
+        The fixture leaves are started (enclosures, steps done), so the grant
+        is recorded as given before the start: that is what the file holds, an
+        architect giver with the fixture time.
+        """
+        write_grant_file(
+            grant_path_for(self.coord, candidate),
+            DirectExecutionGrant(
+                leaf=candidate,
+                granted_by="architect",
+                granted_at=NOW,
+                granter_agent_id="fixture",
+            ),
+        )
 
     def _contract(
         self,

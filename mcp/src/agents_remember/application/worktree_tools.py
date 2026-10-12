@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,10 @@ from agents_remember.application.review_sync_rebinding import rebinding_result_b
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
 from agents_remember.kernel.authority import require_repo, require_within_coordination
+from agents_remember.kernel.direct_execution_grants import (
+    DirectGrantError,
+    read_grant,
+)
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
@@ -34,6 +39,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
 )
 from agents_remember.models.lifecycles.responses import TerminalState
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
@@ -125,6 +131,74 @@ every start result and on the lifecycle refusal.
 """
 
 
+def _direct_leaf_start_refusal(
+    config: McpRuntimeConfig, identity: TaskIdentity
+) -> dict[str, Any] | None:
+    """Refuse ``worktree_start`` for a direct leaf: it gets no enclosure (MIK-R94 rule 12).
+
+    ``None`` for series starts, for leaves that cannot be resolved, and for
+    leaves without a grant. A grant that cannot be read refuses: a leaf is
+    never taken as direct without a readable grant.
+    """
+    if not identity.leaf_id:
+        return None
+    task_root = (
+        Path(config.coordination_root) / "tasks" / identity.repo_id / (identity.task_name or "")
+    )
+    ref = _started_leaf_ref(task_root, identity.repo_id, identity.task_name, identity.leaf_id)
+    if ref is None:
+        return None
+    try:
+        grant = read_grant(Path(config.coordination_root), ref)
+    except DirectGrantError as error:
+        grant = None
+        unreadable = error.detail
+    else:
+        unreadable = ""
+    if grant is None and not unreadable:
+        return None
+    if unreadable:
+        summary = (
+            f"worktree_start for {ref.repository}:{ref.path} is refused: {unreadable}"
+        )
+    else:
+        summary = (
+            f"worktree_start for {ref.repository}:{ref.path} is refused: the leaf is direct "
+            f"({grant.describe()}). A direct leaf has no enclosure of its own; start its "
+            "roles with role_start on the same leaf, which gives them the checkouts of "
+            "the master's branch."
+        )
+    return {
+        "ok": False,
+        "state": "direct-leaf-no-enclosure",
+        "summary": summary,
+        "detail": summary,
+        "eligibility": dict(_START_ELIGIBILITY),
+    }
+
+
+def _started_leaf_ref(
+    task_root: Path, repo_id: str, task_name: str | None, leaf_id: str
+) -> TaskDocumentRef | None:
+    """The canonical reference of a leaf addressed by task name and leaf id."""
+    if not task_name or not task_root.is_dir():
+        return None
+    for candidate in sorted(task_root.glob("*.json")):
+        if candidate.name == "task.json":
+            continue
+        try:
+            payload = json.loads(candidate.read_bytes().decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(payload, dict)
+            and payload.get("kind") == "subTask"
+            and payload.get("id") == leaf_id
+        ):
+            return TaskDocumentRef(repository=repo_id, path=f"{task_name}/{candidate.name}")
+    return None
+
+
 def worktree_start_tool(
     config: McpRuntimeConfig,
     identity: TaskIdentity,
@@ -133,6 +207,9 @@ def worktree_start_tool(
     execution: StartExecution = DEFAULT_START_EXECUTION,
 ) -> dict[str, Any]:
     repo = require_repo(config, identity.repo_id)
+    direct_refusal = _direct_leaf_start_refusal(config, identity)
+    if direct_refusal is not None:
+        return direct_refusal
     amb = ambient()
     if amb is not None and amb.current is not None and not amb.current.fleeting:
         return {

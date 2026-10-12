@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import (
@@ -206,6 +207,40 @@ class DirectLandingRuntime:
 
 def direct_landing_store(contract: WorktreeContract) -> LifecycleOperationStore:
     return located_lifecycle_operation_store(contract, "direct-landing")
+
+
+def _leaf_mismatch(operation_input: DirectLandingOperationInput, leaf_ref: Any) -> bool:
+    """Whether the stored generation belongs to another leaf (or cannot be told)."""
+
+    try:
+        return bool(operation_input.leafTaskDocumentRef != leaf_ref)
+    except Exception:
+        return True
+
+
+def direct_pair_proof(contract: WorktreeContract, leaf_ref: Any) -> bool | None:
+    """Whether this leaf's pair is proven landed (F05/F09).
+
+    ``True`` when the contract's direct-landing journal holds a completed
+    generation for exactly this leaf whose result names both the code and the
+    memory commit. ``False`` when a generation for this leaf exists but is
+    incomplete, failed, or completed without the pair. ``None`` when no
+    generation for this leaf exists or the journal cannot be read -- then the
+    caller falls back to document/checkout evidence instead of guessing.
+    """
+
+    try:
+        record = direct_landing_store(contract).read()
+    except Exception:
+        return None
+    if record is None or not isinstance(
+        record.input, DirectLandingOperationInput
+    ) or _leaf_mismatch(record.input, leaf_ref):
+        return None
+    if record.status != "completed":
+        return False
+    result = record.result if isinstance(record.result, dict) else {}
+    return bool(result.get("codeCommit") and result.get("memoryContentCommit"))
 
 
 def direct_landing_record(

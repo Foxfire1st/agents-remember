@@ -23,9 +23,11 @@ from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
     load_agentic_settings,
 )
+from agents_remember.kernel.direct_execution_grants import DirectGrantError, require_grant
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
-from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
@@ -68,9 +70,12 @@ DEFAULT_TASK_DOC_CALL = TaskDocCall()
 
 
 def _enforce_branch_addressed_policy(
-    config: McpRuntimeConfig, operation: str, branch_addressed: bool
+    config: McpRuntimeConfig,
+    operation: str,
+    branch_addressed: bool,
+    leaf: TaskDocumentRef | None,
 ) -> None:
-    """Refuse a branch-addressed call the policy does not sanction."""
+    """Refuse a branch-addressed call the leaf's grant does not sanction."""
     if not branch_addressed:
         return
     if operation != "record_route_review":
@@ -78,11 +83,30 @@ def _enforce_branch_addressed_policy(
             "branch_addressed mode is only defined for record_route_review; "
             f"operation {operation!r} resolves its own contract binding"
         )
-    if not config.direct_execution_enabled:
+    if leaf is None:
         raise TaskDocError(
-            "branch_addressed mode is disabled by policy; enable directExecutionEnabled "
-            "in the MCP authority settings for sanctioned direct execution"
+            "branch_addressed record_route_review names no leaf; "
+            "address the leaf document to review"
         )
+    try:
+        resolved = TaskDocumentTopology(config.coordination_root).resolve(leaf)
+    except Exception as error:
+        raise TaskDocError(
+            f"branch_addressed record_route_review for {leaf.repository}:{leaf.path} "
+            f"is refused: no canonical task document: {error}"
+        ) from error
+    if resolved.document.kind != "subTask":
+        raise TaskDocError(
+            "branch_addressed record_route_review is defined for a leaf only; "
+            f"{leaf.repository}:{leaf.path} is {resolved.document.kind}"
+        )
+    try:
+        require_grant(config.coordination_root, leaf)
+    except DirectGrantError as error:
+        raise TaskDocError(
+            f"branch_addressed record_route_review for {leaf.repository}:{leaf.path} "
+            f"is refused: {error.detail}"
+        ) from error
 
 
 @dataclass(frozen=True)

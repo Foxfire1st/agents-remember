@@ -14,6 +14,11 @@ normalization that would corrupt blank lines inside code fences).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agents_remember.kernel.direct_execution_grants import DirectExecutionGrant
+
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
@@ -42,13 +47,18 @@ from .execution_graph_titles import SprintGraphTitles
 _MASTER_INDEX_HEADING = "Master Index"
 
 
-def render_markdown(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
+def render_markdown(
+    doc: TaskDocument,
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+    direct_grant: DirectExecutionGrant | None = None,
+) -> str:
     if doc.kind == "master":
         return _render_master(doc, graph_titles=graph_titles)
     title = f"# Task: {doc.title}"
     if doc.kind == "subTask":
         title = f"{title} (Sub-task {doc.id})"
-    parts: list[str] = [title, "", *_header_lines(doc)]
+    parts: list[str] = [title, "", *_header_lines(doc, direct_grant=direct_grant)]
     parts += _section("Objective", [doc.objective or "_To be defined._"])
     parts += _section("Requirements", _requirement_lines(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
@@ -181,7 +191,9 @@ def _master_ref_link(ref: SubTaskRef) -> str:
     return f"../{target}"
 
 
-def _header_lines(doc: TaskDocument) -> list[str]:
+def _header_lines(
+    doc: TaskDocument, *, direct_grant: DirectExecutionGrant | None = None
+) -> list[str]:
     status = f"**Status:** {doc.status}"
     if doc.statusNote:  # descriptive suffix beside the strict enum (R4)
         status = f"{status} — {doc.statusNote}"
@@ -191,6 +203,8 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         f"**Type:** {doc.type}",
         f"**Created:** {doc.createdAt}",
     ]
+    if direct_grant is not None:  # MIK-R94 rule 4: read from the one record, never stored
+        lines.append(f"**Direct execution:** {direct_grant.describe()}")
     if doc.master:
         lines.append(f"**Master:** `{doc.master}`")
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema

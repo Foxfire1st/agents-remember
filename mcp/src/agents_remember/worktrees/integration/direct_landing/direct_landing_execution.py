@@ -40,6 +40,7 @@ from agents_remember.worktrees.modules.git import (
     ensure_git_identity,
     head_commit,
     publish_tree_commit,
+    require_git,
     stage_tree,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -162,6 +163,41 @@ def execute_or_require_direct_landing_recovery(
         ) from exc
 
 
+def _code_output_published(
+    contract: WorktreeContract, record: LifecycleOperationRecord
+) -> bool:
+    """Whether the admitted code commit is proven on the branch (F01/F04).
+
+    The admitted generation persists the code commit, candidate tree and
+    pre-publication snapshot on its own input before the move. This re-proves
+    that output live: the commit holds the admitted candidate tree under the
+    admitted pre-state tip, and the branch names the commit or a descendant
+    of it. A branch that advanced past the admitted commit still carries the
+    published output -- the generation is not unpublished (F01-F04-moved-code).
+    Anything else (replaced history, unreadable repo) is not a proven
+    publication; the caller then judges memory evidence alone.
+    """
+    operation_input = record.input
+    if not isinstance(operation_input, DirectLandingOperationInput):
+        return False
+    commit = operation_input.codeCommit
+    before = operation_input.codeBefore
+    if not commit or before is None:
+        return False
+    try:
+        repo = contract.code_repo_path
+        if require_git(repo, ["rev-parse", f"{commit}^{{tree}}"]) != (
+            operation_input.candidateTree
+        ) or require_git(repo, ["rev-parse", f"{commit}^"]) != before.head:
+            return False
+        tip = branch_commit(repo, contract.code_work_branch)
+        if tip != commit:
+            require_git(repo, ["merge-base", "--is-ancestor", commit, tip])
+        return True
+    except (OSError, RuntimeError):
+        return False
+
+
 def _published_nothing(runtime: DirectLandingRuntime) -> bool:
     """Whether this generation provably has no memory commit on its branch.
 
@@ -176,7 +212,24 @@ def _published_nothing(runtime: DirectLandingRuntime) -> bool:
         record = runtime.store.read() or runtime.record
     except RuntimeError:  # an unreadable journal proves nothing
         return False
+    code = record.mutationEvidence.get("code")
+    if code is not None and code.state == "commit-proven" and code.commit:
+        # A proven code leg owns an irreversible output even with memory untouched.
+        return False
+    if _code_output_published(runtime.contract, record):
+        # The admitted code commit is on the branch with the admitted tree and
+        # parent: the code leg published, so this generation owns an
+        # irreversible output even with memory untouched (F01/F04).
+        return False
     evidence = record.mutationEvidence.get("memory")
+    return _memory_leg_unpublished(record, evidence)
+
+
+def _memory_leg_unpublished(
+    record: LifecycleOperationRecord, evidence: GitMutationEvidence | None
+) -> bool:
+    """Whether the memory leg published nothing (the original memory-only view)."""
+
     recovery = record.recoveryCommits
     if (
         record.status in {"completed", "cancelled"}
@@ -455,6 +508,7 @@ def _direct_landing_result(
         "or reused on the series memory branch.",
         "contractPath": contract.contract_path.as_posix(),
         "codeCommit": operation_input.codeCommit,
+        "candidateTree": operation_input.candidateTree,
         "memoryContentCommit": memory_commit,
         "dryRun": False,
         "memory": {

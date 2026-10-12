@@ -119,7 +119,21 @@ def _without_legacy_generation_reuse(
         record.taskIntent, TaskIntentIdentity
     ):
         return controls
+    if record.operationKind == "direct-landing" and _direct_generation_bound(record):
+        # A current direct-landing generation binds its leaf on its own
+        # input; only a legacy generation without that binding reuses
+        # recover/retry unsafely (F04).
+        return controls
     return [control for control in controls if control["action"] not in {"recover", "retry"}]
+
+
+def _direct_generation_bound(record: LifecycleOperationRecord) -> bool:
+    """Whether a direct-landing generation carries its leaf binding."""
+
+    operation_input = record.input
+    return isinstance(
+        operation_input, DirectLandingOperationInput
+    ) and operation_input.leafTaskDocumentRef is not None
 
 
 def _evidence_controls(

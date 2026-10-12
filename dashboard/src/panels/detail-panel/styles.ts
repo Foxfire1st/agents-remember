@@ -65,6 +65,21 @@ export const slice = css({
   borderLeftColor: "grid",
 });
 export const sliceMeta = css({ color: "muted", fontSize: "0.72rem" });
+// The direct-execution grant control on a leaf row (MIK-R94 rule 2): a small inline
+// action beside the drill-in button, never nested inside it.
+export const grantButton = css({
+  fontSize: "0.72rem",
+  color: "muted",
+  textDecoration: "underline",
+  textUnderlineOffset: "2px",
+  cursor: "pointer",
+  background: "transparent",
+  border: "0",
+  padding: "0",
+  marginLeft: "0.5rem",
+  _hover: { color: "ink" },
+  _disabled: { opacity: 0.5, cursor: "default" },
+});
 // A clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
 export const sliceButton = css({
   display: "flex",

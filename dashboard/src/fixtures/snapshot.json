@@ -683,6 +683,10 @@
         "subTasks": [
           {
             "createdAt": "2026-06-14T08:50:00+00:00",
+            "directGrant": {
+              "grantedAt": "2026-06-14T09:00:00+00:00",
+              "grantedBy": "developer"
+            },
             "file": "01.md",
             "name": "contract guard",
             "number": "1",
@@ -751,6 +755,10 @@
           }
         ],
         "design": "two directions, both checked",
+        "directGrant": {
+          "grantedAt": "2026-06-14T09:00:00+00:00",
+          "grantedBy": "developer"
+        },
         "discardedCount": 1,
         "discardedSubTasks": [
           {

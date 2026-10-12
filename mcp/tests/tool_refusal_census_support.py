@@ -132,6 +132,7 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         "worktree_sync": {"contract_path": contract, "dry_run": True},
         "worktree_pause": {"contract_path": contract},
         "direct_landing": {"contract_path": contract, "code_commit": "deadbeef", "dry_run": True},
+        "direct_execution_grant": {"task_document_ref": ABSENT_REF, "action": "give"},
         "worktree_closeout_preview": {"contract_path": contract},
         "worktree_closeout_apply": {
             "contract_path": contract,

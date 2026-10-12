@@ -240,6 +240,55 @@ def branch_exists(repo: Path, branch: str) -> bool:
     )
 
 
+def checkout_holding_branch(repo_path: Path, branch: str) -> Path | None:
+    """The checkout whose HEAD is the named branch, if any holds it (F01).
+
+    Branch tips are repository-global: any holding checkout observes the same
+    refs, so the direct-landing code leg journals its intent and proof against
+    this checkout while the contract anchors the code repository itself.
+    """
+
+    try:
+        listing = require_git(repo_path, ["worktree", "list", "--porcelain"])
+    except RuntimeError:
+        return None
+    wanted = f"refs/heads/{branch.removeprefix('refs/heads/')}"
+    path: str | None = None
+    current: str | None = None
+    detached = False
+    bare = False
+    found: Path | None = None
+
+    def flush() -> None:
+        nonlocal found, path, current, detached, bare
+        if (
+            found is None
+            and path is not None
+            and current == wanted
+            and not detached
+            and not bare
+        ):
+            found = Path(path)
+        path, current = None, None
+        detached, bare = False, False
+
+    for line in listing.splitlines():
+        if not line.strip():
+            flush()
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            path = value.strip()
+        elif key == "branch":
+            current = value.strip()
+        elif key == "detached":
+            detached = True
+        elif key == "bare":
+            bare = True
+    flush()
+    return found
+
+
 def repository_identity(repo: Path | None) -> Path | None:
     """Resolve Git's shared object-store identity for a checkout or linked worktree."""
 

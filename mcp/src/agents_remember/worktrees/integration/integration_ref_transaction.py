@@ -9,6 +9,7 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_attribution import (
     code_commit_exists,
 )
+from agents_remember.worktrees.direct_execution import open_direct_leaf_name
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
     integration_targets,
@@ -141,7 +142,9 @@ def prepare_integration_ref_move(
             memory_source_commit=memory_head_before,
         )
 
-    _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
+    _require_clean_branch_checkout(
+        contract.code_repo_path, code_target.branch, code_head_before, contract=contract
+    )
     if external:
         assert contract.memory_repo_path is not None
         assert memory_target is not None
@@ -150,6 +153,7 @@ def prepare_integration_ref_move(
             memory_target.branch,
             memory_head_before,
             exclude_paths=("memory.md",),
+            contract=contract,
         )
     return IntegrationRefSnapshot(
         code_branch=code_target.branch,
@@ -349,10 +353,24 @@ def _reset_derived_path(checkout: Path, old: str, path: str) -> None:
 
 
 def _require_clean_branch_checkout(
-    repo: Path, branch: str, expected: str, *, exclude_paths: tuple[str, ...] = ()
+    repo: Path,
+    branch: str,
+    expected: str,
+    *,
+    exclude_paths: tuple[str, ...] = (),
+    contract: WorktreeContract | None = None,
 ) -> None:
     for checkout in branch_worktree_owners(repo, branch):
-        require_clean(checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths)
+        try:
+            require_clean(checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths)
+        except RuntimeError as error:
+            leaf = open_direct_leaf_name(contract) if contract is not None else None
+            if leaf is None:
+                raise
+            raise RuntimeError(
+                f"{error}; the direct leaf {leaf} of this master has uncommitted "
+                "changes in this checkout"
+            ) from error
         if head_commit(checkout) != expected:
             raise RuntimeError(
                 f"protected ref {branch!r} checkout is not at its expected named-ref tip"

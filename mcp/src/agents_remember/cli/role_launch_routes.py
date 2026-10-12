@@ -667,7 +667,7 @@ def _revive_execution(config: McpRuntimeConfig, request: RoleDispatchRequest) ->
             detail="This execution has no agent in the Paseo runtime, so there is nothing to revive.",
         )
     if request.role in LEAF_ROLES:
-        _verify_leaf_revival_scope(resolve_role_launch_context(config, request), receipt)
+        _verify_leaf_revival_scope(config, resolve_role_launch_context(config, request), receipt)
     return _revive_agent(config, path, receipt, agent_id)
 
 

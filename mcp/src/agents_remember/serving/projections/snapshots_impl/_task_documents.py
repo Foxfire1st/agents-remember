@@ -16,11 +16,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.direct_execution_grants import (
+    ARCHITECT_GRANTER,
+    DEVELOPER_GRANTER,
+    DirectExecutionGrant,
+    grants_for_task,
+)
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
 )
 from agents_remember.observer.projection import (
+    DirectGrantNode,
     DiscardedSubTaskNode,
     EnclosureNode,
     SeriesNode,
@@ -154,7 +161,11 @@ def read_task_documents(
                 path,
                 lifecycle_maps,
                 now,
-                _TaskDocProjectionOptions(include_body=False, master_docs=master_docs),
+                _TaskDocProjectionOptions(
+                    include_body=False,
+                    master_docs=master_docs,
+                    coordination_root=coordination_root,
+                ),
             )
         )
     return nodes
@@ -198,7 +209,9 @@ def read_task_document_body(  # pragma: no cover
         _task_document_lifecycle_maps(enclosures),
         now,
         _TaskDocProjectionOptions(
-            include_body=True, master_docs=_graph_master_docs(tasks_root, doc)
+            include_body=True,
+            master_docs=_graph_master_docs(tasks_root, doc),
+            coordination_root=coordination_root,
         ),
     )
 
@@ -303,7 +316,15 @@ def read_series_documents(
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
+    docs = list(_iter_task_document_payloads(tasks_root, now=now))
+    leaf_ids_by_dir: dict[str, dict[str, str]] = {}
+    for leaf_path, leaf_payload in docs:
+        leaf_id = leaf_payload.get("id")
+        if leaf_payload.get("kind") == "subTask" and isinstance(leaf_id, str):
+            leaf_ids_by_dir.setdefault(leaf_path.parent.as_posix(), {})[leaf_id] = (
+                leaf_path.as_posix()
+            )
+    for path, payload in docs:
         if payload.get("kind") != "master":
             continue
         doc = _projected_document(payload)
@@ -317,7 +338,13 @@ def read_series_documents(
                 status=doc.status,
                 createdAt=doc.createdAt,
                 objective="",
-                subTasks=_series_subtask_nodes(path, doc),
+                subTasks=_series_subtask_nodes(
+                    path,
+                    doc,
+                    direct_grants=_subtask_grant_nodes(
+                        coordination_root, tasks_root, path, doc, leaf_ids_by_dir
+                    ),
+                ),
                 discardedCount=len(doc.discardedSubTasks),
                 discardedSubTasks=_discarded_subtask_nodes(doc),
                 doneCount=series_done(doc),
@@ -332,7 +359,52 @@ def read_series_documents(
     return nodes
 
 
-def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNode]:
+def _grant_giver_label(grant: DirectExecutionGrant) -> str:
+    """Who gave the grant, as the dashboard shows it (MIK-R94 rule 4)."""
+    if grant.granted_by == DEVELOPER_GRANTER:
+        return DEVELOPER_GRANTER
+    if grant.granter_agent_id:
+        return f"architect {grant.granter_agent_id}"
+    return ARCHITECT_GRANTER
+
+
+def _subtask_grant_nodes(
+    coordination_root: Path,
+    tasks_root: Path,
+    path: Path,
+    doc: TaskDocument,
+    leaf_ids_by_dir: Mapping[str, Mapping[str, str]],
+) -> dict[str, DirectGrantNode]:
+    """One master's subtask grants, keyed by subtask number (MIK-R94 rule 4).
+
+    Matched by leaf id against the payloads already read -- never by filename
+    guess. Unreadable grant files read as no grant (gates still refuse them).
+    """
+    try:
+        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
+    except OSError:
+        return {}
+    repo_root = tasks_root / doc.repo
+    nodes: dict[str, DirectGrantNode] = {}
+    for leaf_id, leaf_posix in leaf_ids_by_dir.get(path.parent.as_posix(), {}).items():
+        try:
+            leaf_rel = Path(leaf_posix).relative_to(repo_root).as_posix()
+        except ValueError:
+            continue
+        grant = grants.get(leaf_rel)
+        if grant is not None:
+            nodes[leaf_id] = DirectGrantNode(
+                grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at
+            )
+    return nodes
+
+
+def _series_subtask_nodes(
+    path: Path,
+    doc: TaskDocument,
+    *,
+    direct_grants: Mapping[str, DirectGrantNode] | None = None,
+) -> list[SeriesSubTaskNode]:
     indexed = [
         (index, sub, _series_subtask_created_at(path.parent, sub.file))
         for index, sub in enumerate(doc.subTasks)
@@ -347,6 +419,7 @@ def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNo
             status=sub.status,
             scope=sub.scope,
             createdAt=created_at,
+            directGrant=(direct_grants or {}).get(sub.number),
         )
         for _, sub, created_at in indexed
     ]
@@ -504,6 +577,7 @@ class _TaskDocProjectionOptions:
 
     include_body: bool = False
     master_docs: Mapping[TaskDocumentRef, TaskDocument] | None = None
+    coordination_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -627,6 +701,7 @@ def _task_doc_node(
     execution_graph, execution_waves, execution_graph_view = _execution_graph_fields(
         doc, options.master_docs
     )
+    direct_grant = _task_doc_grant_node(options.coordination_root, path, doc)
     return TaskDocNode(
         id=doc.id,
         lifecycleId=lifecycle_id,
@@ -679,6 +754,29 @@ def _task_doc_node(
         executionGraph=execution_graph,
         executionWaves=execution_waves,
         executionGraphView=execution_graph_view,
+        directGrant=direct_grant,
+    )
+
+
+def _task_doc_grant_node(
+    coordination_root: Path | None, path: Path, doc: TaskDocument
+) -> DirectGrantNode | None:
+    """One leaf's grant node for its document projection (MIK-R94 rule 4).
+
+    ``None`` for non-leaves, without a coordination root, and when no readable
+    grant exists: a projection never breaks on a missing or broken grant file.
+    """
+    if coordination_root is None or doc.kind != "subTask":
+        return None
+    try:
+        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
+    except (OSError, ValueError):
+        return None
+    grant = grants.get(f"{path.parent.name}/{path.name}")
+    if grant is None:
+        return None
+    return DirectGrantNode(
+        grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at
     )
 
 

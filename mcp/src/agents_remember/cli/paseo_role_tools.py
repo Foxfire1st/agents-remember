@@ -1761,7 +1761,9 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
     if receipt.get("role") in LEAF_ROLES:
         try:
             selection = RoleSelection.model_validate(receipt.get("selection"))
-            _verify_leaf_revival_scope(resolve_role_launch_context(config, selection), receipt)
+            _verify_leaf_revival_scope(
+                config, resolve_role_launch_context(config, selection), receipt
+            )
         except (ValidationError, ValueError, TaskDocumentRefError) as error:
             raise _Refused(
                 "scope-check-failed",

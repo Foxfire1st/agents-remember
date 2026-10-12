@@ -185,9 +185,9 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         the operation targets the canonical task-root master document and binds the accumulated
         master candidate, canonical child membership/intents, and evidence; an atomic child does
         not publish an independent leaf review. Master review is required only at master-to-parent
-        integration. For sanctioned direct execution (no leaf worktree), pass branch_addressed=true
+        integration. For direct execution of a granted leaf (no leaf worktree), pass branch_addressed=true
         to bind the task-root series contract and stamp the candidate tree from the branch HEAD
-        (policy-gated); a canonical atomic child remains deferred to its master.
+        (grant-gated: the leaf must hold a direct-execution grant); a canonical atomic child remains deferred to its master.
         'author_execution_graph' applies one validated atomic batch of structural mutations to a
         sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
         {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},

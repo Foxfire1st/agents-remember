@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
 from agents_remember.application.role_launch_context import LEAF_ROLES, RoleLaunchContext
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import TaskIdentity
@@ -17,12 +18,13 @@ from agents_remember.cli.role_message_files import (
     ensure_messages_link,
     leaf_messages_folder,
 )
-from agents_remember.errors import RolePreparationError
+from agents_remember.errors import MemoryModeUnsupportedError, RolePreparationError
+from agents_remember.kernel.direct_execution_grants import DirectGrantError, read_grant
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from agents_remember.worktrees.task_resolver import series_contract_path
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
 def _recorded_parent(context: RoleLaunchContext) -> str:
@@ -100,6 +102,103 @@ def link_leaf_workspace_messages(group: Path, task_dir: Path, leaf_key: str) -> 
     return ensure_messages_link(group, folder)
 
 
+def _direct_leaf_grant(config: McpRuntimeConfig, leaf: ResolvedTaskDocument) -> bool:
+    """Whether the leaf is direct: it holds a readable grant (MIK-R94 rule 12).
+
+    A grant file that cannot be read refuses the start: a leaf is never taken
+    as direct without a readable grant, and never given an enclosure instead.
+    """
+    if leaf.document.kind != "subTask":
+        return False
+    try:
+        return read_grant(config.coordination_root, leaf.ref) is not None
+    except DirectGrantError as error:
+        raise RolePreparationError(
+            error.status,
+            error.detail,
+            "Repair or remove the unreadable grant file before repeating this same role start.",
+        ) from error
+
+
+def _resolve_direct_workspace(
+    config: McpRuntimeConfig, context: RoleLaunchContext
+) -> dict[str, str]:
+    """The workspace of a direct leaf's role: no enclosure is created.
+
+    The agent gets the checkouts of the master's branch as its code and memory
+    roots, bound by the canonical leaf document and the master's series
+    contract. Its own folders (reports, scratch, document copies) lie in the
+    series worktree group, apart from the master's checkouts.
+    """
+    assert context.task is not None
+    ref = context.task.ref
+    try:
+        refuse_open_direct_sibling(config, ref, "role_start")
+    except DirectGrantError as error:
+        raise RolePreparationError(
+            error.status,
+            error.detail,
+            "Finish the in-work direct leaf named in the detail, or abandon it and plan "
+            "a new one, then repeat this same role start.",
+        ) from error
+    contract_path = series_contract_path(context.task.path.parent)
+    if not contract_path.is_file():
+        raise RolePreparationError(
+            "direct-series-contract-missing",
+            f"The direct leaf {ref.repository}:{ref.path} has no series contract at "
+            f"{contract_path.as_posix()}: a direct role works in the checkouts of its "
+            "master's branch.",
+            "Land the master's series contract before starting a role on its direct leaf.",
+        )
+    try:
+        series = load_contract(contract_path)
+    except (ContractError, MemoryModeUnsupportedError, OSError, UnicodeError, ValueError) as error:
+        raise RolePreparationError(
+            "direct-series-contract-unreadable",
+            f"The series contract of the direct leaf {ref.repository}:{ref.path} cannot be "
+            f"read: {error}",
+            f"Inspect worktree_status(repo_id={ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the series contract before repeating this same request.",
+        ) from error
+    if series.kind != "series":
+        raise RolePreparationError(
+            "direct-series-contract-mismatch",
+            f"The direct leaf {ref.repository}:{ref.path} is not bound by a series contract: "
+            f"{contract_path.as_posix()} is a {series.kind} contract.",
+            "Ask the master owner to reconcile the task's series contract before repeating "
+            "this same role start.",
+        )
+    try:
+        group = _require_directory_of(series.worktree_group, "worktree group")
+        code = _require_directory_of(series.code_worktree, "code checkout")
+    except ValueError as error:
+        raise RolePreparationError(
+            "direct-checkout-unavailable",
+            str(error),
+            f"Inspect worktree_status(repo_id={ref.repository!r}, contract_path={contract_path.as_posix()!r}) and repair the series checkouts before repeating this same request.",
+        ) from error
+    workspace = workspace_folder(group)
+    task_reports = context.task.path.parent / "notes" / "reports"
+    task_reports.mkdir(parents=True, exist_ok=True)
+    report_access = group / "role-reports"
+    report_access.mkdir(exist_ok=True)
+    if report_access.is_symlink():
+        raise ValueError(
+            "The new role-reports folder must be a real directory inside its working folder."
+        )
+    workspace.update(
+        enclosurePreparation="direct",
+        contractPath=contract_path.as_posix(),
+        codeRoot=code.as_posix(),
+        taskReportRoot=task_reports.resolve().as_posix(),
+        taskReportAccessRoot=report_access.as_posix(),
+    )
+    if series.memory_worktree is not None:
+        workspace["memoryRoot"] = _require_directory_of(
+            series.memory_worktree, "memory checkout"
+        ).as_posix()
+    return workspace
+
+
 def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> dict[str, str]:
     """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
 
@@ -110,6 +209,9 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     if context.role not in LEAF_ROLES:
         return workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
+    direct = _direct_leaf_grant(config, context.task)
+    if direct:
+        return _resolve_direct_workspace(config, context)
     contract_path, status = _ensure_leaf_enclosure(
         config,
         context.task,
@@ -217,6 +319,13 @@ def workspace_folder(path: Path) -> dict[str, str]:
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return {"path": root.as_posix()}
+
+
+def _require_directory_of(path: Path | None, label: str) -> Path:
+    """The series checkout directory a direct role works in, else a refusal."""
+    if path is None or not path.is_dir():
+        raise ValueError(f"The selected AR enclosure {label} directory is unavailable.")
+    return path.resolve()
 
 
 def _require_directory(payload: dict[str, Any], key: str) -> Path:

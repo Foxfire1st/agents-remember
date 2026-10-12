@@ -121,7 +121,6 @@ def _write_runtime_config(root: Path, contract: WorktreeContract) -> Path:
                 "version": 1,
                 "coordinationRoot": contract.coordination_root.as_posix(),
                 "workspaceRoot": root.as_posix(),
-                "directExecutionEnabled": False,
                 "repositories": {REPO: {}},
             }
         ),

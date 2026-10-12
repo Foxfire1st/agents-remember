@@ -7,6 +7,7 @@ may import without reversing the package dependency direction.
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -46,6 +47,8 @@ from agents_remember.kernel.primitives.provider_degradation_settings import (
 
 DEFAULT_PROVIDER_SETUP_SECONDS = 1800
 DEFAULT_DOCKER_CONTROL_SECONDS = 120
+
+_logger = logging.getLogger(__name__)
 
 # The documented timeout caps (see examples/mcp/settings.example.json and
 # docs/reference/settings-json.md). Unknown keys are rejected so a typo
@@ -173,10 +176,6 @@ class McpRuntimeConfig:
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
-    # Policy gate for sanctioned direct execution (branch-addressed
-    # series-contract bindings and the direct landing operation): explicit
-    # opt-ins that refuse unless this is enabled. Fail-closed default.
-    direct_execution_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
     provider_degradation: ProviderDegradationSettings = field(
@@ -327,9 +326,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
-    direct_execution_enabled = parse_direct_execution_enabled(
-        data.get("directExecutionEnabled", False)
-    )
+    warn_retired_direct_execution_key(data, config_path)
     dashboard = parse_dashboard_settings(data.get("dashboard"))
     try:
         provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
@@ -354,7 +351,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
-        direct_execution_enabled=direct_execution_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
         provider_degradation=provider_degradation,
@@ -601,10 +597,21 @@ def provider_runtime_name(provider_id: str) -> str:
         raise ConfigError(f"unsupported provider id: {provider_id}") from error
 
 
-def parse_direct_execution_enabled(raw: object) -> bool:
-    if not isinstance(raw, bool):
-        raise ConfigError("directExecutionEnabled must be a boolean")
-    return raw
+def warn_retired_direct_execution_key(data: dict[str, Any], config_path: Path) -> None:
+    """The retired switch loads with one notice per load: a grant per task decides now.
+
+    Logged, not warned: the warnings policy suppresses a repeated notice for
+    the same file in one process, while the packet requires one notice per
+    load under the ordinary default configuration (F11).
+    """
+    if "directExecutionEnabled" in data:
+        _logger.warning(
+            "directExecutionEnabled in %s is retired and ignored; "
+            "direct execution is decided by a direct-execution grant per task now "
+            "(given by the developer on the task in the dashboard, or by an "
+            "architect with direct_execution_grant). Nothing is refused because of the key.",
+            config_path,
+        )
 
 
 def parse_benchmarks_enabled(raw: object) -> bool:
@@ -892,7 +899,6 @@ def _checkout_runtime_config(
         repositories={"agents-remember": repository},
         providers={},
         benchmarks_enabled=False,
-        direct_execution_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
         retirement=RetirementSettings(

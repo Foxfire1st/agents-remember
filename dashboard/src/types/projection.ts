@@ -161,6 +161,11 @@ export interface CommitRefNode {
   path?: string;
 }
 
+export interface DirectGrantNode {
+  grantedAt: string;
+  grantedBy: string;
+}
+
 export interface DiscardUnstartedProofNode {
   childJson: Record<string, unknown>;
   childMarkdown: Record<string, unknown>;
@@ -555,6 +560,7 @@ export interface SeriesSectionNode {
 
 export interface SeriesSubTaskNode {
   createdAt?: string;
+  directGrant?: DirectGrantNode;
   file: string;
   name: string;
   number: string;
@@ -649,6 +655,7 @@ export interface TaskDocNode {
   currentStep?: string;
   decisions: TaskDecisionNode[];
   design?: string;
+  directGrant?: DirectGrantNode;
   discardedCount?: number;
   /** JSON Schema refinements: {"maxItems":256} */
   discardedSubTasks?: DiscardedSubTaskNode[];

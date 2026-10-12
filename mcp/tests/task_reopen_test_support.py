@@ -319,7 +319,6 @@ def _runtime_config(root: Path, contract: WorktreeContract) -> McpRuntimeConfig:
                     "version": 1,
                     "coordinationRoot": contract.coordination_root.as_posix(),
                     "workspaceRoot": root.as_posix(),
-                    "directExecutionEnabled": False,
                     "repositories": {
                         contract.repo_name: {"path": contract.code_repo_path.as_posix()}
                     },

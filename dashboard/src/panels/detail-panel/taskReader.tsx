@@ -1,7 +1,7 @@
 // The DetailPanel task-document reader family: master overview, sub-task index, slice list, spine
 // lanes, full reader, and the small section primitives (Section/Bullets/StepList/CodeExample/
 // DecisionList). All presentation logic lives here; doc selection stays in model.ts.
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { cx } from "../../../styled-system/css";
 import { Markdown } from "../../grammar/Markdown";
@@ -11,6 +11,8 @@ import {
   type TaskDocumentBodyState,
 } from "../../data/useTaskDocumentBody";
 import { orderedByCreation } from "../../data/taskHierarchy";
+import type { DirectGrantNode } from "../../types/projection";
+import { postDirectExecutionGrant } from "../../data/directExecutionGrant";
 import {
   qualifiedLeafKey,
   taskDocSelectionKey,
@@ -45,6 +47,7 @@ import {
   SUBSTEP,
   badge,
   crossButton,
+  grantButton,
   lane,
   laneMeta,
   laneRepo,
@@ -414,6 +417,38 @@ function SubTaskIndexRow({
     );
   }
   return (
+    <SubTaskLeafRow
+      ref={ref}
+      match={match}
+      position={position}
+      label={label}
+      meta={meta}
+      onOpen={onOpen}
+      testidPrefix={testidPrefix}
+    />
+  );
+}
+
+// The in-series leaf row: the drill-in button plus, for an authored leaf, the
+// developer's direct-execution grant control beside it (MIK-R94 rule 2).
+function SubTaskLeafRow({
+  ref,
+  match,
+  position,
+  label,
+  meta,
+  onOpen,
+  testidPrefix,
+}: {
+  ref: SubTaskRow;
+  match: TaskDocNode | undefined;
+  position: number;
+  label: string;
+  meta: ReactNode;
+  onOpen: (slug: string) => void;
+  testidPrefix: string;
+}) {
+  return (
     <li key={subTaskKey(ref, position - 1)}>
       {match ? (
         <button
@@ -435,6 +470,14 @@ function SubTaskIndexRow({
           {meta}
         </div>
       )}
+      {match && match.kind === "subTask" ? (
+        <DirectGrantControl
+          doc={match}
+          initialGrant={rowDirectGrant(ref, match)}
+          testidPrefix={testidPrefix}
+          position={position}
+        />
+      ) : null}
     </li>
   );
 }
@@ -451,10 +494,115 @@ function subTaskDisplay(
 
 function subTaskMeta(match: TaskDocNode | undefined, ref: SubTaskRow): ReactNode {
   const progress = match ? taskStepProgress(match) : undefined;
+  const grant = rowDirectGrant(ref, match);
   return (
     <span className={sliceMeta}>
       {progress && progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
       {ref.status}
+      {grant ? (
+        <>
+          {" · "}
+          <span className={badge}>Direct · {grant.grantedBy}</span>
+        </>
+      ) : null}
+    </span>
+  );
+}
+
+// A leaf's grant from either row shape: a series row carries it directly, a master
+// index row reads it off the matched leaf document (MIK-R94 rule 4).
+function rowDirectGrant(
+  ref: SubTaskRow,
+  match: TaskDocNode | undefined,
+): DirectGrantNode | null | undefined {
+  if ("directGrant" in ref && ref.directGrant) return ref.directGrant;
+  return match?.directGrant;
+}
+
+// The developer's direct-execution grant control on an authored leaf row (MIK-R94
+// rule 2): give the grant or take it back through the serving route, showing the
+// server's words. A sibling of the drill-in button, never nested inside it.
+//
+// The control follows the live projection: a served add/remove/issuer change
+// replaces its grant, while a refused or unreachable request keeps the actual
+// grant and only shows the server's words. A selection change resets it, and a
+// reply that arrives after one is ignored, so grant state never transfers to
+// another leaf (F06).
+function DirectGrantControl({
+  doc,
+  initialGrant,
+  testidPrefix,
+  position,
+}: {
+  doc: TaskDocNode;
+  initialGrant: DirectGrantNode | null | undefined;
+  testidPrefix: string;
+  position: number;
+}) {
+  const docRef = taskDocumentRefForDoc(doc);
+  const docKey = docRef ? `${docRef.repository}:${docRef.path}` : doc.id;
+  const [grant, setGrant] = useState<DirectGrantNode | null>(initialGrant ?? null);
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const served = useRef<{ key: string; grant: DirectGrantNode | null }>({
+    key: docKey,
+    grant: initialGrant ?? null,
+  });
+  const callId = useRef(0);
+  const servedBy = initialGrant?.grantedBy ?? null;
+  const servedAt = initialGrant?.grantedAt ?? null;
+  useEffect(() => {
+    if (served.current.key !== docKey) {
+      served.current = { key: docKey, grant: initialGrant ?? null };
+      callId.current += 1;
+      setGrant(initialGrant ?? null);
+      setNotice(null);
+      setPending(false);
+      return;
+    }
+    const next = initialGrant ?? null;
+    const prev = served.current.grant;
+    if (
+      (next?.grantedBy ?? null) !== (prev?.grantedBy ?? null) ||
+      (next?.grantedAt ?? null) !== (prev?.grantedAt ?? null)
+    ) {
+      served.current = { key: docKey, grant: next };
+      setGrant(next);
+    }
+  }, [docKey, servedBy, servedAt]);
+  if (!docRef) return null;
+  const run = async (action: "give" | "revoke") => {
+    const mine = ++callId.current;
+    setPending(true);
+    setNotice(null);
+    const outcome = await postDirectExecutionGrant(docRef.repository, docRef.path, action);
+    if (mine !== callId.current) return;
+    setPending(false);
+    if (outcome.ok) {
+      served.current = { key: docKey, grant: outcome.grant };
+      setGrant(outcome.grant);
+    }
+    setNotice(outcome.text);
+  };
+  return (
+    <span className={sliceMeta}>
+      <button
+        type="button"
+        className={grantButton}
+        disabled={pending}
+        onClick={() => void run(grant ? "revoke" : "give")}
+        data-testid={`${testidPrefix}-direct-${position}`}
+        title={
+          grant
+            ? `Take back this leaf's direct-execution grant (${grant.grantedBy})`
+            : "Give this leaf its direct-execution grant"
+        }
+      >
+        {pending ? "…" : grant ? "Take back" : "Make direct"}
+      </button>
+      {notice ? (
+        <span data-testid={`${testidPrefix}-direct-note-${position}`}> · {notice}</span>
+      ) : null}
     </span>
   );
 }
@@ -653,6 +801,7 @@ export function TaskReader({
 }) {
   const progress = taskStepProgress(doc);
   const leafKey = qualifiedLeafKey(doc);
+  const readerGrant = doc.kind === "subTask" ? (doc.directGrant ?? null) : null;
   return (
     <TaskRequirementBoundary doc={doc} onOpenNotes={onOpenNotes}>
     <div className={taskdoc} data-task-leaf-key={leafKey}>
@@ -660,8 +809,19 @@ export function TaskReader({
         <span className={badge}>{doc.kind}</span>
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
+        {readerGrant ? (
+          <span className={badge}>Direct · {readerGrant.grantedBy}</span>
+        ) : null}
         <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
       </div>
+      {doc.kind === "subTask" ? (
+        <DirectGrantControl
+          doc={doc}
+          initialGrant={readerGrant}
+          testidPrefix="taskdoc-direct"
+          position={0}
+        />
+      ) : null}
       <TaskBodyNotice state={bodyState} />
       {bodyState !== "loading" ? (
         <DocChangeSetBar

@@ -17,6 +17,7 @@ from .core import (
     server_info_payload,
 )
 from .curator_coherence import curator_coherence_payload
+from .direct_execution import direct_execution_grant_payload
 from .direct_landing import direct_landing_payload
 from .enclosure_adoption import worktree_enclosure_adopt_payload
 from .gates import (
@@ -85,6 +86,7 @@ __all__ = [
     "closeout_queue_payload",
     "context_packet_payload",
     "curator_coherence_payload",
+    "direct_execution_grant_payload",
     "direct_landing_payload",
     "dispatch_agent_payload",
     "gate_create_payload",

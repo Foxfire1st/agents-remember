@@ -774,6 +774,26 @@
       "title": "CommitRefNode",
       "type": "object"
     },
+    "DirectGrantNode": {
+      "additionalProperties": false,
+      "description": "A leaf's direct-execution grant as the dashboard shows it (MIK-R94 rule 4).\n\nRead from the one grant record at projection time, never stored twice.\n``None`` on the parent node distinguishes a leaf with no grant.",
+      "properties": {
+        "grantedAt": {
+          "title": "Grantedat",
+          "type": "string"
+        },
+        "grantedBy": {
+          "title": "Grantedby",
+          "type": "string"
+        }
+      },
+      "required": [
+        "grantedBy",
+        "grantedAt"
+      ],
+      "title": "DirectGrantNode",
+      "type": "object"
+    },
     "DiscardUnstartedProofNode": {
       "additionalProperties": false,
       "description": "Persisted proof facts retained after an unstarted leaf source is discarded.",
@@ -3048,6 +3068,17 @@
           "default": null,
           "title": "Createdat"
         },
+        "directGrant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectGrantNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "file": {
           "default": "",
           "title": "File",
@@ -3551,6 +3582,17 @@
           ],
           "default": null,
           "title": "Design"
+        },
+        "directGrant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectGrantNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "discardedCount": {
           "anyOf": [

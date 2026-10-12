@@ -807,6 +807,10 @@ class EntryPointWorld:
                 "code_commit": "deadbeef",
                 "dry_run": True,
             },
+            "direct_execution_grant": {
+                "task_document_ref": {"repository": REPO, "path": f"{MASTER}/absent.json"},
+                "action": "give",
+            },
             "worktree_start": {
                 "repo_id": REPO,
                 "task_name": f"{MASTER}-absent",
