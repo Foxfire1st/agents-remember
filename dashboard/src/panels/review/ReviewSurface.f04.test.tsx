@@ -13,8 +13,6 @@ import { treeOrderStore } from './triageOrderPreference';
 import { treeViewStore } from './triageViewPreference';
 import { captured } from './l43.test-utils';
 
-vi.setConfig({ testTimeout: 30000 });
-
 const entries = captured<ReviewEntryListResult>('l43r2.f04.entries.captured.json');
 const family = captured<ReviewResult>('l43r2.f04.family.captured.json');
 const trees = captured<ReviewTreesResult>('l43r2.f04.trees.captured.json');

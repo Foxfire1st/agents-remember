@@ -232,7 +232,10 @@ describe("L150-CODE-06: the dispatch notifies the current callback at acceptance
     const run = writers();
     const parked = stubDeferredDispatch();
     const done = dispatchRoleAction(live, run, "start", REQUEST_SELECTION);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Wait for the dispatch request itself, not a wall-clock sleep.
+    await vi.waitFor(() => {
+      expect(seen.some((call) => call.url === "/api/role-launch/dispatch")).toBe(true);
+    });
     return { parked, done, run };
   }
 
@@ -242,7 +245,10 @@ describe("L150-CODE-06: the dispatch notifies the current callback at acceptance
   }
 
   async function sentRequestId(): Promise<string> {
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Wait for the dispatch request itself, not a wall-clock sleep.
+    await vi.waitFor(() => {
+      expect(seen.some((call) => call.url === "/api/role-launch/dispatch")).toBe(true);
+    });
     const dispatches = seen.filter((call) => call.url === "/api/role-launch/dispatch");
     return (dispatches[dispatches.length - 1]?.body as Record<string, string>)["requestId"];
   }

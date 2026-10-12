@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CockpitShell } from "../../cockpit/Cockpit";
@@ -415,7 +415,8 @@ describe("NotesReaderViewer tree rail (the shared ExplorerTree)", () => {
     view.rerender(
       <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
     expect(urls.filter((url) => url.startsWith("/api/notes/folder"))).toHaveLength(loaded);
     // Demand still loads: opening the closed folder fetches exactly its level.
     fireEvent.click(view.getByTitle("reports"));

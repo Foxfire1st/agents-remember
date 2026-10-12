@@ -5,7 +5,7 @@
 //
 // The cards read the selection's entries from the tree view (data/reviewTrees.ts); an unconverted
 // review never mounts this component and keeps the landed file view (ReviewExpressions.tsx).
-import { useContext, useEffect, useState } from 'react';
+import { Fragment, useContext, useEffect, useState } from 'react';
 
 import { css } from '../../../styled-system/css';
 import type { ReviewChangedFile, ReviewPayload } from '../../data/review';
@@ -329,20 +329,34 @@ function sideStateText(side: ReviewTreeEntrySide): string {
 }
 
 function CardCurrentness({ card }: { card: ExpressionCard }) {
+  // The mark names the entry, its MIK-R03 state and its side, exactly (F4). A recorded reason
+  // reads beside it, outside any disclosure (F06) — never inside the mark's own text.
   return (
     <p className={css({ margin: 0, padding: '0 0.8rem' })}>
       {notCurrent(card).map((mark) => (
-        <span
-          key={`${mark.entry}:${mark.side}`}
-          className={css({ color: 'amber', fontSize: '0.72rem', marginRight: '0.8rem' })}
-          data-testid="review-card-currentness"
-          data-currentness={mark.state}
-          data-entry={mark.entry}
-          data-side={mark.side}
-          data-review-content="currentness"
-        >
-          {mark.entry} {mark.state} on the {mark.side} side{mark.reason ? `: ${mark.reason}` : ''}
-        </span>
+        <Fragment key={`${mark.entry}:${mark.side}`}>
+          <span
+            className={css({ color: 'amber', fontSize: '0.72rem', marginRight: '0.8rem' })}
+            data-testid="review-card-currentness"
+            data-currentness={mark.state}
+            data-entry={mark.entry}
+            data-side={mark.side}
+            data-review-content="currentness"
+          >
+            {mark.entry} {mark.state} on the {mark.side} side
+          </span>
+          {mark.reason ? (
+            <span
+              className={css({ color: 'amber', fontSize: '0.72rem', marginRight: '0.8rem' })}
+              data-testid="review-card-currentness-reason"
+              data-entry={mark.entry}
+              data-side={mark.side}
+              data-review-content="currentness"
+            >
+              : {mark.reason}
+            </span>
+          ) : null}
+        </Fragment>
       ))}
     </p>
   );

@@ -10,8 +10,6 @@ import { treeViewStore } from './triageViewPreference';
 import { catalogue, selectedMemberId, serve as serve86, target as target86 } from './l86.test-utils';
 import { catalogue as catalogue43, serve, subject, target, taskBody } from './l43.test-utils';
 
-vi.setConfig({ testTimeout: 30000 });
-
 beforeEach(() => {
   localStorage.clear();
   treeViewStore.getState().setView('changed');

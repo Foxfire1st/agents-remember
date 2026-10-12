@@ -360,7 +360,8 @@ describe("TaskNotes resolution liveness (L150-CODE-01, kept at the L127 sync)", 
     await view.findByTestId("note-ref-1");
     expect(resolveCalls(urls)).toHaveLength(1);
     view.rerender(<TaskNotes repo={REPO} master={MASTER} references={["notes/friction-ledger.md"]} onOpenNotes={vi.fn()} />);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
     expect(resolveCalls(urls)).toHaveLength(1);
     expect((await view.findByTestId("notes-root-count")).textContent).toContain("in the top folder");
   });

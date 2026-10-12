@@ -163,7 +163,8 @@ describe("when the options effect runs", () => {
     // The scope memos hold across a rerender with the same selection: no second load.
     view.rerender(<RoleChatsPane active taskDocuments={[]} series={[]} />);
     await waitFor(() => expect(view.getByRole("button", { name: "Start role" })).toBeTruthy());
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
     expect(bodies("/api/role-launch/options")).toHaveLength(1);
     // A new selection recomputes the scope memos, so the effect loads its scope exactly once.
     fireEvent.change(view.getByLabelText("Role"), { target: { value: "investigator" } });
@@ -178,7 +179,8 @@ describe("when the options effect runs", () => {
     expect(start.disabled).toBe(false);
     // A feature-only change leaves the scope memos (and the options load) alone.
     fireEvent.change(view.getByLabelText("Speed override"), { target: { value: "priority" } });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
     expect(bodies("/api/role-launch/options")).toHaveLength(1);
     expect((view.getByRole("button", { name: "Start role" }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -221,7 +223,8 @@ describe("L150-CODE-04: newer Result authority survives a delayed options reply"
         ),
       );
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
     expect(view.queryByRole("button", { name: "Refresh role result" })).not.toBeNull();
     expect(view.queryByTestId("role-launch-error")).toBeNull();
   });

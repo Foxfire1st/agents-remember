@@ -36,14 +36,14 @@ import { SubjectKnowledge } from './SubjectWorklistIdentity';
 import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
-import { familyTriage, memberChanges, orderMemberRows } from './changeTriage';
+import { familyTriage, memberChanges, orderMemberRows, outlineGroups } from './changeTriage';
 import {
   FamilyBreakdown,
   MemberChangeBadge,
   useMemberChange,
   GuaranteeChangeBadge,
 } from './ChangeBadges';
-import { useTreeOrder } from './triageOrderPreference';
+import { useTreeOrder, type TreeOrder } from './triageOrderPreference';
 import { DiffPane } from '../changeset/DiffPane';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { ReviewExpressions } from './ReviewExpressions';
@@ -611,6 +611,48 @@ function FamilyMemberContext({
   );
 }
 
+// The tree's displayed member order for one family as a rank per member row: the outline
+// group's member sequence under the store's order — the same grouping the sidebar draws
+// (outlineGroups), so the center list and the tree cannot drift apart. Undefined when the
+// outline does not cover the family; the caller keeps its own order then.
+function displayedMemberRanks(
+  entry: ReviewFamilyContextEntry,
+  walked: readonly ReviewFamilyContextEntry[],
+  outline: ReviewOutline | undefined,
+  order: TreeOrder,
+): ((row: ReviewFamilyMember) => number) | undefined {
+  if (!outline || outline.state !== 'outlined') return undefined;
+  const group = outlineGroups(outline, [], walked, order).find(
+    (one) => one.family?.selectorId === entry.family_id,
+  );
+  if (!group) return undefined;
+  const position = new Map(group.members.map((row, index) => [row.selectorId, index]));
+  return (row) =>
+    row.invariant_id === undefined
+      ? Number.MAX_SAFE_INTEGER
+      : (position.get(row.invariant_id) ?? Number.MAX_SAFE_INTEGER);
+}
+
+// The family's member revisions in the order the center lists them: the tree's displayed order
+// through the outline where the comparison served one (MIK-R33), else the entry's own order
+// (a dataset review's entry carries no change facts and keeps its order).
+function orderedCenterMembers(
+  entry: ReviewFamilyContextEntry,
+  walked: readonly ReviewFamilyContextEntry[],
+  outline: ReviewOutline | undefined,
+  order: TreeOrder,
+): ReviewFamilyMember[] {
+  const members = [...entry.before.members, ...entry.after.members];
+  const rows = [...new Map(members.map((m) => [m.invariant_revision_id, m])).values()].map(
+    (member) => ({
+      member,
+    }),
+  );
+  const displayed = displayedMemberRanks(entry, walked, outline, order);
+  if (displayed) rows.sort((a, b) => displayed(a.member) - displayed(b.member));
+  return (displayed ? rows : orderMemberRows(entry, rows, order)).map(({ member }) => member);
+}
+
 function FamilyCenter({
   entry,
   layout,
@@ -622,6 +664,7 @@ function FamilyCenter({
   expressions,
   knowledge,
   payload,
+  outline,
 }: {
   entry: ReviewFamilyContextEntry;
   expressions: React.ReactNode;
@@ -633,17 +676,12 @@ function FamilyCenter({
   onOpenMember: (memberRevisionId: string) => void;
   onOpenPath: (path: string) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
+  // The entries answer's tree outline, when served: the member list follows the tree's order.
+  outline?: ReviewOutline;
 }) {
-  const members = [...entry.before.members, ...entry.after.members];
-  // On a tree comparison the list follows the tree's displayed order (MIK-R33); a dataset review's
-  // entry carries no change facts and keeps its order.
-  const distinct = orderMemberRows(
-    entry,
-    [...new Map(members.map((m) => [m.invariant_revision_id, m])).values()].map((member) => ({
-      member,
-    })),
-    useTreeOrder(),
-  ).map(({ member }) => member);
+  const storeOrder = useTreeOrder();
+  const walked = payload.family_context?.entries ?? [];
+  const distinct = orderedCenterMembers(entry, walked, outline, storeOrder);
   return (
     <section className={shell} data-testid="review-center-family" data-family={entry.family_id}>
       <div>
@@ -1004,6 +1042,7 @@ function SelectedCenter({
           entry={entry}
           listedPartial={payload.source.inventory.partial}
           onOpenMember={(revision) => onOpenMember(entry.family_id, revision)}
+          outline={props.outline}
         />
       )}
     </div>

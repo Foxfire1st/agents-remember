@@ -195,7 +195,9 @@ async function reviewed(
   const mounted = render(
     <ReviewSurface repo={REPO} master={MASTER} leaf={LEAF} onBack={vi.fn()} />,
   );
-  return within(await mounted.findByTestId('review-details'));
+  // Since MIK-R86 the knowledge pane renders in the reading area's center column beside the
+  // statement (FamilyReviewCenter), no longer inside the technical details.
+  return within(await mounted.findByTestId('review-center-column'));
 }
 
 afterEach(() => {
@@ -287,11 +289,12 @@ describe('the knowledge pane over a one-sided statement', () => {
   });
 
   it('draws no diff and both named states when no subject was compared', async () => {
+    // Since MIK-R86 the surface shows the knowledge pane for the selected subject; a review with
+    // no subject selected shows the source-only view instead. The pane's no-operand contract is
+    // exercised here through a selected subject whose operands are both unresolved.
     const view = await reviewed({
       before_statement: unresolved('no knowledge operand was compared'),
       after_statement: unresolved('no knowledge operand was compared'),
-      selection_state: 'task_context',
-      selection_detail: 'no invariant or family subject was selected for this review',
     });
 
     const before = await view.findByTestId('review-before-state');
@@ -302,6 +305,10 @@ describe('the knowledge pane over a one-sided statement', () => {
   });
 
   it('names an absent field value and a recorded empty one without printing either as blank', async () => {
+    // Since MIK-R86 the technical details no longer repeat authored-text values (statement,
+    // conditions and their kin read in the main page instead), so the recorded-empty side of
+    // this contract is exercised through the record's status field, which is shown beside the
+    // statement. The absent/recorded-empty distinction itself still stands (ICR-L6).
     const view = await reviewed({
       before_statement: present(SHARED_STATEMENT),
       after_statement: present(SHARED_STATEMENT),
@@ -317,7 +324,7 @@ describe('the knowledge pane over a one-sided statement', () => {
           item_kind: 'invariant',
           field: 'lifecycle',
           before_value: 'proposed',
-          after_value: 'accepted',
+          after_value: '',
         },
         {
           item_id: '2c935ffe-a88b-45d4-b454-53a466db32b0',
@@ -326,23 +333,13 @@ describe('the knowledge pane over a one-sided statement', () => {
           before_value: STRUCTURED_BEFORE,
           after_value: STRUCTURED_AFTER,
         },
-        {
-          item_id: '2c935ffe-a88b-45d4-b454-53a466db32b0',
-          item_kind: 'invariant',
-          field: 'essential_conditions',
-          before_value: 'the batch is admitted for this namespace.',
-          after_value: '',
-        },
       ],
     });
 
     const rows = await view.findByTestId('review-field-changes');
     expect(rows.textContent).toContain(`acceptance_ref: (absent) → ${SHARED_ACCEPTANCE_REF}`);
-    expect(rows.textContent).toContain('lifecycle: proposed → accepted');
+    expect(rows.textContent).toContain('lifecycle: proposed → (recorded empty)');
     expect(rows.textContent).toContain(`provenance: ${STRUCTURED_BEFORE} → ${STRUCTURED_AFTER}`);
     expect(STRUCTURED_BEFORE).not.toBe(STRUCTURED_AFTER);
-    expect(rows.textContent).toContain(
-      'essential_conditions: the batch is admitted for this namespace. → (recorded empty)',
-    );
   });
 });
