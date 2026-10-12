@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
@@ -109,10 +111,27 @@ def test_dry_run_is_the_default_and_writes_nothing(tmp_path: Path) -> None:
 
     config, contract_path, group = _scratch_world(tmp_path)
 
-    payload = worktree_enclosure_adopt_payload(config, _request(contract_path, group, dry_run=True))
+    request = _request(contract_path, group, dry_run=True)
+    with tool_call_context(
+        "worktree_enclosure_adopt",
+        {
+            "contract_path": contract_path.as_posix(),
+            "expected_worktree_group": group.as_posix(),
+            "rationale": _RATIONALE,
+            "dry_run": True,
+        },
+        config=config,
+    ):
+        payload = worktree_enclosure_adopt_payload(config, request)
 
     assert payload["ok"] is True
-    assert payload["operation"] == "worktree_enclosure_adopt"
+    # MIK-R108 rules 1-2: the caller answer carries the outcome and the next
+    # step, not the envelope; `operation` stays in the whole result for the
+    # report and the log. The answer points at it through `log` (rule 3).
+    assert "operation" not in payload
+    assert isinstance(payload.get("log"), str), "the answer must point at its whole result"
+    whole = json.loads(Path(str(payload["log"])).read_text(encoding="utf-8"))
+    assert whole["operation"] == "worktree_enclosure_adopt"
     assert payload["state"] == "would-adopt-enclosure"
     assert payload["dryRun"] is True
     assert payload["nextAction"] == "adopt"

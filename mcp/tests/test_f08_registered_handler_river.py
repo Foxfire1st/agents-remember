@@ -2,7 +2,7 @@
 
 The retained river tests install a writer by hand and call
 ``complete_tool_response`` directly. These four cases instead drive the
-registered ``ping`` handler through a server built by ``create_server`` over a
+registered ``server_info`` handler through a server built by ``create_server`` over a
 real in-memory MCP client session -- the same entry shape the retained
 entry-point sweep uses -- and read the workspace river the server writes:
 
@@ -11,7 +11,7 @@ entry-point sweep uses -- and read the workspace river the server writes:
 * a genuinely fresh spawn-guarded child process writing its first call;
 * one caller read at startup that stays fixed while the process runs.
 
-The vehicle is ``ping`` on purpose: read-only, no side effects, no host,
+The vehicle is ``server_info`` on purpose: read-only, no side effects, no host,
 Paseo, dashboard, paid actor, or E8 involvement. ``AR_F08_MCP_SRC`` selects the
 product source under proof (default: this checkout's ``mcp/src``); every
 ``agents_remember`` import happens inside functions from that root only, so the
@@ -239,14 +239,14 @@ def _result_payload(result: object) -> dict:
             decoded = json.loads(text)
             if isinstance(decoded, dict):
                 return decoded
-    raise AssertionError(f"registered ping answered without a mapping payload: {result!r}")
+    raise AssertionError(f"registered server_info answered without a mapping payload: {result!r}")
 
 
-async def _call_ping(server: FastMCP) -> dict:
+async def _call_server_info(server: FastMCP) -> dict:
     inner = server._mcp_server
     async with create_connected_server_and_client_session(inner) as client:
         result = await asyncio.wait_for(
-            client.call_tool("ping", {}), timeout=SESSION_TIMEOUT_SECONDS
+            client.call_tool("server_info", {}), timeout=SESSION_TIMEOUT_SECONDS
         )
     return _result_payload(result)
 
@@ -271,7 +271,7 @@ def _river_rows(coord: Path) -> list[dict]:
 def _assert_bound_row(row: dict, *, agent_id: str, root_name: str) -> None:
     data = row.get("data")
     assert isinstance(data, dict), f"river row carries no data mapping: {row!r}"
-    assert data.get("tool") == "ping", f"unexpected tool in river row: {data!r}"
+    assert data.get("tool") == "server_info", f"unexpected tool in river row: {data!r}"
     assert data.get("ok") is True, f"river row is not ok: {data!r}"
     assert data.get("role") == "worker", f"river row caller role mismatch: {data!r}"
     assert data.get("agentId") == agent_id, f"river row agent mismatch: {data!r}"
@@ -290,8 +290,8 @@ def test_f08_bound_first_call_through_registered_handler() -> None:
             )
             with mock.patch.dict(os.environ, environment, clear=False):
                 coord, server = _build_world(root)
-                payload = asyncio.run(_call_ping(server))
-                assert payload.get("ok") is True, f"registered ping refused: {payload!r}"
+                payload = asyncio.run(_call_server_info(server))
+                assert payload.get("ok") is True, f"registered server_info refused: {payload!r}"
                 rows = _river_rows(coord)
                 _retain_evidence(
                     "bound-first-call",
@@ -303,8 +303,8 @@ def test_f08_bound_first_call_through_registered_handler() -> None:
             environment = _isolated_environment(root, _empty_binding_environment())
             with mock.patch.dict(os.environ, environment, clear=False):
                 coord, server = _build_world(root)
-                payload = asyncio.run(_call_ping(server))
-                assert payload.get("ok") is True, f"registered ping refused: {payload!r}"
+                payload = asyncio.run(_call_server_info(server))
+                assert payload.get("ok") is True, f"registered server_info refused: {payload!r}"
                 rows = _river_rows(coord)
                 _retain_evidence(
                     "bound-first-call",
@@ -319,8 +319,8 @@ def test_f08_unbound_chat_harness_through_registered_handler() -> None:
         environment = _isolated_environment(root, _empty_binding_environment())
         with mock.patch.dict(os.environ, environment, clear=False):
             coord, server = _build_world(root)
-            payload = asyncio.run(_call_ping(server))
-            assert payload.get("ok") is True, f"registered ping refused: {payload!r}"
+            payload = asyncio.run(_call_server_info(server))
+            assert payload.get("ok") is True, f"registered server_info refused: {payload!r}"
             rows = _river_rows(coord)
             _retain_evidence(
                 "unbound-chat-harness",
@@ -354,15 +354,15 @@ def test_f08_caller_fixed_after_startup_binding_rewrite() -> None:
                 clear=False,
             ):
                 coord, server = _build_world(root)
-                first = asyncio.run(_call_ping(server))
-            assert first.get("ok") is True, f"registered ping refused: {first!r}"
+                first = asyncio.run(_call_server_info(server))
+            assert first.get("ok") is True, f"registered server_info refused: {first!r}"
             with mock.patch.dict(
                 os.environ,
                 _binding_environment(root, agent_id=AGENT_B, request_id=REQUEST_B),
                 clear=False,
             ):
-                second = asyncio.run(_call_ping(server))
-            assert second.get("ok") is True, f"registered ping refused: {second!r}"
+                second = asyncio.run(_call_server_info(server))
+            assert second.get("ok") is True, f"registered server_info refused: {second!r}"
             rows = _river_rows(coord)
             _retain_evidence(
                 "caller-fixed",
@@ -377,7 +377,7 @@ def test_f08_caller_fixed_after_startup_binding_rewrite() -> None:
 
 
 def _f08_spawn_child_main(payload: dict) -> None:
-    """Child entry: own world, own server, one registered ping, row to disk."""
+    """Child entry: own world, own server, one registered server_info, row to disk."""
     child_src = str(payload["src_root"])
     if child_src not in sys.path:
         sys.path.insert(0, child_src)
@@ -387,7 +387,7 @@ def _f08_spawn_child_main(payload: dict) -> None:
         environment = _isolated_environment(root, dict(payload["binding"]))
         with mock.patch.dict(os.environ, environment, clear=False):
             coord, server = _build_world(root)
-            answer = asyncio.run(_call_ping(server))
+            answer = asyncio.run(_call_server_info(server))
             rows = _river_rows(coord)
     record = {
         "pid": os.getpid(),
@@ -441,13 +441,13 @@ def test_f08_fresh_process_first_call_through_registered_handler() -> None:
         assert str(record.get("origin", "")).startswith(str(_MCP_SRC)), (
             f"child imported product code from elsewhere: {record.get('origin')!r}"
         )
-        assert record.get("answer_ok") is True, f"child ping refused: {record!r}"
+        assert record.get("answer_ok") is True, f"child server_info refused: {record!r}"
         rows = record.get("rows")
         assert isinstance(rows, list), f"child record carries no rows: {record!r}"
         if record.get("has_river"):
             assert len(rows) == 1, f"child must write exactly one row, saw {rows!r}"
             data = rows[0].get("data", {})
-            assert data.get("tool") == "ping" and data.get("ok") is True
+            assert data.get("tool") == "server_info" and data.get("ok") is True
             assert data.get("agentId") == AGENT_A, f"child row agent mismatch: {data!r}"
             assert data.get("taskId") == DOC_ID and data.get("taskTitle") == DOC_TITLE, (
                 f"child row task mismatch: {data!r}"

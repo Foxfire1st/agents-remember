@@ -162,6 +162,7 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "worktree_cleanup": "L111",
     "worktree_abandon": "L111",
     "direct_landing": "L111",
+    "direct_execution_grant": "L111",
     "task_doc": "L111",
     "lifecycle_finalize_task": "L111",
     "closeout_queue": "L111",

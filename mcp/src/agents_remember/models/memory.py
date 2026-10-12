@@ -113,7 +113,10 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     blockingCount: int | None = Field(default=None, ge=0)
     blocking: list[dict[str, Any]] | None = None
     censusPath: str | None = Field(default=None, max_length=8192)
-    code: str | None = Field(default=None, max_length=120)
+    # R108 rule 4: the guard converts an over-long code to invalid-code with the
+    # original whole in the detail, so the bound stays off the model and the
+    # refusal keeps what the caller sent.
+    code: str | None = None
 
 
 class _MemoryQualityExecutionRequest(BaseModel):

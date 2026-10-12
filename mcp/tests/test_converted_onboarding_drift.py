@@ -644,23 +644,32 @@ def _skill_copies(skill: str) -> list[Path]:
 
 
 def test_descriptions_say_what_the_check_is() -> None:
-    """Rule 8 / L44-C1-10: every surface states measurement, currentness, duty, repair."""
+    """Rule 8 / L44-C1-10: every live surface states measurement, currentness, duty, repair.
+
+    MIK-R44 as amended (D126) with MIK-R112 rule 5: the `drift_check` tool
+    is removed while the check stays, so what the packet says of the tool
+    holds for the check and the drift part of `context_packet`, and the
+    rule-8 sentence for the description of the removed tool falls away.
+    The phrase assertions below therefore cover only the surviving
+    surfaces (context_packet's include_drift and the skills); the removed
+    tool's registration has no live surface left to assert.
+    """
 
     registration = (
         REPO_ROOT / "mcp" / "src" / "agents_remember" / "mcp" / "registration" / "memory.py"
     ).read_text(encoding="utf-8")
     assert "Task-start gate: classify how far onboarding has drifted" not in registration
-    for phrase in (
-        *_MEASUREMENT,
-        *_CURRENTNESS,
-        *_ADVISORY,
-    ):
-        assert phrase in registration, phrase
+    assert "def drift_check" not in registration, (
+        "the removed tool must not come back as a registration"
+    )
 
     core = (
         REPO_ROOT / "mcp" / "src" / "agents_remember" / "mcp" / "registration" / "core.py"
     ).read_text(encoding="utf-8")
     assert "include_drift" in core and "nothing is measured" in core
+    assert "docs/tool-details.md" in core, (
+        "the surviving description must name where the longer explanation is (R112 rule 7)"
+    )
     for phrase in (*_MEASUREMENT, *_CURRENTNESS, *_ADVISORY):
         assert phrase in core, phrase
 

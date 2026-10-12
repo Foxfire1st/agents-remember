@@ -444,6 +444,7 @@ BASELINE_STATUS_ROW_FIELDS = frozenset(
         "drift_report",
         "drift",
         "ledger",
+        "legacyCards",
     }
 )
 BASELINE_STATUS_ROW_USES = {
@@ -457,6 +458,7 @@ BASELINE_STATUS_ROW_USES = {
     "drift_report": "open the drift report the state was read off",
     "drift": "read the drift counts behind a blocked-drift state",
     "ledger": "read the ledger state behind an already-adopted state",
+    "legacyCards": "correct the listed old-format cards behind a blocked-legacy-cards state",
 }
 BASELINE_STATUS_ROW_BOUND = 600
 BASELINE_STATUS_PRODUCTION_PATHS = ("ready", "adopted")
@@ -477,6 +479,7 @@ BASELINE_ADOPT_ROW_FIELDS = frozenset(
         "message",
         "onboarding_root",
         "topology",
+        "legacyCards",
     }
 )
 BASELINE_ADOPT_ROW_USES = {
@@ -492,6 +495,7 @@ BASELINE_ADOPT_ROW_USES = {
     "message": "read the adoption outcome in one sentence",
     "onboarding_root": "confirm which onboarding tree was measured",
     "topology": "read the repository topology the adoption was measured on",
+    "legacyCards": "correct the listed old-format cards blocking adoption",
 }
 BASELINE_ADOPT_ROW_BOUND = 700
 BASELINE_ADOPT_PRODUCTION_PATHS = ("adopted", "refused")

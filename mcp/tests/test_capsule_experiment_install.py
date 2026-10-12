@@ -32,6 +32,7 @@ if str(MCP_SRC) not in sys.path:
     sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.install import experiment as install_experiment
 from agents_remember.install import runtime as install_runtime
 from agents_remember.kernel.agentic_settings import (
@@ -600,17 +601,29 @@ def test_the_registered_tool_takes_the_selection_as_this_run_s_own_input(tmp_pat
         transcript_root=coordination_root / "logs" / "mcp",
     )
 
-    payload = runtime_install_payload(
-        config,
-        install_runtime.RuntimeInstallRequest(
-            dry_run=True,
-            install_provider_deps=False,
-            source_root=source,
-            experiment=install_experiment.ROLE_CAPSULES,
-        ),
+    selected_request = install_runtime.RuntimeInstallRequest(
+        dry_run=True,
+        install_provider_deps=False,
+        source_root=source,
+        experiment=install_experiment.ROLE_CAPSULES,
     )
+    with tool_call_context(
+        "runtime_install",
+        {
+            "dry_run": True,
+            "install_provider_deps": False,
+            "experiment": install_experiment.ROLE_CAPSULES,
+        },
+        config=config,
+    ):
+        payload = runtime_install_payload(config, selected_request)
 
-    experiment = payload["experiment"]
+    # The capsule run overflows the row bound, so the delivered answer carries
+    # no `experiment`; the selection is verified on the retained whole result
+    # the answer points at through `log` (MIK-R108 rules 3-4).
+    assert isinstance(payload.get("log"), str), "the answer must point at its whole result"
+    whole = json.loads(Path(str(payload["log"])).read_text(encoding="utf-8"))
+    experiment = whole["experiment"]
     assert experiment["selection"]["selected"] is True
     assert experiment["selection"]["source"] == "request"
     assert experiment["delivery"]["mode"] == "capsule"

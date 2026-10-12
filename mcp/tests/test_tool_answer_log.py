@@ -264,6 +264,20 @@ class ToolAnswerLogTests(unittest.TestCase):
         self.assertEqual(line["arguments"]["note"], "holds ordinary-note-value inside")
 
     def test_home_folder_path_stays_whole(self) -> None:
+        """Ordinary home-folder text is preserved whole inside its length domain (rule 3)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["AR_L108_TEST_DATADIR"] = tmp
+            try:
+                coord = Path(tmp)
+                short_path = "group/series-contract.md"
+                self._record(coord, arguments={"contract_path": short_path, "repo_id": "r"})
+                (line,) = self._read_lines(coord)
+            finally:
+                del os.environ["AR_L108_TEST_DATADIR"]
+        self.assertEqual(line["arguments"]["contract_path"], short_path)
+
+    def test_home_folder_path_follows_the_length_rule(self) -> None:
+        """The real tmp-rooted path is whole at or under 200 chars, else length+digest (rule 3)."""
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["AR_L108_TEST_DATADIR"] = tmp
             try:
@@ -273,8 +287,32 @@ class ToolAnswerLogTests(unittest.TestCase):
                 (line,) = self._read_lines(coord)
             finally:
                 del os.environ["AR_L108_TEST_DATADIR"]
-        self.assertEqual(line["arguments"]["contract_path"], contract_path)
-        self.assertIn(tmp, json.dumps(line))
+        if len(contract_path) > 200:
+            self.assertEqual(
+                line["arguments"]["contract_path"],
+                {
+                    "length": len(contract_path),
+                    "sha256": hashlib.sha256(contract_path.encode("utf-8")).hexdigest(),
+                },
+            )
+        else:
+            self.assertEqual(line["arguments"]["contract_path"], contract_path)
+
+    def test_overlong_path_shortens_to_length_and_digest(self) -> None:
+        """A value over 200 chars is replaced by its length and digest (rule 3)."""
+        long_path = "home/" + "d" * 250 + "/series-contract.md"
+        assert len(long_path) > 200
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            self._record(coord, arguments={"contract_path": long_path, "repo_id": "r"})
+            (line,) = self._read_lines(coord)
+        self.assertEqual(
+            line["arguments"]["contract_path"],
+            {
+                "length": len(long_path),
+                "sha256": hashlib.sha256(long_path.encode("utf-8")).hexdigest(),
+            },
+        )
 
     def test_slash_bearing_env_credential_is_omitted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -755,7 +793,8 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
             services.provider_lifecycle = FakeLifecycle()
             with mock.patch.object(cleanup_module, "worktree_services", return_value=services):
                 directories = cleanup_module._removed_directories(
-                    SimpleNamespace(worktree_group=group, kind="leaf"), dry_run=False
+                    SimpleNamespace(worktree_group=group, kind="leaf", task_root=Path(tmp)),
+                    dry_run=False,
                 )
             self.assertIn(
                 (logs.as_posix(), False),
