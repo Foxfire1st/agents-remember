@@ -1,7 +1,8 @@
 // MIK-R127 rule 2: the head, on every form. Form, id and status on one line, then the
-// title; under the title the objective (the developer's direction D219: the page leads
-// with it); then one strip of short facts, the label above the value; then the status note
-// and the header notes as labelled lines that open in place.
+// title; then one strip of short facts, the label above the value; then the status note
+// and the header notes as labelled lines that open in place. The objective is no
+// longer drawn here: under MIK-R150 rule 14 (D237) it is the first block after
+// the head, drawn by the skeletons.
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { cx } from '../../../styled-system/css';
@@ -103,7 +104,6 @@ export function DocHead({
       <h2 className={docTitle} data-testid="doc-title">
         {doc.title}
       </h2>
-      <ObjectiveLead text={doc.objective} openView={openView} />
       <div className={facts} data-testid="doc-facts">
         <ChainFact doc={doc} form={form} chain={chain} onJump={onJump} />
         <PrimaryFact primary={primary} />
@@ -235,12 +235,15 @@ function LeadTools({
   );
 }
 
-// The objective, first under the title (D219), under a heading like every block
-// of the page (D223). Closed it shows its first lines,
-// so the facts and the first rows stay on the first screen; "more" opens it in
-// place. A text beyond the long-text bound (rule 6) opens to that bound, and
-// the link to the view that holds it whole stands beside "more" from the start.
-function ObjectiveLead({ text, openView }: { text: string; openView: (view: DocView) => void }) {
+// The objective, first block after the head on every form (MIK-R150 rule 14,
+// D237), under a heading like every block of the page (D223). Closed it shows
+// its first lines, so the facts and the first rows stay on the first screen;
+// "more" opens it in place. A text beyond the long-text bound (rule 6) opens to
+// that bound, and the link to the view that holds it whole stands beside "more"
+// from the start. Its bound, its link and what a reader opened stay as they are
+// (MIK-R127 rules 2 and 6): only the place changed. The skeletons draw it, not
+// the head.
+export function ObjectiveLead({ text, openView }: { text: string; openView: (view: DocView) => void }) {
   const bounded = boundedText(text);
   const ref = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);

@@ -71,16 +71,7 @@ export interface IndexRowHandlers {
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
-  // What the page adds beside a leaf row's link: the direct-execution grant of
-  // MIK-R94, built by the reader, which holds the control.
-  leafExtra?: LeafExtra;
 }
-
-export type LeafExtra = (
-  ref: SubTaskRow,
-  match: TaskDocNode | undefined,
-  position: number,
-) => ReactNode;
 
 export interface RowTarget {
   testid: string;
@@ -252,7 +243,6 @@ function MasterNowRow({
         <span data-testid={`now-steps-${position}`}>
           <StepsDone match={match} />
         </span>
-        {handlers.leafExtra?.(ref, match, position)}
       </span>
       {step ? (
         <span className={nowStep} data-testid={`now-step-${position}`}>
@@ -279,21 +269,19 @@ export function MasterNowBlock({
   onOpen,
   onJump,
   docPathForRef,
-  leafExtra,
 }: {
   doc: Pick<TaskDocNode, 'id' | 'subTasks'>;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
-  leafExtra?: LeafExtra;
 }) {
   const groups = groupSubTaskRows(doc.subTasks);
   // A bare page keeps no empty Now heading: without a row in any group the
   // block is absent.
   if (isEmptyIndex(groups)) return null;
   const positions = fullOrderPositions(doc.subTasks);
-  const handlers: IndexRowHandlers = { sliceDocs, onOpen, onJump, docPathForRef, leafExtra };
+  const handlers: IndexRowHandlers = { sliceDocs, onOpen, onJump, docPathForRef };
   return (
     <Block
       title="Now"
@@ -600,7 +588,6 @@ function TaskWaitingRow({
       <span className={cx(dim, cell({ at: 'mid' }))}>{requirement ?? ''}</span>
       <span className={dim}>
         {waitingFact(ref, match)}
-        {handlers.leafExtra?.(ref, match, position)}
       </span>
     </Row>
   );
@@ -612,7 +599,6 @@ export function MasterTasksBlock({
   onOpen,
   onJump,
   docPathForRef,
-  leafExtra,
   openView,
 }: {
   doc: Pick<TaskDocNode, 'id' | 'subTasks' | 'sections' | 'discardedSubTasks'>;
@@ -620,12 +606,11 @@ export function MasterTasksBlock({
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
-  leafExtra?: LeafExtra;
   openView: (view: DocView) => void;
 }) {
   const groups = groupSubTaskRows(doc.subTasks);
   const positions = fullOrderPositions(doc.subTasks);
-  const handlers: IndexRowHandlers = { sliceDocs, onOpen, onJump, docPathForRef, leafExtra };
+  const handlers: IndexRowHandlers = { sliceDocs, onOpen, onJump, docPathForRef };
   const intro = sectionIntro(doc.sections, 'subTasks');
   // The discarded-before-start history stands beside the abandoned rows: the
   // link shows whenever either exists, so no audit is left without a way back.
@@ -890,7 +875,6 @@ function GroupRow({
         <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
         <span className={dim}>
           {(match ? primaryRequirement(match)?.label : undefined) ?? ''}
-          {handlers.leafExtra?.(ref, match, position)}
         </span>
       </Row>
     );

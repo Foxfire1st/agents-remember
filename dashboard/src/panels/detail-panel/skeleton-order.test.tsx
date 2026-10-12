@@ -1,7 +1,7 @@
 // MIK-R127 evidence 1: per form, the order of the blocks on a document that
 // has everything, and on a document that has only the required fields. The
-// objective is the first block under the title on every form (D219): it stands
-// inside the head, above the facts, and nowhere further down.
+// objective is the first block below the head on every form (MIK-R150 rule 14,
+// D237): it stands after the head and before Now or Steps.
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -412,5 +412,143 @@ describe('sprint skeleton order (rule 3)', () => {
     expect(getByTestId('doc-form').textContent).toBe('sprint');
     expect(blockOrder(container, 'skeleton-sprint')).toEqual(['head']);
     expect(queryByTestId('now-split')).toBeNull();
+  });
+});
+
+describe('objective below the head (MIK-R150 rule 14)', () => {
+  function before(first: Element, second: Element): boolean {
+    return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  }
+
+  function headings(container: HTMLElement, skeleton: string): string[] {
+    const root = container.querySelector(`[data-testid="${skeleton}"]`);
+    if (!root) throw new Error(`skeleton not rendered: ${skeleton}`);
+    return Array.from(root.querySelectorAll('h2, h3')).map((el) => el.textContent ?? '');
+  }
+
+  // The last element of the head stands before the objective, the objective
+  // before Now or Steps: read from the rendered page, one test per form.
+  it('stands after the head and before Steps on a task page', () => {
+    seedTaskDocuments([
+      taskDoc({
+        id: 'L1',
+        kind: 'subTask',
+        docPath: LEAF,
+        title: 'Leaf one',
+        status: 'inProgress',
+        statusNote: 'Leaf status note.',
+        headerNotes: [{ label: 'Stage', value: 'Run 3, a long enough line for a note of its own.' }],
+        objective: 'Leaf objective.',
+        steps: [
+          {
+            id: 'S1',
+            title: 'Done step',
+            status: 'done',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+        ],
+        stepsDone: 1,
+        stepsTotal: 1,
+        requirements: ['Requirement one.'],
+      }),
+    ]);
+    const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
+
+    const head = getByTestId('doc-head');
+    const objective = getByTestId('objective-lead');
+    const steps = container.querySelector('[data-block="steps"]');
+    if (!head.lastElementChild || !steps) throw new Error('task page missing head end or steps');
+    expect(head.contains(objective)).toBe(false);
+    expect(before(head.lastElementChild, objective)).toBe(true);
+    expect(before(objective, steps)).toBe(true);
+    expect(headings(container, 'skeleton-task')).toEqual([
+      'Leaf one',
+      'Objective',
+      'Steps',
+      'Requirements',
+    ]);
+  });
+
+  it('stands after the head and before Now on a master page', () => {
+    seedTaskDocuments([
+      taskDoc({
+        id: 'M',
+        kind: 'master',
+        docPath: MASTER,
+        title: 'Master',
+        status: 'inProgress',
+        form: 'master',
+        statusNote: 'Master status note.',
+        headerNotes: [{ label: 'Authority', value: 'D1, a long enough line for a note of its own.' }],
+        objective: 'Master objective.',
+        subTasks: [
+          { number: 'L1', name: 'Leaf one', file: '01_leaf.md', status: 'inProgress', scope: '' },
+        ],
+        requirements: ['Master requirement.'],
+      }),
+    ]);
+    const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
+
+    const head = getByTestId('doc-head');
+    const objective = getByTestId('objective-lead');
+    const now = container.querySelector('[data-block="now"]');
+    if (!head.lastElementChild || !now) throw new Error('master page missing head end or now');
+    expect(head.contains(objective)).toBe(false);
+    expect(before(head.lastElementChild, objective)).toBe(true);
+    expect(before(objective, now)).toBe(true);
+    expect(headings(container, 'skeleton-master')).toEqual([
+      'Master',
+      'Objective',
+      'Now',
+      'Tasks',
+      'Requirements',
+    ]);
+  });
+
+  it('stands after the head and before Now on a sprint page', () => {
+    const sprintPath = '/tasks/repo-a/sprint/task.json';
+    seedTaskDocuments([
+      taskDoc({
+        id: 'S',
+        kind: 'master',
+        docPath: sprintPath,
+        title: 'Sprint',
+        status: 'inProgress',
+        form: 'sprint',
+        statusNote: 'Sprint status note.',
+        headerNotes: [{ label: 'Portfolio gate', value: 'Gate, a long enough line for a note of its own.' }],
+        objective: 'Sprint objective.',
+        orchestrates: ['master-a'],
+        subTasks: [
+          {
+            number: 'M1',
+            name: 'Master A',
+            file: '',
+            status: 'inProgress',
+            scope: '',
+            masterRef: { repository: 'repo-a', path: 'master-a/task.json' },
+          },
+        ],
+        requirements: ['Sprint requirement.'],
+      }),
+    ]);
+    const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${sprintPath}`} />);
+
+    const head = getByTestId('doc-head');
+    const objective = getByTestId('objective-lead');
+    const now = container.querySelector('[data-block="now"]');
+    if (!head.lastElementChild || !now) throw new Error('sprint page missing head end or now');
+    expect(head.contains(objective)).toBe(false);
+    expect(before(head.lastElementChild, objective)).toBe(true);
+    expect(before(objective, now)).toBe(true);
+    expect(headings(container, 'skeleton-sprint')).toEqual([
+      'Sprint',
+      'Objective',
+      'Now',
+      'Masters',
+      'Requirements',
+    ]);
   });
 });

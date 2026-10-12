@@ -61,8 +61,8 @@ function before(first: Element, second: Element): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
-describe('the head (rule 2, D219)', () => {
-  it('leads with the objective, then the labelled facts, then the notes', () => {
+describe('the head (rule 2, with MIK-R150 rule 14)', () => {
+  it('leads with the title, then the labelled facts, then the notes, then the objective below the head', () => {
     seedTaskDocuments([
       master(),
       leaf({
@@ -79,12 +79,13 @@ describe('the head (rule 2, D219)', () => {
     expect(within(getByTestId('objective-lead')).getByRole('heading').textContent).toBe(
       'Objective',
     );
-    const order = ['doc-title', 'objective-lead', 'doc-facts', 'header-notes'].map((id) =>
+    const order = ['doc-title', 'doc-facts', 'header-notes', 'objective-lead'].map((id) =>
       getByTestId(id),
     );
     order.slice(1).forEach((element, index) => expect(before(order[index], element)).toBe(true));
-    // the objective stands once, inside the head and nowhere further down
+    // the objective stands once, below the head and nowhere further down
     expect(container.querySelectorAll('[data-block="objective"]')).toHaveLength(1);
+    expect(getByTestId('doc-head').querySelector('[data-block="objective"]')).toBeNull();
     expect(getAllByText('One pure helper with its test.')).toHaveLength(1);
     // every fact of the strip is a label with its value under it
     const facts = Array.from(getByTestId('doc-facts').children).map((fact) => cells(fact));

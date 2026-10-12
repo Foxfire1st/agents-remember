@@ -76,7 +76,7 @@ import type { TaskDocumentBodyState } from '../../data/useTaskDocumentBody';
 
 export type { DocForm, DocView };
 export { Block, Clip };
-export { DocHead, HeaderNotesViewBody, type HeadCount, type HeadDoc } from './docHead';
+export { DocHead, HeaderNotesViewBody, ObjectiveLead, type HeadCount, type HeadDoc } from './docHead';
 export { FindingsViewBody, ReviewBlock, SkippedDisposition, StepsBlock } from './taskBlocks';
 
 type ScrollOwner = { kind: 'window' } | { kind: 'element'; el: Element };

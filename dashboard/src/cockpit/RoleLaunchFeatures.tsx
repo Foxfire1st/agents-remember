@@ -24,7 +24,43 @@ function featureValueText(feature: RoleFeatureChoice, defaultValue?: FeatureValu
   return options.find((option) => option.id === String(current))?.label ?? String(current ?? "host default");
 }
 
-function FeatureControl({ feature, defaultValue, overrideValue, source, disabled, onChange }: {
+// The selectable values of a feature: a toggle offers On/Off, a choice its options.
+function featureOptionChoices(feature: RoleFeatureChoice): Array<{ id: string; label: string }> {
+  if (feature.type === "toggle") return [{ id: "true", label: "On" }, { id: "false", label: "Off" }];
+  return feature.options ?? [];
+}
+
+// The hover text's shown value: the override's label when set, else the default marker.
+function chosenFeatureText(
+  feature: RoleFeatureChoice,
+  choices: Array<{ id: string; label: string }>,
+  overrideValue?: FeatureValue,
+): string | undefined {
+  if (overrideValue === undefined) return undefined;
+  if (feature.type === "toggle") return overrideValue === true || overrideValue === "true" ? "On" : "Off";
+  return choices.find((option) => option.id === String(overrideValue))?.label ?? String(overrideValue);
+}
+
+// A permission-bearing feature is read-only: its value is set in the user's settings.
+function PermissionFeatureNote({ feature, defaultValue }: {
+  feature: RoleFeatureChoice;
+  defaultValue?: FeatureValue | null;
+}) {
+  const valueText = featureValueText(feature, defaultValue);
+  return (
+    <span className={launcherChip} title={`${feature.label} ${valueText}: set in the user's settings`}>
+      {feature.label} {valueText}
+    </span>
+  );
+}
+
+function chooseFeatureValue(feature: RoleFeatureChoice, value: string): FeatureValue | undefined {
+  if (value === "") return undefined;
+  return feature.type === "toggle" ? value === "true" : value;
+}
+
+// An ordinary feature: a selector between its choices, defaulting to the role default.
+function FeatureOverrideSelect({ feature, defaultValue, overrideValue, source, disabled, onChange }: {
   feature: RoleFeatureChoice;
   defaultValue?: FeatureValue | null;
   overrideValue?: FeatureValue;
@@ -32,24 +68,8 @@ function FeatureControl({ feature, defaultValue, overrideValue, source, disabled
   disabled: boolean;
   onChange: (value: FeatureValue | undefined) => void;
 }) {
-  if (feature.permissionBearing) {
-    const valueText = featureValueText(feature, defaultValue);
-    return (
-      <span className={launcherChip} title={`${feature.label} ${valueText}: set in the user's settings`}>
-        {feature.label} {valueText}
-      </span>
-    );
-  }
-  function choose(value: string) {
-    if (value === "") onChange(undefined);
-    else onChange(feature.type === "toggle" ? value === "true" : value);
-  }
-  const choices = feature.type === "toggle" ? [{ id: "true", label: "On" }, { id: "false", label: "Off" }] : feature.options ?? [];
-  const chosen = overrideValue === undefined ? undefined
-    : feature.type === "toggle"
-      ? (overrideValue === true || overrideValue === "true") ? "On" : "Off"
-      : choices.find((option) => option.id === String(overrideValue))?.label ?? String(overrideValue);
-  const displayed = chosen ?? `${feature.label} · default`;
+  const choices = featureOptionChoices(feature);
+  const displayed = chosenFeatureText(feature, choices, overrideValue) ?? `${feature.label} · default`;
   return (
     <label className={featureField}>
       <select
@@ -58,13 +78,46 @@ function FeatureControl({ feature, defaultValue, overrideValue, source, disabled
         title={`${displayed} — ${feature.id}: ${String(defaultValue ?? "unset")} · ${source ?? "host default"}`}
         disabled={disabled}
         value={String(overrideValue ?? "")}
-        onChange={(event) => choose(event.target.value)}
+        onChange={(event) => onChange(chooseFeatureValue(feature, event.target.value))}
       >
         <option value="">{feature.label} · default</option>
         {choices.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
       </select>
     </label>
   );
+}
+
+function FeatureControl({ feature, defaultValue, overrideValue, source, disabled, onChange }: {
+  feature: RoleFeatureChoice;
+  defaultValue?: FeatureValue | null;
+  overrideValue?: FeatureValue;
+  source?: string;
+  disabled: boolean;
+  onChange: (value: FeatureValue | undefined) => void;
+}) {
+  if (feature.permissionBearing) return <PermissionFeatureNote feature={feature} defaultValue={defaultValue} />;
+  return (
+    <FeatureOverrideSelect
+      feature={feature}
+      defaultValue={defaultValue}
+      overrideValue={overrideValue}
+      source={source}
+      disabled={disabled}
+      onChange={onChange}
+    />
+  );
+}
+
+function withFeatureValue(
+  override: RoleAgentOverride | undefined,
+  id: string,
+  value: FeatureValue | undefined,
+): RoleAgentOverride | undefined {
+  const values = { ...override?.featureValues };
+  if (value === undefined) delete values[id];
+  else values[id] = value;
+  const next = { ...override, featureValues: values };
+  return Object.keys(values).length || next.agentId || next.modelId || next.effortId ? next : undefined;
 }
 
 export function RoleLaunchFeatures({ features, defaults, override, disabled, onChange }: {
@@ -74,20 +127,47 @@ export function RoleLaunchFeatures({ features, defaults, override, disabled, onC
   disabled: boolean;
   onChange: (override: RoleAgentOverride | undefined) => void;
 }) {
-  function choose(id: string, value: FeatureValue | undefined) {
-    const values = { ...override?.featureValues };
-    if (value === undefined) delete values[id];
-    else values[id] = value;
-    const next = { ...override, featureValues: values };
-    onChange(Object.keys(values).length || next.agentId || next.modelId || next.effortId ? next : undefined);
-  }
   const featureChoices = defaults.choices?.featureValues as
     | Record<string, { value?: unknown; source?: string }>
     | undefined;
   return features.map((feature) => <FeatureControl key={feature.id} feature={feature}
     defaultValue={defaults.featureValues?.[feature.id] ?? feature.value} overrideValue={override?.featureValues?.[feature.id]}
     source={featureChoices?.[feature.id]?.source}
-    disabled={disabled} onChange={(value) => choose(feature.id, value)} />);
+    disabled={disabled} onChange={(value) => onChange(withFeatureValue(override, feature.id, value))} />);
+}
+
+// The applied mode as one chip: the resolved mode on the role's own agent, else a pointer
+// that the mode resolves for the selected agent at start.
+function ModeChip({ defaults, onRoleAgent, modeLabel, modeDescription }: {
+  defaults: RoleDefaults;
+  onRoleAgent: boolean;
+  modeLabel?: string;
+  modeDescription?: string;
+}) {
+  if (!onRoleAgent) {
+    return (
+      <span className={launcherChip} title="The mode is resolved for the selected agent at start.">At start</span>
+    );
+  }
+  const modeSource = defaults.choices?.mode?.source ?? "user settings";
+  const modeTitle = modeDescription ? `${modeSource} · ${modeDescription}` : modeSource;
+  return (
+    <span className={launcherChip} title={modeTitle}>{modeLabel ?? defaults.mode ?? "none stated"}</span>
+  );
+}
+
+// The user-instructions chip, present only when the defaults carry instructions.
+function InstructionsChip({ defaults }: { defaults: RoleDefaults }) {
+  const notes = defaults.choices?.notes;
+  if (!notes?.present) return null;
+  return (
+    <span
+      className={launcherChip}
+      title={`User instructions (${notes.source ?? "user settings"}): ${notes.baselineReplaced ? "baseline replaced" : "added to baseline"}`}
+    >
+      Instructions
+    </span>
+  );
 }
 
 // What the row said in words lives on: the applied mode is one chip whose
@@ -101,25 +181,15 @@ export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, modeD
   ready: boolean;
 }) {
   if (!ready) return null;
-  const onRoleAgent = selectedAgentId === defaults.agent;
-  const modeSource = defaults.choices?.mode?.source ?? "user settings";
-  const modeTitle = modeDescription ? `${modeSource} · ${modeDescription}` : modeSource;
-  const notes = defaults.choices?.notes;
   return (
     <>
-      {onRoleAgent ? (
-        <span className={launcherChip} title={modeTitle}>{modeLabel ?? defaults.mode ?? "none stated"}</span>
-      ) : (
-        <span className={launcherChip} title="The mode is resolved for the selected agent at start.">At start</span>
-      )}
-      {notes?.present ? (
-        <span
-          className={launcherChip}
-          title={`User instructions (${notes.source ?? "user settings"}): ${notes.baselineReplaced ? "baseline replaced" : "added to baseline"}`}
-        >
-          Instructions
-        </span>
-      ) : null}
+      <ModeChip
+        defaults={defaults}
+        onRoleAgent={selectedAgentId === defaults.agent}
+        modeLabel={modeLabel}
+        modeDescription={modeDescription}
+      />
+      <InstructionsChip defaults={defaults} />
     </>
   );
 }

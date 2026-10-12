@@ -398,6 +398,32 @@ describe("NotesReaderViewer tree rail (the shared ExplorerTree)", () => {
     ).length;
     expect(keepFetches).toBe(1);
   });
+
+  it("refetches nothing on an unrelated rerender and still loads on demand", async () => {
+    const urls = stubNotesApi(
+      { "": [entry("a.md"), entry("reports/")], reports: [entry("reports/r.md")] },
+      { "a.md": content("a.md") },
+    );
+    const onSelectNote = vi.fn();
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("a.md");
+    const loaded = urls.filter((url) => url.startsWith("/api/notes/folder")).length;
+    expect(loaded).toBeGreaterThan(0);
+    // The same props again: the loaded folders answer from the cache, no second fetch.
+    view.rerender(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(urls.filter((url) => url.startsWith("/api/notes/folder"))).toHaveLength(loaded);
+    // Demand still loads: opening the closed folder fetches exactly its level.
+    fireEvent.click(view.getByTitle("reports"));
+    expect(await view.findByTitle("r.md")).toBeTruthy();
+    expect(
+      urls.filter((url) => url.startsWith("/api/notes/folder") && url.includes("path=reports")).length,
+    ).toBe(1);
+  });
 });
 
 describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () => {

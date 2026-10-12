@@ -60,21 +60,41 @@ export const slices = css({
   gap: '0.15rem',
 });
 export const sliceMeta = css({ color: 'muted', fontSize: '0.72rem' });
-// The direct-execution grant control on a leaf row (MIK-R94 rule 2): a small inline
-// action beside the drill-in button, never nested inside it.
-export const grantButton = css({
-  fontSize: "0.72rem",
-  color: "muted",
-  textDecoration: "underline",
-  textUnderlineOffset: "2px",
-  cursor: "pointer",
-  background: "transparent",
-  border: "0",
-  padding: "0",
-  marginLeft: "0.5rem",
-  _hover: { color: "ink" },
-  _disabled: { opacity: 0.5, cursor: "default" },
+// One switch on the task's own page for the direct-execution grant (MIK-R150
+// rules 9 to 13): a label, a track with a knob, and the served words. The track
+// carries the position through its alignment, off at the left and on at the
+// right, in the dashboard's own tokens.
+export const directLine = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  fontSize: '0.78rem',
+  color: 'ink',
+  margin: '0.3rem 0 0',
 });
+export const directSwitch = css({
+  width: '2rem',
+  height: '1.1rem',
+  borderRadius: '999px',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  background: 'bg',
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0.12rem',
+  cursor: 'pointer',
+});
+export const directSwitchOff = css({ justifyContent: 'flex-start' });
+export const directSwitchOn = css({ justifyContent: 'flex-end', background: 'oklch(0.7 0.1 200 / 0.12)', borderColor: 'amber' });
+export const directKnob = css({
+  width: '0.75rem',
+  height: '0.75rem',
+  borderRadius: '999px',
+  background: 'muted',
+});
+export const directGiven = css({ color: 'muted', fontSize: '0.74rem' });
+export const directNote = css({ color: 'amber', fontSize: '0.74rem' });
 // A clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
 export const sliceButton = css({
   display: 'flex',

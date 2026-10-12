@@ -13,7 +13,8 @@
 // MIK-R126: the rail is the SHARED `ExplorerTree` (the File viewer's tree), fed one folder at a
 // time — folders stay closed until opened, except the folders on the way to the open note, and a
 // folder answered in parts shows a row that loads the next part. No second tree is written.
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
+import { ancestorsOf, isMoreRow, useNotesFolderCache } from "./useNotesFolderCache";
 import type { RoleReportContent } from "../../data/roleReport";
 import { readRoleReport } from "../../data/roleReport";
 import type { LauncherRole } from "../../cockpit/roleLaunchModel";
@@ -21,7 +22,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import { css } from "../../../styled-system/css";
 import type { FileContent } from "../../data/files";
-import { listFolder, readNote, type FolderEntry, type NoteContent } from "../../data/notes";
+import { readNote, type NoteContent } from "../../data/notes";
 import {
   listRequirements,
   readRequirement,
@@ -144,48 +145,6 @@ function dualPaneProps(note: ArtifactContent): { code: FileContent | null; sidec
     : { code: noteAsFileContent(note), sidecar: { state: "empty" } };
 }
 
-// A next-part row is a synthetic leaf row: its path carries the folder and the next offset.
-const MORE_MARKER = "\0more:";
-
-function isMoreRow(row: ExplorerRow): boolean {
-  return row.path.includes(MORE_MARKER);
-}
-
-function moreFolder(path: string): string {
-  return path.split(MORE_MARKER)[0];
-}
-
-function ancestorsOf(path: string): string[] {
-  const parts = path.split("/");
-  parts.pop();
-  const ancestors: string[] = [];
-  for (let depth = 1; depth <= parts.length; depth++) ancestors.push(parts.slice(0, depth).join("/"));
-  return ancestors;
-}
-
-function toRows(entries: FolderEntry[]): ExplorerRow[] {
-  return entries.map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind }));
-}
-
-// One loaded folder's accumulated parts, so the next-part row appends without refetching.
-// `gone` carries the server's reason when the folder vanished; null while present.
-interface FolderCache {
-  entries: ExplorerRow[];
-  nextOffset: number | null; // null when the folder answered whole
-  gone: string | null;
-}
-
-// The working set one retained reader lifetime may hold. Each reply is already capped
-// at 200 rows; this caps how many folders stay cached, evicting least-recently-used
-// folders that do not hold the open note. The number is stated here and pinned by the
-// eviction tests; no elapsed-time threshold is imposed.
-const MAX_CACHED_FOLDERS = 32;
-
-function parentOf(note: string): string {
-  const slash = note.lastIndexOf("/");
-  return slash < 0 ? "" : note.slice(0, slash);
-}
-
 function NotesTree({
   repo,
   master,
@@ -197,159 +156,10 @@ function NotesTree({
   current: string | undefined;
   onSelectNote: (path: string) => void;
 }) {
-  const folders = useRef(new Map<string, FolderCache>()).current;
-  const [revision, setRevision] = useState(0);
-  // loadChildren runs without `current` in scope; the ref carries the live address.
-  const currentRef = useRef(current);
-  currentRef.current = current;
+  const { loadChildren, openEntry, revision } = useNotesFolderCache(repo, master, current, onSelectNote);
   // Ancestor folders of the open note, deepest last; the tree opens exactly these, so
   // folders stay closed until opened except on the way to the open note.
   const ancestors = current ? ancestorsOf(current) : [];
-
-  // Folders on the way to the open note are never evicted; everything else is
-  // least-recently-used (Map insertion order, refreshed on every access below).
-  const insertFolder = (directory: string, cache: FolderCache) => {
-    folders.delete(directory);
-    folders.set(directory, cache);
-    const open = currentRef.current;
-    const pinned = new Set(open ? ancestorsOf(open) : []);
-    while (folders.size > MAX_CACHED_FOLDERS) {
-      const oldest = folders.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      if (oldest !== directory && !pinned.has(oldest)) {
-        folders.delete(oldest);
-        continue;
-      }
-      const victim = [...folders.keys()].find((key) => key !== directory && !pinned.has(key));
-      if (victim === undefined) break;
-      folders.delete(victim);
-    }
-  };
-
-  const touchFolder = (directory: string, cache: FolderCache) => {
-    folders.delete(directory);
-    folders.set(directory, cache);
-  };
-
-  const markGone = (directory: string, reason: string) => {
-    insertFolder(directory, { entries: [], nextOffset: null, gone: reason });
-  };
-
-  // The open note may live beyond the loaded parts of its folder: fetch successive
-  // parts until its row exists or the folder is exhausted. Each reply stays bounded;
-  // only the open note's own folder is touched, unrelated folders stay closed.
-  const fillToCurrent = async (directory: string): Promise<void> => {
-    const wanted = currentRef.current;
-    if (!wanted || parentOf(wanted) !== directory) return;
-    let cached = folders.get(directory);
-    while (
-      cached &&
-      cached.gone === null &&
-      cached.nextOffset !== null &&
-      currentRef.current === wanted &&
-      !cached.entries.some((row) => !isMoreRow(row) && row.path === wanted)
-    ) {
-      const folder = await listFolder(repo, master, directory, cached.nextOffset);
-      if (!folder.exists) {
-        markGone(directory, folder.reason ?? "that folder is gone");
-        throw new Error(folder.reason ?? "that folder is gone");
-      }
-      const settled = cached.entries.filter((row: ExplorerRow) => !isMoreRow(row));
-      const entries = [...settled, ...toRows(folder.entries)];
-      const remaining = folder.total - (cached.nextOffset ?? 0) - folder.entries.length;
-      if (remaining > 0) {
-        entries.push({
-          path: `${directory}${MORE_MARKER}${(cached.nextOffset ?? 0) + folder.entries.length}`,
-          name: `load next (${remaining} more)`,
-          kind: "file",
-        });
-      }
-      cached.entries = entries;
-      cached.nextOffset = remaining > 0 ? (cached.nextOffset ?? 0) + folder.entries.length : null;
-      touchFolder(directory, cached);
-    }
-  };
-
-  const loadChildren = useCallback(
-    async (directory: string): Promise<ExplorerRow[]> => {
-      // Refresh-safe: the tree re-asks loaded folders after a revision bump, and the
-      // cache answers without refetching. Next parts are fetched only by the more-row
-      // handler below, which accumulates into the same cache before refreshing.
-      const cached = folders.get(directory);
-      if (cached) {
-        if (cached.gone !== null) throw new Error(cached.gone);
-        touchFolder(directory, cached);
-        await fillToCurrent(directory);
-        return folders.get(directory)?.entries ?? cached.entries;
-      }
-      const folder = await listFolder(repo, master, directory, 0);
-      if (!folder.exists) {
-        const reason = folder.reason ?? "that folder is gone";
-        markGone(directory, reason);
-        throw new Error(reason);
-      }
-      const entries = toRows(folder.entries);
-      const remaining = folder.total - folder.entries.length;
-      if (remaining > 0) {
-        entries.push({
-          path: `${directory}${MORE_MARKER}${folder.entries.length}`,
-          name: `load next (${remaining} more)`,
-          kind: "file",
-        });
-      }
-      const cache: FolderCache = {
-        entries,
-        nextOffset: remaining > 0 ? folder.entries.length : null,
-        gone: null,
-      };
-      insertFolder(directory, cache);
-      await fillToCurrent(directory);
-      return folders.get(directory)?.entries ?? cache.entries;
-    },
-    [folders, master, repo],
-  );
-
-  // A next-part row appends the next part to its folder, then refreshes the tree, which
-  // re-reads the accumulated cache; a file row opens its note. A vanished folder empties
-  // its cached children and keeps the server's reason; the refresh then surfaces it.
-  const open = useCallback(
-    (entry: ExplorerRow) => {
-      if (isMoreRow(entry)) {
-        const directory = moreFolder(entry.path);
-        const cached = folders.get(directory);
-        if (!cached || cached.nextOffset === null || cached.gone !== null) return;
-        const offset = cached.nextOffset;
-        void listFolder(repo, master, directory, offset).then(
-          (folder) => {
-            if (!folder.exists) {
-              markGone(directory, folder.reason ?? "that folder is gone");
-              setRevision((n: number) => n + 1);
-              return;
-            }
-            const settled = cached.entries.filter((row: ExplorerRow) => !isMoreRow(row));
-            const entries = [...settled, ...toRows(folder.entries)];
-            const remaining = folder.total - offset - folder.entries.length;
-            if (remaining > 0) {
-              entries.push({
-                path: `${directory}${MORE_MARKER}${offset + folder.entries.length}`,
-                name: `load next (${remaining} more)`,
-                kind: "file",
-              });
-            }
-            cached.entries = entries;
-            cached.nextOffset = remaining > 0 ? offset + folder.entries.length : null;
-            touchFolder(directory, cached);
-            setRevision((n: number) => n + 1);
-          },
-          () => {},
-        );
-        return;
-      }
-      if (entry.kind === "file") onSelectNote(entry.path);
-    },
-    [folders, master, onSelectNote, repo],
-  );
-
   return (
     <div className={railCol}>
       <div className={railHead}>notes ({master})</div>
@@ -358,7 +168,7 @@ function NotesTree({
         testid="notes-tree"
         root={{ name: master, path: "", kind: "dir" }}
         loadChildren={loadChildren}
-        onOpen={open}
+        onOpen={openEntry}
         current={current}
         ancestors={ancestors}
         revision={String(revision)}

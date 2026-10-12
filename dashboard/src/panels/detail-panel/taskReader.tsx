@@ -2,8 +2,8 @@
 // (MIK-R127). A sprint, a master and a task each show a fixed set of blocks in
 // a fixed order; a block without content is absent. Nothing is drawn twice,
 // and what is long shows its first lines and a link to a view of its own. The
-// page leads with the objective on every form (the developer's direction D219):
-// it stands in the head, under the title and above the strip of facts.
+// page leads with the head on every form and the objective first after it
+// (MIK-R150 rule 14, D237): it stands below the head, above Now or Steps.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { TaskRequirementLinksProvider } from '../../grammar/TaskRequirementLinks';
@@ -20,7 +20,6 @@ import type {
   DirectGrantNode,
   ProviderNode,
   SeriesNode,
-  SubTaskRow,
   TaskDocNode,
   TaskDocumentRef,
 } from '../../types/projection';
@@ -36,6 +35,7 @@ import {
   DocViewShell,
   FurtherNotesBlock,
   LongTextBlock,
+  ObjectiveLead,
   ReaderHead,
   RegistersBlock,
   RequirementsBlock,
@@ -77,9 +77,16 @@ import {
 } from './model';
 import { plural } from './pageParts';
 import { page } from './pageStyles';
+import { cx } from '../../../styled-system/css';
 import {
   badge,
-  grantButton,
+  directGiven,
+  directKnob,
+  directLine,
+  directNote,
+  directSwitch,
+  directSwitchOff,
+  directSwitchOn,
   lane,
   laneMeta,
   laneRepo,
@@ -117,8 +124,9 @@ export interface ReaderPool {
   seriesList: SeriesNode[];
 }
 
-// The head, body notice and change-set bar shared by the sprint and master
-// skeletons (rule 2 first, structure after).
+// The head, the objective first after it (MIK-R150 rule 14), then the body
+// notice and change-set bar shared by the sprint and master skeletons (rule 2
+// first, structure after).
 function OverviewTop({
   doc,
   chain,
@@ -139,6 +147,7 @@ function OverviewTop({
   return (
     <>
       <DocHead doc={doc} chain={chain} onJump={onJump} openView={openView} counts={counts} />
+      <ObjectiveLead text={doc.objective} openView={openView} />
       <TaskBodyNotice state={bodyState} />
       <ReaderHead doc={doc} bodyState={bodyState} kind="master" onOpenChangeSet={onOpenChangeSet} />
     </>
@@ -228,7 +237,7 @@ export function TaskContent({
 }
 
 // ---------------------------------------------------------------------------
-// The sprint skeleton, in this order (rule 3, with D219): head with the
+// The sprint skeleton, in this order (rule 3, with MIK-R150 rule 14): head,
 // objective, Now, Order, Masters, Requirements, Registers, Decisions, Further
 // notes, Notes. Requirements stand where the proposal's sprint page has them
 // (rule 10); without the block a sprint's requirement lines could not be read
@@ -432,7 +441,7 @@ function SprintViewBody({
 }
 
 // ---------------------------------------------------------------------------
-// The master skeleton, in this order (rule 4, with D219): head with the
+// The master skeleton, in this order (rule 4, with MIK-R150 rule 14): head,
 // objective, Now, Tasks, Requirements, Decisions, Further notes, Notes. The
 // order of a master's tasks is drawn by MIK-R128; this leaf keeps the received
 // order.
@@ -536,7 +545,6 @@ function MasterPageBody({
         onOpen={onOpen}
         onJump={onJump}
         docPathForRef={docPathForRef}
-        leafExtra={leafRowGrant}
       />
       <MasterTasksBlock
         doc={doc}
@@ -544,7 +552,6 @@ function MasterPageBody({
         onOpen={onOpen}
         onJump={onJump}
         docPathForRef={docPathForRef}
-        leafExtra={leafRowGrant}
         openView={openView}
       />
       <RequirementsBlock requirements={doc.requirements} openView={openView} />
@@ -594,7 +601,7 @@ function MasterViewBody({
           refs={refs}
           discarded={view.status === 'gone' ? (doc.discardedSubTasks ?? undefined) : undefined}
           positions={fullOrderPositions(doc.subTasks)}
-          handlers={{ sliceDocs, onOpen, onJump, docPathForRef, leafExtra: leafRowGrant }}
+          handlers={{ sliceDocs, onOpen, onJump, docPathForRef }}
           parentId={doc.id}
         />
       </DocViewShell>
@@ -603,69 +610,112 @@ function MasterViewBody({
   return <DocContentView view={view} doc={doc} handlers={{ onBack, onOpenNotes }} scope="master" />;
 }
 
-// A leaf's grant from either row shape: a series row carries it directly, a master
-// index row reads it off the matched leaf document (MIK-R94 rule 4).
-function rowDirectGrant(
-  ref: SubTaskRow,
-  match: TaskDocNode | undefined,
-): DirectGrantNode | null | undefined {
-  if ("directGrant" in ref && ref.directGrant) return ref.directGrant;
-  return match?.directGrant;
-}
-
-// The developer's direct-execution grant control on an authored leaf row (MIK-R94
-// rule 2): give the grant or take it back through the serving route, showing the
-// server's words. A sibling of the drill-in button, never nested inside it.
-//
-// The control follows the live projection: a served add/remove/issuer change
-// replaces its grant, while a refused or unreachable request keeps the actual
-// grant and only shows the server's words. A selection change resets it, and a
-// reply that arrives after one is ignored, so grant state never transfers to
-// another leaf (F06).
-function DirectGrantControl({
-  doc,
-  initialGrant,
-  testidPrefix,
-  position,
-}: {
-  doc: TaskDocNode;
-  initialGrant: DirectGrantNode | null | undefined;
-  testidPrefix: string;
-  position: number;
-}) {
+// One switch on the task's own page for a planning leaf (MIK-R150 rules 10
+// and 11): the label, a track with a knob, and the served words beside it. The
+// switch is disabled while its request runs and keeps its position; a refusal
+// or an unreachable server keeps the real state and shows the server's words on
+// the same line. The page has no second control for the grant.
+function DirectExecutionSwitch({ doc }: { doc: TaskDocNode }) {
   const docRef = taskDocumentRefForDoc(doc);
   const docKey = docRef ? `${docRef.repository}:${docRef.path}` : doc.id;
-  const [grant, setGrant] = useState<DirectGrantNode | null>(initialGrant ?? null);
+  const { grant, pending, notice, run } = useDirectGrant(docKey, docRef, doc.directGrant ?? null);
+  if (!docRef) return null;
+  const on = grant !== null;
+  return (
+    <div className={directLine} data-testid="taskdoc-direct-line">
+      <span>Direct execution</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Direct execution"
+        className={cx(directSwitch, on ? directSwitchOn : directSwitchOff)}
+        data-testid="taskdoc-direct-switch"
+        disabled={pending}
+        onClick={() => void run(on ? 'revoke' : 'give')}
+      >
+        <span className={directKnob} />
+      </button>
+      {on && grant ? <span className={directGiven}>given by {grant.grantedBy}</span> : null}
+      {notice ? <span className={directNote} data-testid="taskdoc-direct-note"> · {notice}</span> : null}
+    </div>
+  );
+}
+
+// The grant's words where it cannot be changed (MIK-R150 rule 12): a task that
+// is not planning shows `Direct · given by <who>` when it has a grant and
+// nothing when it has none.
+function DirectExecutionWords({ doc }: { doc: TaskDocNode }) {
+  const served = doc.directGrant ?? null;
+  if (!served) return null;
+  return (
+    <div className={directLine} data-testid="taskdoc-direct-line">
+      <span className={directGiven}>Direct · given by {served.grantedBy}</span>
+    </div>
+  );
+}
+
+// Under the head of the task's own page (MIK-R150 rules 9, 10 and 12): one
+// switch for a planning leaf, bare words for any other granted state, and
+// nothing otherwise. A master page never renders this; rows carry no control.
+function TaskDirectGrant({ doc }: { doc: TaskDocNode }) {
+  if (doc.kind !== 'subTask') return null;
+  if (doc.status === 'planning') return <DirectExecutionSwitch doc={doc} />;
+  return <DirectExecutionWords doc={doc} />;
+}
+
+// Two served grants match when the server names the same giver at the same time;
+// the row's other fields never reopen the control's state.
+function sameServedGrant(
+  next: DirectGrantNode | null,
+  prev: DirectGrantNode | null,
+): boolean {
+  return (next?.grantedBy ?? null) === (prev?.grantedBy ?? null) &&
+    (next?.grantedAt ?? null) === (prev?.grantedAt ?? null);
+}
+
+// The control's live grant: the served add/remove/issuer change replaces it, a
+// refused or unreachable request keeps the actual grant, a selection change resets
+// it, and a late reply is ignored. The sync keys on the document key and the
+// served giver/instant content — never on grant object identity.
+function useDirectGrant(
+  docKey: string,
+  docRef: TaskDocumentRef | undefined,
+  initialGrant: DirectGrantNode | null | undefined,
+): {
+  grant: DirectGrantNode | null;
+  pending: boolean;
+  notice: string | null;
+  run: (action: "give" | "revoke") => Promise<void>;
+} {
+  const fallback = initialGrant ?? null;
+  const [grant, setGrant] = useState<DirectGrantNode | null>(fallback);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const served = useRef<{ key: string; grant: DirectGrantNode | null }>({
-    key: docKey,
-    grant: initialGrant ?? null,
-  });
+  const served = useRef<{ key: string; grant: DirectGrantNode | null }>({ key: docKey, grant: fallback });
   const callId = useRef(0);
-  const servedBy = initialGrant?.grantedBy ?? null;
-  const servedAt = initialGrant?.grantedAt ?? null;
+  // The current render's grant for the sync below. A ref mirror (never a
+  // dependency) so the effect lists the content mark it truly depends on.
+  const grantRef = useRef<DirectGrantNode | null>(fallback);
+  grantRef.current = fallback;
+  const servedMark = `${fallback?.grantedBy ?? ""}\0${fallback?.grantedAt ?? ""}`;
   useEffect(() => {
+    const next = grantRef.current;
     if (served.current.key !== docKey) {
-      served.current = { key: docKey, grant: initialGrant ?? null };
+      served.current = { key: docKey, grant: next };
       callId.current += 1;
-      setGrant(initialGrant ?? null);
+      setGrant(next);
       setNotice(null);
       setPending(false);
       return;
     }
-    const next = initialGrant ?? null;
-    const prev = served.current.grant;
-    if (
-      (next?.grantedBy ?? null) !== (prev?.grantedBy ?? null) ||
-      (next?.grantedAt ?? null) !== (prev?.grantedAt ?? null)
-    ) {
+    if (!sameServedGrant(next, served.current.grant)) {
       served.current = { key: docKey, grant: next };
       setGrant(next);
     }
-  }, [docKey, servedBy, servedAt]);
-  if (!docRef) return null;
+  }, [docKey, servedMark]);
   const run = async (action: "give" | "revoke") => {
+    if (!docRef) return;
     const mine = ++callId.current;
     setPending(true);
     setNotice(null);
@@ -678,73 +728,11 @@ function DirectGrantControl({
     }
     setNotice(outcome.text);
   };
-  return (
-    <span className={sliceMeta}>
-      <button
-        type="button"
-        className={grantButton}
-        disabled={pending}
-        onClick={() => void run(grant ? "revoke" : "give")}
-        data-testid={`${testidPrefix}-direct-${position}`}
-        title={
-          grant
-            ? `Take back this leaf's direct-execution grant (${grant.grantedBy})`
-            : "Give this leaf its direct-execution grant"
-        }
-      >
-        {pending ? "…" : grant ? "Take back" : "Make direct"}
-      </button>
-      {notice ? (
-        <span data-testid={`${testidPrefix}-direct-note-${position}`}> · {notice}</span>
-      ) : null}
-    </span>
-  );
-}
-
-// Beside a leaf row's link on a master page (MIK-R94 rules 2 and 4): who gave the
-// leaf its grant, and the developer's control for an authored leaf. The rows are
-// drawn in task-groups.tsx, which takes this as what the page adds to a leaf row.
-function leafRowGrant(
-  ref: SubTaskRow,
-  match: TaskDocNode | undefined,
-  position: number,
-): ReactNode {
-  const grant = rowDirectGrant(ref, match);
-  return (
-    <>
-      {grant ? <span className={badge}>Direct · {grant.grantedBy}</span> : null}
-      {match && match.kind === 'subTask' ? (
-        <DirectGrantControl
-          doc={match}
-          initialGrant={grant}
-          testidPrefix="subtask-open"
-          position={position}
-        />
-      ) : null}
-    </>
-  );
-}
-
-// Under the head of a selected leaf (MIK-R94 rule 4): who gave it its grant, and
-// the control. A master and a light task have no grant.
-function TaskDirectGrant({ doc }: { doc: TaskDocNode }) {
-  if (doc.kind !== 'subTask') return null;
-  const readerGrant = doc.directGrant ?? null;
-  return (
-    <div>
-      {readerGrant ? <span className={badge}>Direct · {readerGrant.grantedBy}</span> : null}
-      <DirectGrantControl
-        doc={doc}
-        initialGrant={readerGrant}
-        testidPrefix="taskdoc-direct"
-        position={0}
-      />
-    </div>
-  );
+  return { grant, pending, notice, run };
 }
 
 // ---------------------------------------------------------------------------
-// The task skeleton, in this order (rule 5, with D219): head with the
+// The task skeleton, in this order (rule 5, with MIK-R150 rule 14): head,
 // objective, Steps, Review, Requirements, Design, Proposed code, Decisions,
 // References and reports (MIK-R126 rule 5) as one block, Further notes, Notes.
 // ---------------------------------------------------------------------------
@@ -786,6 +774,7 @@ function TaskReaderPage({
     <TaskRequirementBoundary doc={doc} onOpenNotes={onOpenNotes}>
       <div className={page} data-task-leaf-key={leafKey} data-testid="skeleton-task">
         <DocHead doc={doc} chain={chain} onJump={jump} openView={openView} />
+        <ObjectiveLead text={doc.objective} openView={openView} />
         <TaskDirectGrant doc={doc} />
         <TaskBodyNotice state={bodyState} />
         <ReaderHead
