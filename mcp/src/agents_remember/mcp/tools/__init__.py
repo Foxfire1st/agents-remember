@@ -12,7 +12,6 @@ from .base import _tool_payload as _tool_payload  # re-exported for tool-respons
 from .closeout_queue import closeout_queue_payload
 from .core import (
     context_packet_payload,
-    resolve_context_payload,
     runtime_install_payload,
     server_info_payload,
 )
@@ -109,7 +108,6 @@ __all__ = [
     "operator_inbox_supersede_payload",
     "orchestration_nudge_manager_payload",
     "read_ar_files_payload",
-    "resolve_context_payload",
     "role_message_payload",
     "role_start_payload",
     "route_index_refresh_payload",

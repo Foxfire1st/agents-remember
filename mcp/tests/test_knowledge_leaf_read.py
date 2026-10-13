@@ -26,7 +26,10 @@ from agents_remember.application.knowledge_leaf.selection import (
 )
 from agents_remember.application.knowledge_paging import KNOWLEDGE_PAGE_THRESHOLD_TOKENS
 from agents_remember.application.knowledge_paging.threshold import response_tokens
-from agents_remember.application.knowledge_read import open_read_context, select_knowledge_scope
+from agents_remember.application.knowledge_read import (
+    open_read_context,
+    select_knowledge_scope,
+)
 from agents_remember.application.published_intent import (
     PublishedIntentSelection,
     published_intent_block,
@@ -43,14 +46,23 @@ from agents_remember.mcp.tools.knowledge import (
     knowledge_read_payload,
 )
 from agents_remember.memory.knowledge.read import SelectedScope
-from agents_remember.memory.knowledge_index import INDEX_REPOSITORY_ID, KnowledgeIndex, text_uuid
-from agents_remember.models.knowledge.continuation import MAX_QUEUED_SEEDS, decode_continuation
+from agents_remember.memory.knowledge_index import (
+    INDEX_REPOSITORY_ID,
+    KnowledgeIndex,
+    text_uuid,
+)
+from agents_remember.models.knowledge.continuation import (
+    MAX_QUEUED_SEEDS,
+    decode_continuation,
+)
 from agents_remember.models.knowledge.read import InvariantIdentitySeed, PathSeed
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     file_sidecar_path,
     record_path,
 )
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from knowledge_index_test_support import (
     REVIEW_INVARIANT,
     REVIEW_PATH,
@@ -144,12 +156,23 @@ def _graph(root: Path) -> None:
 
     init_repository(root)
     write_document(root, LAYOUT_MARKER_PATH, {"schema": "ar-memory-layout/v2", "conversion": "x"})
-    for identifier in ("INV-AAAAAA", "INV-BBBBBB", "INV-CCCCCC", "INV-DDDDDD", "INV-EEEEEE"):
+    for identifier in (
+        "INV-AAAAAA",
+        "INV-BBBBBB",
+        "INV-CCCCCC",
+        "INV-DDDDDD",
+        "INV-EEEEEE",
+    ):
         _invariant(root, identifier)
     _invariant(root, "INV-XXXXXX")
     _invariant(root, "INV-RRRRRR", status="retired")
     _family(root, "FAM-F11111", ["INV-AAAAAA", "INV-CCCCCC", "INV-DDDDDD"], ["src"])
-    _family(root, "FAM-F22222", ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"], ["."])
+    _family(
+        root,
+        "FAM-F22222",
+        ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"],
+        ["."],
+    )
     _family(root, "FAM-F33333", ["INV-CCCCCC", "INV-DDDDDD", "INV-XXXXXX"], ["lib"])
     _sidecar(root, SEED, [("RLZ-A00001", "INV-AAAAAA"), ("RLZ-B00001", "INV-BBBBBB")])
     _sidecar(root, "src/c.py", [("RLZ-C00001", "INV-CCCCCC")])
@@ -187,15 +210,31 @@ def _read_body(tmp_path: Path, root: Path, *, workspace: Path | None = None, **f
     the overflow contract, and the rows resolve here. Never a claim of pointer retrieval.
     """
 
-    return _read_result(
+    body, _selection, _resolver = _read_result(
         ReadToolRequest(memory_root=str(root), **fields),
         workspace_root=None if workspace is None else str(workspace),
         coordination_root=str(tmp_path / "coordination"),
     )
+    return body
 
 
 def _shape(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return [(row["kind"], row["id"]) for row in rows]
+
+
+def _projected_shape(rows: list[dict[str, Any]]) -> list[tuple[str, str, str | None]]:
+    # Projected rows name their record with the endpoint riding the role.
+    return [(row["kind"], row["id"], row.get("role")) for row in rows]
+
+
+_STRUCTURAL_ENDPOINTS = {
+    "member": ("invariant", "member"),
+    "member_reference": ("invariant", "reference"),
+    "family_header": ("family", "header"),
+    "advertised_family": ("family", "advertised"),
+    "chain_family": ("family", "chain"),
+    "family_header_reference": ("family", "reference"),
+}
 
 
 def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> None:
@@ -258,10 +297,20 @@ def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> 
     reference = rows[("member_reference", "INV-CCCCCC")]
     assert reference["returnedUnder"] == "FAM-F11111"
     # Ruling Q1: an invariant has no title; the reference's is derived from its statement.
-    assert (reference["title"], reference["titleDerivedFrom"]) == ("INV-CCCCCC holds.", "statement")
-    assert rows[("advertised_family", "FAM-F33333")]["via"] == ["INV-CCCCCC", "INV-DDDDDD"]
+    assert (reference["title"], reference["titleDerivedFrom"]) == (
+        "INV-CCCCCC holds.",
+        "statement",
+    )
+    assert rows[("advertised_family", "FAM-F33333")]["via"] == [
+        "INV-CCCCCC",
+        "INV-DDDDDD",
+    ]
     # Rule 7: a member names every family containing it, the advertised one included.
-    assert rows[("member", "INV-CCCCCC")]["families"] == ["FAM-F11111", "FAM-F22222", "FAM-F33333"]
+    assert rows[("member", "INV-CCCCCC")]["families"] == [
+        "FAM-F11111",
+        "FAM-F22222",
+        "FAM-F33333",
+    ]
     assert page["counts"] == {
         "families": 2,
         "members": 5,
@@ -269,7 +318,12 @@ def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> 
         "realizations": 5,
         "proofs": 1,
         "distinctPaths": 5,
-        "invariantsByState": {"stale": 0, "unverifiable": 5, "unrealized": 0, "current": 0},
+        "invariantsByState": {
+            "stale": 0,
+            "unverifiable": 5,
+            "unrealized": 0,
+            "current": 0,
+        },
         "advertisedFamilies": 1,
         "chainFamilies": 2,
         "rowsTotal": 17,
@@ -299,7 +353,17 @@ def test_both_surfaces_return_one_selection_under_one_manifest(tmp_path: Path) -
     assert (
         read["page"]["manifestDigest"] == block["manifestDigest"] == block["page"]["manifestDigest"]
     )
-    assert read["payload"]["rows"] == block["rows"]
+    # The read names what the leaf read returns: same rows by ID, with
+    # structural rows projected to their record kind and endpoint role,
+    # and no text.
+    read_shape = _projected_shape(read["payload"]["rows"])
+    block_shape = _shape(block["rows"])
+    assert [row_id for _, row_id, _ in read_shape] == [row_id for _, row_id in block_shape]
+    for (read_kind, row_id, read_role), (block_kind, _) in zip(
+        read_shape, block_shape, strict=True
+    ):
+        expected = _STRUCTURAL_ENDPOINTS.get(block_kind, (block_kind, None))
+        assert (read_kind, read_role) == expected, (row_id, read_kind, read_role, block_kind)
     assert read["page"]["selectionPolicy"] == block["page"]["selectionPolicy"]
     # The currentness block covers what the page returns, by state.
     assert {one["id"] for one in read["currentness"]["invariants"]} == {
@@ -322,35 +386,44 @@ def test_the_invariant_view_names_its_families(tmp_path: Path) -> None:
         invariant_revision_id=text_uuid("revision", "INV-CCCCCC@1"),
     )
     assert view["state"] == "view", view
-    assert view["families"] == [
-        {"id": "FAM-F11111", "title": "Title of FAM-F11111"},
-        {"id": "FAM-F22222", "title": "Title of FAM-F22222"},
-        {"id": "FAM-F33333", "title": "Title of FAM-F33333"},
+    # The view names its families; their titles stay behind the answer's log.
+    assert [entry["id"] for entry in view["families"]] == [
+        "FAM-F11111",
+        "FAM-F22222",
+        "FAM-F33333",
     ]
+    assert "Title of FAM-F11111" not in json.dumps(view), view
 
 
-def test_the_conforming_example_returns_the_whole_family_in_one_response(tmp_path: Path) -> None:
+def test_the_conforming_example_returns_the_whole_family_in_one_response(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "memory"
     init_repository(root)
     write_review_tree(root)
     commit_all(root)
     response = _read(tmp_path, root, view="source_context", source_path=REVIEW_PATH)
     assert response["state"] == "page" and response["payload"].get("continuation") is None, response
-    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
     assert response_tokens(response) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
     rows = response["payload"]["rows"]
-    assert (rows[0]["kind"], rows[0]["id"]) == ("member", REVIEW_INVARIANT)  # its own invariant
-    header = next(row for row in rows if row["kind"] == "family_header")
-    assert header["title"] == "Comparison-bound unchanged realization context"
-    assert header["guarantee"].startswith("Every realization of the family")
-    statements = {row["statement"] for row in rows if row["kind"] == "member"}
-    assert len(statements) == 2  # every member's statement
-    realized = {row["path"] for row in rows if row["kind"] == "realization"}
-    assert REVIEW_PATH in realized and len(realized) == 4  # every member entry, four files
-    assert {row["invariant"] for row in rows if row["kind"] == "realization"} == {
-        REVIEW_INVARIANT,
-        SIBLING_INVARIANT,
-    }
+    by_id = {row["id"]: row for row in rows if isinstance(row, dict)}
+    # The family's members are all named, with usable kinds and states.
+    assert {REVIEW_INVARIANT, SIBLING_INVARIANT} <= set(by_id), by_id
+    for row in rows:
+        assert row["kind"] in {
+            "invariant",
+            "realization",
+            "family",
+            "decision",
+            "proof",
+        }, row
+        assert row["state"] in {"current", "stale", "unverifiable", "unrealized"}, row
+        location = row["location"]
+        assert location is not None, row
+        assert Path(location["file"]).is_file(), row
+    # The members' records open as written.
+    member = by_id[REVIEW_INVARIANT]
+    assert "statement" not in member and "guarantee" not in member, member
 
 
 def test_a_path_without_entries_still_returns_its_route_chain(tmp_path: Path) -> None:
@@ -373,11 +446,19 @@ def test_absent_and_partial_states_are_named(tmp_path: Path) -> None:
     _graph(root)
     # With no route covering the path either (F2 leaves ``.``), it is refused, and the refusal
     # states the chain (MIK-R05).
-    _family(root, "FAM-F22222", ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"], ["src"])
+    _family(
+        root,
+        "FAM-F22222",
+        ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"],
+        ["src"],
+    )
     commit_all(root)
     refused = published_intent_block(_context(tmp_path, root), ["docs/nothing.md"])
     absent = refused["seeds"][0]
-    assert (absent["state"], absent["refusalCode"]) == ("refused", "registration_absent")
+    assert (absent["state"], absent["refusalCode"]) == (
+        "refused",
+        "registration_absent",
+    )
     assert "realization or proof claim" in absent["refusalDetail"]  # review N6
     assert absent["routeChain"]["state"] == "no_governing_family"
     # Review N5: the leaf read applied, and refused every path.
@@ -393,7 +474,12 @@ def test_absent_and_partial_states_are_named(tmp_path: Path) -> None:
 def test_a_partial_index_is_named_on_both_surfaces(tmp_path: Path) -> None:
     root = tmp_path / "memory"
     _graph(root)
-    _family(root, "FAM-F22222", ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"], ["src"])
+    _family(
+        root,
+        "FAM-F22222",
+        ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"],
+        ["src"],
+    )
     commit_all(root)
     (root / "knowledge" / "invariants" / "INV-BRKN01-x.json").write_text("{}", "utf-8")
     partial = published_intent_block(_context(tmp_path, root), [SEED])["seeds"][0]
@@ -412,14 +498,20 @@ def test_a_repository_root_with_no_commit_is_refused_by_name(tmp_path: Path) -> 
     plain.mkdir()
     for named in (empty, plain):
         refused = _read(
-            tmp_path, root, view="source_context", source_path=SEED, repository_root=str(named)
+            tmp_path,
+            root,
+            view="source_context",
+            source_path=SEED,
+            repository_root=str(named),
         )
         assert refused["state"] == "refused", refused
         assert refused["refusalCode"] == "selected_input_unavailable"
         assert str(named) in refused["refusalDetail"]
 
 
-def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(tmp_path: Path) -> None:
+def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(
+    tmp_path: Path,
+) -> None:
     code = tmp_path / "code"
     init_repository(code)
     (code / "src").mkdir()
@@ -455,11 +547,12 @@ def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(tmp_path
         code_tree_id=tree,
         repository_root=str(code),
     )
-    # Forty long members overflow the mounted bound: the public answer keeps the
-    # overflow contract, and the page resolves through the same domain body the
-    # mounted tool serves (explicitly marked below, never as pointer retrieval).
-    assert first["state"] == "page" and first.get("overflow"), first
-    assert first["resultKept"] is False, first
+    # Rule 2 states the rows: forty long members fit within the bound as
+    # names (no text), and the mounted answer carries the continuation.
+    assert first["state"] == "page", first
+    assert count_response_tokens(first) <= bound_for("knowledge_read"), first
+    assert "holds " not in json.dumps(first["payload"]["rows"]), first
+    assert first["continuation"] is not None, first
     body = _read_body(
         tmp_path,
         root,
@@ -481,9 +574,12 @@ def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(tmp_path
     assert resumed_body["state"] == "page", resumed_body
     assert resumed_body["page"]["codeTreeId"] == tree
     assert resumed_body["currentness"]["codeTree"]["treeId"] == tree
-    # A page that continues the family starts with its header reference as a literal row.
-    assert resumed_body["payload"]["rows"][0]["kind"] == "family_header_reference"
+    # The continued family's header reference, in L109's family/role vocabulary, on both
+    # the resumed answer (rule 2) and the domain body behind it.
     assert resumed_body["payload"]["rows"][0]["id"] == "FAM-WK0001"
+    assert resumed["payload"]["rows"][0]["kind"] == "family", resumed["payload"]["rows"][0]
+    assert resumed["payload"]["rows"][0].get("role") == "reference", resumed["payload"]["rows"][0]
+    assert resumed["payload"]["rows"][0]["id"] == "FAM-WK0001"
     elsewhere = tmp_path / "elsewhere"
     init_repository(elsewhere)
     commit_all(elsewhere, "unrelated")
@@ -536,25 +632,125 @@ def _seed_key(seed: dict[str, Any]) -> str:
     return json.dumps(seed, sort_keys=True)
 
 
-def _item_keys(page: dict[str, Any]) -> list[str]:
-    """A page's returned rows: scope ``items`` by ID, leaf ``rows`` by kind and ID."""
+def _identify_item(item: dict[str, Any], raw_kind: Any, resolve: Any = None) -> str:
+    """One raw scope item's record key: the entry names its own record, never its invariant."""
 
+    generic = ("record_id", "invariant_id", "family_id", "member_id", "claim_id")
+    if raw_kind in ("realization_claim", "proof_claim", "proof"):
+        # An entry names its own record, never the invariant it
+        # realizes or proves.
+        ordered = ("claim_id", "entry_id", "proof_id", *generic)
+    elif raw_kind == "family_membership":
+        # A membership names its member record, never the family.
+        ordered = ("invariant_id", "invariant_revision_id", "member_id", *generic)
+    else:
+        ordered = generic
+    identified = None
+    for key in ordered:
+        value = item.get(key)
+        if isinstance(value, str):
+            identified = resolve(value) if resolve is not None else value
+            break
+    if not isinstance(identified, str):
+        identified = item["item_id"]
+    return str(_bare_key(identified))
+
+
+def _item_keys(page: dict[str, Any], resolve: Any = None) -> list[tuple[str, str, str]]:
+    """A page's returned rows in one key space: (kind, text ID, role).
+
+    Raw scope ``items`` carry projected UUIDs and raw leaf ``rows`` carry
+    role kinds; projected answer rows already carry text IDs, kinds and
+    states. With ``resolve`` (UUID to text ID) every shape maps to the
+    record text ID, so a walk that mixes block pages and registered
+    answers still detects a repeat or a gap. Distinct rows that name one
+    record (a revision, its membership and its realization) key apart by
+    kind and role: a membership names its member record (kind invariant)
+    with the member role beside it. The continued family's header
+    reference is framing (see ``_counted``) and is skipped here too.
+    """
+
+    # Raw scope-item kinds to the projected record vocabulary the answers
+    # carry, with the implied role: the walk meets each entity in both shapes.
+    kinds = {
+        "invariant_revision": ("invariant", ""),
+        "family_revision": ("family", ""),
+        "family_membership": ("invariant", "member"),
+        "realization_claim": ("realization", ""),
+        "advertised_family": ("family", "advertised"),
+    }
     if "items" in page:
-        return [item["item_id"] for item in page["items"]]
+        keys = []
+        for item in page["items"]:
+            raw_kind = item.get("kind")
+            kind, role = kinds.get(raw_kind, (raw_kind, ""))
+            keys.append((str(kind), _identify_item(item, raw_kind, resolve), str(role)))
+        return keys
+    rows = page["rows"]
+    if isinstance(rows, dict):
+        # A transport-truncated list carries its entries under items; the
+        # cursor still counts delivered rows.
+        rows = rows.get("items", [])
+    if rows and isinstance(rows[0], dict) and "item_id" in rows[0]:
+        return [("row", str(row["item_id"]), "") for row in rows]
     return [
-        f"{row['kind']}:{row['id']}"
-        for row in page["rows"]
-        if row["kind"] != "family_header_reference"
+        (str(row.get("kind")), str(row["id"]), str(row.get("role") or ""))
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("kind") != "family_header_reference"
+        and not (row.get("kind") == "family" and (row.get("role") or "") == "reference")
     ]
 
 
-def _walk_entries(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str, list[str]]:
+def _bare_key(value: str) -> str:
+    """One key without a ``@revision`` suffix or ``family/member`` composite head."""
+
+    bare = value.split("@", 1)[0]
+    if "/" in bare:
+        head, _, tail = bare.partition("/")
+        if head.split("-", 1)[0] == "FAM" and tail.split("-", 1)[0] in (
+            "INV",
+            "DEC",
+            "ASM",
+            "REQ",
+            "RLZ",
+            "PRF",
+        ):
+            return tail
+    return bare
+
+
+def _walk_entries(
+    tmp_path: Path, root: Path, block: dict[str, Any]
+) -> dict[str, list[tuple[str, str, str]]]:
     """Every seed's rows: from the block, then through each continuation it hands out."""
 
-    walked: dict[str, list[str]] = {}
+    selection = resolve_published_memory_tree(_context(tmp_path, root))
+    index_path = getattr(selection, "database_path", None)
+    tree_key = getattr(getattr(selection, "memory_tree", None), "tree_key", None)
+
+    def resolve(value: str) -> str:
+        if index_path is None or tree_key is None:
+            return value
+        with KnowledgeIndex(index_path, expected_key=tree_key) as index:
+            resolved = index.text_id(value) or value
+        bare, _, _suffix = resolved.partition("@")
+        if "@" in resolved and bare.split("-", 1)[0] in (
+            "INV",
+            "FAM",
+            "DEC",
+            "ASM",
+            "REQ",
+            "RLZ",
+            "PRF",
+        ):
+            return bare
+        return resolved
+
+    walked: dict[str, list[tuple[str, str, str]]] = {}
     for entry in block["seeds"]:
         if entry["state"] == "page":
-            walked.setdefault(_seed_key(entry["seed"]), []).extend(_item_keys(entry))
+            walked.setdefault(_seed_key(entry["seed"]), []).extend(_item_keys(entry, resolve))
         view, continuation = entry.get("continuationView"), entry.get("continuation")
         while continuation is not None:
             response = _read(tmp_path, root, view=view, continuation=continuation)
@@ -571,12 +767,14 @@ def _walk_entries(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str
             body = _read_body(tmp_path, root, view=view, continuation=continuation)
             assert body["state"] == "page", body
             page = body["payload"]
-            walked.setdefault(_seed_key(page["seed"]), []).extend(_item_keys(page))
+            walked.setdefault(_seed_key(page["seed"]), []).extend(_item_keys(page, resolve))
             view, continuation = page["continuationView"], body.get("continuation")
     return walked
 
 
-def test_identity_seeds_on_a_tree_keep_the_scope_read_beside_the_leaf(tmp_path: Path) -> None:
+def test_identity_seeds_on_a_tree_keep_the_scope_read_beside_the_leaf(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "memory"
     init_repository(root)
     write_document(root, LAYOUT_MARKER_PATH, {"schema": "ar-memory-layout/v2", "conversion": "x"})
@@ -605,19 +803,55 @@ def test_identity_seeds_on_a_tree_keep_the_scope_read_beside_the_leaf(tmp_path: 
         first["state"] == "page" and first["page"]["selectionPolicy"] == "recorded-family-frontier"
     )
     collapsed = [entry for entry in block["seeds"] if "seeds" in entry]
-    assert {entry["continuationView"] for entry in collapsed} == {"invariant", "source_context"}
+    assert {entry["continuationView"] for entry in collapsed} == {
+        "invariant",
+        "source_context",
+    }
     walked = _walk_entries(tmp_path, root, block)
     assert len(walked) == len(seeds)
     context = open_read_context(selection.database_path, INDEX_REPOSITORY_ID)
-    for seed in seeds:
-        keys = walked[_seed_key(seed.model_dump(mode="json"))]
-        if isinstance(seed, PathSeed):
-            with KnowledgeIndex(selection.database_path) as index:
-                structure = select_leaf(index, seed.path)
-            assert structure is not None
-            total = len(structure.order)
-        else:
-            scope = select_knowledge_scope(selection.database_path, context, seed)
-            assert isinstance(scope, SelectedScope)
-            total = len(scope.items)
-        assert len(keys) == len(set(keys)) == total, seed
+    with KnowledgeIndex(selection.database_path) as _resolve_index:
+
+        def _resolve(value: str) -> str:
+            return _resolve_index.text_id(value) or value
+
+        for seed in seeds:
+            keys = walked[_seed_key(seed.model_dump(mode="json"))]
+            # Keys carry the role beside kind and ID: a membership names its
+            # member record (kind invariant) with the member role, so it keys
+            # apart from the revision row for the same record. No exact row
+            # repeats anywhere.
+            assert len(keys) == len(set(keys)), seed
+            if isinstance(seed, PathSeed):
+                with KnowledgeIndex(selection.database_path) as index:
+                    structure = select_leaf(index, seed.path)
+                assert structure is not None
+                assert len(keys) == len(structure.order), seed
+            else:
+                scope = select_knowledge_scope(selection.database_path, context, seed)
+                assert isinstance(scope, SelectedScope)
+                # The walked rows are exactly the scope's items, in either
+                # shape: raw items mirror to the projected vocabulary with
+                # the implied role, so no gap and no extra row survives.
+                mirror = {
+                    "invariant_revision": ("invariant", ""),
+                    "family_revision": ("family", ""),
+                    "family_membership": ("invariant", "member"),
+                    "realization_claim": ("realization", ""),
+                    "advertised_family": ("family", ""),
+                }
+                expected = set()
+                for item in scope.items:
+                    dumped = item.model_dump(mode="json")
+                    raw_kind = dumped.get("kind")
+                    if not isinstance(raw_kind, str):
+                        continue
+                    kind, role = mirror.get(raw_kind, (raw_kind, ""))
+                    expected.add(
+                        (
+                            str(kind),
+                            _identify_item(dumped, raw_kind, _resolve),
+                            str(role),
+                        )
+                    )
+                assert set(keys) == expected, seed

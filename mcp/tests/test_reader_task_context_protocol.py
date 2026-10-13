@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,58 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         reset_worktree_services()
         self.temporary.cleanup()
 
+    async def _assert_naming_is_call_local(self, client: Any, marker_name: str) -> None:
+        """The naming reads the call's own code root and carries no text."""
+
+        base_args: dict[str, object] = {
+            "repo_id": self.repo_id,
+            "files": [marker_name],
+        }
+        leaf_args = {
+            **base_args,
+            "task_context": self.task_context,
+        }
+
+        async def read(arguments: dict[str, object]) -> dict[str, Any]:
+            result = await client.call_tool("read_ar_files", arguments)
+            return _structured(result)
+
+        base_naming = await read(base_args)
+        leaf_naming = await read(leaf_args)
+        for naming in (base_naming, leaf_naming):
+            self.assertEqual(naming["state"], "named", naming)
+            self.assertNotIn("source", json.dumps(naming), naming)
+        self.assertEqual([entry["path"] for entry in base_naming["files"]], [marker_name])
+        self.assertFalse(base_naming["files"][0]["exists"], base_naming)
+        self.assertTrue(leaf_naming["files"][0]["exists"], leaf_naming)
+        # The same call twice names the same: the server keeps no
+        # per-session state about what it sent.
+        self.assertEqual((await read(base_args))["files"], base_naming["files"])
+        self.assertEqual((await read(leaf_args))["files"], leaf_naming["files"])
+        concurrent = await asyncio.gather(read(base_args), read(leaf_args))
+        self.assertFalse(concurrent[0]["files"][0]["exists"])
+        self.assertTrue(concurrent[1]["files"][0]["exists"])
+        # The removed object-form entry is refused by name, not read.
+        removed = await client.call_tool(
+            "read_ar_files",
+            {
+                "repo_id": self.repo_id,
+                "files": [{"path": marker_name, "onboarding": False}],
+                "task_context": self.task_context,
+            },
+        )
+        removed_body = _structured(removed)
+        self.assertEqual(
+            (removed_body["state"], removed_body["refusalCode"]),
+            ("refused", "argument-removed"),
+            removed_body,
+        )
+        self.assertEqual(
+            removed_body["refusalDetail"],
+            "read the file with your own tools; this tool names the cards",
+            removed_body,
+        )
+
     def test_registered_readers_use_call_local_admitted_leaf_context(self) -> None:
         assert (
             self.contract.memory_worktree is not None
@@ -106,7 +159,10 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         marker_name = ".__ar_reader_scope_protocol.txt"
         base_code = self.config.repositories[self.repo_id].path
         leaf_code = self.contract.code_worktree
-        marker_contents = {"base": "BASE_PROTOCOL_ROOT\n", "leaf": "LEAF_PROTOCOL_ROOT\n"}
+        marker_contents = {
+            "base": "BASE_PROTOCOL_ROOT\n",
+            "leaf": "LEAF_PROTOCOL_ROOT\n",
+        }
         markers = {"base": base_code / marker_name, "leaf": leaf_code / marker_name}
         status_before = {
             "base": _git_status(base_code),
@@ -159,50 +215,30 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                 )
                 base_packet = _structured(base_packet_result)
                 leaf_packet = _structured(leaf_packet_result)
-                self.assertEqual(base_packet["repo"]["root"], base_code.as_posix())
-                self.assertEqual(leaf_packet["repo"]["root"], leaf_code.as_posix())
+                self.assertEqual(base_packet["roots"]["code"], base_code.as_posix())
+                self.assertEqual(leaf_packet["roots"]["code"], leaf_code.as_posix())
+                # Rule 4 compacts the slim roots code-relative when shorter:
+                # join a relative root with its absolute code anchor first.
+                leaf_memory = leaf_packet["roots"]["memory"]
+                leaf_memory_path = Path(leaf_memory)
+                if not leaf_memory_path.is_absolute():
+                    leaf_memory_path = Path(
+                        os.path.normpath(os.path.join(leaf_packet["roots"]["code"], leaf_memory))
+                    )
                 self.assertEqual(
-                    leaf_packet["paths"]["memoryRoot"],
+                    leaf_memory_path.as_posix(),
                     cast(Path, self.contract.memory_worktree).as_posix(),
                 )
-                self.assertNotEqual(
-                    base_packet["paths"]["memoryRoot"], leaf_packet["paths"]["memoryRoot"]
-                )
+                self.assertNotEqual(base_packet["roots"]["memory"], leaf_packet["roots"]["memory"])
 
-                for label, marker in markers.items():
-                    with marker.open("x", encoding="utf-8") as stream:
-                        created.append(marker)
-                        stream.write(marker_contents[label])
+                # One marker only in the leaf checkout: existence itself
+                # proves which code root each call read.
+                leaf_marker = markers["leaf"]
+                with leaf_marker.open("x", encoding="utf-8") as stream:
+                    created.append(leaf_marker)
+                    stream.write(marker_contents["leaf"])
 
-                base_args = {
-                    "repo_id": self.repo_id,
-                    "files": [{"path": marker_name, "onboarding": False}],
-                }
-                leaf_args = {
-                    **base_args,
-                    "task_context": self.task_context,
-                }
-
-                async def read(arguments: dict[str, object]) -> str:
-                    result = await client.call_tool("read_ar_files", arguments)
-                    return _structured(result)["files"][0]["source"]
-
-                self.assertEqual(
-                    (
-                        await read(base_args),
-                        await read(leaf_args),
-                        await read(base_args),
-                        await read(leaf_args),
-                    ),
-                    (marker_contents["base"], marker_contents["leaf"]) * 2,
-                )
-
-                concurrent_base, concurrent_leaf = await asyncio.gather(
-                    read(base_args),
-                    read(leaf_args),
-                )
-                self.assertEqual(concurrent_base, marker_contents["base"])
-                self.assertEqual(concurrent_leaf, marker_contents["leaf"])
+                await self._assert_naming_is_call_local(client, marker_name)
 
                 wrong_repo = await client.call_tool(
                     "context_packet",
@@ -221,7 +257,11 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                 }
                 wrong_contract = await client.call_tool(
                     "read_ar_files",
-                    {**base_args, "task_context": wrong_contract_context},
+                    {
+                        "repo_id": self.repo_id,
+                        "files": [marker_name],
+                        "task_context": wrong_contract_context,
+                    },
                 )
                 self.assertTrue(
                     wrong_contract.isError
@@ -279,7 +319,8 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
                     await _await_protocol(list_tools, wait_seconds=3)
 
         with mock.patch.dict(
-            self.server._mcp_server.request_handlers, {types.ListToolsRequest: late_tools}
+            self.server._mcp_server.request_handlers,
+            {types.ListToolsRequest: late_tools},
         ):
             _run_protocol(exercise_late_response)
         self.assertEqual(handler_closed, [True])
@@ -291,7 +332,9 @@ def _run_protocol(exercise: Callable[[], Awaitable[None]]) -> None:
 
 
 async def _await_protocol(
-    exercise: Callable[[], Awaitable[None]], *, wait_seconds: float = PROTOCOL_WAIT_SECONDS
+    exercise: Callable[[], Awaitable[None]],
+    *,
+    wait_seconds: float = PROTOCOL_WAIT_SECONDS,
 ) -> None:
     try:
         with anyio.fail_after(wait_seconds):
@@ -334,7 +377,14 @@ def _tool_error_text(result) -> str:
 
 def _git_status(root: Path) -> str:
     result = subprocess.run(
-        ["git", "-C", root.as_posix(), "status", "--porcelain", "--untracked-files=all"],
+        [
+            "git",
+            "-C",
+            root.as_posix(),
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+        ],
         capture_output=True,
         check=True,
         text=True,

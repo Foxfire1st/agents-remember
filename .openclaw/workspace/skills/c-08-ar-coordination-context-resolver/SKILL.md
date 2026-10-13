@@ -28,7 +28,10 @@ When a sibling `settings.json` exists beside `settings.md`, the `c-08-ar-coordin
 
 ## Outputs
 
-The resolver returns one coordination context for the target repository:
+The resolver returns one coordination context for the target repository. Roots come from
+resolution; settings, storage, `pathRules` and `crossRepo` come from the source-bound
+settings read (sibling `settings.json` preferred, fenced `settings.md` accepted); code
+roots and build identity come from the `server_info` metadata route:
 
 - `topology`: `external`
 - `code_repository_name`
@@ -68,30 +71,52 @@ Workspaces are resolved per target repository: each repository binds to its own 
 
 ## MCP Tools
 
-Use the Agents Remember MCP resolver tools as the normal installed runtime entry
+Use the Agents Remember MCP context tool as the normal installed runtime entry
 point:
 
 ```text
-resolve_context(repo_id="<repo-id>", task_name="<task>", parent_task="<parent-task>", leaf_id="<leaf-id>", contract_path="<series-contract.md>", worktree_name="<worktree>", topology="external")
+context_packet(repo_id="<repo-id>", include_drift=false)
 ```
 
-For startup context that also needs provider status or drift summary, request:
+`include_freshness` fetches remotes (a write); `include_drift` measures
+onboarding anchors. Neither providers nor any other prerequisite is needed:
+context resolution reads settings and the filesystem only.
 
-```text
-context_packet(repo_id="<repo-id>", include_providers=true, include_drift=false)
-```
+A canonical leaf adds its `task_context` (`task_document_ref` plus `contract_path`);
+the admitted enclosure then supplies the code and memory worktrees. `context_packet`
+answers where the caller works and what needs action: the code worktree, the memory
+worktree, the enclosure and the rendered task document; the task's ID and its master;
+one line for each state that needs action; and the serving build and pair identity as
+short values. Everything else derives from those roots by fixed layout:
+
+- memory worktree + `onboarding/` → cards and sidecars; + `system/` → settings, sources,
+  tools; + `memory.md` → the ledger;
+- memory worktree's memory block (`memory.md` and `system/settings.md`, read at their
+  source-bound paths, never invented) → storage mode, path rules and cross-repo allowances;
+- coordination root + task ID → task root and temp root (only when the coordination root
+  is configured; without one the caller works from its own roots and reports them).
 
 The MCP server owns the authority settings for repository IDs, workspace roots,
 coordination root, and provider configuration. Callers that already know a
 checkout path should still identify the configured repository through the MCP
-settings rather than inventing a parallel resolver path.
+settings rather than inventing a parallel resolver path. (`resolve_context` is
+removed; what a caller needs from it for roots and actions is in `context_packet`,
+which publishes roots, task, actions, build and pair -- not settings blocks.)
+Settings, storage, path rules and policy come from the source-bound settings read
+(the memory worktree's `system/settings.md` and the user's own settings file) and
+from the `server_info` metadata route for code roots and build identity: read those
+sources, never a removed resolver or a parallel path.
+
+Delegation policy (who decides leaf gates) lives in the user's own settings
+file, not in the coordination root: the resolver does not resolve policy, and
+no policy file is a prerequisite for resolution.
 
 The skill tree is instruction-only; installed and development workflows use the
 MCP/package route.
 
 ## Consumers
 
-- `AGENTS.md` Gate 1 uses this skill to resolve coordination root, memory root, task root, temp root, onboarding root, settings, storage, `pathRules`, worktree facts, ledger path, and cross-repo allowances.
+- `AGENTS.md` Gate 1 uses this skill to resolve coordination root, memory root, task root, temp root, onboarding root, worktree facts and ledger path; it reads settings, storage, `pathRules` and cross-repo allowances from the source-bound settings files, and code roots and build identity from the `server_info` metadata route.
 - `c-02-memory-quality-control` consumes the resolved context and owns memory quality checks, including task-start drift classification and trust reporting.
 - `c-03-repo-bootstrap`, `c-04-retrieval-strategy-router`, `c-05-create-or-update-onboarding-files`, and task workflows use the resolved roots instead of rebuilding topology rules.
 - `c-09-git-worktree-manager` consumes the resolved context and owns Git worktree mutation, task contract updates, and closeout sequencing.
@@ -99,6 +124,6 @@ MCP/package route.
 ## Boundaries
 
 1. The `c-08-ar-coordination-context-resolver` skill owns topology detection, coordination-root and memory-root resolution, JSON-first settings parsing with Markdown fallback, storage semantics, `pathRules`, task-contract fact loading, and cross-repo allowance parsing.
-2. Other skills may request MCP `resolve_context` or `context_packet`, but they must not keep parallel resolver implementations.
+2. Other skills may request MCP `context_packet`, but they must not keep parallel resolver implementations.
 3. The top `AGENTS.md` topology explanation remains orientation guidance for humans and agents, not a replacement runtime path.
 4. The `c-08-ar-coordination-context-resolver` skill resolves where context lives; it does not create missing scaffolding or Git worktrees. Use the `c-00-initialize-memory-repo` skill for memory-root creation and the `c-09-git-worktree-manager` skill for worktree lifecycle mutation.

@@ -43,35 +43,41 @@ import apsw
 
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_file_diff import (
-    BoundedDiff,
-    LeftOut,
-    bounded_diff,
     held_paths,
     knowledge_file_diff,
     narrowed_diff,
 )
+from agents_remember.application.knowledge_names import (
+    NameResolver,
+    SelectionMovedError,
+    SelectionProvenance,
+    _memory_commit,
+    _memory_dirty,
+    project_knowledge_body,
+)
 from agents_remember.application.knowledge_paging import threshold_block
 from agents_remember.application.knowledge_paging.currentness import WalkCurrentness
-from agents_remember.application.knowledge_paging.threshold import (
-    ENVELOPE_RESERVE_TOKENS,
-    KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
-    response_tokens,
-)
 from agents_remember.application.knowledge_paging.tree_read import (
     DEFAULT_ORDERING,
     PageExtras,
     ReadSubject,
     TreeExtras,
+    TreeReadScope,
     read_tree_page,
 )
 from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.knowledge_reports import ReportWriteError, write_report
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     select_knowledge_dataset,
 )
-from agents_remember.kernel.git_command import GitRunnerOptions, git_environment, run_git
+from agents_remember.kernel.git_command import (
+    GitRunnerOptions,
+    git_environment,
+    run_git,
+)
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
@@ -116,6 +122,19 @@ _TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 _GIT_TIMEOUT_SECONDS = 20
 # What ``afterRevision`` reports when the caller named none: the memory working tree.
 WORKING_TREE = "working tree"
+
+
+@dataclass(frozen=True)
+class ProjectionNaming:
+    """How one projected answer locates: the locating, the epoch, the resolver.
+
+    The resolver is sizing's shared instance, revalidated for moves; without
+    one, the provenance opens a bound resolver, and without that a fresh one.
+    """
+
+    relative_locations: bool = False
+    provenance: SelectionProvenance | None = None
+    resolver: NameResolver | None = None
 
 
 @dataclass(frozen=True)
@@ -199,7 +218,10 @@ def _memory_tree_refusal(memory_root: str, operation: str) -> tuple[str, str] | 
     return (
         LEGACY_FORMAT_CODE,
         legacy_format_refusal(
-            path.parent, operation=operation, subject=f"the file {path}", database_file=True
+            path.parent,
+            operation=operation,
+            subject=f"the file {path}",
+            database_file=True,
         ),
     )
 
@@ -213,7 +235,8 @@ def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDatase
     """
 
     return select_knowledge_dataset(
-        Path(path), coordination_root=None if coordination_root is None else Path(coordination_root)
+        Path(path),
+        coordination_root=None if coordination_root is None else Path(coordination_root),
     )
 
 
@@ -321,14 +344,106 @@ def knowledge_read_payload(
     *,
     workspace_root: str | None = None,
     coordination_root: str | None = None,
+    relative_locations: bool = False,
 ) -> dict[str, Any]:
-    """Retrieve one named view of a memory tree, through the response-model choke point."""
+    """Retrieve one named view of a memory tree, through the response-model choke point.
 
-    body = _read_result(request, workspace_root=workspace_root, coordination_root=coordination_root)
+    The application layer computes the whole result; the answer names records
+    instead of carrying them (MIK-R109 rule 2): each row holds the text ID,
+    kind, computed state and memory-checkout location, and record text stays
+    behind the answer's log. With ``relative_locations`` the emitted files
+    are memory-root-relative (the answered absolute ``memoryRoot`` is the
+    join base); otherwise they are absolute with the commit beside the
+    answer, for a caller with no memory worktree.
+    """
+
+    body, selected, shared = _read_result(
+        request,
+        workspace_root=workspace_root,
+        coordination_root=coordination_root,
+        relative_locations=relative_locations,
+    )
     if body["state"] == "refused":
         # MIK-R02 rule 1: a refusal states the threshold too (a page states it in page).
         body.setdefault("threshold", threshold_block())
+    elif selected is None:
+        # Unreachable: a non-refused body always carries the selection that
+        # read it. The guard refuses rather than projecting unbound rows.
+        code, detail = _selection_refusal(
+            request.memory_root,
+            MemoryTreeError(f"{request.memory_root} read without a selection"),
+        )
+        body = _refused_read(request.view, request.repository_id, code, detail)
+    else:
+        body = _projected_body(
+            body,
+            request,
+            selected,
+            naming=ProjectionNaming(
+                relative_locations=relative_locations,
+                resolver=shared,
+            ),
+        )
     return _tool_payload("knowledge_read", body)
+
+
+def _projected_body(
+    body: dict[str, Any],
+    request: ReadToolRequest,
+    selected: SelectedKnowledgeDataset,
+    *,
+    naming: ProjectionNaming | None = None,
+) -> dict[str, Any]:
+    """One answer naming the records one full body carries, or a typed refusal.
+
+    The projection reuses the read's own selection: paths, commit
+    provenance and currentness all bind the same snapshot the rows were
+    read from, never a later re-selection's. The shared naming resolver
+    (sizing's instance) is revalidated for moves and reused with its
+    caches; without one, the provenance opens a bound resolver, and
+    without that a fresh one. When the checkout moved between selection
+    and projection, the answer is a ``snapshot_unavailable`` refusal
+    naming the move instead of mixed rows.
+    """
+
+    naming = naming if naming is not None else ProjectionNaming()
+    resolver = naming.resolver
+    tree = selected.memory_tree
+    if tree is None:
+        code, detail = _selection_refusal(
+            request.memory_root,
+            MemoryTreeError(f"{request.memory_root} selected no memory tree"),
+        )
+        return _refused_read(request.view, request.repository_id, code, detail)
+    if resolver is None:
+        try:
+            resolver = NameResolver.open(
+                memory_root=Path(request.memory_root),
+                index_path=selected.database_path,
+                tree_key=tree.tree_key,
+                relative_locations=naming.relative_locations,
+                selection=naming.provenance,
+            )
+        except SelectionMovedError as moved:
+            return _refused_read(
+                request.view,
+                request.repository_id,
+                "snapshot_unavailable",
+                f"the memory checkout moved between selection and projection "
+                f"(selection {moved.selection_commit}, now {moved.current_commit}); reread",
+            )
+    else:
+        try:
+            resolver.revalidate()
+        except SelectionMovedError as moved:
+            return _refused_read(
+                request.view,
+                request.repository_id,
+                "snapshot_unavailable",
+                f"the memory checkout moved between selection and projection "
+                f"(selection {moved.selection_commit}, now {moved.current_commit}); reread",
+            )
+    return project_knowledge_body(body, resolver)
 
 
 def _read_result(
@@ -336,8 +451,17 @@ def _read_result(
     *,
     workspace_root: str | None = None,
     coordination_root: str | None = None,
-) -> dict[str, Any]:
-    """The one ``knowledge_read`` body, before the registered model validates it."""
+    relative_locations: bool = False,
+) -> tuple[dict[str, Any], SelectedKnowledgeDataset | None, NameResolver | None]:
+    """The one ``knowledge_read`` body with the selection that read it.
+
+    The selection rides beside the body so the naming projection binds
+    the same snapshot -- paths, commit provenance and currentness never
+    mix a later re-selection's state with these rows. The shared naming
+    resolver rides beside the selection: one instance serves sizing and
+    projection, move-validated at projection. The epoch (commit and
+    dirtiness) is captured at selection time for the move validation.
+    """
 
     repository_id, view = request.repository_id, request.view
     if view not in (
@@ -345,11 +469,15 @@ def _read_result(
         "invariant",
         "family",
     ):
-        return _refused_read(
-            view,
-            repository_id,
-            "unknown_view",
-            f"{view!r} is not one of the three named query views",
+        return (
+            _refused_read(
+                view,
+                repository_id,
+                "unknown_view",
+                f"{view!r} is not one of the three named query views",
+            ),
+            None,
+            None,
         )
     # The admitted-ordering closure is checked **before** the tree is opened, because the view
     # layer's own refusal is the answer the caller needs and the request model cannot carry the
@@ -357,14 +485,36 @@ def _read_result(
     # request with a fifth ordering raises instead of refusing.
     ordering_refusal = require_admitted_ordering_input(_ordering(request))
     if ordering_refusal is not None:
-        return _refused_read(view, repository_id, ordering_refusal.code, ordering_refusal.detail)
+        return (
+            _refused_read(view, repository_id, ordering_refusal.code, ordering_refusal.detail),
+            None,
+            None,
+        )
     unreadable = _memory_tree_refusal(request.memory_root, "knowledge_read")
     if unreadable is not None:
-        return _refused_read(view, repository_id, *unreadable)
+        return (_refused_read(view, repository_id, *unreadable), None, None)
     # The tree is opened inside the boundary, because every failure to index or read it is a fact
     # about the selection and not a programming error.
     try:
+        # The epoch brackets the selection: commit and dirtiness are read
+        # before the tree opens and again after, so a move or dirty edit
+        # during selection refuses instead of binding a mixed epoch.
+        before_commit = _memory_commit(Path(request.memory_root))
+        before_dirty = _memory_dirty(Path(request.memory_root))
         selected = _select(request.memory_root, coordination_root)
+        # The epoch binds the selection: commit and dirtiness are captured
+        # here, at selection time, for the projection's move validation --
+        # never re-probed as provenance at projection time.
+        provenance = SelectionProvenance(
+            commit=_memory_commit(Path(request.memory_root)),
+            dirty=_memory_dirty(Path(request.memory_root)),
+            relative=relative_locations,
+        )
+        if (provenance.commit, provenance.dirty) != (before_commit, before_dirty):
+            # A move or dirty edit during selection refuses through the
+            # same moved-selection refusal as the projection seam: no
+            # mixed epoch is ever bound to rows.
+            raise SelectionMovedError(before_commit, provenance.commit)
         repository_root, code_tree_id = _source_resolution(request, workspace_root)
         context = open_read_context(
             selected.database_path,
@@ -373,15 +523,41 @@ def _read_result(
             code_tree_id=code_tree_id,
         )
         # MIK-R02: a tree's pages are cut by the threshold.
-        return read_tree_page(
+        body, shared = read_tree_page(
             request,
             selected,
             context,
             extras=_tree_extras(selected),
-            workspace_root=workspace_root,
+            scope=TreeReadScope(workspace_root=workspace_root, provenance=provenance),
+        )
+        return body, selected, shared
+    except SelectionMovedError as moved:
+        if moved.selection_commit == moved.current_commit:
+            detail = (
+                "the memory checkout changed between selection and projection "
+                f"(selection {moved.selection_commit}); reread"
+            )
+        else:
+            detail = (
+                "the memory checkout moved between selection and projection "
+                f"(selection {moved.selection_commit}, now {moved.current_commit}); reread"
+            )
+        return (
+            _refused_read(
+                view,
+                repository_id,
+                "snapshot_unavailable",
+                detail,
+            ),
+            None,
+            None,
         )
     except _SELECTION_FAILURES as error:
-        return _refused_read(view, repository_id, *_selection_refusal(request.memory_root, error))
+        return (
+            _refused_read(view, repository_id, *_selection_refusal(request.memory_root, error)),
+            None,
+            None,
+        )
 
 
 def _ordering(request: ReadToolRequest) -> str:
@@ -409,27 +585,36 @@ def _tree_extras(selected: SelectedKnowledgeDataset) -> TreeExtras:
     return prepare
 
 
-def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
-    """The Git diff of the knowledge files of two memory trees, through the response-model choke point."""
+def knowledge_diff_payload(
+    request: DiffToolRequest, *, coordination_root: str | None = None
+) -> dict[str, Any]:
+    """One ``knowledge_diff`` answer, through the response-model choke point.
 
-    body = _diff_result(request)
-    # The answer is cut to the threshold every bounded knowledge read states, and states it.
-    body.setdefault("threshold", threshold_block())
+    The full comparison is a caller-readable report (MIK-R109 rule 3): the
+    answer holds the two trees compared, the count of changes by kind, the
+    records whose change asks for a decision up to the list bound, and the
+    report's location. The comparison behind both is unchanged for the
+    reviewer in the dashboard (:func:`knowledge_file_diff`).
+    """
+
+    body = _diff_result(request, coordination_root=coordination_root)
     return _tool_payload("knowledge_diff", body)
 
 
-def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
+def _diff_result(request: DiffToolRequest, coordination_root: str | None = None) -> dict[str, Any]:
     """The one ``knowledge_diff`` body, before the registered model validates it (MIK-R26 rule 5).
 
-    The answer is the Git diff of the knowledge files between two trees of the memory repository:
-    record, history and census files, onboarding sidecars and the onboarding cards, each with its
-    patch, grouped by record and by source path (:func:`knowledge_file_diff`, over the reviewer's
-    own computation). A tree that holds no layout marker is unconverted and refused as
-    ``legacy-format``; a directory inside the repository is refused with the repository root to
-    pass; a ``record_id`` or a ``path`` that names nothing in either tree is refused by name, not
-    answered with an empty diff. The answer is cut to the threshold of ``knowledge_read``, and what
-    it leaves out is named. The builder reads files and Git objects only: it infers no semantic
-    effect label and opens no database.
+    The comparison is the Git diff of the knowledge files between two trees of the memory
+    repository: record, history and census files, onboarding sidecars and the onboarding cards,
+    each with its patch, grouped by record and by source path (:func:`knowledge_file_diff`, over
+    the reviewer's own computation). The whole comparison is written as a caller-readable report
+    (MIK-R109 rule 3); the answer names the two trees, counts the changes by kind, names the
+    changed records up to the list bound, and locates the report. A tree that holds no layout
+    marker is unconverted and refused as ``legacy-format``; a directory inside the repository is
+    refused with the repository root to pass; a ``record_id`` or a ``path`` that names nothing in
+    either tree is refused by name, not answered with an empty diff; a report that cannot be
+    written refuses the call with the reason, leaving nothing partial behind. The builder reads
+    files and Git objects only: it infers no semantic effect label and opens no database.
     """
 
     def refused(code: str, detail: str) -> dict[str, Any]:
@@ -471,7 +656,7 @@ def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
     compared = _compared(root, request, trees)
     if isinstance(compared, _Refusal):
         return refused(compared.code, compared.detail)
-    return _bounded_body(request, trees, compared)
+    return _reported_body(request, trees, compared, coordination_root)
 
 
 def _repository_holding(root: Path) -> Path | None:
@@ -483,7 +668,9 @@ def _repository_holding(root: Path) -> Path | None:
 
     try:
         named = run_git(
-            root, ["rev-parse", "--show-toplevel"], GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS)
+            root,
+            ["rev-parse", "--show-toplevel"],
+            GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS),
         )
     except (OSError, subprocess.SubprocessError, GitPreparationError):
         return None
@@ -493,65 +680,139 @@ def _repository_holding(root: Path) -> Path | None:
     return None if Path(top).resolve() == root.resolve() else Path(top)
 
 
-def _bounded_body(
-    request: DiffToolRequest, trees: tuple[str, str], diff: ReviewKnowledgeTreeDiff
+def _reported_body(
+    request: DiffToolRequest,
+    trees: tuple[str, str],
+    diff: ReviewKnowledgeTreeDiff,
+    coordination_root: str | None,
 ) -> dict[str, Any]:
-    """The ``compared`` body within the threshold, naming every file it had to leave out."""
+    """The ``compared`` body: counts and decision-asking records beside a report.
 
-    def body(part: BoundedDiff) -> dict[str, Any]:
-        answer: dict[str, Any] = {
+    The whole comparison — what the answer held before — is written as a
+    caller-readable report (MIK-R109 rule 3). The answer holds the two trees
+    compared, the count of changes by kind, every changed record up to the
+    list bound in decision order, and the report's location.
+    """
+
+    dump = diff.model_dump(mode="json")
+    try:
+        report_path = write_report(
+            "knowledge-diff",
+            {
+                "operation": "knowledge_diff",
+                "memoryRoot": request.memory_root,
+                "beforeRevision": request.before,
+                "afterRevision": request.after or WORKING_TREE,
+                "beforeTree": trees[0],
+                "afterTree": trees[1],
+                "changedFiles": diff.changed_files,
+                "records": dump["records"],
+                "sources": dump["sources"],
+                "history": dump["history"],
+                "other": dump["other"],
+            },
+            coordination_root=coordination_root,
+        )
+    except ReportWriteError as error:
+        if error.residual is None:
+            detail = error.reason + "; nothing partial was left behind"
+        else:
+            detail = error.reason
+        return {
             "ok": True,
-            "state": "compared",
+            "state": "refused",
             "memoryRoot": request.memory_root,
-            "beforeRevision": request.before,
-            "afterRevision": request.after or WORKING_TREE,
-            "threshold": threshold_block(),
-            "complete": part.complete,
-            "diff": part.diff.model_dump(mode="json"),
+            "refusalCode": "report-unwritable",
+            "refusalDetail": detail,
         }
-        if not part.complete:
-            answer["leftOut"] = _left_out(request, trees, diff.changed_files, part.left_out)
-        return answer
-
-    budget = KNOWLEDGE_PAGE_THRESHOLD_TOKENS - ENVELOPE_RESERVE_TOKENS
-    return body(bounded_diff(diff, lambda part: response_tokens(body(part)) <= budget))
-
-
-def _left_out(
-    request: DiffToolRequest, trees: tuple[str, str], changed: int, left_out: LeftOut
-) -> dict[str, Any]:
-    """What one answer does not hold, with the request that reaches each part of it."""
-
-    git = f"git -C {request.memory_root} diff -M {trees[0]} {trees[1]}"
-    said: list[str] = []
-    steps: list[str] = []
-    if left_out.files:
-        said.append(
-            f"{left_out.files} of the {changed} changed files do not fit within the "
-            f"{KNOWLEDGE_PAGE_THRESHOLD_TOKENS}-token threshold of one answer, so their patches "
-            f"are left out; `paths` names {len(left_out.paths)} of them in the answer's order"
-        )
-        steps.append(
-            "pass one path of `paths` (or a source path, or a `recordId`) as `path` to read that "
-            "file's patch"
-        )
-    if left_out.unnamed:
-        said.append(f"{left_out.unnamed} more could not even be named within the threshold")
-        steps.append(f"`{git} --name-only -- knowledge onboarding` lists every changed file")
-    if left_out.cut_patches:
-        said.append(
-            f"the patch of {', '.join(left_out.cut_patches)} is cut short, because one patch is "
-            "longer than an answer or than the longest patch a file change carries"
-        )
-        steps.append(f"`{git} -- <path>` prints a file's whole patch")
+    counts = _change_counts(diff)
+    named = _decision_records(diff)
     return {
-        "files": left_out.files,
-        "paths": list(left_out.paths),
-        "pathsNotNamed": left_out.unnamed,
-        "cutPatches": list(left_out.cut_patches),
-        "detail": "; ".join(said),
-        "nextAction": "; ".join(steps),
+        "ok": True,
+        "state": "compared",
+        "memoryRoot": request.memory_root,
+        "beforeRevision": request.before,
+        "afterRevision": request.after or WORKING_TREE,
+        "beforeTree": trees[0],
+        "afterTree": trees[1],
+        "counts": counts,
+        "decisionRecords": named[:TOOL_ANSWER_LIST_MAX],
+        "decisionRecordCount": len(named),
+        "report": str(report_path),
     }
+
+
+def _change_counts(diff: ReviewKnowledgeTreeDiff) -> dict[str, int]:
+    """The count of changes by kind: changed files by Git status, groups by listing."""
+
+    counts = {
+        "changedFiles": diff.changed_files,
+        "records": len(diff.records),
+        "sources": len(diff.sources),
+        "history": len(diff.history),
+        "other": len(diff.other),
+    }
+    for group in (*diff.records, *diff.sources):
+        for change in group.files:
+            counts[change.status] = counts.get(change.status, 0) + 1
+    for change in (*diff.history, *diff.other):
+        counts[change.status] = counts.get(change.status, 0) + 1
+    return counts
+
+
+# A changed record asks for a decision soonest when knowledge appeared or
+# vanished (an added or deleted record file), next when a code-side claim
+# about it changed (its entries), then renames, type changes and edits.
+_DECISION_ORDER = {
+    "added": 0,
+    "deleted": 1,
+    "entries-changed": 2,
+    "renamed": 3,
+    "type-changed": 4,
+    "modified": 5,
+}
+
+
+def _group_change(statuses: set[str], has_entries: bool) -> str:
+    """The one change kind naming a record group, in decision order."""
+
+    if "added" in statuses:
+        return "added"
+    if "deleted" in statuses:
+        return "deleted"
+    if has_entries:
+        return "entries-changed"
+    if "renamed" in statuses:
+        return "renamed"
+    if "type_changed" in statuses:
+        return "type-changed"
+    return "modified"
+
+
+def _decision_records(diff: ReviewKnowledgeTreeDiff) -> list[dict[str, Any]]:
+    """Every changed record group as ID, kind, change and index path.
+
+    The path is the authoritative record path inside the memory tree, not
+    joined with the checkout: the answered absolute ``memoryRoot`` is the
+    join base, so large comparisons stay within their bound on any root
+    length (MIK-R109 rule 3).
+    """
+
+    named = []
+    for group in diff.records:
+        statuses = {change.status for change in group.files}
+        change = _group_change(statuses, bool(group.entries))
+        path = group.files[0].path if group.files else None
+        named.append(
+            {
+                "recordId": group.record_id,
+                "kind": group.kind,
+                "change": change,
+                "path": path,
+            }
+        )
+    named.sort(key=lambda entry: (_DECISION_ORDER[entry["change"]], entry["recordId"]))
+    return named
 
 
 @dataclass(frozen=True)
@@ -598,7 +859,10 @@ def _compared(
 
 
 def _absent_selector(
-    root: Path, request: DiffToolRequest, trees: tuple[str, str], selected: ReviewKnowledgeTreeDiff
+    root: Path,
+    request: DiffToolRequest,
+    trees: tuple[str, str],
+    selected: ReviewKnowledgeTreeDiff,
 ) -> str | None:
     """Why a selector names nothing in either tree, or ``None`` when each names something.
 
@@ -643,7 +907,12 @@ def _working_tree(root: Path) -> _ResolvedTree | str:
             ["cat-file", "-e", f"{tree}:{LAYOUT_MARKER_PATH}"],
             GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS),
         )
-    except (OSError, RuntimeError, subprocess.SubprocessError, GitPreparationError) as error:
+    except (
+        OSError,
+        RuntimeError,
+        subprocess.SubprocessError,
+        GitPreparationError,
+    ) as error:
         return f"the memory working tree at {root} cannot be captured: {error}"
     return _ResolvedTree(tree, marker.returncode == 0)
 
@@ -660,7 +929,9 @@ def _resolve_tree(root: Path, revision: str) -> _ResolvedTree | str:
     options = GitRunnerOptions(timeout=_GIT_TIMEOUT_SECONDS)
     try:
         named = run_git(
-            root, ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{tree}}"], options
+            root,
+            ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{tree}}"],
+            options,
         )
         if named.returncode != 0 or not _TREE_ID_PATTERN.match(named.stdout.strip()):
             return f"{revision!r} names no tree in the Git repository at {root}"
@@ -768,10 +1039,16 @@ def _refused_check(memory_root: str | None, code: str, detail: str) -> dict[str,
     }
 
 
-def _validator_inputs(request: IntegrityCheckRequest) -> _ValidatorInputs | tuple[str, str]:
+def _validator_inputs(
+    request: IntegrityCheckRequest,
+) -> _ValidatorInputs | tuple[str, str]:
     """The trees one call names, or the refusal code and detail for a call that names too little."""
 
-    memory_root, code_root, bases = request.memoryRoot, request.codeRoot, request.baseCommits
+    memory_root, code_root, bases = (
+        request.memoryRoot,
+        request.codeRoot,
+        request.baseCommits,
+    )
     if request.contractPath is not None and (memory_root is None or code_root is None):
         try:
             contract = load_contract(Path(request.contractPath))

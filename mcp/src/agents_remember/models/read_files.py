@@ -1,12 +1,9 @@
-"""Response models for the ``read_ar_files`` tool (slice 07).
+"""Response models for the ``read_ar_files`` tool (MIK-R109 rule 1).
 
-AR-owned, strict response contract: one batch of paired source+onboarding reads
-of repo-relative paths inside an AR-managed repo. Per-file ``status`` is the
-onboarding-lookup outcome (``found | missing | disabled | unsupported |
-not_requested``); ``source`` is independent of status (present whenever the
-source file exists and decodes as UTF-8 text). The packet also auto-attaches the
-repo overview and the governing route-overview chain, deduplicated per lifecycle
-and code/onboarding root.
+AR-owned, strict response contract: one batch of knowledge locations for
+repo-relative paths inside an AR-managed repo. A read names where a thing
+is and does not carry it: the answer holds no source text, no card text
+and no overview text.
 
 Token fields are stamped by ``finalize_payload_tokens`` at the ``_tool_payload``
 choke point -- this module never sets them.
@@ -14,68 +11,77 @@ choke point -- this module never sets them.
 
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Literal
 
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 
-# The onboarding-lookup outcome for one requested source path, declared once, HERE.
-# It is a served status: it is a field of the response below, so it is wire vocabulary and
-# this package owns it. Declaring it in the application entry point that decides it made the
-# response model import the application layer: the one edge that made ``models`` and
-# ``application`` mutually dependent (``layers.toml``), for a five-member literal.
-#
-# This is the ONBOARDING status, never a source-read condition: source presence rides the
-# independent ``source`` field, which is why ``found`` and a missing ``source`` are not a
-# contradiction.
-FileReadStatus = Literal["found", "missing", "disabled", "unsupported", "not_requested"]
 
-# The runtime half of the alias, derived from it rather than retyped beside it.
-VALID_FILE_READ_STATUSES: frozenset[FileReadStatus] = frozenset(get_args(FileReadStatus))
+class NamedRecord(StrictResponseModel):
+    """One record whose state asks the caller to act (packet rule 1).
+
+    Named singly: the text ID, the kind, the computed state, and the card
+    heading that covers it, so the caller opens the card at the heading.
+    ``titleFallback`` reports the limitation: the card carries sections,
+    but none scored, so the heading is the title rather than a resolved
+    section.
+    """
+
+    id: str
+    kind: str
+    state: str
+    heading: str
+    titleFallback: bool = False
 
 
-class FileRead(StrictResponseModel):
-    """One requested file's paired source + onboarding result.
+class NamedFile(StrictResponseModel):
+    """What governs one requested path: existence, card location, record states.
 
-    ``source`` is the full file or the exact requested line range; it is omitted
-    when the file is absent or is binary/non-decodable. ``onboarding`` is the
-    file-level onboarding body (``meaningful_body``) when ``status == found``;
-    omitted otherwise.
+    ``card`` is the governing card's location in the caller's memory
+    worktree — relative to the caller's working folder when the file lies
+    in it, absolute otherwise — or ``None`` when the path has none.
+    ``recordCounts`` counts the card's records by state on the code the
+    caller sees; ``actionNeeded`` names only the records whose state asks
+    the caller to act (longer lists are cut to the count plus first entries
+    by the answer guard, MIK-R108 rule 4). A row the server could not
+    confine carries ``exists: None`` with a row-level ``refusalCode`` /
+    ``refusalDetail`` instead of a card: confinement fails closed per row,
+    never for the whole batch.
     """
 
     path: str
-    status: FileReadStatus
-    source: str | None = None
-    onboarding: str | None = None
-    # MIK-R24 rules 5 and 9: ``text/v2`` for a converted memory tree, whose card comes with its
-    # sidecar and its resolved references; ``legacy-format`` for an unconverted one, returned as
-    # it is with nothing resolved.
-    format: Literal["text/v2", "legacy-format"] | None = None
-    sidecar: dict[str, Any] | None = None
-    references: list[dict[str, Any]] | None = None
+    exists: bool | None = None
+    card: str | None = None
+    cardState: str | None = None
+    recordCounts: dict[str, int] | None = None
+    actionNeeded: list[NamedRecord] | None = None
+    statesProblem: str | None = None
+    indexComplete: bool | None = None
+    refusalCode: str | None = None
+    refusalDetail: str | None = None
 
 
 class ReadArFilesResponse(ToolResponse):
-    """``read_ar_files``: paired source+onboarding reads + auto-attached overviews.
+    """``read_ar_files``: the knowledge governing a batch of paths, as locations.
 
-    ``repository_overview`` and ``route_overviews`` are the session-deduplicated
-    front-door: each is served once per lifecycle and code/onboarding root, or
-    again when its content changed; both are omitted when already served unchanged (or when
-    ``onboarding`` was suppressed for every file).
+    ``overviews`` lists the governing overviews once for the call, as
+    locations, nearest first. ``codeState`` says what the record states were
+    measured on (``head``: the checkout's HEAD tree; MIK-R73 rule 7 keeps the
+    field and moves the measurement to the working tree) and ``codeTree`` is
+    the tree observed. ``memoryState`` says whether cards could be named at
+    all (``converted``, ``missing`` or ``unconverted``).
 
-    ``published_intent`` is the repository's published intent, read through the
-    existing selective read at one exact snapshot and seeded with the requested
-    paths (ICR-R19@v1). It is always present, because its own ``state`` is the
-    answer: ``recorded`` carries the dataset identity, the snapshot and one
-    bounded page per seed; ``not-recorded`` and ``unusable`` name why no
-    publication could be read. Its shape is owned by
-    ``application.published_intent`` -- the route that selects, seeds and
-    names the absences -- so this model carries it rather than re-declaring a
-    second contract for the same read.
+    A refusal is a state, not a partial naming: ``state`` is ``named`` or
+    ``refused``, and the refusal fields name the offending input.
     """
 
     operation: Literal["read_ar_files"] = "read_ar_files"
     repoId: str
-    files: list[FileRead]
-    repository_overview: dict[str, Any] | None = None
-    route_overviews: dict[str, Any] | None = None
-    published_intent: dict[str, Any] | None = None
+    state: Literal["named", "refused"]
+    codeState: str | None = None
+    codeTree: str | None = None
+    memoryState: str | None = None
+    files: list[NamedFile] | None = None
+    overviews: list[str] | None = None
+    statesProblem: str | None = None
+    refusalCode: str | None = None
+    refusalDetail: str | None = None

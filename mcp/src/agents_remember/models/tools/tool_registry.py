@@ -5,7 +5,8 @@ Response-model convention (one place, deliberately two tiers):
 - Tools whose response shape is fully owned by this package use a STRICT model
   (``StrictResponseModel`` / ``ResponseModel`` / ``ToolResponse``, ``extra="forbid"``)
   so the field set is a real, drift-proof contract. ``context_packet`` (the
-  fully-typed ``ContextPacketV2``) and ``server_info`` are the
+  slim agent answer ``SlimContextPacket``; the whole ``ContextPacketV2`` stays
+  behind the answer's log) and ``server_info`` are the
   exemplars; new AR-owned responses should follow them.
 - Tools that surface provider-native / raw diagnostic detail (CodeGraphContext,
   GrepAI, Docker, watcher output) use a FLEXIBLE model
@@ -22,7 +23,7 @@ payload genuinely embeds provider-native detail.
 from __future__ import annotations
 
 from agents_remember.models.base import ResponseEnvelope
-from agents_remember.models.context_packet import ContextPacketV2
+from agents_remember.models.context_packet import SlimContextPacket
 from agents_remember.models.core import ServerInfoResponse
 from agents_remember.models.direct_execution_grant import DirectExecutionGrantResponse
 from agents_remember.models.direct_landing import DirectLandingResponse
@@ -53,7 +54,7 @@ from agents_remember.models.role_agents import (
     RoleStartResponse,
     RoleStartSetResponse,
 )
-from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
+from agents_remember.models.runtime import RuntimeInstallResponse
 from agents_remember.models.structural.agent import DispatchAgentResponse, RetireChildResponse
 from agents_remember.models.structural.gates import (
     GateCreateResponse,
@@ -124,7 +125,7 @@ INTERNAL_COMPAT_TOOL_NAMES = frozenset(
 # being written into the already-dumped dict instead.
 TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "server_info": ServerInfoResponse,
-    "context_packet": ContextPacketV2,
+    "context_packet": SlimContextPacket,
     "read_ar_files": ReadArFilesResponse,
     "attach_terminal_session_to_task": AttachTerminalSessionToTaskResponse,
     "spawn_agent_session": SpawnAgentSessionResponse,
@@ -134,7 +135,6 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "dispatch_agent": DispatchAgentResponse,
     "retire_child": RetireChildResponse,
     "runtime_install": RuntimeInstallResponse,
-    "resolve_context": ResolveContextResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
     "citation_fix": CitationFixResponse,
     "route_index_refresh": RouteIndexRefreshResponse,

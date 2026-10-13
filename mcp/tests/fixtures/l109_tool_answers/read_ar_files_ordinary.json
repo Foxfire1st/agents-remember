@@ -1,0 +1,16 @@
+{
+ "codeState": "head",
+ "codeTree": "ee110e387cbe20053709519e5789b7c402492e2c",
+ "files": [
+  {
+   "exists": true,
+   "path": "mcp/src/agents_remember/mcp/tools/knowledge.py"
+  }
+ ],
+ "log": "/gen/logs/ar-tools-2000-01-01/231641654180-read_ar_files-87791416.json",
+ "memoryState": "unconverted",
+ "ok": true,
+ "overviews": [],
+ "repoId": "agents-remember",
+ "state": "named"
+}

@@ -14,11 +14,13 @@ succeed, the answer is one of exactly four things, each named:
   ``refusalStatus``), a non-empty reason, and a machine-readable next action
   (``nextStep``/``nextTool``/``nextAction``/``nextArgs``). The three axes are asserted
   separately, so a refusal that stops naming WHY fails on that axis by name;
-* a **stateful refusal** -- ``ok: true`` with ``state: "refused"`` and the refusal carried in the
-  surface's own ``refusalCode``/``refusalDetail`` pair. This is the mounted ``knowledge_*``
-  surface, whose models declare it: *"A refusal is a state, not a partial success"*
-  (``models/tools/knowledge_responses.py``). It is a **fourth shape that had to be named**, not a
-  tolerated entry in ``ALWAYS_ANSWERS``: the merged line's five tools arrived after this census
+# * a **stateful refusal** -- ``ok: true`` with ``state: "refused"`` and the refusal carried in the
+#   surface's own ``refusalCode``/``refusalDetail`` pair. This is the mounted ``knowledge_*``
+#   surface, whose models declare it: *"A refusal is a state, not a partial success"*
+#   (``models/tools/knowledge_responses.py``), and -- since MIK-R109 rule 1 -- ``read_ar_files``,
+#   whose removed parameters and object-form entries refuse with ``argument-removed``. It is a
+#   **fourth shape that had to be named**, not a
+#   tolerated entry in ``ALWAYS_ANSWERS``: the merged line's five tools arrived after this census
   was written, and a tool that refuses is not a tool that succeeded. Pinned by name in
   ``STATEFUL_REFUSALS`` under the same both-directions rule as the other two, with its own case
   asserting the code and the detail, so the shape cannot become a place to hide a silent success;
@@ -51,11 +53,19 @@ import anyio
 import pytest
 from agents_remember.application.worktree_tool_requests import TaskIdentity
 from agents_remember.application.worktree_tools import worktree_start_tool
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import WorktreeStartResponse
-from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
+from agents_remember.observer import (
+    AmbientLifecycle,
+    EventStore,
+    install_ambient,
+    observer_root,
+)
 from agents_remember.observer.ambient import reset_ambient
 from pydantic import ValidationError
 from test_tool_entry_point_sweep import T34_REPAIRED_TOOLS
@@ -98,6 +108,10 @@ STATEFUL_REFUSALS: frozenset[str] = frozenset(
         "knowledge_read",
         "knowledge_diff",
         "knowledge_integrity_check",
+        # MIK-R109 rule 1: removed parameters and object-form file entries are
+        # refused with `argument-removed` rather than read. The census drives
+        # the object form, so that case is this tool's refusal proof.
+        "read_ar_files",
     }
 )
 
@@ -156,9 +170,6 @@ ALWAYS_ANSWERS: frozenset[str] = frozenset(
         # Reports the resolved configuration. `repo_id`/`task_name` are optional filters, so a
         # filter that matches nothing narrows the answer instead of refusing.
         "server_info",
-        # Files a coverage verdict per requested path; a path with no card is REPORTED in the
-        # answer (`files[].status: missing`) rather than refused.
-        "read_ar_files",
         # `memory_init` is a repair, not a precondition check: the fixture's memory root already
         # exists with an onboarding scaffold, so this call has nothing to refuse. Its
         # `dry_run=True` form verifies rather than writes.
@@ -182,7 +193,7 @@ ALWAYS_ANSWERS: frozenset[str] = frozenset(
 # `application/memory_tools.py`). What remains is the same defect on other preconditions,
 # grouped by the mechanism that raises, each already on the register:
 #
-# * ``require_repo`` -- `context_packet`, `resolve_context`,
+# * ``require_repo`` -- `context_packet`,
 #   `memory_baseline_status` answer an unknown `repo_id` by raising the authority error
 #   (`kernel/authority.py`). Its sibling `memory_baseline_adopt` now refuses in the envelope
 #   for the absence this leaf repaired, which is why it is not here.
@@ -209,7 +220,6 @@ ALWAYS_ANSWERS: frozenset[str] = frozenset(
 BARE_RAISERS: frozenset[str] = frozenset(
     {
         "context_packet",
-        "resolve_context",
         "memory_baseline_status",
         "citation_fix",
         "route_index_refresh",
@@ -218,6 +228,10 @@ BARE_RAISERS: frozenset[str] = frozenset(
         "task_doc",
         "worktree_attach",
         "worktree_status",
+        # MIK-R82's adoption tool: a contract outside the coordination root is
+        # refused by name at the boundary, which raises (measured 2026-10-11).
+        # Owned by the worktree-tool leaves (L111 reshapes these answers).
+        "worktree_enclosure_adopt",
         "memory_carryover_plan",
         "memory_carryover_apply",
     }
@@ -505,7 +519,9 @@ class FailurePathCensusTests:
                 f"{tool} left the (L108, T54) no-path half: it addresses a tool"
             )
 
-    def test_every_stateful_refusal_names_its_code_its_detail_and_its_model(self) -> None:
+    def test_every_stateful_refusal_names_its_code_its_detail_and_its_model(
+        self,
+    ) -> None:
         """The fourth shape's own axes, so it cannot become a place to hide a silent success.
 
         `ok: true` alone would be indistinguishable from the always-answers, so the shape is
@@ -677,13 +693,18 @@ class FailurePathControlTests:
         with pytest.raises(ValidationError, match="switch_lifecycle"):
             WorktreeStartResponse.model_validate(old_guidance)
 
-    def test_stripping_each_axis_of_a_real_refusal_makes_the_predicate_fail(self) -> None:
+    def test_stripping_each_axis_of_a_real_refusal_makes_the_predicate_fail(
+        self,
+    ) -> None:
         """The predicate must be able to fail. Each axis is stripped from a REAL refusal."""
         refusal = {
             "ok": False,
             "status": "provider-capability-unavailable",
             "detail": "the grepai-memory provider is not configured",
-            "nextStep": {"summary": "arm the provider", "nextTool": "provider_watchers"},
+            "nextStep": {
+                "summary": "arm the provider",
+                "nextTool": "provider_watchers",
+            },
         }
         assert refusal_axes(refusal) == (True, True, True), "the control's own fixture is wrong"
 
@@ -692,7 +713,12 @@ class FailurePathControlTests:
             ("why", {"detail": None, "summary": None, "message": None}),
             (
                 "next action",
-                {"nextStep": None, "nextTool": None, "nextAction": None, "nextArgs": None},
+                {
+                    "nextStep": None,
+                    "nextTool": None,
+                    "nextAction": None,
+                    "nextArgs": None,
+                },
             ),
         ):
             stripped = {**refusal, **mutation}
@@ -706,7 +732,12 @@ class FailurePathControlTests:
         """So the three-way partition is not a predicate that only ever says one thing."""
 
         answered = {"ok": True, "operation": "ping"}
-        refusal = {"ok": False, "status": "x", "detail": "y", "nextStep": {"summary": "z"}}
+        refusal = {
+            "ok": False,
+            "status": "x",
+            "detail": "y",
+            "nextStep": {"summary": "z"},
+        }
         assert answered.get("ok") is True
         assert refusal.get("ok") is False
         assert all(refusal_axes(refusal))

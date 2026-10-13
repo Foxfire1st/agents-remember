@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 40 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
+The Agents Remember MCP server exposes 38 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
 `dry_run=true` to preview first. Repository-scoped tools
 take a `repo_id` that must be an allowed repo in the MCP settings. Search the code with
 the harness's own tools: the former `cgc_*`, `grepai_*` and `provider_*` code-search tools
@@ -22,8 +22,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `server_info` | Report the resolved configuration: build, roots, allowed repos, provider keys left unused, and, on a role-launched server, the tool server name and agent binding. It does not list the tools. | — |
-| `resolve_context` | Resolve a repository's coordination/memory context (topology, roots, settings, storage, pathRules). | `repo_id`, optional `task_name` / `contract_path` / `worktree_name` / `topology` |
-| `context_packet` | Bundle repo state, paths, memory, worktree, drift and freshness into one packet. | `repo_id`, `include_drift=false`, `include_freshness=false` |
+| `context_packet` | Where the caller works and what needs action: the roots, the task, action lines only when needed, the serving build commit and the pair's two commits. | `repo_id`, `include_drift=false`, `include_freshness=false` |
 
 ## Structural role control
 
@@ -56,7 +55,6 @@ plane authorization failure remains a refusal and never retries as ambient. `dis
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, docs, runtime folders) into the coordinator; optionally install benchmark fixtures. The final `host` part provisions the build-pinned host/plugin from the per-use shared `system/settings.json` block; shared authority is never written and needed restarts are deferred. Missing block is named; dry run has no host mutations. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** the managed scaffold (`skills/`, `docs/`). No provider install/start/watch path remains (MIK-R112): the install stops leftover watcher processes as its only watcher action and reports enabled provider keys once as unused (`unusedProviderKeys`); `install_provider_deps` no longer drives installation. Leftover provider runtime folders are reported with sizes; only the `providers-remove` command deletes them. `experiment` is a per-call input (never a setting) selecting an experimental cutover for one run; its source is named in the record. | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
-| `skills_install` | Maintenance/manual install tool for non-package setups: copy the packaged (already flat) skills into the harness skill root — one folder per skill `name`; no layout option. The package-based first-run path gets skills from the copied harness starter package instead. | `dry_run=false`, `overwrite=false`, `archive_existing=false` |
 
 ## Memory & onboarding
 
@@ -66,6 +64,8 @@ plane authorization failure remains a refusal and never retries as ambient. `dis
 | `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
 | `citation_fix` | Regenerate anchored citation ranges only inside a contract-selected leaf memory worktree; official memory, ambiguous anchors, renames, and deletions refuse. | `repo_id`, `contract_path`, `document=None`, `expected_snapshot=None`, `dry_run=false` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
+| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`): each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
+| `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison: the two trees, counts by kind, changed records, report location. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
 
 `memory_quality_check.request` is exactly one shape. `sync` and `start` accept repository,
 scope, checks, and detail fields; `poll` accepts only `mode`, `repo_id`, and `run_id`. Do not resend
@@ -129,7 +129,7 @@ rename, a deletion and an ambiguous match are refused rather than guessed at. `c
 **required**: there is no argument list that names the official memory repo, and a contract that
 points at it is refused. The checkout-only CLI remains a development adapter to the same guarded
 application operation, not an agent-facing route around MCP.
-| `read_ar_files` | Batch read up to 5 repo-relative source paths in a managed repo, each paired with its file-level onboarding, plus the repository + governing route overviews (auto-attached, session-deduped); emits a facts-only `read.packet`. **The research-phase read** — use it instead of a native read up to the build decision; a native read remains the edit precondition during build. | `repo_id`, `files:[{path, source:"full"\|{startLine,endLine}, onboarding?}]`, `refresh=false` |
+| `read_ar_files` | Name which knowledge governs up to 20 paths: existence, governing card as a memory-worktree location, record counts by state, and action-asking records by ID, kind, state and card heading; overviews once per call, nearest first. No source, card or overview text: read the named files with your own tools. `refresh` and object-form entries are refused as `argument-removed`. | `repo_id`, `files:[strings]`, `task_context` for a leaf |
 
 ## Memory baseline & carryover
 
@@ -266,11 +266,9 @@ See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `knowledge_read` | Read one named view (source_context, invariant, family, review_matrix, curation_queue) at one snapshot, paged; records carry authored/mechanical provenance. | `databasePath`, `repositoryId`, `view`, subject + paging selectors |
-| `knowledge_change` | Always refuses with `registration_absent` and names the writer that can record; record through `knowledge-ingest` / `knowledge-bootstrap`, read back with `knowledge_read`. | `databasePath`, `repositoryId`, `recordKind` |
-| `knowledge_diff` | Field and record changes between exact states; semantic labels only when an identified agent or assessment supplied them. | `databasePath`, `repositoryId`, `beforePath`, `afterPath` |
-| `knowledge_integrity_check` | Structural-rule violations, matched review conditions, scope and limits; no verdict, no causal explanation. | dataset/scope selectors, `runId` / `inputDigest`, `contractPath` |
-| `knowledge_project` | Render read-only views into an authorized destination; provenance copied, never invented. | `databasePath`, `repositoryId`, `destinationRoot`, profile/formats/views, `authorizedOverwrites` |
+| `knowledge_read` | Name the records of one memory-tree view (`source_context`, `invariant`, `family`) at one snapshot, paged; each row holds the text ID, kind, state and memory-checkout location. No record text: open the named files with your own tools. | `memoryRoot`, `view`, `limit=32`, `continuation`, view seeds |
+| `knowledge_diff` | Name the changed records of two memory trees beside a caller-readable report holding the whole comparison. | `memoryRoot`, `beforeRevision="HEAD"`, `afterRevision`, `recordId`, `path` |
+| `knowledge_integrity_check` | Structural-rule violations, matched review conditions, scope and limits; no verdict, no causal explanation. | `memoryRoot`, `codeRoot` |
 | `curator_coherence` | Author, publish, inspect or validate one leaf's curator-coherence authority (`prepare` → `publish` → `validate`). | one action's request shape at a time |
 
 ## Role agents

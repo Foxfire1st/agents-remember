@@ -15,7 +15,7 @@ from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
 )
-from agents_remember.models.context_packet import ContextPacketV2
+from agents_remember.models.context_packet import ContextPacketV2, SlimContextPacket
 from agents_remember.models.core import ServerInfoResponse, Transport
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.memory import (
@@ -52,7 +52,7 @@ from agents_remember.models.providers import (
     ProviderWatchersResponse,
     WatcherState,
 )
-from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
+from agents_remember.models.runtime import RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.models.tokens import (
@@ -133,13 +133,13 @@ __all__ = [
     "ProviderTargetRepo",
     "ProviderWatcherAction",
     "ProviderWatchersResponse",
-    "ResolveContextResponse",
     "ResponseModel",
     "ResponseTokenCounter",
     "RouteIndexRefreshResponse",
     "RuntimeInstallResponse",
     "ServerInfoResponse",
     "SkillsInstallResponse",
+    "SlimContextPacket",
     "StrictResponseModel",
     "TaskScopedReaderContext",
     "TiktokenTokenCounter",

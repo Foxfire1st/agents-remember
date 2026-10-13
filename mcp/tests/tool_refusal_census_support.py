@@ -37,7 +37,10 @@ WORKTREE_NAME = "w"
 # rather than a refusal; the tools below pass it only to reach a LATER refusal.
 TASK_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/task.json"}
 LEAF_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/1_leaf.json"}
-ABSENT_REF: dict[str, str] = {"repository": REPO, "path": f"{MASTER}/absent-task/task.json"}
+ABSENT_REF: dict[str, str] = {
+    "repository": REPO,
+    "path": f"{MASTER}/absent-task/task.json",
+}
 
 
 def absent_contract(world) -> str:
@@ -73,16 +76,23 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         "server_info": {},
         "context_packet": {"repo_id": "no-such-repo"},
         "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
-        "resolve_context": {"repo_id": "no-such-repo"},
         "runtime_install": {"dry_run": True, "install_provider_deps": False},
         # -- structural ---------------------------------------------------------------
-        "dispatch_agent": {"task_document_ref": ABSENT_REF, "role": "worker", "brief": "census"},
+        "dispatch_agent": {
+            "task_document_ref": ABSENT_REF,
+            "role": "worker",
+            "brief": "census",
+        },
         # -- memory -------------------------------------------------------------------
         "memory_quality_check": {
             "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
         },
         "citation_fix": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
-        "route_index_refresh": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
+        "route_index_refresh": {
+            "repo_id": REPO,
+            "contract_path": contract,
+            "dry_run": True,
+        },
         "memory_init": {"repo_id": REPO, "initialize_git": True, "dry_run": True},
         "memory_baseline_status": {"repo_id": "no-such-repo"},
         # ADOPT_REPO is configured AND has a real memory repository that has never recorded
@@ -117,12 +127,6 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "repo_id": REPO,
             "task_name": f"{MASTER}-absent",
             "worktree_name": WORKTREE_NAME,
-        },
-        "worktree_enclosure_adopt": {
-            "contract_path": contract,
-            "expected_worktree_group": (world.coord / "worktrees" / "absent").as_posix(),
-            "rationale": "refusal census",
-            "dry_run": True,
         },
         "worktree_status": {
             "repo_id": REPO,
@@ -161,10 +165,22 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "worktree_cleanup": {"contract_path": contract, "dry_run": True},
         "worktree_abandon": {"contract_path": contract, "dry_run": True},
+        # MIK-R82's adoption tool arrived with no census row (the census failed
+        # closed at set equality until this row); a contract outside the
+        # coordination root is refused by name at the boundary, which raises.
+        "worktree_enclosure_adopt": {
+            "contract_path": "/none/absent-contract.md",
+            "expected_worktree_group": "/none/absent-group",
+            "rationale": "refusal census",
+        },
         "task_reopen": {"contract_path": contract, "dry_run": True},
         "lifecycle_finalize_task": {"contract_path": contract, "dry_run": True},
         # -- task documents and queue -------------------------------------------------
-        "task_doc": {"repo_id": REPO, "operation": "get", "task_name": f"{MASTER}-absent"},
+        "task_doc": {
+            "repo_id": REPO,
+            "operation": "get",
+            "task_name": f"{MASTER}-absent",
+        },
         "curator_coherence": {"request": {"action": "status", "contract_path": contract}},
         "closeout_queue": {
             "request": {
@@ -266,5 +282,9 @@ def drive_census(world) -> dict[str, dict[str, Any]]:
     for tool in PUBLIC_TOOLS:
         kind, payload = world.call(tool, arguments[tool])
         answer = payload or {}
-        results[tool] = {"kind": kind, "payload": answer, "whole": whole_result_for(answer)}
+        results[tool] = {
+            "kind": kind,
+            "payload": answer,
+            "whole": whole_result_for(answer),
+        }
     return results

@@ -24,6 +24,7 @@ from typing import Any, Final
 from agents_remember.application.knowledge_currentness import CodeTree, Currentness
 from agents_remember.application.knowledge_paging import (
     KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
+    CutBudget,
     PageBinding,
     PageCut,
     PageRow,
@@ -103,7 +104,9 @@ def subtree_page(
     envelope = response_tokens(
         {"view": "subtree", "state": "view", "selection": selection.to_document()}
     )
-    _cut, body = cut_page(page.rows, start, page.render, threshold=threshold - envelope)
+    _cut, body = cut_page(
+        page.rows, start, page.render, budget=CutBudget(threshold=threshold - envelope)
+    )
     # The answer's selection block is the measured one: a resumed page names the walk's code tree
     # and why (review R3-1), the same tree its ``page.codeTreeId`` states.
     return {"state": "view", "selection": selection.to_document(), **body}

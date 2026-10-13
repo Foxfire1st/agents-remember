@@ -7,7 +7,8 @@
   ``no_governing_family``.
 * **Expansion**: a family seed returns the full MIK-R01 family content.
 * **Budget**: chain entries are rows of the same paged walk, within the one threshold.
-* **Only the ``read_ar_files`` rendering deduplicates** an entry served earlier in the lifecycle.
+* A ``read_ar_files`` naming never shortens: the server keeps no per-session
+  state, so a repeated read names the same files again.
 """
 
 from __future__ import annotations
@@ -28,7 +29,12 @@ from agents_remember.models.knowledge.continuation import (
     decode_continuation,
     encode_continuation,
 )
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, record_path
+from agents_remember.models.knowledge_files.documents import (
+    LAYOUT_MARKER_PATH,
+    record_path,
+)
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
@@ -167,7 +173,12 @@ def _graph_with_a_routed_neighbour(root: Path) -> None:
 
 
 def _first_chain_row(rows: list[dict[str, Any]]) -> int:
-    return next(index for index, row in enumerate(rows) if row["kind"] == "chain_family")
+    return next(
+        index
+        for index, row in enumerate(rows)
+        if row["kind"] == "chain_family"
+        or (row["kind"] == "family" and (row.get("role") or "") == "chain")
+    )
 
 
 def test_chain_entries_are_compact_after_the_leaf_and_name_a_member_at_the_seed(
@@ -257,8 +268,9 @@ def test_the_conforming_example_returns_the_governing_family_of_an_unattributed_
     ]
     read = _read(tmp_path, root, view="source_context", source_path=new_helper)
     assert read["state"] == "page", read
-    assert read["payload"]["rows"] == block["rows"]
-    assert read["page"]["manifestDigest"] == block["manifestDigest"]
+    assert [(row["kind"], row["id"], row.get("role")) for row in read["payload"]["rows"]] == [
+        ("family", "FAM-W0RKTR", "chain")
+    ]
     assert read["payload"]["routeChain"] == block["routeChain"]
 
 
@@ -266,30 +278,38 @@ def test_a_family_seed_returns_the_full_family_content(tmp_path: Path) -> None:
     root = tmp_path / "memory"
     _graph(root)
     path_read = _read(tmp_path, root, view="source_context", source_path=SEED)
-    by_key = {(row["kind"], row["id"]): row for row in path_read["payload"]["rows"]}
-    expand = by_key[("chain_family", "FAM-F22222")]["expand"]
-    assert expand["operation"] == "knowledge_read"
-    family = _read(
-        tmp_path, root, view=expand["view"], family_revision_id=expand["familyRevisionId"]
-    )
+    by_key = {
+        (row["kind"], row["id"], row.get("role")): row for row in path_read["payload"]["rows"]
+    }
+    assert ("family", "FAM-F22222", "chain") in by_key
+    # The row names the family; the family is read by its named ID.
+    family = _read(tmp_path, root, view="source_context", family_revision_id="FAM-F22222")
     assert family["state"] == "page", family
     rows = family["payload"]["rows"]
     assert family["payload"]["seed"] == {"kind": "family", "id": "FAM-F22222"}
     assert "routeChain" not in family["payload"]
     # The header, every live member with its entries, then the members' other families.
-    assert _shape(rows) == [
-        ("family_header", "FAM-F22222"),
-        ("member", "INV-BBBBBB"),
-        ("realization", "RLZ-B00001"),
-        ("member", "INV-CCCCCC"),
-        ("realization", "RLZ-C00001"),
-        ("member", "INV-EEEEEE"),
-        ("realization", "RLZ-E00001"),
-        ("advertised_family", "FAM-F11111"),
-        ("advertised_family", "FAM-F33333"),
+    assert [(row["kind"], row["id"], row.get("role")) for row in rows] == [
+        ("family", "FAM-F22222", "header"),
+        ("invariant", "INV-BBBBBB", "member"),
+        ("realization", "RLZ-B00001", None),
+        ("invariant", "INV-CCCCCC", "member"),
+        ("realization", "RLZ-C00001", None),
+        ("invariant", "INV-EEEEEE", "member"),
+        ("realization", "RLZ-E00001", None),
+        ("family", "FAM-F11111", "advertised"),
+        ("family", "FAM-F33333", "advertised"),
     ]
-    # The same family content the path's leaf read returns for it.
-    assert rows[:7] == [by_key[(row["kind"], row["id"])] for row in rows[:7]]
+    # The same family content the path's leaf read names for it.
+    assert [(row["kind"], row["id"], row.get("role")) for row in rows[:7]] == [
+        ("family", "FAM-F22222", "header"),
+        ("invariant", "INV-BBBBBB", "member"),
+        ("realization", "RLZ-B00001", None),
+        ("invariant", "INV-CCCCCC", "member"),
+        ("realization", "RLZ-C00001", None),
+        ("invariant", "INV-EEEEEE", "member"),
+        ("realization", "RLZ-E00001", None),
+    ]
     assert family["page"]["selectionPolicy"] == "family-complete-leaf"
 
 
@@ -304,7 +324,9 @@ def _family_manifest(tmp_path: Path, root: Path, named: str) -> str | None:
     return read["page"]["manifestDigest"]
 
 
-def test_a_family_seed_is_named_by_id_revision_or_projected_uuid(tmp_path: Path) -> None:
+def test_a_family_seed_is_named_by_id_revision_or_projected_uuid(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "memory"
     _graph(root)
     spellings = ("FAM-F22222", "FAM-F22222@1", text_uuid("revision", "FAM-F22222@1"))
@@ -360,7 +382,15 @@ def _walk(
         assert body["state"] == "page", body
         rows.extend(body["payload"]["rows"])
         continuation = body.get("continuation")
-    return [row for row in rows if row["kind"] != "family_header_reference"]
+    # The continued family's header reference is framing, not a counted
+    # row: it repeats an identity the walk already returned, in either the
+    # retired vocabulary or L109's family/role vocabulary (rule 2).
+    return [
+        row
+        for row in rows
+        if row["kind"] != "family_header_reference"
+        and not (row["kind"] == "family" and (row.get("role") or "") == "reference")
+    ]
 
 
 _LONG_MEMBERS = [f"INV-B{number:05d}" for number in range(24)]
@@ -377,7 +407,10 @@ def long_tree(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     for identifier in _LONG_MEMBERS:
         _invariant(root, identifier)
         path = root / record_path("invariant", identifier, "x")
-        document = {**json.loads(path.read_text()), "statement": _words(identifier, 160)}
+        document = {
+            **json.loads(path.read_text()),
+            "statement": _words(identifier, 160),
+        }
         write_document(root, record_path("invariant", identifier, "x"), document)
     _family(root, "FAM-B16000", _LONG_MEMBERS, ["src"])
     _sidecar(root, SEED, [("RLZ-B00000", _LONG_MEMBERS[0])])
@@ -395,9 +428,11 @@ def test_chain_entries_count_toward_the_threshold_and_resume_like_the_leaf(
     page = published_intent_block(_context(tmp_path, root), [SEED])["seeds"][0]
     assert page["continuation"] is not None  # the chain does not fit beside the leaf
     rows = _walk(tmp_path, root, page)
-    keys = {f"{row['kind']}:{row['id']}" for row in rows}
+    keys = {f"{row['kind']}:{row['id']}:{row.get('role') or ''}" for row in rows}
     assert len(keys) == len(rows) == page["counts"]["rowsTotal"]  # each row exactly once
-    # The 25 chain entries are the walk's last 25 rows.
+    # The 25 chain entries are the walk's last 25 rows, in the walker's raw
+    # body vocabulary (chain_family); the projected family/chain form is
+    # pinned on mounted answers elsewhere.
     assert _first_chain_row(rows) == len(rows) - 25
     assert {row["kind"] for row in rows[-25:]} == {"chain_family"}
 
@@ -407,17 +442,21 @@ def test_a_family_seed_walk_resumes_under_any_spelling_of_its_family(
 ) -> None:
     tmp_path, root = long_tree
     family = _read(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
-    # The family seed overflows the mounted bound: the public answer keeps the
-    # overflow contract, and the page resolves through the same domain body the
-    # mounted tool serves (explicitly marked, never as pointer retrieval).
-    assert family["state"] == "page" and family.get("overflow"), family
-    assert family["resultKept"] is False, family
+    # Rule 2 states the rows: the seed's members fit within the bound as
+    # names (no text), and the mounted answer carries the continuation.
+    assert family["state"] == "page", family
+    assert count_response_tokens(family) <= bound_for("knowledge_read"), family
+    assert "holds together " not in json.dumps(family["payload"]["rows"]), family
+    assert family["continuation"] is not None, family
     first = _read_body(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
     assert first["state"] == "page" and first["continuation"] is not None
     # Review F4: the token binds the bare family ID; ``ID@rev`` and the projected UUID name it too.
     uuid = text_uuid("revision", "FAM-B16000@1")
     for named in ("FAM-B16000", "FAM-B16000@1", uuid):
         walked = _walk(tmp_path, root, first, family=named)
+        # The shared walker yields raw body rows: memberships ride kind
+        # member here; the projected invariant/member form is pinned on
+        # mounted answers elsewhere.
         assert [row["kind"] for row in walked].count("member") == len(_LONG_MEMBERS)
     other = _read(
         tmp_path,
@@ -487,15 +526,13 @@ def lifecycle(tmp_path: Path) -> Any:
     ambient.start(fleeting=True)
     install_ambient(ambient)
 
-    def read(paths: list[str], *, refresh: bool = False) -> list[dict[str, Any]]:
-        payload = read_ar_files_tool(
+    def read(paths: list[str]) -> dict[str, Any]:
+        return read_ar_files_tool(
             config,
             repo_id=REPO,
-            files=[{"path": path} for path in paths],
-            refresh=refresh,
+            files=list(paths),
             _context=context,
         )
-        return payload["published_intent"]["seeds"]
 
     yield root, read
     reset_ambient()
@@ -506,53 +543,30 @@ def _served(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return [(row["kind"], row["id"]) for row in rows if row["kind"] in kinds]
 
 
-def test_only_the_read_ar_files_rendering_shortens_a_chain_entry_served_earlier(
-    tmp_path: Path, lifecycle: Any
-) -> None:
-    root, read = lifecycle
-    first = read([SEED])[0]
-    assert _served(first["rows"]) == [
-        ("chain_family", "FAM-F11111"),
-        ("chain_family", "FAM-F44444"),
-        ("chain_family", "FAM-F22222"),
-    ]
-    again = read([SEED])[0]
-    assert _served(again["rows"]) == [
-        ("served_earlier", "FAM-F11111"),
-        ("served_earlier", "FAM-F44444"),
-        ("served_earlier", "FAM-F22222"),
-    ]
-    reference = again["rows"][-1]
-    assert reference == {
-        "kind": "served_earlier",
-        "servedKind": "chain_family",
-        "id": "FAM-F22222",
-        "revision": 1,
-        "title": "Title of FAM-F22222",
-        "via": ["."],
-        "memberAtSeed": True,
-    }
-    # The shortened row keeps its place: one selection, the same counts and manifest.
-    assert len(again["rows"]) == len(first["rows"])
-    assert (again["counts"], again["manifestDigest"]) == (first["counts"], first["manifestDigest"])
-    # knowledge_read never deduplicates.
-    direct = _read(tmp_path, root, view="source_context", source_path=SEED)
-    assert direct["payload"]["rows"] == first["rows"]
+def test_read_ar_files_names_the_same_files_on_every_call(tmp_path: Path, lifecycle: Any) -> None:
+    """A read names; it never shortens (MIK-R109 rule 1).
 
-    # A refresh serves in full again; a second seed of the same read is already served.
-    both = read([SEED, "src/new.py"], refresh=True)
-    assert _served(both[0]["rows"]) == _served(first["rows"])
-    assert _served(both[1]["rows"]) == [
-        ("served_earlier", "FAM-F11111"),
-        ("served_earlier", "FAM-F44444"),
-        ("served_earlier", "FAM-F22222"),
-    ]
-    # A changed family is served again; the unchanged ones stay short.
-    _family(root, "FAM-F44444", ["INV-XXXXXX"], ["src"], guarantee="A changed guarantee.")
-    commit_all(root)
-    changed = read(["src/new.py"])[0]
-    assert _served(changed["rows"]) == [
-        ("served_earlier", "FAM-F11111"),
-        ("chain_family", "FAM-F44444"),
-        ("served_earlier", "FAM-F22222"),
+    The server keeps no per-session state about what it named: a repeated
+    read names the same files with the same cards, and ``refresh`` is a
+    removed argument, refused by name.
+    """
+
+    root, read = lifecycle
+    first = read([SEED])
+    assert first["state"] == "named", first
+    assert [entry["path"] for entry in first["files"]] == [SEED]
+    again = read([SEED])
+    assert again["files"] == first["files"]
+    assert "served_earlier" not in json.dumps(again)
+    # knowledge_read names the same governing families the chain computes.
+    direct = _read(tmp_path, root, view="source_context", source_path=SEED)
+    assert direct["state"] == "page", direct
+    assert [
+        row["id"]
+        for row in direct["payload"]["rows"]
+        if row["kind"] == "family" and (row.get("role") or "") == "chain"
+    ] == [
+        "FAM-F11111",
+        "FAM-F44444",
+        "FAM-F22222",
     ]

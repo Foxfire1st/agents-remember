@@ -41,7 +41,6 @@ from agents_remember.mcp.tools import knowledge as tools
 from agents_remember.mcp.tools.closeout_queue import closeout_queue_payload
 from agents_remember.mcp.tools.core import (
     context_packet_payload,
-    resolve_context_payload,
     server_info_payload,
 )
 from agents_remember.mcp.tools.gates import gate_list_payload
@@ -143,7 +142,12 @@ def test_every_registered_read_leaves_nothing_but_cache(
     compared = tools.knowledge_diff_payload(
         tools.DiffToolRequest(memory_root=str(world.memory), before="HEAD", after="HEAD")
     )
-    assert compared["state"] == "compared", compared
+    # MIK-R109 rule 3: the comparison answers only beside its caller-readable
+    # report, and this rootless direct call names nowhere to write it, so the
+    # tool refuses and writes nothing -- the registered tool always passes
+    # the coordination root (the compared path rides the report suites).
+    assert compared["state"] == "refused", compared
+    assert compared["refusalCode"] == "report-unwritable", compared
     checked = tools.knowledge_integrity_check_payload(
         tools.IntegrityCheckRequest(contractPath=str(world.contract))
     )
@@ -401,14 +405,8 @@ def test_miscellaneous_description_called_reads_write_nothing(
         config, ServingBuildPayload(version="0", bootedAt="2026-10-02T00:00:00Z")
     )
     assert isinstance(info, dict) and info.get("ok") is True, info
-    resolved = resolve_context_payload(
-        config,
-        TaskRef(
-            repo_id=endpoints.repository_id,
-            contract_path=endpoints.contract.contract_path.as_posix(),
-        ),
-    )
-    assert isinstance(resolved, dict), resolved
+    # `resolve_context` is removed (MIK-R109 rule 5): no removed tool rides
+    # the miscellaneous-read battery; `context_packet` covers its readers.
     gates = gate_list_payload(config, lifecycle_id=None)
     assert isinstance(gates, dict), gates
     code_files = sorted(
@@ -724,8 +722,9 @@ def test_context_packet_freshness_fetch_is_bounded(
     )
     assert isinstance(packet, dict), packet
     assert calls == ["fetch"], calls
-    code_fresh = packet.get("freshness", {}).get("code", {})
-    assert code_fresh.get("behind") == 1, code_fresh
+    # MIK-R109 rule 4: the slim answer carries behind-ness as an action line,
+    # not as a raw freshness block.
+    assert "the code checkout is 1 behind its upstream" in packet.get("actions", []), packet
     after = _snapshot(roots)
     findings = _classify(
         before,

@@ -69,7 +69,7 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
         )
 
     # The timeout class is picked per command, not per module. The three ref reads below
-    # are constant time -- ~1.8ms each on this repository -- and sit on `resolve_context`,
+    # are constant time -- ~1.8ms each on this repository -- and sit on `context_packet`,
     # which runs on essentially every tool call. On the runner's local default all four
     # probes here could hold one MCP call for twenty minutes over a stalled mount or a
     # held index lock, with no cancellation path for the client; the metadata band exists

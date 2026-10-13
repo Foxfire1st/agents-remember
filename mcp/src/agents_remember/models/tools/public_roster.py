@@ -23,7 +23,6 @@ PUBLIC_TOOLS = (
     "server_info",
     "context_packet",
     "read_ar_files",
-    "resolve_context",
     "runtime_install",
     "dispatch_agent",
     # MIK-R100 rule 8 restores only retire_child; the L112 removals otherwise stand.

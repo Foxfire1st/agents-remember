@@ -209,7 +209,8 @@ class KnowledgeIndex:
         families = tuple(
             str(row[0])
             for row in self._rows(
-                "SELECT family FROM ix_member WHERE invariant = ? ORDER BY family", (invariant_id,)
+                "SELECT family FROM ix_member WHERE invariant = ? ORDER BY family",
+                (invariant_id,),
             )
         )
         linked = tuple(link for link in self._incoming(invariant_id) if link.relation != "member")
@@ -228,13 +229,15 @@ class KnowledgeIndex:
         members = tuple(
             str(row[0])
             for row in self._rows(
-                "SELECT invariant FROM ix_member WHERE family = ? ORDER BY invariant", (family_id,)
+                "SELECT invariant FROM ix_member WHERE family = ? ORDER BY invariant",
+                (family_id,),
             )
         )
         routes = tuple(
             str(row[0])
             for row in self._rows(
-                "SELECT route FROM ix_route WHERE family = ? ORDER BY route", (family_id,)
+                "SELECT route FROM ix_route WHERE family = ? ORDER BY route",
+                (family_id,),
             )
         )
         return self._answer(
@@ -278,7 +281,10 @@ class KnowledgeIndex:
             return self._answer(())
         placeholders = ", ".join("?" for _ in invariant_ids)
         return self._answer(
-            self._entries(f"kind = 'proof' AND invariant IN ({placeholders})", tuple(invariant_ids))
+            self._entries(
+                f"kind = 'proof' AND invariant IN ({placeholders})",
+                tuple(invariant_ids),
+            )
         )
 
     def invariants_without_proof(self) -> Answer[tuple[Record, ...]]:
@@ -311,7 +317,8 @@ class KnowledgeIndex:
         where, parameters = _under(directory)
         prefix = _prefix(directory)
         entries = self._entries(
-            f"({where}) AND instr(substr(path, ?), '/') = 0", (*parameters, len(prefix) + 1)
+            f"({where}) AND instr(substr(path, ?), '/') = 0",
+            (*parameters, len(prefix) + 1),
         )
         return self._answer(_split(entries))
 
@@ -354,9 +361,47 @@ class KnowledgeIndex:
         """Return the text ID a projected UUID stands for, or ``None`` (rule 6's reverse map)."""
 
         row = next(
-            iter(self._rows("SELECT id FROM ix_uuid WHERE uuid = ?", (projected_uuid,))), None
+            iter(self._rows("SELECT id FROM ix_uuid WHERE uuid = ?", (projected_uuid,))),
+            None,
         )
         return None if row is None else str(row[0])
+
+    def entry_sidecar(self, entry_id: str) -> str | None:
+        """The memory-relative file that declares one entry, or ``None``.
+
+        The indexed sidecar is authoritative for where an entry is
+        declared; text scans of the working files are the fallback for
+        entries the index does not know.
+        """
+
+        row = next(
+            iter(self._rows("SELECT sidecar FROM ix_entry WHERE id = ?", (entry_id,))),
+            None,
+        )
+        return None if row is None else str(row[0])
+
+    def entry_sidecars(self) -> dict[str, str]:
+        """Every entry ID to its declaring file, for one answer's lookups."""
+
+        return {
+            str(entry_id): str(sidecar)
+            for entry_id, sidecar in self._rows("SELECT id, sidecar FROM ix_entry")
+        }
+
+    def record_paths(self) -> dict[str, str]:
+        """Every record ID to its authoritative path, for one answer's lookups."""
+
+        return {
+            str(record_id): str(path)
+            for record_id, path in self._rows("SELECT id, path FROM ix_record")
+        }
+
+    def uuid_text_ids(self) -> dict[str, str]:
+        """Every projected UUID to its text ID, for one answer's lookups."""
+
+        return {
+            str(uuid): str(text_id) for uuid, text_id in self._rows("SELECT uuid, id FROM ix_uuid")
+        }
 
     # -- internals -------------------------------------------------------------------------------
 
@@ -474,7 +519,11 @@ def _under(directory: str, *, column: str = "path") -> tuple[str, tuple[Any, ...
     prefix = _prefix(directory)
     if not prefix:
         return "1 = 1", ()
-    return f"{column} = ? OR substr({column}, 1, ?) = ?", (prefix[:-1], len(prefix), prefix)
+    return f"{column} = ? OR substr({column}, 1, ?) = ?", (
+        prefix[:-1],
+        len(prefix),
+        prefix,
+    )
 
 
 def _split(entries: Sequence[Entry]) -> EntriesAtPath:

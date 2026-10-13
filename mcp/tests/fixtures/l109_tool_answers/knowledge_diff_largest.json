@@ -1,0 +1,145 @@
+{
+ "afterRevision": "HEAD",
+ "afterTree": "afa46b05f20583ae13d824ade141d151a72108d9",
+ "beforeRevision": "HEAD~1",
+ "beforeTree": "c7e48cc0cc1570c055db3b76207aae22362b518d",
+ "counts": {
+  "added": 26,
+  "changedFiles": 66,
+  "deleted": 1,
+  "history": 0,
+  "modified": 35,
+  "other": 0,
+  "records": 66,
+  "renamed": 4,
+  "sources": 0
+ },
+ "decisionRecordCount": 66,
+ "decisionRecords": [
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-4NPRREC9-rec-53.json",
+   "recordId": "INV-4NPRREC9"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-5GHFKCHJ-rec-70.json",
+   "recordId": "INV-5GHFKCHJ"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-5QTA4AXF-rec-64.json",
+   "recordId": "INV-5QTA4AXF"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-67WZXP9F-rec-74.json",
+   "recordId": "INV-67WZXP9F"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-6KRQZ97F-rec-72.json",
+   "recordId": "INV-6KRQZ97F"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-7VSK0D5G-rec-65.json",
+   "recordId": "INV-7VSK0D5G"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-BMC13BY0-rec-52.json",
+   "recordId": "INV-BMC13BY0"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-D6EDD36D-rec-76.json",
+   "recordId": "INV-D6EDD36D"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-DTXGTQFG-rec-60.json",
+   "recordId": "INV-DTXGTQFG"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-G7PJPC9Y-rec-75.json",
+   "recordId": "INV-G7PJPC9Y"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-HQQMB610-rec-59.json",
+   "recordId": "INV-HQQMB610"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-KTZR1H54-rec-62.json",
+   "recordId": "INV-KTZR1H54"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-M4051WZ0-rec-68.json",
+   "recordId": "INV-M4051WZ0"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-M86194R5-rec-55.json",
+   "recordId": "INV-M86194R5"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-MDXNZEN0-rec-71.json",
+   "recordId": "INV-MDXNZEN0"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-MS3TQ18E-rec-50.json",
+   "recordId": "INV-MS3TQ18E"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-NW9FRAEK-rec-66.json",
+   "recordId": "INV-NW9FRAEK"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-PB9TXFJ1-rec-51.json",
+   "recordId": "INV-PB9TXFJ1"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-QSXGQGYP-rec-57.json",
+   "recordId": "INV-QSXGQGYP"
+  },
+  {
+   "change": "added",
+   "kind": "invariant",
+   "path": "knowledge/invariants/INV-TRTY0AYM-rec-73.json",
+   "recordId": "INV-TRTY0AYM"
+  }
+ ],
+ "log": "/world/worktrees/repo-a/w-ar/logs/ar-tools-2000-01-01/000000000000-knowledge_diff-00000000.json",
+ "memoryRoot": "/gen/memory",
+ "ok": true,
+ "report": "/world/worktrees/repo-a/w-ar/reports/000000000000-knowledge-diff-00000000.json",
+ "state": "compared"
+}

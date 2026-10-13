@@ -36,7 +36,8 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
 
 ## Tool surface
 - Native file tools inside the two worktrees; shell for the checks below.
-- Read-only AR retrieval: `read_ar_files` (serves the OFFICIAL baseline, never your worktree —
+- Read-only AR retrieval: `read_ar_files` (names the governing cards in the repositories of
+  your scope — the leaf worktrees under task scope, the official checkouts otherwise;
   final verification uses native reads), `context_packet`.
 - When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
   freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a

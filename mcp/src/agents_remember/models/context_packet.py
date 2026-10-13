@@ -122,3 +122,46 @@ class ContextPacketV2(ToolResponse):
     drift: DriftSummary
     freshness: FreshnessSummary = Field(default_factory=FreshnessSummary)
     diagnostics: ContextDiagnosticsHint = Field(default_factory=ContextDiagnosticsHint)
+
+
+class SlimRoots(StrictResponseModel):
+    """Where the caller works: the roots it opens (MIK-R109 rule 4)."""
+
+    code: str
+    memory: str
+    enclosure: str | None = None
+    taskDocument: str | None = None
+
+
+class SlimTask(StrictResponseModel):
+    """The task: its ID and its master (MIK-R109 rule 4)."""
+
+    id: str
+    master: str
+
+
+class SlimPair(StrictResponseModel):
+    """The pair identity as its two commits (MIK-R109 rule 4)."""
+
+    code: str
+    memory: str
+
+
+class SlimContextPacket(ToolResponse):
+    """``context_packet`` as one agent answers it (MIK-R109 rule 4).
+
+    The whole result stays whole behind the answer's log (MIK-R108 rule 5);
+    what leaves the server for an agent is where the caller works and what
+    needs action: the roots, the task, one line per state that needs action
+    (and none when nothing does), the serving build as its commit, and the
+    pair identity as its two commits. An ordinary answer is under 600 tokens.
+    """
+
+    operation: Literal["context_packet"] = "context_packet"
+    contextPacketVersion: Literal[3] = 3
+    ok: bool
+    roots: SlimRoots
+    task: SlimTask | None = None
+    actions: list[str] | None = None
+    servingBuild: str | None = None
+    pair: SlimPair | None = None
