@@ -31,7 +31,8 @@ import { masterIdsByFolder, shortTaskId } from "./lifecycle-list/rowState";
 // gate, and actionable-drift rows are repo-level one-shot signals anchored by the drift snapshot
 // timestamp.
 //
-// The measures are the approved pages' measures; see lifecycle-list/columnLook.ts.
+// The measures are the task page's text sizes (MIK-R163 rule 1); see
+// lifecycle-list/columnLook.ts.
 //
 // The bell is a view tab at the column's size (`columnTabButton`). What only a bell has is here:
 // it takes the colour of the most pressing entry that waits, and it is filled while its layer is
@@ -135,7 +136,7 @@ const item = css({
   alignItems: "baseline",
   paddingInline: "0.2625rem",
   paddingBlock: "0.21rem",
-  fontSize: "0.7rem",
+  fontSize: "0.72rem",
   lineHeight: "1.45",
   borderTopWidth: "1px",
   borderTopStyle: "solid",
@@ -155,8 +156,14 @@ const severityMark = css({
   userSelect: "none",
   "& > span": { marginRight: "0" },
 });
-const what = css({ minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-const age = css({ fontSize: "0.6125rem", whiteSpace: "nowrap" });
+const what = css({
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: "0.8rem",
+});
+const age = css({ fontSize: "0.72rem", whiteSpace: "nowrap" });
 const dismissButton = css({
   font: "inherit",
   lineHeight: "1",
@@ -179,14 +186,14 @@ const where = cva({
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    fontSize: "0.63rem",
+    fontSize: "0.72rem",
     color: "muted",
   },
   variants: {
     link: {
       true: {
         font: "inherit",
-        fontSize: "0.63rem",
+        fontSize: "0.72rem",
         color: "cyan",
         background: "transparent",
         borderStyle: "none",

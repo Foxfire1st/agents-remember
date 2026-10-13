@@ -132,7 +132,7 @@ const groupHeader = css({
   minWidth: "0",
   marginBottom: "0.0875rem",
   color: "muted",
-  fontSize: "0.595rem",
+  fontSize: "0.72rem",
   lineHeight: "1.4",
   letterSpacing: "0.09em",
   textTransform: "uppercase",
@@ -145,7 +145,7 @@ const groupCount = css({ marginLeft: "auto", letterSpacing: "0.02em" });
 const rowItem = css({
   minWidth: "0",
   marginInline: "-0.2625rem",
-  fontSize: "0.7rem",
+  fontSize: "0.8rem",
   lineHeight: "1.5",
   cursor: "pointer",
   outline: "none",
@@ -201,13 +201,13 @@ const statusDot = cva({
   },
 });
 const rowIdCell = cva({
-  base: { flex: "none", color: "muted" },
-  variants: { long: { true: { fontSize: "0.6125rem" } } },
+  base: { flex: "none", color: "muted", fontSize: "0.72rem" },
+  variants: { long: { true: { fontSize: "0.72rem" } } },
 });
 const rowTitle = cva({
   base: { flex: "1 1 0", minWidth: "8ch", overflow: "hidden", textOverflow: "ellipsis" },
   variants: {
-    weight: { parent: { fontWeight: "600" }, fold: { color: "muted" } },
+    weight: { parent: { fontWeight: "600" }, fold: { color: "muted", fontSize: "0.72rem" } },
   },
 });
 const rowRepo = css({
@@ -215,7 +215,7 @@ const rowRepo = css({
   minWidth: "0",
   overflow: "hidden",
   textOverflow: "ellipsis",
-  fontSize: "0.6125rem",
+  fontSize: "0.72rem",
   color: "muted",
 });
 // The word: what asks for the developer is coloured, a state that asks for nothing is muted.
@@ -226,7 +226,7 @@ const rowWordCell = cva({
     maxWidth: "15ch",
     overflow: "hidden",
     textOverflow: "ellipsis",
-    fontSize: "0.6125rem",
+    fontSize: "0.72rem",
   },
   variants: {
     tone: {
@@ -242,12 +242,12 @@ const rowFigure = css({
   flex: "none",
   minWidth: "3ch",
   textAlign: "right",
-  fontSize: "0.6125rem",
+  fontSize: "0.72rem",
 });
 const pickupDismiss = css({
   flex: "none",
   font: "inherit",
-  fontSize: "0.6125rem",
+  fontSize: "0.72rem",
   color: "muted",
   background: "transparent",
   borderStyle: "none",
