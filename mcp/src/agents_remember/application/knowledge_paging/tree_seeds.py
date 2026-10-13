@@ -19,9 +19,10 @@ from agents_remember.memory.knowledge_index.projection import text_uuid
 __all__ = ["SEED_SOURCES", "absent_seed", "tree_seed_refusal"]
 
 SEED_SOURCES: Final = (
-    "a converted memory tree's seeds are the revision UUIDs its own reads return -- take one from "
-    "the knowledge section of read_ar_files or from a source_context row (the projected UUID of "
-    "'<ID>@<revision>'); a database-era revision ID names nothing in a converted tree"
+    "a converted memory tree's seeds are the revision UUIDs its own reads return -- take the "
+    "seed the refusal names for the held revision, or name the revision's text ID (for example "
+    "'FAM-…' or 'FAM-…@1') in a source_context read; a database-era revision ID names nothing "
+    "in a converted tree"
 )
 _PREFIXES: Final = {
     "invariantRevisionId": ("INV-", "invariant"),

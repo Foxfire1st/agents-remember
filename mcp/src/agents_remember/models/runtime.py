@@ -1,4 +1,4 @@
-"""Models for runtime installation and coordination context tools."""
+"""Models for runtime installation tools."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from agents_remember.models.base import FlexibleToolResponse, ToolResponse
+from agents_remember.models.base import FlexibleToolResponse
 
 
 class RuntimeInstallResponse(FlexibleToolResponse):
@@ -26,9 +26,3 @@ class RuntimeInstallResponse(FlexibleToolResponse):
             "payload keeps counts and a compact rebind digest."
         ),
     )
-
-
-class ResolveContextResponse(ToolResponse):
-    operation: Literal["resolve_context"] = "resolve_context"
-    repoId: str
-    context: dict[str, Any]

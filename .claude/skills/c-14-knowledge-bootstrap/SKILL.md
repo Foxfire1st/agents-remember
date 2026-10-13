@@ -84,7 +84,7 @@ curator, and the curator's hand-off list is the only thing handed to the writer.
 ## Inputs
 
 - **The repository id the MCP authority settings declare**, and the resolved coordination context
-  (`context_packet`, `resolve_context`, `server_info`). There is no default repository.
+  (`context_packet`, `server_info`). There is no default repository.
 - **The code and memory revision the foundation is being built against.** The taskless entry derives
   both from the real checkouts; a caller does not type them. Both lines must resolve `HEAD`: a
   checkout that answers no commit is refused by name (`code_revision_unavailable`,
@@ -109,7 +109,7 @@ Four states are four different facts, and a run that merges them invents history
 | **Context not admitted** — `context-not-admitted` | `memory_init`'s `knowledge` block, or the refusal a `knowledge-bootstrap` run prints | The bootstrap admission itself refused (see the refusal table below). The route is the refusal's own `nextAction`; it is not a knowledge state at all. |
 | **Legacy format** | the memory root holds no `knowledge/layout.json`; `knowledge_read` and the write commands answer `legacy-format` | The tree is not converted, and nothing can be written to it. **Report it; do not create the marker by hand.** The refusal names the conversion command. |
 | **Converted, no records** | the memory root holds `knowledge/layout.json` and no record file under `knowledge/<kind>/` | This is the first-foundation entry: continue to step 2. A memory root that `memory_init` created is in this state. |
-| **Converted, records present** | record files under `knowledge/<kind>/`; read them with `knowledge_read` (`memoryRoot` and one of `view="family"`, `view="invariant"`, `view="source_context"`; without a seed each lists the records the tree holds) | A foundation exists. Read it before extending it: never author a second record for an obligation the tree already holds. |
+| **Converted, records present** | record files under `knowledge/<kind>/`; name them with `knowledge_read`, then open the named files natively (`memoryRoot` and one of `view="family"`, `view="invariant"`, `view="source_context"`; without a seed each lists the records the tree holds) | A foundation exists. Read it before extending it: never author a second record for an obligation the tree already holds. |
 
 For an admitted converted memory tree, `memory_init.knowledge` reports `not-recorded` when its
 complete index contains no authored knowledge records, `recorded` when the complete index contains
@@ -119,8 +119,8 @@ names that derived index; its mere existence does not prove an authored foundati
 refusal reports `context-not-admitted`, with its actual `code`, `detail` and `nextAction`. An
 unconverted root reports `unusable` with `code: legacy-format`; follow the returned crossing-sync or
 conversion route, never create a layout marker by hand. Other unreadable states remain unusable:
-report the returned reason and recovery rather than infer empty knowledge. Independently read the
-text records through `knowledge_read` before extending the foundation; `recorded` establishes their
+report the returned reason and recovery rather than infer empty knowledge. Independently name the
+records through `knowledge_read` and open the named files natively before extending the foundation; `recorded` establishes their
 presence, not semantic coverage of the requested scope.
 
 ### 2. Build a bounded source inventory and a coverage plan
@@ -262,7 +262,8 @@ its own fact:
   `unresolvable`).
 
 Verify the stored result through the ordinary read surface as well — `knowledge_read` over the memory
-root (`memoryRoot`) for the records and families the run wrote, and `agents-remember
+root (`memoryRoot`) for the records and families the run wrote (open each named file at its line and
+confirm the ID it declares), and `agents-remember
 knowledge-validate` for the tree — so the claim is about the files and not about the run's own prose.
 
 ### 6. Report coverage and unresolved work

@@ -110,6 +110,24 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
         4000,
         "the designated place for roots, build and identity (rule 2)",
     ),
+    # L109: a read names where a thing is. Each bound is set from the
+    # largest case of its row, within twice that case and at most 4,000.
+    ("read_ar_files", None): (
+        2400,
+        "twenty named paths with their cards, counts and overviews",
+    ),
+    ("knowledge_read", None): (
+        4000,
+        "the largest family-complete page in named rows with short currentness",
+    ),
+    ("knowledge_diff", None): (
+        1500,
+        "the compared trees with counts and up to twenty named records",
+    ),
+    ("context_packet", None): (
+        360,
+        "roots, task, action lines and short values under 600 tokens",
+    ),
 }
 
 # MIK-R110 rule 6: the governed per-tool answer bounds for the landed memory
@@ -133,19 +151,13 @@ SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
 
 # Rule 7: until its leaf lands, a tool stands in the table as an interim row
 # (bound 4,000, no list of fields, the name of its leaf). The guard holds it
-# to the bound. This leaf builds rules 1-6 and 8 and changes the envelope;
-# the answers themselves are rebuilt by L109-L112.
+# to the bound. L109 has landed: its four rebuilt reads hold final rows in
+# TOOL_ANSWER_EXCEPTIONS above. The rows below name the leaves still to land.
 INTERIM_TOOL_LEAF: dict[str, str] = {
     # L100: native tools land with their own leaf; until it lands they stand
     # as interim rows here.
     "retire_child": "L100",
     "role_start_set": "L100",
-    # L109: a read names where a thing is.
-    "read_ar_files": "L109",
-    "knowledge_read": "L109",
-    "knowledge_diff": "L109",
-    "context_packet": "L109",
-    "resolve_context": "L109",
     # L111: the task and landing tools answer with the state and the next step.
     "worktree_start": "L111",
     "worktree_attach": "L111",
@@ -170,7 +182,7 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "role_start": "L111",
     "role_message": "L111",
 }
-INTERIM_LEAVES = ("L100", "L109", "L110", "L111", "L112")
+INTERIM_LEAVES = ("L100", "L110", "L111", "L112")
 
 
 # Rule 9 (L112): the landed leaf's final rows carry their own bounds. The

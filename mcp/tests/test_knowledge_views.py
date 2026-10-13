@@ -15,6 +15,7 @@ with the canonical database. The projection writer's cases left with it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -156,7 +157,16 @@ def test_the_registry_admits_one_rule_per_ordering_input() -> None:
 def test_no_registered_rule_reads_a_name_a_path_or_a_score() -> None:
     """The four forbidden ordering sources are absent from every registered rule's declared reads."""
 
-    forbidden = ("name", "symbol", "prefix", "extension", "depth", "score", "rank", "weight")
+    forbidden = (
+        "name",
+        "symbol",
+        "prefix",
+        "extension",
+        "depth",
+        "score",
+        "rank",
+        "weight",
+    )
     for rule in MECHANICAL_RULES:
         for read in rule.reads:
             assert not any(token in read for token in forbidden), (rule.rule_id, read)
@@ -215,7 +225,10 @@ def test_incompleteness_and_its_continuation_must_agree() -> None:
     """
 
     remaining = view_counts(
-        registered_realizations=2, registered_families=1, rows_returned=2, rows_remaining=3
+        registered_realizations=2,
+        registered_families=1,
+        rows_returned=2,
+        rows_remaining=3,
     )
     with pytest.raises(ValueError):
         SourceContextView(
@@ -226,7 +239,10 @@ def test_incompleteness_and_its_continuation_must_agree() -> None:
         )
 
     complete = view_counts(
-        registered_realizations=2, registered_families=1, rows_returned=2, rows_remaining=0
+        registered_realizations=2,
+        registered_families=1,
+        rows_returned=2,
+        rows_remaining=0,
     )
     with pytest.raises(ValueError):
         SourceContextView(
@@ -255,7 +271,10 @@ def test_a_quantity_with_no_meaning_for_a_view_says_so_instead_of_reporting_zero
     """Every required quantity is present, and an absent measurement is stated, never a zero."""
 
     counts = view_counts(
-        registered_realizations=None, registered_families=None, rows_returned=0, rows_remaining=0
+        registered_realizations=None,
+        registered_families=None,
+        rows_returned=0,
+        rows_remaining=0,
     )
     assert counts.registered_realizations.state == "not_applicable"
     assert counts.registered_realizations.value is None
@@ -477,8 +496,19 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
             "repositoryRoot",
             "codeTreeId",
         },
-        "knowledge_diff": {"memoryRoot", "beforeRevision", "afterRevision", "recordId", "path"},
-        "knowledge_integrity_check": {"memoryRoot", "codeRoot", "baseCommits", "contractPath"},
+        "knowledge_diff": {
+            "memoryRoot",
+            "beforeRevision",
+            "afterRevision",
+            "recordId",
+            "path",
+        },
+        "knowledge_integrity_check": {
+            "memoryRoot",
+            "codeRoot",
+            "baseCommits",
+            "contractPath",
+        },
     }
 
     family = await _call(
@@ -503,15 +533,21 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
         {"memoryRoot": str(root), "beforeRevision": "HEAD~1", "afterRevision": "HEAD"},
     )
     assert compared["state"] == "compared", compared
-    assert [change["path"] for change in compared["diff"]["other"]] == [
-        "knowledge/notes-for-the-diff.json"
-    ]
-    assert compared["diff"]["changed_files"] == 1
+    assert compared["beforeRevision"] == "HEAD~1" and compared["afterRevision"] == "HEAD"
+    assert compared["counts"]["changedFiles"] == 1
+    assert compared["decisionRecordCount"] == 0
+    assert compared["decisionRecords"] == []
     assert "semanticEffectLabels" not in compared
+    assert "diff" not in compared and "leftOut" not in compared
+    report = Path(compared["report"])
+    assert report.is_file(), compared
+    reported = json.loads(report.read_text(encoding="utf-8"))
+    assert [change["path"] for change in reported["other"]] == ["knowledge/notes-for-the-diff.json"]
+    assert reported["changedFiles"] == 1
     empty = await _call(
         server, "knowledge_diff", {"memoryRoot": str(root), "beforeRevision": "HEAD"}
     )
-    assert empty["state"] == "compared" and empty["diff"]["changed_files"] == 0
+    assert empty["state"] == "compared" and empty["counts"]["changedFiles"] == 0
 
     code = tmp_path / "code"
     code.mkdir()

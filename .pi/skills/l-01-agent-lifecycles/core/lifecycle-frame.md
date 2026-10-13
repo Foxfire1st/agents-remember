@@ -42,10 +42,10 @@ The opening detail the **architect and orchestrator** run before relying on memo
 (each role file binds whether its seat runs it; a spawned role never repeats it, because its
 spawner compiles the facts into the brief):
 
-1. `context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true,
+1. `context_packet(repo_id="<repo-id>", include_drift=true,
    include_freshness=true)`.
-2. Report the packet facts before relying on memory or providers: repository/branch/dirty state;
-   memory + onboarding roots; provider state; drift status and actionable count; branch freshness
+2. Report the packet facts before relying on memory: repository/branch/dirty state;
+   memory + onboarding roots; drift status and actionable count; branch freshness
    (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory
    content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not
    block an otherwise valid code/memory pair.

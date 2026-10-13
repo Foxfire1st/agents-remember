@@ -46,7 +46,10 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.application.operator_inbox_tools import operator_inbox_post_tool
-from agents_remember.application.structural.outcomes import StructuralOutcome, structural_payload
+from agents_remember.application.structural.outcomes import (
+    StructuralOutcome,
+    structural_payload,
+)
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
@@ -83,7 +86,10 @@ from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.models.terminal import SessionRetireResponse
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import WorktreeOperationControlResponse
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    terminal_catalog_path,
+)
 from agents_remember.worktrees.activation import atomic_series_activation_terminal
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
@@ -131,7 +137,9 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     return sites
 
 
-def choke_point_handlers(path: Path) -> tuple[list[ast.FunctionDef | ast.AsyncFunctionDef], int]:
+def choke_point_handlers(
+    path: Path,
+) -> tuple[list[ast.FunctionDef | ast.AsyncFunctionDef], int]:
     """The handlers in one tool module, and that module's ``_tool_payload`` call sites.
 
     A **handler** here is any public module-level function: in ``mcp/tools/`` a public
@@ -218,30 +226,32 @@ def advertised_tool_names() -> set[str]:
 # of it, so an accidental change fails against the registration modules rather than against a
 # number somebody has to remember to update.
 #
-# 39 on the merged line: the official line holds 73 (74 minus `knowledge_change` and
+# 40 on the merged line: the official line holds 73 (74 minus `knowledge_change` and
 # `knowledge_project`, removed upstream by MIK-R26 rule 5), and the leaf removes the 11
 # provider/code-search tools and the 23 table tools (all of rule 5 except
 # `dispatch_agent`), 73 - 11 - 23 = 39. MIK-R100 adds `role_start_set` (rule 1) and
-# restores `retire_child` (rule 8), and MIK-R94 rule 2 adds `direct_execution_grant`:
-# 39 + 2 + 1 = 42.
-ROSTER_SIZE = 42
+# restores `retire_child` (rule 8), MIK-R94 rule 2 adds `direct_execution_grant`,
+# and L109 removes `resolve_context` (context_packet is the orientation read):
+# 39 + 2 + 1 - 1 = 41.
+ROSTER_SIZE = 41
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
 #
-# 19 modules and 63 handlers on the merged line: the official line adds the
+# 19 modules and 64 handlers on the merged line: the official line adds the
 # enclosure-adoption adapter module beside the leaf's deletions, and the leaf
 # deletes the `providers`, `benchmark` and `capsule_serving` adapter modules
 # with their tools, and the payload builders only the 23 removed tools
 # called. (A `*_payload`-suffixed helper that only shapes a dict, such as
 # the install compactor, is not a handler: it never reaches the choke point.)
 # MIK-R100 adds the `role_start_set` and restores the `retire_child` payload
-# builders, and MIK-R94 rule 2 adds the `direct_execution` adapter module and
-# its handler: 19 + 1 = 20 modules, 63 + 2 + 1 = 66 handlers.
+# builders, MIK-R94 rule 2 adds the `direct_execution` adapter module and
+# its handler, and L109 removes the one `resolve_context` handler:
+# 19 + 1 = 20 modules, 63 + 2 + 1 - 1 = 65 handlers.
 TOOL_MODULE_COUNT = 20
-TOOL_HANDLER_COUNT = 66
+TOOL_HANDLER_COUNT = 65
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -463,7 +473,9 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             declared_strict, strict, "a model declares strict but is not configured so"
         )
         self.assertEqual(
-            declared_flexible, flexible, "a model declares flexible but is not configured so"
+            declared_flexible,
+            flexible,
+            "a model declares flexible but is not configured so",
         )
         self.assertEqual(set(TOOL_RESPONSE_MODELS), declared_strict | declared_flexible)
 
@@ -589,7 +601,9 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         )
         return _worktree_result("lifecycle_finalize_task", result)
 
-    def test_lifecycle_finalize_validates_with_the_series_release_produced(self) -> None:
+    def test_lifecycle_finalize_validates_with_the_series_release_produced(
+        self,
+    ) -> None:
         """D53: the success arm emits both keys, so both must be declared.
 
         The firing state is ``contract.kind == "series"`` **and** ``dry_run=False`` **and**
@@ -605,10 +619,14 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         payload = self._finalize_payload(contract, dry_run=False)
 
         self.assertIn(
-            "atomicSeriesActivation", payload, "fixture did not reach the emitting branch"
+            "atomicSeriesActivation",
+            payload,
+            "fixture did not reach the emitting branch",
         )
         self.assertIn(
-            "atomicSeriesActivationRelease", payload, "fixture did not reach the emitting branch"
+            "atomicSeriesActivationRelease",
+            payload,
+            "fixture did not reach the emitting branch",
         )
         self.assertEqual("series", contract.kind)
         self.assertFalse(payload["dryRun"])
@@ -757,7 +775,9 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
             self.assertNotIn(field, payload)
 
-    def test_task_doc_description_and_refusal_name_the_same_kind_vocabulary(self) -> None:
+    def test_task_doc_description_and_refusal_name_the_same_kind_vocabulary(
+        self,
+    ) -> None:
         """T43 / T50's class: a description that advertises what the mechanism refuses.
 
         The published description is the load-bearing surface here because the schema cannot
@@ -935,7 +955,9 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
         )
         return coord
 
-    def test_session_retire_reports_the_stranded_row_after_the_seat_is_gone(self) -> None:
+    def test_session_retire_reports_the_stranded_row_after_the_seat_is_gone(
+        self,
+    ) -> None:
         """T16: the seat is retired, then the caller got a schema error instead of the report.
 
         Each arm runs on its own world because retirement is irreversible: on a reused world
@@ -968,7 +990,9 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
     # -- T4: the shared structural delivery projection ---------------------------------
 
-    def test_the_structural_delivery_projection_is_declared_on_every_consumer(self) -> None:
+    def test_the_structural_delivery_projection_is_declared_on_every_consumer(
+        self,
+    ) -> None:
         """T4: one producer, and the staying consumer declares its keys.
 
         ``structural_payload`` adds ``deliveryState`` and ``adapterDeliveryState`` whenever

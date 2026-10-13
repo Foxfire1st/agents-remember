@@ -445,6 +445,14 @@ def _entry_row(entry: Entry, observed: Mapping[str, Any]) -> dict[str, Any]:
         "path": entry.path,
         "locator": anchor.get("locator"),
     }
+    # The recorded anchor rides beside the row (internal: projection drops
+    # it) so a citing card scores the entry's own blob/content, and two
+    # records in one file under distinct sections resolve to their own
+    # anchors rather than the first path-matching section.
+    if isinstance(anchor.get("blob"), str):
+        row["recordedBlob"] = anchor["blob"]
+    if isinstance(anchor.get("content"), str):
+        row["recordedContent"] = anchor["content"]
     if entry.kind == "realization":
         row["role"] = document.get("role")
     else:

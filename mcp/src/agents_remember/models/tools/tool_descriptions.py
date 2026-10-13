@@ -29,11 +29,6 @@ RETAINED_DESCRIPTION_LENGTHS: dict[str, int] = {
 }
 
 INTERIM_DESCRIPTION_OWNERS: dict[str, str] = {
-    "context_packet": "L109",
-    "read_ar_files": "L109",
-    "resolve_context": "L109",
-    "knowledge_read": "L109",
-    "knowledge_diff": "L109",
     "memory_quality_check": "L110",
     "citation_fix": "L110",
     "route_index_refresh": "L110",

@@ -1,45 +1,45 @@
-"""Application entry point for the ``read_ar_files`` tool (slice 07).
+"""Application entry point for the ``read_ar_files`` tool (MIK-R109 rule 1).
 
-Batch paired source+onboarding reads of repo-relative paths inside an AR-managed
-repo. Resolution lives here (not in the payload module) so a later dashboard
-``GET /api/files`` route can reuse it. The tool surface is thin: validate the
-request, resolve the coordination context once, then per file confine the path,
-read source (full or range), and look up onboarding via the storage mode plus the
-precomputed route index. On top of the per-file onboarding bodies it auto-attaches
-the repo overview and the governing route-overview chain, deduplicated per
-lifecycle and code/onboarding root, and emits a facts-only ``read.packet`` (paths/ranges/statuses/bytes --
-never content).
+A read names where a thing is and does not carry it. The tool takes
+``repo_id`` and ``files`` (repository-relative paths, as strings, up to
+:data:`READ_AR_FILES_MAX_PATHS`) and answers, per path, whether the file
+exists in the caller's code checkout, the card that governs it as a location
+in the caller's memory worktree (or that it has none), the card's record
+counts by state on the code the caller sees, and — only for records whose
+state asks the caller to act — the text ID, kind, state and card heading of
+each. The governing overviews are listed once per call, as locations,
+nearest first.
 
-It is also the ordinary route to the repository's **published intent** (ICR-R19@v1): the same call
-resolves the repository's published knowledge dataset from the coordination context -- no task, no
-leaf and no enclosure -- and reads the recorded invariants about each requested path at that
-dataset's exact snapshot through the shipped selective read. The block is attached on every read,
-including when the repository publishes nothing yet, because "nothing is recorded" is an answer a
-fresh planner needs and an omitted block is indistinguishable from a route that never ran. The
-selection, the seeds and the named absences are owned by
-:mod:`agents_remember.application.published_intent`; this module only carries the block -- and
-renders one thing in it: a route-chain family entry (MIK-R05) already served to this lifecycle, and
-unchanged since, is shortened to a ``served_earlier`` reference row through the same served ledger
-the overviews use. The row keeps its place, so the block's counts and continuations are unchanged;
-``knowledge_read`` never shortens.
+It returns no source text, no card text and no overview text. The removed
+parameters (``refresh``, per-file ``source``/``onboarding``) and object-form
+file entries are refused with ``argument-removed``: the caller reads the
+file with its own tools. The server keeps no per-session state about what
+it sent: the same call on the same state gives the same answer. There is no
+continuation.
 """
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.knowledge_leaf.chain import shorten_served
-from agents_remember.application.published_intent import published_intent_block
-from agents_remember.application.read_files_format import (
-    TEXT_FORMAT,
-    converted_card_parts,
-    legacy_published_intent,
-    memory_format,
+import apsw
+
+from agents_remember.application.knowledge_currentness.observe import CodeTree
+from agents_remember.application.published_intent import select_knowledge_dataset
+from agents_remember.application.read_file_cards import (
+    CODE_STATE_HEAD,
+    READ_AR_FILES_MAX_PATHS,
+    CardSelection,
+    SectionAnchors,
+    aggregate_state,
+    card_records_for_path,
+    head_tree_of,
 )
+from agents_remember.application.read_files_format import TEXT_FORMAT, memory_format
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
@@ -53,10 +53,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
     resolve_storage_for_source,
 )
-from agents_remember.kernel.primitives.observer_paths import observer_root
-from agents_remember.kernel.primitives.runtime_config import (
-    McpRuntimeConfig,
-)
+from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.route_index import ROUTE_OVERVIEW_NAME
 from agents_remember.kernel.sidecar_pairing import (
     confine_rel as _confined_rel,
@@ -64,64 +61,59 @@ from agents_remember.kernel.sidecar_pairing import (
 from agents_remember.kernel.sidecar_pairing import (
     route_sidecar_status as _route_sidecar_status,
 )
-from agents_remember.kernel.sidecar_pairing import (
-    sidecar_body as _sidecar_body,
-)
-
-# ``_resolve_onboarding`` below decides the ``FileReadStatus`` value; ``models.read_files``
-# owns the type, because it is served wire vocabulary.
-from agents_remember.models.read_files import FileReadStatus
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge_index import IndexMismatchError, MemoryTreeError
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.observer.ambient import ambient
-from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
-MAX_FILES = 5
-
-# Storage modes whose onboarding body lives in a sidecar markdown file. This
-# repo's own memory is ``external``, which also writes sidecars, so it is treated
-# as sidecar here even though ``is_sidecar_storage`` (used for missing-onboarding
-# gating) returns True only for ``repo-sidecar`` / ``memory-repo``.
+# Storage modes whose card lives in a sidecar markdown file beside the route
+# index. This repo's own memory is ``external``, which also writes sidecars,
+# so it is treated as sidecar here even though ``is_sidecar_storage`` (used
+# for missing-onboarding gating) returns True only for ``repo-sidecar`` /
+# ``memory-repo``.
 _SIDECAR_STORAGE_MODES = {"repo-sidecar", "memory-repo", "external"}
 
-# The auto-attached front-door pieces, keyed for the served ledger.
-_KIND_REPO_OVERVIEW = "repository_overview"
-_KIND_ROUTE_OVERVIEW = "route_overview"
-# A route-chain family entry of the published-intent block (MIK-R05 rule 4), keyed by family ID.
-_KIND_CHAIN_FAMILY = "knowledge_chain_family"
-
-# The workspace marker whose presence clears the served set for the current
-# lifecycle on the next read (see ``_maybe_reset_served``).
-_COMPACT_RESET_MARKER = "compact-reset.json"
+ARGUMENT_REMOVED_SENTENCE = "read the file with your own tools; this tool names the cards"
 
 
 @dataclass(frozen=True)
-class _FileRequest:
-    path: str
-    full: bool
-    start_line: int
-    end_line: int
-    onboarding_requested: bool
+class _Refusal:
+    """Why one ``read_ar_files`` call is refused before anything is read."""
+
+    code: str
+    detail: str
 
 
 def read_ar_files_tool(
-    config: McpRuntimeConfig,
+    config: Any,
     *,
     repo_id: str,
-    files: list[dict[str, Any]],
-    refresh: bool = False,
+    files: list[Any],
+    working_folder: Path | None = None,
     _context: CoordinationContext | None = None,
 ) -> dict[str, Any]:
-    """Resolve a batch of paired source+onboarding reads. Returns a plain dict.
+    """Name the knowledge governing a batch of repository-relative paths.
 
-    ``_context`` is a test seam: callers normally let the resolver run, but tests
-    inject a pre-built :class:`CoordinationContext` to isolate one storage mode.
+    ``working_folder`` is the caller's working folder when the server knows
+    it (a leaf's worktree group under task scope): locations inside it are
+    answered relative, so the caller opens them as written. Otherwise
+    locations are absolute. ``_context`` is a test seam: callers normally let
+    the resolver run, but tests inject a pre-built
+    :class:`CoordinationContext` to isolate one storage mode.
     """
+
     repo = require_repo(config, repo_id)
-    if len(files) > MAX_FILES:
-        raise AuthorityError(
-            f"read_ar_files accepts at most {MAX_FILES} files per call; got {len(files)}"
-        )
-    requests = [_parse_file_request(entry) for entry in files]
+    refusal = _request_refusal(files)
+    if refusal is not None:
+        return {
+            "ok": True,
+            "operation": "read_ar_files",
+            "repoId": repo.repo_id,
+            "state": "refused",
+            "refusalCode": refusal.code,
+            "refusalDetail": refusal.detail,
+        }
 
     context = _context or resolve_coordination_context(
         code_repository_name=repo.repo_id,
@@ -134,330 +126,318 @@ def read_ar_files_tool(
         ),
     )
 
-    amb = ambient()
-    lifecycle_id = amb.current.id if (amb is not None and amb.current is not None) else None
-    _maybe_reset_served(config, amb, lifecycle_id, refresh=refresh)
+    memory_state, dataset = _memory_selection(context, config)
+    code_root = Path(repo.path)
+    head_tree = head_tree_of(code_root)
+    code_state = CODE_STATE_HEAD if head_tree is not None else "unmeasured"
+    scope = _BatchScope(
+        memory_state=memory_state,
+        dataset=dataset,
+        head_tree=head_tree,
+        working_folder=working_folder,
+    )
 
     file_results: list[dict[str, Any]] = []
     event_files: list[dict[str, Any]] = []
-    attach_any_onboarding = False
-    for request in requests:
-        result, facts, attach = _read_one(context, repo.path, request)
+    for rel in files:
+        try:
+            result, facts = _name_one(context, code_root, rel, scope)
+        except AuthorityError as error:
+            # Confinement stays fail-closed, but at the row boundary (packet
+            # Failure): one outside path earns its row and never reads outside,
+            # while the valid siblings are still answered.
+            result = {
+                "path": rel,
+                "exists": None,
+                "refusalCode": "outside-repository",
+                "refusalDetail": str(error),
+            }
+            facts = {"path": rel, "lines": "named", "status": "refused", "bytes": 0}
         file_results.append(result)
         event_files.append(facts)
-        attach_any_onboarding = attach_any_onboarding or attach
 
     payload: dict[str, Any] = {
         "ok": True,
         "operation": "read_ar_files",
         "repoId": repo.repo_id,
+        "state": "named",
+        "codeState": code_state,
+        "memoryState": memory_state,
         "files": file_results,
-        # The published intent of the repository this read is addressed at, read at one exact
-        # snapshot through the existing selective read and seeded with the paths just requested
-        # (ICR-R19@v1). It is attached even when the repository publishes nothing yet: that named
-        # absence is the answer, and an omitted block could not be told apart from a route that
-        # never ran. Every one of its failures is carried inside the block, so it can never cost
-        # the caller the source and onboarding bytes this call exists to return.
-        # MIK-R24 rule 9: an unconverted memory tree returns no knowledge section.
-        "published_intent": (
-            _chain_rendered(
-                published_intent_block(context, [request.path for request in requests]),
-                amb,
-                lifecycle_id,
-            )
-            if memory_format(context.onboarding_root.parent) == TEXT_FORMAT
-            else legacy_published_intent(context.onboarding_root.parent)
-        ),
+        "overviews": _overview_locations(context, code_root, files, working_folder),
     }
-    if attach_any_onboarding:
-        served = _attach_front_door(context, repo.path, requests, amb, lifecycle_id)
-        if served.get("repository_overview") is not None:
-            payload["repository_overview"] = served["repository_overview"]
-        if served.get("route_overviews"):
-            payload["route_overviews"] = served["route_overviews"]
+    if head_tree is not None:
+        payload["codeTree"] = head_tree
+    else:
+        payload["statesProblem"] = (
+            "the code checkout's HEAD tree could not be read, so no record state "
+            "was measured; the cards are still named"
+        )
 
+    amb = ambient()
     if amb is not None:
         amb.emit_read_packet(repo.repo_id, event_files)
     return payload
 
 
-# --- request parsing -------------------------------------------------------
+# --- request validation ----------------------------------------------------
 
 
-def _parse_file_request(entry: dict[str, Any]) -> _FileRequest:
-    path = entry.get("path")
-    if not isinstance(path, str) or not path:
-        raise AuthorityError("each file entry must carry a non-empty 'path'")
-    onboarding = entry.get("onboarding", True)
-    onboarding_requested = onboarding is not False
-    source = entry.get("source", "full")
-    if source == "full" or source is None:
-        return _FileRequest(path, True, 1, 0, onboarding_requested)
-    if isinstance(source, dict):
-        start = source.get("startLine")
-        end = source.get("endLine")
-        if not isinstance(start, int) or not isinstance(end, int):
-            raise AuthorityError(f"source range for {path!r} needs integer startLine and endLine")
-        if start < 1:
-            raise AuthorityError(f"startLine for {path!r} must be >= 1")
-        if end < 1:
-            raise AuthorityError(f"endLine for {path!r} must be >= 1")
-        if end < start:
-            raise AuthorityError(f"endLine for {path!r} must be >= startLine (got {start}..{end})")
-        return _FileRequest(path, False, start, end, onboarding_requested)
-    raise AuthorityError(f"source for {path!r} must be 'full' or {{startLine, endLine}}")
+def _request_refusal(files: list[Any]) -> _Refusal | None:
+    """The refusal a malformed batch earns before anything is read, or ``None``."""
+
+    if not isinstance(files, list) or not files:
+        return _Refusal(
+            "empty_paths",
+            "name one to twenty repository-relative paths as strings",
+        )
+    if len(files) > READ_AR_FILES_MAX_PATHS:
+        return _Refusal(
+            "too_many_paths",
+            f"name at most {READ_AR_FILES_MAX_PATHS} paths per call; got {len(files)}",
+        )
+    for entry in files:
+        if not isinstance(entry, str) or not entry:
+            return _Refusal("argument-removed", ARGUMENT_REMOVED_SENTENCE)
+    return None
 
 
-# --- per-file read ---------------------------------------------------------
+# --- memory selection ------------------------------------------------------
 
 
-def _read_one(
-    context: CoordinationContext, code_root: Path, request: _FileRequest
-) -> tuple[dict[str, Any], dict[str, Any], bool]:
-    rel = _confined_rel(code_root, request.path)
-    source, byte_count = _read_source(code_root / rel, request)
-    status, onboarding, attach = _resolve_onboarding(context, rel, request)
+@dataclass(frozen=True)
+class _Dataset:
+    """The converted memory tree's index selection, or why there is none."""
 
-    result: dict[str, Any] = {"path": request.path, "status": status}
-    if source is not None:
-        result["source"] = source
-    if onboarding is not None:
-        result["onboarding"] = onboarding
-        memory_root = context.onboarding_root.parent
-        if memory_format(memory_root) == TEXT_FORMAT:
-            result.update(converted_card_parts(memory_root, rel))
-        else:
-            result["format"] = "legacy-format"
-
-    facts: dict[str, Any] = {
-        "path": request.path,
-        "lines": "full" if request.full else [request.start_line, request.end_line],
-        "status": status,
-        "bytes": byte_count,
-    }
-    return result, facts, attach
+    index_path: Path | None = None
+    memory_tree_id: str | None = None
+    index_state: str | None = None
+    index_problems: tuple[tuple[str, str], ...] = ()
 
 
-def _read_source(source_path: Path, request: _FileRequest) -> tuple[str | None, int]:
-    """Read the requested source slice; ``None`` when absent or non-decodable.
+def _memory_selection(context: CoordinationContext, config: Any) -> tuple[str, _Dataset]:
+    """The memory state and, when converted, its index selection.
 
-    The byte count is the UTF-8 length of what was returned (0 when omitted) --
-    a fact for the event, never the content itself.
+    A missing or unconverted memory worktree is not a refusal: the answer
+    says so with the existing code and names no card (packet Failure).
     """
-    if not filesystem.is_file(source_path):
-        return None, 0
+
+    memory_root = context.onboarding_root.parent
+    if not memory_root.exists():
+        return "missing", _Dataset()
+    if not (memory_root / LAYOUT_MARKER_PATH).is_file():
+        return "unconverted", _Dataset()
     try:
-        if request.full:
-            text = filesystem.read_text(source_path)
-        else:
-            text = filesystem.read_text_range(source_path, request.start_line, request.end_line)
-    except (UnicodeDecodeError, ValueError, OSError):
-        # Non-decodable, malformed range, or unreadable-but-present file: degrade
-        # to source-omitted (matching _sidecar_body / _repo_overview) so one bad
-        # file never aborts the whole batch.
-        return None, 0
-    return text, len(text.encode("utf-8"))
+        selected = select_knowledge_dataset(memory_root, coordination_root=config.coordination_root)
+    except (
+        MemoryTreeError,
+        IndexMismatchError,
+        GitPreparationError,
+        KnowledgeStorageError,
+        apsw.Error,
+        OSError,
+    ):
+        return "unconverted", _Dataset()
+    tree = selected.memory_tree
+    if tree is None:
+        return "unconverted", _Dataset()
+    if memory_format(memory_root) != TEXT_FORMAT:
+        return "unconverted", _Dataset()
+    return "converted", _Dataset(
+        index_path=selected.database_path,
+        memory_tree_id=tree.tree_key,
+        index_state=tree.index_state,
+        index_problems=tuple(tree.problems),
+    )
 
 
-def _resolve_onboarding(
-    context: CoordinationContext, rel: str, request: _FileRequest
-) -> tuple[FileReadStatus, str | None, bool]:
-    """Return ``(status, onboarding_body, attach_front_door)`` for one file.
-
-    ``attach_front_door`` is True when this file participates in onboarding
-    (so the auto-attached overviews are served), independent of whether its own
-    sidecar body resolved.
-    """
-    if not request.onboarding_requested:
-        return "not_requested", None, False
-
-    storage_mode = resolve_storage_for_source(rel, context.storage, context.code_repository_name)
-    if storage_mode == "disabled":
-        return "disabled", None, True
-    if storage_mode not in _SIDECAR_STORAGE_MODES:
-        # inline (and any non-sidecar mode) cannot yield a sidecar body here.
-        return "unsupported", None, True
-
-    index_status = _route_sidecar_status(context.onboarding_root, rel)
-    if index_status == "present":
-        body = _sidecar_body(context.onboarding_root, rel)
-        if body is not None:
-            return "found", body, True
-        # Route index says covered but the sidecar is unreadable; report missing
-        # without probing further.
-        return "missing", None, True
-    # absent (in-scope, uncovered) and out-of-scope both report missing without
-    # probing the filesystem for an unrelated sidecar (pre-resolved decision 4).
-    return "missing", None, True
+# --- per-path naming -------------------------------------------------------
 
 
-# --- auto-attached, session-deduped front-door -----------------------------
+@dataclass(frozen=True)
+class _BatchScope:
+    """What one batch measures every path against: memory, tree and folder."""
+
+    memory_state: str
+    dataset: _Dataset
+    head_tree: str | None
+    working_folder: Path | None
 
 
-def _attach_front_door(
+def _name_one(
     context: CoordinationContext,
     code_root: Path,
-    requests: list[_FileRequest],
-    amb: Any,
-    lifecycle_id: str | None,
-) -> dict[str, Any]:
-    """Build the deduped repo + route overview attachment for this read.
+    path: str,
+    scope: _BatchScope,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Name what governs one path: existence, card location, record states."""
 
-    Each piece is served once per lifecycle and code/onboarding root, or again when its content hash
-    changed; an already-served-unchanged piece is omitted. With no active
-    lifecycle there is no ledger, so everything is served (best effort). Each
-    request path is run through the same ``_confined_rel`` confinement here, so
-    the front-door's governing-route derivation never depends on ``_read_one``
-    having confined the path first (it rejects an escape on its own).
-    """
-    served: dict[str, Any] = {"repository_overview": None, "route_overviews": {}}
-    scope_key = _overview_scope_key(context, code_root)
+    rel = _confined_rel(code_root, path)
+    exists = filesystem.is_file(code_root / rel)
+    result: dict[str, Any] = {"path": path, "exists": exists}
+    facts: dict[str, Any] = {
+        "path": path,
+        "lines": "named",
+        "status": "missing",
+        "bytes": 0,
+    }
+    if not exists:
+        return result, facts
 
-    repo_overview = _repo_overview(context)
-    if repo_overview is not None and _should_serve(
-        amb,
-        lifecycle_id,
-        f"{_KIND_REPO_OVERVIEW}@{scope_key}",
-        repo_overview["path"],
-        repo_overview["_hash"],
-    ):
-        served["repository_overview"] = {
-            "path": repo_overview["path"],
-            "overview": repo_overview["overview"],
-        }
+    card_rel = _governing_card(context, rel)
+    if card_rel is None or scope.memory_state != "converted":
+        result["card"] = None
+        return result, facts
+    facts["status"] = "found"
 
-    seen_routes: set[str] = set()
-    for request in requests:
-        if not request.onboarding_requested:
-            continue
-        rel = _confined_rel(code_root, request.path)
-        for route_overview in _governing_route_overviews(context, rel):
-            route = route_overview["route"]
-            if route in seen_routes:
-                continue
-            seen_routes.add(route)
-            if _should_serve(
-                amb,
-                lifecycle_id,
-                f"{_KIND_ROUTE_OVERVIEW}@{scope_key}",
-                route_overview["path"],
-                route_overview["_hash"],
-            ):
-                served["route_overviews"][route] = {
-                    "path": route_overview["path"],
-                    "overview": route_overview["overview"],
-                }
-    return served
-
-
-def _chain_rendered(block: dict[str, Any], amb: Any, lifecycle_id: str | None) -> dict[str, Any]:
-    """The block with each chain entry this lifecycle was already served shortened (MIK-R05)."""
-
-    return shorten_served(
-        block,
-        lambda family, digest: _should_serve(amb, lifecycle_id, _KIND_CHAIN_FAMILY, family, digest),
-    )
-
-
-def _overview_scope_key(context: CoordinationContext, code_root: Path) -> str:
-    """Separate identical relative overview paths owned by distinct code/memory roots."""
-    scope = "\0".join(
-        (
-            code_root.resolve(strict=False).as_posix(),
-            context.onboarding_root.resolve(strict=False).as_posix(),
+    memory_root = context.onboarding_root.parent
+    card_absolute = memory_root / "onboarding" / f"{card_rel}.md"
+    if not card_absolute.is_file():
+        # The route index still covers the path but the card file is gone or
+        # not a file (stale index): the row names the absence instead of an
+        # unopenable location, and the valid siblings are still answered.
+        result["card"] = None
+        result["statesProblem"] = (
+            f"the governing card {card_rel} is indexed but has no readable file; "
+            "it names no records"
         )
-    )
-    return hashlib.sha256(scope.encode("utf-8")).hexdigest()
-
-
-def _should_serve(
-    amb: Any, lifecycle_id: str | None, kind: str, path: str, content_hash: str
-) -> bool:
-    """Serve when there is no ledger, or the piece is new/changed; then record it."""
-    if amb is None or lifecycle_id is None:
-        return True
-    if amb.served.is_served(lifecycle_id, kind, path, content_hash):
-        return False
-    amb.served.record(lifecycle_id, kind, path, content_hash, ts=now_iso())
-    return True
-
-
-def _repo_overview(context: CoordinationContext) -> dict[str, Any] | None:
-    overview_path = context.onboarding_root / ROUTE_OVERVIEW_NAME
-    if not overview_path.is_file():
-        return None
+        return result, facts
     try:
-        text = filesystem.read_text(overview_path)
+        card_text = filesystem.read_text(card_absolute)
     except (UnicodeDecodeError, OSError):
-        return None
-    return {"path": ROUTE_OVERVIEW_NAME, "overview": text, "_hash": _content_hash(text)}
-
-
-def _governing_route_overviews(context: CoordinationContext, rel: str) -> list[dict[str, Any]]:
-    """The governing route-overview chain for ``rel`` (nearest folder first).
-
-    Reads each governing route's ``overview.md`` directly; the repo-root
-    overview is delivered as ``repository_overview`` and excluded here.
-    """
-    overviews: list[dict[str, Any]] = []
-    parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
-    routes: list[str] = []
-    while parent:
-        routes.append(parent)
-        parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
-    for route in routes:
-        overview_rel = f"{route}/{ROUTE_OVERVIEW_NAME}"
-        overview_path = context.onboarding_root / overview_rel
-        if not overview_path.is_file():
-            continue
-        try:
-            text = filesystem.read_text(overview_path)
-        except (UnicodeDecodeError, OSError):
-            continue
-        overviews.append(
-            {
-                "route": route,
-                "path": overview_rel,
-                "overview": text,
-                "_hash": _content_hash(text),
-            }
+        card_text = None
+    if card_text is None:
+        # Readability before emission: a card that cannot be read names no
+        # location and no states. The actual surface (unreadable, not the
+        # converted one) is reported, and the valid siblings are still
+        # answered; a failed read never stands in for their aligned data.
+        result["card"] = None
+        result["statesProblem"] = (
+            f"the governing card {card_rel} is indexed but its file could not be read; "
+            "it names no records"
         )
-    return overviews
+        return result, facts
+    result["card"] = _locate(card_absolute, scope.working_folder)
+
+    dataset = scope.dataset
+    head_tree = scope.head_tree
+    if dataset.index_path is not None and head_tree is not None:
+        records = card_records_for_path(
+            CardSelection(
+                index_path=dataset.index_path,
+                memory_tree_id=dataset.memory_tree_id or "",
+                index_state=dataset.index_state or "",
+                code_tree=CodeTree(code_root, head_tree),
+                index_problems=dataset.index_problems,
+            ),
+            rel,
+            card_text,
+            card_rel,
+            anchors=SectionAnchors(
+                references=_sidecar_references(card_absolute),
+                own_path=rel,
+            ),
+        )
+        result["recordCounts"] = records.counts
+        result["cardState"] = aggregate_state(records.counts)
+        result["actionNeeded"] = [
+            {
+                "id": one.id,
+                "kind": one.kind,
+                "state": one.state,
+                "heading": one.heading,
+                "titleFallback": one.title_fallback,
+            }
+            for one in records.action_needed
+        ]
+        if records.problem is not None:
+            result["statesProblem"] = records.problem
+        if not records.index_complete:
+            result["indexComplete"] = False
+    return result, facts
 
 
-def _content_hash(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+def _governing_card(context: CoordinationContext, rel: str) -> str | None:
+    """The card governing ``rel`` as its memory-relative stem, or ``None``.
 
-
-# --- compact-reset marker --------------------------------------------------
-
-
-def _maybe_reset_served(
-    config: McpRuntimeConfig,
-    amb: Any,
-    lifecycle_id: str | None,
-    *,
-    refresh: bool,
-) -> None:
-    """Clear the served set on an explicit ``refresh`` or a compaction marker.
-
-    ``refresh=true`` is the working manual reset and reaches this on every read.
-    The marker at ``<observer_root>/workspace/compact-reset.json`` is the
-    automatic half; nothing writes it yet, and its producer is owned by
-    ``260628_developer-notification-reliability`` leaf 05 (POST-COMPACTION
-    RECOVERY, gap G2). This side follows the ``read_setup_progress`` "absent ==
-    no signal" idiom and deletes the marker after consuming it, so it fires once.
+    Which card governs a file is decided as today (packet Preservation): the
+    route index says ``present`` exactly when the sidecar covers the path.
     """
-    if amb is None or lifecycle_id is None:
-        return
-    marker = _reset_marker_path(config)
-    marker_present = marker.is_file()
-    if refresh or marker_present:
-        amb.served.reset(lifecycle_id)
-    if marker_present:
-        with contextlib.suppress(OSError):
-            marker.unlink()
+
+    storage_mode = resolve_storage_for_source(rel, context.storage, context.code_repository_name)
+    if storage_mode not in _SIDECAR_STORAGE_MODES:
+        return None
+    if _route_sidecar_status(context.onboarding_root, rel) != "present":
+        return None
+    return rel
 
 
-def _reset_marker_path(config: McpRuntimeConfig) -> Path:
-    return observer_root(config) / "workspace" / _COMPACT_RESET_MARKER
+def _sidecar_references(card_absolute: Path) -> Mapping[str, Any] | None:
+    """The card sidecar's ``references{}`` mapping, or ``None``.
+
+    Converted ``[n]`` markers resolve through the sidecar beside the card
+    (``<card without .md>.json``); a missing or unreadable sidecar simply
+    leaves legacy ``cit`` matching and title fallback.
+    """
+
+    try:
+        document = json.loads(filesystem.read_text(card_absolute.with_suffix(".json")))
+    except (UnicodeDecodeError, OSError, ValueError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    references = document.get("references")
+    return references if isinstance(references, Mapping) else None
+
+
+def _locate(absolute: Path, working_folder: Path | None) -> str:
+    """The location as the caller opens it (MIK-R108 rule 1).
+
+    Relative to the caller's working folder when the file lies in it,
+    absolute otherwise.
+    """
+
+    if working_folder is not None:
+        try:
+            return str(absolute.relative_to(working_folder))
+        except ValueError:
+            pass
+    return str(absolute)
+
+
+# --- overview locations, once per call -------------------------------------
+
+
+def _overview_locations(
+    context: CoordinationContext,
+    code_root: Path,
+    paths: list[str],
+    working_folder: Path | None,
+) -> list[str]:
+    """The overviews governing the named files, as locations, nearest first.
+
+    Every path contributes its chain -- immediate parent, ancestors, root --
+    and each overview is listed once for the call (packet rule 1). Deeper
+    chains sort before their ancestors, so a shared ancestor never moves
+    before its descendants; ties sort by location for determinism, and the
+    repository root (depth zero) sorts last.
+    """
+
+    depths: dict[str, int] = {}
+    for path in paths:
+        try:
+            rel = _confined_rel(code_root, path)
+        except AuthorityError:
+            continue
+        chain = rel.split("/")[:-1]
+        for depth in range(len(chain), -1, -1):
+            ancestor = "/".join(chain[:depth])
+            overview = context.onboarding_root / (
+                ROUTE_OVERVIEW_NAME if not ancestor else f"{ancestor}/{ROUTE_OVERVIEW_NAME}"
+            )
+            if overview.is_file():
+                depths.setdefault(_locate(overview, working_folder), depth)
+    return sorted(depths, key=lambda location: (-depths[location], location))
+
+
+__all__ = ["ARGUMENT_REMOVED_SENTENCE", "read_ar_files_tool"]

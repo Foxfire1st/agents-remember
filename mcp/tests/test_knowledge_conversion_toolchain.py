@@ -26,7 +26,10 @@ from agents_remember.application.memory_quality.converted_base import (
     context_check_base,
     converted_check_base,
 )
-from agents_remember.application.memory_tools import CitationOperationScope, memory_init_tool
+from agents_remember.application.memory_tools import (
+    CitationOperationScope,
+    memory_init_tool,
+)
 from agents_remember.application.read_files import read_ar_files_tool
 from agents_remember.application.worktree_services import MemoryQualityAdapter
 from agents_remember.cli import knowledge_convert
@@ -38,9 +41,18 @@ from agents_remember.mcp.tools import memory as memory_tool_payloads
 from agents_remember.memory.conversion import card_authoring
 from agents_remember.memory.conversion.card_authoring import author_card_references
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.memory.conversion.convert import CONVERSION_FORMAT_VERSION, convert_memory
-from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
-from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.memory.conversion.convert import (
+    CONVERSION_FORMAT_VERSION,
+    convert_memory,
+)
+from agents_remember.memory.conversion.inputs import (
+    memory_from_directory,
+    write_changed,
+)
+from agents_remember.memory_quality.check import (
+    DriftCheckContext,
+    run_memory_quality_check,
+)
 from agents_remember.memory_quality.converted_cards import converted_card_metadata
 from agents_remember.memory_quality.converted_check import converted_knowledge_check
 from agents_remember.memory_quality.final_certification.catalog import (
@@ -57,9 +69,11 @@ from agents_remember.memory_quality.memory_census_scope import (
     MemoryCensusPathChange,
     MemoryCensusScope,
 )
-from agents_remember.memory_quality.reference_state import check_references, fix_references
+from agents_remember.memory_quality.reference_state import (
+    check_references,
+    fix_references,
+)
 from agents_remember.models.knowledge_files.canonical import canonical_text
-from agents_remember.models.knowledge_files.ids import derived_record_id
 from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.observer import reset_ambient
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
@@ -95,7 +109,9 @@ def _convert_in_place(memory: Path, code: CodeFixture) -> None:
     write_changed(memory, outcome.changed)
 
 
-def test_read_ar_files_returns_legacy_format_or_resolved_references(tmp_path: Path) -> None:
+def test_read_ar_files_names_the_converted_records_without_carrying_them(
+    tmp_path: Path,
+) -> None:
     code = code_repository(tmp_path / "workspace" / REPO)
     memory = tmp_path / "memory"
     memory_repository(memory, code)
@@ -103,44 +119,26 @@ def test_read_ar_files_returns_legacy_format_or_resolved_references(tmp_path: Pa
     _write_route_index(onboarding, "", covered=[APP])
     config = _make_config(tmp_path, code.root)
     context = _build_context(
-        code.root, onboarding, coordination_root=config.coordination_root, storage_mode="external"
+        code.root,
+        onboarding,
+        coordination_root=config.coordination_root,
+        storage_mode="external",
     )
     reset_ambient()
 
-    def read() -> dict:
-        return read_ar_files_tool(config, repo_id=REPO, files=[{"path": APP}], _context=context)
-
-    legacy = read()
-    assert legacy["files"][0]["format"] == "legacy-format"
-    assert "references" not in legacy["files"][0] and "sidecar" not in legacy["files"][0]
-    assert legacy["published_intent"]["state"] == "legacy-format"
-
     _convert_in_place(memory, code)
-    sidecar_path = onboarding / f"{APP}.json"
-    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    invariant = derived_record_id("invariant", "inv-one")
-    sidecar["references"]["9"] = {"targets": [{"kind": "invariant", "id": invariant}]}
-    sidecar_path.write_text(canonical_text(sidecar), encoding="utf-8")
 
-    payload = read()
-    # The converted tree's knowledge section is the derived index's (MIK-R23 rule 6), read through
-    # this same route; test_knowledge_index_reuse measures that block's content.
-    block = payload["published_intent"]
-    assert block["state"] == "recorded", block
-    assert block["memoryTree"]["indexState"] == "complete"
-    statements = {row.get("statement") for row in block["seeds"][0]["rows"]}  # leaf (MIK-R01)
-    assert "Alpha adds one." in statements  # the exported invariant realized in this file
-    converted = payload["files"][0]
-    assert converted["format"] == "text/v2"
-    assert "- alpha and beta compute the total. [2]" in converted["onboarding"]
-    assert converted["sidecar"]["path"] == APP
-    by_number = {reference["number"]: reference for reference in converted["references"]}
-    assert by_number[2]["note"] == "alpha and beta compute the total."
-    assert by_number[2]["targets"][0]["anchor"]["path"] == APP  # filled in for the own file
-    assert by_number[9]["targets"][0]["record"]["statement"] == "Alpha adds one."
+    naming = read_ar_files_tool(config, repo_id=REPO, files=[APP], _context=context)
+    assert naming["state"] == "named", naming
+    assert naming["files"][0]["exists"] is True, naming
+    # No record, card or overview text rides the answer: the converted
+    # invariant realized in this file is named, not carried.
+    assert "Alpha adds one." not in json.dumps(naming), naming
 
 
-def test_references_are_checked_and_only_mechanical_moves_are_fixed(tmp_path: Path) -> None:
+def test_references_are_checked_and_only_mechanical_moves_are_fixed(
+    tmp_path: Path,
+) -> None:
     code = code_repository(tmp_path / "code")
     memory = tmp_path / "memory"
     memory_repository(memory, code)
@@ -202,7 +200,11 @@ def test_memory_quality_reads_the_converted_format(tmp_path: Path) -> None:
 
     passing = drift_item(result["checks"])
     assert (passing["status"], passing["findingCount"]) == ("pass", 0)
-    refused = {**result["checks"]["knowledge.converted"], "ok": False, "findingCount": 2}
+    refused = {
+        **result["checks"]["knowledge.converted"],
+        "ok": False,
+        "findingCount": 2,
+    }
     failing = drift_item({**result["checks"], "knowledge.converted": refused})
     assert (failing["status"], failing["findingCount"]) == ("fail", 2)
     absent = drift_item({})  # a run that executed neither spelling is still a failure
@@ -243,7 +245,10 @@ def test_an_unconverted_leaf_is_refused_with_the_conversion_step_on_any_line(
     assert refused is not None and "crossing sync" in refused and "worktree_sync" in refused
     assert (
         unconverted_line_refusal(
-            memory_worktree=memory, memory_repository=memory, official_branch="main", operation="x"
+            memory_worktree=memory,
+            memory_repository=memory,
+            official_branch="main",
+            operation="x",
         )
         is None
     )
@@ -275,7 +280,10 @@ def test_memory_init_creates_new_memory_in_the_text_format_only(tmp_path: Path) 
     failed_init = {"returncode": 128, "stderr": "fatal: cannot init"}
     with mock.patch.object(memory_init, "_git_init_result", return_value=failed_init):
         failed = memory_init_tool(config, repo_id="repo", initial_branch="main")
-    assert (failed["ok"], failed["layoutMarker"]) == (False, "not-created")  # L24 nit, at L37
+    assert (failed["ok"], failed["layoutMarker"]) == (
+        False,
+        "not-created",
+    )  # L24 nit, at L37
 
     created = memory_init_tool(config, repo_id="repo", initial_branch="main")
     memory = Path(str(created["memoryRoot"]))
@@ -326,7 +334,9 @@ def _census(memory: Path, head: str, compared: str, changed: tuple[str, ...]) ->
     return SimpleNamespace(scope=scope, result=result)
 
 
-def test_the_census_compares_a_converting_leaf_with_its_converted_base(tmp_path: Path) -> None:
+def test_the_census_compares_a_converting_leaf_with_its_converted_base(
+    tmp_path: Path,
+) -> None:
     """MIK-R24 rule 7 for the census (L37 P1b): a converted card's source comes from the converted
     format, and the conversion itself is no task edit; a sidecar counts only beyond its anchors'
     mechanical fields (MIK-R30 rule 3)."""
@@ -348,7 +358,10 @@ def test_the_census_compares_a_converting_leaf_with_its_converted_base(tmp_path:
     _convert_in_place(memory, code)
     compared = compare(memory, head, _tree(memory))
     assert git(memory, "diff", "--name-only", compared, _tree(memory)) == ""  # the conversion
-    for kept in ("knowledge.sqlite", ".gitignore"):  # not a converted kind: K_B's own blob
+    for kept in (
+        "knowledge.sqlite",
+        ".gitignore",
+    ):  # not a converted kind: K_B's own blob
         assert git(memory, "rev-parse", f"{compared}:{kept}") == git(
             memory, "rev-parse", f"{head}:{kept}"
         )
@@ -386,7 +399,7 @@ def test_the_census_is_captured_and_rechecked_against_the_comparison_base(
     contract = SimpleNamespace(worktree_group=tmp_path)
     compare = object()
     captured: list[object] = []
-    scope = SimpleNamespace(code_input=None, to_payload=lambda: {})
+    scope = SimpleNamespace(code_input=None, to_payload=dict)
 
     def capture(_contract: object, *, code_input: object = None, comparison: object) -> object:
         captured.append(comparison)
@@ -394,7 +407,9 @@ def test_the_census_is_captured_and_rechecked_against_the_comparison_base(
 
     monkeypatch.setattr(census_module, "load_contract", lambda _path: contract)
     monkeypatch.setattr(
-        census_module, "census_comparison", lambda one: compare if one is contract else None
+        census_module,
+        "census_comparison",
+        lambda one: compare if one is contract else None,
     )
     monkeypatch.setattr(census_module, "capture_memory_census_scope", capture)
     monkeypatch.setattr(census_module, "_prepared_code_input", lambda _scope: None)
@@ -434,7 +449,12 @@ def test_a_converted_cards_kind_and_source_come_from_its_place_and_its_sidecar()
         "doc_type": "repo-entity-catalog"
     }
     declared = canonical_text(
-        {"schema": "ar-onboarding-file/v1", "path": "src/a.py", "references": {}, "realizes": []}
+        {
+            "schema": "ar-onboarding-file/v1",
+            "path": "src/a.py",
+            "references": {},
+            "realizes": [],
+        }
     )
     assert converted_card_metadata("onboarding/src/b.py.md", "onboarding", declared) == {
         "doc_type": "file-level-onboarding",
@@ -554,7 +574,10 @@ def test_one_converted_card_is_fixed_by_its_document_alone_and_unconverted_is_re
 
     def fix(scope: CitationOperationScope) -> dict[str, Any]:
         return memory_tools.citation_fix_tool(
-            cast(Any, None), repo_id="demo", contract_path="contract.md", operation_scope=scope
+            cast(Any, None),
+            repo_id="demo",
+            contract_path="contract.md",
+            operation_scope=scope,
         )
 
     refused = fix(one)  # unconverted: refused with the conversion step; the fixer never runs
@@ -562,7 +585,10 @@ def test_one_converted_card_is_fixed_by_its_document_alone_and_unconverted_is_re
     assert "agents-remember knowledge-convert" in refused["detail"]
     with pytest.raises(ValueError, match="together"):
         memory_tools.citation_migrate_tool(
-            cast(Any, None), repo_id="demo", contract_path="contract.md", operation_scope=one
+            cast(Any, None),
+            repo_id="demo",
+            contract_path="contract.md",
+            operation_scope=one,
         )
     with pytest.raises(ValueError, match="together"):
         CitationOperationScope(expected_snapshot="a" * 64)  # a snapshot never comes alone
@@ -617,7 +643,8 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     without = converted_knowledge_check(memory, code.root)
     assert set(_rules(without["findings"])) == {"R22.6-anchor-path"}  # every anchor read as new
     leaf = SimpleNamespace(
-        contract=SimpleNamespace(code_base_commit=code.first), quality_code_root=code.root
+        contract=SimpleNamespace(code_base_commit=code.first),
+        quality_code_root=code.root,
     )
     coordination = tmp_path / "coordination"
     base = converted_check_base(cast(Any, leaf), coordination)
@@ -649,7 +676,9 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     git(unborn, "init", "-q")
     nothing = SimpleNamespace(contract=None, quality_code_root=unborn)
     unbuilt = converted_knowledge_check(
-        memory, code.root, base=converted_check_base(cast(Any, nothing), tmp_path / "other")
+        memory,
+        code.root,
+        base=converted_check_base(cast(Any, nothing), tmp_path / "other"),
     )
     assert unbuilt["ok"] is False and "R24.7-converted-base" in _rules(unbuilt["findings"])
 
@@ -658,7 +687,9 @@ class _QualityPhaseReached(Exception):
     """The prepared closeout reached its memory-quality phase; the case needs nothing after it."""
 
 
-def test_the_prepared_closeout_hands_its_quality_phase_the_converted_base(tmp_path: Path) -> None:
+def test_the_prepared_closeout_hands_its_quality_phase_the_converted_base(
+    tmp_path: Path,
+) -> None:
     """L37 carry: the prepared closeout's quality phase gets the converted-base port (MIK-R24
     rule 7), bound to the candidate's own physical code root and coordination context.
 
@@ -666,9 +697,15 @@ def test_the_prepared_closeout_hands_its_quality_phase_the_converted_base(tmp_pa
     phase would check an unconverted base's anchors against nothing and refuse a converting leaf.
     """
 
-    physical, logical, memory = tmp_path / "physical", tmp_path / "logical", tmp_path / "memory"
+    physical, logical, memory = (
+        tmp_path / "physical",
+        tmp_path / "logical",
+        tmp_path / "memory",
+    )
     pair = SimpleNamespace(
-        memoryRoot=str(memory), onboardingRoot=str(memory / "onboarding"), codeRoot=str(logical)
+        memoryRoot=str(memory),
+        onboardingRoot=str(memory / "onboarding"),
+        codeRoot=str(logical),
     )
     request = SimpleNamespace(
         candidate=SimpleNamespace(
@@ -682,10 +719,14 @@ def test_the_prepared_closeout_hands_its_quality_phase_the_converted_base(tmp_pa
         selected=SimpleNamespace(terminals=terminals, run=SimpleNamespace(admission="a")),
     )
     resolved = SimpleNamespace(
-        code_repository_root=None, memory_root=None, onboarding_root=None, storage="storage"
+        code_repository_root=None,
+        memory_root=None,
+        onboarding_root=None,
+        storage="storage",
     )
     observed = SimpleNamespace(
-        code=SimpleNamespace(candidateTree="c" * 40), memory=SimpleNamespace(candidateTree="d" * 40)
+        code=SimpleNamespace(candidateTree="c" * 40),
+        memory=SimpleNamespace(candidateTree="d" * 40),
     )
     port = object()
     seen: dict[str, Any] = {}
@@ -739,7 +780,9 @@ def _card_with_rows(memory: Path, source: str, *rows: str) -> Path:
     return card
 
 
-def test_authoring_numbers_after_existing_references_dry_runs_and_validates(tmp_path: Path) -> None:
+def test_authoring_numbers_after_existing_references_dry_runs_and_validates(
+    tmp_path: Path,
+) -> None:
     """Review R3-2: a new row never overwrites a reference (Z09), a dry run writes nothing (Z12),
     and a sidecar that would not parse is refused before anything is written (Z20)."""
 
@@ -761,7 +804,10 @@ def test_authoring_numbers_after_existing_references_dry_runs_and_validates(tmp_
 
     preview = author_card_references(memory, code.root, dry_run=True)
     assert (preview["dryRun"], preview["authoredReferences"]) == (True, 1)
-    assert (app_card.read_bytes(), (memory / APP_SIDECAR).read_bytes()) == untouched  # Z12
+    assert (
+        app_card.read_bytes(),
+        (memory / APP_SIDECAR).read_bytes(),
+    ) == untouched  # Z12
 
     author_card_references(memory, code.root)
     after = json.loads((memory / APP_SIDECAR).read_text(encoding="utf-8"))
@@ -820,7 +866,10 @@ def test_the_fixer_checks_every_card_first_and_refuses_by_name(tmp_path: Path) -
     )
     assert fixed["ok"] is False
     refused = {one["card"]: one["reason"] for one in fixed["authoring"]["refused"]}
-    assert set(refused) == {"onboarding/src/pkg/a_first.py.md", "onboarding/src/pkg/z_last.py.md"}
+    assert set(refused) == {
+        "onboarding/src/pkg/a_first.py.md",
+        "onboarding/src/pkg/z_last.py.md",
+    }
     assert all("does not parse" in reason for reason in refused.values())
     # MIK-R45 failure behavior with MIK-R110 rule 2: refused cards are named in the
     # authoring refusal above and stay out of the mechanical re-record, so the fixer
@@ -866,7 +915,10 @@ def test_a_leftover_evidence_line_is_refused_and_only_the_named_card_loses_refer
     table = "\n| Finding | Anchor | Source |\n| --- | --- | --- |\n"
     twice = f"| Extra, once. [1] | `extra` | {EXTRA}:1-2 |\n| Extra, twice. [1] | `extra` | {EXTRA}:1-2 |\n"
     card.write_text(text.replace("- Extra. [1]\n", "") + table + twice, encoding="utf-8")
-    doubled, sidecar_before = card.read_bytes(), (memory / f"onboarding/{EXTRA}.json").read_bytes()
+    doubled, sidecar_before = (
+        card.read_bytes(),
+        (memory / f"onboarding/{EXTRA}.json").read_bytes(),
+    )
     refused = author_card_references(memory, code.root)
     assert "both re-author reference [1]" in refused["refused"][0]["reason"]
     assert card.read_bytes() == doubled
@@ -882,7 +934,10 @@ def test_a_leftover_evidence_line_is_refused_and_only_the_named_card_loses_refer
     assert set(json.loads(sidecar.read_text())["references"]) == {"1", "2", "3"}
     named = author_card_references(memory, code.root, only=f"{EXTRA}.md")
     assert named["removedReferences"] == 1
-    assert set(json.loads(sidecar.read_text())["references"]) == {"1", "3"}  # never renumbered
+    assert set(json.loads(sidecar.read_text())["references"]) == {
+        "1",
+        "3",
+    }  # never renumbered
 
 
 def test_one_documents_fix_reports_its_own_stale_references_and_the_status_counts(
@@ -949,7 +1004,9 @@ def test_one_documents_fix_reports_its_own_stale_references_and_the_status_count
     assert "findings" not in sent_legacy
 
 
-def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(tmp_path: Path) -> None:
+def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(
+    tmp_path: Path,
+) -> None:
     """L37 P1c, C3: the table reader ends a table only at a blank line, so a second table directly
     below one reads as its rows. Where either holds citations the card is refused, naming the
     line, and nothing is written; a card whose tables hold no citations is left alone."""

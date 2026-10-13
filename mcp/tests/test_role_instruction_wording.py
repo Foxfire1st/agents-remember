@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import patch
 
-from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
+from agents_remember.application.role_capsules.compilation import (
+    compile_admitted_capsule,
+)
 from agents_remember.application.role_capsules.launch import _capsule_launch
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
@@ -40,7 +42,10 @@ from agents_remember.cli.role_launch_preparation import (
     _ar_mcp_context,
     _compile_handover,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
@@ -174,11 +179,13 @@ class InstructionFileWordingTests(unittest.TestCase):
         router = read(LIFECYCLE / "SKILL.md")
         self.assertEqual(router.count("system-specialist"), 1)
         self.assertIn(
-            "`system-specialist` is the earlier ID of the same Investigator role.", router
+            "`system-specialist` is the earlier ID of the same Investigator role.",
+            router,
         )
         orientation = read(LIFECYCLE / "operations/orientation.md")
         self.assertIn(
-            "an Investigator uses its parent's first message for the concern", orientation
+            "an Investigator uses its parent's first message for the concern",
+            orientation,
         )
 
     def test_retired_investigator_wording_is_detected_when_reinserted(self) -> None:
@@ -192,11 +199,13 @@ class InstructionFileWordingTests(unittest.TestCase):
                     shipped = (REPOSITORY_ROOT / source).read_text(encoding="utf-8")
                     relative = source.removeprefix("skills/")
                     self.assertEqual(
-                        retired_statement_findings(normalize_statement(shipped), relative), []
+                        retired_statement_findings(normalize_statement(shipped), relative),
+                        [],
                     )
                     self.assertTrue(
                         retired_statement_findings(
-                            normalize_statement(shipped + "\n" + row.statement), relative
+                            normalize_statement(shipped + "\n" + row.statement),
+                            relative,
                         )
                     )
 
@@ -276,7 +285,8 @@ class InstructionFileWordingTests(unittest.TestCase):
         kept = "In flat mode, when no Manager or Orchestrator owns closeout, you may coordinate the existing c-09/c-12 paired transaction only under its already-delegated authority and after independent review and required curation evidence exist."
         self.assertIn(kept, architect)
         self.assertIn(
-            "Flat mode here is only the developer-chosen direct-coordination exception.", architect
+            "Flat mode here is only the developer-chosen direct-coordination exception.",
+            architect,
         )
         closeout = " ".join(read(LIFECYCLE / "operations/closeout.md").split())
         self.assertIn(
@@ -301,7 +311,9 @@ class InstructionFileWordingTests(unittest.TestCase):
         self.assertIn("A Worker starts no role", role_text("worker"))
         self.assertIn("Keep exactly one Curator writer", role_text("curator"))
 
-    def test_leaf_roles_and_operations_deliver_their_own_positive_obligations(self) -> None:
+    def test_leaf_roles_and_operations_deliver_their_own_positive_obligations(
+        self,
+    ) -> None:
         for source, clauses in LEAF_CLAUSES.items():
             with self.subTest(source=source):
                 self.assertEqual(missing_clauses(read(LIFECYCLE / source), clauses), [])
@@ -328,7 +340,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                     self.assertNotEqual(mutant, reading, "control must remove real instructions")
                     self.assertIn(name, missing_clauses(mutant, clauses))
 
-    def test_equivalent_preserved_identity_and_no_role_boundaries_are_allowed(self) -> None:
+    def test_equivalent_preserved_identity_and_no_role_boundaries_are_allowed(
+        self,
+    ) -> None:
         for role in ROLES:
             reading = role_text(role).replace("starts no role", "does not start a role")
             with self.subTest(role=role):
@@ -358,7 +372,9 @@ class InstructionFileWordingTests(unittest.TestCase):
             "Selected-master coordinator and decision owner under the Architect for one master or the Orchestrator for concurrent masters.",
         )
 
-    def test_the_surfaces_are_the_router_seven_roles_and_their_eight_operations(self) -> None:
+    def test_the_surfaces_are_the_router_seven_roles_and_their_eight_operations(
+        self,
+    ) -> None:
         names = [path.relative_to(LIFECYCLE).as_posix() for path in instruction_files()]
         self.assertEqual(names[0], "SKILL.md")
         self.assertEqual(names[1:8], [f"roles/{role}.md" for role in LAUNCHER_ROLES])
@@ -379,7 +395,9 @@ class InstructionFileWordingTests(unittest.TestCase):
             ],
         )
 
-    def test_no_forbidden_host_string_is_left_and_the_packaged_copy_is_the_same_text(self) -> None:
+    def test_no_forbidden_host_string_is_left_and_the_packaged_copy_is_the_same_text(
+        self,
+    ) -> None:
         for relative in (*instruction_files(), LIFECYCLE / "composition-manifest.json"):
             with self.subTest(file=relative.as_posix()):
                 self.assertEqual(forbidden_in(read(relative)), [])
@@ -389,7 +407,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                     "run python3 scripts/sync-skills.py",
                 )
 
-    def test_every_passage_that_names_an_ar_tool_names_the_task_tool_server(self) -> None:
+    def test_every_passage_that_names_an_ar_tool_names_the_task_tool_server(
+        self,
+    ) -> None:
         naming = 0
         for relative in instruction_files():
             for passage in re.split(r"\n\s*\n", read(relative)):
@@ -402,7 +422,9 @@ class InstructionFileWordingTests(unittest.TestCase):
         # The rule is checked on real passages, not satisfied by finding none.
         self.assertGreaterEqual(naming, 20)
 
-    def test_the_router_names_the_host_the_two_tools_and_the_only_tool_server(self) -> None:
+    def test_the_router_names_the_host_the_two_tools_and_the_only_tool_server(
+        self,
+    ) -> None:
         router = " ".join(read(LIFECYCLE / "SKILL.md").split())
         for sentence in (
             "Paseo is the host",
@@ -474,7 +496,8 @@ class InstructionFileWordingTests(unittest.TestCase):
                 else:
                     self.assertNotIn("`role_start`", text)
                     self.assertRegex(
-                        text, r"(?:A (?:Worker|Reviewer|Curator)|An Investigator) starts no role"
+                        text,
+                        r"(?:A (?:Worker|Reviewer|Curator)|An Investigator) starts no role",
                     )
         for role in set(LAUNCHER_ROLES) - {"architect"}:
             with self.subTest(role=role, told="a role without a parent needs none"):
@@ -542,7 +565,8 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertIn("--authorization-ref <ref> --commit --json", text)
                 self.assertIn("publishes no dataset", text)
                 self.assertIn(
-                    "The CLI has no `--baseline`, `--publish` or `--publish-to` options", text
+                    "The CLI has no `--baseline`, `--publish` or `--publish-to` options",
+                    text,
                 )
                 self.assertIn("its parser rejects them before the file writer is invoked", text)
                 self.assertIn("source-bound command", text)
@@ -592,7 +616,9 @@ class InstructionFileWordingTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, 2)
                 self.assertIn("unrecognized arguments: " + option, errors.getvalue())
 
-    def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(self) -> None:
+    def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(
+        self,
+    ) -> None:
         manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
         for role in LAUNCHER_ROLES:
             with self.subTest(role=role):
@@ -620,13 +646,18 @@ class HandoverTextWordingTests(unittest.TestCase):
             transcript_root=root / "coordination" / "logs" / "mcp",
             repositories={
                 "repo": RepositoryScope(
-                    repo_id="repo", path=root / "projects" / "repo", memory_root=root / "memory"
+                    repo_id="repo",
+                    path=root / "projects" / "repo",
+                    memory_root=root / "memory",
                 )
             },
         )
         for name, stub in (
             ("compile_launch_capsule", self.role_capsule),
-            ("build_context_packet", lambda *_args, **_kwargs: {"repo": {"id": "repo"}}),
+            (
+                "build_context_packet",
+                lambda *_args, **_kwargs: {"repo": {"id": "repo"}},
+            ),
             (
                 "_read_task_doc",
                 lambda _config, resolved: {
@@ -680,12 +711,21 @@ class HandoverTextWordingTests(unittest.TestCase):
 
         root = self.config.coordination_root
         documents = {
-            "sprint/task.json": {"id": "SPRINT", "kind": "master", "orchestrates": ["master"]},
+            "sprint/task.json": {
+                "id": "SPRINT",
+                "kind": "master",
+                "orchestrates": ["master"],
+            },
             "master/task.json": {
                 "id": "MASTER",
                 "kind": "master",
                 "subTasks": [
-                    {"number": "01", "name": "Leaf", "file": "01_leaf.md", "status": "inProgress"}
+                    {
+                        "number": "01",
+                        "name": "Leaf",
+                        "file": "01_leaf.md",
+                        "status": "inProgress",
+                    }
                 ],
             },
             "master/01_leaf.json": {
@@ -710,11 +750,20 @@ class HandoverTextWordingTests(unittest.TestCase):
             path.write_text(document.model_dump_json(by_alias=True), encoding="utf-8")
         refs = {}
         if role not in {"architect", "investigator"}:
-            refs["sprintDocumentRef"] = {"repository": "repo", "path": "sprint/task.json"}
+            refs["sprintDocumentRef"] = {
+                "repository": "repo",
+                "path": "sprint/task.json",
+            }
         if role in {"manager", "worker", "reviewer", "curator"}:
-            refs["masterDocumentRef"] = {"repository": "repo", "path": "master/task.json"}
+            refs["masterDocumentRef"] = {
+                "repository": "repo",
+                "path": "master/task.json",
+            }
         if role in {"worker", "reviewer", "curator"}:
-            refs["taskDocumentRef"] = {"repository": "repo", "path": "master/01_leaf.json"}
+            refs["taskDocumentRef"] = {
+                "repository": "repo",
+                "path": "master/01_leaf.json",
+            }
         context = resolve_role_launch_context(
             self.config, RoleSelection.model_validate({"role": role, **refs})
         )
@@ -780,7 +829,8 @@ class HandoverTextWordingTests(unittest.TestCase):
                 if routed:
                     assert parent is not None
                     self.assertIn(
-                        "send what needs the developer's decision to that parent", question
+                        "send what needs the developer's decision to that parent",
+                        question,
                     )
                     # A question stays addressed to the parent's agent ID (MIK-R93
                     # rules 1 and 10; architect QADDR ruling option (a)): rule 10's
@@ -797,7 +847,9 @@ class HandoverTextWordingTests(unittest.TestCase):
                 _prompt, handover = self.compiled(role, None)
                 self.assertEqual(handover["host"]["developerQuestions"].encode(), ordinary.encode())
 
-    def test_owner_relation_routes_developer_questions_and_preserves_coordinators(self) -> None:
+    def test_owner_relation_routes_developer_questions_and_preserves_coordinators(
+        self,
+    ) -> None:
         parents = (
             StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects"),
             StartingAgent("2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"),
@@ -886,7 +938,9 @@ class HandoverTextWordingTests(unittest.TestCase):
             self.assertNotIn("installed", told)
             self.assertNotIn("AR MCP tool", told)
 
-    def test_the_handover_names_the_tool_server_the_two_tools_and_the_host(self) -> None:
+    def test_the_handover_names_the_tool_server_the_two_tools_and_the_host(
+        self,
+    ) -> None:
         prompt, handover = self.compiled("architect", None)
         host = handover["host"]
         self.assertEqual((host["name"], host["arToolServer"]), ("Paseo", TOOL_SERVER))
@@ -922,8 +976,9 @@ class HandoverTextWordingTests(unittest.TestCase):
             "serves this assignment.",
             f"look once more before reporting {TOOL_SERVER} missing, and report that instead of "
             "substituting another.",
-            "add the requested files to read_ar_files as a list of objects such as "
-            '{"path": "<path in the repository>", "source": "full"}.',
+            "add the requested files to read_ar_files as a list of path strings such as "
+            '"<path in the repository>". A read names where each file is and carries no file '
+            "text: read the named files with your harness's own file tool.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, host["arMcpUsage"])
@@ -938,7 +993,11 @@ class HandoverTextWordingTests(unittest.TestCase):
         )
         self.assertEqual(
             {key: host["roleTools"][key] for key in ("toolServer", "start", "message")},
-            {"toolServer": TOOL_SERVER, "start": "role_start", "message": "role_message"},
+            {
+                "toolServer": TOOL_SERVER,
+                "start": "role_start",
+                "message": "role_message",
+            },
         )
         usage = host["roleTools"]["usage"]
         for said in (
@@ -975,7 +1034,8 @@ class HandoverTextWordingTests(unittest.TestCase):
             with self.subTest(said=said):
                 self.assertIn(said, usage)
         self.assertIn(
-            "Put every question for the developer in your own chat", host["developerQuestions"]
+            "Put every question for the developer in your own chat",
+            host["developerQuestions"],
         )
         self.assertIn("taskless role has no task document", handover["ownerHandover"])
         self.assertTrue(
@@ -1037,7 +1097,10 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
         self.assertIn("in Paseo", described["role_start"])
         told = {name: " ".join(text.split()) for name, text in described.items()}
         for name, sentence in (
-            ("role_start", "Only the agent that started an execution repeats its request_id."),
+            (
+                "role_start",
+                "Only the agent that started an execution repeats its request_id.",
+            ),
             ("role_start", "Starts run one at a time."),
             (
                 "role_message",

@@ -18,7 +18,11 @@ from typing import Any
 
 import pytest
 from agents_remember.application.knowledge_proofs import invariants_without_proof
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import (
+    Owner,
+    WriteRequest,
+    write_knowledge,
+)
 from agents_remember.application.knowledge_writer.handoff import (
     TestFileMention as FileMention,
 )
@@ -47,7 +51,9 @@ from agents_remember.memory_quality.curator_checklist import (
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.documents import file_sidecar_path
-from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.models.lifecycles.memory_candidate import (
+    MemoryCandidatePairIdentity,
+)
 from knowledge_index_test_support import (
     FAMILY,
     OUTSIDER_INVARIANT,
@@ -99,14 +105,23 @@ def _write(world: World, document: Any, *, commit: bool = True):
             "pytest mcp/tests/test_a.py::Holder::test_one",
             (Reference("mcp/tests/test_a.py", "Holder.test_one"),),
         ),
-        ("pytest mcp/tests/test_a.py -k test_one", (Reference("mcp/tests/test_a.py", "test_one"),)),
+        (
+            "pytest mcp/tests/test_a.py -k test_one",
+            (Reference("mcp/tests/test_a.py", "test_one"),),
+        ),
         (
             "pytest mcp/tests/test_a.py -k 'test_one'.",
             (Reference("mcp/tests/test_a.py", "test_one"),),
         ),
         # An expression names no one test, so only the file is named.
-        ("pytest mcp/tests/test_a.py -k 'a and not b'", (FileMention("mcp/tests/test_a.py"),)),
-        ("pytest mcp/tests/test_a.py -k one or two", (FileMention("mcp/tests/test_a.py"),)),
+        (
+            "pytest mcp/tests/test_a.py -k 'a and not b'",
+            (FileMention("mcp/tests/test_a.py"),),
+        ),
+        (
+            "pytest mcp/tests/test_a.py -k one or two",
+            (FileMention("mcp/tests/test_a.py"),),
+        ),
         (
             "pinned in mcp/tests/test_a.py, see pkg/landing.py",
             (FileMention("mcp/tests/test_a.py"),),
@@ -144,7 +159,10 @@ def test_evidence_names_a_test_as_a_test_id_or_as_a_path_plus_symbol(
 
 
 def test_a_file_named_with_a_test_anywhere_in_the_evidence_is_not_also_reported_bare() -> None:
-    evidence = ["pytest mcp/tests/test_a.py::test_x", "the pin in mcp/tests/test_a.py holds"]
+    evidence = [
+        "pytest mcp/tests/test_a.py::test_x",
+        "the pin in mcp/tests/test_a.py holds",
+    ]
     assert named_in(evidence) == (Reference("mcp/tests/test_a.py", "test_x"),)
     assert named_in(list(reversed(evidence))) == (Reference("mcp/tests/test_a.py", "test_x"),)
 
@@ -169,7 +187,10 @@ def test_both_forms_become_proofs_once_faceted_and_unresolvable_evidence_is_repo
                 scope=SCOPE,
                 admission=ADMISSION,
                 proofs=[
-                    {"test": {"path": TEST_FILE, "symbol": "test_plain"}, "facet": "plain lands"},
+                    {
+                        "test": {"path": TEST_FILE, "symbol": "test_plain"},
+                        "facet": "plain lands",
+                    },
                     {
                         "test": f"{TEST_FILE}::LandingTests::test_pair_lands_together",
                         "facet": "both halves land as one value",
@@ -252,10 +273,17 @@ def test_the_invariant_and_family_views_carry_their_proofs(tmp_path: Path) -> No
     (proof,) = proven["proofs"]
     assert proof["id"] == "PRF-T3ST0K"
     assert proof["invariant"] == REVIEW_INVARIANT
-    assert proof["path"] == "mcp/tests/test_review_family_context.py"
-    assert proof["anchor"]["locator"] == {"kind": "symbol", "name": "test_unchanged_context"}
-    assert proof["facet"] == "unchanged realizations are shown"
-    # A proof states what its test demonstrates; nothing claims the test passed.
+    assert proof["location"]["file"].endswith(
+        "onboarding/mcp/tests/test_review_family_context.py.json"
+    ), proof
+    assert proof["codeLocation"]["file"] == "mcp/tests/test_review_family_context.py"
+    assert proof["codeLocation"]["anchor"]["locator"] == {
+        "kind": "symbol",
+        "name": "test_unchanged_context",
+    }
+    # A proof is cited, not carried: no facet prose rides the answer, and
+    # nothing claims the test passed.
+    assert "facet" not in proof
     assert not {"passed", "status", "result", "satisfied"} & set(proof)
 
     unproven = _read(
@@ -268,7 +296,10 @@ def test_the_invariant_and_family_views_carry_their_proofs(tmp_path: Path) -> No
     assert unproven["proofs"] == []
 
     family = _read(
-        root, coordination, view="family", family_revision_id=text_uuid("revision", f"{FAMILY}@1")
+        root,
+        coordination,
+        view="family",
+        family_revision_id=text_uuid("revision", f"{FAMILY}@1"),
     )
     assert family["state"] == "view", family
     assert [one["id"] for one in family["proofs"]] == ["PRF-T3ST0K"]
@@ -290,7 +321,9 @@ def test_the_other_views_carry_no_proofs(tmp_path: Path) -> None:
     assert queue["refusalCode"] == "unknown_view", queue
 
 
-def test_a_family_whose_members_have_no_proof_shows_an_empty_list(tmp_path: Path) -> None:
+def test_a_family_whose_members_have_no_proof_shows_an_empty_list(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "memory"
     init_repository(root)
     write_review_tree(root)
@@ -366,7 +399,9 @@ def _checklist(report_path: Path, without_proof: WithoutProof | None) -> Curator
     )
 
 
-def test_the_checklist_shows_the_list_as_information_that_moves_no_count(tmp_path: Path) -> None:
+def test_the_checklist_shows_the_list_as_information_that_moves_no_count(
+    tmp_path: Path,
+) -> None:
     unconverted = report_path_for(tmp_path / "unconverted")
     converted = report_path_for(tmp_path / "converted")
     first = write_curator_checklist(_checklist(unconverted, None))
@@ -408,12 +443,18 @@ def test_migrated_evidence_is_listed_then_turned_into_a_proof_by_a_curator_pass(
     document["origin"]["handoff"] = {
         "evidence": [f"Evidence: pinned by {TEST_FILE}::test_plain in the landing suite."]
     }
-    write(world.memory, {record.relative_to(world.memory).as_posix(): canonical_text(document)})
+    write(
+        world.memory,
+        {record.relative_to(world.memory).as_posix(): canonical_text(document)},
+    )
 
     coverage = invariants_without_proof(world.memory)
     assert coverage is not None and coverage.problem is None
     (listed,) = coverage.unproven
-    assert (listed.id, listed.evidence_tests) == (BASE_INVARIANT, (f"{TEST_FILE}::test_plain",))
+    assert (listed.id, listed.evidence_tests) == (
+        BASE_INVARIANT,
+        (f"{TEST_FILE}::test_plain",),
+    )
     # The memory-quality run hands exactly this list to the checklist, and nothing for unconverted.
     section = checklist_without_proof(world.memory)
     assert section is not None and [row["invariant"] for row in section.rows] == [BASE_INVARIANT]
@@ -426,18 +467,28 @@ def test_migrated_evidence_is_listed_then_turned_into_a_proof_by_a_curator_pass(
                 "M-1",
                 invariant_id=BASE_INVARIANT,
                 statement=document["statement"],
-                proofs=[{"test": f"{TEST_FILE}::test_plain", "facet": "a plain landing lands"}],
+                proofs=[
+                    {
+                        "test": f"{TEST_FILE}::test_plain",
+                        "facet": "a plain landing lands",
+                    }
+                ],
             )
         ],
     )
     assert report.state == "written", report.render()
     (proof,) = read_json(world.memory, f"onboarding/{TEST_FILE}.json")["proves"]
-    assert (proof["invariant"], proof["facet"]) == (BASE_INVARIANT, "a plain landing lands")
+    assert (proof["invariant"], proof["facet"]) == (
+        BASE_INVARIANT,
+        "a plain landing lands",
+    )
     after = invariants_without_proof(world.memory)
     assert after is not None and after.unproven == ()
 
 
-def test_the_list_reuses_the_cached_index_and_reports_an_unreadable_one(tmp_path: Path) -> None:
+def test_the_list_reuses_the_cached_index_and_reports_an_unreadable_one(
+    tmp_path: Path,
+) -> None:
     root = _review_tree(tmp_path)
     coordination = tmp_path / "coordination"
     first = invariants_without_proof(root, coordination_root=coordination)

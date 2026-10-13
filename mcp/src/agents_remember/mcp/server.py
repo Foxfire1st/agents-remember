@@ -11,7 +11,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
-from agents_remember.application.agent_binding import TOOL_SERVER_NAME, read_agent_binding
+from agents_remember.application.agent_binding import (
+    TOOL_SERVER_NAME,
+    read_agent_binding,
+)
 from agents_remember.application.runtime import startup as server_startup
 from agents_remember.application.tool_answer_log import (
     ToolCallRecord,
@@ -37,6 +40,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 
 from .compact_content import install_compact_content
 from .public_surface import DISPATCH_AGENT_INPUT_FIELDS
+from .read_only import apply_read_only_marks
 from .registration import TOOL_REGISTRARS
 
 
@@ -176,6 +180,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # the only place that decides which families a server advertises.
     for register_tools in TOOL_REGISTRARS:
         register_tools(server, config)
+    # MIK-R109 rule 7: the one list of read-only marks rides on the advertised
+    # annotations, applied here so every family is covered and an unlisted
+    # tool breaks creation instead of shipping unmarked.
+    apply_read_only_marks(server)
     return server
 
 

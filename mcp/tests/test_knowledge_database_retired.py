@@ -84,11 +84,19 @@ from typing import Any
 import apsw
 import knowledge_writer_test_support as fixture
 import pytest
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import (
+    Owner,
+    WriteRequest,
+    write_knowledge,
+)
 from agents_remember.application.published_intent import published_intent_block
 from agents_remember.mcp.tools import knowledge as tools
 from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge_index import build_index, directory_snapshot, text_uuid
+from agents_remember.memory.knowledge_index import (
+    build_index,
+    directory_snapshot,
+    text_uuid,
+)
 from agents_remember_test_support.testing import database_retirement_guard as guard
 from agents_remember_test_support.testing import database_source_reading as reader
 
@@ -165,7 +173,10 @@ NAMES_ALLOWED = {
 }
 # The one package whose database is not a knowledge database: the citation source index.
 _OTHER_STORES = ("memory_quality/style/citations/",)
-_ROW_WRITERS = {"memory/knowledge_index/build.py", "memory/knowledge_index/projection.py"}
+_ROW_WRITERS = {
+    "memory/knowledge_index/build.py",
+    "memory/knowledge_index/projection.py",
+}
 _REVIEW = "a reviewer read of the dataset file of each side of a comparison"
 _RE_EXPORT = "re-exports it for its package"
 # Each helper opens, builds, probes or copies a database at the path its caller hands it, so a new
@@ -397,7 +408,10 @@ _FORMS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("from sqlite3 import dbapi2\ndef f(p): return dbapi2.connect(p)\n", _CONSTRUCTORS),
     ("import sqlite3.dbapi2 as d\ndef f(p): return d.connect(p)\n", _CONSTRUCTORS),
     ("import apsw.ext as e\ndef f(p): return e.Connection(p)\n", _CONSTRUCTORS),
-    ('import apsw\nN = "Conn" + "ection"\ndef f(p): return getattr(apsw, N)(p)\n', _CONSTRUCTORS),
+    (
+        'import apsw\nN = "Conn" + "ection"\ndef f(p): return getattr(apsw, N)(p)\n',
+        _CONSTRUCTORS,
+    ),
     ('import apsw\ndef f(p): return vars(apsw)["Connection"](p)\n', _CONSTRUCTORS),
     ('import apsw\ndef f(p): return apsw.__dict__["Connection"](p)\n', _ATTRIBUTES),
     ("import apsw\nopener = apsw\n", _CONSTRUCTORS),
@@ -411,8 +425,14 @@ _FORMS: tuple[tuple[str, Callable[[], None]], ...] = (
         'import importlib\ndef f(p): return importlib.import_module("sq" + "lite3").connect(p)\n',
         _CONSTRUCTORS,
     ),
-    ("import importlib\ndef f(n, p): return importlib.import_module(n).connect(p)\n", _IMPORTS),
-    ("from importlib import import_module as load\ndef f(n): return load(n)\n", _IMPORTS),
+    (
+        "import importlib\ndef f(n, p): return importlib.import_module(n).connect(p)\n",
+        _IMPORTS,
+    ),
+    (
+        "from importlib import import_module as load\ndef f(n): return load(n)\n",
+        _IMPORTS,
+    ),
     ('def f(n, p): return __import__("sq" + n).connect(p)\n', _IMPORTS),
     ('def f(c): c.execute("-- x\\nINSERT INTO t VALUES (1)")\n', _WRITERS),
     ('def f(c): c.execute("/* x */ DELETE FROM t")\n', _WRITERS),
@@ -447,8 +467,14 @@ _FORMS: tuple[tuple[str, Callable[[], None]], ...] = (
     ('def f(c): c.execute("ATTACH CAST(? AS TEXT) AS other", ("x",))\n', _READ_ONLY),
     *((f"def f(c): c.execute({statement!r})\n", _WRITERS) for statement in _WRITE_SPELLINGS),
     *((f"from agents_remember.elsewhere import {helper}\n", _CALLERS) for helper in HELPER_CALLERS),
-    ("from ..memory.knowledge import connection as c\nf = c.open_read_only_database\n", _CALLERS),
-    ("import agents_remember.memory.knowledge_index as index\nf = index.build_index\n", _CALLERS),
+    (
+        "from ..memory.knowledge import connection as c\nf = c.open_read_only_database\n",
+        _CALLERS,
+    ),
+    (
+        "import agents_remember.memory.knowledge_index as index\nf = index.build_index\n",
+        _CALLERS,
+    ),
     (
         "from ..memory.conversion.inputs import *\ndef f(r): return memory_from_git(r, 'x', r)\n",
         _CALLERS,
@@ -473,7 +499,9 @@ _LEGITIMATE = (
 
 
 def _failing(
-    source: str, monkeypatch: pytest.MonkeyPatch, relative: str = "application/probe_slip.py"
+    source: str,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str = "application/probe_slip.py",
 ) -> set[Callable[[], None]]:
     """The static tests that fail once ``source`` is one more production module."""
 
@@ -589,14 +617,23 @@ def test_the_run_time_guard_records_what_the_source_cannot_show(
     tests = Path(__file__).parent
     emptying = {
         path.name
-        for path in (*tests.glob("*.py"), *(tests.parent / "test_support").rglob("*.py"))
+        for path in (
+            *tests.glob("*.py"),
+            *(tests.parent / "test_support").rglob("*.py"),
+        )
         if "_take_violations" in path.read_text(encoding="utf-8")
     }
-    assert emptying == {Path(__file__).name, f"{guard.PLUGIN_NAME.rsplit('.', 1)[-1]}.py"}
+    assert emptying == {
+        Path(__file__).name,
+        f"{guard.PLUGIN_NAME.rsplit('.', 1)[-1]}.py",
+    }
     probe = _production_probe(_PROBE_MODULE)
     dataset = tmp_path / "knowledge.sqlite"
     apsw.Connection(str(dataset)).close()
-    other, links = tmp_path / "other.db", (tmp_path / "hard.sqlite", tmp_path / "symbolic.sqlite")
+    other, links = (
+        tmp_path / "other.db",
+        (tmp_path / "hard.sqlite", tmp_path / "symbolic.sqlite"),
+    )
     cases: dict[str, tuple[tuple[Any, ...], list[str]]] = {
         "hidden_constructor": ((dataset, "Conn" + "ection"), [CONNECT]),
         "dotted_submodule": ((other,), [CONNECT]),
@@ -637,7 +674,9 @@ def test_the_run_time_guard_records_what_the_source_cannot_show(
     assert _take_violations() == []
 
 
-def test_the_run_time_guard_allows_the_named_modules_and_test_code(tmp_path: Path) -> None:
+def test_the_run_time_guard_allows_the_named_modules_and_test_code(
+    tmp_path: Path,
+) -> None:
     """The same operations are no violation from test code, or from the module named for them."""
 
     dataset = tmp_path / "index.sqlite"
@@ -656,7 +695,11 @@ def test_the_run_time_guard_allows_the_named_modules_and_test_code(tmp_path: Pat
         *(CONNECT, CONNECT, COPY, WRITE, WRITE),
         *(COPY, WRITE, CONNECT_READ_ONLY),
     ]
-    assert [event.module for event in events] == [*[None] * 5, *[_PROBE_MODULE] * 2, None]
+    assert [event.module for event in events] == [
+        *[None] * 5,
+        *[_PROBE_MODULE] * 2,
+        None,
+    ]
     assert [(event.operation, event.function) for event in _take_violations()] == [
         (COPY, "through"),
         (WRITE, "through"),
@@ -714,7 +757,10 @@ def test_an_event_with_no_repository_frame_is_refused_unless_coverage_could_make
     with guard.observed_database_events() as observed:
         probe["in_a_pool"](connect, tmp_path / "coverage.db").close()
     (made,) = guard.events_beneath(tmp_path, observed)
-    assert made.allowed and (made.operation, made.module) == (CONNECT, NO_REPOSITORY_FRAME)
+    assert made.allowed and (made.operation, made.module) == (
+        CONNECT,
+        NO_REPOSITORY_FRAME,
+    )
     assert _take_violations() == []
 
 
@@ -770,7 +816,9 @@ def test_the_run_time_guard_names_the_modules_the_static_check_names() -> None:
 # --- the tool surface under the run-time guard --------------------------------------------------------
 
 
-def test_the_tool_surface_and_the_writer_open_only_the_derived_index_cache(tmp_path: Path) -> None:
+def test_the_tool_surface_and_the_writer_open_only_the_derived_index_cache(
+    tmp_path: Path,
+) -> None:
     """What the knowledge surface actually touches, by every route the run-time guard sees.
 
     The memory tree holds a file named ``knowledge.sqlite`` (the database a converted tree still
@@ -807,7 +855,10 @@ def test_the_tool_surface_and_the_writer_open_only_the_derived_index_cache(tmp_p
     # they are refused, and the legacy reader, whose file that is, is not.
     through = _production_probe(_PROBE_MODULE)["through"]
     snapshot = directory_snapshot(world.memory)
-    retired, scratch = tmp_path / "elsewhere" / "knowledge.sqlite", cache / "scratch.sqlite"
+    retired, scratch = (
+        tmp_path / "elsewhere" / "knowledge.sqlite",
+        cache / "scratch.sqlite",
+    )
     retired.parent.mkdir()
     through(build_index, snapshot, scratch)
     through(open_read_only_database, scratch).close()
@@ -834,11 +885,13 @@ def _drive_the_knowledge_surface(world: Any, coordination: Path) -> None:
         )
 
     family = read(
-        view="family", family_revision_id=text_uuid("revision", f"{fixture.BASE_FAMILY}@1")
+        view="family",
+        family_revision_id=text_uuid("revision", f"{fixture.BASE_FAMILY}@1"),
     )
     assert family["state"] in {"view", "page"}, family
     invariant = read(
-        view="invariant", invariant_revision_id=text_uuid("revision", f"{fixture.BASE_INVARIANT}@1")
+        view="invariant",
+        invariant_revision_id=text_uuid("revision", f"{fixture.BASE_INVARIANT}@1"),
     )
     assert invariant["state"] in {"view", "page"}, invariant
     leaf = read(view="source_context", source_path=fixture.CODE_FILE)
@@ -849,7 +902,8 @@ def _drive_the_knowledge_surface(world: Any, coordination: Path) -> None:
     assert refused["refusalCode"] == "unknown_view", refused
 
     compared = tools.knowledge_diff_payload(
-        tools.DiffToolRequest(memory_root=str(world.memory), before="HEAD", after="HEAD")
+        tools.DiffToolRequest(memory_root=str(world.memory), before="HEAD", after="HEAD"),
+        coordination_root=str(coordination),
     )
     assert compared["state"] == "compared", compared
 

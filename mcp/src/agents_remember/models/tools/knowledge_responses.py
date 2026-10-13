@@ -78,9 +78,18 @@ __all__ = [
 class KnowledgeReadResponse(ToolResponse):
     """``knowledge_read``: one named view's payload, or one typed refusal.
 
-    ``view`` and ``snapshot`` are echoed beside the payload so a caller can tell which of the five
+    ``view`` and ``snapshot`` are echoed beside the payload so a caller can tell which of the three
     views it received and which snapshot it was read at without parsing the payload's own body. The
     payload itself is the view payload verbatim -- the same object requirements 2 and 3 define.
+
+    Since MIK-R109 rule 2 the payload's rows name records instead of carrying them: each row
+    holds the text ID, kind, computed state and memory-checkout location. The file is
+    memory-root-relative beside the answered absolute ``memoryTree.memoryRoot`` for a caller
+    reading its own memory worktree, and absolute with ``memoryCommit`` beside the answer for
+    a caller with no memory worktree. ``memoryCommit`` is
+    the memory commit the locations were read from, beside the absolute ``memoryRoot`` the
+    ``memoryTree`` block already names; ``memoryDirty`` says whether the checkout holds
+    uncommitted changes. Any other view name is refused as ``unknown_view``.
     """
 
     operation: Literal["knowledge_read"] = "knowledge_read"
@@ -94,6 +103,9 @@ class KnowledgeReadResponse(ToolResponse):
     threshold: dict[str, Any] | None = None
     payload: dict[str, Any] | None = None
     memoryTree: dict[str, Any] | None = None
+    memoryCommit: str | None = None
+    memoryDirty: bool | None = None
+    report: str | None = None
     indexComplete: bool | None = None
     proofs: list[dict[str, Any]] | None = None
     currentness: dict[str, Any] | None = None
@@ -104,18 +116,21 @@ class KnowledgeReadResponse(ToolResponse):
 
 
 class KnowledgeDiffResponse(ToolResponse):
-    """``knowledge_diff``: the Git diff of the knowledge files of two memory trees, or one refusal.
+    """``knowledge_diff``: names beside a report of the comparison, or one refusal.
 
-    ``diff`` has the shape of the reviewer's tree diff (``ReviewKnowledgeTreeDiff``): the changed
-    knowledge files (records, history, onboarding sidecars and cards) with their patches, grouped
-    by record and by source path. It holds nothing an agent supplied and no semantic effect label:
-    none is ever inferred from the change (requirement 6.2 quotes ``Doc13:184``'s "not inferred
-    from the diff" as the whole contract).
-
-    One answer stays within ``threshold``, the bound ``knowledge_read`` states. ``complete`` says
-    whether the answer holds the whole patch of every selected file; when it does not, ``leftOut``
-    names the files whose patch is absent (``files``, ``paths``, ``pathsNotNamed``), the patches
-    that are cut short (``cutPatches``), and the request that reaches each (``nextAction``).
+    Since MIK-R109 rule 3 the answer no longer carries the comparison: the
+    whole comparison (the changed knowledge files with their patches,
+    grouped by record and by source path, over the reviewer's own
+    computation, with no inferred semantic effect label) is written as a
+    caller-readable report. The answer holds the two trees it compared
+    (``beforeTree``/``afterTree`` beside the named revisions), the count of
+    changes by kind (``counts``: changed files by Git status, groups by
+    listing), every changed record up to the list bound in decision order
+    (``decisionRecords``: text ID, kind, change, authoritative index path
+    inside the memory tree, joined with the answered absolute
+    ``memoryRoot``; ``decisionRecordCount`` the total), and the report's location
+    (``report``), openable as written. ``complete``/``diff``/``leftOut``
+    are gone with the carried patches.
     """
 
     operation: Literal["knowledge_diff"] = "knowledge_diff"
@@ -123,10 +138,12 @@ class KnowledgeDiffResponse(ToolResponse):
     memoryRoot: str | None = None
     beforeRevision: str | None = None
     afterRevision: str | None = None
-    threshold: dict[str, Any] | None = None
-    complete: bool | None = None
-    diff: dict[str, Any] | None = None
-    leftOut: dict[str, Any] | None = None
+    beforeTree: str | None = None
+    afterTree: str | None = None
+    counts: dict[str, Any] | None = None
+    decisionRecords: list[dict[str, Any]] | None = None
+    decisionRecordCount: int | None = None
+    report: str | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 

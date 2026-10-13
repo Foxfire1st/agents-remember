@@ -542,12 +542,15 @@ def test_bootstrap_journey_from_init_to_second_fixer_refusal(
     assert reread["knowledge"]["state"] == "not-recorded", reread["knowledge"]
     assert "knowledge-bootstrap" in reread["knowledge"]["nextAction"], reread["knowledge"]
 
-    reading = read_ar_files_tool(
-        config, repo_id=REPO_ID, files=[{"path": "pkg/alpha.py", "source": "full"}]
-    )
-    assert reading["ok"] is True, reading
-    assert reading["files"][0].get("format") == "text/v2", reading
-    assert "[1]" in str(reading["files"][0].get("onboarding") or ""), reading
+    reading = read_ar_files_tool(config, repo_id=REPO_ID, files=["pkg/alpha.py"])
+    assert reading["ok"] is True and reading["state"] == "named", reading
+    # MIK-R109 rule 1: the read names the governing card; it carries no
+    # text. The converted onboarding of the file is asserted in the card
+    # file the answer names, read here with the test's own file read.
+    (row,) = reading["files"]
+    assert (row["path"], row["exists"]) == ("pkg/alpha.py", True), row
+    assert row["card"], row
+    assert "Alpha prints alpha." in Path(row["card"]).read_text(encoding="utf-8"), row
 
     checked = drift_check_tool(config, repo_id=REPO_ID)
     assert checked["ok"] is True, checked

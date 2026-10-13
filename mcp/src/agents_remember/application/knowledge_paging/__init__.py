@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from agents_remember.application.knowledge_paging.pager import (
     OVERSIZED_ROW,
+    CutBudget,
     PageBinding,
     PageCut,
     PageRow,
@@ -49,6 +50,7 @@ __all__ = [
     "KNOWLEDGE_PAGE_THRESHOLD_TOKENS",
     "KNOWLEDGE_PAGE_TOKENIZER",
     "OVERSIZED_ROW",
+    "CutBudget",
     "PageBinding",
     "PageCut",
     "PageRow",

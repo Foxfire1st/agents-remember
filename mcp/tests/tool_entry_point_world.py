@@ -19,7 +19,10 @@ from typing import Any
 import anyio
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.mcp.server import create_server
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_answer import (
@@ -276,7 +279,9 @@ def _unknown_delivered_path(answer: Any, whole: Any, *, top: bool, path: str) ->
     return None
 
 
-def _read_whole_result(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def _read_whole_result(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
     """Read the whole result of this call from the file the answer names.
 
     MIK-R130 rule 3: where the answer names no file, or the file cannot be
@@ -391,7 +396,12 @@ def _init_repo(path: Path, branch: str = "main") -> None:
     _git(path, "commit", "-m", "fixture base")
     commit = _git(path, "rev-parse", "HEAD")
     _git(path, "update-ref", f"refs/remotes/origin/{branch}", commit)
-    _git(path, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+    _git(
+        path,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        f"refs/remotes/origin/{branch}",
+    )
 
 
 class EntryPointWorld:
@@ -700,7 +710,6 @@ class EntryPointWorld:
             "server_info": {},
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
-            "resolve_context": {"repo_id": REPO},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
             "dispatch_agent": {
                 "task_document_ref": self.task_ref,
@@ -831,8 +840,14 @@ class EntryPointWorld:
             # has no memory tree: `knowledge_read` and `knowledge_integrity_check` name an absent
             # root, which the surface answers inside the envelope (`state: "refused"` with a
             # shipped refusal code); `knowledge_diff` refuses the same absent root.
-            "knowledge_read": {"memoryRoot": absent_memory_root, "view": "source_context"},
-            "knowledge_diff": {"memoryRoot": absent_memory_root, "beforeRevision": "HEAD"},
+            "knowledge_read": {
+                "memoryRoot": absent_memory_root,
+                "view": "source_context",
+            },
+            "knowledge_diff": {
+                "memoryRoot": absent_memory_root,
+                "beforeRevision": "HEAD",
+            },
             "knowledge_integrity_check": {
                 "memoryRoot": absent_memory_root,
                 "codeRoot": self.coord.as_posix(),

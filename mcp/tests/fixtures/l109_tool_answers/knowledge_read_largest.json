@@ -1,0 +1,278 @@
+{
+ "completeWithinDeclaredScope": false,
+ "continuation": "kc2.eNp9k0GOgzAMAP_ic7u1nRACn0EmMbtVoUVA0VZV_75B2rNPtjxRDiPNGyZoASVU2QUfGblJqWYNER2jBhWXsk997ZWieEmUua4acRhzyL3TppKocIIZWuIy9vLdzuWwlGVUGcq6QvuG2_Wey2mW7ed4fowW1iVdsuo8vrq7rpvmbpZ0k2_tRt117BBtTDZmGzsbextXNg42rm0cbdyYmGxrZFsj2xrZ1si2RrY1sq2RbY1sa2RbY9sa29bYtsbuMunU69LR1_yCT4miFAODTNfxdU6PaR510_N_MFtBESM2PuXQKxL3kmsenBt6YR9EHQZSDY0c7R0pRUQ8wVHf-nguSbv0uG_6u8HnD089aFM",
+ "currentness": {
+  "codeTree": null,
+  "counts": {
+   "current": 0,
+   "stale": 0,
+   "unrealized": 0,
+   "unverifiable": 18
+  },
+  "families": [
+   {
+    "id": "FAM-PG0001",
+    "members": 18,
+    "stale": [],
+    "staleMembers": 0
+   }
+  ],
+  "invariants": [
+   {
+    "entries": [
+     {
+      "id": "RLZ-P00000",
+      "kind": "realization",
+      "path": "src/pkg/seed.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-P00000",
+    "state": "unverifiable"
+   },
+   {
+    "entries": [
+     {
+      "id": "RLZ-P00001",
+      "kind": "realization",
+      "path": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_1.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-P00001",
+    "state": "unverifiable"
+   },
+   {
+    "entries": [
+     {
+      "id": "RLZ-P00002",
+      "kind": "realization",
+      "path": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_2.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-P00002",
+    "state": "unverifiable"
+   },
+   {
+    "entries": [
+     {
+      "id": "RLZ-P00003",
+      "kind": "realization",
+      "path": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_3.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-P00003",
+    "state": "unverifiable"
+   },
+   {
+    "entries": [
+     {
+      "id": "RLZ-P00004",
+      "kind": "realization",
+      "path": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_4.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-P00004",
+    "state": "unverifiable"
+   },
+   {
+    "entries": [],
+    "id": "INV-P00005",
+    "state": "unverifiable"
+   }
+  ],
+  "unverifiableReason": "no code tree was requested"
+ },
+ "indexComplete": true,
+ "log": "/world/worktrees/repo-a/w-ar/logs/ar-tools-2000-01-01/000000000000-knowledge_read-00000000.json",
+ "memoryCommit": "c915dfba0d95465e300b5b9e8e464a61932d167c",
+ "memoryDirty": false,
+ "memoryTree": {
+  "indexState": "complete",
+  "memoryRoot": "/gen/memory",
+  "problems": [],
+  "treeId": "808094cd6be012bad72f33fba246ae3061ee69ae"
+ },
+ "ok": true,
+ "page": {
+  "codeTreeId": null,
+  "enumerationComplete": false,
+  "manifestDigest": "0a65d36482029cc72e680320e6ea3cd4cb74e18a4ac1d2759a308d6db3e95a8e",
+  "memoryTreeId": "808094cd6be012bad72f33fba246ae3061ee69ae",
+  "remaining": 25,
+  "returned": 12,
+  "rowsOnPage": 12,
+  "selectionPolicy": "family-complete-leaf",
+  "selectionPolicyVersion": "v2",
+  "start": 0,
+  "threshold": {
+   "tokenizer": "tiktoken:o200k_base",
+   "tokens": 8000
+  },
+  "total": 37
+ },
+ "payload": {
+  "continuationOperation": "knowledge_read",
+  "continuationView": "source_context",
+  "counts": {
+   "advertisedFamilies": 0,
+   "chainFamilies": 0,
+   "distinctPaths": 18,
+   "entries": 18,
+   "families": 1,
+   "invariantsByState": {
+    "current": 0,
+    "stale": 0,
+    "unrealized": 0,
+    "unverifiable": 18
+   },
+   "members": 18,
+   "proofs": 0,
+   "realizations": 18,
+   "rowsRemaining": 25,
+   "rowsReturned": 12,
+   "rowsTotal": 37
+  },
+  "enumerationComplete": false,
+  "hasMore": true,
+  "indexState": "complete",
+  "manifestDigest": "0a65d36482029cc72e680320e6ea3cd4cb74e18a4ac1d2759a308d6db3e95a8e",
+  "memoryTreeId": "808094cd6be012bad72f33fba246ae3061ee69ae",
+  "routeChain": {
+   "derivation": "mechanical",
+   "directory": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23",
+   "families": 0,
+   "links": 26,
+   "state": "no_governing_family"
+  },
+  "rows": [
+   {
+    "id": "INV-P00001",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00001-member-1.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   },
+   {
+    "id": "RLZ-P00001",
+    "kind": "realization",
+    "location": {
+     "file": "onboarding/src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_1.py.json",
+     "line": 13
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "FAM-PG0001",
+    "kind": "family",
+    "location": {
+     "file": "knowledge/families/FAM-PG0001-paged-family.json",
+     "line": 4
+    },
+    "role": "header",
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-P00000",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00000-member-0.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   },
+   {
+    "id": "RLZ-P00000",
+    "kind": "realization",
+    "location": {
+     "file": "onboarding/src/pkg/seed.py.json",
+     "line": 13
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-P00002",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00002-member-2.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   },
+   {
+    "id": "RLZ-P00002",
+    "kind": "realization",
+    "location": {
+     "file": "onboarding/src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_2.py.json",
+     "line": 13
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-P00003",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00003-member-3.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   },
+   {
+    "id": "RLZ-P00003",
+    "kind": "realization",
+    "location": {
+     "file": "onboarding/src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_3.py.json",
+     "line": 13
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-P00004",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00004-member-4.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   },
+   {
+    "id": "RLZ-P00004",
+    "kind": "realization",
+    "location": {
+     "file": "onboarding/src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_4.py.json",
+     "line": 13
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-P00005",
+    "kind": "invariant",
+    "location": {
+     "file": "knowledge/invariants/INV-P00005-member-5.json",
+     "line": 8
+    },
+    "role": "member",
+    "state": "unverifiable"
+   }
+  ],
+  "seed": {
+   "kind": "path",
+   "path": "src/deeply_nested_package_level_00/deeply_nested_package_level_01/deeply_nested_package_level_02/deeply_nested_package_level_03/deeply_nested_package_level_04/deeply_nested_package_level_05/deeply_nested_package_level_06/deeply_nested_package_level_07/deeply_nested_package_level_08/deeply_nested_package_level_09/deeply_nested_package_level_10/deeply_nested_package_level_11/deeply_nested_package_level_12/deeply_nested_package_level_13/deeply_nested_package_level_14/deeply_nested_package_level_15/deeply_nested_package_level_16/deeply_nested_package_level_17/deeply_nested_package_level_18/deeply_nested_package_level_19/deeply_nested_package_level_20/deeply_nested_package_level_21/deeply_nested_package_level_22/deeply_nested_package_level_23/member_1.py"
+  },
+  "state": "page"
+ },
+ "repositoryId": "7511e917-d5d3-584e-b0ce-44dcad666cfe",
+ "snapshot": "808094cd6be012bad72f33fba246ae3061ee69ae",
+ "state": "page",
+ "view": "source_context"
+}

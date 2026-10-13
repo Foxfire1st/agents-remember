@@ -10,6 +10,7 @@ read surfaces that attach it.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,14 +80,49 @@ NOTES_V1 = "# Notes\n\nNothing here.\n"
 
 # entry id -> (invariant, path, locator, list)
 ENTRIES: dict[str, tuple[str, str, dict[str, Any], str]] = {
-    "RLZ-A00001": ("INV-AAAAAA", REVIEW, {"kind": "symbol", "name": "_not_listed"}, "realizes"),
-    "RLZ-B00001": ("INV-BBBBBB", REVIEW, {"kind": "symbol", "name": "other"}, "realizes"),
-    "RLZ-C00001": ("INV-CCCCCC", REVIEW, {"kind": "symbol", "name": "third"}, "realizes"),
-    "RLZ-D00001": ("INV-DDDDDD", REVIEW, {"kind": "symbol", "name": "fourth"}, "realizes"),
-    "RLZ-E00001": ("INV-EEEEEE", LINES, {"kind": "line_range", "start": 3, "end": 5}, "realizes"),
+    "RLZ-A00001": (
+        "INV-AAAAAA",
+        REVIEW,
+        {"kind": "symbol", "name": "_not_listed"},
+        "realizes",
+    ),
+    "RLZ-B00001": (
+        "INV-BBBBBB",
+        REVIEW,
+        {"kind": "symbol", "name": "other"},
+        "realizes",
+    ),
+    "RLZ-C00001": (
+        "INV-CCCCCC",
+        REVIEW,
+        {"kind": "symbol", "name": "third"},
+        "realizes",
+    ),
+    "RLZ-D00001": (
+        "INV-DDDDDD",
+        REVIEW,
+        {"kind": "symbol", "name": "fourth"},
+        "realizes",
+    ),
+    "RLZ-E00001": (
+        "INV-EEEEEE",
+        LINES,
+        {"kind": "line_range", "start": 3, "end": 5},
+        "realizes",
+    ),
     "RLZ-G00001": ("INV-GGGGGG", LINES, {"kind": "file"}, "realizes"),
-    "RLZ-H00001": ("INV-HHHHHH", NOTES, {"kind": "symbol", "name": "Notes"}, "realizes"),
-    "RLZ-H00002": ("INV-HHHHHH", REVIEW, {"kind": "symbol", "name": "other"}, "realizes"),
+    "RLZ-H00001": (
+        "INV-HHHHHH",
+        NOTES,
+        {"kind": "symbol", "name": "Notes"},
+        "realizes",
+    ),
+    "RLZ-H00002": (
+        "INV-HHHHHH",
+        REVIEW,
+        {"kind": "symbol", "name": "other"},
+        "realizes",
+    ),
     "PRF-P00001": (
         "INV-AAAAAA",
         TESTS,
@@ -113,7 +149,11 @@ def git(root: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(root), "GIT_CONFIG_NOSYSTEM": "1"},
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": str(root),
+            "GIT_CONFIG_NOSYSTEM": "1",
+        },
     )
     if result.returncode != 0:
         raise AssertionError(f"fixture git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -193,7 +233,12 @@ def _memory_files(code: Path, tree: str) -> dict[str, str | None]:
     for entry_id, (invariant_id, path, locator, key) in sorted(ENTRIES.items()):
         sidecar = sidecars.setdefault(
             path,
-            {"schema": "ar-onboarding-file/v1", "path": path, "references": {}, "realizes": []},
+            {
+                "schema": "ar-onboarding-file/v1",
+                "path": path,
+                "references": {},
+                "realizes": [],
+            },
         )
         entry: dict[str, Any] = {
             "id": entry_id,
@@ -217,7 +262,8 @@ class World:
         self.memory = root / "memory"
         _init(self.code)
         self.base = _commit(
-            self.code, {REVIEW: REVIEW_V1, TESTS: TESTS_V1, LINES: LINES_V1, NOTES: NOTES_V1}
+            self.code,
+            {REVIEW: REVIEW_V1, TESTS: TESTS_V1, LINES: LINES_V1, NOTES: NOTES_V1},
         )
         _init(self.memory)
         _commit(self.memory, _memory_files(self.code, self.base))
@@ -269,7 +315,9 @@ def _body_edit() -> str:
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a_raw_git_body_edit_flags_only_its_invariant_and_names_the_entry(world: World) -> None:
+def test_a_raw_git_body_edit_flags_only_its_invariant_and_names_the_entry(
+    world: World,
+) -> None:
     at_base = world.states(world.tree())
     assert at_base["states"] == {
         "INV-AAAAAA": "current",
@@ -302,7 +350,12 @@ def test_a_raw_git_body_edit_flags_only_its_invariant_and_names_the_entry(world:
     counts = edited["result"].counts()
     assert counts == {"stale": 1, "unverifiable": 0, "unrealized": 2, "current": 6}
     family = edited["result"].families[0].to_document()
-    assert family == {"id": "FAM-F00001", "members": 4, "staleMembers": 1, "stale": ["INV-AAAAAA"]}
+    assert family == {
+        "id": "FAM-F00001",
+        "members": 4,
+        "staleMembers": 1,
+        "stale": ["INV-AAAAAA"],
+    }
 
 
 def test_stale_covers_an_absent_path_an_ambiguous_symbol_and_an_unmappable_range(
@@ -361,10 +414,15 @@ def test_unverifiable_names_why_for_no_tree_an_unreadable_tree_and_an_unsupporte
     assert "no shipped grammar reads it" in (changed.reason or "")
     # (a) its path absent at the tree -> stale.
     gone = world.states(world.change({NOTES: None}))["entries"]["RLZ-H00001"]
-    assert (gone.state, gone.reason) == ("stale", f"the path {NOTES!r} is absent at the code tree")
+    assert (gone.state, gone.reason) == (
+        "stale",
+        f"the path {NOTES!r} is absent at the code tree",
+    )
 
 
-def test_a_failed_or_timed_out_git_call_is_unverifiable_with_its_reason(world: World) -> None:
+def test_a_failed_or_timed_out_git_call_is_unverifiable_with_its_reason(
+    world: World,
+) -> None:
     tree = world.change({REVIEW: _body_edit()})
     timeout = subprocess.TimeoutExpired(["git", "diff"], 20)
     with mock.patch.object(CodeTrees, "resolve", side_effect=timeout):
@@ -417,7 +475,9 @@ def test_precedence_stale_before_unverifiable_before_unrealized(world: World) ->
     assert currentness.invariant_state(()) == "unrealized"
 
 
-def test_a_proof_whose_test_changed_or_disappeared_is_flagged_stale(world: World) -> None:
+def test_a_proof_whose_test_changed_or_disappeared_is_flagged_stale(
+    world: World,
+) -> None:
     """Carried from L28: a proof is flagged stale at read time exactly like a realization."""
 
     changed = world.states(
@@ -518,7 +578,9 @@ def _read(world: World, view: str, **fields: Any) -> dict[str, Any]:
     )
 
 
-def test_knowledge_read_flags_a_stale_invariant_and_keeps_it_visible(world: World) -> None:
+def test_knowledge_read_flags_a_stale_invariant_and_keeps_it_visible(
+    world: World,
+) -> None:
     tree = world.change({REVIEW: _body_edit()})
     family = _read(
         world,
@@ -539,10 +601,18 @@ def test_knowledge_read_flags_a_stale_invariant_and_keeps_it_visible(world: Worl
         "INV-CCCCCC": "current",
         "INV-DDDDDD": "current",
     }
-    assert block["counts"] == {"stale": 1, "unverifiable": 0, "unrealized": 0, "current": 3}
-    # Nothing is withheld: the stale invariant's realization is still a row of the view.
-    names = [(row.get("locator") or {}).get("qualified_name") for row in family["payload"]["rows"]]
-    assert "_not_listed" in names
+    assert block["counts"] == {
+        "stale": 1,
+        "unverifiable": 0,
+        "unrealized": 0,
+        "current": 3,
+    }
+    # Nothing is withheld: the stale invariant's realization is still a named row of the
+    # view, with its stale state, while its statement text stays behind the answer's log.
+    rows = family["payload"]["rows"]
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["RLZ-A00001"]["state"] == "stale", rows
+    assert "INV-AAAAAA holds." not in json.dumps(family), family
 
     invariant = _read(
         world,
@@ -552,8 +622,8 @@ def test_knowledge_read_flags_a_stale_invariant_and_keeps_it_visible(world: Worl
     )  # a tree named without a repository is read from the mount's workspace store
     (stale,) = invariant["currentness"]["invariants"]
     assert stale["state"] == "stale"
-    assert [entry["id"] for entry in stale["entries"]] == ["RLZ-A00001"]
-    assert "INV-AAAAAA holds." in str(invariant["payload"])
+    assert [entry["id"] for entry in stale["entries"]] == ["RLZ-A00001", "PRF-P00001"]
+    assert "INV-AAAAAA holds." not in json.dumps(invariant), invariant
 
 
 def test_knowledge_read_without_a_named_tree_is_unverifiable_and_never_reads_head(
@@ -573,8 +643,18 @@ def test_knowledge_read_without_a_named_tree_is_unverifiable_and_never_reads_hea
         assert [one["state"] for one in block["invariants"]] == ["unverifiable"]
         # One read-wide reason explains every entry, so each is named compactly (review N4).
         assert block["invariants"][0]["entries"] == [
-            {"id": "RLZ-A00001", "kind": "realization", "path": REVIEW, "state": "unverifiable"},
-            {"id": "PRF-P00001", "kind": "proof", "path": TESTS, "state": "unverifiable"},
+            {
+                "id": "RLZ-A00001",
+                "kind": "realization",
+                "path": REVIEW,
+                "state": "unverifiable",
+            },
+            {
+                "id": "PRF-P00001",
+                "kind": "proof",
+                "path": TESTS,
+                "state": "unverifiable",
+            },
         ]
 
 
@@ -618,13 +698,17 @@ def test_the_published_intent_block_flags_returned_invariants_at_its_resolved_tr
     assert "INV-AAAAAA holds." in str(block["seeds"])
 
     unresolved = cast(
-        CoordinationContext, SimpleNamespace(**{**context.__dict__, "code_repository_root": None})
+        CoordinationContext,
+        SimpleNamespace(**{**context.__dict__, "code_repository_root": None}),
     )
     none = published_intent_block(unresolved, [REVIEW])["currentness"]
     assert none["codeTree"] is None
     assert "treeScope" not in none
     assert none["unverifiableReason"] == "no code tree was requested"
-    assert {one["state"] for one in none["invariants"]} <= {"unverifiable", "unrealized"}
+    assert {one["state"] for one in none["invariants"]} <= {
+        "unverifiable",
+        "unrealized",
+    }
     assert "stale" not in {one["state"] for one in none["invariants"]}
 
 
@@ -641,7 +725,13 @@ def test_a_failing_currentness_step_degrades_to_a_reason_and_never_refuses_the_r
             code_tree_id=tree.tree,
         )
     assert response["state"] == "view", response
-    assert "INV-AAAAAA holds." in str(response["payload"])
+    # The read still names the invariant and its realization; the statement text stays
+    # behind the answer's log even as currentness degrades to a reason.
+    assert [row["id"] for row in response["payload"]["rows"]] == [
+        "INV-AAAAAA",
+        "RLZ-A00001",
+    ]
+    assert "INV-AAAAAA holds." not in json.dumps(response), response
     assert response["currentness"] == {
         "codeTree": tree.to_document(),
         "counts": {"stale": 0, "unverifiable": 0, "unrealized": 0, "current": 0},

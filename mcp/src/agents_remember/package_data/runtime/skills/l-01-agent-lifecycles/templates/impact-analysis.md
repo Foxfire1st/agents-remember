@@ -43,7 +43,7 @@ the spawning agent's main loop.
 
 ## Evidence Inventory
 - Route indexes read:
-- read_ar_files reads (paired source+onboarding):
+- read_ar_files namings (IDs and cards, then natively opened):
 
 ## Bottom Line (for the spawning agent's main loop)
 - <the one or two things the orchestrator/reviewer must act on> — no mutation performed here.

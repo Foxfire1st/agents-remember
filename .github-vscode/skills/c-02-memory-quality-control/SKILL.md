@@ -19,7 +19,7 @@ and code-quality checks may still be scoped.
 ## Inputs
 
 This skill operates on one repository at a time and starts from the context
-resolved by `c-08-ar-coordination-context-resolver` or MCP `resolve_context`.
+resolved by `c-08-ar-coordination-context-resolver` or MCP `context_packet`.
 
 ## Primary Outputs
 
@@ -64,11 +64,11 @@ integration carry.
 
 ### 1. Resolve Context
 
-Use `c-08-ar-coordination-context-resolver` or MCP `resolve_context` to confirm
+Use `c-08-ar-coordination-context-resolver` or MCP `context_packet` to confirm
 the target repository's active memory and coordination context.
 
 ```text
-resolve_context(repo_id="<repo-id>")
+context_packet(repo_id="<repo-id>")
 ```
 
 The MCP server owns topology detection, coordination-root resolution, settings

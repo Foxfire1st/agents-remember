@@ -8,7 +8,6 @@ from mcp.types import ToolAnnotations
 from agents_remember.application.context_packet import ContextPacketRequest
 from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
-from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
@@ -16,16 +15,38 @@ from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from ..tools import (
     context_packet_payload,
     read_ar_files_payload,
-    resolve_context_payload,
     runtime_install_payload,
     server_info_payload,
 )
+from ..tools.read_files import _REMOVED_ARGUMENT
+
+
+def _scrub_removed_argument(server: FastMCP, tool_name: str, argument: str) -> None:
+    """Drop one receivable-but-removed argument from the advertised schema.
+
+    The argument stays in the signature so a call that supplies it reaches
+    the boundary refusal; it leaves the advertised ordinary contract so no
+    caller learns it (MIK-R109 rule 1). Mirrors the post-registration mark
+    application for read-only tools.
+    """
+
+    tools: dict[str, Any] = server._tool_manager._tools
+    tool = tools.get(tool_name)
+    if tool is None:
+        return
+    parameters = dict(tool.parameters)
+    properties = dict(parameters.get("properties", {}))
+    properties.pop(argument, None)
+    parameters["properties"] = properties
+    parameters["required"] = [name for name in parameters.get("required", []) if name != argument]
+    tool.parameters = parameters
 
 
 def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register the core tools, split by what the caller is trying to find out."""
-    _register_identity_tools(server, config, mcp_serving_build_payload())
-    _register_orientation_tools(server, config)
+    serving_build = mcp_serving_build_payload()
+    _register_identity_tools(server, config, serving_build)
+    _register_orientation_tools(server, config, serving_build.commit)
     _register_installation_tools(server, config)
 
 
@@ -47,7 +68,9 @@ def _register_identity_tools(
         return server_info_payload(config, serving_build)
 
 
-def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_orientation_tools(
+    server: FastMCP, config: McpRuntimeConfig, serving_build_commit: str | None
+) -> None:
     """Read-only reads that orient a session in a repository before it changes anything."""
 
     @server.tool()
@@ -57,19 +80,19 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         include_freshness: bool = False,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Bundle a repository's current state into one packet: repo/git state, resolved paths,
-        memory mode/storage, worktree state, and (optionally) drift, and branch
-        freshness (include_freshness fetches remote-tracking refs and reports ahead/behind for the
-        code and memory checkouts plus whether the ledger maps code HEAD). Read-only apart from
-        that optional fetch. `include_drift` measures the reference anchors of onboarding cards
-        and the validity of the tree -- a stale reference is reported and never blocks by itself; whether
-        an invariant is still current is answered by `knowledge_read` and
-        `knowledge_integrity_check`, not here; a leaf that changes a source file must change
-        that file's card or record why not (MIK-R30); and nothing is repaired (`citation_fix`
-        re-records anchors that only moved, and a curator re-authors a stale one); omit it
-        and nothing is measured. For a canonical leaf, pass task_context with task_document_ref and
-        contract_path together; the admitted enclosure supplies code and memory roots, and repo_id
-        must match its repository. Omit task_context for configured Projects scope."""
+        """Where the caller works and what needs action (MIK-R109).
+
+        Slim answer: the roots (code/memory worktrees, enclosure, task
+        document), task ID/master, action lines when needed, serving build
+        and pair commits. `include_drift` measures the reference anchors of onboarding cards
+        and the validity of the tree -- a stale reference is reported and never blocks by itself;
+        whether an invariant is still current is answered by `knowledge_read` and
+        `knowledge_integrity_check`, not here; a leaf that changes a source
+        file must change that file's card or record why not (MIK-R30); and
+        nothing is repaired (`citation_fix` re-records anchors that only
+        moved, and a curator re-authors a stale one); omit it and nothing is measured. `include_freshness` fetches remotes and writes FETCH_HEAD,
+        so the tool is marked as a write. Leaf calls pass task_context.
+        Longer explanation: docs/reference/mcp-tools.md."""
         return context_packet_payload(
             config,
             ContextPacketRequest(
@@ -78,31 +101,25 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
                 include_freshness=include_freshness,
             ),
             task_context=task_context,
+            serving_build_commit=serving_build_commit,
         )
 
     @server.tool()
     def read_ar_files(
         repo_id: str,
-        files: list[dict[str, Any]],
-        refresh: bool = False,
+        files: list[Any],
+        refresh: Any = _REMOVED_ARGUMENT,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Read-only batch read of up to 5 repo-relative paths inside an AR-managed repo,
-        each paired with its file-level onboarding. Per file pass {"path": "...", "source":
-        "full" | {"startLine": N, "endLine": M}, "onboarding": false?}; the response returns
-        {path, status, source?, onboarding?} where status is the onboarding-lookup outcome
-        (found | missing | disabled | unsupported | not_requested) and source is the full file
-        or the exact requested range (omitted for absent or non-UTF-8 files). It also
-        auto-attaches the repo overview and the governing route-overview chain, deduplicated
-        per session (served once, re-served only when changed; pass refresh=true to force
-        re-serve, e.g. after a compaction). Route-index rule: a file inside sourceScope but
-        absent from coveredFiles reports missing without probing. In a managed repo this is
-        the read for the research phase (the lifecycle up to the build decision): use it
-        instead of a native read to get each file paired with its onboarding plus the
-        repository and governing route overviews. Native read is the edit precondition once
-        building begins. For a canonical leaf, pass task_context with task_document_ref and
-        contract_path together; the admitted enclosure supplies code and memory roots, and repo_id
-        must match its repository. Omit task_context for configured Projects scope."""
+        """Name which knowledge governs up to 20 paths (MIK-R109).
+
+        For each path (as strings): existence, governing card as a memory-worktree
+        location (or none), record counts by state, and action-asking records by ID,
+        kind, state and card heading. Overviews once per call, nearest first. No
+        text is returned: read files with your own tools. `refresh` was removed
+        from the ordinary contract: supplying it (true, false or null) is refused
+        as `argument-removed`, like object-form entries. Stateless; no continuation.
+        Leaf calls pass task_context. Longer explanation: docs/reference/mcp-tools.md."""
         return read_ar_files_payload(
             config,
             repo_id,
@@ -111,32 +128,7 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
             task_context=task_context,
         )
 
-    @server.tool()
-    def resolve_context(
-        repo_id: str,
-        task_name: str | None = None,
-        parent_task: str | None = None,
-        leaf_id: str | None = None,
-        contract_path: str | None = None,
-        *,
-        worktree_name: str | None = None,
-        topology: str | None = None,
-    ) -> dict[str, Any]:
-        """Resolve a repository's coordination/memory context: topology (external), code and memory
-        roots, settings paths, storage mode, and path rules. Read-only. Use this (or context_packet)
-        before relying on onboarding, task files, or provider tools."""
-        return resolve_context_payload(
-            config,
-            TaskRef(
-                repo_id=repo_id,
-                task_name=task_name,
-                contract_path=contract_path,
-                leaf_id=leaf_id,
-                parent_task=parent_task,
-            ),
-            worktree_name=worktree_name,
-            topology=topology,
-        )
+    _scrub_removed_argument(server, "read_ar_files", "refresh")
 
 
 def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

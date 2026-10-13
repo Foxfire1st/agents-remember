@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.agent_binding import TOOL_SERVER_NAME, read_agent_binding
-from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
-from agents_remember.application.coordination_tools import resolve_context_tool
-from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
-from agents_remember.application.task_docs.task_ref import TaskRef
-from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
+from agents_remember.application.agent_binding import (
+    TOOL_SERVER_NAME,
+    read_agent_binding,
+)
+from agents_remember.application.context_packet import (
+    ContextPacketRequest,
+    build_context_packet,
+    slim_context_packet,
+)
+from agents_remember.application.runtime.install import (
+    RuntimeInstallRequest,
+    run_runtime_install,
+)
+from agents_remember.application.task_scoped_mcp import (
+    task_scoped_mcp_config_for_reader,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
@@ -61,15 +71,26 @@ def context_packet_payload(
     request: ContextPacketRequest,
     *,
     task_context: TaskScopedReaderContext | None = None,
+    serving_build_commit: str | None = None,
 ) -> dict[str, Any]:
+    """The agent's slim answer from one whole context packet (MIK-R109 rule 4).
+
+    What leaves the server is the roots, the task, the action lines and
+    the short values. The framework's log preserves the delivered answer
+    behind it; the whole packet is rebuilt on demand through
+    :func:`build_context_packet` (the dashboard and command line route),
+    which carries every omitted policy fact.
+    """
+
     scoped_config = task_scoped_mcp_config_for_reader(
         config,
         repository_id=request.repo_id,
         task_context=task_context,
     )
+    full = build_context_packet(scoped_config, request)
     return _tool_payload(
         "context_packet",
-        build_context_packet(scoped_config, request),
+        slim_context_packet(full, serving_build_commit=serving_build_commit),
     )
 
 
@@ -148,16 +169,3 @@ def compact_runtime_install_payload(
     if report_path is not None:
         compact["reportPath"] = report_path
     return compact
-
-
-def resolve_context_payload(
-    config: McpRuntimeConfig,
-    task: TaskRef,
-    *,
-    worktree_name: str | None = None,
-    topology: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "resolve_context",
-        resolve_context_tool(config, task, worktree_name=worktree_name, topology=topology),
-    )

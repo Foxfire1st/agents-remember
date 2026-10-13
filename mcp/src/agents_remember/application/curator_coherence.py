@@ -73,7 +73,7 @@ def _configured_refusal(
         "contractPath": request.contract_path,
         "status": status,
         "detail": detail,
-        "nextAction": projected.get("nextAction") or "resolve_context",
+        "nextAction": projected.get("nextAction") or "context_packet",
     }
     for key in ("expected", "observed"):
         if key in projected:

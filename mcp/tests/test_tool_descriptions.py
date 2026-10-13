@@ -42,11 +42,6 @@ from mcp.server.fastmcp import FastMCP
 # landing from the live server; the test fails on any growth before the owning leaf
 # rewrites it.
 INTERIM_DESCRIPTION_LENGTHS: dict[str, int] = {
-    "context_packet": 590,
-    "read_ar_files": 1324,
-    "resolve_context": 242,
-    "knowledge_read": 2240,
-    "knowledge_diff": 1990,
     "memory_quality_check": 1865,
     "citation_fix": 848,
     "route_index_refresh": 244,
@@ -217,7 +212,8 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
                 )
                 match = _POINTER_RE.search(text)
                 self.assertIsNotNone(
-                    match, f"{name} does not end by naming where the longer explanation is"
+                    match,
+                    f"{name} does not end by naming where the longer explanation is",
                 )
                 assert match is not None
                 target = _pointer_target(match.group(1))
@@ -289,7 +285,9 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
         )
         for phrase in required:
             self.assertIn(
-                phrase, details, f"moved detail missing from {TOOL_DETAILS_NAME}: {phrase}"
+                phrase,
+                details,
+                f"moved detail missing from {TOOL_DETAILS_NAME}: {phrase}",
             )
 
 

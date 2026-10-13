@@ -448,7 +448,7 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
     the facet you author says what this test demonstrates, not the invariant's statement;
   - `unresolvable` when it names no test at C, or names a test file without a test in it.
 - **Proofs are shown and counted (MIK-R28).** `knowledge_read`'s `invariant` and `family` views of a
-  converted tree return the `proofs` of the invariant or of every member. The curator checklist lists
+  converted tree name the `proofs` of the invariant or of every member (ID, kind, state, location). The curator checklist lists
   the invariants without any proof, with the tests their recorded evidence names; the list is
   information, not a gate. A migrated record's "Evidence: …" text sits in `origin.handoff`: a curator
   pass turns each resolvable test it names into a proof through `proofs`, with an authored facet.

@@ -52,6 +52,11 @@ from agents_remember.application.knowledge_leaf.selection import (
     LEAF_POLICY_VERSION,
     family_names,
 )
+from agents_remember.application.knowledge_names import (
+    NameResolver,
+    SelectionProvenance,
+    project_knowledge_body,
+)
 from agents_remember.application.knowledge_paging.bindings import (
     PagingRefusal,
     mint_continuation,
@@ -62,6 +67,7 @@ from agents_remember.application.knowledge_paging.bindings import (
     resolution_refusal,
 )
 from agents_remember.application.knowledge_paging.pager import (
+    CutBudget,
     PageBinding,
     PageCut,
     cut_page,
@@ -101,7 +107,12 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadResult,
     KnowledgeReadSeed,
 )
-from agents_remember.models.knowledge.view import MAX_VIEW_ROWS, ViewRefusal, ViewRequest
+from agents_remember.models.knowledge.view import (
+    MAX_VIEW_ROWS,
+    ViewRefusal,
+    ViewRequest,
+)
+from agents_remember.models.tools.tool_answer import TOOL_ANSWER_LIST_MAX, bound_for
 
 __all__ = [
     "DEFAULT_ORDERING",
@@ -187,6 +198,18 @@ TreeExtras = Callable[[ReadSubject, CodeTree | None, list[Any]], PageExtras]
 
 
 @dataclass(frozen=True)
+class TreeReadScope:
+    """Where one tree read locates: the caller workspace and the selection epoch.
+
+    The epoch carries the locating it was selected for (relative files for a
+    worktree caller, absolute with the commit beside the answer otherwise).
+    """
+
+    workspace_root: str | None = None
+    provenance: SelectionProvenance | None = None
+
+
+@dataclass(frozen=True)
 class _TreeRead:
     request: ToolReadRequest
     selected: SelectedKnowledgeDataset
@@ -195,6 +218,8 @@ class _TreeRead:
     extras: TreeExtras
     workspace_root: str | None
     code_tree: CodeTree | None = None
+    relative_locations: bool = False
+    resolver: NameResolver | None = None
 
     @property
     def index_complete(self) -> bool:
@@ -219,39 +244,74 @@ def read_tree_page(
     context: KnowledgeReadContext,
     *,
     extras: TreeExtras,
-    workspace_root: str | None = None,
-) -> dict[str, Any]:
-    """One ``knowledge_read`` response for a converted memory tree: a page, or a refusal."""
+    scope: TreeReadScope | None = None,
+) -> tuple[dict[str, Any], NameResolver | None]:
+    """One ``knowledge_read`` response plus its shared naming resolver.
 
+    The resolver opens once per answer with the selection's epoch and is
+    shared by sizing (the admission measure) and projection (the answer):
+    one instance, one set of per-answer caches, move-validated at
+    projection. Refusals carry no resolver.
+    """
+
+    located = scope if scope is not None else TreeReadScope()
+    provenance = located.provenance
+    relative_locations = provenance.relative if provenance is not None else False
     tree = selected.memory_tree
     if tree is None:
         raise ValueError("a tree read needs a selection that names a memory tree")
-    read = _TreeRead(request, selected, tree, context, extras, workspace_root)
-    if request.continuation is None:
-        return _fresh_read(read)
-    resume = read_continuation(request.continuation, view=request.view)
-    if isinstance(resume, PagingRefusal):
-        return _refused(read, resume.code, resume.detail)
-    policy, version = _POLICIES[resume.response]
-    refusal: PagingRefusal | None = request_binding_refusal(
-        resume, memory_tree_id=tree.tree_key, selection_policy=policy, policy_version=version
+    read = _TreeRead(
+        request,
+        selected,
+        tree,
+        context,
+        extras,
+        located.workspace_root,
+        relative_locations=relative_locations,
     )
-    refusal = (
-        refusal
-        or _subject_refusal(request, resume, lambda named: _family_spelling(read, named)[0])
-        or ordering_refusal(resume, ordering_input=request.ordering_input)
-        or resolution_refusal(resume, code_tree_id=request.code_tree_id)
+    resume = None
+    if request.continuation is not None:
+        resume = read_continuation(request.continuation, view=request.view)
+        if isinstance(resume, PagingRefusal):
+            return _refused(read, resume.code, resume.detail), None
+        policy, version = _POLICIES[resume.response]
+        refusal: PagingRefusal | None = request_binding_refusal(
+            resume,
+            memory_tree_id=tree.tree_key,
+            selection_policy=policy,
+            policy_version=version,
+        )
+        refusal = (
+            refusal
+            or _subject_refusal(request, resume, lambda named: _family_spelling(read, named)[0])
+            or ordering_refusal(resume, ordering_input=request.ordering_input)
+            or resolution_refusal(resume, code_tree_id=request.code_tree_id)
+        )
+        if refusal is not None:
+            return _refused(read, refusal.code, refusal.detail), None
+        absent = _resumed_revision_absent(read, resume)
+        if absent is not None:
+            return _refused(read, "selector_absent", absent), None
+        read = _at_code_tree(read, resume.code_tree_id)
+        missing = _missing_code_tree(read, resume.code_tree_id)
+        if missing is not None:
+            return _refused(read, missing.code, missing.detail), None
+    # One shared naming resolver per answer, opened with the selection's
+    # epoch: sizing (the admission measure) and projection (the answer)
+    # share its caches, and projection revalidates the move. Refusals
+    # above carry no resolver; a fresh absent seed still opens one (its
+    # cost is one scan, its validation cannot fire in the same instant).
+    shared = NameResolver.open(
+        memory_root=read.tree.memory_root,
+        index_path=selected.database_path,
+        tree_key=read.tree.tree_key,
+        relative_locations=relative_locations,
+        selection=provenance,
     )
-    if refusal is not None:
-        return _refused(read, refusal.code, refusal.detail)
-    absent = _resumed_revision_absent(read, resume)
-    if absent is not None:
-        return _refused(read, "selector_absent", absent)
-    read = _at_code_tree(read, resume.code_tree_id)
-    missing = _missing_code_tree(read, resume.code_tree_id)
-    if missing is not None:
-        return _refused(read, missing.code, missing.detail)
-    return _resumed_response(read, resume)
+    read = replace(read, resolver=shared)
+    if resume is None:
+        return _fresh_read(read), shared
+    return _resumed_response(read, resume), shared
 
 
 def _fresh_read(read: _TreeRead) -> dict[str, Any]:
@@ -420,6 +480,59 @@ def _seed_mismatch(argument: str, value: str) -> PagingRefusal:
     )
 
 
+# The answer guard attaches the log location after the cut, and attaching
+# it can take an exact-edge answer over its bound. The cut models that
+# attachment pessimally: 512 chars covers a log dir twice as deep as any
+# fixture's at ~4 chars a token, so an admitted page survives the guard
+# with its cursor/count/completeness intact.
+_DELIVERED_LOG_MODEL = "x" * 512
+
+
+def _delivered_measure(
+    read: _TreeRead,
+    extras: Callable[[dict[str, Any]], dict[str, Any]],
+    resolver: NameResolver | None = None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Measure one rendered body as the delivered naming answer (MIK-R109 rule 2).
+
+    The resolver is shared with the response projection: one instance per
+    answer serves sizing and projection, so its per-answer caches (text
+    IDs, record paths, entry scan, sidecars, card reads) make both the
+    repeated admission measures and the projection cheap. Extras ride the
+    measure exactly as they ride the response, so the cut accounts proofs,
+    families and currentness too. The modeled log rides it too, so the
+    guard's later attachment cannot overflow an admitted page and strand
+    its walk. A missing resolver opens one (sizing only, without the
+    projection's selection binding).
+    """
+
+    selected = read.selected
+    resolver = read.resolver
+    if resolver is None:
+        resolver = NameResolver.open(
+            memory_root=read.tree.memory_root,
+            index_path=selected.database_path,
+            tree_key=read.tree.tree_key,
+            relative_locations=read.relative_locations,
+        )
+
+    def measure(body: dict[str, Any]) -> dict[str, Any]:
+        envelope = dict(body)
+        payload = body.get("payload")
+        if isinstance(payload, dict):
+            envelope.update(extras(payload))
+        envelope["log"] = _DELIVERED_LOG_MODEL
+        return project_knowledge_body(envelope, resolver)
+
+    return measure
+
+
+def _delivered_bound() -> int:
+    """The token bound the delivered naming answer is cut against."""
+
+    return bound_for("knowledge_read")
+
+
 def _view_response(
     read: _TreeRead, subject: ReadSubject, resume: KnowledgeContinuation | None
 ) -> dict[str, Any]:
@@ -463,7 +576,16 @@ def _view_response(
     family = family_reference(
         read.selected.database_path, read.tree.tree_key, subject.family_revision_id
     )
-    _cut, response = cut_page(view_rows(whole, family), position, render)
+    _cut, response = cut_page(
+        view_rows(whole, family),
+        position,
+        render,
+        budget=CutBudget(
+            threshold=_delivered_bound(),
+            max_rows=TOOL_ANSWER_LIST_MAX,
+            project=_delivered_measure(read, extras),
+        ),
+    )
     return response
 
 
@@ -479,7 +601,11 @@ def _view_page(
         None
         if cut.complete
         else mint_continuation(
-            binding, response="view", view=subject.view, seeds=(subject.seed(),), position=cut.end
+            binding,
+            response="view",
+            view=subject.view,
+            seeds=(subject.seed(),),
+            position=cut.end,
         )
     )
     body = view_page_payload(whole, cut, token, index_complete=read.index_complete)
@@ -548,7 +674,16 @@ def _scope_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str,
             **extras(payload),
         }
 
-    _cut, response = cut_page(prepared.rows, prepared.position, render)
+    _cut, response = cut_page(
+        prepared.rows,
+        prepared.position,
+        render,
+        budget=CutBudget(
+            threshold=_delivered_bound(),
+            max_rows=TOOL_ANSWER_LIST_MAX,
+            project=_delivered_measure(read, extras),
+        ),
+    )
     return response
 
 
@@ -639,7 +774,10 @@ def _leaf_response(
             refused.update(absent_chain(path))  # MIK-R05: no family route covers the path either
         return refused
     states = LeafCurrentness(read.code_tree, [prepared])
-    fixed = {"memoryTree": memory_tree_block(read.tree), "indexComplete": read.index_complete}
+    fixed = {
+        "memoryTree": memory_tree_block(read.tree),
+        "indexComplete": read.index_complete,
+    }
 
     def render(cut: PageCut) -> dict[str, Any]:
         block = prepared.render(cut)
@@ -659,7 +797,22 @@ def _leaf_response(
             "currentness": states.document(payload),
         }
 
-    _cut, response = cut_page(prepared.rows, prepared.position, render)
+    def leaf_extras(payload: dict[str, Any]) -> dict[str, Any]:
+        return {**fixed, "currentness": states.document(payload)}
+
+    # Leaf pages prepend the group's header reference row ahead of the cut,
+    # so the cut holds one fewer data row: the delivered page still fits
+    # the list bound the cursor/count metadata was minted for (MIK-R109).
+    _cut, response = cut_page(
+        prepared.rows,
+        prepared.position,
+        render,
+        budget=CutBudget(
+            threshold=_delivered_bound(),
+            max_rows=TOOL_ANSWER_LIST_MAX - 1,
+            project=_delivered_measure(read, leaf_extras),
+        ),
+    )
     return response
 
 

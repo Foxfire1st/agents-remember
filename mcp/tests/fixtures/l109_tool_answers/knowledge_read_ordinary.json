@@ -1,0 +1,210 @@
+{
+ "completeWithinDeclaredScope": true,
+ "currentness": {
+  "codeTree": null,
+  "counts": {
+   "current": 0,
+   "stale": 0,
+   "unrealized": 0,
+   "unverifiable": 1
+  },
+  "families": [],
+  "invariants": [
+   {
+    "entries": [
+     {
+      "id": "RLZ-J9300H",
+      "kind": "realization",
+      "path": "mcp/src/agents_remember/application/tool_caller.py",
+      "state": "unverifiable"
+     },
+     {
+      "id": "PRF-05YDKB",
+      "kind": "proof",
+      "path": "mcp/tests/test_tool_event_river.py",
+      "state": "unverifiable"
+     },
+     {
+      "id": "PRF-5N48VF",
+      "kind": "proof",
+      "path": "mcp/tests/test_tool_event_river.py",
+      "state": "unverifiable"
+     },
+     {
+      "id": "PRF-9MZC5P",
+      "kind": "proof",
+      "path": "mcp/tests/test_tool_event_river.py",
+      "state": "unverifiable"
+     }
+    ],
+    "id": "INV-0MX54D",
+    "state": "unverifiable"
+   }
+  ],
+  "unverifiableReason": "no code tree was requested"
+ },
+ "families": [
+  {
+   "id": "FAM-V8AH28",
+   "kind": "family",
+   "location": {
+    "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/knowledge/families/FAM-V8AH28-host-path-river-row-whole-and-bounded.json",
+    "line": 9
+   },
+   "state": null
+  }
+ ],
+ "indexComplete": true,
+ "log": "/gen/logs/ar-tools-2000-01-01/231643503964-knowledge_read-8bb5527b.json",
+ "memoryCommit": "9274c42caeabdbf54536f87a070ccc477f8a85ab",
+ "memoryTree": {
+  "indexState": "complete",
+  "memoryRoot": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468",
+  "problems": [],
+  "treeId": "fa7254dd91be7d3f66e0093e749de4c6a2547ea8"
+ },
+ "ok": true,
+ "page": {
+  "codeTreeId": null,
+  "enumerationComplete": true,
+  "manifestDigest": "d4c007c5a035ad6b0b77aaf25d22b6e1f2dfc5ce58896e5f60c9737d45deee0f",
+  "memoryTreeId": "fa7254dd91be7d3f66e0093e749de4c6a2547ea8",
+  "remaining": 0,
+  "returned": 2,
+  "rowsOnPage": 2,
+  "selectionPolicy": "knowledge-view-selection",
+  "selectionPolicyVersion": "v1",
+  "start": 0,
+  "threshold": {
+   "tokenizer": "tiktoken:o200k_base",
+   "tokens": 8000
+  },
+  "total": 2
+ },
+ "payload": {
+  "completeness": {
+   "complete_within_declared_scope": true,
+   "scope": {
+    "extractors": [
+     "knowledge-view-renderer/1"
+    ],
+    "recorded_graph": "recorded-envelope-and-generation-1-entities",
+    "snapshot_logical_digest": "f3a64fb6132cd4b0e32da0c3b0a4f2c716af3b1fea6f4a463bd76d4701d850d4",
+    "traversal_policy": "knowledge-view-selection/v1"
+   }
+  },
+  "continuation": null,
+  "counts": {
+   "ambiguous_references": {
+    "reason": "this view resolves no cited references",
+    "state": "not_applicable",
+    "value": null
+   },
+   "dependency_content_identity_mismatches": {
+    "reason": "this view reads no recorded dependency bytes",
+    "state": "not_applicable",
+    "value": null
+   },
+   "facets_omitted": {
+    "reason": "this view returns no facet rows",
+    "state": "not_applicable",
+    "value": null
+   },
+   "registered_families": {
+    "reason": null,
+    "state": "counted",
+    "value": 43
+   },
+   "registered_realizations": {
+    "reason": null,
+    "state": "counted",
+    "value": 1206
+   },
+   "rows_remaining": {
+    "reason": null,
+    "state": "counted",
+    "value": 0
+   },
+   "rows_returned": {
+    "reason": null,
+    "state": "counted",
+    "value": 2
+   },
+   "unmapped_changed_paths": {
+    "reason": "this view compares no two exact states",
+    "state": "not_applicable",
+    "value": null
+   },
+   "unresolved_references": {
+    "reason": "this view resolves no cited references",
+    "state": "not_applicable",
+    "value": null
+   }
+  },
+  "limitations": [],
+  "ordering_rule_ids": [
+   "ordering.declared-tiebreak"
+  ],
+  "renderer_version": "knowledge-view-renderer/1",
+  "rows": [
+   {
+    "id": "RLZ-J9300H",
+    "kind": "realization",
+    "location": {
+     "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/onboarding/mcp/src/agents_remember/application/tool_caller.py.md",
+     "heading": "mcp/src/agents_remember/application/tool_caller.py"
+    },
+    "state": "unverifiable"
+   },
+   {
+    "id": "INV-0MX54D",
+    "kind": "statement",
+    "location": {
+     "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/knowledge/invariants/INV-0MX54D-rule-2-caller-snapshot-read-once.json",
+     "line": 16
+    },
+    "state": "unverifiable"
+   }
+  ],
+  "snapshot": {
+   "context_digest": "c88b3d68b13159a000f89c61d3d5066a60ce2d592e1f3ecba14ec5c2c15fda3d",
+   "logical_digest": "f3a64fb6132cd4b0e32da0c3b0a4f2c716af3b1fea6f4a463bd76d4701d850d4",
+   "repository_id": "7511e917-d5d3-584e-b0ce-44dcad666cfe",
+   "schema_version": "ar-knowledge-sqlite/v9"
+  },
+  "view": "invariant"
+ },
+ "proofs": [
+  {
+   "id": "PRF-05YDKB",
+   "kind": "proof",
+   "location": {
+    "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/onboarding/mcp/tests/test_tool_event_river.py.md",
+    "heading": "mcp/tests/test_tool_event_river.py"
+   },
+   "state": "unverifiable"
+  },
+  {
+   "id": "PRF-5N48VF",
+   "kind": "proof",
+   "location": {
+    "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/onboarding/mcp/tests/test_tool_event_river.py.md",
+    "heading": "mcp/tests/test_tool_event_river.py"
+   },
+   "state": "unverifiable"
+  },
+  {
+   "id": "PRF-9MZC5P",
+   "kind": "proof",
+   "location": {
+    "file": "/tmp/l109-recorded/projects/ar-coordination/worktrees/agents-remember/109_a-read-names-where-a-thing-is-7909ab1468-ar/memory-109_a-read-names-where-a-thing-is-7909ab1468/onboarding/mcp/tests/test_tool_event_river.py.md",
+    "heading": "mcp/tests/test_tool_event_river.py"
+   },
+   "state": "unverifiable"
+  }
+ ],
+ "repositoryId": "7511e917-d5d3-584e-b0ce-44dcad666cfe",
+ "snapshot": "f3a64fb6132cd4b0e32da0c3b0a4f2c716af3b1fea6f4a463bd76d4701d850d4",
+ "state": "view",
+ "view": "invariant"
+}

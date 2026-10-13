@@ -24,6 +24,7 @@ assessments as attributed records; ``knowledge_diff`` returns the files' own Git
 label; ``knowledge_integrity_check`` returns the validator's report and a leaf's worklist.
 """
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -40,6 +41,37 @@ from ..tools.knowledge import (
 )
 
 
+def _worktree_relative_locations(config: McpRuntimeConfig, memory_root: str) -> bool:
+    """Whether one read names worktree-relative locations (MIK-R109 rule 2).
+
+    A caller reading its own memory worktree joins the answered absolute
+    ``memoryRoot`` with relative row files, so large answers stay within
+    their bound on any root length. A caller with no memory worktree names
+    the server's configured memory checkout itself and keeps absolute
+    files with the commit beside the answer.
+    """
+
+    try:
+        root = Path(memory_root).resolve()
+    except OSError:
+        return False
+    repositories = getattr(config, "repositories", None)
+    if not repositories:
+        # No configured checkout to compare against: keep the absolute
+        # no-worktree form rather than guessing a worktree.
+        return False
+    try:
+        configured = set()
+        for scope in repositories.values():
+            configured_root = scope.memory_root
+            if configured_root is None:
+                continue
+            configured.add(Path(configured_root).resolve())
+    except OSError:
+        return True
+    return root not in configured
+
+
 def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register the knowledge read, diff and integrity operations.
 
@@ -51,7 +83,7 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """
 
     _register_knowledge_read(server, config)
-    _register_knowledge_diff(server)
+    _register_knowledge_diff(server, config)
     _register_knowledge_integrity_check(server)
 
 
@@ -72,32 +104,19 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         repositoryRoot: str | None = None,
         codeTreeId: str | None = None,
     ) -> dict[str, Any]:
-        """Retrieve one named view of a memory tree's knowledge from supplied seeds at one snapshot,
-        using explicit filters and a snapshot-bound continuation. `memoryRoot` is the root
-        directory of a converted memory tree (one that holds knowledge/layout.json): a leaf's
-        memory worktree, or `memoryTree.memoryRoot` of a read_ar_files published-intent block. An
-        unconverted tree or a database file is refused as `legacy-format`. The three views are
-        source_context, invariant and family. Returns recorded
-        claims and assessments as attributed records: every ordered position and every
-        no-consequence statement carries an `authored` or `mechanical` provenance class, and a
-        value that cannot be classified is reported as an unresolved limitation rather than
-        returned with an empty class. orderingInput defaults to stable_ordering. Every response is
-        a page within one token threshold (`page`, and `threshold` on a refusal), and
-        `continuation` accepts the token any page minted, including the published-intent block of
-        read_ar_files: pass it with its `continuationView` as `view` and no other subject (the
-        token binds its ordering and code tree; repositoryRoot relocates the code repository).
-        `currentness` gives each returned invariant's state (stale, unverifiable, unrealized,
-        current) at the walk's code tree: the one named by `codeTreeId`, or the continuation's on a
-        resumed page; without either they are unverifiable. source_context with sourcePath is the
-        family-complete leaf read: the path's own invariants, then each containing family's header
-        (guarantee, routes, members) and its remaining members with their entries, then the
-        advertised families -- the same selection and manifestDigest read_ar_files returns -- then
-        one compact chain_family row per family routed at the path's directory or an ancestor
-        (`payload.routeChain`; no_governing_family when none). source_context with a family ID in
-        familyRevisionId and no sourcePath returns that family's full content. The invariant view
-        names the invariant's families in `families`. No mounted tool writes knowledge: the
-        curator file writer does, through `agents-remember knowledge-ingest` for a leaf and
-        `agents-remember knowledge-bootstrap` for a repository with no leaf."""
+        """Name records of one memory-tree view (MIK-R109).
+
+        Rows hold text ID, kind, state and location: the file in the
+        caller's memory worktree, relative to memoryTree.memoryRoot, or
+        the absolute file with the commit beside the answer for a caller
+        with no memory worktree. No record
+        text: open named files yourself. Views: source_context, invariant,
+        family. Paging with continuation;
+        converted trees only (`legacy-format` otherwise). No mounted tool
+        writes knowledge through `agents-remember knowledge-ingest` and
+        `agents-remember knowledge-bootstrap`.
+        Longer explanation: docs/reference/mcp-tools.md."""
+
         return knowledge_read_payload(
             ReadToolRequest(
                 memory_root=memoryRoot,
@@ -113,10 +132,11 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
             ),
             workspace_root=str(config.workspace_root),
             coordination_root=str(config.coordination_root),
+            relative_locations=_worktree_relative_locations(config, memoryRoot),
         )
 
 
-def _register_knowledge_diff(server: FastMCP) -> None:
+def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
     """The comparison operation, which infers no semantic label."""
 
     @server.tool()
@@ -127,29 +147,15 @@ def _register_knowledge_diff(server: FastMCP) -> None:
         recordId: str | None = None,
         path: str | None = None,
     ) -> dict[str, Any]:
-        """Return the Git diff of the knowledge files of a memory repository: every changed file
-        under knowledge/ and onboarding/ with its patch. Record files (and a record's .md prose)
-        are grouped by record, with the realization and proof entries that changed; an onboarding
-        card (.md) and its sidecar (.json) are grouped under the source path the sidecar declares;
-        history files and any other changed knowledge file are listed beside them.
-        `memoryRoot` is the root of the memory repository (or of one of its worktrees); a
-        directory inside it is refused with the root to pass. With `afterRevision` given, the two
-        Git revisions or trees are compared and nothing is written. With no `afterRevision`,
-        `beforeRevision` (default `HEAD`) is compared with the memory WORKING TREE, so uncommitted
-        knowledge changes show: to do that the working tree is captured as a Git tree, which
-        writes loose, unreferenced objects into the repository's object store (no ref, branch,
-        index or working file changes; Git's own garbage collection removes them later).
-        One answer stays within the token `threshold` that `knowledge_read` states. `complete`
-        says whether it holds every selected file's whole patch; when it does not, `leftOut` names
-        the files whose patch is absent (`paths`, in the answer's order; `pathsNotNamed` counts any
-        that could not even be named), the patches cut short (`cutPatches`), and how to reach each
-        (`nextAction`). `recordId` narrows the answer to one record and the source paths that name
-        it; `path` narrows it to one changed file (a record file, a sidecar or a card, by its
-        memory-repository path) or, given a source path, to that source's card and sidecar. A
-        `recordId` or a `path` that names nothing in either tree is refused by name
-        (`selector_absent`); one that names something unchanged answers with no file. A side whose
-        tree is unconverted (it holds no knowledge/layout.json) is refused as `legacy-format`. The
-        diff is the files' own change: no semantic effect label is inferred from it."""
+        """Name the changed records of two memory trees beside a report (MIK-R109).
+
+        The whole comparison is a caller-readable report: every changed file
+        with its patch, grouped by record and source path. The answer holds
+        the two trees, the counts by kind, the changed records, and the
+        report's location. With no `afterRevision`, HEAD meets the working
+        tree, which writes loose, unreferenced objects. Narrow with
+        `recordId`/`path`; absent selectors refused, unconverted sides as
+        `legacy-format`. Longer explanation: docs/reference/mcp-tools.md."""
         return knowledge_diff_payload(
             DiffToolRequest(
                 memory_root=memoryRoot,
@@ -157,7 +163,8 @@ def _register_knowledge_diff(server: FastMCP) -> None:
                 after=afterRevision,
                 record_id=recordId,
                 path=path,
-            )
+            ),
+            coordination_root=str(config.coordination_root),
         )
 
 

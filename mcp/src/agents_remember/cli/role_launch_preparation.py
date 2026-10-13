@@ -17,7 +17,10 @@ from agents_remember.application.agent_binding import (
     TOOL_SERVER_NAME,
     launch_server_exclusion,
 )
-from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
+from agents_remember.application.context_packet import (
+    ContextPacketRequest,
+    build_context_packet,
+)
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
@@ -32,7 +35,9 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
+from agents_remember.application.task_scoped_mcp import (
+    task_scoped_mcp_config_for_reader,
+)
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import (
     launcher_options,
@@ -128,7 +133,8 @@ _AR_TOOL_SERVER_USAGE_TAIL = (
     f"take some seconds to appear: look once more before reporting {TOOL_SERVER_NAME} missing, "
     "and report that instead of substituting another. For a leaf, pass the exact "
     "arMcpContext.readerArguments; add the requested files to read_ar_files as a list of "
-    'objects such as {"path": "<path in the repository>", "source": "full"}. If either tool '
+    'path strings such as "<path in the repository>". A read names where each file is and '
+    "carries no file text: read the named files with your harness's own file tool. If either tool "
     "schema lacks the declared task_context fields, stop and report the missing AR reader "
     "capability; do not drop task_context or substitute another root."
 )
@@ -1010,7 +1016,10 @@ def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> 
 
 
 def _role_assignment(
-    context: RoleLaunchContext, report_path: str, *, started_by: StartingAgent | None = None
+    context: RoleLaunchContext,
+    report_path: str,
+    *,
+    started_by: StartingAgent | None = None,
 ) -> str:
     selected = context.effective_task
     if context.role == "architect":

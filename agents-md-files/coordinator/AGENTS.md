@@ -68,9 +68,10 @@ inspected. Route retrieval through `c-04-retrieval-strategy-router` (see
 _Memory Retrieval Strategies_ below) before relying on onboarding, providers, or
 repository source.
 
-Until the build decision, read managed-repo source through the `read_ar_files` MCP tool
-rather than the native read tool — it pairs each file with its onboarding by construction and
-keeps the read trail observable. Native read is the edit precondition once building begins.
+Until the build decision, route managed-repo source reads through the `read_ar_files` MCP tool
+rather than going straight to the native read tool — it names where each file is and keeps
+the read trail observable, but it carries no file text: read the named files with the native
+read tool. Native read is the edit precondition once building begins.
 Count your `read_ar_files` calls as retrieval evidence alongside CGC and GrepAI.
 
 ### Developer Clarifications
@@ -100,11 +101,15 @@ Provider authority comes from the MCP settings file.
 If the MCP settings configure providers, run:
 
 ```text
-context_packet(repo_id="<repo-id>", include_providers=true)
+context_packet(repo_id="<repo-id>")
 ```
 
-If the packet reports stopped or degraded providers, report that state and use
-the MCP provider/runtime operations that match the requested work.
+(`context_packet` takes no provider argument; provider state comes from the settings
+and the provider operations below, never from the packet.) If the settings report
+stopped or degraded providers, report that state and use
+the MCP provider/runtime operations that match the requested work: `reconnect` (with
+`force: true` to switch accounts) for hosted connector accounts, `authorize` for local
+MCP server OAuth, and `install`/`enable` for local MCP servers from the catalog.
 
 Skip this provider check when no MCP server is configured or the MCP settings
 report no providers.
@@ -147,9 +152,10 @@ report no providers.
 - `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use the
-  `read_ar_files` MCP tool for paired onboarding + bounded source confirmation: one call
-  batches each source file with its sidecar and auto-attaches the repository and governing
-  route overviews.
+  `read_ar_files` MCP tool to name the onboarding for bounded source confirmation: one call
+  names each source file's card or record; then read the named sidecars and source with the
+  native read tool, adding the repository and governing route overviews only when a file's
+  role is unclear.
 
 Use `c-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 

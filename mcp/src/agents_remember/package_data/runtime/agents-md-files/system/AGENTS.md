@@ -15,11 +15,13 @@ Gate 1: Invoke `c-08-ar-coordination-context-resolver` for the target repository
 onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, task/worktree context, ledger path, and cross-repo allowances.
 
 Gate 2: If the Agents Remember MCP server is configured, call its
-`context_packet` MCP tool for the target repo with provider inspection enabled.
-Provider authority comes from the MCP settings file.
+`context_packet` MCP tool for the target repo.
+Provider authority comes from the MCP settings file: provider state is read
+from the settings and the provider operations, never from the packet (which
+takes no provider argument).
 
 ```text
-context_packet(repo_id="<repo-id>", include_providers=true)
+context_packet(repo_id="<repo-id>")
 ```
 
 Skip this gate only when no Agents Remember MCP server is configured or the MCP

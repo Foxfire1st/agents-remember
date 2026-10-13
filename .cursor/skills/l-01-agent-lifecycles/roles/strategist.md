@@ -22,7 +22,8 @@ You must be given all of these; a brief missing one is refused and reported, nev
 - **The JSON-primary task docs** for the in-flight masters and leaves, and the previous orchestration task when
   one exists.
 - **The authoritative route map**: onboarding `overview.md` pillars plus the generated `overview.index.json`
-  route indexes, read paired with source through `read_ar_files`.
+  route indexes, read paired with source in your worktrees; ask `read_ar_files`
+  which cards govern the paths and in which state their records are.
 - **The plan-review catalog** `../criteria/plan-review.md` — the standing criteria your plan is judged against.
 
 **Do not re-run the trust checkpoint.** A spawned seat uses the facts its spawner compiled into the brief. A

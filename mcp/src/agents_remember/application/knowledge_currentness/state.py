@@ -70,7 +70,13 @@ def invariant_state(observations: Iterable[EntryObservation]) -> InvariantState:
 
 @dataclass(frozen=True)
 class InvariantCurrentness:
-    """One invariant's state, and each of its entries that is not ``current``."""
+    """One invariant's state, and each of its entries' states.
+
+    Every observed entry rides the document -- current entries included:
+    a projector that only sees non-current entries cannot name a current
+    row's state (MIK-R109 rule 2). ``differing`` still selects the entries
+    that ask the caller to act.
+    """
 
     id: str
     state: InvariantState
@@ -81,7 +87,7 @@ class InvariantCurrentness:
         return tuple(entry for entry in self.entries if entry.state != "current")
 
     def to_document(self, *, compact: bool = False) -> dict[str, Any]:
-        """``compact`` names each differing entry by ID, kind, path and state only: used when one
+        """``compact`` names each entry by ID, kind, path and state only: used when one
         read-wide reason (``unverifiableReason``) already explains every entry (review N4)."""
 
         return {
@@ -91,7 +97,7 @@ class InvariantCurrentness:
                 {"id": e.entry_id, "kind": e.kind, "path": e.path, "state": e.state}
                 if compact
                 else e.to_document()
-                for e in self.differing
+                for e in self.entries
             ],
         }
 

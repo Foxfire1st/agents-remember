@@ -101,6 +101,21 @@ class PageBinding:
 RenderPage = Callable[[PageCut], dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class CutBudget:
+    """The sizing inputs one page cut is admitted against.
+
+    ``threshold`` is the delivered bound the cut must fit; ``max_rows``
+    caps the cut at that many rows beside the token budget; ``project``
+    maps the rendered body to the shape the caller is actually delivered,
+    so the cut is verified against the delivered size.
+    """
+
+    threshold: int = KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+    max_rows: int | None = None
+    project: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+
 def header_reference(rows: Sequence[PageRow], start: int) -> Mapping[str, Any] | None:
     """The reference row a page starting at ``start`` begins with, or ``None``.
 
@@ -125,7 +140,7 @@ def cut_page(
     render: RenderPage,
     *,
     alone: RenderPage | None = None,
-    threshold: int = KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
+    budget: CutBudget | None = None,
 ) -> tuple[PageCut, dict[str, Any]]:
     """Cut the page starting at ``start`` and return it with its rendered response.
 
@@ -136,22 +151,32 @@ def cut_page(
     ``alone`` renders the page as a response of its own, for a page laid out beside others (a seed
     of a ``read_ar_files`` block). A row that does not fit is ``oversized`` only when it does not
     fit alone either; otherwise the cut comes back empty and ``blocked``, and the caller defers it.
+    ``budget`` carries the delivered bound, the row cap beside it, and the delivered-shape
+    projection: the agent answer delivers at most ``TOOL_ANSWER_LIST_MAX`` rows, so the
+    cursor/count/completeness minted here already describe the delivered page (MIK-R109 rule 2).
+    The projection maps the rendered body to the shape the caller is actually delivered -- the
+    naming projection for the agent route: the cut is then verified against the delivered size, so
+    a page whose raw prose is small but whose named locations are large still pages exactly. The
+    returned body stays rendered (callers add extras keyed by the raw rows afterwards); only the
+    admission measure sees the projection.
     """
 
+    sizing = budget if budget is not None else CutBudget()
     total = len(rows)
-    budget = threshold - ENVELOPE_RESERVE_TOKENS
+    allowance = sizing.threshold - ENVELOPE_RESERVE_TOKENS
     reference = header_reference(rows, start)
     empty = PageCut(start=start, end=start, total=total, header_reference=reference)
     if start >= total:
         return empty, render(empty)
-    end = _estimated_end(rows, start, response_tokens(render(empty)), budget)
+    end = _estimated_end(rows, start, response_tokens(render(empty)), allowance, sizing.max_rows)
     while True:
         cut = replace(empty, end=end)
         body = render(cut)
-        if response_tokens(body) <= budget:
+        sized = sizing.project(body) if sizing.project is not None else body
+        if response_tokens(sized) <= allowance:
             return cut, body
         if cut.rows_on_page == 1:
-            if alone is not None and response_tokens(alone(cut)) <= budget:
+            if alone is not None and response_tokens(alone(cut)) <= allowance:
                 blocked = replace(empty, blocked=True)
                 return blocked, render(blocked)
             flagged = replace(cut, oversized=True)
@@ -159,11 +184,19 @@ def cut_page(
         end -= 1
 
 
-def _estimated_end(rows: Sequence[PageRow], start: int, used: int, budget: int) -> int:
+def _estimated_end(
+    rows: Sequence[PageRow],
+    start: int,
+    used: int,
+    budget: int,
+    max_rows: int | None,
+) -> int:
     """The end of the longest run whose summed row sizes fit beside the empty page, at least one."""
 
     end = start
     while end < len(rows):
+        if max_rows is not None and end - start >= max_rows:
+            break
         # One more token for the separator a row adds to the list it is placed in.
         cost = response_tokens(rows[end].body) + 1
         if used + cost > budget:

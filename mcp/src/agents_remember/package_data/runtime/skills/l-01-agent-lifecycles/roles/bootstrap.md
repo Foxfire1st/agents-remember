@@ -71,7 +71,10 @@ wins. This section states only the obligations that are yours while running it: 
 
 - **The setup surfaces:** `runtime_install`,
   `memory_init`, `memory_baseline_status`, `memory_baseline_adopt`.
-- **Read-only resolution and retrieval:** `context_packet`, `resolve_context`, `server_info`, `read_ar_files`.
+- **Read-only resolution and retrieval:** `context_packet`, `server_info`, `read_ar_files`.
+  (`resolve_context` is removed; `context_packet` answers
+  where the caller works and what needs action. Ask `read_ar_files` which cards govern a
+  path, then read the named files with your own tools.)
 - **Native reads**, and shell for the state commands the procedure names (`git status`, `git log`, `ls`) —
   reading state is not mutating it.
 - **Harness sub-agents**, within this assignment and its permissions, including permitted read-only
@@ -85,7 +88,7 @@ wins. This section states only the obligations that are yours while running it: 
   resolving context, ordinary work belongs to the lifecycle roles, and a later request to "tidy" a working
   installation is refused with the owning skill named.
 - **Never mutate beyond the setup surfaces:** no `worktree_*`, `task_doc`, `lifecycle_*`, `gate_*`,
-  `dispatch_agent`, `closeout_*`, `direct_landing`, `task_reopen`,
+  `dispatch_agent`, `closeout_*`, `direct_landing`, `message_child`, `retire_child`, `rename_*`, `task_reopen`,
   `curator_coherence`, `route_index_refresh`, `memory_carryover_*`, `citation_fix`. No `git commit`, no
   `git push`, no branch movement, no worktree creation. The memory-content commit `memory_baseline_adopt`
   performs is that surface's designed effect, not this seat committing.

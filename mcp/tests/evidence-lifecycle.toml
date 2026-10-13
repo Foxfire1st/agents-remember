@@ -236,10 +236,16 @@ permanence_rationale = "The refusal is only observable where the product's path 
 replacement_contract = "node:mcp/tests/test_user_settings_guard.py::test_every_support_write_of_the_user_settings_goes_through_the_guard"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_host_release_contract.py",
   "mcp/tests/test_investigator.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_diff_report.py",
+  "mcp/tests/test_knowledge_name_projection.py",
+  "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_paseo_agent_tools.py",
@@ -260,6 +266,7 @@ consumers = [
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_paseo_status_bridge.py",
   "mcp/tests/test_previous_host_removed.py",
+  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_launch_routes.py",
@@ -300,11 +307,13 @@ consumers = [
   "mcp/tests/test_knowledge_copy_cleanup.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_report.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
@@ -329,7 +338,9 @@ consumers = [
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -345,6 +356,9 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -516,6 +530,7 @@ consumers = [
   "mcp/tests/test_completed_direct_landing_disposition.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
@@ -564,6 +579,7 @@ consumers = [
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
@@ -589,7 +605,10 @@ consumers = [
   "mcp/tests/test_tool_answer_rows_citation.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_untyped_sprint_rows.py",
@@ -1079,6 +1098,182 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/context_packet_largest.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "recorded MIK-R108-shaped wire answer: the hermetic entry-point world with a leaf enclosure, sanitized log fields only"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The context_packet row's largest case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/context_packet_ordinary.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "recorded MIK-R108-shaped wire answer: the hermetic entry-point world, providers off, sanitized log fields only"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The context_packet row's ordinary case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/knowledge_diff_largest.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "operation-produced by _produce_l109_knowledge_diff_largest (eighty-record repository-memory comparison, sanitized volatile fields); L109_REGEN=1 rewrites it"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The knowledge_diff row's largest case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_knowledge_diff_largest_is_operation_produced"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/knowledge_diff_ordinary.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "recorded MIK-R108-shaped wire answer: one changed file in a synthetic converted repo, sanitized log/report fields only"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The knowledge_diff row's ordinary case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/knowledge_read_largest.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "operation-produced by _produce_l109_knowledge_read_largest (the actually delivered largest source_context page, sanitized volatile fields); L109_REGEN=1 rewrites it"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The knowledge_read row's largest case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_knowledge_read_largest_is_operation_produced"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/knowledge_read_ordinary.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "recorded MIK-R108-shaped wire answer: one invariant view, five rows, sanitized log fields only"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The knowledge_read row's ordinary case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/read_ar_files_largest.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "operation-produced by _produce_l109_read_ar_files_largest (twenty converted governed files, sanitized volatile fields); L109_REGEN=1 rewrites it"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The read_ar_files row's largest case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_read_ar_files_largest_is_operation_produced"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l109_tool_answers/read_ar_files_ordinary.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_tool_answer_table.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "recorded MIK-R108-shaped wire answer: one path named with its card in the leaf worktrees, sanitized log fields only"
+introduced_by = "260928-MIK-L109"
+lifetime = "permanent"
+permanence_rationale = "The read_ar_files row's ordinary case pins the final field/bound contract."
+replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
 path = "mcp/tests/fixtures/l43_l37_attempt-1.json"
 kind = "fixture"
 authority = "internal-canonical"
@@ -1242,6 +1437,7 @@ consumers = [
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_context_packet_cli.py",
+  "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_gates.py",
   "mcp/tests/test_controlplane_gates_tool_1.py",
@@ -1354,6 +1550,7 @@ consumers = [
   "mcp/tests/test_knowledge_decisions.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_report.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_canonical.py",
@@ -1365,6 +1562,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
@@ -1902,10 +2100,13 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_diff_report.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundary.py",
@@ -1913,6 +2114,9 @@ consumers = [
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_meaning_effects.py",
@@ -1921,6 +2125,9 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -1987,11 +2194,13 @@ consumers = [
   "mcp/tests/test_knowledge_copy_cleanup.py",
   "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_report.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
@@ -2016,7 +2225,9 @@ consumers = [
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -2032,6 +2243,9 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
 ]
@@ -2081,7 +2295,12 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
 [[artifact]]
@@ -2355,13 +2574,18 @@ consumers = [
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
 [[artifact]]
@@ -2593,7 +2817,14 @@ permanence_rationale = "The sweep, its controls and the refusal census all drive
 replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPointProbeTests::test_every_public_tool_answers_in_the_products_own_vocabulary"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_context_packet_slim.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_diff_report.py",
+  "mcp/tests/test_knowledge_name_projection.py",
+  "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_table.py",

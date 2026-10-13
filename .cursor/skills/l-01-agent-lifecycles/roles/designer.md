@@ -18,7 +18,8 @@ You must be given all of these; a brief missing one is refused and reported, nev
   carries **refs to durable state, never pasted state**.
 - **The ask**, as the developer put it, plus any prior design, notes, or decision the brief names.
 - **The authoritative route map** for the evidence pass: onboarding `overview.md` pillars and the generated
-  `overview.index.json` route indexes, read paired with source through `read_ar_files`.
+  `overview.index.json` route indexes, read paired with source in your worktrees; ask `read_ar_files`
+  which cards govern the paths and in which state their records are.
 - **The task-collaboration doctrine** `tasks/AGENTS.md`, **applied, not paraphrased**: meta-questioning,
   reframe-before-execution, evidence-first, visible planning, assumptions and truth gaps stated.
 - **Where code is in scope:** the resolved memory layer's `system/tools.md` and

@@ -20,21 +20,15 @@ from typing import Any
 
 import apsw
 import pytest
-from agents_remember.application.knowledge_paging import KNOWLEDGE_PAGE_THRESHOLD_TOKENS
-from agents_remember.application.knowledge_paging.threshold import (
-    response_tokens,
+from agents_remember.application.knowledge_read import (
+    open_read_context,
+    read_knowledge_scope,
 )
-from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.mcp.tools import knowledge as knowledge_tools
 from agents_remember.mcp.tools.knowledge import (
     DiffToolRequest,
     IntegrityCheckRequest,
     ReadToolRequest,
-    # MIK-R108: answers are bounded and carry no token count. Tests assert the
-    # threshold and the overflow contract on the public payload boundary
-    # (model-validated answer) and resolve whole results through the same domain
-    # body the mounted tool serves (explicitly marked, never pointer proof).
-    _diff_result,
     _integrity_check_result,
     knowledge_diff_payload,
     knowledge_integrity_check_payload,
@@ -56,6 +50,8 @@ from agents_remember.models.knowledge.read import (
     PathSeed,
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from knowledge_index_test_support import (
     FAMILY,
     REVIEW_INVARIANT,
@@ -99,7 +95,8 @@ def test_a_retired_record_is_never_selected_as_live_and_is_answered_as_retired(
             index.database_path,
             context,
             KnowledgeReadRequest(
-                seed=PathSeed(path=REVIEW_PATH), budget=KnowledgeReadBudget(max_items=64)
+                seed=PathSeed(path=REVIEW_PATH),
+                budget=KnowledgeReadBudget(max_items=64),
             ),
         ).page
         answer = index.invariant(REVIEW_INVARIANT).value
@@ -141,7 +138,9 @@ def _read(root: Path, coordination: Path | None, **fields: Any) -> dict[str, Any
     )
 
 
-def test_knowledge_read_resolves_a_converted_memory_tree_through_its_index(tmp_path: Path) -> None:
+def test_knowledge_read_resolves_a_converted_memory_tree_through_its_index(
+    tmp_path: Path,
+) -> None:
     root = _converted(tmp_path)
     coordination = tmp_path / "coordination"
     family = text_uuid("revision", f"{FAMILY}@1")
@@ -189,20 +188,8 @@ def test_the_bootstrap_skill_names_only_views_that_list_an_existing_foundation(
 
 def _diff(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:
     return knowledge_diff_payload(
-        DiffToolRequest(memory_root=str(root), before=before, after=after, **fields)
-    )
-
-
-def _diff_body(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:
-    """The same diff as a domain-unit body, for changes the mounted bound does not retain.
-
-    Only overflowed diffs take this path (marked at each call): the public answer keeps
-    the overflow contract, and the left-out detail resolves here. Never a claim of
-    pointer retrieval.
-    """
-
-    return _diff_result(
-        DiffToolRequest(memory_root=str(root), before=before, after=after, **fields)
+        DiffToolRequest(memory_root=str(root), before=before, after=after, **fields),
+        coordination_root=str(root.parent / "coordination"),
     )
 
 
@@ -218,7 +205,14 @@ def _check_body(**fields: Any) -> dict[str, Any]:
     return _integrity_check_result(IntegrityCheckRequest(**fields))
 
 
-def test_knowledge_diff_serves_the_git_diff_of_the_knowledge_files(tmp_path: Path) -> None:
+def _reported(answer: dict[str, Any]) -> dict[str, Any]:
+    """The caller-readable report behind a compared answer: the whole comparison."""
+    return json.loads(Path(str(answer["report"])).read_text(encoding="utf-8"))
+
+
+def test_knowledge_diff_serves_the_git_diff_of_the_knowledge_files(
+    tmp_path: Path,
+) -> None:
     root = _converted(tmp_path)
     base = commit_all(root, "base")
     target = next((root / "knowledge" / "invariants").glob(f"{REVIEW_INVARIANT}-*.json"))
@@ -230,47 +224,70 @@ def test_knowledge_diff_serves_the_git_diff_of_the_knowledge_files(tmp_path: Pat
     sidecar_document = json.loads(sidecar.read_text("utf-8"))
     sidecar_document["realizes"][0]["rationale"] = "loadReview refuses a changed context."
     sidecar.write_text(canonical_text(sidecar_document), encoding="utf-8")
-    changed = commit_all(root, "change the statement")
+    commit_all(root, "change the statement")
 
     compared = _diff(root, base)  # the after side defaults to HEAD
     assert compared["state"] == "compared", compared
     assert (compared["beforeRevision"], compared["afterRevision"]) == (base, "HEAD")
-    diff = compared["diff"]
-    assert diff["changed_files"] == 2 and len(diff["before_tree"]) == 40
-    (group,) = diff["records"]
+    assert len(compared["beforeTree"]) == 40 and len(compared["afterTree"]) == 40
+    assert compared["beforeTree"] != compared["afterTree"]
+    assert compared["counts"]["changedFiles"] == 2, compared
+    # The answer names the changed record; the whole comparison, patches
+    # included, is the caller-readable report behind it.
+    (named,) = compared["decisionRecords"]
+    assert (named["recordId"], named["kind"], named["change"]) == (
+        REVIEW_INVARIANT,
+        "invariant",
+        "entries-changed",
+    )
+    assert named["path"].startswith("knowledge/invariants/")
+    assert compared["decisionRecordCount"] == 1
+    whole = json.dumps(compared)
+    assert "A comparison shows every unchanged realization." not in whole
+    assert "semanticEffectLabels" not in compared
+    assert "notes.txt" not in whole
+    report = _reported(compared)
+    assert report["changedFiles"] == 2
+    (group,) = report["records"]
     assert group["record_id"] == REVIEW_INVARIANT and group["kind"] == "invariant"
     (change,) = group["files"]
     assert change["status"] == "modified" and change["path"].startswith("knowledge/invariants/")
     assert "A comparison shows every unchanged realization." in change["patch"]
     # The changed entry is named under its record and, with its sidecar, under its source path.
     assert [entry[0] for entry in group["entries"]] == ["RLZ-RVW001"]
-    (source,) = diff["sources"]
+    (source,) = report["sources"]
     assert source["source_path"] == "dashboard/src/data/review.ts"
     assert source["records"] == [REVIEW_INVARIANT]
     assert "refuses a changed context" in source["files"][0]["patch"]
-    # The answer carries only the files' own change: no label of any effect is inferred.
-    assert "semanticEffectLabels" not in compared
-    assert not any("notes.txt" in str(value) for value in diff.values())
-    assert _diff(root, base, changed)["diff"] == diff
-
-    # The selectors narrow the same answer; a record or file that did not change answers empty.
-    assert _diff(root, base, record_id=REVIEW_INVARIANT)["diff"] == diff
-    by_file = _diff(root, base, path=change["path"])["diff"]
-    assert by_file["changed_files"] == 1 and by_file["sources"] == []
-    assert [file["path"] for file in by_file["records"][0]["files"]] == [change["path"]]
-    by_source = _diff(root, base, path="dashboard/src/data/review.ts")["diff"]
-    assert by_source["changed_files"] == 1 and by_source["records"][0]["files"] == []
-    assert by_source["sources"] == diff["sources"]
-    nothing = _diff(root, base, record_id=SIBLING_INVARIANT)["diff"]
-    assert (nothing["changed_files"], nothing["records"], nothing["sources"]) == (0, [], [])
-    same = _diff(root, changed)["diff"]
-    assert same["changed_files"] == 0 and same["records"] == []
-    # The whole answer fits one answer's bound, and says so.
-    assert compared["complete"] is True and "leftOut" not in compared
-    assert compared["threshold"]["tokens"] == KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+    _assert_selectors_narrow(root, base, report, change)
 
 
-def test_knowledge_diff_refuses_a_path_that_names_nothing_in_either_tree(tmp_path: Path) -> None:
+def _assert_selectors_narrow(
+    root: Path, base: str, report: dict[str, Any], change: dict[str, Any]
+) -> None:
+    """The selectors narrow the same comparison; an unchanged record answers empty."""
+
+    by_record = _diff(root, base, record_id=REVIEW_INVARIANT)
+    assert by_record["counts"]["changedFiles"] == 2, by_record
+    assert [entry["recordId"] for entry in by_record["decisionRecords"]] == [REVIEW_INVARIANT]
+    # The same comparison behind a narrowed answer: the report's records match.
+    assert _reported(by_record)["records"] == report["records"]
+    by_file = _diff(root, base, path=change["path"])
+    assert by_file["counts"]["changedFiles"] == 1 and by_file["counts"]["sources"] == 0
+    assert [entry["recordId"] for entry in by_file["decisionRecords"]] == [REVIEW_INVARIANT]
+    by_source = _diff(root, base, path="dashboard/src/data/review.ts")
+    assert by_source["counts"]["changedFiles"] == 1
+    assert [entry["recordId"] for entry in by_source["decisionRecords"]] == [REVIEW_INVARIANT]
+    assert _reported(by_source)["sources"] == report["sources"]
+    nothing = _diff(root, base, record_id=SIBLING_INVARIANT)
+    assert (nothing["counts"]["changedFiles"], nothing["decisionRecords"]) == (0, [])
+    same = _diff(root, base, base)
+    assert same["counts"]["changedFiles"] == 0 and same["decisionRecords"] == []
+
+
+def test_knowledge_diff_refuses_a_path_that_names_nothing_in_either_tree(
+    tmp_path: Path,
+) -> None:
     """A selector that names nothing would read like "nothing changed", so it is refused by name."""
 
     root = _converted(tmp_path)
@@ -278,19 +295,30 @@ def test_knowledge_diff_refuses_a_path_that_names_nothing_in_either_tree(tmp_pat
     _write(root, f"onboarding/{REVIEW_PATH}.md", "a card\n")
     _write(root, "notes.txt", "not knowledge\n")
     commit_all(root, "a card and a note")
-    assert _diff(root, base, path=REVIEW_PATH)["diff"]["changed_files"] == 1
+    assert _diff(root, base, path=REVIEW_PATH)["counts"]["changedFiles"] == 1
     # An absent knowledge file, an unknown source, and a file of the tree that is not knowledge.
-    for absent in ("knowledge/invariants/absent.json", "no/such/source.py", "notes.txt"):
+    for absent in (
+        "knowledge/invariants/absent.json",
+        "no/such/source.py",
+        "notes.txt",
+    ):
         refused = _diff(root, base, path=absent)
-        assert (refused["state"], refused["refusalCode"]) == ("refused", "selector_absent"), absent
-        assert repr(absent) in refused["refusalDetail"] and "diff" not in refused
+        assert (refused["state"], refused["refusalCode"]) == (
+            "refused",
+            "selector_absent",
+        ), absent
+        assert repr(absent) in refused["refusalDetail"] and "report" not in refused
     both = _diff(root, base, record_id=REVIEW_INVARIANT, path="no/such/source.py")
     assert both["refusalCode"] == "selector_absent" and "`path`" in both["refusalDetail"]
     # A file, a source and a route that a tree holds and that did not change answer with no file.
     family = next((root / "knowledge" / "families").glob(f"{FAMILY}-*.json"))
-    for held in (family.relative_to(root).as_posix(), SIBLING_PATHS[0], "dashboard/src"):
+    for held in (
+        family.relative_to(root).as_posix(),
+        SIBLING_PATHS[0],
+        "dashboard/src",
+    ):
         quiet = _diff(root, base, path=held)
-        assert quiet["state"] == "compared" and quiet["diff"]["changed_files"] == 0, held
+        assert quiet["state"] == "compared" and quiet["counts"]["changedFiles"] == 0, held
 
 
 def _write(root: Path, path: str, text: str) -> None:
@@ -332,40 +360,44 @@ def test_knowledge_diff_serves_the_cards_beside_their_sidecars_and_refuses_an_un
     (root / sidecar).write_text(canonical_text(document), encoding="utf-8")
     commit_all(root, "edit the cards")
 
-    diff = _diff(root, base)["diff"]
-    assert diff["changed_files"] == 7
-    assert _files(diff["sources"], "source_path") == {
+    compared = _diff(root, base)
+    assert compared["state"] == "compared", compared
+    assert compared["counts"]["changedFiles"] == 7, compared
+    report = _reported(compared)
+    assert _files(report["sources"], "source_path") == {
         REVIEW_PATH: [sidecar, card],
         SIBLING_PATHS[0]: [lone],
         TEST_PATH: [gone],
         "dashboard/src": [overview],
     }
-    assert [change["path"] for change in diff["other"]] == [stray]
-    assert _files(diff["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
-    assert diff["records"][0]["kind"] == "invariant"
+    assert [change["path"] for change in report["other"]] == [stray]
+    assert _files(report["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
+    assert report["records"][0]["kind"] == "invariant"
     statuses = {
-        change["path"]: change["status"] for group in diff["sources"] for change in group["files"]
+        change["path"]: change["status"] for group in report["sources"] for change in group["files"]
     }
     assert (statuses[card], statuses[gone]) == ("modified", "deleted")
 
-    by_card = _diff(root, base, path=card)["diff"]
-    assert by_card["changed_files"] == 1 and by_card["records"] == []
-    assert _files(by_card["sources"], "source_path") == {REVIEW_PATH: [card]}
-    assert "+second" in by_card["sources"][0]["files"][0]["patch"]
-    by_source = _diff(root, base, path=REVIEW_PATH)["diff"]
-    assert _files(by_source["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
-    by_record = _diff(root, base, record_id=REVIEW_INVARIANT)["diff"]
-    assert _files(by_record["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
-    assert _files(by_record["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
+    by_card = _diff(root, base, path=card)
+    assert by_card["counts"]["changedFiles"] == 1 and by_card["counts"]["records"] == 0
+    assert _files(_reported(by_card)["sources"], "source_path") == {REVIEW_PATH: [card]}
+    assert "+second" in _reported(by_card)["sources"][0]["files"][0]["patch"]
+    by_source = _diff(root, base, path=REVIEW_PATH)
+    assert _files(_reported(by_source)["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
+    by_record = _diff(root, base, record_id=REVIEW_INVARIANT)
+    assert _files(_reported(by_record)["sources"], "source_path") == {REVIEW_PATH: [sidecar, card]}
+    assert _files(_reported(by_record)["records"], "record_id") == {REVIEW_INVARIANT: [prose]}
 
     unheld = _diff(root, base, record_id="INV-N0SVCH")
     assert (unheld["state"], unheld["refusalCode"]) == ("refused", "selector_absent")
-    assert "INV-N0SVCH" in unheld["refusalDetail"] and "diff" not in unheld
+    assert "INV-N0SVCH" in unheld["refusalDetail"] and "report" not in unheld
     # A record a tree holds and that did not change is still answered, with nothing changed.
-    assert _diff(root, base, record_id=SIBLING_INVARIANT)["diff"]["changed_files"] == 0
+    assert _diff(root, base, record_id=SIBLING_INVARIANT)["counts"]["changedFiles"] == 0
 
 
-def test_knowledge_diff_refuses_a_directory_inside_the_memory_repository(tmp_path: Path) -> None:
+def test_knowledge_diff_refuses_a_directory_inside_the_memory_repository(
+    tmp_path: Path,
+) -> None:
     """Git reads its pathspecs from the directory it runs in, so a directory below the root would
     be compared as the whole memory tree and answer "nothing changed". It is refused instead, and
     the refusal names the root to pass. A linked worktree is a root of its own."""
@@ -374,62 +406,86 @@ def test_knowledge_diff_refuses_a_directory_inside_the_memory_repository(tmp_pat
     base = commit_all(root, "base")
     _write(root, f"onboarding/{REVIEW_PATH}.md", "a card\n")
     commit_all(root, "a card")
-    assert _diff(root, base)["diff"]["changed_files"] == 1
+    assert _diff(root, base)["counts"]["changedFiles"] == 1
     for inside in (root / "onboarding", root / "knowledge" / "families"):
-        for refused in (_diff(inside, base), knowledge_diff_payload(DiffToolRequest(str(inside)))):
+        for refused in (
+            _diff(inside, base),
+            knowledge_diff_payload(DiffToolRequest(str(inside))),
+        ):
             assert refused["state"] == "refused", (inside, refused)
             assert refused["refusalCode"] == "selected_input_unavailable"
             assert f"pass {root} as memoryRoot" in refused["refusalDetail"]
     linked = tmp_path / "linked"
     _git(root, "worktree", "add", "-q", "--detach", str(linked), "HEAD")
-    assert _diff(linked, base)["diff"]["changed_files"] == 1
+    assert _diff(linked, base)["counts"]["changedFiles"] == 1
 
 
 def _shown(answer: dict[str, Any]) -> list[str]:
-    diff = answer["diff"]
+    report = _reported(answer)
     groups = (
-        *diff["records"],
-        *diff["sources"],
-        {"files": diff["history"]},
-        {"files": diff["other"]},
+        *report["records"],
+        *report["sources"],
+        {"files": report["history"]},
+        {"files": report["other"]},
     )
     return [change["path"] for group in groups for change in group["files"]]
-
-
-def _assert_single_path_cuts(
-    root: Path, before: str, after: str, paths: tuple[str, str], digests: list[str]
-) -> None:
-    """One patch longer than an answer is cut at a line end and named as cut."""
-
-    long, plain = paths
-
-    cut = _diff(root, before, after, path=long)
-    assert cut["state"] == "compared" and cut.get("overflow"), cut
-    assert cut["resultKept"] is False, cut
-    cut_body = _diff_body(root, before, after, path=long)
-    (change,) = cut_body["diff"]["other"]
-    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
-    assert response_tokens(cut) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and cut["complete"] is False
-    assert change["truncated"] is True and change["patch"].endswith("\n")
-    assert digests[0] in change["patch"] and digests[-1] not in change["patch"]
-    assert (cut_body["leftOut"]["files"], cut_body["leftOut"]["cutPatches"]) == (0, [long])
-    assert "-- <path>` prints a file's whole patch" in cut_body["leftOut"]["nextAction"]
-    limited = _diff(root, before, after, path=plain)
-    assert limited["state"] == "compared" and limited.get("overflow"), limited
-    assert limited["resultKept"] is False, limited
-    limited_body = _diff_body(root, before, after, path=plain)
-    assert limited["complete"] is False and limited_body["leftOut"]["cutPatches"] == [plain]
-    assert limited_body["diff"]["other"][0]["truncated"] is True
 
 
 def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leaves_out(
     tmp_path: Path,
 ) -> None:
-    """One answer never exceeds the bound ``knowledge_read`` states (MIK-R02's constant).
+    """Ported to MIK-R109 rule 3 (the 12:46 ruling is withdrawn).
 
-    The answer holds the patches of as many leading files as fit and names every file it left out,
-    each of which is then reached whole by ``path``. A patch longer than an answer is cut and named
-    as cut. When not even the names fit, the answer names as many as fit and counts the rest.
+    The landed version held the pre-R109 contract: the patches of as many
+    files as fit, the files left out named. Under rule 3 the mounted answer
+    is the two trees, the counts by kind, the decision-asking records up to
+    the bound, and the report's location; it never takes the overflow form.
+    Assertions whose subject rule 3 removes (a patch cut at a line end and
+    named as cut, the files left out of the answer, the names that fit and
+    the count of the rest) left with the code they tested. What remains keeps
+    its substance and reads the content in the report: nothing is dropped
+    (forty cards and nine hundred files are all in the report), one path
+    narrows the comparison (read in the report), the answer is within its
+    bound at both sizes, measured with the product's counter.
+    """
+
+    fixture = _bound_report_fixtures(tmp_path)
+    root = fixture["root"]
+    cards = fixture["cards"]
+    bulk = fixture["bulk"]
+    base, many, longer, most = (
+        fixture["base"],
+        fixture["many"],
+        fixture["longer"],
+        fixture["most"],
+    )
+    answer = _diff(root, base, many)
+    assert answer["state"] == "compared", answer
+    assert count_response_tokens(answer) <= bound_for("knowledge_diff"), answer
+    assert not answer.get("overflow") and "resultKept" not in answer, answer
+    assert answer["counts"]["changedFiles"] == len(cards), answer
+    whole = _reported(answer)
+    assert whole["changedFiles"] == len(cards)
+    assert _shown(answer) == cards
+    assert "says thing 79" in whole["other"][-1]["patch"]
+    one = _diff(root, base, many, path=cards[-1])
+    assert one["counts"]["changedFiles"] == 1, one
+    assert _shown(one) == [cards[-1]]
+    assert "says thing 79" in _reported(one)["other"][0]["patch"]
+    crowd = _diff(root, longer, most)
+    assert crowd["state"] == "compared", crowd
+    assert count_response_tokens(crowd) <= bound_for("knowledge_diff"), crowd
+    assert not crowd.get("overflow") and "resultKept" not in crowd, crowd
+    assert crowd["counts"]["changedFiles"] == len(bulk), crowd
+    assert len(_shown(crowd)) == len(bulk), crowd
+
+
+def _bound_report_fixtures(tmp_path: Path) -> dict[str, Any]:
+    """The forty/long/bulk comparison fixtures both bound tests walk (MIK-R109 rule 3).
+
+    Writes and commits in the same order the threshold test uses, so every
+    named revision compares the same trees; the rule-3 test then asserts the
+    counts in the bounded answers and the whole comparisons in the reports.
     """
 
     root = _converted(tmp_path)
@@ -440,59 +496,84 @@ def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leav
         _write(root, path, "first\n")
     base = commit_all(root, "short cards")
     for number, path in enumerate(cards):
-        _write(root, path, "".join(f"card {number} says thing {line}\n" for line in range(80)))
+        _write(
+            root,
+            path,
+            "".join(f"card {number} says thing {line}\n" for line in range(80)),
+        )
     many = commit_all(root, "forty long cards")
-
-    answer = _diff(root, base, many)
-    # Forty long cards overflow the mounted bound: the public answer keeps the
-    # overflow contract, and the left-out detail resolves through the same domain
-    # body the mounted tool serves (explicitly marked, never pointer retrieval).
-    assert answer["state"] == "compared" and answer.get("overflow"), answer
-    assert answer["resultKept"] is False, answer
-    whole = _diff_body(root, base, many)
-    left = whole["leftOut"]
-    assert whole["state"] == "compared" and whole["complete"] is False
-    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
-    assert response_tokens(answer) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
-    assert whole["diff"]["changed_files"] == len(cards)
-    # Nothing is dropped: the files shown and the files named are the whole change, in order.
-    assert _shown(whole) and _shown(whole) + left["paths"] == cards
-    assert (left["files"], left["pathsNotNamed"], left["cutPatches"]) == (len(left["paths"]), 0, [])
-    assert "as `path`" in left["nextAction"]
-    one = _diff(root, base, many, path=left["paths"][-1])
-    assert one["complete"] is True and "leftOut" not in one
-    assert (
-        _shown(one) == [left["paths"][-1]] and "says thing 79" in one["diff"]["other"][0]["patch"]
-    )
-
-    # One patch longer than an answer: as much of it as fits, cut at a line end, named as cut.
     digests = [hashlib.sha256(str(line).encode()).hexdigest() for line in range(600)]
     _write(root, long, "".join(f"{digest}\n" for digest in digests))
-    # A patch the per-file limit cuts although it fits an answer is named as cut too.
-    _write(root, plain, "".join(f"the same plain words on line {line}\n" for line in range(900)))
+    _write(
+        root,
+        plain,
+        "".join(f"the same plain words on line {line}\n" for line in range(900)),
+    )
     longer = commit_all(root, "two long cards")
-    _assert_single_path_cuts(root, many, longer, (long, plain), digests)
-
-    # More changed files than one answer can name: no patch, the names that fit, the rest counted.
     for path in bulk:
         _write(root, path, "second\n")
     most = commit_all(root, "nine hundred cards")
-    crowd = _diff(root, longer, most)
-    # Nine hundred names do not fit even the whole result's list: the public answer
-    # keeps the bounded window, and the named-as-many-as-fit list resolves through
-    # the same domain body the mounted tool serves (explicitly marked).
-    assert crowd["state"] == "compared", crowd
-    crowd_body = _diff_body(root, longer, most)
-    named = crowd_body["leftOut"]["paths"]
-    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
-    assert response_tokens(crowd) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and _shown(crowd) == []
-    assert 0 < len(named) < len(bulk) and named == bulk[: len(named)]
-    assert crowd["leftOut"]["files"] == len(bulk) == crowd["diff"]["changed_files"]
-    assert crowd["leftOut"]["pathsNotNamed"] == len(bulk) - len(named)
-    assert (
-        "--name-only -- knowledge onboarding` lists every changed file"
-        in (crowd["leftOut"]["nextAction"])
+    return {
+        "root": root,
+        "cards": cards,
+        "long": long,
+        "plain": plain,
+        "bulk": bulk,
+        "base": base,
+        "many": many,
+        "longer": longer,
+        "most": most,
+        "digests": digests,
+    }
+
+
+def test_knowledge_diff_answers_beside_a_report_holding_the_whole_comparison(
+    tmp_path: Path,
+) -> None:
+    """The answer names; the report holds the whole comparison (MIK-R109 rule 3).
+
+    No answer carries file text: the report behind a forty-card comparison
+    holds all forty patches, and one file's patch is reached by ``path``.
+    Nine hundred changed files are all in the report too; the answer counts
+    them. The report holds the reviewer's own computation, per-file caps
+    included: a patch longer than one file's limit is cut at the limit and
+    flagged, the same for every reader of the report.
+    """
+
+    fixture = _bound_report_fixtures(tmp_path)
+    root = fixture["root"]
+    cards = fixture["cards"]
+    long, plain = fixture["long"], fixture["plain"]
+    bulk = fixture["bulk"]
+    base, many, longer, most = (
+        fixture["base"],
+        fixture["many"],
+        fixture["longer"],
+        fixture["most"],
     )
+    digests = fixture["digests"]
+    answer = _diff(root, base, many)
+    assert answer["state"] == "compared", answer
+    assert answer["counts"]["changedFiles"] == len(cards), answer
+    assert answer["decisionRecords"] == [] and answer["decisionRecordCount"] == 0
+    # Nothing is dropped and nothing is cut: the report holds every file whole, in order.
+    assert _shown(answer) == cards
+    whole = _reported(answer)
+    assert whole["changedFiles"] == len(cards)
+    assert "says thing 79" in whole["other"][-1]["patch"]
+    one = _diff(root, base, many, path=cards[-1])
+    assert one["counts"]["changedFiles"] == 1, one
+    assert _shown(one) == [cards[-1]] and "says thing 79" in _reported(one)["other"][0]["patch"]
+    # The same cuts in the report: the report flags what the answer leaves out.
+    cut = _diff(root, many, longer, path=long)
+    (change,) = _reported(cut)["other"]
+    assert change["path"] == long and change["truncated"] is True
+    assert digests[0] in change["patch"] and digests[-1] not in change["patch"]
+    limited = _diff(root, many, longer, path=plain)
+    assert _reported(limited)["other"][0]["truncated"] is True
+    crowd = _diff(root, longer, most)
+    # The report holds all nine hundred beside the bounded answer that counts them.
+    assert crowd["counts"]["changedFiles"] == len(bulk) == len(_shown(crowd)), crowd
 
 
 # --- MIK-R26 rule 5: no tool reads unconverted memory or a database file -------------------------
@@ -546,8 +627,16 @@ def test_every_knowledge_tool_refuses_legacy_memory_and_opens_no_database(
     monkeypatch.setattr(apsw, "Connection", spy)
     selections = (
         (legacy, f"the memory tree {legacy}", "holds no converted memory yet"),
-        (legacy / "knowledge.sqlite", "knowledge database file", "holds no converted memory yet"),
-        (converted / "knowledge.sqlite", "knowledge database file", f"worktree {converted}"),
+        (
+            legacy / "knowledge.sqlite",
+            "knowledge database file",
+            "holds no converted memory yet",
+        ),
+        (
+            converted / "knowledge.sqlite",
+            "knowledge database file",
+            f"worktree {converted}",
+        ),
     )
     for selection, subject, held in selections:
         read = _read(selection, coordination, view="family")
@@ -563,7 +652,10 @@ def test_every_knowledge_tool_refuses_legacy_memory_and_opens_no_database(
     assert not coordination.exists()
 
     absent = _read(tmp_path / "nowhere", coordination, view="family")
-    assert (absent["state"], absent["refusalCode"]) == ("refused", "selected_input_unavailable")
+    assert (absent["state"], absent["refusalCode"]) == (
+        "refused",
+        "selected_input_unavailable",
+    )
     assert "does not exist" in absent["refusalDetail"]
 
 
@@ -574,9 +666,12 @@ def test_knowledge_diff_with_no_after_revision_compares_with_the_working_tree(
     base = commit_all(root, "base")
     target = next((root / "knowledge" / "invariants").glob(f"{REVIEW_INVARIANT}-*.json"))
     # Nothing uncommitted yet: the working tree equals HEAD.
-    clean = knowledge_diff_payload(DiffToolRequest(memory_root=str(root)))
+    clean = knowledge_diff_payload(
+        DiffToolRequest(memory_root=str(root)),
+        coordination_root=str(tmp_path / "coordination"),
+    )
     assert clean["state"] == "compared" and clean["afterRevision"] == "working tree", clean
-    assert clean["diff"]["changed_files"] == 0
+    assert clean["counts"]["changedFiles"] == 0
 
     document = json.loads(target.read_text("utf-8"))
     document.update(
@@ -585,7 +680,10 @@ def test_knowledge_diff_with_no_after_revision_compares_with_the_working_tree(
     target.write_text(canonical_text(document), encoding="utf-8")
     (root / "knowledge" / "families" / "FAM-NEWONE-x.json").write_text("{}\n", encoding="utf-8")
     loose, refs = _git(root, "count-objects"), _git(root, "for-each-ref")
-    uncommitted = knowledge_diff_payload(DiffToolRequest(memory_root=str(root)))
+    uncommitted = knowledge_diff_payload(
+        DiffToolRequest(memory_root=str(root)),
+        coordination_root=str(tmp_path / "coordination"),
+    )
     assert uncommitted["state"] == "compared", uncommitted
     # The capture writes loose objects that nothing references (the tool's description says so),
     # and a comparison of two named revisions writes none.
@@ -594,26 +692,32 @@ def test_knowledge_diff_with_no_after_revision_compares_with_the_working_tree(
     assert _git(root, "for-each-ref") == refs
     _diff(root, base, base)
     assert _git(root, "count-objects") == captured
-    diff = uncommitted["diff"]
-    assert diff["changed_files"] == 2
+    report = _reported(uncommitted)
+    assert report["changedFiles"] == 2
     files = {
         change["path"]: change
-        for group in (*diff["records"], {"files": diff["other"]})
+        for group in (*report["records"], {"files": report["other"]})
         for change in group["files"]
     }
     assert any("uncommitted statement" in change["patch"] for change in files.values())
     assert any(change["status"] == "added" for change in files.values())
-    # The default before side is HEAD; naming it, or its commit, gives the same answer.
-    named = knowledge_diff_payload(DiffToolRequest(memory_root=str(root), before=base))
-    assert named["diff"] == uncommitted["diff"] and named["beforeRevision"] == base
+    # The units the answer names: the edited record and the added file's record (none).
+    assert [entry["recordId"] for entry in uncommitted["decisionRecords"]] == [REVIEW_INVARIANT]
+    # The default before side is HEAD; naming it, or its commit, names the same records.
+    named = knowledge_diff_payload(
+        DiffToolRequest(memory_root=str(root), before=base),
+        coordination_root=str(tmp_path / "coordination"),
+    )
+    assert named["decisionRecords"] == uncommitted["decisionRecords"]
+    assert named["beforeRevision"] == base
     # The working files, the index and the branch are unchanged by the read.
     assert _git(root, "rev-parse", "HEAD") == base
     assert _git(root, "diff", "--cached", "--name-only") == ""
     # With both revisions named the two trees are compared, whatever the working tree holds.
     committed = commit_all(root, "second state")
     pair = _diff(root, base, committed)
-    assert pair["afterRevision"] == committed and pair["diff"]["changed_files"] == 2
-    assert _diff(root, committed)["diff"]["changed_files"] == 0
+    assert pair["afterRevision"] == committed and pair["counts"]["changedFiles"] == 2
+    assert _diff(root, committed)["counts"]["changedFiles"] == 0
 
 
 def test_knowledge_diff_refuses_an_unconverted_working_tree(tmp_path: Path) -> None:
@@ -648,7 +752,10 @@ def test_knowledge_diff_refuses_a_revision_whose_tree_is_unconverted_and_an_unkn
     assert _diff(root, "HEAD", "HEAD")["state"] == "compared"
 
     unknown = _diff(root, "no-such-revision")
-    assert (unknown["state"], unknown["refusalCode"]) == ("refused", "selected_input_unavailable")
+    assert (unknown["state"], unknown["refusalCode"]) == (
+        "refused",
+        "selected_input_unavailable",
+    )
     assert "no-such-revision" in unknown["refusalDetail"]
     plain = tmp_path / "not-a-repository"
     plain.mkdir()
@@ -668,14 +775,18 @@ def test_a_retired_family_is_never_selected_as_live(tmp_path: Path) -> None:
             index.database_path,
             context,
             KnowledgeReadRequest(
-                seed=PathSeed(path=REVIEW_PATH), budget=KnowledgeReadBudget(max_items=64)
+                seed=PathSeed(path=REVIEW_PATH),
+                budget=KnowledgeReadBudget(max_items=64),
             ),
         ).page
         family = index.family(FAMILY).value
         invariant = index.invariant(REVIEW_INVARIANT).value
         assert index.text_id(text_uuid("revision", f"{FAMILY}@1")) is None
     assert page is not None
-    assert {item.kind for item in page.items} == {"invariant_revision", "realization_claim"}
+    assert {item.kind for item in page.items} == {
+        "invariant_revision",
+        "realization_claim",
+    }
     # The index still answers the family and its members, and says it is retired.
     assert family.record is not None and family.record.status == "retired"
     assert family.members == (REVIEW_INVARIANT, SIBLING_INVARIANT)
@@ -732,7 +843,10 @@ def test_a_converted_tree_refuses_a_seed_it_does_not_hold(tmp_path: Path) -> Non
         _read(root, coordination, view="invariant", invariant_revision_id=held)["state"] == "view"
     )
     for view, seeds in (
-        ("invariant", {"invariant_revision_id": str(uuid.uuid4())}),  # a database-era ID
+        (
+            "invariant",
+            {"invariant_revision_id": str(uuid.uuid4())},
+        ),  # a database-era ID
         ("invariant", {"invariant_revision_id": REVIEW_INVARIANT}),  # a bare record ID
         ("family", {"family_revision_id": str(uuid.uuid4())}),
         ("source_context", {"family_revision_id": "FAM-ZZZZZZ"}),
@@ -740,7 +854,7 @@ def test_a_converted_tree_refuses_a_seed_it_does_not_hold(tmp_path: Path) -> Non
         refused = _read(root, coordination, view=view, **seeds)
         assert refused["state"] == "refused", (view, seeds, refused)
         assert refused["refusalCode"] == "selector_absent"
-        assert "read_ar_files" in refused["refusalDetail"]
+        assert "source_context" in refused["refusalDetail"]
     bare = _read(root, coordination, view="invariant", invariant_revision_id=REVIEW_INVARIANT)
     assert f"whose seed is {held}" in bare["refusalDetail"]
 
@@ -826,7 +940,8 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
         return knowledge_integrity_check_payload(IntegrityCheckRequest(**fields))
 
     expected = validate_tree(
-        knowledge_tree_from_directory(root), code=CodeDirectory(label=code.as_posix(), root=code)
+        knowledge_tree_from_directory(root),
+        code=CodeDirectory(label=code.as_posix(), root=code),
     )
     assert expected.refusals  # the fixture's anchors name files this empty code checkout lacks
     reported = check(memoryRoot=str(root), codeRoot=str(code))
@@ -848,6 +963,21 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
         window = validation["violations"]
         assert (reported["memoryRoot"], reported["codeRoot"]) == (str(root), code.as_posix())
     assert (validation["ok"], validation["refusalCount"], validation["reportCount"]) == (
+        False,
+        len(expected.refusals),
+        len(expected.reports),
+    )
+    # Rule 3's half beside it: the reported roots and counts name the same result.
+    validation = reported["validation"]
+    assert (reported["memoryRoot"], reported["codeRoot"]) == (
+        str(root),
+        code.as_posix(),
+    )
+    assert (
+        validation["ok"],
+        validation["refusalCount"],
+        validation["reportCount"],
+    ) == (
         False,
         len(expected.refusals),
         len(expected.reports),
