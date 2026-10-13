@@ -70,6 +70,13 @@ def _leaf(world: World, series: WorktreeContract, leaf_id: str = "L1", **cells: 
         code_worktree=world.coord.parent / "leaf-worktrees" / slug,
     )
     child = replace(child, **cells)
+    if child.memory_worktree is None:
+        memory_worktree = world.coord.parent / "leaf-worktrees" / f"memory-{slug}"
+        child = replace(
+            child,
+            memory_worktree=memory_worktree,
+            ledger_path=memory_worktree / "memory.md",
+        )
     write_contract(path, child)
     master = read_task_doc(series.task_root / "task.json")
     if leaf_id not in {row.number for row in master.subTasks}:

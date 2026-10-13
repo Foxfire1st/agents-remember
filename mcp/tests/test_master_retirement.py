@@ -17,7 +17,6 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
@@ -42,6 +41,9 @@ class World:
         self.code = root / "code"
         self.base = init_repo(self.code)
         git(self.code, "branch", "super")
+        self.memory = root / "world-memory"
+        self.memory_base = init_repo(self.memory)
+        git(self.memory, "branch", "super")
         self.cfg = _config(self.coord, self.code)
         self.refs = [
             TaskDocumentRef(repository=REPOSITORY, path=f"master-{name}/task.json")
@@ -91,7 +93,11 @@ class World:
         self.fields = {"masterRef": a.model_dump(), "reason": "This work is deliberately retired."}
 
     def retire(self, *, dry_run: bool = False, fields=None):
-        return task_doc_payload(
+        # The whole application result, not the bounded protocol answer: these
+        # tests assert whole-result fields (readinessFacts) that the delivered
+        # answer's overflow guard (MIK-R108 rule 4) may legitimately omit on
+        # long scratch paths, while the product still reports would-retire.
+        return task_doc_tool(
             self.cfg,
             self.target,
             operation="retire_master",
@@ -116,19 +122,26 @@ class World:
 
     def series(self, name: str = "master-a"):
         git(self.code, "branch", f"ar/{name}")
+        git(self.memory, "branch", f"ar/{name}")
         contract = default_series_contract(
             ContractTask(
                 name=name,
                 repo_name=REPOSITORY,
                 coordination_root=self.coord,
                 workflow_kind="light-task",
-                memory_mode="disabled",
+                memory_mode="external",
             ),
             code=RepoBranchPlan(
                 repo_path=self.code,
                 source_branch="super",
                 work_branch=f"ar/{name}",
                 base_commit=self.base,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=self.memory,
+                source_branch="super",
+                work_branch=f"ar/{name}",
+                base_commit=self.memory_base,
             ),
         )
         contract = replace(
@@ -138,6 +151,8 @@ class World:
             code_commit=self.base,
             integration_status="completed",
             integrated_code_commit=self.base,
+            memory_content_commit=self.memory_base,
+            integrated_memory_content_commit=self.memory_base,
         )
         write_contract(contract.contract_path, contract)
         return contract

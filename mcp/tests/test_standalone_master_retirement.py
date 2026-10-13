@@ -194,6 +194,8 @@ def test_lone_master_with_open_work_refuses_without_writes_and_a_pending_cleanup
         code_source_branch=contract.code_work_branch,
         code_work_branch="leaf-l1",
         code_worktree=leaf_worktree,
+        memory_worktree=world.coord.parent / "leaf-memory-worktree",
+        ledger_path=world.coord.parent / "leaf-memory-worktree" / "memory.md",
     )
     write_contract(leaf.contract_path, leaf)
     before = world.snapshot()

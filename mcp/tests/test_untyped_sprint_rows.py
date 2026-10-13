@@ -141,6 +141,11 @@ def test_finalize_completes_the_master_and_reports_the_sprint_row_as_skipped(wor
         write_task_doc(world.tasks / "sprint", TaskDocument.model_validate(data))
         fact = {"kind": "seat-doc-row-ambiguous", "rows": ["S-M1", "S-M3"]}
     fact["master"] = f"agents-remember/{name}/task.json"
+    # The master is still in work, so finalization completes it and records that
+    # decision; an already-Completed document is reported already-completed and
+    # left untouched, which records nothing.
+    unfinished = read_task_doc(world.tasks / name / "task.json")
+    write_task_doc(world.tasks / name, unfinished.model_copy(update={"status": "inProgress"}))
     sprint_pair = {path: path.read_bytes() for path in (world.tasks / "sprint").glob("task.*")}
     for dry_run in (True, False):
         done = _finalize(world, name, dry_run=dry_run)
