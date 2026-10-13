@@ -584,18 +584,25 @@ def test_the_closeout_preview_answers_what_the_apply_will_do(
 def test_an_unconverted_leafs_preview_carries_no_gate_verdict(
     world: _Continued, ports: None
 ) -> None:
-    """L37 review R6-5 (N21). The gate does not govern unconverted memory, and its verdict says so
-    instead of reading as a pass: the preview of such a leaf is what it was before the preview
-    asked the gate, with no ``knowledge_gate`` block."""
+    """MIK-R46 rule 1 (supersedes L37 review R6-5 N21; name retained as anchor).
+
+    The gate now governs unconverted memory by refusing it: the preview of
+    such a leaf carries the format verdict (`knowledge-gate-refused` with the
+    central `legacy-format` message) instead of passing with no
+    ``knowledge_gate`` block. The invariant gate itself is still never
+    evaluated, and the preview still writes nothing.
+    """
 
     for branch in ("main", "leaf"):  # neither the parent line nor the leaf holds the marker
         git(world.memory, "checkout", "-q", branch)
         git(world.memory, "rm", "-q", "knowledge/layout.json")
         commit(world.memory, {})
+    before = _sides(world)
     with mock.patch.object(gate_module, "_evaluate", wraps=gate_module._evaluate) as evaluated:
         preview = _public_preview(world)
-    assert (preview.returncode, preview.payload["state"]) == (0, "would-closeout")
-    assert "knowledge_gate" not in preview.payload and evaluated.call_count == 0
+    assert (preview.returncode, preview.payload["state"]) == (2, "knowledge-gate-refused")
+    assert "legacy-format" in json.dumps(preview.payload), preview.payload
+    assert evaluated.call_count == 0 and _sides(world) == before
 
 
 def test_a_leaf_that_continues_after_its_closeout_writes_its_next_attempt(

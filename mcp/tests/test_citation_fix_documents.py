@@ -126,33 +126,11 @@ class DocumentListRefusalTests(unittest.TestCase):
             scope.validate()
         self.assertIn("only citation_fix", str(caught.exception))
 
-    def test_a_list_without_a_snapshot_is_refused_before_tree_reads(self) -> None:
-        # As one document does today: the leaf resolves, then the strict rule refuses
-        # the missing snapshot before any tree is read.
-        scope = CitationOperationScope(documents=("kernel/a.py.md", "kernel/b.py.md"))
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            leaf = SimpleNamespace(
-                repo_id="demo",
-                onboarding_root=root / "onboarding",
-                code_root=root / "code",
-            )
-            with (
-                mock.patch.object(memory_tools, "_leaf_memory_writer_scope", return_value=leaf),
-                mock.patch.object(
-                    memory_tools,
-                    "_citation_trees",
-                    side_effect=AssertionError("refusal read the trees"),
-                ),
-                self.assertRaises(ValueError) as caught,
-            ):
-                memory_tools.citation_fix_tool(
-                    cast(Any, None),
-                    repo_id="demo",
-                    contract_path="contract.md",
-                    operation_scope=scope,
-                )
-        self.assertIn("together", str(caught.exception))
+    # MIK-R46 rule 1 removed test_a_list_without_a_snapshot_is_refused_before_tree_reads:
+    # the snapshot rule ("--document and --expected-snapshot together") belonged to the
+    # old-format path, which now refuses with the one legacy-format message before any
+    # snapshot check; on converted memory a document list needs no snapshot (MIK-R110
+    # rule 2, _converted_citation_fix handles each card alone).
 
 
 class UnconvertedListFixTests(TreeCase):

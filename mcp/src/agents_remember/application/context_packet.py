@@ -31,6 +31,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     not_checked,
     run_drift_summary,
 )
+from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.models.context_packet import (
     ContextPacketV2,
     ContextPaths,
@@ -43,6 +44,7 @@ from agents_remember.models.context_packet import (
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
 from agents_remember.providers.status import provider_summary_packet
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 CONTEXT_PACKET_VERSION = 2
@@ -195,6 +197,21 @@ def _drift_packet(
 ) -> DriftSummaryPacket:
     if not request.include_drift:
         return not_checked()
+    # MIK-R46 rules 1 and 2: the drift block on unconverted memory is status "error" with
+    # the one rule-2 message; it is not measured in the old format. A root that cannot be
+    # told (missing) keeps its own error from the summary below.
+    memory_root = getattr(context, "memory_root", None) or repo_scope.memory_root
+    if memory_root is not None:
+        memory_path = memory_root if isinstance(memory_root, Path) else Path(str(memory_root))
+        if memory_path.is_dir() and not is_converted_memory(memory_path):
+            return {
+                "status": "error",
+                "error": legacy_format_refusal(
+                    memory_path,
+                    operation="context_packet",
+                    subject=f"the memory tree {memory_path.as_posix()}",
+                ),
+            }
     # The packet's drift section is read-only content: no temp report is filed (rule 6).
     return run_drift_summary(
         code_repository_root=repo_scope.path,

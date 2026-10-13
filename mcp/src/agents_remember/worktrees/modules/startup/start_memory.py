@@ -7,9 +7,15 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import derive_memory_ledger
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.cutover_lock import first_conversion_procedure
 from agents_remember.worktrees.disabled_memory import (
     OptOutSubject,
     opt_out_result_fields,
+)
+from agents_remember.worktrees.knowledge_validation import (
+    LayoutProbeError,
+    has_layout_marker,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -30,6 +36,37 @@ def _memory_source_state(
     if not contract.memory_repo_path.exists():
         return _missing_memory_repo_state(contract, args)
     return None
+
+
+def _memory_format_for_start(contract: WorktreeContract) -> dict[str, object]:
+    """The memory format fact for the start result (MIK-R46 rule 6).
+
+    ``worktree_start`` works on unconverted memory; its result then says
+    ``memoryFormat: "legacy-format"`` with the first-conversion procedure. Converted memory
+    says ``"converted"``. When the format cannot be told (no official line yet, or a probe
+    Git cannot answer) the fact is omitted rather than guessed.
+    """
+
+    worktree = contract.memory_worktree
+    if worktree is not None and (worktree / LAYOUT_MARKER_PATH).is_file():
+        return {"memoryFormat": "converted"}
+    repository = contract.memory_repo_path
+    assert repository is not None
+    if not branch_exists(repository, contract.memory_source_branch):
+        return {}
+    try:
+        converted = has_layout_marker(repository, contract.memory_source_branch)
+    except LayoutProbeError:
+        return {}
+    if converted:
+        return {"memoryFormat": "converted"}
+    return {
+        "memoryFormat": "legacy-format",
+        "memoryFormatProcedure": (
+            "this memory line is unconverted (no knowledge/layout.json): "
+            f"{first_conversion_procedure()}"
+        ),
+    }
 
 
 def prepare_memory_for_start(
@@ -69,6 +106,7 @@ def prepare_memory_for_start(
         "mtimeSync": mtime_sync,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
+        **_memory_format_for_start(contract),
     }
 
 

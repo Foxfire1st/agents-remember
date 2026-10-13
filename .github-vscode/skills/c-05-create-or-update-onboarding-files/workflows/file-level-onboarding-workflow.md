@@ -102,7 +102,7 @@ Before creating file-level onboarding, confirm the target is one concrete source
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 6. fill the template from `../templates/file-level-onboarding-template.md`, including `governingOverview` and the `## Governing Overview` backlink
 7. update the repo-level or route-local overview index if the file should be indexed or cross-referenced there
-8. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure every cited target still exists (health-check the paths), ensure cross-repo rows still represent a real external or sibling boundary, and ensure every table row carries an anchor plus a `path:start-end` source. The `memory-citations` CLI (`--fix` / `--migrate`) is the tool for a table still in the superseded shape
+8. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure every cited target still exists (health-check the paths), ensure cross-repo rows still represent a real external or sibling boundary, and ensure every table row carries an anchor plus a `path:start-end` source. The `memory-citations` CLI (`--fix`) is the tool for repairing ranges already in the anchored format; it has no migration mode (MIK-R46 rule 5): a tree still in the superseded shape converts to the text knowledge format first, then its citations are authored through the curator workflow
 
 ## Maintain Workflow
 

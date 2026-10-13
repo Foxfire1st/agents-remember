@@ -250,7 +250,10 @@ def test_an_unconverted_memory_root_is_refused_as_legacy_format_and_nothing_is_w
     printed = capsys.readouterr().out
 
     assert code == 2, printed
-    assert f"knowledge-bootstrap refuses the memory root {one.memory_root.as_posix()}" in printed
+    assert (
+        f"knowledge-bootstrap refuses the unconverted memory of {one.memory_root.as_posix()}"
+        in printed
+    )
     assert "legacy format" in printed and "MIK-R26" in printed
     assert "worktree_sync" in printed and "agents-remember knowledge-convert" in printed
     assert "holds no converted memory yet" in printed

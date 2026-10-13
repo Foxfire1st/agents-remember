@@ -1,26 +1,28 @@
 """The cutover lock: unconverted memory is read, never written, checked, synced or landed.
 
-MIK-R09 rule 6 (second bullet) and MIK-R24 rule 9: a route whose memory holds the layout marker
-``knowledge/layout.json`` on neither side is unconverted, and the new runtime refuses it, naming the
-crossing sync. Reads still work (``read_ar_files`` marks the card ``legacy-format``), and code may
-still change; every write, memory-quality run, managed memory sync other than a crossing sync,
-closeout and landing refuses (MIK-R37 rule 6).
+MIK-R46 rule 1 (one rule): a check, a write, a memory sync, a closeout or a landing whose
+memory input is unconverted refuses. ``cutover_lock_refusal`` no longer returns "not locked"
+for a repository without converted memory: the caller has established that the route's
+memory is unconverted on every side, and the refusal is unconditional. The probe
+:func:`converted_memory_location` stays and only words the message (where converted memory
+already is); it decides nothing. Reads still work (``read_ar_files`` marks the card
+``legacy-format`` with no knowledge section), and code may still change; every write,
+memory-quality run, managed memory sync other than a crossing sync or an adopting
+fast-forward, closeout and landing refuses.
 
-**When the lock holds (L37 ruling).** The lock holds for a memory repository once that repository
-holds converted memory anywhere: a local branch whose tip holds the marker, or a registered worktree
-whose working tree does. That is the observable fact of the cutover window -- the cutover leaf's
-memory worktree holds the converted tree before its build is installed (MIK-R37 rule 2), and every
-converted line descends from it -- so the installed build meets a locked repository from its
-installation on, and every other agents-remember master's unconverted line is refused at once. A
-repository that holds no converted memory at all is not locked: every route behaves exactly as it
-did before this master, which is what keeps the lock inert on unconverted lines until the installed
-build meets them (the build's own unconverted fixtures, the base-against-worktree comparison, and
-any repository that has not crossed). A converting candidate is never refused: it holds the marker
-on its own side, so the gate applies to it instead, against the converted base (MIK-R24 rule 7).
+MIK-R46 rule 2 (one message): every such refusal comes from
+:func:`legacy_format_refusal` and carries the code ``legacy-format``. It names the
+operation, the memory root or line, that the memory has no ``knowledge/layout.json``, and
+how it converts: ``worktree_sync`` with ``merge-memory`` when the line it syncs from is
+converted; otherwise the first conversion of rule 6. A route keeps the status name it
+returns today; the detail text is this message. Answers that must fit a row
+bound carry a short form of it once and keep the full text in the logged
+result; a drift result is ``status: "error"`` without repeating it.
 
 **Fail closed.** A probe Git cannot answer refuses by name; it is never read as "no converted
-memory". The caller decides that the route's sides are unconverted; this module only answers
-whether the repository is locked and words the refusal.
+memory" and never as "legacy". The caller decides that the route's sides are unconverted;
+this module only refuses and words the refusal. Missing, unreadable or corrupt memory keeps
+its own error; it is never called "legacy" (MIK-R46 preservation).
 """
 
 from __future__ import annotations
@@ -38,16 +40,45 @@ from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 __all__ = [
     "CUTOVER_LOCK_CODE",
+    "FIRST_CONVERSION_COMMAND",
+    "FIRST_CONVERSION_GUIDE",
+    "FIRST_CONVERSION_SKILL",
     "LEGACY_FORMAT_CODE",
     "CutoverProbeError",
     "converted_memory_location",
     "cutover_lock_refusal",
+    "first_conversion_procedure",
+    "is_legacy_format_refusal",
     "legacy_format_refusal",
 ]
 
 CUTOVER_LOCK_CODE: Final = "unconverted-memory-locked"
 LEGACY_FORMAT_CODE: Final = "legacy-format"
 _WORKTREE_PREFIX: Final = "worktree "
+
+#: How a never-converted repository makes its first conversion (MIK-R46 rule 6).
+FIRST_CONVERSION_COMMAND: Final = (
+    "agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY"
+)
+#: The skill that describes the first-conversion procedure.
+FIRST_CONVERSION_SKILL: Final = "c-13-install-and-onboard"
+#: The guide page that describes the first-conversion procedure.
+FIRST_CONVERSION_GUIDE: Final = "docs/guides/first-conversion.md"
+
+
+def first_conversion_procedure() -> str:
+    """How a never-converted repository makes its first conversion (MIK-R46 rule 6).
+
+    Memory with no attributed baseline converts in place with the conversion command, then
+    adopts the baseline; memory with an official line converts inside one new leaf's memory
+    worktree as that leaf's first memory change, then closes out and lands like any leaf.
+    The skill and the guide carry the full procedure.
+    """
+
+    return (
+        f"make its first conversion with `{FIRST_CONVERSION_COMMAND}`, as the "
+        f"{FIRST_CONVERSION_SKILL} skill and {FIRST_CONVERSION_GUIDE} describe (MIK-R46 rule 6)"
+    )
 
 
 class CutoverProbeError(RuntimeError):
@@ -157,44 +188,60 @@ def _converted_lines(repository: Path) -> str:
     return " and ".join(one for one in found if one is not None)
 
 
-def cutover_lock_refusal(repository: Path | None, *, operation: str, line: str) -> str | None:
-    """Refuse ``operation`` on the unconverted memory of ``line`` once the repository is locked.
+def is_legacy_format_refusal(text: str) -> bool:
+    """Whether ``text`` is the one rule-2 message (it carries ``code legacy-format``).
 
-    The caller has established that the route's memory is unconverted on every side. ``None`` means
-    the repository holds no converted memory, so the route behaves exactly as before this master.
+    Named probe errors deliberately do not carry the code, so they never match.
+    Routes use this to keep legacy refusals free of durable side effects without
+    changing any other refusal's behavior.
+    """
+
+    return "code legacy-format" in text
+
+
+def cutover_lock_refusal(repository: Path | None, *, operation: str, line: str) -> str | None:
+    """Refuse ``operation`` on the unconverted memory of ``line`` (MIK-R46 rule 1).
+
+    The caller has established that the route's memory is unconverted on every side, so the
+    refusal is unconditional: a repository without converted memory is refused exactly as a
+    repository with converted memory elsewhere is. The probe
+    :func:`converted_memory_location` only words the message and decides nothing. ``None``
+    only when there is no memory repository to judge: ``None``, not a directory, or
+    definitely not a Git repository (a plain directory has no lines). A probe Git cannot
+    answer refuses by name, never as unlocked and never as "legacy".
     """
 
     if repository is None or not repository.is_dir():
         return None
     try:
-        where = converted_memory_location(repository)
+        if not _is_repository(repository):
+            return None
+        converted_memory_location(repository)
     except CutoverProbeError as error:
         return (
             f"{operation} refuses the unconverted memory of {line}: the cutover lock cannot tell "
             f"whether this memory repository already holds converted memory ({error}), and an "
             "unanswered probe is never read as unlocked (MIK-R09 rule 6)"
         )
-    if where is None:
-        return None
-    return (
-        f"{operation} refuses the unconverted memory of {line}: this memory repository already "
-        f"holds converted memory ({where}), so unconverted memory is only read (legacy-format) and "
-        "is never written, checked, synced or landed (MIK-R24 rule 9, MIK-R09 rule 6). The line "
-        "converts through the crossing sync: once the line it syncs from holds converted memory, "
-        "run worktree_sync, which crosses the boundary (MIK-R24 rule 8)"
+    return legacy_format_refusal(
+        repository, operation=operation, subject=f"the unconverted memory of {line}"
     )
 
 
 def legacy_format_refusal(
     repository: Path | None, *, operation: str, subject: str, database_file: bool = False
 ) -> str:
-    """Word the refusal of a knowledge route that was handed memory in the legacy format (MIK-R26).
+    """Word the refusal of a route that was handed memory in the legacy format (MIK-R46 rule 2).
 
     The canonical knowledge database is retired: knowledge is read and written as files, so a
     route given an unconverted memory tree or a database file (``database_file``) has nothing to
-    open. The refusal names the two ways memory converts and, when Git can say, the line of
+    open. The refusal names the operation, the memory root or line, that the memory has no
+    ``knowledge/layout.json``, and how it converts: ``worktree_sync`` with ``merge-memory``
+    when the line it syncs from is converted; otherwise the first conversion of MIK-R46 rule 6
+    (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``, as the
+    ``c-13-install-and-onboard`` skill describes). When Git can say, it names the line of
     ``repository`` that already holds converted memory. It decides nothing; the caller established
-    the legacy input.
+    the legacy input. It carries the code ``legacy-format``.
     """
 
     held = "This memory repository holds no converted memory yet."
@@ -210,12 +257,12 @@ def legacy_format_refusal(
         "it is a knowledge database file, the legacy format, and no route opens one: name the "
         "root directory of a converted memory tree instead"
         if database_file
-        else f"it is memory in the legacy format (no {LAYOUT_MARKER_PATH})"
+        else f"it is memory in the legacy format (code legacy-format; no {LAYOUT_MARKER_PATH})"
     )
     return (
         f"{operation} refuses {subject}: {what}. The canonical knowledge database is retired "
         "(MIK-R26), so knowledge is read and written only as files. A line that descends from a "
-        "converted line converts through the crossing sync: run worktree_sync (MIK-R24 rule 8). A "
-        "repository that was never converted converts with `agents-remember knowledge-convert "
-        f"MEMORY_ROOT --code CODE_REPOSITORY` (MIK-R24). {held}"
+        "converted line converts through the crossing sync: run worktree_sync with merge-memory "
+        "once the line it syncs from holds converted memory (MIK-R24 rule 8). A repository that "
+        f"was never converted {first_conversion_procedure()}. {held}"
     )

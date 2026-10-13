@@ -31,6 +31,7 @@ from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index import (
     open_repository_index,
 )
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.tools.tool_answer import bound_for
 from test_worktree_support import git, open_external_contract_fixture
 from tool_answer_l110_rows import (
@@ -88,6 +89,60 @@ def _write_card(onboarding: Path, name: str, source: str, *, anchor: str = "run"
     )
 
 
+def _write_anchor_sidecar(
+    onboarding: Path, name: str, anchor_path: str, *, marker: bool = True
+) -> None:
+    """Author one file sidecar whose reference anchor names ``anchor_path``.
+
+    The converted analog of a card row: the validator judges the anchor's path, not a
+    citation table. The paired Markdown carries the reference's marker when ``marker``
+    so the markers rule stays silent and the anchor path is the sidecar's violation.
+    """
+
+    (onboarding / name).parent.mkdir(parents=True, exist_ok=True)
+    if marker:
+        (onboarding / f"{name}.md").write_text(
+            f"# {name}\n\nThe file's anchor [1] names its source.\n",
+            encoding="utf-8",
+        )
+    (onboarding / f"{name}.json").write_text(
+        canonical_text(
+            {
+                "schema": "ar-onboarding-file/v1",
+                "path": name,
+                "references": {
+                    "1": {
+                        "targets": [
+                            {
+                                "kind": "code",
+                                "anchor": {
+                                    "path": anchor_path,
+                                    "locator": {"kind": "symbol", "name": "run"},
+                                    "blob": "0" * 40,
+                                    "content": "sha256:" + "0" * 64,
+                                },
+                            }
+                        ]
+                    }
+                },
+                "realizes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_converted_layout(memory_worktree: Path) -> None:
+    """Mark the memory worktree converted so the run judges converted damage."""
+
+    layout = memory_worktree / "knowledge" / "layout.json"
+    layout.parent.mkdir(parents=True, exist_ok=True)
+    layout.write_text(
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+        encoding="utf-8",
+    )
+
+
 def _run_fix(
     scoped: McpRuntimeConfig,
     configured: McpRuntimeConfig,
@@ -117,9 +172,61 @@ def _run_fix(
         )
 
 
+def _write_stale_world(onboarding: Path, count: int) -> None:
+    """Author ``count`` missing-anchor sidecars plus the run-failing malformed one."""
+
+    for index in range(count):
+        _write_anchor_sidecar(
+            onboarding,
+            f"pkg/side-{index:02d}-needs-curator-repair.py",
+            f"pkg/missing-{index:02d}-no-longer-here.py",
+        )
+    (onboarding / "pkg" / "broken.json").write_text("{not json\n", encoding="utf-8")
+
+
+def _run_documents_scope() -> dict[str, Any]:
+    """Run citation_fix over two sidecars through a two-document scope."""
+
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        contract, configured, scoped = _scoped_pair(root)
+        package = contract.code_worktree / "pkg"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "real.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+        onboarding = contract.memory_worktree / "onboarding"
+        _write_anchor_sidecar(onboarding, "pkg/a.py", "pkg/real.py")
+        _write_anchor_sidecar(onboarding, "pkg/b.py", "pkg/real.py")
+        _write_converted_layout(contract.memory_worktree)
+        with open_repository_index(
+            Trees(
+                code_root=contract.code_worktree,
+                memory_root=contract.memory_worktree,
+            )
+        ) as index:
+            snapshot = index.snapshot_id
+        git(contract.memory_worktree, "add", "-A")
+        return _run_fix(
+            scoped,
+            configured,
+            contract,
+            CitationOperationScope(
+                documents=("pkg/a.py.md", "pkg/b.py.md"),
+                expected_snapshot=snapshot,
+            ),
+        )
+
+
 class CitationProductionTests(unittest.TestCase):
-    def test_unconverted_paths_derive_the_row_cases(self) -> None:
-        """Real unconverted runs: one clean card passes, 25 broken ones fail bounded."""
+    def test_converted_stale_anchors_derive_the_row_cases(self) -> None:
+        """Real converted runs: one clean sidecar passes, 25 stale ones fail bounded.
+
+        The converted port of the unconverted card cases below: converted memory has no
+        citation tables, so the damage is sidecar anchors naming missing files. The
+        converted answer carries the failing rows as ``stale`` (there is no ``declined``
+        on converted); each slim stale entry keeps the sidecar path beside the message,
+        which names the reference. One cardless malformed sidecar fails the run without
+        refusing any card.
+        """
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -128,15 +235,11 @@ class CitationProductionTests(unittest.TestCase):
             package.mkdir(parents=True, exist_ok=True)
             (package / "real.py").write_text("def run():\n    return 1\n", encoding="utf-8")
             onboarding = contract.memory_worktree / "onboarding"
-            _write_card(onboarding, "clean.md", "pkg/real.py:1-2")
+            _write_anchor_sidecar(onboarding, "pkg/clean.py", "pkg/real.py")
+            _write_converted_layout(contract.memory_worktree)
+            git(contract.memory_worktree, "add", "-A")
             whole_clean = _run_fix(scoped, configured, contract, CitationOperationScope())
-            for index in range(25):
-                _write_card(
-                    onboarding,
-                    f"broken-{index:02d}.md",
-                    f"pkg/missing-{index:02d}.py:1-2",
-                    anchor=f"zzq{index:02d}uniq",
-                )
+            _write_stale_world(onboarding, 25)
             git(contract.memory_worktree, "add", "-A")
             whole_failed = _run_fix(scoped, configured, contract, CitationOperationScope())
         with self.subTest("ordinary"):
@@ -149,38 +252,18 @@ class CitationProductionTests(unittest.TestCase):
             self.assertFalse(answer["ok"])
             self.assertEqual(answer["refusedCount"], 0)
             self.assertGreaterEqual(answer["staleCount"], 20)
-            self.assertEqual(len(answer["declined"]), 10)
-            # Round-3 obligation: the slim entry keeps the known place (line)
-            # beside document, code, and message; anchors ride in the message.
-            for entry in answer["declined"]:
-                self.assertIn("line", entry)
+            self.assertEqual(len(answer["stale"]), 10)
+            # The converted slim entry keeps the sidecar path beside the message, which
+            # names the stale reference; converted stale rows carry no line numbers.
+            for entry in answer["stale"]:
+                self.assertIn("path", entry)
+                self.assertIn("message", entry)
             measured = assert_production_answer(self, _TOOL, answer)
             self.assertLessEqual(measured, 1500)
             self.assertLessEqual(1500, 2 * measured)
             assert_answer_survives_the_guard(_TOOL, whole_failed, answer)
         with self.subTest("documents"):
-            with TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                contract, configured, scoped = _scoped_pair(root)
-                package = contract.code_worktree / "pkg"
-                package.mkdir(parents=True, exist_ok=True)
-                (package / "real.py").write_text("def run():\n    return 1\n", encoding="utf-8")
-                onboarding = contract.memory_worktree / "onboarding"
-                _write_card(onboarding, "a.md", "pkg/real.py:1-2")
-                _write_card(onboarding, "b.md", "pkg/real.py:1-2")
-                with open_repository_index(
-                    Trees(
-                        code_root=contract.code_worktree,
-                        memory_root=contract.memory_worktree,
-                    )
-                ) as index:
-                    snapshot = index.snapshot_id
-                whole = _run_fix(
-                    scoped,
-                    configured,
-                    contract,
-                    CitationOperationScope(documents=("a.md", "b.md"), expected_snapshot=snapshot),
-                )
+            whole = _run_documents_scope()
             answer = _citation_fix_answer(whole)
             self.assertTrue(answer["ok"])
             self.assertEqual(answer["documentCount"], 2)
@@ -222,7 +305,7 @@ class CitationProductionTests(unittest.TestCase):
             assert_answer_survives_the_guard(_TOOL, whole_failed, answer)
 
     def test_a_real_over_bound_call_hits_the_guard(self) -> None:
-        """A real pathological call (verbose declines) exceeds the bound and is cut."""
+        """A real pathological call (verbose stale rows) exceeds the bound and is cut."""
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -231,17 +314,19 @@ class CitationProductionTests(unittest.TestCase):
             package.mkdir(parents=True, exist_ok=True)
             (package / "real.py").write_text("def run():\n    return 1\n", encoding="utf-8")
             onboarding = contract.memory_worktree / "onboarding"
-            # Adversarially long card paths: even slimmed to document, code,
-            # and message and capped at the status entry cap, ten such rows
-            # exceed the default bound, so the guard still cuts a real call.
-            # (230 chars stays under the OS filename limit.)
-            long_dir = "deep-" + "x" * 230
+            # Adversarially long sidecar paths: even slimmed to path and message and
+            # capped at the status entry cap, ten such rows exceed the default bound,
+            # so the guard still cuts a real call. (120 chars per level stays under
+            # the OS filename limit.)
+            long_dir = "deep-" + "x" * 120 + "/" + "deep-" + "y" * 120
             for index in range(20):
-                _write_card(
+                _write_anchor_sidecar(
                     onboarding,
-                    f"{long_dir}-{index:02d}.md",
-                    f"pkg/missing-{index:02d}.py:1-2",
+                    f"{long_dir}/side-{index:02d}.py",
+                    f"pkg/missing-{index:02d}.py",
                 )
+            (onboarding / long_dir / "broken.json").write_text("{not json\n", encoding="utf-8")
+            _write_converted_layout(contract.memory_worktree)
             git(contract.memory_worktree, "add", "-A")
             whole = _run_fix(scoped, configured, contract, CitationOperationScope())
         answer = _citation_fix_answer(whole)

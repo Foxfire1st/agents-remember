@@ -73,9 +73,9 @@ def is_converted(memory_root: Path | None) -> bool:
 def unconverted_write_refusal(contract: WorktreeContract) -> str:
     """Why ``knowledge-ingest`` does not write this contract's unconverted memory, by name.
 
-    A leaf whose official line is converted, or whose repository holds converted memory anywhere,
-    converts through the crossing sync (MIK-R24 rule 9, MIK-R09 rule 6). Any other unconverted
-    tree is memory in the legacy format: the database writer is retired (MIK-R26).
+    Unconverted memory converts first (MIK-R46 rule 1): a line that descends from a converted
+    line crosses through the crossing sync (MIK-R24 rule 8); any other unconverted tree makes
+    its first conversion (MIK-R46 rule 6). The database writer is retired (MIK-R26).
     """
 
     memory = contract.memory_worktree

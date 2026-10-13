@@ -7,6 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.knowledge_writer.memory_state import Owner
+from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -42,6 +44,7 @@ from closeout_input_test_support import (
 )
 from repository_profile_test_support import AGENTS_REMEMBER_PROFILE_REFERENCE
 from selected_lifecycle_test_support import selected_closeout_operation_input
+from test_closeout_queue import _ensure_fixture_services
 from test_source_lineage import _fixture, _git
 
 
@@ -61,12 +64,43 @@ def _closed_external_leaf_worktrees(
     _git(fixture.code_repo, "worktree", "add", code_worktree.as_posix(), "leaf")
     _git(memory_repo, "worktree", "add", memory_worktree.as_posix(), "leaf")
     (memory_worktree / "onboarding").mkdir()
+    # The coherence publication gates on converted memory (MIK-R46 rule 1), so the
+    # closed candidate carries the layout marker exactly as a converted leaf would.
+    (memory_worktree / "knowledge").mkdir(exist_ok=True)
+    (memory_worktree / "knowledge" / "layout.json").write_text(
+        '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+    )
     (code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
     _git(code_worktree, "add", "candidate.txt")
     _git(code_worktree, "commit", "-m", "closed code")
     code_commit = _git(code_worktree, "rev-parse", "HEAD")
     (memory_worktree / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
     prepare_memory_cache(memory_worktree)
+    # A converted leaf covers its code change the way a real leaf does (MIK-R30):
+    # the candidate hunk would otherwise fail the coherence gate it now reaches.
+    covered = write_knowledge(
+        WriteRequest(
+            memory_root=memory_worktree,
+            code_root=code_worktree,
+            owner=Owner(
+                task=fixture.leaf_contract.task_id,
+                kind="leaf",
+                id=fixture.leaf_contract.leaf_id or "?",
+            ),
+            handoff_path="handoff.json",
+            document={
+                "history": [
+                    {
+                        "subject": "onboarding:candidate.txt",
+                        "disposition": "no_impact",
+                        "reason": "The fixture leaf's code change carries no invariant.",
+                    }
+                ]
+            },
+            commit=True,
+        )
+    )
+    assert covered.state == "written", covered.render()
     _git(memory_worktree, "add", "-A")
     _git(
         memory_worktree, "commit", "-m", render_memory_content_message("closed memory", code_commit)
@@ -96,6 +130,7 @@ def _publish_completed_closeout_fixture(
 ) -> WorktreeContract:
     """Attach integration evidence after valid admission, optionally varying its final target."""
 
+    _ensure_fixture_services()
     input_factory = (
         selected_closeout_operation_input if closed.kind == "leaf" else closeout_operation_input
     )

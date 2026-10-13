@@ -30,6 +30,8 @@ archived locator.
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import tempfile
 import tomllib
@@ -53,6 +55,9 @@ from agents_remember.application.worktree_tool_requests import (
     StartExecution,
     TaskIdentity,
 )
+from agents_remember.cli import knowledge_convert
+from agents_remember.memory.conversion.convert import CONVERSION_FORMAT_VERSION
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.reopen import reopen_task
@@ -503,8 +508,43 @@ class SeriesExtensionRouteTests(unittest.TestCase):
 
         del world
         assert self._leaf.memory_worktree is not None
+        # The start creates a fresh, unconverted memory worktree: its first conversion
+        # (the public command) precedes any ordinary memory operation on it.
+        convert_args = argparse.Namespace(
+            memory_root=self._leaf.memory_worktree,
+            code=self._leaf.code_worktree,
+            code_commit="HEAD",
+            version=CONVERSION_FORMAT_VERSION,
+            report=None,
+            check=False,
+        )
+        self.assertEqual(knowledge_convert.run(convert_args), 0)
         (self._leaf.code_worktree / "extension.txt").write_text("extension\n", encoding="utf-8")
         (self._leaf.memory_worktree / f"{LEAF_SLUG}.md").write_text(f"# {LEAF}\n", encoding="utf-8")
+        # The gate judges the new code file: give the leaf's open history its trace row.
+        history_dir = self._leaf.memory_worktree / "knowledge" / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_path = history_dir / f"{LEAF}.json"
+        if history_path.is_file():
+            document = json.loads(history_path.read_text(encoding="utf-8"))
+            rows = list(document.get("rows", []))
+        else:
+            rows = []
+        rows.append(
+            {
+                "id": f"ROW-{len(rows):06d}",
+                "subject": "onboarding:extension.txt",
+                "disposition": "no_impact",
+                "reason": "The extension file carries no invariant.",
+                "items": [],
+            }
+        )
+        history_path.write_text(
+            canonical_text(
+                {"schema": "ar-history/v1", "leaf": LEAF, "closed": False, "rows": rows}
+            ),
+            encoding="utf-8",
+        )
         git(self._leaf.code_worktree, "add", "-A")
         git(self._leaf.code_worktree, "commit", "-m", CODE_MESSAGE)
 
@@ -512,10 +552,11 @@ class SeriesExtensionRouteTests(unittest.TestCase):
         """Step 5: closeout records the accepted commit; integration lands it on the re-cut line."""
 
         messages = CloseoutCommitMessages(code=CODE_MESSAGE, memory=MEMORY_MESSAGE)
+        _preview = worktree_tools.worktree_closeout_preview_tool(
+            world.cfg, self._leaf.contract_path.as_posix(), messages
+        )
         self.assertEqual(
-            worktree_tools.worktree_closeout_preview_tool(
-                world.cfg, self._leaf.contract_path.as_posix(), messages
-            )["state"],
+            _preview["state"],
             "would-closeout",
         )
         closed = worktree_tools.worktree_closeout_apply_tool(

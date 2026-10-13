@@ -180,6 +180,109 @@ def _complete_master_documents(task_root: Path) -> None:
     )
 
 
+def _converted_marker_commits(memory_repo: Path) -> set[str]:
+    """Commit SHAs that are the conversion marker's own (L46 parity option 2).
+
+    The shared fixture builds converted memory whose base (marker) commit pairs the
+    ledger with the code base; the world of before has no such commit. Returns the
+    commit adding the layout marker so the comparison takes the marker's ledger row
+    out by what it is (the row mapping to that commit), never by position. Empty
+    where the base is unconverted.
+    """
+
+    def _git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(memory_repo), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+
+    if _git("rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
+        return set()
+    adder = (
+        _git("log", "--reverse", "--format=%H", "--diff-filter=A", "--", "knowledge/layout.json")
+        .stdout.strip()
+        .splitlines()
+    )
+    return {adder[0]} if adder else set()
+
+
+def _without_marker_row_entries(
+    repair: dict[str, Any], marker_commits: set[str]
+) -> tuple[dict[str, Any], int]:
+    """Drop the rowsAdded ledger rows mapping to the marker commit; count the drops."""
+
+    repair = dict(repair)
+    dropped = 0
+    rows_added = repair.get("rowsAdded")
+    if isinstance(rows_added, list):
+        kept = []
+        for entry in rows_added:
+            parts = {part.strip() for part in str(entry).split("->")}
+            if parts & marker_commits:
+                dropped += 1
+            else:
+                kept.append(entry)
+        assert dropped <= 1, (dropped, rows_added)  # exactly the marker's own row
+        repair["rowsAdded"] = kept
+    return repair, dropped
+
+
+def _without_marker_row_counts(repair: dict[str, Any], dropped: int) -> dict[str, Any]:
+    """Move the counts attached to dropped marker rows back by exactly that many."""
+
+    repair = dict(repair)
+    if isinstance(repair.get("rowsAfter"), int):
+        repair["rowsAfter"] -= dropped
+    if isinstance(repair.get("sourceTraileredCommits"), int):
+        repair["sourceTraileredCommits"] -= dropped
+    summary = repair.get("summary")
+    match = re.search(r"added (\d+) row\(s\)", str(summary))
+    if match:
+        repair["summary"] = (
+            str(summary)[: match.start(1)]
+            + str(int(match.group(1)) - dropped)
+            + str(summary)[match.end(1) :]
+        )
+    return repair
+
+
+def _without_conversion_row(response: Any, marker_commits: set[str]) -> Any:
+    """Take the conversion's own row out of one response, by what it is.
+
+    The marker base contributes exactly its own ledger row wherever a repair
+    counts rows: the rowsAdded entry mapping to the marker commit, the trailered
+    commit that pairs it, the converted preview's gate promise, and the leaf
+    repair's bare row count. Counts move only by matched drops, and the caller
+    asserts the remainder equal, so nothing else can hide here.
+    """
+
+    if isinstance(response, list):
+        return [_without_conversion_row(value, marker_commits) for value in response]
+    if not isinstance(response, dict):
+        return response
+    cleaned: dict[str, Any] = {}
+    for key, value in response.items():
+        if key == "knowledge_gate" and value == {"state": "pass"}:
+            continue  # the converted preview's gate promise is the conversion's own
+        cleaned[key] = _without_conversion_row(value, marker_commits)
+    repair = cleaned.get("memory_ledger_repair")
+    if isinstance(repair, dict):
+        repair, dropped = _without_marker_row_entries(repair, marker_commits)
+        if dropped:
+            repair = _without_marker_row_counts(repair, dropped)
+        elif isinstance(repair.get("rows"), int) and marker_commits:
+            # Leaf worktree repair reports only the row count: the marker base
+            # contributes exactly its own ledger row.
+            assert repair["rows"] >= 1, repair
+            repair = dict(repair)
+            repair["rows"] -= 1
+        cleaned["memory_ledger_repair"] = repair
+    return cleaned
+
+
 class NoGrantCloseoutParityTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="parity-")
@@ -305,9 +408,31 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
             str(self.tmp_path / "world-pristine"),
             str(self.tmp_path / "world-grant"),
         ]
+        markers = {
+            name: _converted_marker_commits(
+                self.tmp_path / name / "coordination" / "memory-repos" / "ar-repo-a"
+            )
+            for name in ("baseline-world", "world-pristine", "world-grant")
+        }
+        worlds = (
+            (baseline, markers["baseline-world"]),
+            (pristine, markers["world-pristine"]),
+            (noisy, markers["world-grant"]),
+        )
         for phase in PHASES:
             with self.subTest(phase=phase):
-                scrubbed = [_scrub(world[phase], roots) for world in (baseline, pristine, noisy)]
+                # Raw grant/current equality first (volatile scrub only, no take-out):
+                # the take-out below must never be what makes the grant world exact.
+                raw = [_scrub(world[phase], roots) for world, _ in worlds]
+                self.assertEqual(raw[1], raw[2])
+                taken = [
+                    _without_conversion_row(world[phase], marker_commits)
+                    for world, marker_commits in worlds
+                ]
+                scrubbed = [_scrub(taken_world, roots) for taken_world in taken]
+                # The grant world stays exact against the current world on every phase,
+                # taken out or not; the world of before is compared after the take-out.
+                self.assertEqual(scrubbed[1], scrubbed[2])
                 self.assertEqual(scrubbed[0], scrubbed[1])
                 self.assertEqual(scrubbed[0], scrubbed[2])
 

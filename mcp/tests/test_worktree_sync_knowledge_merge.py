@@ -14,7 +14,7 @@ text merge -- and the file validator runs before the merge is committed. These c
 * an item deleted on one side and re-anchored on the other is deleted;
 * ``cancel`` restores the line;
 * a master line's merge opens its crossing history file;
-* unconverted lines still merge as plain Git, without the structural merge being asked;
+* unconverted lines refuse with ``legacy-format`` before Git is touched (MIK-R46 rule 3);
 * a journal a build before MIK-R26 wrote still loads.
 
 The fixture is the conversion test support's memory (two cards, a route card, a legacy database with
@@ -134,7 +134,7 @@ def _commit(root: Path, files: dict[str, bytes | None], message: str) -> str:
 def _unconverted_line(tmp_path: Path) -> tuple[SyncFixture, CodeFixture]:
     """The official memory line holding the conversion fixture's unconverted memory."""
 
-    fixture = SyncFixture(tmp_path)
+    fixture = SyncFixture(tmp_path, converted=False)
     code = fixture.code_repo
     first = commit_files(
         code,
@@ -530,42 +530,48 @@ def test_a_master_lines_record_conflict_opens_its_crossing_history_file(tmp_path
     assert (lines.leaf / crossing).is_file()
 
 
-def test_unconverted_lines_merge_as_plain_git_and_converted_ones_never_do(
+def test_unconverted_lines_refuse_before_git_and_converted_ones_never_merge_as_plain_git(
     tmp_path: Path,
 ) -> None:
     """The structural merge is asked for exactly the merges with a converted side.
 
-    With no knowledge merge bound in the process, a merge of unconverted lines completes (it is not
-    asked), and a merge of converted lines is refused before Git touches the worktree instead of
-    falling back to Git's line merge.
+    A merge of unconverted lines refuses with ``legacy-format`` before Git touches the
+    worktree (MIK-R46 rule 3); the plain Git merge of memory is gone. With no knowledge
+    merge bound in the process, a merge of converted lines is refused before Git touches
+    the worktree instead of falling back to Git's line merge.
     """
 
     bound = bound_worktree_services()
     fixture, _ = _unconverted_line(tmp_path / "unconverted")
     worktree = fixture.contract.memory_worktree
     assert worktree is not None
-    assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
+    refused_first = fixture.sync(memory_sync_choice="merge-memory").payload
+    assert refused_first["state"] == "sync-unconverted-memory-locked", refused_first
+    assert "code legacy-format" in str(refused_first["detail"]), refused_first
     _commit(worktree, {"onboarding/leaf.md": b"# leaf\n"}, "leaf card")
+    leaf_head = git(worktree, "rev-parse", "HEAD")
     plain = Lines(fixture=fixture, leaf=worktree, line=fixture.memory_repo)
     plain.on_line({"onboarding/line.md": b"# line\n"})
     lines = _converted_lines(tmp_path / "converted")
     base = _sidecar(lines.leaf)
-    leaf_head = lines.on_leaf({APP_SIDECAR: _edited(base, "1", blob="b" * 40)})
+    converted_leaf_head = lines.on_leaf({APP_SIDECAR: _edited(base, "1", blob="b" * 40)})
     lines.on_line({APP_SIDECAR: _edited(base, "1", blob="c" * 40)})
 
     try:
         bind_worktree_services(replace(bound, knowledge_crossing=None))
-        merged = plain.merge()
-        refused = lines.merge()
+        refused = plain.merge()
+        refused_converted = lines.merge()
     finally:
         bind_worktree_services(bound)
 
-    assert merged["state"] == "synced", merged
-    assert (worktree / "onboarding/line.md").is_file()
+    assert refused["state"] == "sync-unconverted-memory-locked", refused
+    assert "code legacy-format" in str(refused["detail"]), refused
+    assert git(worktree, "rev-parse", "HEAD") == leaf_head
+    assert not (worktree / "onboarding/line.md").exists()
     assert not (worktree / "knowledge/layout.json").exists()
-    assert refused["state"] == "sync-git-proof-failed", refused
-    assert "converted memory is never merged as plain Git" in str(refused["summary"])
-    assert git(lines.leaf, "rev-parse", "HEAD") == leaf_head
+    assert refused_converted["state"] == "sync-git-proof-failed", refused_converted
+    assert "converted memory is never merged as plain Git" in str(refused_converted["summary"])
+    assert git(lines.leaf, "rev-parse", "HEAD") == converted_leaf_head
     with pytest.raises(AssertionError):
         git(lines.leaf, "rev-parse", "-q", "--verify", "MERGE_HEAD")
 

@@ -653,9 +653,9 @@ def test_the_commit_route_validates_against_the_conversion_of_an_unconverted_bas
 
 
 def _crossing_fixture(tmp_path: Path) -> tuple[SyncFixture, Path, dict[str, str], str]:
-    """A leaf whose memory is unconverted, synced once from its line; returns the verified commit."""
+    """A leaf whose memory is unconverted, refused once from its line; returns the verified commit."""
 
-    fixture = SyncFixture(tmp_path)
+    fixture = SyncFixture(tmp_path, converted=False)
     worktree = fixture.contract.memory_worktree
     assert worktree is not None
     commit_file(fixture.code_repo, APP, APP_SOURCE.rstrip("\n"))
@@ -674,13 +674,20 @@ def _crossing_fixture(tmp_path: Path) -> tuple[SyncFixture, Path, dict[str, str]
         (fixture.memory_repo / relative).write_text(text, encoding="utf-8")
     git(fixture.memory_repo, "add", "-A")
     git(fixture.memory_repo, "commit", "-q", "-m", render_memory_content_message("cards", verified))
+    line_before = git(fixture.memory_repo, "rev-parse", "main")
+    leaf_before = git(worktree, "rev-parse", "HEAD")
     first = fixture.sync(memory_sync_choice="merge-memory").payload
-    assert first["state"] == "synced"
-    # Both memory sides are unconverted: the sync recomputes no worklist (MIK-R08 rule 8).
-    assert "knowledgeWorklist" not in first
-    # An ordinary (non-crossing) sync journal keeps the shape the installed runtime reads.
-    journal = sync_operation_path(fixture.contract.worktree_group).read_text(encoding="utf-8")
-    assert "crossingReport" not in journal
+    # MIK-R46 rule 3: a merge whose base, own and incoming sides are all unconverted refuses
+    # with legacy-format before anything moves; the plain Git merge of memory is gone.
+    assert first["state"] == "sync-unconverted-memory-locked", first
+    assert "code legacy-format" in str(first["detail"]), first
+    assert "knowledge-convert" in str(first["detail"]), first
+    assert git(fixture.memory_repo, "rev-parse", "main") == line_before
+    assert git(worktree, "rev-parse", "HEAD") == leaf_before
+    assert not sync_operation_path(fixture.contract.worktree_group).exists()
+    # Setup for the crossing below (not product behavior): carry the line's cards into the
+    # still-unconverted leaf worktree, as the removed plain merge once did as a side effect.
+    git(worktree, "merge", "-q", "main")
     return fixture, worktree, cards, verified
 
 

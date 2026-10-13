@@ -8,11 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.knowledge_writer.memory_state import Owner
+from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
 from agents_remember.kernel.direct_execution_grants import (
     DirectExecutionGrant,
     grant_path_for,
     write_grant_file,
 )
+from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     write_ledger,
@@ -107,6 +110,93 @@ def _master(
     )
 
 
+def _ensure_fixture_services() -> None:
+    """Bind the default application composition when the caller has none.
+
+    MIK-R46 rule 8: converted fixtures publish curator evidence at setup, and the evidence
+    publication recomputes the invariant gate, which is reached through the bound services
+    (production always binds them in its MCP/CLI composition). Integration tests get this
+    from the autouse composition; module-scoped fixtures and unit tests do not, so the
+    shared fixture binds the default composition itself when nothing is bound. No test
+    asserts unbound services alongside this fixture.
+    """
+
+    from agents_remember.application.worktree_services import (  # noqa: PLC0415
+        bind_worktree_services,
+        build_default_worktree_services,
+    )
+    from agents_remember.worktrees.services import (  # noqa: PLC0415
+        WorktreeServicesUnboundError,
+        worktree_services,
+    )
+
+    try:
+        worktree_services()
+    except WorktreeServicesUnboundError:
+        bind_worktree_services(build_default_worktree_services())
+
+
+def cover_fixture_code_changes(contract: WorktreeContract, *paths: str) -> None:
+    """Author ``no_impact`` rows for the named code files, on converted memory only.
+
+    A fixture leaf that changes code mid-scenario covers the change the way a real leaf
+    does, before the next evidence publication judges the candidate (MIK-R30).
+    """
+
+    if (
+        contract.memory_worktree is None
+        or not (contract.memory_worktree / "knowledge" / "layout.json").is_file()
+    ):
+        return
+    report = write_knowledge(
+        WriteRequest(
+            memory_root=contract.memory_worktree,
+            code_root=contract.code_worktree,
+            owner=Owner(task=contract.task_id, kind="leaf", id=contract.leaf_id or "?"),
+            handoff_path="handoff.json",
+            document={
+                "history": [
+                    {
+                        "subject": f"onboarding:{path}",
+                        "disposition": "no_impact",
+                        "reason": "The fixture leaf's code change carries no invariant.",
+                    }
+                    for path in paths
+                ]
+            },
+            commit=True,
+        )
+    )
+    assert report.state == "written", report.render()
+
+
+def _publish_fixture_evidence(contract: WorktreeContract) -> None:
+    """Publish curator evidence for a fixture leaf that can carry it.
+
+    MIK-R46 rule 1: an unconverted leaf's coherence authority is refused by the
+    validator itself, so the fixture publishes evidence only on converted memory.
+    """
+
+    if (
+        contract.memory_worktree is None
+        or not (contract.memory_worktree / "knowledge" / "layout.json").is_file()
+    ):
+        return
+    write_curator_evidence(contract, caller_ref=SPRINT)
+
+
+def _author_fixture_change_row(contract: WorktreeContract) -> None:
+    """Author the row the fixture leaf's own code change needs, on converted memory only.
+
+    MIK-R46 rule 8: converted fixtures are judged by the invariant gate, so the fixture
+    leaf covers its ``feature.txt`` change the way a real leaf does -- the change carries no
+    invariant, answered by its onboarding ``no_impact`` row (MIK-R30). Unconverted fixtures
+    author nothing: the writer writes converted trees only, and the gate does not judge them.
+    """
+
+    cover_fixture_code_changes(contract, "feature.txt")
+
+
 def _leaf(contract: WorktreeContract, slug: str) -> TaskDocument:
     report = contract.task_root / "notes" / "reports" / f"{slug}-review.md"
     report.parent.mkdir(parents=True, exist_ok=True)
@@ -189,7 +279,7 @@ def _grade(priority: str, candidate: TaskDocumentRef) -> dict[str, Any]:
 class QueueFixture:
     """Current task/door/projection fixture retained for non-queue lifecycle suites."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- one fixture builds the whole lifecycle world
         self,
         root: Path,
         *,
@@ -197,6 +287,7 @@ class QueueFixture:
         atomic_a: bool = False,
         atomic_b: bool = False,
         memory_mode: str = "external",
+        converted: bool = True,
     ) -> None:
         self.root = root
         self.coord = root / "coordination"
@@ -207,6 +298,7 @@ class QueueFixture:
         self.atomic_a = atomic_a
         self.atomic_b = atomic_b
         self.unstarted_leaf_a: str | None = None
+        _ensure_fixture_services()
         init_repo(self.code, "main")
         install_fixture_profile(self.code, REPO)
         git(self.code, "add", "-A")
@@ -234,8 +326,25 @@ class QueueFixture:
             self.memory / "memory.md",
             create_initial_ledger(REPO, code_base, memory_content),
         )
-        git(self.memory, "add", "memory.md")
-        git(self.memory, "commit", "-m", "Add ledger")
+        # MIK-R46 rule 8: the shared fixture builds converted memory by default -- the
+        # layout marker rides the base commit, so lifecycles under test run the converted
+        # routes. Tests whose subject is the old path pass converted=False.
+        if converted:
+            (self.memory / "knowledge").mkdir(parents=True, exist_ok=True)
+            (self.memory / "knowledge" / "layout.json").write_text(
+                '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+            )
+            git(self.memory, "add", "memory.md", "knowledge/layout.json")
+        else:
+            git(self.memory, "add", "memory.md")
+        # The base commit pairs the memory line with the code base (Code-Commit trailer), so
+        # the invariant gate can read the pairing on converted fixtures (MIK-R46 rule 8).
+        git(
+            self.memory,
+            "commit",
+            "-m",
+            render_memory_content_message("Add ledger", code_base),
+        )
         memory_base = git(self.memory, "rev-parse", "HEAD")
         git(self.code, "branch", "super", code_base)
         git(self.memory, "branch", "super", memory_base)
@@ -434,6 +543,7 @@ class QueueFixture:
             (contract.memory_worktree / f"{leaf_id.lower()}.md").write_text(
                 f"# {leaf_id}\n", encoding="utf-8"
             )
+        _author_fixture_change_row(contract)
         write_task_doc(contract.task_root, _leaf(contract, leaf_id.lower()))
         write_contract(contract.contract_path, contract)
         publish_new_lifecycle_operation_location(
@@ -441,7 +551,7 @@ class QueueFixture:
             contract_text=contract_publication_text(contract.contract_path, contract),
         )
         if contract.memory_worktree is not None:
-            write_curator_evidence(contract, caller_ref=SPRINT)
+            _publish_fixture_evidence(contract)
         return contract
 
     def grant_direct_execution(self, candidate: TaskDocumentRef) -> None:
@@ -557,6 +667,7 @@ class QueueFixture:
                 f"# {leaf_id}\n",
                 encoding="utf-8",
             )
+        _author_fixture_change_row(contract)
         write_task_doc(contract.task_root, _leaf(contract, leaf_id.lower()))
         write_contract(contract.contract_path, contract)
         publish_new_lifecycle_operation_location(
@@ -564,7 +675,7 @@ class QueueFixture:
             contract_text=contract_publication_text(contract.contract_path, contract),
         )
         if contract.memory_worktree is not None:
-            write_curator_evidence(contract, caller_ref=SPRINT)
+            _publish_fixture_evidence(contract)
         return contract
 
     def set_priority(self, candidate: TaskDocumentRef, priority: str) -> None:
@@ -615,7 +726,7 @@ class QueueFixture:
         if update_priority:
             self.set_priority(leaf, priority)
         if contract.memory_worktree is not None:
-            write_curator_evidence(contract, caller_ref=SPRINT)
+            _publish_fixture_evidence(contract)
         request = CloseoutDoorRequest.model_validate(
             {
                 "action": "declare",
@@ -649,7 +760,7 @@ class QueueFixture:
         """
 
         if contract.memory_worktree is not None:
-            write_curator_evidence(contract, caller_ref=SPRINT)
+            _publish_fixture_evidence(contract)
         request = CloseoutDoorRequest.model_validate(
             {
                 "action": "declare",

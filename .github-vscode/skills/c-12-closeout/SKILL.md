@@ -72,6 +72,15 @@ mandatory invariant gate (MIK-R09) about the leaf's exact code and memory candid
   the closeout cell's pair once more before any ref moves, in preview and apply; recording
   and master-level landings run their own judgments (see `c-09-git-worktree-manager`).
 
+On unconverted memory (the memory tree has no `knowledge/layout.json`) both closeout tools
+refuse with the code `legacy-format` before anything is claimed or committed — the preview
+answers `knowledge-gate-refused` with the refusal instead of `"would-closeout"`, and the
+apply refuses the same way. Convert first with the `c-13-install-and-onboard` skill's
+first-conversion procedure (`docs/guides/first-conversion.md`), then close out like any
+leaf: the conversion itself counts as no change. A failed crossing plan leaves the line
+unchanged; a conflict or a validator refusal after the merge started keeps the staged merge
+for `continue` or `cancel`, as usual.
+
 ## Approval Authority
 
 Closeout is always authority-gated, but the authority is contextual.

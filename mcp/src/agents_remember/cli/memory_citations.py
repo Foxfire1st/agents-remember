@@ -1,7 +1,7 @@
-"""CLI adapter: check a leaf's memory citations, regenerate their ranges, or migrate them.
+"""CLI adapter: check a leaf's memory citations or regenerate their ranges.
 
     agents-remember memory-citations --repo <id> --contract <contract>
-        [--build-index | --fix | --migrate]
+        [--build-index | --fix]
 
 ``--contract`` names the leaf enclosure whose memory worktree is rewritten, exactly as the
 worktree verbs do. For ``--fix`` it may be omitted on the configured memory root while that
@@ -14,7 +14,7 @@ the register every call already honours (the memory layer's ``onboarding.pathRul
 and the code repo's ``.gitignore``). The register's rule set is reported in the result, so a
 reader can see which patterns produced the population.
 
-THE FOUR MODES DO DIFFERENT WORK AND ARE NOT INTERCHANGEABLE.
+THE THREE MODES DO DIFFERENT WORK AND ARE NOT INTERCHANGEABLE.
 
     (none)          report. Nothing is written.
     --build-index   build or validate one complete dirty-snapshot source index before a
@@ -22,10 +22,6 @@ THE FOUR MODES DO DIFFERENT WORK AND ARE NOT INTERCHANGEABLE.
     --fix           regenerate the range of every citation ALREADY in the anchored format that
                 fails, from its anchor. With --document, also normalise passing ranges in
                 that one document so no curator-authored line number survives.
-    --migrate       convert a tree still in the superseded format: add the Anchor column, widen
-                the delimiter, turn markdown links into `path:start-end`, and rewrite the old
-                prose spelling into `cit:`. Run ONCE per repository adopting the format, and
-                again after a curator wave supplies anchors it had to decline.
 
 Exit status is the gate's: 0 when nothing is left to do, 1 when anything remains. What
 remains is a work order per DOCUMENT, so a parallel dispatch of curator agents takes one
@@ -42,7 +38,6 @@ from agents_remember.application.memory_tools import (
     CitationOperationScope,
     citation_check_tool,
     citation_fix_tool,
-    citation_migrate_tool,
     citation_source_index_build_tool,
 )
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
@@ -83,12 +78,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "only reports.",
     )
     parser.add_argument(
-        "--migrate",
-        action="store_true",
-        help="Convert a tree still in the superseded citation format. Cannot be combined "
-        "with --fix: one converts the format, the other maintains it.",
-    )
-    parser.add_argument(
         "--document",
         action="append",
         default=None,
@@ -123,7 +112,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --fix or --migrate, report every rewrite it would make and write nothing.",
+        help="With --fix, report every rewrite it would make and write nothing.",
     )
 
 
@@ -132,9 +121,9 @@ def run(args: argparse.Namespace) -> int:
     expected_snapshot = getattr(args, "expected_snapshot", None)
     named = getattr(args, "document", None) or []
     caller_excludes = tuple(getattr(args, "exclude", None) or ())
-    selected_modes = sum((build_index, args.fix, args.migrate))
+    selected_modes = sum((build_index, args.fix))
     if selected_modes > 1:
-        print("--build-index, --fix, and --migrate are different operations; pass one.")
+        print("--build-index and --fix are different operations; pass one.")
         return 1
     if build_index and (named or args.dry_run or expected_snapshot is not None):
         print(
@@ -170,15 +159,6 @@ def run(args: argparse.Namespace) -> int:
                 config,
                 repo_id=args.repo,
                 contract_path=args.contract,
-                operation_scope=operation_scope,
-            )
-        elif args.migrate:
-            assert args.contract is not None  # guarded above: only --fix runs unscoped
-            payload = citation_migrate_tool(
-                config,
-                repo_id=args.repo,
-                contract_path=args.contract,
-                dry_run=args.dry_run,
                 operation_scope=operation_scope,
             )
         elif args.fix:

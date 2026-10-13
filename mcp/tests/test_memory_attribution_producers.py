@@ -164,10 +164,16 @@ def test_the_one_renderer_keeps_the_callers_body_verbatim_and_its_trailer_final(
     assert parse_code_commit_trailer(rendered) == CODE_TWO
 
 
-def _carryover_world(root: Path) -> tuple[QueueFixture, WorktreeContract, str, str, str]:
-    """One open external leaf whose source branch memory describes landed official code."""
+def _carryover_world(
+    root: Path, *, converted: bool = False
+) -> tuple[QueueFixture, WorktreeContract, str, str, str]:
+    """One open external leaf whose source branch memory describes landed official code.
 
-    fixture = QueueFixture(root, memory_mode="external")
+    Carryover's subject is the retired legacy-format copy, so its world stays unconverted
+    unless a caller asks for a converted target.
+    """
+
+    fixture = QueueFixture(root, memory_mode="external", converted=converted)
     contract = fixture.contracts[MASTER_A]
     code = fixture.code
     memory = fixture.memory
@@ -236,27 +242,18 @@ def _carryover_world(root: Path) -> tuple[QueueFixture, WorktreeContract, str, s
     return fixture, contract, old_base, official_head, source_memory.as_posix()
 
 
-def test_carryover_attributes_its_memory_content_commit_to_the_official_head(tmp_path) -> None:
-    """``memory_carryover_apply`` lands a body the caller still owns, plus its attribution.
+def test_carryover_apply_refuses_unconverted_memory_with_the_conversion_step(tmp_path) -> None:
+    """MIK-R46 rule 1: ``memory_carryover_apply`` refuses unconverted memory, writing nothing.
 
-    The caller's message is a public argument and is deliberately hostile here: its last
-    paragraph is itself ``Key: value`` lines, including a ``Code-Commit:`` line that is not this
-    carryover's code commit. The landed body has to keep that paragraph verbatim and the trailer
-    has to be the separate final block, so the attribution names ``official_head``. The cache
-    derives that pair from the one content commit, and a repeated carry creates no extra commit.
+    The legacy-format copy (Markdown with no format check and no validator) is retired: on
+    unconverted memory the apply refuses with the one ``legacy-format`` message naming the
+    conversion, and the refusal writes nothing. What carryover does on converted memory is
+    MIK-R56, which lands after this leaf.
     """
 
-    fixture, contract, old_base, official_head, source_memory = _carryover_world(tmp_path)
+    fixture, contract, old_base, _official_head, source_memory = _carryover_world(tmp_path)
     memory_worktree = contract.memory_worktree
     assert memory_worktree is not None and contract.ledger_path is not None
-    body = (
-        "Carry over landed branch memory\n"
-        "\n"
-        "The reviewer's own closing notes.\n"
-        "\n"
-        "Reviewed-By: someone@example.invalid\n"
-        f"{CODE_COMMIT_TRAILER_KEY}: {CODE_ONE}\n"
-    )
 
     selection = CarryoverSelection(
         repo_id=contract.repo_name,
@@ -266,48 +263,54 @@ def test_carryover_attributes_its_memory_content_commit_to_the_official_head(tmp
         source_code_ref="source",
         old_base=old_base,
     )
-    before = git(memory_worktree, "rev-parse", "HEAD")
     contract.ledger_path.write_text("not a ledger\n", encoding="utf-8")
+
+    def _byte_tree(root: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and "/.git/objects/" not in path.as_posix()
+        }
+
+    before = (
+        git(fixture.code, "for-each-ref"),
+        git(memory_worktree, "for-each-ref"),
+        git(memory_worktree, "rev-parse", "HEAD"),
+        git(memory_worktree, "status", "--porcelain"),
+        git(memory_worktree, "diff", "--cached", "--name-only"),
+        git(memory_worktree, "ls-files", "-s"),
+        _byte_tree(memory_worktree),
+    )
     result = memory_carryover_apply_tool(
         fixture.cfg,
         selection,
         intent_note="carry the landed branch memory",
-        messages=CarryoverCommitMessages(memory=body),
+        messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
     )
-
-    assert result["ok"] is True, result
-    assert result["state"] == "carried-over", result
-    content = str(result["memory_content_commit"])
-    assert "ledger_commit" not in result
-    assert git(memory_worktree, "rev-parse", "HEAD") == content
-    assert git(memory_worktree, "rev-list", "--count", f"{before}..{content}") == "1"
-    landed = git(memory_worktree, "log", "-1", "--format=%B", content)
-    # The caller's body, byte for byte, and exactly one added trailer block after it.
-    assert landed == f"{body.rstrip()}\n\n{CODE_COMMIT_TRAILER_KEY}: {official_head}"
-    assert landed.count(CODE_COMMIT_TRAILER_KEY) == 2
-    assert _attribution(memory_worktree, content) == f"Code-Commit: {official_head}"
-    assert _parsed_trailer(memory_worktree, content, tmp_path) == f"Code-Commit: {official_head}"
-    assert git(memory_worktree, "ls-files", "memory.md") == ""
-    row = load_ledger(contract.ledger_path).rows[0]
-    assert (row.code_commit, row.memory_commit) == (official_head, content)
-    contract.ledger_path.unlink()
-    repeated = memory_carryover_apply_tool(
-        fixture.cfg,
-        selection,
-        intent_note="reuse already carried memory",
-        messages=CarryoverCommitMessages(memory=body),
-    )
-    assert repeated["state"] == "nothing-to-carryover", repeated
-    assert git(memory_worktree, "rev-parse", "HEAD") == content
+    assert result.get("ok") is False, result
+    assert result.get("code") == "legacy-format", result
+    assert "did not run" in str(result.get("message", "")), result
+    assert "agents-remember knowledge-convert" in str(result.get("detail", "")), result
+    assert "nextAction" in result, result
+    assert (
+        git(fixture.code, "for-each-ref"),
+        git(memory_worktree, "for-each-ref"),
+        git(memory_worktree, "rev-parse", "HEAD"),
+        git(memory_worktree, "status", "--porcelain"),
+        git(memory_worktree, "diff", "--cached", "--name-only"),
+        git(memory_worktree, "ls-files", "-s"),
+        _byte_tree(memory_worktree),
+    ) == before
 
 
 def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_path) -> None:
-    """L37 review R1, F2 (MIK-R24 rule 9, MIK-R09 rule 6).
+    """MIK-R46 rules 1 and 2 (was L37 review R1, F2).
 
     Carryover copies legacy-format onboarding Markdown and commits it with no format check and no
     validator, so a converted target is refused, naming the file writer. An unconverted target is
-    refused by the cutover lock once its memory repository holds converted memory, naming the
-    crossing sync. Neither refusal writes anything.
+    refused by the cutover lock with the one ``legacy-format`` message -- whether or not its
+    memory repository holds converted memory elsewhere -- naming the crossing sync when it does.
+    Neither refusal writes anything.
     """
 
     fixture, contract, old_base, _official_head, source_memory = _carryover_world(tmp_path)
@@ -321,6 +324,26 @@ def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_
         source_code_ref="source",
         old_base=old_base,
     )
+
+    def refused_legacy() -> dict:
+        before = (
+            git(memory_worktree, "rev-parse", "HEAD"),
+            git(memory_worktree, "status", "--porcelain"),
+        )
+        result = memory_carryover_apply_tool(
+            fixture.cfg,
+            selection,
+            intent_note="carry the landed branch memory",
+            messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
+        )
+        after = (
+            git(memory_worktree, "rev-parse", "HEAD"),
+            git(memory_worktree, "status", "--porcelain"),
+        )
+        assert after == before
+        assert result.get("ok") is False, result
+        assert result.get("code") == "legacy-format", result
+        return result
 
     def refused() -> str:
         before = (
@@ -351,15 +374,19 @@ def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_
     git(memory, "switch", "-q", "-c", "converted-line", "main")
     convert(memory)
     git(memory, "switch", "-q", "main")
-    locked = refused()
-    assert "branch converted-line" in locked and "crossing sync" in locked, locked
+    locked = refused_legacy()
+    assert "branch converted-line" in str(locked.get("detail", "")) and "crossing sync" in str(
+        locked.get("detail", "")
+    ), locked
 
     convert(memory_worktree)
     converted = refused()
     assert "refuses a converted target" in converted and "file writer" in converted, converted
 
 
-def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch(tmp_path) -> None:
+def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch(
+    tmp_path, worktree_services: None
+) -> None:
     """``memory_baseline_adopt`` attributes the first memory commit it creates, once.
 
     The code commit is resolved once for the content trailer, from which the cache derives its
@@ -393,6 +420,12 @@ def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch
     # Adoption is the bootstrap exception on the exact unborn branch memory_init mints.
     git(memory, "config", "agents-remember.defaultBranch", "main")
     git(memory, "update-ref", "-d", "refs/heads/main")
+    # MIK-R46 rule 8: this subject (attribution) runs on converted memory -- the marker is
+    # present, and the bare card below carries no old-format sign, so no legacy card blocks it.
+    (memory / "knowledge").mkdir(parents=True, exist_ok=True)
+    (memory / "knowledge" / "layout.json").write_text(
+        '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+    )
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding" / "module.md").write_text("# Module\n", encoding="utf-8")
     (memory / "system").mkdir(parents=True, exist_ok=True)

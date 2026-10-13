@@ -4,7 +4,11 @@
 rule 2).** :func:`merge_structure` reads the layout marker of the merge base, the own side and the
 incoming side. When all three are converted, the three trees merge as they are. When at least one is
 unconverted and at least one converted, the merge is a *crossing sync* (rule 8): markers move and
-the unconverted trees are converted first. Only a merge of three unconverted trees is plain Git.
+the unconverted trees are converted first. A merge of three unconverted trees stays plain Git
+inside this structural helper only; the managed sync never runs it there -- it refuses the
+all-unconverted sides with the one ``legacy-format`` message before Git moves (MIK-R46 rule 1,
+the plain-Git merge of memory is gone). The helper itself stays until MIK-R65 removes the
+retired machinery; this prose does not promise the managed path it no longer takes.
 
 Before Git merges anything, :func:`crossing_plan` asks the bound ``KnowledgeCrossingPort`` for the
 structural merge of the three trees; a failing step is refused with its name and the line is left
@@ -15,15 +19,13 @@ resolution route (``continue``) is how the curator finishes it. The merge commit
 (MIK-R22), against converted bases (rule 7), when it is committed. A crossing sync's own commit
 converts the line; there is no separate conversion commit.
 
-**Unconverted lines (rule 9).** :func:`unconverted_line_refusal` is what a write or a memory-quality
-run calls on a leaf's memory tree: an unconverted tree whose official line is already converted is
-refused, naming the crossing sync, which is only for lines that descend from a converted official
-line. Any other unconverted tree is refused by the cutover lock (:mod:`.cutover_lock`, MIK-R09 rule 6)
-once its memory repository holds converted memory anywhere -- the cutover window of MIK-R37 rule 6,
-in which other masters' unconverted lines are only read. A repository that holds no converted memory
-is not locked: its official line converts by running ``agents-remember knowledge-convert`` on that
-line and committing it through its normal route (for this master's line, MIK-R37), and until then
-this returns ``None``, so no route changes behaviour.
+**Unconverted lines (MIK-R46 rule 1).** :func:`unconverted_line_refusal` is what a write or a
+memory-quality run calls on a leaf's memory tree: an unconverted tree is refused, naming the
+crossing sync when its official line is already converted (only lines that descend from a
+converted official line convert that way), and the one rule-2 message otherwise. The probe
+:func:`~.cutover_lock.converted_memory_location` only words the message; it decides nothing.
+A converting candidate is never refused: it holds the marker on its own side, so the gate
+applies to it instead, against the converted base (MIK-R24 rule 7).
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text, parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
+from agents_remember.worktrees.cutover_lock import cutover_lock_refusal, legacy_format_refusal
 from agents_remember.worktrees.knowledge_validation import (
     LayoutProbeError,
     PairedCode,
@@ -194,7 +196,17 @@ def apply_crossing(worktree: Path, plan: CrossingPlanView) -> tuple[str, ...]:
     tracked = _tracked(worktree)
     _git(worktree, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *KNOWLEDGE_ROOTS])
     _write_plan_files(worktree, plan, tracked)
-    _git(worktree, ["add", "-A", "--", *KNOWLEDGE_ROOTS])
+    # A converted tree with no cards has no onboarding tree at all; an explicit pathspec that
+    # matches nothing in the worktree and the index fails the add, so only stage the roots
+    # that exist or the index still holds (MIK-R46: shared fixtures build such cardless trees).
+    present = [
+        root
+        for root in KNOWLEDGE_ROOTS
+        if (worktree / root).exists()
+        or any(path == root or path.startswith(f"{root}/") for path in tracked)
+    ]
+    if present:
+        _git(worktree, ["add", "-A", "--", *present])
     conflicted = tuple(sorted(plan.conflict_versions))
     if conflicted:
         _unmerge(worktree, plan, conflicted)
@@ -208,30 +220,44 @@ def unconverted_line_refusal(
     official_branch: str,
     operation: str,
 ) -> str | None:
-    """Rule 9: refuse ``operation`` on an unconverted tree whose official line is converted.
+    """Rule 1: refuse ``operation`` on an unconverted tree (MIK-R46).
 
-    Otherwise the cutover lock decides (:func:`~.cutover_lock.cutover_lock_refusal`): an unconverted
-    tree in a memory repository that holds converted memory anywhere is refused as well.
+    A tree whose official line is converted converts only through the crossing sync, so the
+    refusal names it. Otherwise the cutover lock refuses with the one rule-2 message. ``None``
+    only when the tree already holds the layout marker (a converting candidate or converted
+    leaf) or there is no memory repository to judge.
     """
 
     if (memory_worktree / LAYOUT_MARKER_PATH).is_file():
         return None
     if memory_repository is None or not memory_repository.is_dir():
         return None
-    if not _official_line_converted(memory_repository, official_branch):
+    official_state = _official_line_converted(memory_repository, official_branch)
+    if isinstance(official_state, str):
+        return official_state  # the official line cannot be probed; name that error
+    if not official_state:
         return cutover_lock_refusal(
             memory_repository, operation=operation, line=os.fspath(memory_worktree)
         )
-    return (
-        f"{operation} refuses the unconverted memory tree {os.fspath(memory_worktree)}: its "
-        f"official line {official_branch} is already converted (knowledge/layout.json), and a "
-        "line that descends from a converted official line converts only through the crossing "
-        "sync -- run worktree_sync first (MIK-R24 rules 8 and 9)"
+    return legacy_format_refusal(
+        memory_repository,
+        operation=operation,
+        subject=(
+            f"the unconverted memory tree {os.fspath(memory_worktree)}: its official line "
+            f"{official_branch} is already converted (knowledge/layout.json), so the line "
+            "converts only through the crossing sync -- run worktree_sync with merge-memory "
+            "first (MIK-R24 rules 8 and 9)"
+        ),
     )
 
 
-def _official_line_converted(repository: Path, official_branch: str) -> bool:
-    """Whether the official line's tip holds the marker (no line, or an unreadable one: no)."""
+def _official_line_converted(repository: Path, official_branch: str) -> bool | str:
+    """Whether the official line's tip holds the marker.
+
+    No official line is unconverted (``False``). A tip Git cannot answer is returned as
+    its named error text, never read as unconverted: conversion does not repair an
+    unreadable object (MIK-R46).
+    """
 
     if not official_branch:
         return False
@@ -245,8 +271,8 @@ def _official_line_converted(repository: Path, official_branch: str) -> bool:
         return False
     try:
         return has_layout_marker(repository, commit)
-    except LayoutProbeError:
-        return False
+    except LayoutProbeError as error:
+        return str(error)
 
 
 _CROSSING_HISTORY: Final = re.compile(r"^knowledge/history/[^/]+-crossing-[1-9][0-9]*\.json$")

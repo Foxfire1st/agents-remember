@@ -49,6 +49,7 @@ from agents_remember.memory_quality.legacy_cards import find_legacy_cards
 from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.cutover_lock import FIRST_CONVERSION_COMMAND, legacy_format_refusal
 from agents_remember.worktrees.integration.integration_branch_authority import (
     memory_repository_default_branch,
 )
@@ -686,8 +687,60 @@ def _converted_base_payload(
     }
 
 
+def _is_unconverted_memory_root(memory_root: Path) -> bool:
+    """Whether ``memory_root`` positively holds unconverted memory (MIK-R46 rule 1).
+
+    Only an existing directory without the layout marker counts: a missing, unreadable or
+    corrupt root keeps its own error and is never called "legacy".
+    """
+
+    return memory_root.is_dir() and not is_converted_memory(memory_root)
+
+
+def _legacy_format_payload(context, *, operation: str) -> dict[str, object]:
+    """The ``legacy-format`` answer for an unconverted memory root (MIK-R46 rules 2 and 6).
+
+    The refusal is said once, short, in ``message`` (it survives the answer guard's
+    short form, unlike the 600-character rule-2 text); the full text stays in
+    ``detail`` for the logged whole result. The drift section reports status
+    ``"error"`` without repeating the text.
+    """
+
+    message = legacy_format_refusal(
+        context.memory_root,
+        operation=operation,
+        subject=f"the memory root {context.memory_root.as_posix()}",
+    )
+    short = f"{operation} did not run: the memory root is unconverted (no knowledge/layout.json)."
+    return {
+        "state": "legacy-format",
+        "code_repository_name": context.code_repository_name,
+        "topology": context.topology,
+        "code_repository_root": context.code_repository_root.as_posix(),
+        "memory_root": context.memory_root.as_posix(),
+        "onboarding_root": context.onboarding_root.as_posix(),
+        "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
+        "message": short,
+        "detail": message,
+        "drift": {"status": "error"},
+        "ledger": ledger_status(context.memory_root),
+        "nextAction": (
+            f"convert the memory root first ({FIRST_CONVERSION_COMMAND}), then rerun "
+            f"{operation}; memory_baseline_status reports the same repository's state"
+        ),
+        "nextStep": {
+            "summary": short,
+            "nextTool": "memory_baseline_status",
+        },
+    }
+
+
 def baseline_status(request: BaselineRequest) -> dict[str, object]:
     context = resolve_request_context(request)
+    if _is_unconverted_memory_root(context.memory_root):
+        # Before the conversion, the status answers the state `legacy-format` with the
+        # first-conversion step (MIK-R46 rule 6); drift is not measured on legacy memory.
+        return _legacy_format_payload(context, operation="memory_baseline_status")
     # A status read files nothing (rule 6): only an explicit report path is a
     # report producer.
     summary, report = run_drift(context, request.report, write_report=request.report is not None)
@@ -741,6 +794,10 @@ def baseline_adopt(
     context = resolve_request_context(request)
     if context.topology != "external":
         raise RuntimeError("adoption requires external topology")
+    if _is_unconverted_memory_root(context.memory_root):
+        # Unconverted memory is never adopted: it converts first (MIK-R46 rules 1 and 6).
+        payload = _legacy_format_payload(context, operation="memory_baseline_adopt")
+        return 2, payload
     # A dry-run preview files nothing (rule 6); the mutating adoption keeps
     # full report behavior.
     summary, report = run_drift(context, request.report, write_report=not dry_run)
@@ -770,17 +827,15 @@ def baseline_adopt(
         return 2, payload
     if dry_run:
         payload["state"] = "would-adopt"
-        payload["accepted_drift"] = bool(accept_drift)
-        return 0, payload
-
-    resolved_source_branch = source_branch or current_branch(context.code_repository_root)
-    result = adopt_initial_baseline(
-        context, resolved_source_branch, work_branch or resolved_source_branch
-    )
-    payload["state"] = "adopted"
+    else:
+        resolved_source_branch = source_branch or current_branch(context.code_repository_root)
+        result = adopt_initial_baseline(
+            context, resolved_source_branch, work_branch or resolved_source_branch
+        )
+        payload["state"] = "adopted"
+        payload["bootstrap"] = result
+        payload["ledger"] = ledger_status(context.memory_root)
     payload["accepted_drift"] = bool(accept_drift)
-    payload["bootstrap"] = result
-    payload["ledger"] = ledger_status(context.memory_root)
     return 0, payload
 
 

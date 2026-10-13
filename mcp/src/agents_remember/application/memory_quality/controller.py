@@ -461,7 +461,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
     if refusal is not None:
         # MIK-R24 rule 9 / MIK-R09 rule 6: unconverted memory is never checked in the old format
         # once its official line, or anything in its repository, is converted; it crosses first.
-        return {
+        whole: dict[str, object] = {
             "ok": False,
             "operation": "memory_quality_check",
             "repoId": scope.repo_id,
@@ -469,6 +469,14 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             "code": "unconverted-memory",
             "detail": refusal,
         }
+        # The delivered answer projects blockingCount, nextAction and status; the whole
+        # carries the projection's own values (computed in the one place, nothing made up)
+        # so the answer validates against it.
+        projected = quality_result_answer(whole)
+        whole["status"] = projected["status"]
+        whole["blockingCount"] = projected["blockingCount"]
+        whole["nextAction"] = projected["nextAction"]
+        return whole
     quality_code_root = scope.quality_code_root
     quality_context = scope.quality_context
     candidate_inputs = (

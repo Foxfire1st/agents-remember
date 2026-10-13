@@ -465,10 +465,12 @@ def test_memory_backed_reads_write_nothing(tmp_path: Path, worktree_services: An
     assert isinstance(packet, dict), packet
     drift = drift_check_tool(config, repo_id=endpoints.repository_id)
     assert isinstance(drift, dict), drift
-    # Without onboarding content there is nothing to baseline: the tool names the missing
-    # root by raising. A raising read is still a read for rule 6: it must write nothing.
-    with pytest.raises(RuntimeError, match="onboarding root does not exist"):
-        memory_baseline_status_payload(config, endpoints.repository_id)
+    # Without onboarding content there is nothing to baseline: on unconverted memory the
+    # status answers legacy-format (MIK-R46 rule 6) instead of running drift. A refusing
+    # read is still a read for rule 6: it must write nothing.
+    status = memory_baseline_status_payload(config, endpoints.repository_id)
+    assert status["ok"] is False
+    assert status["state"] == "legacy-format"
 
     after = _snapshot(roots)
     findings = _classify(

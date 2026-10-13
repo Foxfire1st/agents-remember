@@ -282,8 +282,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     The same holds for the mandatory invariant gate (MIK-R09): a converted leaf's preview asks the
     gate the apply's preflight asks, over the same two trees, and answers
     ``knowledge-gate-refused`` with the findings instead of ``would-closeout`` when it refuses
-    (:func:`_gate_refused_preview`). The verdict is memoised, so the apply that follows does not
-    evaluate it again.
+    (:func:`_gate_refused_preview`). An unconverted leaf's preview is refused by the cutover
+    lock first (MIK-R46 rule 1), so it never promises a closeout the apply refuses. The verdict
+    is memoised, so the apply that follows does not evaluate it again.
     """
 
     if is_disabled_contract(contract):
@@ -292,6 +293,16 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         # apply does.
         return _opt_out_preview(contract, "worktree_closeout_preview")
     refuse_series_workbench_commit(contract)
+    if contract.kind == "series":
+        # MIK-R46 rule 1: the series format verdict precedes publication authority,
+        # as the apply's preflight precedes publication -- an unconverted line's
+        # true blocker is the conversion, and the preview must refuse what the
+        # apply refuses. Converted lines answer not-applicable and read authority.
+        early = candidate_gate_verdict(
+            contract, args.candidate_tree or code_candidate_tree(contract)
+        )
+        if early is not None and early != GATE_NOT_APPLICABLE:
+            return _gate_refused_preview(contract, early)
     require_closeout_publication_authority(contract)
     verdict = candidate_gate_verdict(contract, args.candidate_tree or code_candidate_tree(contract))
     if verdict is not None and verdict != GATE_NOT_APPLICABLE:
@@ -342,7 +353,8 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "proposed_commits": proposed_closeout_commits(
             contract, args, code_dirty, memory_would_commit
         ),
-        # Present on a converted leaf only: an unconverted leaf's preview is what it was.
+        # Present on a converted leaf only: an unconverted leaf's preview is refused by the
+        # cutover lock (MIK-R46 rule 1), so it never promises a closeout.
         **({} if verdict == GATE_NOT_APPLICABLE else {"knowledge_gate": {"state": "pass"}}),
     }
 

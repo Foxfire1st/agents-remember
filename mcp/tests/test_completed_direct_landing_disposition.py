@@ -11,8 +11,9 @@ which withdraws point 2 of ruling 08236bba). An interrupted direct landing is
 continued by the control's recover on what the record carries, with the kept
 closing receipt settled in the same call (rule 3b, first branch).
 
-Completed-case tests run on the plain series fixture (no invariant gate); the
-interrupted case runs converted, where the kept closing receipt exists.
+Completed-case tests run on the converted series fixture, where the invariant gate
+judges each landing; the interrupted case runs converted too, where the kept
+closing receipt exists.
 """
 
 from __future__ import annotations
@@ -82,7 +83,6 @@ from test_direct_landing import (
     _converted_request,
     _converted_series_fixture,
     _kept_closings,
-    _series_fixture,
 )
 from test_knowledge_closeout_gate import (
     CODE_A,
@@ -100,25 +100,15 @@ from test_worktree_support import git
 MASTER_REF = TaskDocumentRef(repository="repo-a", path="direct-task/task.json")
 
 
-def _plain_landing_request(fixture: dict, code_commit: str) -> DirectLandingRequest:
-    return DirectLandingRequest(
-        contract_path=fixture["contract"].contract_path.as_posix(),
-        code_commit=code_commit,
-        candidate_tree=require_git(fixture["code"], ["rev-parse", f"{code_commit}^{{tree}}"]),
-        memory_commit_message="publish plain tree",
-        intent_note="fixture approval",
-        leaf_task_document_ref=fixture["leaf_ref"],
-    )
-
-
 def _landed(tmp_path: Path, name: str = "landed") -> dict:
-    """A plain series fixture with one completed direct landing."""
+    """A converted-memory fixture with one completed direct landing."""
 
-    fixture = _series_fixture(tmp_path / name)
+    fixture = _converted_series_fixture(tmp_path / name)
+    world = fixture["world"]
+    code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
     bind_worktree_services(build_default_worktree_services())
-    landed = direct_landing_tool(
-        fixture["config"], _plain_landing_request(fixture, fixture["code_head"])
-    )
+    landed = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
     assert landed["ok"], landed
     return fixture
 
@@ -189,12 +179,13 @@ def _control(
 
 
 def _advance_plain_code(fixture: dict) -> str:
-    code = fixture["code"]
-    git(code, "checkout", "ar/direct-task")
-    (code / "feature.py").write_text("def f():\n    return 2\n", encoding="utf-8")
-    git(code, "add", "-A")
-    git(code, "commit", "-m", "advance code past the landing")
-    return git(code, "rev-parse", "HEAD")
+    # Generation two advances the covered file. Its landing is refused: the first
+    # landing closed the leaf's history (MIK-R07 rule 7).
+    world = fixture["world"]
+    return commit(
+        world.code,
+        {A: CODE_A.replace("return value", "return -value").replace("return 1", "return 2")},
+    )
 
 
 def test_owner_retire_admitted_and_supersede_refused_at_check(
@@ -311,9 +302,14 @@ def test_direct_record_carrying_a_door_is_not_recognised(tmp_path: Path) -> None
 def test_owner_retire_proof_through_public_tool(tmp_path: Path) -> None:
     """Ruling e55c0093 point 6: the owner retires a completed direct landing
     and its disposition is retired; a second retire answers the same; a
-    stranger is refused; a supersede is refused with the text of point 3; and
-    after the retire the next direct_landing with advanced code is accepted
-    and completes."""
+    stranger is refused; a supersede is refused with the text of point 3.
+
+    Ruling e55c0093 point 7 (MIK-R07 rule 7): on converted memory the same
+    leaf's second landing is refused -- the first landing closed its history,
+    so the gate refuses the new candidate. The record stays generation 1,
+    retired; acceptance after a retire is proven by the converted-successor
+    variant below, not here.
+    """
 
     fixture = _landed(tmp_path)
     _with_disposition_topology(fixture)
@@ -353,11 +349,14 @@ def test_owner_retire_proof_through_public_tool(tmp_path: Path) -> None:
     assert "direct_landing" in str(no_door["detail"])
 
     advanced = _advance_plain_code(fixture)
-    relanded = direct_landing_tool(fixture["config"], _plain_landing_request(fixture, advanced))
-    assert relanded["ok"], relanded
+    relanded = direct_landing_tool(fixture["config"], _converted_request(fixture, advanced))
+    assert relanded["ok"] is False
+    assert relanded["status"] == "direct-landing-knowledge-gate-refused"
     landed = store.read()
     assert landed is not None
-    assert (landed.status, landed.generation) == ("completed", 2)
+    assert (landed.status, landed.generation) == ("completed", 1)
+    assert landed.generationDisposition == "retired"
+    assert list(fixture["memory"].glob("knowledge/history/*-attempt-*.json")) == []
 
 
 def _interrupted(tmp_path: Path, name: str = "interrupted") -> dict:
@@ -485,15 +484,17 @@ def test_old_shape_cancelled_direct_is_offered_nothing(tmp_path: Path) -> None:
     """Finding L143-CODE-R1-F02: a cancelled earlier-shape direct record is
     offered no control and raises no error."""
 
-    fixture = _series_fixture(tmp_path / "old-shape-cancelled")
+    fixture = _converted_series_fixture(tmp_path / "old-shape-cancelled")
+    world = fixture["world"]
+    code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
     bind_worktree_services(build_default_worktree_services())
-    code = fixture["code_head"]
     with mock.patch.object(
         direct_landing_owner,
         "execute_or_require_direct_landing_recovery",
         side_effect=DirectLandingError("cut-before-execution", "stopped after admission"),
     ):
-        stopped = direct_landing_tool(fixture["config"], _plain_landing_request(fixture, code))
+        stopped = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
     assert stopped["ok"] is False
     store = direct_landing_store(fixture["contract"])
     record = store.read()

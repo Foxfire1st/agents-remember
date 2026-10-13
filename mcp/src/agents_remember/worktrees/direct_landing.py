@@ -1514,8 +1514,8 @@ def _direct_gate_owner(
 ) -> str | None:
     """MIK-R09 rule 3 over the candidate; the leaf whose history file this landing closes.
 
-    ``None`` for unconverted memory, which is probed before anything is captured or written; the
-    cutover lock refuses it instead once the repository holds converted memory (MIK-R09 rule 6).
+    ``None`` for unconverted memory, which is probed before anything is captured or written;
+    the cutover lock refuses it unconditionally (MIK-R46 rule 1).
     """
 
     memory_repo = contract.memory_repo_path

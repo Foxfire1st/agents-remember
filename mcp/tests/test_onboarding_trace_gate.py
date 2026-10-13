@@ -768,11 +768,18 @@ def test_the_persisted_worklist_carries_the_onboarding_items_in_its_one_list(lea
     assert again[0]["digest"] != persisted["digest"]  # the digest covers the gate's items
 
 
-def test_an_unconverted_leaf_keeps_todays_gate_unchanged(leaf: Leaf) -> None:
+def test_an_unconverted_leaf_is_refused_before_any_gate_runs(leaf: Leaf) -> None:
+    """MIK-R46 rule 1: ``memory_quality_check`` refuses unconverted memory with the one
+    ``legacy-format`` message naming the conversion; neither the old Update History gate nor
+    the new one runs, and nothing is written."""
+
     git(leaf.memory, "rm", "-q", "knowledge/layout.json")
     leaf.memory_base = commit(leaf.memory, {}, trailer=leaf.code_base)
     assert leaf_onboarding_trace_sides(load_contract(leaf.contract())) is None
     assert recompute_leaf_worklist(load_contract(leaf.contract())) is None  # still no worklist
     response, legacy = _run_controller(leaf, (A,))
-    legacy.assert_called_once()  # today's Update History gate, with today's arguments
+    assert response["state"] == "refused" and response["code"] == "unconverted-memory"
+    assert "code legacy-format" in response["detail"]
+    assert "agents-remember knowledge-convert" in response["detail"]
+    legacy.assert_not_called()  # no gate ran at all
     assert "onboardingTrace" not in response

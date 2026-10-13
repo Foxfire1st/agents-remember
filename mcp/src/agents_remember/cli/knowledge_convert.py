@@ -12,8 +12,17 @@ only and refuses any other.
 
 The conversion validates the whole converted tree before it writes anything; ``--check`` computes
 and reports without writing. A tree that already holds ``knowledge/layout.json`` is left unchanged.
-The command commits nothing: committing a conversion to a real memory line is the cutover's
-(MIK-R37) or a crossing sync's (rule 8) business.
+The command commits nothing: committing the conversion is the first-conversion procedure's
+business (MIK-R46 rule 6) -- in place, then adopt the baseline, for memory with no attributed
+baseline; inside one new leaf's memory worktree as that leaf's first memory change, then close
+out and land like any leaf, for memory with an official line. The ``c-13-install-and-onboard``
+skill and ``docs/guides/first-conversion.md`` describe that procedure.
+
+The conversion command, its read-only reader of the legacy database
+(``memory/conversion/legacy_db.py``) and conversion-format version 1 are permanent parts of
+the product: the build cannot know that no unconverted line is left, because such lines live
+in other clones and on other machines, so removing any of the three is a breaking change that
+needs a developer decision of its own (MIK-R46 rule 7).
 
 Exit status: 0 converted (or already converted); 1 refused (validation or an input the conversion
 needs); 2 invocation or read error.

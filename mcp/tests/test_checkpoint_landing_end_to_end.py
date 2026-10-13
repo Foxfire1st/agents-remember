@@ -125,6 +125,9 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         first = accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
         source = advance_source_line(self.series, self.scratch, label="source")
         absorb_source_into_master_line(self.series, self.scratch, label="source")
+        # The sync rebound the series contract it wrote; reload before touching its cells
+        # so the journal it journaled survives the base update below.
+        self.series = load_contract(self.series.contract_path)
         self.series = replace(
             self.series,
             memory_base_commit=rev(
@@ -355,6 +358,20 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         """
 
         self._unclosed_contract()
+
+        leaf = load_contract(self.leaf.contract_path)
+        with self.assertRaises(RuntimeError) as leaf_raised:
+            integrate_result(
+                WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
+                leaf,
+            )
+
+        leaf_refusal = str(leaf_raised.exception)
+        self.assertIn("integration requires closeout.status completed", leaf_refusal)
+        self.assertNotIn("worktree_checkpoint_landing", leaf_refusal)
+
+        # The helper lands the leaf through its own route, so it runs after the leaf
+        # half, which needs the enclosure unclosed.
         accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
 
         with self.assertRaises(RuntimeError) as raised:
@@ -368,17 +385,6 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         refusal = str(raised.exception)
         self.assertIn("integration requires closeout.status completed", refusal)
         self.assertIn("worktree_checkpoint_landing", refusal)
-
-        leaf = load_contract(self.leaf.contract_path)
-        with self.assertRaises(RuntimeError) as leaf_raised:
-            integrate_result(
-                WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
-                leaf,
-            )
-
-        leaf_refusal = str(leaf_raised.exception)
-        self.assertIn("integration requires closeout.status completed", leaf_refusal)
-        self.assertNotIn("worktree_checkpoint_landing", leaf_refusal)
 
     def test_a_completed_master_is_still_refused_by_the_checkpoint(self) -> None:
         # The other surviving refusal, driven through the PUBLIC operation. It fires at preflight,
@@ -394,17 +400,28 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(applied.exception.status, "atomic-series-checkpoint-master-complete")
 
     def test_a_code_advance_without_memory_attribution_can_checkpoint(self) -> None:
+        # The architect's checkpoint ruling: a commit no leaf landed cannot be
+        # checkpointed (MIK-R52 rule 4). The setup stays -- a bare code advance with no
+        # memory attribution -- and the preview and the apply both refuse with the
+        # leaf-chain message; no ref moves.
         code_commit = commit_code(self.series, self.scratch, label="code-only")
         memory = memory_repository(self.series)
         memory_tip = rev(memory, self.series.memory_work_branch)
+        code_tip = rev(self.series.code_repo_path, self.series.code_work_branch)
         preview = checkpoint(self.fixture, self.series, dry_run=True)
-        self.assertEqual(preview["state"], "would-checkpoint", preview)
+        self.assertEqual(preview["state"], "knowledge-gate-refused", preview)
+        self.assertIn("atomic-series-leaf-chain-invalid", str(preview.get("summary")))
+        # The refusal names the foreign commit itself: the series ref it reports is the
+        # bare code advance, which no leaf landed.
+        self.assertIn(code_commit, str(preview.get("reason")))
 
         result = checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertEqual(result["state"], "knowledge-gate-refused", result)
+        self.assertIn("atomic-series-leaf-chain-invalid", str(result.get("summary")))
+        self.assertIn(code_commit, str(result.get("reason")))
 
-        self.assertEqual(result["state"], "checkpointed", result)
-        self.assertEqual(result["integrated_code_commit"], code_commit)
-        self.assertEqual(result["integrated_memory_content_commit"], memory_tip)
+        self.assertEqual(rev(self.series.code_repo_path, self.series.code_work_branch), code_tip)
+        self.assertEqual(rev(memory, self.series.memory_work_branch), memory_tip)
         self.assertNotIn(
             code_commit, {row.code_commit for row in derive_memory_ledger(memory, memory_tip).rows}
         )

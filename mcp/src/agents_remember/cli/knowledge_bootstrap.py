@@ -190,8 +190,8 @@ def _run(args: argparse.Namespace, admitted: AdmittedKnowledgeBootstrap) -> int:
             coordination_root=admitted.authority.coordination_root,
         )
     line = "no memory root" if memory is None else memory.as_posix()
-    # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is only read.
-    # Any other unconverted root is memory in the legacy format, whose writer is retired (MIK-R26).
+    # MIK-R46 rule 1: unconverted memory is refused unconditionally, with the one
+    # legacy-format message naming the conversion (MIK-R26 retires the writer).
     print(
         cutover_lock_refusal(memory, operation="knowledge-bootstrap", line=line)
         or legacy_format_refusal(

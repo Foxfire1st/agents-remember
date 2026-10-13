@@ -62,11 +62,17 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
-from agents_remember.worktrees.knowledge_gate import leaf_gate_refusal
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
+from agents_remember.worktrees.knowledge_gate import (
+    GateProbeError,
+    converted_memory,
+    leaf_gate_refusal,
+    leaf_line,
+)
 from agents_remember.worktrees.modules.future_code_candidate import (
     capture_future_code_candidate,
 )
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.git import local_branch_ref, worktree_candidate_tree
 from agents_remember.worktrees.modules.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
@@ -353,9 +359,35 @@ def _require_knowledge_gate(
 
     The worklist is recomputed and the validator run over the very code and memory trees this
     authority binds; any open item, incomplete run or violation refuses. An unconverted leaf (no
-    layout marker on either side) is not gated and is validated exactly as before.
+    layout marker on either side) is refused here with the one ``legacy-format`` message
+    (MIK-R46 rule 1): this independent validator answers the format itself, whatever the
+    closeout entries refused first. A probe Git cannot answer refuses by name, exactly as
+    the validator answers it.
     """
 
+    repository = contract.memory_repo_path or contract.memory_worktree
+    official = contract.memory_source_branch
+    try:
+        official_ref = local_branch_ref(official) if official else ""
+        applies = repository is not None and converted_memory(
+            repository, observation.memory_candidate_tree, official_ref
+        )
+    except (GateProbeError, RuntimeError) as error:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            str(error),
+            next_action="memory_quality_check",
+        ) from error
+    if not applies:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            legacy_format_refusal(
+                repository,
+                operation="the curator-coherence knowledge gate",
+                subject=f"the unconverted memory of {leaf_line(contract)}",
+            ),
+            next_action="memory_quality_check",
+        )
     refusal = leaf_gate_refusal(
         contract,
         code_tree=observation.code_candidate_tree,

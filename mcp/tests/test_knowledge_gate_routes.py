@@ -871,11 +871,14 @@ def test_the_memo_key_holds_the_parent_tip(world: Gated) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# Finding 7: record landing probes before it reads, so unconverted memory records as before
+# Finding 7 (MIK-R46): record landing refuses unconverted memory before it reads, so the landed
+# commit is still never read -- but nothing records as before. The old would-record path is gone.
+# L46-R1-B04: an unreadable landed commit is named by its probe error on either line -- conversion
+# does not repair an unreadable object, so it is never classified legacy-format.
 # --------------------------------------------------------------------------------------------------
 
 
-def test_record_landing_on_unconverted_memory_never_reads_the_landed_commit(
+def test_record_landing_on_unconverted_memory_refuses_before_reading_the_landed_commit(
     world: Gated, ports: None
 ) -> None:
     unreadable = "f" * 40
@@ -889,8 +892,10 @@ def test_record_landing_on_unconverted_memory_never_reads_the_landed_commit(
         git(world.memory, "rm", "-q", "knowledge/layout.json")
         commit(world.memory, {})
     world.memory_base = git(world.memory, "rev-parse", "main")
-    recorded = _record(world, unreadable)
-    assert recorded.returncode == 0 and recorded.payload["state"] == "would-record"
+    with pytest.raises(RuntimeError, match="code legacy-format"):
+        _record(world, world.memory_base)  # unconverted: refused with the conversion step
+    with pytest.raises(RuntimeError, match="cannot read"):
+        _record(world, unreadable)  # unconverted + unreadable: the probe error, never legacy
 
 
 # --------------------------------------------------------------------------------------------------

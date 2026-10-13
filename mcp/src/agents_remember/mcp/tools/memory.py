@@ -44,6 +44,7 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_LIST_MAX,
     TOOL_ANSWER_STATUS_ENTRY_MAX,
 )
+from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE
 
 from .base import _tool_payload
 
@@ -181,6 +182,20 @@ _CITATION_CONVERTED_ENTRY_KEYS = ("stale", "unreadableSidecars", "refused")
 _CITATION_UNCONVERTED_ENTRY_KEYS = ("declined", "refusedDocuments")
 
 
+def _carry_legacy_refusal(full: Mapping[str, Any], answer: dict[str, Any]) -> None:
+    """MIK-R46 rule 2: the legacy refusal's central code and conversion message.
+
+    The public answer itself carries both -- the logged whole result alone
+    does not satisfy the rule, because the caller never learns how it
+    converts from the log.
+    """
+
+    if full.get("code") == LEGACY_FORMAT_CODE:
+        answer["code"] = full["code"]
+        if full.get("detail") is not None:
+            answer["detail"] = full["detail"]
+
+
 def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
     """MIK-R110 rules 1-2: one ``citation_fix`` whole result answered as a status.
 
@@ -203,6 +218,7 @@ def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
             continue
         if full.get(key) is not None:
             answer[key] = full[key]
+    _carry_legacy_refusal(full, answer)
     if bool(answer.get("ok", False)):
         return answer
     # A failed run is recovered by working the entries below, then running the
@@ -304,8 +320,7 @@ def _bounded_citation_fix(payload: dict[str, Any]) -> dict[str, Any]:
     A tree-wide run on converted memory names every stale reference, every rewritten sidecar and
     every authored card: hundreds of entries on a real tree. The response keeps the counts and the
     first :data:`MAX_INLINE_CITATION_ITEMS` entries of each list and says which lists it capped.
-    An unconverted tree's result has its own, unchanged shape and is passed through: its complete
-    repair list is that fixer's contract (L6-R15).
+    An unconverted tree's refusal (MIK-R46 rule 1) has no such lists and is passed through.
     """
 
     if payload.get("status") != "converted":

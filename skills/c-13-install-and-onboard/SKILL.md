@@ -352,6 +352,46 @@ migrated. If a checkout still carries one, report the exact path and the route o
 worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
 rewrite or delete it, and never treat it as an already-present memory layer.
 
+## First Conversion Of Unconverted Memory (MIK-R46 rule 6)
+
+When the memory is still in the legacy format (no `knowledge/layout.json`), every
+ordinary memory operation refuses it with the code `legacy-format` and names this
+procedure. Reading still works: `read_ar_files` returns old-format cards as they are,
+marked `legacy-format`. Convert before anything else in this skill: no baseline is
+adopted and no knowledge foundation is authored on unconverted memory. Pick exactly one
+case; both end on converted memory, after which the same operation is repeated and runs
+the ordinary converted route.
+
+1. **Memory with no attributed baseline** (it has no commit that a leaf could start
+   from): run `agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY`
+   on the memory root itself, paired with the code repository it documents, then adopt
+   the baseline, which validates the tree (MIK-R44 rule 7). Before the conversion,
+   `memory_baseline_status` answers the state `legacy-format` with this step.
+   `memory_init` on an existing unconverted root still writes no marker; its result
+   names this procedure.
+2. **Memory with an official line** (a branch leaves start from): start one new leaf
+   from that line — `worktree_start` works on unconverted memory and its result says
+   `memoryFormat: "legacy-format"` with this procedure. Run `knowledge-convert` on the
+   leaf's memory worktree with the leaf's code worktree, as the leaf's first memory
+   change, naming the paired code commit explicitly (`--code-commit`; the default is
+   the code worktree's HEAD). Then close the leaf out and land it like any leaf: its candidate is
+   converted, so the validator and the invariant gate run against the converted base
+   (MIK-R24 rule 7) and the conversion itself counts as no change. The landing moves
+   the leaf's source branches (the series line), not the base; read back the landed
+   memory commit (message plus `Code-Commit` trailer) and the marker at its tip. Every other open
+   line of that repository crosses at its next `worktree_sync` with `merge-memory`
+   (MIK-R24 rule 8).
+
+A conversion that fails validation writes nothing and names the failing files. After a
+conversion or a crossing, the refused operation is repeated and runs the ordinary
+converted route. The full procedure also lives in `docs/guides/first-conversion.md`;
+`knowledge-convert --help` states the same entry points.
+
+The converter stays: the conversion command, its read-only reader of the legacy
+database, and conversion-format version 1 are permanent parts of the product, because
+unconverted lines live in other clones and on other machines (MIK-R46 rule 7). Never
+propose retiring them as part of this master's work.
+
 ## Stage 5 - Bootstrap, The First Baseline, Then The Knowledge Foundation
 
 Run this stage's onboarding and baseline halves only when Stage 4 scaffolded a new memory repo; the

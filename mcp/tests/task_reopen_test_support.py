@@ -89,7 +89,15 @@ def _external_memory_repo(
         create_initial_ledger(repo_name, code_commit, memory_base),
     )
     git(memory_repo, "add", "-A")
-    git(memory_repo, "commit", "-m", "Record the ledger pair and this world's identity")
+    # The message carries the code pair as a Code-Commit trailer: on converted memory the
+    # pairing gate reads the trailer (not the ledger file) to prove the memory line belongs
+    # to the code line, so a world without one has no provable pairing.
+    git(
+        memory_repo,
+        "commit",
+        "-m",
+        f"Record the ledger pair and this world's identity\n\nCode-Commit: {code_commit}",
+    )
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     if branch != "main":
         git(memory_repo, "branch", "-f", branch, memory_base)

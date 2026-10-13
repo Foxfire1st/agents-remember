@@ -213,10 +213,12 @@ def _assert_memory_attribution(
     assert _git(memory_worktree, "ls-tree", "--name-only", content_commit, "--", "memory.md") == ""
 
 
-def _closeout_fixture(tmp_path):
+def _closeout_fixture(tmp_path, *, converted: bool = False):
     """A leaf with a new code file and a new memory file, ready for the public closeout."""
 
-    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    fixture = _fixture(
+        tmp_path, external_memory=True, selected_profile=False, converted_memory=converted
+    )
     contract = fixture.leaf_contract
     assert contract.memory_repo_path is not None and contract.memory_worktree is not None
     contract.memory_worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -303,7 +305,7 @@ def test_ordinary_code_commit_is_the_admitted_tree_and_keeps_a_later_edit(
     """R5-3 for the code side: a file edited while the commit object is written is not committed
     and does not refuse the closeout; it stays an uncommitted change."""
 
-    contract, config = _closeout_fixture(tmp_path)
+    contract, config = _converted_closeout_fixture(tmp_path)
     native = git_owner.run_git
     seen: list[str] = []
 
@@ -347,7 +349,7 @@ def _code_and_memory_state(contract) -> tuple[str, ...]:
 def test_a_moved_code_branch_refuses_the_closeout_and_a_retry_completes_it(
     tmp_path, worktree_services, seam
 ):
-    contract, config = _closeout_fixture(tmp_path)
+    contract, config = _converted_closeout_fixture(tmp_path)
     before = _code_and_memory_state(contract)
     with (
         _branch_race(contract.code_worktree, seam),
@@ -373,7 +375,7 @@ def test_a_moved_memory_branch_leaves_the_pair_to_the_recovery_a_retry_runs(
     """The code commit landed, the memory publication was refused, nothing of the memory side
     stayed behind, and the rerun finishes the same pair on the code commit that landed."""
 
-    contract, config = _closeout_fixture(tmp_path)
+    contract, config = _converted_closeout_fixture(tmp_path)
     memory = contract.memory_worktree
     assert memory is not None
     memory_before = tuple(
@@ -459,16 +461,53 @@ def test_a_refused_converted_memory_publication_gives_back_every_preparation(
     ]
 
 
-def _converted_closeout_fixture(tmp_path):
-    """The public closeout fixture on converted memory, with a branch ``elsewhere`` on each side."""
+def _seed_converted_memory_layout(memory_worktree) -> None:
+    """The layout marker on converted memory, in canonical formatting."""
 
-    contract, config = _closeout_fixture(tmp_path)
-    assert contract.memory_worktree is not None
-    layout = contract.memory_worktree / "knowledge" / "layout.json"
+    layout = memory_worktree / "knowledge" / "layout.json"
     layout.parent.mkdir(exist_ok=True)
     layout.write_text(
         canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}), encoding="utf-8"
     )
+
+
+def _seed_leaf_trace_row(memory_worktree, leaf_id: str, subject: str) -> None:
+    """Seed the leaf's open history with the onboarding trace its new file needs.
+
+    The closeout extends the open file with its own rows; the gate answers the trace item
+    from this row.
+    """
+
+    history_dir = memory_worktree / "knowledge" / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    (history_dir / f"{leaf_id}.json").write_text(
+        canonical_text(
+            {
+                "schema": "ar-history/v1",
+                "leaf": leaf_id,
+                "closed": False,
+                "rows": [
+                    {
+                        "id": "ROW-000000",
+                        "subject": subject,
+                        "disposition": "no_impact",
+                        "reason": "The new file carries no invariant.",
+                        "items": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _converted_closeout_fixture(tmp_path):
+    """The public closeout fixture on converted memory, with a branch ``elsewhere`` on each side."""
+
+    contract, config = _closeout_fixture(tmp_path, converted=True)
+    assert contract.memory_worktree is not None
+    _seed_converted_memory_layout(contract.memory_worktree)
+    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
     for repository in (contract.code_worktree, contract.memory_worktree):
         _git(repository, "branch", "elsewhere")
     return contract, config
@@ -591,7 +630,9 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
 ):
     """Closeout is a Git transaction even when quality/review authorities are absent."""
 
-    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    fixture = _fixture(
+        tmp_path, external_memory=True, selected_profile=False, converted_memory=True
+    )
     contract = fixture.leaf_contract
     assert contract.memory_repo_path is not None and contract.memory_worktree is not None
     contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -618,6 +659,7 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)
@@ -708,7 +750,9 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
 def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, worktree_services):
     """Resume an interrupted public closeout with a missing cache and only its memory commit owed."""
 
-    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    fixture = _fixture(
+        tmp_path, external_memory=True, selected_profile=False, converted_memory=True
+    )
     contract = fixture.leaf_contract
     assert contract.memory_repo_path is not None and contract.memory_worktree is not None
     contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
@@ -733,6 +777,7 @@ def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, 
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)
