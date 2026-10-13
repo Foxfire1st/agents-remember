@@ -47,10 +47,9 @@ export const viewTabButton = css({
   _focusVisible: viewTabFocusLook,
 });
 
-// The same tab at the size of the tasks column (MIK-R144 rule 3b): the grouping
-// switch, the bell of the attention queue and "Clear all". The pages of the
-// column's approved look are drawn on a base of 14 px, so their tab is the
-// metrics above times 0.875, with less room left and right. At the tab's own
+// The same tab at the size of the tasks column (MIK-R144 rule 3b, MIK-R163 rule 1): the grouping
+// switch, the bell of the attention queue and "Clear all". The column's text follows the task
+// page's smaller text, so the tab is 0.72rem with less room left and right. At the tab's own
 // size the switch and the bell do not fit the head of the column beside its
 // title. Colours, border, corners, the selected and the focus look are the
 // ones above; the focus line lies inside the tab, because the column cuts what
@@ -58,7 +57,7 @@ export const viewTabButton = css({
 export const columnTabButton = css({
   font: "inherit",
   ...viewTabMetrics,
-  fontSize: "0.63rem",
+  fontSize: "0.72rem",
   lineHeight: "1.4",
   paddingInline: "0.525rem",
   paddingBlock: "0.2625rem",
